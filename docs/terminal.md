@@ -49,10 +49,10 @@ A ticket that is never redeemed expires with its 30 seconds and the reservation 
 
 Two backends behind one interface (`pty.ts`), chosen at boot:
 
-- **`Bun.Terminal`**, the runtime's own PTY, when the Bun version has it (`typeof Bun.Terminal === "function"`).
-- **`python3`** with the standard `pty` module otherwise, through `pty_helper.py`: the helper forks the shell in a PTY and speaks a five-byte framing on its stdin (kind, length, payload: keystrokes or a resize) with raw output on stdout. Every Linux server and macOS has it; nothing is installed. It exits with the shell's status, or 128 + signal, and hangs the shell up when its stdin closes.
+- **`python3`** with the standard `pty` module, through `pty_helper.py`, whenever `python3` is on the PATH: the helper forks the shell in a PTY (`pty.fork()`, which makes it a session leader with the PTY as controlling terminal) and speaks a five-byte framing on its stdin (kind, length, payload: keystrokes or a resize) with raw output on stdout. Every Linux server and macOS has it; nothing is installed. It exits with the shell's status, or 128 + signal, and hangs the shell up when its stdin closes.
+- **`Bun.Terminal`**, the runtime's own PTY, as the fallback when the Bun version has it (`typeof Bun.Terminal === "function"`). As of Bun 1.4.2 it attaches the PTY as plain stdio without making it the controlling terminal: bash reports "no job control in this shell", Ctrl-C reaches no process, and programs that open `/dev/tty` (sudo, ssh prompts, polkit's agent) fail. Fine for output, poor for a shell, hence second.
 
-Neither backend exists → `enabled` is false in the status with a boot log line saying so, and the picker says "off".
+`SPACE_TERMINAL_PTY=bun|python` forces one (for the day Bun's PTY sets a controlling terminal). Neither backend exists → `enabled` is false in the status with a boot log line saying so, and the picker says "off".
 
 Sessions run with the ai-space process's environment minus anything that looks like a credential (`*TOKEN`, `*SECRET`, `*PASSWORD`, `*PASSPHRASE`, `*API_KEY`, `*ACCESS_KEY`, `*PRIVATE_KEY`, `*CREDENTIALS`), plus `TERM=xterm-256color`, `COLORTERM=truecolor`, a UTF-8 `LANG` when none is set, `SPACE_HOME` and `SPACE_TERMINAL_SESSION`. The workspace `.env` is loaded into the process at boot, so the strip keeps `SPACE_API_TOKEN`, `SPACE_HUB_TOKEN`, `SPACE_PEER_*_TOKEN`, `SPACE_S3_SECRET_ACCESS_KEY`, `GH_TOKEN` and the model keys off the screen (`env`, a shared recording, a screenshot) and out of whatever the shell spawns by accident. It is not isolation: the shell runs as the operator's user, who can `cat` the file. A login shell (`-l`) reads the user's own profile, so the operator's PATH and aliases apply, the same as over SSH.
 

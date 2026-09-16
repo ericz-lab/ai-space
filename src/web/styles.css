@@ -303,7 +303,8 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .term .task-head { gap: 8px; }
 .term .task-head .chat-model { margin-left: auto; max-width: 40%; }
 .term .task-head .chat-sub { margin-right: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.term-tabs { flex: none; display: flex; gap: 6px; padding: 8px 12px 0; overflow-x: auto; }
+/* Chips align with the terminal box below (its margin plus the focus ring), with room for the ring. */
+.term-tabs { flex: none; display: flex; gap: 6px; padding: 10px 14px 4px; overflow-x: auto; overflow-y: hidden; }
 .term-tab {
   display: inline-flex; align-items: center; gap: 7px; padding: 4px 8px 4px 10px; border-radius: 999px; flex: none;
   border: 1px solid var(--glass-border); background: var(--glass); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
@@ -323,7 +324,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 }
 .term-pass-row .chat-send { width: auto; padding: 0 14px; border-radius: 9px; font-size: 13px; }
 .term-hist { flex: none; max-height: 220px; overflow-y: auto; padding: 0 6px 6px; border-bottom: 1px solid var(--glass-border); }
-.term-body { position: relative; flex: 1; min-height: 0; margin: 8px 12px 0; border-radius: 12px; overflow: hidden; background: #fbfbfd; border: 1px solid var(--hairline); }
+.term-body { position: relative; flex: 1; min-height: 0; margin: 6px 12px 0; border-radius: 12px; overflow: hidden; background: #fbfbfd; border: 1px solid var(--hairline); }
 :root[data-theme="dark"] .term-body { background: #0b0d12; }
 .term-body .task-note { position: relative; z-index: 1; }
 .term-body .task-note.err { color: #ef4444; }

@@ -27,8 +27,8 @@ export type WsAttachment = {
   drain?(ws: ServerWebSocket<WsData>): void;
 };
 
-/** What a terminal socket carries: who handles its events (a local session or a bridge to a peer). */
-export type WsData = { attachment: WsAttachment };
+/** What a terminal socket carries: who handles its events (a local session or a bridge to a peer), and its keepalive timer. */
+export type WsData = { attachment: WsAttachment; pinger?: ReturnType<typeof setInterval> };
 
 export type SessionView = {
   id: string;
@@ -107,7 +107,7 @@ export class TerminalService {
   private lockedUntil = 0;
 
   constructor(private readonly opts: TerminalServiceOptions) {
-    this.backend = opts.backend ?? (opts.config.enabled ? detectPtyBackend() : undefined);
+    this.backend = opts.backend ?? (opts.config.enabled ? detectPtyBackend(opts.env ?? process.env) : undefined);
     if (opts.config.enabled) {
       this.timer = setInterval(() => this.sweep(), opts.sweepMs ?? SWEEP_MS);
       this.timer.unref?.();

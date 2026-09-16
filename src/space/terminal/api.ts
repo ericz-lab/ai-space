@@ -48,6 +48,7 @@ export type MachineView = {
 const FORWARD_TIMEOUT_MS = 8_000;
 export const PASSPHRASE_HEADER = "x-terminal-passphrase";
 const MAX_QUEUE = 256;
+const PING_MS = 25_000;
 
 export function createTerminalRoutes(opts: TerminalApiOptions): Routes {
   const { service, hub } = opts;
@@ -148,13 +149,27 @@ export function createTerminalRoutes(opts: TerminalApiOptions): Routes {
 
 /** The server's `websocket` option: every terminal socket delegates to the attachment it was upgraded with. */
 export const terminalWebSocket: WebSocketHandler<WsData> = {
-  open: (ws) => ws.data.attachment.open(ws),
+  open: (ws) => {
+    // A ping every 25 s: a tunnel's edge drops a socket idle for ~100 s, and a shell showing a prompt is idle.
+    ws.data.pinger = setInterval(() => {
+      try {
+        ws.ping();
+      } catch {
+        /* closed */
+      }
+    }, PING_MS);
+    ws.data.attachment.open(ws);
+  },
   message: (ws, m) => ws.data.attachment.message(ws, m),
-  close: (ws, code, reason) => ws.data.attachment.close(ws, code, reason),
+  close: (ws, code, reason) => {
+    clearInterval(ws.data.pinger);
+    ws.data.attachment.close(ws, code, reason);
+  },
   drain: (ws) => ws.data.attachment.drain?.(ws),
   // Keystrokes are small; a paste is bounded so a client cannot hold megabytes in the server.
   maxPayloadLength: 1024 * 1024,
-  idleTimeout: 0,
+  // Bun's own idle cut, well above the ping period; the session's idle limit is the service's.
+  idleTimeout: 960,
 };
 
 /**

@@ -31,10 +31,23 @@ export type PtyHandle = {
 
 const KILL_GRACE_MS = 2_000;
 
-/** The backend this runtime can offer, if any. */
-export function detectPtyBackend(): PtyBackend | undefined {
-  if (typeof (Bun as unknown as { Terminal?: unknown }).Terminal === "function") return "bun";
-  if (Bun.which("python3")) return "python";
+/**
+ * The backend this runtime can offer, if any. Python first: `pty.fork()` makes
+ * the shell a session leader with the PTY as its controlling terminal, so job
+ * control, Ctrl-C and programs that open /dev/tty (sudo, ssh, polkit) work.
+ * `Bun.Terminal` (checked on 1.3.14 through 1.4.2) attaches the PTY as plain
+ * stdio without a controlling terminal: bash warns "no job control", Ctrl-C
+ * reaches nothing. It stays as the fallback for a machine without python3.
+ * `SPACE_TERMINAL_PTY=bun|python` forces one.
+ */
+export function detectPtyBackend(env: Record<string, string | undefined> = process.env): PtyBackend | undefined {
+  const forced = env.SPACE_TERMINAL_PTY?.trim().toLowerCase();
+  const hasBun = typeof (Bun as unknown as { Terminal?: unknown }).Terminal === "function";
+  const hasPython = Boolean(Bun.which("python3"));
+  if (forced === "bun") return hasBun ? "bun" : undefined;
+  if (forced === "python") return hasPython ? "python" : undefined;
+  if (hasPython) return "python";
+  if (hasBun) return "bun";
   return undefined;
 }
 
