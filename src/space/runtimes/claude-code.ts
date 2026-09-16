@@ -1,4 +1,5 @@
 import { pumpLines, spawnCollect } from "./process.ts";
+import { readClaudeTranscript } from "./transcripts.ts";
 import type { AgentOutcome, AgentRun, Backend, ChatCallbacks, ChatTurn, ClaudeCodeSpec, CompleteInput, CompleteOutcome, RuntimeAdapter, Usage } from "./types.ts";
 
 /**
@@ -65,6 +66,8 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
     chat(turn, cb) {
       return chatStream([...bin, ...chatArgs(turn, spec.chatArgs)], turn, cb);
     },
+
+    transcript: (cwd, sid) => readClaudeTranscript(cwd, sid, spec.transcriptHome),
   };
 }
 

@@ -12,7 +12,7 @@
  * runs.
  */
 
-export const RUNTIME_KINDS = ["claude-code", "anthropic-api"] as const;
+export const RUNTIME_KINDS = ["claude-code", "anthropic-api", "deepseek-harness"] as const;
 export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 
 /** A runtime's name in the configuration and in the ledger (`claude`, `api`, `dsh`). */
@@ -103,6 +103,9 @@ export type Capabilities = {
   chat: boolean;
 };
 
+/** A past conversation as the chat panel shows it: the user's texts and the assistant's, with the tools it called. */
+export type TranscriptMessage = { role: "user"; text: string } | { role: "ai"; text: string; tools: { name: string; hint: string }[] };
+
 export type RuntimeAdapter = {
   readonly name: string;
   readonly kind: RuntimeKind;
@@ -111,8 +114,14 @@ export type RuntimeAdapter = {
   readonly capabilities: Capabilities;
   complete(input: CompleteInput, signal?: AbortSignal): Promise<CompleteOutcome>;
   runAgent(run: AgentRun): Promise<AgentOutcome>;
-  /** Spawn one turn and forward its events line by line. Returns a handle to kill it. */
+  /**
+   * Spawn one turn and forward its events line by line. The lines are Claude
+   * Code's `stream-json` shapes, which the panel reads; another runtime's
+   * adapter translates its own events into them. Returns a handle to kill it.
+   */
   chat(turn: ChatTurn, cb: ChatCallbacks): { kill: () => void };
+  /** A past chat session from the runtime's own records; null when it has none. */
+  transcript?(cwd: string, sessionId: string): Promise<TranscriptMessage[] | null>;
 };
 
 // ---------------------------------------------------------------- specs
@@ -127,6 +136,8 @@ export type ClaudeCodeSpec = {
   sshHost?: string;
   /** Extra arguments appended to every chat turn (a permission wrapper, say). */
   chatArgs: string[];
+  /** Home directory whose `.claude/projects` holds the transcripts; default the process's (tests). */
+  transcriptHome?: string;
 };
 
 /** The Messages API with a key: answers only, no tools, no login state. */
@@ -137,7 +148,26 @@ export type AnthropicApiSpec = {
   apiUrl: string;
 };
 
-export type RuntimeSpec = ClaudeCodeSpec | AnthropicApiSpec;
+/**
+ * DeepSeek Harness (`dsh`): `dsh --profile headless --json` for all three
+ * operations, `--session-id` for chat continuity, a `--patch` overlay per run
+ * for the system prompt, model, thinking and tool set. Billed by the DeepSeek
+ * API key the harness home holds.
+ */
+export type DeepseekHarnessSpec = {
+  name: string;
+  kind: "deepseek-harness";
+  /** The CLI command; default `dsh`. */
+  bin: string[];
+  /** The harness home (`DSH_HOME`); default the CLI's own (`~/.dsh`). Session logs are read from it. */
+  home?: string;
+  /** Profile to boot; default `headless`. */
+  profile: string;
+  /** Machine whose harness `complete` uses over ssh; agent runs and chats stay local. */
+  sshHost?: string;
+};
+
+export type RuntimeSpec = ClaudeCodeSpec | AnthropicApiSpec | DeepseekHarnessSpec;
 
 export type RuntimesConfig = {
   /** Runtime a bare model name (no `runtime/` prefix) goes to. */

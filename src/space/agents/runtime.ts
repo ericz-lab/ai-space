@@ -11,7 +11,7 @@ import type { ChatTurn, RuntimeAdapter } from "../runtimes/types.ts";
 export { PERMISSION_MODES } from "../runtimes/claude-code.ts";
 export type { ChatCallbacks, ChatTurn } from "../runtimes/types.ts";
 
-export const SESSION_ID_RE = /^[a-f0-9-]{8,64}$/i;
+export { SESSION_ID_RE } from "../runtimes/transcripts.ts";
 export const MODEL_RE = /^[a-z0-9._-]{1,64}$/i;
 
 /**

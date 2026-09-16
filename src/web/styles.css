@@ -293,6 +293,46 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .usage-bar-val, .usage-bar-lbl { font-size: 10px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 @media (max-width: 520px) { .usage-cards { grid-template-columns: repeat(2, 1fr); } }
 
+/* Terminal: shells on this machine and on peers, one xterm per tab, in a floating panel. */
+.term {
+  position: relative; width: min(960px, 96vw); height: min(84vh, 820px); display: flex; flex-direction: column;
+  background: var(--panel); -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--glass-border); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden;
+}
+.term .task-head { gap: 8px; }
+.term .task-head .chat-model { margin-left: auto; max-width: 40%; }
+.term .task-head .chat-sub { margin-right: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-tabs { flex: none; display: flex; gap: 6px; padding: 8px 12px 0; overflow-x: auto; }
+.term-tab {
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 8px 4px 10px; border-radius: 999px; flex: none;
+  border: 1px solid var(--glass-border); background: var(--glass); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+}
+.term-tab.on { color: var(--text); box-shadow: 0 0 0 2px var(--accent, #8b5cf6); }
+.term-tab i { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); }
+.term-tab.open i { background: var(--green); }
+.term-tab.closed i { background: rgba(120, 120, 128, 0.5); }
+.term-tab.closed { opacity: 0.7; }
+.term-tab-x { margin-left: 2px; font-size: 11px; opacity: 0.6; }
+.term-tab-x:hover { opacity: 1; }
+.term-pass { flex: none; padding: 8px 12px 0; }
+.term-pass-row { display: flex; gap: 8px; }
+.term-pass-row input {
+  flex: 1; border: 1px solid var(--glass-border); background: var(--glass); border-radius: 9px;
+  padding: 7px 10px; font-family: inherit; font-size: 13px; color: var(--text);
+}
+.term-pass-row .chat-send { width: auto; padding: 0 14px; border-radius: 9px; font-size: 13px; }
+.term-hist { flex: none; max-height: 220px; overflow-y: auto; padding: 0 6px 6px; border-bottom: 1px solid var(--glass-border); }
+.term-body { position: relative; flex: 1; min-height: 0; margin: 8px 12px 0; border-radius: 12px; overflow: hidden; background: #fbfbfd; border: 1px solid var(--hairline); }
+:root[data-theme="dark"] .term-body { background: #0b0d12; }
+.term-body .task-note { position: relative; z-index: 1; }
+.term-body .task-note.err { color: #ef4444; }
+.term-pane { position: absolute; inset: 6px 0 6px 8px; }
+.term-pane.hidden { visibility: hidden; pointer-events: none; }
+.term-pane .xterm { height: 100%; }
+.term-state { position: absolute; right: 10px; top: 8px; font-size: 11px; color: var(--muted); }
+.term-note { flex: none; margin: 0; padding: 6px 14px calc(8px + env(safe-area-inset-bottom)); font-size: 11px; color: var(--muted); }
+
 /* Chat: a floating panel in the middle of the page; the agent tabs sit along its left edge. */
 .chat {
   position: relative; width: min(720px, 94vw); height: min(82vh, 800px); display: flex; flex-direction: row;
@@ -476,7 +516,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 /* Panels that belong near the top of the page, such as the settings. */
 .overlay.top { align-items: flex-start; padding-top: clamp(40px, 8vh, 80px); }
 .overlay.top .panel { max-height: calc(100vh - clamp(40px, 8vh, 80px) - 20px); }
-.overlay > .panel, .overlay > .chat, .overlay > .tasks, .overlay > .modal { animation: rise 0.2s ease; }
+.overlay > .panel, .overlay > .chat, .overlay > .tasks, .overlay > .term, .overlay > .modal { animation: rise 0.2s ease; }
 @keyframes fadeIn { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(0.985); } }
 @media (prefers-reduced-motion: reduce) { .overlay, .overlay > * { animation: none; } }
@@ -523,7 +563,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 
   /* Panels take the whole screen on a phone. */
   .overlay, .overlay.top { padding: 0; }
-  .panel.settings, .chat, .tasks { width: 100%; height: 100%; max-height: none; border-radius: 0; border: none; }
+  .panel.settings, .chat, .tasks, .term { width: 100%; height: 100%; max-height: none; border-radius: 0; border: none; }
   .overlay.top .panel { max-height: none; }
   .task-body { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
   .chat-input { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }

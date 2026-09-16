@@ -17,6 +17,8 @@ export type PeerSnapshot = {
   services: ServiceView[];
   widgets: WidgetView[];
   agents: AgentView[];
+  /** Whether the peer offers a terminal to the hub (docs/terminal.md). */
+  terminal: boolean;
   asOf: string;
 };
 
@@ -101,7 +103,7 @@ export class PeerClient {
 
   private async refreshOnce(): Promise<void> {
     try {
-      const r = await this.fetch(this.config.url + SNAPSHOT_PATH, { headers: this.headers(), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) });
+      const r = await this.fetch(this.config.url + SNAPSHOT_PATH, { headers: this.authHeaders(), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) });
       if (r.status === 401 || r.status === 403) throw new Error("token rejected");
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const snap = parseSnapshot(await r.json());
@@ -119,8 +121,8 @@ export class PeerClient {
    * answer back. Bodies are small JSON, so they are read whole; the response
    * body (a file, a page, an SSE stream) is passed through as it arrives.
    */
-  async forward(req: Request, path: string, opts: { timeoutMs?: number } = {}): Promise<Response> {
-    const headers = this.headers();
+  async forward(req: Request, path: string, opts: { timeoutMs?: number; headers?: Record<string, string> } = {}): Promise<Response> {
+    const headers = { ...this.authHeaders(), ...(opts.headers ?? {}) };
     const ct = req.headers.get("content-type");
     if (ct) headers["content-type"] = ct;
     const init: RequestInit = { method: req.method, headers, signal: opts.timeoutMs ? AbortSignal.any([req.signal, AbortSignal.timeout(opts.timeoutMs)]) : req.signal };
@@ -129,7 +131,8 @@ export class PeerClient {
     return new Response(up.body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store" } });
   }
 
-  private headers(): Record<string, string> {
+  /** The headers every request to the peer carries: the access layer's extras and the bearer token. */
+  authHeaders(): Record<string, string> {
     return { ...this.config.headers, ...(this.config.token ? { authorization: `Bearer ${this.config.token}` } : {}) };
   }
 
@@ -153,6 +156,7 @@ export function parseSnapshot(j: unknown): PeerSnapshot {
     services: o.services as ServiceView[],
     widgets: o.widgets as WidgetView[],
     agents: o.agents as AgentView[],
+    terminal: o.terminal === true,
     asOf: typeof o.asOf === "string" ? o.asOf : new Date().toISOString(),
   };
 }

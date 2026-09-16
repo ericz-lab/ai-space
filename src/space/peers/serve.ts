@@ -14,9 +14,14 @@ import { SPACE_AGENT, SPACE_APP } from "../agents/api.ts";
  *   GET  /api/peer/widgets/:app/:name/embed        = /api/widgets/:app/:name/embed
  *   POST /api/peer/agents/:app/:agent/chat         = /api/agents/:app/:agent/chat
  *   GET  /api/peer/agents/:app/:agent/sessions[/:sid]
+ *   GET  /api/peer/terminal                        = /api/terminal            ┐ only when the terminal is
+ *   POST /api/peer/terminal/sessions               = /api/terminal/sessions   │ enabled here; the snapshot
+ *   DELETE /api/peer/terminal/sessions/:id         = /api/terminal/sessions/:id │ says so with `terminal: true`
+ *   GET  /api/peer/terminal/ws                     = /api/terminal/ws         ┘ (docs/terminal.md)
  */
 
-type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
+// The server argument only matters to the terminal's socket route, which upgrades the request.
+type Handler = (req: Request & { params: Record<string, string> }, server: Bun.Server<unknown>) => Response | undefined | Promise<Response | undefined>;
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 type Routes = Record<string, Handler | Partial<Record<Method, Handler>>>;
 
@@ -26,6 +31,8 @@ export type PeerServeOptions = {
   name: string;
   panel: Routes;
   agents: Routes;
+  /** The terminal routes, when the terminal is enabled on this machine; absent = no terminal for the hub. */
+  terminal?: Routes;
 };
 
 export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
@@ -34,10 +41,10 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
 
   const guard =
     (h: Handler): Handler =>
-    async (req) => {
+    async (req, server) => {
       if (req.headers.get("authorization") !== expected) return json({ ok: false, error: "unauthorized" }, 401);
       try {
-        return await h(req);
+        return await h(req, server);
       } catch (e) {
         return json({ ok: false, error: (e as Error).message ?? String(e) }, 400);
       }
@@ -45,14 +52,14 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
 
   const mirror = (routes: Routes, path: string, method: Method): Handler => {
     const h = handlerOf(routes, path, method);
-    return (req) => h(req);
+    return (req, server) => h(req, server);
   };
 
   /** Call a local GET route in-process and return its JSON body. */
   const local = async <T>(routes: Routes, path: string, base: string): Promise<T> => {
     const req = Object.assign(new Request(new URL(path, base)), { params: {} as Record<string, string> });
-    const r = await handlerOf(routes, path, "GET")(req);
-    return (await r.json()) as T;
+    const r = await handlerOf(routes, path, "GET")(req, undefined as unknown as Bun.Server<unknown>);
+    return (await r!.json()) as T;
   };
 
   return {
@@ -73,6 +80,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
           widgets: widgets.widgets,
           // The hub has its own space agent.
           agents: agents.agents.filter((a) => a.id !== `${SPACE_APP}/${SPACE_AGENT}`),
+          terminal: opts.terminal !== undefined,
           asOf: new Date().toISOString(),
         });
       }),
@@ -83,7 +91,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
       GET: guard((req) => {
         const url = new URL("/api/panel/appcolor", req.url);
         url.searchParams.set("app", req.params.app ?? "");
-        return handlerOf(opts.panel, "/api/panel/appcolor", "GET")(Object.assign(new Request(url), { params: {} }));
+        return handlerOf(opts.panel, "/api/panel/appcolor", "GET")(Object.assign(new Request(url), { params: {} }), undefined as unknown as Bun.Server<unknown>);
       }),
     },
     "/api/peer/agents/:app/:agent/avatar": { GET: guard(mirror(opts.panel, "/api/agents/:app/:agent/avatar", "GET")) },
@@ -91,6 +99,14 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     "/api/peer/agents/:app/:agent/chat": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/chat", "POST")) },
     "/api/peer/agents/:app/:agent/sessions": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions", "GET")) },
     "/api/peer/agents/:app/:agent/sessions/:sid": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions/:sid", "GET")) },
+    ...(opts.terminal
+      ? {
+          "/api/peer/terminal": { GET: guard(mirror(opts.terminal, "/api/terminal", "GET")) },
+          "/api/peer/terminal/sessions": { POST: guard(mirror(opts.terminal, "/api/terminal/sessions", "POST")) },
+          "/api/peer/terminal/sessions/:id": { DELETE: guard(mirror(opts.terminal, "/api/terminal/sessions/:id", "DELETE")) },
+          "/api/peer/terminal/ws": { GET: guard(mirror(opts.terminal, "/api/terminal/ws", "GET")) },
+        }
+      : {}),
   };
 }
 

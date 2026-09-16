@@ -18,6 +18,12 @@ import { RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type RuntimeKind, type RuntimeSpec
  *       kind: anthropic-api
  *       apiKeyEnv: ANTHROPIC_API_KEY   # variable holding the key (default shown)
  *       url: https://…            # optional
+ *     dsh:
+ *       kind: deepseek-harness
+ *       ssh: box                  # optional: answers run on that machine's harness
+ *       bin: /home/me/.npm-global/bin/dsh   # optional: the CLI command; default dsh
+ *       home: /home/me/.dsh       # optional: DSH_HOME; default the CLI's own
+ *       profile: headless         # optional: default shown
  *
  * Keys stay in the environment, never in the file: `apiKeyEnv` names the
  * variable. A runtime whose key variable is empty is dropped with a warning
@@ -72,6 +78,7 @@ function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>
   const allowed: Record<RuntimeKind, string[]> = {
     "claude-code": ["kind", "ssh", "bin", "chatArgs"],
     "anthropic-api": ["kind", "apiKeyEnv", "url"],
+    "deepseek-harness": ["kind", "ssh", "bin", "home", "profile"],
   };
   for (const key of Object.keys(raw)) if (!allowed[kind].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
   switch (kind) {
@@ -85,6 +92,14 @@ function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>
       const apiKey = env[keyEnv]?.trim() ?? "";
       if (!apiKey) return { warning: `runtime ${name} skipped: ${keyEnv} is not set` };
       return { name, kind, apiKey, apiUrl: optionalString(raw.url, `${ctx}: url`) ?? "" };
+    }
+    case "deepseek-harness": {
+      const sshHost = optionalString(raw.ssh, `${ctx}: ssh`);
+      if (sshHost && !/^[A-Za-z0-9._@-]+$/.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);
+      const home = optionalString(raw.home, `${ctx}: home`);
+      const profile = optionalString(raw.profile, `${ctx}: profile`) ?? "headless";
+      if (!/^[a-z][a-z0-9-]*$/.test(profile)) throw new Error(`${ctx}: profile must be a profile name`);
+      return { name, kind, bin: command(raw.bin, `${ctx}: bin`), profile, ...(home ? { home } : {}), ...(sshHost ? { sshHost } : {}) };
     }
   }
 }

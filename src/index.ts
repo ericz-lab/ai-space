@@ -26,6 +26,7 @@ import {
 } from "./space/storage/backup/index.ts";
 import { type Workspace, discoverApps, ensureWorkspace, loadWorkspaceEnv, resolveHome } from "./space/workspace.ts";
 import { SetupAborted, realDeps, runSetup, terminalIO } from "./space/setup.ts";
+import { type TerminalConfig, TerminalService, TerminalStore, createTerminalRoutes, loadTerminalConfig, terminalWebSocket } from "./space/terminal/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
 
 /**
@@ -44,7 +45,7 @@ import { createWebRoutes } from "./web/routes.ts";
  *
  * Configuration comes from the environment, then from `<workspace>/.env`
  * (process values win). See `.env.example`, `docs/scheduler.md`, `docs/storage.md`
- * `docs/notify.md`, `docs/model.md`, `docs/panel.md` and `docs/peers.md`.
+ * `docs/notify.md`, `docs/model.md`, `docs/panel.md`, `docs/peers.md` and `docs/terminal.md`.
  */
 
 export type Config = {
@@ -69,6 +70,8 @@ export type Config = {
   name: string;
   /** Token a hub must present on `/api/peer/*` (SPACE_HUB_TOKEN); empty = those routes are absent. */
   hubToken: string;
+  /** The web terminal (docs/terminal.md): off unless SPACE_TERMINAL_ENABLED is set. */
+  terminal: TerminalConfig;
   /** Where snapshots go (SPACE_BACKUP_URL); default s3://<SPACE_S3_BUCKET>/backups/<SPACE_NAME>/ when S3 is configured; empty = backup tasks fail until set. */
   backupUrl: string;
   /** Cron for the per-app backup tasks (SPACE_BACKUP_SCHEDULE); each app gets its own minute. */
@@ -98,6 +101,8 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
   const s3Bucket = env.SPACE_S3_BUCKET?.trim() ?? "";
   const s3Configured = Boolean(env.SPACE_S3_ACCESS_KEY_ID?.trim() && env.SPACE_S3_SECRET_ACCESS_KEY?.trim());
   const name = env.SPACE_NAME?.trim() || hostname();
+  const terminal = loadTerminalConfig(env);
+  for (const w of terminal.warnings) console.warn(`[terminal] ${w}`);
   return {
     // One prefix per machine: several spaces sharing a bucket must not mix their `space/` (and same-named apps') snapshots.
     backupUrl: env.SPACE_BACKUP_URL?.trim() || (s3Configured && s3Bucket ? `s3://${s3Bucket}/backups/${name}/` : ""),
@@ -121,6 +126,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     serviceStop: env.SPACE_SERVICE_STOP?.trim() ?? "",
     name,
     hubToken: env.SPACE_HUB_TOKEN?.trim() ?? "",
+    terminal: terminal.config,
     model: {
       maxConcurrency: Math.max(1, Number(env.SPACE_MODEL_MAX_CONCURRENCY ?? 4) || 4),
       retentionDays: Math.max(0, Number(env.SPACE_MODEL_RETENTION_DAYS ?? 0) || 0),
@@ -275,6 +281,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     ...(config.serviceStop ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) } : {}),
   });
   const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, envFor: (app) => storage.envFor(app), peers });
+  // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
+  const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
+  if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");
+  const terminalRoutes = createTerminalRoutes({ service: terminal, name: config.name, hub: peers });
 
   const server = Bun.serve({
     hostname: config.host,
@@ -315,18 +325,21 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...panelRoutes,
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),
-      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes }),
+      ...terminalRoutes,
+      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
       ...createWebRoutes(),
     },
+    websocket: terminalWebSocket,
     fetch: () => new Response(JSON.stringify({ ok: false, error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }),
   });
-  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""} · runtimes ${runtimes.describe()} (${loaded.source})`);
+  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}${terminal.enabled ? ` · terminal ${terminal.backend}` : ""} · runtimes ${runtimes.describe()} (${loaded.source})`);
 
   const shutdown = async () => {
     console.log("[space] shutting down");
     scheduler.stop();
     notify.stop();
     peers.stop();
+    terminal.stop();
     server.stop();
     await scheduler.idle();
     await notify.idle();

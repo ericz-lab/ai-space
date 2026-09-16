@@ -26,6 +26,7 @@ So the panel is a set of routes in ai-space's `Bun.serve`, a React page bundled 
 | Services (in Settings) | every registered manifest with a `service` | One row per service: icon, title, loopback port, health. |
 | Language (in Settings) | the browser's preferences | English or Chinese for everything the panel owns; the browser's language is the default. Apps' titles and descriptions follow when their manifest has an `i18n:` section. Design in [i18n.md](i18n.md). |
 | Desk pet (in Settings) | the browser's preferences | A sprite walking along the bottom edge. Off by a switch; any pet from [petdex.dev](https://petdex.dev) by name: the name is looked up in petdex's public manifest, the sheet URL is kept in `localStorage` with the other preferences, and the bundled capybara stands in when the sheet no longer loads. Pets are user-submitted fan art; the browser talks to petdex directly and sends no Referer, which its hotlink protection rejects. |
+| Terminal (a floating panel opened from Settings) | this machine, and every peer whose snapshot says `terminal: true` | A machine picker, one tab per session, xterm.js over a WebSocket to a pseudo-terminal running the operator's shell in the workspace root. Off unless the machine sets `SPACE_TERMINAL_ENABLED=1`; every session is opened with a same-origin check and a one-time ticket, optionally a passphrase; sessions close when idle. Design and trust boundary in [terminal.md](terminal.md). |
 | Tasks (a floating panel opened from Settings) | every task the scheduler knows, grouped by app | One row per task: status dot, name, effective schedule and event triggers (`on <app>/<event>`, filter and debounce on hover), last outcome and duration, next run, queued events, target kind; `api` and `override` badges; disabled and orphaned tasks muted. A row expands to the last twenty runs with error text and captured output; a run started by hand or carrying events says so. Read-only: it uses the scheduler's `GET /api/tasks` and `GET /api/tasks/:id/runs`, which carry no token; running or toggling a task still goes through the token-guarded routes from the machine. |
 
 Two independent axes decide where an app appears. A `url` means a person can open it: that is a tile. A `service` means a process runs: that is a row under Services. An app with both (a web app) has both; a data or background service with no page has a row and no tile, and stays registered, scheduled and probed, its agents and widgets (if any) in their own sections; a link app has a tile and no row; an app with neither (a repository that only runs tasks) appears in neither, and is still listed by `GET /api/apps?all=1`.
@@ -75,7 +76,7 @@ Nothing panel-related is written into an app directory or into the workspace as 
 
 `POST /api/agents/:app/:agent/chat` runs one turn: ai-space spawns `claude -p <message> --output-format stream-json` in the agent's working directory with the identity from the manifest (`--append-system-prompt` from the prompt file plus the app title, description and `AGENTS.md`; `--allowedTools` from `tools`; `--model` from the request, the manifest, then `SPACE_CHAT_MODEL`) and streams the events back as server-sent events. Multi-turn continuity is `--resume <sid>`. The browser can pick a write tier (`acceptEdits`, `bypassPermissions`, `plan`); the default is the headless read-only behaviour. `SPACE_CHAT_ARGS` appends operator-chosen arguments to every run.
 
-Transcripts are read back from the CLI's own store (`~/.claude/projects/<cwd>/<sid>.jsonl`), so restoring a past session costs no extra storage. The turn runs on the runtime the agent's manifest names ([runtimes.md](runtimes.md)); an agent naming a runtime the space lacks, or one without chat, answers 501. The browser reads Claude Code's `stream-json` events; other runtimes' events are a follow-up.
+Transcripts are read back from the runtime's own store (Claude Code: `~/.claude/projects/<cwd>/<sid>.jsonl`; DeepSeek Harness: its session log), so restoring a past session costs no extra storage. The turn runs on the runtime the agent's manifest names ([runtimes.md](runtimes.md)); an agent naming a runtime the space lacks, or one without chat, answers 501. The browser reads Claude Code's `stream-json` events; another runtime's adapter translates its own events into that shape.
 
 ## Widgets
 
@@ -103,6 +104,7 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 | `POST /api/agents/:app/:agent/chat` | one chat turn, SSE |
 | `GET /api/agents/:app/:agent/sessions[/:sid]` | recent sessions, restored transcript |
 | `GET /api/peers`, `PATCH`/`DELETE /api/peers/:peer/apps/:app`, `/api/peers/:peer/…` | peer machines, hub-side hide, forwarded uninstall/icon/embed/chat/sessions ([peers.md](peers.md)) |
+| `GET /api/terminal`, `POST /api/terminal/sessions`, `DELETE /api/terminal/sessions/:id`, `GET /api/terminal/ws`, `/api/peers/:peer/terminal/…` | the web terminal: status and machines, open a session (one-time ticket), end one, the session socket; the same on a peer, forwarded and bridged ([terminal.md](terminal.md)) |
 | `/api/peer/…` | this space as a peer of a hub, bearer-guarded ([peers.md](peers.md)) |
 
 ## Trust boundary
@@ -111,6 +113,8 @@ These routes carry no bearer token. The browser cannot hold `SPACE_API_TOKEN`, a
 
 - Anyone who passes the access layer can open a chat with `bypassPermissions`, which is a shell on the machine with the operator's runtime login. This is the same exposure as before, now written down.
 - Anything on the machine that can reach loopback can add an app from a link, uninstall an app (which runs the stop command) and change the layout. Command tasks run as the same user anyway.
+
+- The terminal, when a machine enables it, is the same shell without the agent in between. It adds what the other routes lack because a cross-site page could otherwise open it through the operator's browser: a same-origin check on every request that opens or ends a session, a one-time ticket on the socket, an optional passphrase, an idle limit and a cap. [terminal.md](terminal.md#trust-boundary) states the whole boundary.
 
 An operator who wants a second factor puts it in front of the tunnel, not in ai-space.
 
@@ -121,9 +125,10 @@ src/space/panel/    registry.ts (registered manifests), layout.ts (panel_kv), he
                     widgets.ts (feed + cache), view.ts (API shapes), links.ts (manifest-only apps), uninstall.ts (stop + directory),
                     api.ts (routes)
 src/space/peers/    other machines' panels merged into this one, and this one served to a hub (peers.md)
+src/space/terminal/ the web terminal: PTY backends, tickets and sessions, audit rows, routes and the socket bridge to a peer (terminal.md)
 src/space/agents/   runtime.ts (claude process + SSE), sessions.ts (chat_sessions),
                     transcript.ts, api.ts (routes, space agent)
-src/web/            index.html, main.tsx (language root), App.tsx, Chat.tsx, Tasks.tsx, Pet.tsx, petdex.ts (pet lookup),
+src/web/            index.html, main.tsx (language root), App.tsx, Chat.tsx, Tasks.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
                     i18n.ts (dictionaries, language choice), styles.css, api.ts, routes.ts (HTML import + public files),
                     public/ (PWA shell, pet sprite)
 ```

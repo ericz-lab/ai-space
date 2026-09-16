@@ -90,10 +90,11 @@ App 规范（什么是 app、目录布局、`space.yaml` 契约）见 [docs/app-
 - **模型**（`src/space/model/`）：app 和 agent 任务的模型调用统一走一个 `POST /api/model/run`：请求指定空间里的某个运行时（或用默认的），调用受并发上限约束，每次调用连同运行时上报的 token 数进入同一本账，面板按 app、用途和模型展示。见 [docs/model.md](docs/model.md)。
 - **运行时**（`src/space/runtimes/`）：一个空间拥有的 AI 运行时（本机或经 ssh 的 Claude Code、Anthropic API，后续增加更多种类），在 `runtimes.yaml` 里配置，各自按能力提供问答、agent 运行和聊天三种操作。模型服务、调度器和面板都通过这一层启动运行时。见 [docs/runtimes.md](docs/runtimes.md)。
 - **面板**（`src/space/panel/`、`src/space/agents/`、`src/web/`）：`/` 上的 web 入口。工作区里每个 app 的启动器（图标、入口 URL、健康状态），以任意声明的 agent 或空间 agent 身份打开 Claude Code 会话的聊天窗口，由 app 提供数据的 widget 卡片，所有定时任务及其运行历史的只读视图，以及从链接添加 app、隐藏、排序或卸载的编辑模式。中英文跟随浏览器或设置；app 在 `space.yaml` 里翻译自己的标题（[docs/i18n.md](docs/i18n.md)）。见 [docs/panel.md](docs/panel.md)。
+- **终端**（`src/space/terminal/`、`src/web/Terminal.tsx`）：在浏览器里打开本机以及每台启用了终端的 peer 机器的 shell：xterm.js 通过 WebSocket 连到一个伪终端，里面以操作员的 shell 在工作区根目录运行。默认关闭（`SPACE_TERMINAL_ENABLED=1` 开启）；每个会话都有同源检查和一次性票据，可选口令，空闲超时和会话数上限，shell 环境里剥离凭据，每个会话一条审计记录，不记录按键。见 [docs/terminal.md](docs/terminal.md)。
 
 ## 状态
 
-早期阶段。调度器（时间表和事件触发）、存储（数据库和对象存储交接）、备份、通知、带用量账本的模型调用、面板（agent 聊天、widget、从链接添加、卸载）、peers（多台机器共用一个面板，[docs/peers.md](docs/peers.md)）和交互式 `setup` 已就位。后续工作，大致按顺序：
+早期阶段。调度器（时间表和事件触发）、存储（数据库和对象存储交接）、备份、通知、带用量账本的模型调用、面板（agent 聊天、widget、从链接添加、卸载）、peers（多台机器共用一个面板，[docs/peers.md](docs/peers.md)）、web 终端（[docs/terminal.md](docs/terminal.md)）和交互式 `setup` 已就位。后续工作，大致按顺序：
 
 - **服务托管**：启动 `service.command`，失败时重启，把日志收集到 `<workspace>/logs/<app>/`；在此之前服务是操作员自己安装的 systemd 单元，面板直接探测健康状态。
 - **Skills 挂载**：把 manifest 里的 `skills:` 和 `memory:` 提供给 agent 会话；目前两者只解析不挂载。

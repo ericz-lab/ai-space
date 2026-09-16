@@ -1,5 +1,6 @@
 import { createAnthropicApi } from "./anthropic-api.ts";
 import { createClaudeCode } from "./claude-code.ts";
+import { createDeepseekHarness } from "./deepseek-harness.ts";
 import { RUNTIME_NAME_PATTERN, type RuntimeAdapter, type RuntimeSpec, type RuntimesConfig } from "./types.ts";
 
 /**
@@ -61,6 +62,8 @@ function createAdapter(spec: RuntimeSpec, deps: RegistryDeps): RuntimeAdapter {
       return createClaudeCode(spec);
     case "anthropic-api":
       return createAnthropicApi(spec, deps);
+    case "deepseek-harness":
+      return createDeepseekHarness(spec);
   }
 }
 

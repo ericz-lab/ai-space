@@ -1,6 +1,6 @@
 # Runtimes
 
-Status: implemented for Claude Code (`claude-code`) and the Anthropic Messages API (`anthropic-api`). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
+Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`) and the Anthropic Messages API (`anthropic-api`). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
 
 ## Why one layer
 
@@ -23,6 +23,7 @@ Every operation reports what the runtime said about the model call, token counts
 | kind | complete | agent | chat | login | notes |
 | --- | --- | --- | --- | --- | --- |
 | `claude-code` | yes, local or ssh | yes | yes | the CLI's own (`claude login`) | `claude -p --output-format json` for answers and agent runs, `stream-json` for chat, `--resume` for continuity. Answers over ssh: every argument validated, the system prompt base64-encoded. |
+| `deepseek-harness` | yes, local or ssh | yes | yes | a DeepSeek API key in the harness home | `dsh --profile headless --json` for everything, the task on stdin; `--session-id` for continuity. A `--patch` overlay per run sets the system prompt, model, thinking (`reasoningEffort`) and tool rows: an answer runs with the harness identity, runtime context and every tool off (6,872 input tokens as shipped → 32), a chat keeps them and adds the agent's prompt as persona. Usage from the `step_end` events, cost from DeepSeek's list prices at peak (off-peak is half). Chat events are translated into Claude Code's `stream-json`; transcripts read from the harness's session log. |
 | `anthropic-api` | yes | no | no | an API key | `POST /v1/messages`. Tools refused. Cost from list prices for known models. |
 
 ## Configuration
@@ -41,7 +42,35 @@ runtimes:
     kind: anthropic-api
     apiKeyEnv: ANTHROPIC_API_KEY # default shown
     url: https://…               # optional
+  dsh:
+    kind: deepseek-harness
+    ssh: box                     # optional: answers run on that machine's harness
+    bin: /home/me/.npm-global/bin/dsh   # optional; default dsh (must be on the login shell's PATH over ssh)
+    home: /home/me/.dsh          # optional: DSH_HOME, where session logs are read; default the CLI's own
+    profile: headless            # optional; default shown
 ```
+
+### Preparing a DeepSeek Harness
+
+On the machine that runs it (Node 22.19 or newer):
+
+```sh
+npm i -g @deepseek-ai/dsh@alpha            # the alpha channel has --json and --session-id
+dsh --profile headless --help              # initialises ~/.dsh/profiles/headless
+```
+
+Put the key in `~/.dsh/.env` as `DEEPSEEK_API_KEY=…` (mode 600). Then, in `~/.dsh/cordis.patch.yml`, keep session logs on the machine and readable by ai-space: the harness otherwise sends them to DeepSeek with each request, exports telemetry after feedback, and compresses them.
+
+```yaml
+- id: session-log-deepseek
+  config: { enabled: false }
+- id: session-telemetry-otel
+  disabled: true
+- id: session-persistence-jsonl
+  config: { root: !!js dshHomePath("sessions"), compression: none }
+```
+
+`dsh --profile headless --dump-config` shows the composed rows. Models are named as the harness names them (`deepseek-flash`, `deepseek-v4-pro`); `provider:model` selects another provider the harness has configured.
 
 A runtime whose key variable is empty is skipped with a warning at boot rather than failing it, so a space keeps running when one login is missing. `default` must name a runtime that remains.
 
@@ -56,10 +85,11 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 
 ## Code
 
-`src/space/runtimes/`: `types.ts` (operations, specs, adapter interface), `process.ts` (spawn, collect, kill the process group on timeout), `claude-code.ts`, `anthropic-api.ts`, `config.ts` (`runtimes.yaml` and the environment fallback), `registry.ts` (by name, `runtime/model` resolution), `testing.ts` (the fake CLI tests use).
+`src/space/runtimes/`: `types.ts` (operations, specs, adapter interface), `process.ts` (spawn, collect, kill the process group on timeout), `claude-code.ts`, `deepseek-harness.ts`, `anthropic-api.ts`, `transcripts.ts` (past sessions from each runtime's records), `config.ts` (`runtimes.yaml` and the environment fallback), `registry.ts` (by name, `runtime/model` resolution), `testing.ts` and `testing-dsh.ts` (the fake CLIs tests use).
 
 ## Follow-ups
 
 - Further kinds: another coding agent's CLI (its one-shot mode for answers and agent runs, its event stream for chat, usage read from where it records it), model APIs of other vendors.
-- Chat events normalised across runtimes, with ai-space keeping its own transcripts; today the browser reads Claude Code's `stream-json` and past sessions are read from the CLI's own files.
+- Chat events normalised across runtimes, with ai-space keeping its own transcripts; today the browser reads Claude Code's `stream-json` (other runtimes' adapters translate into it) and past sessions are read from each runtime's own files.
+- DeepSeek off-peak pricing in the ledger (the price table takes the peak rate), and a price table in `runtimes.yaml` for models the adapters do not know.
 - Per-app default runtime and routing by tag, fallback chains, budgets; a runtime picker in the chat panel.

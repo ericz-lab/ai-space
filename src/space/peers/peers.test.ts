@@ -94,7 +94,8 @@ widgets:
   peerLayout.hide("secret", true); // hidden on the peer: never reaches the hub
   const peerPanel = createPanelRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, widgets: new WidgetFeed(peerRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback });
   const peerAgents = createAgentRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, sessions: new SessionStore(peerDb), runtimes, defaultModel: "sonnet", home: peerHome });
-  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents }) } });
+  // The peer routes may upgrade a socket (the terminal's), so the server declares a websocket handler.
+  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents }) }, websocket: { message() {} } });
   peerBase = `http://127.0.0.1:${peerServer.port}`;
 
   // ---- the hub: a local app, a link app that duplicates the peer's app, and the peer

@@ -74,8 +74,9 @@ Present only when `SPACE_HUB_TOKEN` is set; every route requires `Authorization:
 | `GET /api/peer/widgets/:app/:name/embed` | `/api/widgets/:app/:name/embed` | The proxied embed page, `?theme=` passed through. |
 | `POST /api/peer/agents/:app/:agent/chat` | `/api/agents/:app/:agent/chat` | The same body, the same SSE stream. Sessions are recorded on the peer. |
 | `GET /api/peer/agents/:app/:agent/sessions[/:sid]` | `/api/agents/:app/:agent/sessions[/:sid]` | |
+| `GET /api/peer/terminal`, `POST /api/peer/terminal/sessions`, `DELETE /api/peer/terminal/sessions/:id`, `GET /api/peer/terminal/ws` | `/api/terminal…` | Present only while the terminal is enabled on the peer (`SPACE_TERMINAL_ENABLED`); the snapshot then carries `terminal: true`. A session on the peer, opened and bridged by the hub ([terminal.md](terminal.md#peers)). |
 
-Nothing under `/api/peer/` mutates the peer: no create, no hide, no layout, no tasks, no storage, no notify. The hub's operator changes a peer app on the peer, the same way as today.
+Nothing under `/api/peer/` mutates the peer's configuration: no create, no hide, no layout, no tasks, no storage, no notify. A chat turn and a terminal session run on the peer, of course; that is what they are for. The hub's operator changes a peer app on the peer, the same way as today.
 
 `name` in the snapshot is what the peer calls itself (`SPACE_NAME`); the hub ignores it for addressing (the hub's `SPACE_PEER_<NAME>` key is the name) and reports it, so a misconfigured pair is visible.
 
@@ -121,6 +122,8 @@ A snapshot is refreshed in the background on its own timer, never on a browser r
 The hub's panel routes carry no token (see [panel.md](panel.md)); the peer routes are the first bearer-guarded read surface, because they are meant to cross machines. What the token grants is exactly what the peer's own panel grants through its tunnel: read the app list, load pages and icons, and open a chat, including with `bypassPermissions`, which is a shell on the peer as the peer's user. The hub therefore holds, in its `.env`, a credential worth a shell on every peer; treat the hub's workspace accordingly. A peer that wants to limit this sets no `SPACE_HUB_TOKEN` and is listed on the hub as a link app instead.
 
 Chat forwarding passes the request body through unchanged, so the hub's access layer decides who may chat, and the peer's token check decides which machine may ask. Neither side logs message text.
+
+A peer that enables its terminal ([terminal.md](terminal.md)) offers it to the hub under the same token: the hub's browser opens a session with two forwarded requests and the hub bridges the socket. The peer keeps every rule of its own terminal (same-origin is satisfied by the hub's forward, the ticket is the peer's, the passphrase is the peer's and is typed on the hub's page, the idle limit and cap are the peer's, the audit row is written on the peer). A peer that wants a hub to list it but not to open a shell leaves the terminal off; the hub then shows the machine as off in the picker and nothing else changes.
 
 ## Web UI
 

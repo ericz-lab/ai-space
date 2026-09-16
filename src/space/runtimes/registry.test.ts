@@ -60,6 +60,13 @@ runtimes:
     expect(() => parseRuntimesYaml("default: nope\nruntimes:\n  x: { kind: claude-code }", {})).toThrow(/default must name/);
     expect(() => parseRuntimesYaml("runtimes:\n  api: { kind: anthropic-api }", {})).toThrow(/no usable runtime/);
     expect(() => parseRuntimesYaml("runtimes: [", {})).toThrow(/invalid YAML/);
+    expect(() => parseRuntimesYaml("runtimes:\n  d: { kind: deepseek-harness, profile: 'Bad Profile' }", {})).toThrow(/profile must be/);
+  });
+
+  test("a deepseek-harness runtime takes its command, home, profile and ssh host", () => {
+    const { config } = parseRuntimesYaml("runtimes:\n  claude: { kind: claude-code }\n  dsh: { kind: deepseek-harness, ssh: box, bin: /opt/dsh, home: /home/me/.dsh }\n", {});
+    expect(config.runtimes[1]).toEqual({ name: "dsh", kind: "deepseek-harness", bin: ["/opt/dsh"], profile: "headless", home: "/home/me/.dsh", sshHost: "box" });
+    expect(parseRuntimesYaml("runtimes:\n  dsh: { kind: deepseek-harness }\n", {}).config.runtimes[0]).toEqual({ name: "dsh", kind: "deepseek-harness", bin: [], profile: "headless" });
   });
 });
 
@@ -88,6 +95,8 @@ describe("RuntimeRegistry", () => {
     });
     expect(reg.resolve("haiku")).toMatchObject({ runtime: { name: "claude" }, model: "haiku" });
     expect(reg.resolve("api/claude-haiku-4-5")).toMatchObject({ runtime: { name: "api" }, model: "claude-haiku-4-5" });
+    const withDsh = new RuntimeRegistry({ default: "claude", runtimes: [{ name: "claude", kind: "claude-code", bin: [], chatArgs: [] }, { name: "dsh", kind: "deepseek-harness", bin: [], profile: "headless", sshHost: "box" }] });
+    expect(withDsh.resolve("dsh/deepseek-flash")).toMatchObject({ runtime: { name: "dsh", kind: "deepseek-harness", backend: "ssh:box" }, model: "deepseek-flash" });
     expect(() => reg.resolve("dsh/x")).toThrow(/unknown runtime: dsh/);
     expect(() => reg.resolve("api/")).toThrow(/invalid model/);
     expect(reg.get("nope")).toBeUndefined();

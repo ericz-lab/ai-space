@@ -166,7 +166,9 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const agent = await resolveAgent(req.params.app ?? "", req.params.agent ?? "");
         const sid = req.params.sid ?? "";
         if (!SESSION_ID_RE.test(sid)) return error(400, "invalid session id");
-        const messages = await readTranscript(agent.cwd, sid, opts.home);
+        // The runtime that ran the session keeps its record; `home` (tests) reads Claude Code's from elsewhere.
+        const runtime = opts.runtimes.get(agent.runtime);
+        const messages = opts.home ? await readTranscript(agent.cwd, sid, opts.home) : runtime?.transcript ? await runtime.transcript(agent.cwd, sid) : null;
         if (!messages) return error(404, "transcript not found");
         return json({ ok: true, messages });
       }),
