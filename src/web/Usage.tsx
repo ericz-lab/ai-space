@@ -39,9 +39,10 @@ type CallInfo = {
 
 const WINDOWS = ["5h", "24h", "7d", "30d"] as const;
 
-/** 1234 → 1.2K, 1234567 → 1.23M; a missing figure is a dash. */
+/** 1234 → 1.2K, 1234567 → 1.23M, 2689400000 → 2.69B; a missing figure is a dash. */
 export const fmtTokens = (n: number | undefined): string => {
   if (n === undefined) return "–";
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 1 : 2)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
   return String(n);
