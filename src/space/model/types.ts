@@ -19,7 +19,7 @@ export const DEFAULT_MODEL = "sonnet";
  * per call; naming one replaces all of it.
  */
 export const DEFAULT_SYSTEM = "You answer one request from an application. Reply with exactly what it asks for and nothing else.";
-export const MAX_SYSTEM_CHARS = 20_000;
+export const MAX_SYSTEM_CHARS = 200_000;
 export const DEFAULT_TIMEOUT_MS = 120_000;
 export const MAX_TIMEOUT_MS = 30 * 60_000;
 export const DEFAULT_MAX_TOKENS = 4096;

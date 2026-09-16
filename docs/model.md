@@ -67,7 +67,7 @@ What an app sends to `POST /api/model/run`:
 | field | type | meaning |
 | --- | --- | --- |
 | `prompt` | string | The whole prompt. Required; at most 2 MB. |
-| `system` | string? | The system prompt. Replaces the CLI's own; default: "You answer one request from an application. Reply with exactly what it asks for and nothing else." At most 20K characters. |
+| `system` | string? | The system prompt. Replaces the CLI's own; default: "You answer one request from an application. Reply with exactly what it asks for and nothing else." At most 200K characters: an app may put a slowly changing reference list (the catalogue a classification maps onto) here, where the CLI caches it across calls, and keep only the varying material in `prompt`. |
 | `model` | string? | A model alias or id as `claude --model` accepts it. Default `SPACE_MODEL_DEFAULT`. |
 | `tag` | string? | The purpose of the call inside the app: `translate`, `story`, `digest`. Default `other`. This is the grain the panel groups by. |
 | `tools` | string[]? | Tools the CLI may use, as `--allowedTools` takes them (`WebSearch`, `Bash(git:*)`). None by default; refused on the API backend. |
