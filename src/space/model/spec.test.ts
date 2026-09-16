@@ -30,6 +30,10 @@ describe("parseRunInput", () => {
     expect(() => parseRunInput({ prompt: "x", tools: ["Bash(rm -rf /)"] })).toThrow(/invalid tool name/);
     expect(() => parseRunInput({ prompt: "x", timeoutMs: -1 })).toThrow(/timeoutMs/);
     expect(() => parseRunInput({ prompt: "x", maxTokens: 1.5 })).toThrow(/maxTokens/);
+    expect(() => parseRunInput({ prompt: "x", thinking: -1 })).toThrow(/thinking/);
+    expect(parseRunInput({ prompt: "x", thinking: 0 }).thinking).toBe(0);
+    expect(parseRunInput({ prompt: "x", thinking: 1e9 }).thinking).toBe(128_000);
+    expect("thinking" in parseRunInput({ prompt: "x" })).toBe(false);
   });
 
   test("tool names with a matcher are allowed", () => {

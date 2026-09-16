@@ -35,7 +35,7 @@ if (import.meta.main) {
       type: "result",
       subtype: "success",
       is_error: false,
-      result: `answer to: ${prompt} [args: ${args.join(" ")}]`,
+      result: `answer to: ${prompt} [args: ${args.join(" ")}]${process.env.MAX_THINKING_TOKENS !== undefined ? ` [thinking: ${process.env.MAX_THINKING_TOKENS}]` : ""}`,
       total_cost_usd: 0.0123,
       usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 30, cache_read_input_tokens: 40 },
     }),

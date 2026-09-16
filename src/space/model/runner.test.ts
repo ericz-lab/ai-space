@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { API_MODELS, apiCost, cliArgs, createRunner, parseCliOutput, remoteCommand } from "./runner.ts";
+import { API_MODELS, apiCost, cliArgs, cliEnv, createRunner, parseCliOutput, remoteCommand } from "./runner.ts";
 import { fakeModelBin } from "./testing.ts";
 import type { RunInput } from "./types.ts";
 
@@ -21,6 +21,9 @@ describe("remoteCommand", () => {
     expect(remoteCommand(["claude"], input({ tools: ["WebSearch"] }))).toEqual({
       command: `claude -p --output-format json --model haiku --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt "$(printf %s ${b64} | base64 -d)"`,
     });
+    expect(remoteCommand(["claude"], input({ thinking: 0 }))).toEqual({ command: `MAX_THINKING_TOKENS=0 claude -p --output-format json --model haiku --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)"` });
+    expect(cliEnv(input(), { A: "1" })).toEqual({ A: "1" });
+    expect(cliEnv(input({ thinking: 2048 }), { A: "1" })).toEqual({ A: "1", MAX_THINKING_TOKENS: "2048" });
     expect(remoteCommand(["claude"], input({ model: "x y" }))).toEqual({ bad: "x y" });
     expect(remoteCommand(["claude"], input({ system: "'; rm -rf / #" }))).toMatchObject({ command: expect.not.stringContaining("rm -rf") });
   });
@@ -60,6 +63,13 @@ describe("local backend", () => {
     expect(r.text).toBe("answer to: hello [args: -p --output-format json --model haiku --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt Be brief.]");
     expect(r.usage).toEqual({ inputTokens: 10, cacheWriteTokens: 30, cacheReadTokens: 40, outputTokens: 20 });
     expect(r.costUsd).toBe(0.0123);
+  });
+
+  test("the thinking cap reaches the runtime's environment", async () => {
+    const r = await runner.run(input({ thinking: 0 }));
+    expect(r).toMatchObject({ ok: true, text: expect.stringContaining("[thinking: 0]") });
+    const none = await runner.run(input());
+    expect(none).toMatchObject({ ok: true, text: expect.not.stringContaining("[thinking:") });
   });
 
   test("plain output (an older CLI) is the answer with no usage", async () => {

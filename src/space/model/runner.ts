@@ -20,7 +20,11 @@ import { type Backend, type RunInput, type RunOutcome, type Usage } from "./type
  * `--system-prompt` replaces the prompt, `--tools ""` drops the tool set,
  * `--strict-mcp-config` drops the servers; the same one-line prompt then costs
  * 393 tokens. A call that asks for tools gets exactly those (about 1.1K more
- * per tool) and nothing else.
+ * per tool) and nothing else. Thinking is the other fixed cost: the CLI thinks
+ * before every answer (500-800 tokens on that same translation, ten times the
+ * answer); a request's `thinking` cap becomes `MAX_THINKING_TOKENS` in the
+ * runtime's environment, 0 turning it off (46 output tokens, a third of the
+ * cost, a third of the time).
  */
 
 export type RunnerOptions = {
@@ -66,8 +70,14 @@ export function remoteCommand(bin: string[], input: RunInput): { command: string
   const bad = [...words, ...(tools ? [tools] : [])].find((w) => !SAFE_ARG.test(w));
   if (bad) return { bad };
   const system = Buffer.from(input.system, "utf8").toString("base64");
-  const parts = [...words, "--tools", tools ? tools : '""', ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", `"$(printf %s ${system} | base64 -d)"`];
+  const env = input.thinking === undefined ? [] : [`MAX_THINKING_TOKENS=${Math.trunc(input.thinking)}`];
+  const parts = [...env, ...words, "--tools", tools ? tools : '""', ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", `"$(printf %s ${system} | base64 -d)"`];
   return { command: parts.join(" ") };
+}
+
+/** Environment of a local CLI run: the process's own plus the thinking cap. */
+export function cliEnv(input: RunInput, base: Record<string, string | undefined> = process.env): Record<string, string | undefined> {
+  return input.thinking === undefined ? base : { ...base, MAX_THINKING_TOKENS: String(Math.trunc(input.thinking)) };
 }
 
 export function createRunner(opts: RunnerOptions = {}): Runner {
@@ -130,7 +140,7 @@ export function parseCliOutput(raw: string): { text?: string; error?: string; us
 async function runProcess(cmd: string[], input: RunInput, backend: Backend, signal?: AbortSignal): Promise<RunOutcome> {
   let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
   try {
-    proc = Bun.spawn(cmd, { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: process.env });
+    proc = Bun.spawn(cmd, { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: cliEnv(input) });
   } catch (e) {
     return { ok: false, error: `could not start ${cmd[0]}: ${(e as Error).message}`, backend };
   }

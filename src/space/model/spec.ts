@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_SYSTEM, DEFAULT_TIMEOUT_MS, MAX_PROMPT_CHARS, MAX_SYSTEM_CHARS, MAX_TIMEOUT_MS, MODEL_PATTERN, type RunInput, TAG_PATTERN, TOOL_PATTERN, WINDOWS, type Window } from "./types.ts";
+import { DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_SYSTEM, DEFAULT_TIMEOUT_MS, MAX_PROMPT_CHARS, MAX_SYSTEM_CHARS, MAX_THINKING_TOKENS, MAX_TIMEOUT_MS, MODEL_PATTERN, type RunInput, TAG_PATTERN, TOOL_PATTERN, WINDOWS, type Window } from "./types.ts";
 
 /**
  * Validation of what comes over the API. Strict like manifests: an unknown
@@ -42,7 +42,13 @@ export function parseRunInput(body: Record<string, unknown>, defaults: { model?:
     maxTokens = Math.min(body.maxTokens, 128_000);
   }
 
-  return { prompt: body.prompt, system, model, tag, tools, timeoutMs, maxTokens };
+  let thinking: number | undefined;
+  if (body.thinking !== undefined) {
+    if (typeof body.thinking !== "number" || !Number.isInteger(body.thinking) || body.thinking < 0) throw new Error("thinking must be a non-negative integer (0 turns thinking off)");
+    thinking = Math.min(body.thinking, MAX_THINKING_TOKENS);
+  }
+
+  return { prompt: body.prompt, system, model, tag, tools, timeoutMs, maxTokens, ...(thinking !== undefined ? { thinking } : {}) };
 }
 
 export function parseWindow(raw: string | null | undefined): Window {

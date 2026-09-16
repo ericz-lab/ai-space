@@ -52,6 +52,8 @@ The CLI backends start `claude` lean. Measured on one machine with a one-line tr
 
 So every call gets `--system-prompt` (the request's `system`, or a two-sentence default), `--strict-mcp-config` (no MCP servers), and `--tools` set to exactly the tools the request named, with `""` when it named none. Over ssh the system prompt travels base64-encoded and is decoded by the remote shell, so free text never meets the command line.
 
+Thinking is the other fixed cost. The CLI thinks before every answer; on that same translation it spent 500 to 800 thinking tokens for a 46-token answer, so output tokens, priced five times input, were nine tenths of the call. A request's `thinking` becomes `MAX_THINKING_TOKENS` in the runtime's environment: `0` turns thinking off (the translation then costs a third and takes a third of the time), a positive number caps it. Absent, the runtime's default applies. The API backend does not enable extended thinking at all.
+
 `SPACE_MODEL_BIN` replaces the `claude` command (a wrapper script, the test stand-in). `SPACE_MODEL_MAX_CONCURRENCY` (default 4) caps the calls running at once; the rest wait in order. `SPACE_MODEL_DEFAULT` (default `sonnet`) is the model when a request names none. `SPACE_MODEL_RETENTION_DAYS` (default 90) is how much ledger is kept; older rows are pruned on insert.
 
 The CLI answers with one JSON envelope (`type: result`): the text under `result`, token counts under `usage`, and its own cost figure under `total_cost_usd`. `is_error` in the envelope is a failure even though the process exited 0. A CLI that answers in plain text (an older one, or one started without the json flag) still works: the text is the answer and no usage is recorded.
@@ -71,6 +73,7 @@ What an app sends to `POST /api/model/run`:
 | `tools` | string[]? | Tools the CLI may use, as `--allowedTools` takes them (`WebSearch`, `Bash(git:*)`). None by default; refused on the API backend. |
 | `timeoutMs` | number? | Default 120 s, at most 30 min. |
 | `maxTokens` | number? | Output cap on the API backend; the CLI has none. Default 4096. |
+| `thinking` | number? | Cap on thinking tokens; `0` turns thinking off. Absent = the runtime's default. A translation or a rating needs none; a classification over a long list may want a few thousand. |
 
 The caller is identified by its bearer token, the same way as notify: an app's own `SPACE_APP_TOKEN` (handed over in its `space.env`) maps to that app; the operator's `SPACE_API_TOKEN` requires an explicit `app` in the body.
 

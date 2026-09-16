@@ -23,6 +23,7 @@ export const MAX_SYSTEM_CHARS = 20_000;
 export const DEFAULT_TIMEOUT_MS = 120_000;
 export const MAX_TIMEOUT_MS = 30 * 60_000;
 export const DEFAULT_MAX_TOKENS = 4096;
+export const MAX_THINKING_TOKENS = 128_000;
 export const MAX_PROMPT_CHARS = 2_000_000;
 
 /** What a call asks for, after validation. */
@@ -38,6 +39,12 @@ export type RunInput = {
   timeoutMs: number;
   /** Output cap on the API backend; the CLI has none. */
   maxTokens: number;
+  /**
+   * Cap on thinking tokens (`MAX_THINKING_TOKENS` for the CLI); 0 turns thinking
+   * off. Absent = the runtime's default, which thinks before every answer and,
+   * for a one-line translation, spends ten times the answer's tokens on it.
+   */
+  thinking?: number;
 };
 
 export type Usage = {
