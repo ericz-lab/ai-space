@@ -320,7 +320,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
     fetch: () => new Response(JSON.stringify({ ok: false, error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }),
   });
-  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""} · model ${model.backend}`);
+  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""} · runtimes ${runtimes.describe()} (${loaded.source})`);
 
   const shutdown = async () => {
     console.log("[space] shutting down");
