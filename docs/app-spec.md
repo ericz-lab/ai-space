@@ -339,8 +339,8 @@ Environment, always:
 | `SPACE_APP` | The app name. |
 | `SPACE_APP_DIR` | Absolute path of the app directory. |
 | `SPACE_APP_DATA_DIR` | Absolute path of `<workspace>/data/<name>/`. |
-| `SPACE_API_URL` | Base URL of the Space API, loopback. |
-| `SPACE_APP_TOKEN` | Per-app bearer token for the Space API; identifies the app on `POST /api/notify` and `POST /api/events`. Written to `space.env`. |
+| `SPACE_API_URL` | Base URL of the Space API, loopback. Written to `space.env`. |
+| `SPACE_APP_TOKEN` | Per-app bearer token for the Space API; identifies the app on `POST /api/notify`, `POST /api/events` and `POST /api/model/run`. Written to `space.env`. |
 | `PORT` | For services: the declared port. |
 | `SPACE_TRIGGER` | For task runs: `schedule`, `manual` or `event`. With events, `SPACE_EVENT` (the latest) and `SPACE_EVENTS` (all) as JSON. |
 
