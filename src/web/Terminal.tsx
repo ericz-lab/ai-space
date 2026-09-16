@@ -184,6 +184,7 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
       } catch {
         /* hidden */
       }
+      tab.term.focus();
       void connect(tab);
     });
   };
@@ -244,7 +245,16 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
               </option>
             ))}
           </select>
-          <button className="chat-hbtn" title={t("term.new")} onClick={newTab} disabled={!machines.some((m) => m.enabled)}>
+          <button
+            className="chat-hbtn"
+            title={t("term.new")}
+            // Focus moves to the new terminal; left on the button, a space or enter typed early would open another session.
+            onClick={(e) => {
+              e.currentTarget.blur();
+              newTab();
+            }}
+            disabled={!machines.some((m) => m.enabled)}
+          >
             ＋
           </button>
           <button className="chat-hbtn" title={t("term.history")} onClick={() => setHist((h) => !h)}>
