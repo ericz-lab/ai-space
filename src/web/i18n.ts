@@ -105,11 +105,8 @@ const en = {
   "pet.default": "Capybara (built in)",
   "pet.clickMe": "Click me",
 
-  "settings.terminal": "Terminal",
-  "settings.openTerminal": "Open a terminal",
-  "settings.terminalOff": "off on this machine",
-
   "term.title": "Terminal",
+  "term.blurb": "A shell on this machine and on the peers that offer one.",
   "term.new": "New session",
   "term.machine": "Machine",
   "term.thisMachine": "{name} (this machine)",
@@ -330,11 +327,8 @@ const zh: Record<Key, string> = {
   "pet.default": "水豚（内置）",
   "pet.clickMe": "点我",
 
-  "settings.terminal": "终端",
-  "settings.openTerminal": "打开终端",
-  "settings.terminalOff": "本机未启用",
-
   "term.title": "终端",
+  "term.blurb": "本机以及开放了终端的 peer 机器上的 shell。",
   "term.new": "新建会话",
   "term.machine": "机器",
   "term.thisMachine": "{name}（本机）",

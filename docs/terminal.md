@@ -97,7 +97,7 @@ What the terminal does not do: it does not run as another user, does not confine
 
 ## Web UI
 
-- **Settings → Terminal → Open a terminal** opens the panel; it stays mounted, so closing it (✕ or a click outside) keeps the sessions and their scrollback. Escape is left to the shell.
+- **The Terminal tile**, a built-in tile next to Settings in the Apps grid, opens the panel; it stays mounted, so closing it (✕ or a click outside) keeps the sessions and their scrollback. Escape is left to the shell.
 - **Header**: the machine picker (this machine first, then peers; a machine that is off or down is listed but disabled), ＋ for a new session on the picked machine, 🕘 for the recent sessions of this machine (from the audit rows), ✕.
 - **Tabs**: `<machine> #n` with a dot: amber while connecting, green while open, grey when closed. The ✕ on a tab closes its socket, which hangs the shell up.
 - **Passphrase**: a field appears when the machine says one is required or the one given was wrong; the entry is kept in memory for the page.

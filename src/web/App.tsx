@@ -463,7 +463,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const openSettings = () => {
     setChatOpen(false);
     setTasksOpen(false);
+    setTermOpen(false);
     setSetsOpen(true);
+  };
+  const openTerminal = () => {
+    setChatOpen(false);
+    setTasksOpen(false);
+    setSetsOpen(false);
+    setTermOpen(true);
   };
   const openChat = (a: AgentInfo) => {
     setChatAgent(a);
@@ -677,6 +684,16 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 </Tile>
                 );
               })}
+              <Tile icon="/terminal.svg" fallback="⌨️" name={t("term.title")} editing={editing} onOpen={openTerminal} showPop={!prefs.noPop} className="builtin">
+                <p className="pop-title">
+                  {t("term.title")}
+                  <span className="status">
+                    <i />
+                    {t("status.builtIn")}
+                  </span>
+                </p>
+                <p className="pop-body">{t("term.blurb")}</p>
+              </Tile>
               <Tile icon="/settings.svg" fallback="⚙️" name={t("settings.title")} editing={editing} onOpen={openSettings} showPop={!prefs.noPop} className="builtin">
                 <p className="pop-title">
                   {t("settings.title")}
@@ -850,18 +867,6 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 }}
               >
                 {t("settings.usage")}
-                <span>›</span>
-              </button>
-              <p className="sethead">{t("settings.terminal")}</p>
-              <button
-                className="setrow setlink"
-                onClick={() => {
-                  setSetsOpen(false);
-                  setChatOpen(false);
-                  setTermOpen(true);
-                }}
-              >
-                {t("settings.openTerminal")}
                 <span>›</span>
               </button>
               {services && services.peers.length > 0 && (
