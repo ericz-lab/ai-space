@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { claudeOnly } from "../runtimes/registry.ts";
+import { fakeModelBin } from "../runtimes/testing.ts";
 import { createModelRoutes } from "./api.ts";
-import { createRunner } from "./runner.ts";
 import { ModelService } from "./service.ts";
 import { ModelStore } from "./store.ts";
-import { fakeModelBin } from "./testing.ts";
 import { DEFAULT_SYSTEM } from "./types.ts";
 
 let dir: string;
@@ -20,7 +20,7 @@ const TOKENS: Record<string, string> = { "sat_my-app": "my-app", sat_other: "oth
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "space-model-api-"));
   store = new ModelStore(join(dir, "space.db"));
-  service = new ModelService({ store, runner: createRunner({ bin: fakeModelBin(), env: {} }), maxConcurrency: 2, log: () => {} });
+  service = new ModelService({ store, runtimes: claudeOnly(fakeModelBin()), maxConcurrency: 2, log: () => {} });
   server = Bun.serve({
     port: 0,
     routes: createModelRoutes({ service, token: "op-token", appForToken: async (t) => TOKENS[t], defaultModel: "haiku" }),
@@ -51,8 +51,21 @@ describe("POST /api/model/run", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as RunBody;
     expect(body.text).toBe(`answer to: hello [args: -p --output-format json --model haiku --strict-mcp-config --tools  --system-prompt ${DEFAULT_SYSTEM}]`);
-    expect(body.call).toMatchObject({ app: "my-app", tag: "translate", model: "haiku", status: "ok", usage: { inputTokens: 10 }, costUsd: 0.0123 });
-    expect(store.get(body.call.id)).toMatchObject({ app: "my-app", promptChars: 5 });
+    expect(body.call).toMatchObject({ app: "my-app", tag: "translate", model: "haiku", runtime: "claude", backend: "local", status: "ok", usage: { inputTokens: 10 }, costUsd: 0.0123 });
+    expect(store.get(body.call.id)).toMatchObject({ app: "my-app", promptChars: 5, runtime: "claude" });
+  });
+
+  test("a runtime prefix picks the runtime and is stripped from the model; an unknown one is 400 and leaves no row", async () => {
+    const res = await post("/api/model/run", { prompt: "hello", model: "claude/sonnet" }, "sat_my-app");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as RunBody;
+    expect(body.text).toContain("--model sonnet ");
+    expect(body.call).toMatchObject({ model: "sonnet", runtime: "claude" });
+    const before = store.totals(0).calls;
+    const bad = await post("/api/model/run", { prompt: "hello", model: "dsh/deepseek-v4-flash" }, "sat_my-app");
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: string }).error).toBe("unknown runtime: dsh");
+    expect(store.totals(0).calls).toBe(before);
   });
 
   test("the operator token needs an explicit app; wrong or missing tokens are 401", async () => {
@@ -95,7 +108,7 @@ describe("reads", () => {
     await post("/api/model/run", { prompt: "a", tag: "translate" }, "sat_my-app");
     await post("/api/model/run", { prompt: "b", tag: "digest", model: "sonnet" }, "sat_other");
     const status = (await (await fetch(`${base}/api/model/status`)).json()) as { backend: string; maxConcurrency: number; running: number };
-    expect(status).toMatchObject({ ok: true, backend: "local", maxConcurrency: 2, running: 0 });
+    expect(status).toMatchObject({ ok: true, backend: "local", maxConcurrency: 2, running: 0, runtimes: [{ name: "claude", kind: "claude-code", backend: "local", default: true }] });
 
     const usage = (await (await fetch(`${base}/api/model/usage?window=5h`)).json()) as {
       window: string;

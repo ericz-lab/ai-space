@@ -1,4 +1,5 @@
 import { basename, join } from "node:path";
+import { RUNTIME_NAME_PATTERN } from "../runtimes/types.ts";
 import { assertTriggerEvent } from "./events.ts";
 import { assertSchedule, parseDuration } from "./schedule.ts";
 import { DEFAULT_TIMEOUT_MS, type EventTrigger, TASK_NOTIFY_EVENTS, type Schedule, type Target, type TaskNotify, type TaskNotifyEvent } from "./types.ts";
@@ -24,7 +25,8 @@ const TOP_LEVEL_KEYS = ["spec", "name", "title", "description", "icon", "url", "
 const LANG_TAG_RE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
 export type AppStatus = "active" | "paused" | "archived";
-export type AgentRuntime = "claude" | "codex";
+/** Name of a runtime in the space's registry (`claude`, `dsh`, …); its existence is checked when an agent is used. */
+export type AgentRuntime = string;
 /** Columns x rows on the panel grid. The panel lets the operator override a widget's size; see panel.md. */
 export const WIDGET_SIZES = ["1x1", "2x1", "1x2", "2x2"] as const;
 export type WidgetSize = (typeof WIDGET_SIZES)[number];
@@ -261,6 +263,13 @@ function parseList<T extends { name: string }>(raw: unknown, section: string, pa
   return out;
 }
 
+/** The name of a runtime in the space's registry (`claude` by default); whether it exists is checked when it is used. */
+function parseRuntimeName(v: unknown, ctx: string): string {
+  if (v === undefined) return "claude";
+  if (typeof v !== "string" || !RUNTIME_NAME_PATTERN.test(v)) throw new Error(`${ctx} must be a runtime name (lowercase letters, digits, dashes)`);
+  return v;
+}
+
 function parseAgent(raw: unknown, where: string): ManifestAgent {
   if (!isRecord(raw)) throw new Error(`${where} must be a mapping`);
   const keys = ["name", "title", "description", "avatar", "runtime", "model", "prompt", "cwd", "tools", "skills", "memory"];
@@ -268,8 +277,7 @@ function parseAgent(raw: unknown, where: string): ManifestAgent {
   const name = typeof raw.name === "string" ? raw.name.trim() : "";
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`${where}: invalid or missing name`);
   const ctx = `agent "${name}"`;
-  const runtime = raw.runtime ?? "claude";
-  if (runtime !== "claude" && runtime !== "codex") throw new Error(`${ctx}: runtime must be claude or codex`);
+  const runtime = parseRuntimeName(raw.runtime, `${ctx}: runtime`);
   const memory = raw.memory ?? "shared";
   if (memory !== "shared" && memory !== "app" && memory !== "none") throw new Error(`${ctx}: memory must be shared, app or none`);
   const tools = stringList(raw.tools, `${ctx}: tools`);
@@ -438,8 +446,7 @@ function parseTarget(run: unknown, ctx: string): Target {
 
   const a = run.agent;
   if (!isRecord(a) || typeof a.prompt !== "string") throw new Error(`${ctx}: run.agent needs a prompt path`);
-  const runtime = a.runtime ?? "claude";
-  if (runtime !== "claude" && runtime !== "codex") throw new Error(`${ctx}: run.agent.runtime must be claude or codex`);
+  const runtime = parseRuntimeName(a.runtime, `${ctx}: run.agent.runtime`);
   if (a.model !== undefined && typeof a.model !== "string") throw new Error(`${ctx}: run.agent.model must be a string`);
   return { kind: "agent", runtime, prompt: a.prompt, ...(a.model ? { model: a.model } : {}) };
 }

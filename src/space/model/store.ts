@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS model_calls_started ON model_calls(started_at DESC);
 CREATE INDEX IF NOT EXISTS model_calls_app_started ON model_calls(app, started_at DESC);
 `;
 
-const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [];
+const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [{ table: "model_calls", column: "runtime", ddl: "TEXT" }];
 
 /** Days of ledger kept; 0 keeps everything (the default: the ledger is the history the panel shows). */
 export const DEFAULT_RETENTION_DAYS = 0;
@@ -43,6 +43,7 @@ type Row = {
   app: string;
   tag: string;
   model: string;
+  runtime: string | null;
   backend: string;
   origin: string;
   status: string;
@@ -95,14 +96,15 @@ export class ModelStore {
   add(c: ModelCallInput): ModelCall {
     const r = this.db
       .query(
-        `INSERT INTO model_calls (app, tag, model, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
+        `INSERT INTO model_calls (app, tag, model, runtime, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
                                   input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, cost_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         c.app,
         c.tag,
         c.model,
+        c.runtime ?? null,
         c.backend,
         c.origin,
         c.status,
@@ -201,7 +203,7 @@ export class ModelStore {
   }
 
   /** Sums grouped by one or more columns, largest first by tokens. */
-  groupBy<K extends readonly ("app" | "tag" | "model" | "backend" | "origin")[]>(keys: K, since: number, app?: string): GroupTotals<Record<K[number], string>>[] {
+  groupBy<K extends readonly ("app" | "tag" | "model" | "runtime" | "backend" | "origin")[]>(keys: K, since: number, app?: string): GroupTotals<Record<K[number], string>>[] {
     const cols = keys.join(", ");
     const sql = `SELECT ${cols}, ${TOTALS_SQL} FROM model_calls WHERE started_at >= ?${app ? " AND app = ?" : ""} GROUP BY ${cols}
                  ORDER BY (COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(cache_write_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0) + COALESCE(SUM(output_tokens), 0)) DESC, calls DESC`;
@@ -210,7 +212,8 @@ export class ModelStore {
       : this.db.query<TotalsRow & Record<string, string | number>, [number]>(sql).all(since);
     return rows.map((r) => {
       const out = { ...totalsOf(r) } as Record<string, string | number>;
-      for (const k of keys) out[k] = String(r[k]);
+      // Rows from before runtimes were named have none; the panel shows them under the empty group.
+      for (const k of keys) out[k] = r[k] === null || r[k] === undefined ? "" : String(r[k]);
       return out as GroupTotals<Record<K[number], string>>;
     });
   }
@@ -259,6 +262,7 @@ function rowToCall(r: Row): ModelCall {
     app: r.app,
     tag: r.tag,
     model: r.model,
+    runtime: r.runtime ?? undefined,
     backend: r.backend,
     origin: r.origin as Origin,
     status: r.status as CallStatus,

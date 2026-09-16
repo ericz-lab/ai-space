@@ -4,6 +4,7 @@ import { type LayoutStore, orderBy } from "../panel/layout.ts";
 import type { AppRegistry } from "../panel/registry.ts";
 import { type AgentView, agentView } from "../panel/view.ts";
 import type { PeerHub } from "../peers/hub.ts";
+import type { RuntimeRegistry } from "../runtimes/registry.ts";
 import type { Manifest, ManifestAgent } from "../scheduler/manifest.ts";
 import { loadAppEnv } from "../scheduler/targets.ts";
 import type { Workspace } from "../workspace.ts";
@@ -27,10 +28,10 @@ export type AgentsApiOptions = {
   registry: AppRegistry;
   layout: LayoutStore;
   sessions: SessionStore;
+  /** The configured runtimes; an agent's manifest names one of them. */
+  runtimes: RuntimeRegistry;
   /** Model when neither the request nor the manifest names one (SPACE_CHAT_MODEL). */
   defaultModel?: string;
-  /** Extra runtime arguments (SPACE_CHAT_ARGS). */
-  extraArgs?: string[];
   /** Provisioned variables for an app, merged into the session environment. */
   envFor?: (app: string) => Promise<Record<string, string>>;
   /** Home directory for transcripts; default: the process's. */
@@ -132,7 +133,9 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     "/api/agents/:app/:agent/chat": {
       POST: wrap(async (req) => {
         const agent = await resolveAgent(req.params.app ?? "", req.params.agent ?? "");
-        if (agent.runtime !== "claude") return error(501, `chat with the ${agent.runtime} runtime is not supported yet`);
+        const runtime = opts.runtimes.get(agent.runtime);
+        if (!runtime) return error(501, `runtime ${agent.runtime} is not configured on this space`);
+        if (!runtime.capabilities.chat) return error(501, `runtime ${agent.runtime} does not support chat`);
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
         if (!body) return error(400, "body must be JSON");
         const message = typeof body.message === "string" ? body.message.trim() : "";
@@ -144,7 +147,8 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const permissionMode = typeof body.permissionMode === "string" ? body.permissionMode : undefined;
         const env: Record<string, string | undefined> = { ...process.env, ...(await loadAppEnv(agent.cwd)), ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}) };
         return chatResponse(
-          { message, sessionId, model, permissionMode, systemPrompt: agent.systemPrompt, allowedTools: agent.tools, extraArgs: opts.extraArgs, cwd: agent.cwd, env },
+          runtime,
+          { message, sessionId, model, permissionMode, systemPrompt: agent.systemPrompt, allowedTools: agent.tools, cwd: agent.cwd, env },
           { onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40)) },
         );
       }),

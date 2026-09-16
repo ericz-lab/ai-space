@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import type { RuntimeRegistry } from "../runtimes/registry.ts";
+import { spawnCollect } from "../runtimes/process.ts";
 import { eventEnv, eventPayload, eventPromptSection } from "./events.ts";
 import type { RunStatus, RunTrigger, SpaceEvent, Target } from "./types.ts";
 
@@ -23,6 +25,8 @@ export type RunResult = {
   usage?: { inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number };
   costUsd?: number;
   promptChars?: number;
+  /** Agent targets: where the runtime ran (`local`, `ssh:<host>`), for the ledger. */
+  backend?: string;
 };
 
 export type RunContext = {
@@ -35,6 +39,8 @@ export type RunContext = {
   trigger?: RunTrigger;
   /** Events delivered with this run, oldest first. */
   events?: SpaceEvent[];
+  /** The configured runtimes; an agent target names one of them. Absent = agent targets fail. */
+  runtimes?: RuntimeRegistry;
 };
 
 const MAX_OUTPUT_CHARS = 4000;
@@ -113,96 +119,34 @@ async function runCommand(target: Extract<Target, { kind: "command" }>, ctx: Run
   const env = { ...process.env, ...(await loadAppEnv(cwd)), ...(ctx.env ?? {}), ...(target.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []) };
   // ${VAR} placeholders resolve from the scheduler environment, same as http targets,
   // so machine-specific paths (a venv python, a token) stay out of the manifest.
-  return spawnAndWait(["sh", "-c", interpolate(target.command)], { cwd, env, signal: ctx.signal });
+  const r = await spawnCollect(["sh", "-c", interpolate(target.command)], { cwd, env, signal: ctx.signal });
+  const output = truncate(joinOutput(r.stdout, r.stderr));
+  if (r.aborted || r.timedOut) return { status: "error", error: "timed out", output };
+  if (r.code !== 0) return { status: "error", error: `exit code ${r.code}`, output };
+  return { status: "ok", output };
 }
 
+/**
+ * An agent task runs on the runtime the target names, in the app directory,
+ * with the prompt file (plus the events section) on stdin. The runtime's own
+ * system prompt and tools apply: this is a coding agent at work, not a
+ * one-shot answer. What it reported about the model call travels in the
+ * result for the ledger.
+ */
 async function runAgent(target: Extract<Target, { kind: "agent" }>, ctx: RunContext): Promise<RunResult> {
+  const runtime = ctx.runtimes?.get(target.runtime);
+  if (!runtime) return { status: "error", error: `runtime ${target.runtime} is not configured` };
+  if (!runtime.capabilities.agent) return { status: "error", error: `runtime ${target.runtime} does not run agent tasks` };
   const cwd = target.cwd ?? ctx.appDir ?? process.cwd();
   const promptPath = target.prompt.startsWith("/") ? target.prompt : join(cwd, target.prompt);
   const promptFile = Bun.file(promptPath);
   if (!(await promptFile.exists())) return { status: "error", error: `prompt file not found: ${promptPath}` };
   const prompt = (await promptFile.text()) + (ctx.events?.length ? eventPromptSection(ctx.events) : "");
   const env = { ...process.env, ...(await loadAppEnv(cwd)), ...(ctx.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []) };
-  const cmd = agentCommand(target.runtime, target.model);
-  const result = await spawnAndWait(cmd, { cwd, env, signal: ctx.signal, stdin: prompt }, target.runtime === "claude" ? parseAgentOutput : undefined);
-  return { ...result, promptChars: prompt.length };
-}
-
-/**
- * `claude -p --output-format json` answers with one envelope: the text under
- * `result`, token counts under `usage`, and its own cost figure. A run whose
- * envelope says `is_error` failed even though the process exited 0. Output
- * that is not the envelope (an older CLI) is kept as it is.
- */
-function parseAgentOutput(stdout: string): Partial<RunResult> {
-  let j: { type?: string; is_error?: boolean; result?: string; total_cost_usd?: number; usage?: Record<string, number> };
-  try {
-    j = JSON.parse(stdout) as typeof j;
-  } catch {
-    return {};
-  }
-  if (!j || typeof j !== "object" || j.type !== "result") return {};
-  const u = j.usage;
-  const out: Partial<RunResult> = {
-    ...(u ? { usage: { inputTokens: u.input_tokens ?? 0, cacheWriteTokens: u.cache_creation_input_tokens ?? 0, cacheReadTokens: u.cache_read_input_tokens ?? 0, outputTokens: u.output_tokens ?? 0 } } : {}),
-    ...(typeof j.total_cost_usd === "number" ? { costUsd: j.total_cost_usd } : {}),
-  };
-  if (j.is_error) return { ...out, status: "error", error: (j.result ?? "the runtime reported an error").trim().slice(0, 800) };
-  if (typeof j.result === "string") out.output = truncate(j.result);
-  return out;
-}
-
-/** Command line for an agent runtime; overridable per runtime via SPACE_AGENT_BIN_<RUNTIME> for tests. */
-export function agentCommand(runtime: "claude" | "codex", model?: string): string[] {
-  const override = process.env[`SPACE_AGENT_BIN_${runtime.toUpperCase()}`];
-  if (override) return override.split(/\s+/).filter(Boolean);
-  if (runtime === "claude") {
-    return ["claude", "-p", "--output-format", "json", ...(model ? ["--model", model] : [])];
-  }
-  return ["codex", "exec", ...(model ? ["--model", model] : []), "-"];
-}
-
-/**
- * Spawn and wait, honoring the abort signal. The child is started in its own
- * process group where `setsid` exists (Linux) so a timeout kills the whole tree,
- * not just the `sh` wrapper; without it (macOS) only the direct child is killed
- * and grandchildren are left to finish on their own. After an abort we stop
- * waiting on the pipes: an orphaned grandchild could otherwise hold stdout open.
- */
-async function spawnAndWait(
-  cmd: string[],
-  opts: { cwd: string; env: Record<string, string | undefined>; signal: AbortSignal; stdin?: string },
-  parse?: (stdout: string) => Partial<RunResult>,
-): Promise<RunResult> {
-  const setsid = Bun.which("setsid");
-  const proc = Bun.spawn(setsid ? [setsid, ...cmd] : cmd, {
-    cwd: opts.cwd,
-    env: opts.env,
-    stdin: opts.stdin !== undefined ? new TextEncoder().encode(opts.stdin) : "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const stdout = new Response(proc.stdout).text();
-  const stderr = new Response(proc.stderr).text();
-  const aborted = new Promise<"aborted">((resolve) => opts.signal.addEventListener("abort", () => resolve("aborted"), { once: true }));
-  const outcome = await Promise.race([proc.exited, aborted]);
-
-  if (outcome === "aborted") {
-    try {
-      if (setsid) process.kill(-proc.pid, "SIGKILL");
-      else proc.kill("SIGKILL");
-    } catch {
-      /* already gone */
-    }
-    await Promise.race([proc.exited, Bun.sleep(1000)]);
-    const partial = await Promise.race([Promise.all([stdout, stderr]), Bun.sleep(200).then(() => ["", ""] as const)]);
-    return { status: "error", error: "timed out", output: truncate(joinOutput(partial[0], partial[1])) };
-  }
-
-  const out = await stdout;
-  const output = truncate(joinOutput(out, await stderr));
-  if (outcome !== 0) return { status: "error", error: `exit code ${outcome}`, output };
-  return { status: "ok", output, ...(parse ? parse(out) : {}) };
+  const r = await runtime.runAgent({ prompt, cwd, env, model: target.model, signal: ctx.signal });
+  const base = { promptChars: prompt.length, backend: r.backend, ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
+  if (!r.ok) return { status: "error", error: r.error ?? "failed", output: truncate(r.output), ...base };
+  return { status: "ok", output: truncate(r.text ?? r.output), ...base };
 }
 
 function joinOutput(stdout: string, stderr: string): string {

@@ -64,9 +64,14 @@ describe("ModelStore", () => {
       ["other", "translate", "haiku", 0, 0],
     ]);
     expect(store.groupBy(["backend", "origin"], T0 - 3 * DAY)).toEqual([expect.objectContaining({ backend: "local", origin: "run", calls: 3 })]);
+    // Rows without a runtime (older rows, imports) group under the empty name.
+    expect(store.groupBy(["runtime"], T0 - 3 * DAY).map((g) => [g.runtime, g.calls])).toEqual([["", 3]]);
+    store.add(call({ runtime: "claude", startedAt: T0 + 1 }));
+    expect(store.groupBy(["runtime"], T0 - 3 * DAY).map((g) => [g.runtime, g.calls])).toEqual([["", 3], ["claude", 1]]);
+    expect(store.list({ limit: 1 })[0]).toMatchObject({ runtime: "claude" });
     expect(store.days(T0 - 3 * DAY).map((d) => [d.day, d.calls])).toEqual([
       ["2026-09-14", 1],
-      ["2026-09-16", 2],
+      ["2026-09-16", 3],
     ]);
   });
 

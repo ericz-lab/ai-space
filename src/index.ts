@@ -4,7 +4,8 @@ import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loa
 import { SessionStore, createAgentRoutes } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, LayoutStore, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
-import { ModelService, ModelStore, createModelRoutes, createRunner, importCalls, recordAgentRun } from "./space/model/index.ts";
+import { ModelService, ModelStore, createModelRoutes, importCalls, recordAgentRun } from "./space/model/index.ts";
+import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
 import { type Manifest, Scheduler, Store, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { type S3Config, StorageService, createStorageRoutes, openDatabase, parseStorageSpec, sqliteUrl } from "./space/storage/index.ts";
 import {
@@ -62,8 +63,6 @@ export type Config = {
   notifyTasks: string;
   /** Chat model when neither the request nor the manifest names one (SPACE_CHAT_MODEL). */
   chatModel: string;
-  /** Extra arguments for the chat runtime (SPACE_CHAT_ARGS), e.g. a permission wrapper. */
-  chatArgs: string[];
   /** Command that stops an app's service when the panel uninstalls it (SPACE_SERVICE_STOP), `{app}` = name; empty = services are not stopped. */
   serviceStop: string;
   /** What this space calls itself towards a hub (SPACE_NAME); default: the hostname. */
@@ -80,14 +79,12 @@ export type Config = {
   backupMaxAgeMs: number;
   /** Timeout of one backup run (SPACE_BACKUP_TIMEOUT_MIN). */
   backupTimeoutMs: number;
-  /** The model service (docs/model.md): where calls run and how many at once. */
+  /**
+   * The model service (docs/model.md): how many calls at once and the default model. Which
+   * runtimes exist is `<workspace>/runtimes.yaml`, or the SPACE_MODEL_* / SPACE_CHAT_* variables
+   * when the file is absent (see `src/space/runtimes/config.ts`).
+   */
   model: {
-    /** Machine whose `claude` login the calls borrow over ssh (SPACE_MODEL_SSH_HOST); empty = this machine's `claude`. */
-    sshHost: string;
-    /** Messages API key (SPACE_MODEL_API_KEY); set = the API instead of the CLI. */
-    apiKey: string;
-    /** The CLI command (SPACE_MODEL_BIN); empty = `claude`. */
-    bin: string[];
     /** Calls running at the same time (SPACE_MODEL_MAX_CONCURRENCY). */
     maxConcurrency: number;
     /** Days of ledger kept (SPACE_MODEL_RETENTION_DAYS); 0 = everything. */
@@ -121,14 +118,10 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     pgAdminUrl: env.SPACE_PG_ADMIN_URL?.trim() ?? "",
     notifyTasks: env.SPACE_NOTIFY_TASKS?.trim() ?? "",
     chatModel: env.SPACE_CHAT_MODEL?.trim() ?? "sonnet",
-    chatArgs: (env.SPACE_CHAT_ARGS ?? "").split(/\s+/).filter(Boolean),
     serviceStop: env.SPACE_SERVICE_STOP?.trim() ?? "",
     name,
     hubToken: env.SPACE_HUB_TOKEN?.trim() ?? "",
     model: {
-      sshHost: env.SPACE_MODEL_SSH_HOST?.trim() ?? "",
-      apiKey: env.SPACE_MODEL_API_KEY?.trim() ?? "",
-      bin: (env.SPACE_MODEL_BIN ?? "").split(/\s+/).filter(Boolean),
       maxConcurrency: Math.max(1, Number(env.SPACE_MODEL_MAX_CONCURRENCY ?? 4) || 4),
       retentionDays: Math.max(0, Number(env.SPACE_MODEL_RETENTION_DAYS ?? 0) || 0),
       defaultModel: env.SPACE_MODEL_DEFAULT?.trim() || "sonnet",
@@ -198,13 +191,12 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     channelErrors,
     imageDir: (app) => join(storage.appDataDir(app), "notify"),
   });
+  const loaded = await loadRuntimes(ws.home, env);
+  for (const w of loaded.warnings) console.warn(`[runtimes] ${w}`);
+  const runtimes = new RuntimeRegistry(loaded.config);
   const modelStore = new ModelStore(config.dbPath, { retentionDays: config.model.retentionDays });
-  const model = new ModelService({
-    store: modelStore,
-    runner: createRunner({ sshHost: config.model.sshHost, apiKey: config.model.apiKey, ...(config.model.bin.length ? { bin: config.model.bin } : {}), env }),
-    maxConcurrency: config.model.maxConcurrency,
-  });
-  // Agent tasks spawn the model runtime themselves; their usage reaches the ledger from the run result.
+  const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency });
+  // Agent tasks run on their runtime from the scheduler; their usage reaches the ledger from the run result.
   const recordAgent = recordAgentRun(model);
   const scheduler = new Scheduler({
     store,
@@ -212,7 +204,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     envFor: (app) => storage.envFor(app),
     runner: async (task, ctx) => {
       const startedAt = Date.now();
-      const result = await runTarget(task.target, ctx);
+      const result = await runTarget(task.target, { ...ctx, runtimes });
       recordAgent(task, result, startedAt, Date.now());
       return result;
     },
@@ -282,7 +274,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
     ...(config.serviceStop ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) } : {}),
   });
-  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, defaultModel: config.chatModel, extraArgs: config.chatArgs, envFor: (app) => storage.envFor(app), peers });
+  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, envFor: (app) => storage.envFor(app), peers });
 
   const server = Bun.serve({
     hostname: config.host,

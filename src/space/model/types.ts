@@ -1,11 +1,20 @@
+import type { Backend, CompleteInput, CompleteOutcome, Usage } from "../runtimes/types.ts";
+
 /**
  * Data model of the model service: what an app asks for, what one call
- * produced, and the ledger row every call leaves behind.
+ * produced, and the ledger row every call leaves behind. The request and
+ * outcome shapes are the runtime adapters' (`../runtimes/types.ts`); the
+ * service adds the ledger.
  */
 
+export type { Backend, Usage };
+/** What a call asks for, after validation; `model` may carry a `runtime/` prefix until the service resolves it. */
+export type RunInput = CompleteInput;
+export type RunOutcome = CompleteOutcome;
+
 export const APP_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
-/** A model alias or id as `claude --model` accepts it; also safe inside a shell command. */
-export const MODEL_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,63}$/i;
+/** A model alias or id as a runtime names it, optionally prefixed `runtime/`; also safe inside a shell command. */
+export const MODEL_PATTERN = /^(?:[a-z][a-z0-9-]{0,31}\/)?[a-z0-9][a-z0-9._:-]{0,63}$/i;
 /** A tag names the purpose of a call inside an app (translate, story, digest). */
 export const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 /** Tool names as `--allowedTools` takes them: bare (WebSearch) or with a matcher (Bash(git:*)). */
@@ -26,41 +35,6 @@ export const DEFAULT_MAX_TOKENS = 4096;
 export const MAX_THINKING_TOKENS = 128_000;
 export const MAX_PROMPT_CHARS = 2_000_000;
 
-/** What a call asks for, after validation. */
-export type RunInput = {
-  prompt: string;
-  /** Replaces the runtime's own system prompt; `DEFAULT_SYSTEM` when the request brings none. */
-  system: string;
-  model: string;
-  /** Purpose of the call inside the app; `other` when not given. */
-  tag: string;
-  /** Tools the CLI may use (`--allowedTools`); none by default. */
-  tools: string[];
-  timeoutMs: number;
-  /** Output cap on the API backend; the CLI has none. */
-  maxTokens: number;
-  /**
-   * Cap on thinking tokens (`MAX_THINKING_TOKENS` for the CLI); 0 turns thinking
-   * off. Absent = the runtime's default, which thinks before every answer and,
-   * for a one-line translation, spends ten times the answer's tokens on it.
-   */
-  thinking?: number;
-};
-
-export type Usage = {
-  inputTokens: number;
-  cacheWriteTokens: number;
-  cacheReadTokens: number;
-  outputTokens: number;
-};
-
-/** Where a call ran: the machine's own `claude`, one reached over ssh, or the HTTP API. */
-export type Backend = "local" | `ssh:${string}` | "api";
-
-export type RunOutcome =
-  | { ok: true; text: string; usage?: Usage; costUsd?: number; backend: Backend }
-  | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend };
-
 /** Why a row exists: an app's request, the scheduler running an agent task, or an import of an app's own history. */
 export type Origin = "run" | "task" | "import";
 
@@ -72,6 +46,8 @@ export type ModelCall = {
   app: string;
   tag: string;
   model: string;
+  /** Which configured runtime ran it; absent on rows written before runtimes were named and on imported rows. */
+  runtime?: string;
   backend: string;
   origin: Origin;
   status: CallStatus;

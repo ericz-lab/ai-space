@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { claudeOnly } from "../runtimes/registry.ts";
 import { interpolate, loadAppEnv, runTarget } from "./targets.ts";
 
 let server: ReturnType<typeof Bun.serve>;
@@ -36,7 +37,8 @@ beforeAll(async () => {
 
 afterAll(() => server.stop(true));
 
-const ctx = (timeoutMs = 1000) => ({ appDir, signal: AbortSignal.timeout(timeoutMs) });
+// `sh -c cat` echoes stdin whatever arguments the runtime appends, standing in for the CLI.
+const ctx = (timeoutMs = 1000, bin: string[] = ["sh", "-c", "cat"]) => ({ appDir, signal: AbortSignal.timeout(timeoutMs), runtimes: claudeOnly(bin) });
 
 describe("http target", () => {
   test("posts JSON body with interpolated headers", async () => {
@@ -104,11 +106,13 @@ describe("command target", () => {
 
 describe("agent target", () => {
   test("feeds the prompt file on stdin to the runtime", async () => {
-    process.env.SPACE_AGENT_BIN_CLAUDE = "cat";
     const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx());
-    delete process.env.SPACE_AGENT_BIN_CLAUDE;
     expect(r.status).toBe("ok");
     expect(r.output).toBe("hello agent");
+    expect(r.backend).toBe("local");
+    // A runtime the space lacks, or no registry at all, is an error rather than a crash.
+    expect(await runTarget({ kind: "agent", runtime: "dsh", prompt: "prompt.md" }, ctx())).toMatchObject({ status: "error", error: "runtime dsh is not configured" });
+    expect(await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, { appDir, signal: AbortSignal.timeout(1000) })).toMatchObject({ status: "error", error: expect.stringMatching(/not configured/) });
   });
 
   test("missing prompt file is an error", async () => {
@@ -128,15 +132,13 @@ printf '{"type":"result","result":"done: %s","total_cost_usd":0.25,"usage":{"inp
 `,
       { mode: 0o755 },
     );
-    process.env.SPACE_AGENT_BIN_CLAUDE = fake;
     try {
-      const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "haiku" }, ctx());
-      expect(r).toEqual({ status: "ok", output: "done: hello agent", usage: { inputTokens: 1, cacheWriteTokens: 3, cacheReadTokens: 4, outputTokens: 2 }, costUsd: 0.25, promptChars: 11 });
+      const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "haiku" }, ctx(1000, [fake]));
+      expect(r).toEqual({ status: "ok", output: "done: hello agent", usage: { inputTokens: 1, cacheWriteTokens: 3, cacheReadTokens: 4, outputTokens: 2 }, costUsd: 0.25, promptChars: 11, backend: "local" });
       process.env.FAKE_AGENT_MODE = "error";
-      const bad = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx());
+      const bad = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx(1000, [fake]));
       expect(bad).toMatchObject({ status: "error", error: "boom" });
     } finally {
-      delete process.env.SPACE_AGENT_BIN_CLAUDE;
       delete process.env.FAKE_AGENT_MODE;
     }
   });
@@ -175,9 +177,7 @@ describe("events in a run", () => {
   });
 
   test("agent: the prompt ends with an Events section", async () => {
-    process.env.SPACE_AGENT_BIN_CLAUDE = "cat";
     const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, { ...ctx(), trigger: "event", events });
-    delete process.env.SPACE_AGENT_BIN_CLAUDE;
     expect(r.output).toStartWith("hello agent");
     expect(r.output).toContain("## Events");
     expect(r.output).toContain('"name": "feed/a"');

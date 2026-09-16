@@ -10,6 +10,7 @@ import { HealthProbe } from "../panel/health.ts";
 import { LayoutStore } from "../panel/layout.ts";
 import { AppRegistry } from "../panel/registry.ts";
 import { WidgetFeed } from "../panel/widgets.ts";
+import { claudeOnly } from "../runtimes/registry.ts";
 import { loadManifest } from "../scheduler/manifest.ts";
 import { workspacePaths } from "../workspace.ts";
 import { createPeerRoutes } from "./api.ts";
@@ -85,14 +86,14 @@ widgets:
   await mkdir(join(pws.apps, "secret"), { recursive: true });
   await writeFile(join(pws.apps, "secret", "space.yaml"), "name: secret\nurl: https://secret.example.com\n");
   await writeFile(join(peerHome, "fake-claude.js"), FAKE_CLI);
-  process.env.SPACE_CHAT_BIN = `bun ${join(peerHome, "fake-claude.js")}`;
+  const runtimes = claudeOnly(["bun", join(peerHome, "fake-claude.js")]);
   const peerRegistry = new AppRegistry();
   for (const n of ["media", "secret"]) await peerRegistry.set(await loadManifest(join(pws.apps, n)));
   const peerDb = new Database(":memory:");
   const peerLayout = new LayoutStore(peerDb);
   peerLayout.hide("secret", true); // hidden on the peer: never reaches the hub
   const peerPanel = createPanelRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, widgets: new WidgetFeed(peerRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback });
-  const peerAgents = createAgentRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, sessions: new SessionStore(peerDb), defaultModel: "sonnet", home: peerHome });
+  const peerAgents = createAgentRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, sessions: new SessionStore(peerDb), runtimes, defaultModel: "sonnet", home: peerHome });
   peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents }) } });
   peerBase = `http://127.0.0.1:${peerServer.port}`;
 
@@ -107,13 +108,12 @@ widgets:
   const layout = new LayoutStore(hubDb);
   peers = new PeerHub([{ name: "david", url: peerBase, token: "s3cret", headers: { "X-Access": "svc" }, refreshMs: 10_000 }], { store: new PeerStore(hubDb), fetch: hubFetch, now: () => clock });
   const hubPanel = createPanelRoutes({ ws: hws, registry: hubRegistry, layout, widgets: new WidgetFeed(hubRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback, peers });
-  const hubAgents = createAgentRoutes({ ws: hws, registry: hubRegistry, layout, sessions: new SessionStore(hubDb), defaultModel: "sonnet", home: hubHome, peers });
+  const hubAgents = createAgentRoutes({ ws: hws, registry: hubRegistry, layout, sessions: new SessionStore(hubDb), runtimes, defaultModel: "sonnet", home: hubHome, peers });
   hubServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...hubPanel, ...hubAgents, ...createPeerRoutes({ hub: peers, layout, registry: hubRegistry }) } });
   hub = `http://127.0.0.1:${hubServer.port}`;
 });
 
 afterAll(() => {
-  delete process.env.SPACE_CHAT_BIN;
   peers.stop();
   peerServer.stop(true);
   hubServer.stop(true);

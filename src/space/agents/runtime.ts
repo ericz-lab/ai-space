@@ -1,112 +1,18 @@
+import type { ChatTurn, RuntimeAdapter } from "../runtimes/types.ts";
+
 /**
- * Chat runtime: one turn of a conversation with an agent, run as a headless
- * `claude` process that streams `stream-json` events. Authentication is the
- * CLI's own login on the machine; multi-turn continuity is `--resume <sid>`.
- * The agent identity (system prompt, tool allow-list) is decided by the
- * caller from the manifest, never by the browser.
+ * Chat over HTTP: one turn of a conversation with an agent, run on the
+ * agent's runtime adapter (`../runtimes`) and streamed back as server-sent
+ * events. Authentication is the runtime's own login on the machine; the
+ * agent identity (system prompt, tool allow-list) is decided by the caller
+ * from the manifest, never by the browser.
  */
 
-export type ChatTurn = {
-  message: string;
-  model?: string;
-  sessionId?: string;
-  /** Write authorisation tier; anything else means read-only (the headless default). */
-  permissionMode?: string;
-  systemPrompt?: string;
-  allowedTools?: string[];
-  extraArgs?: string[];
-  cwd: string;
-  env?: Record<string, string | undefined>;
-};
+export { PERMISSION_MODES } from "../runtimes/claude-code.ts";
+export type { ChatCallbacks, ChatTurn } from "../runtimes/types.ts";
 
-export type ChatCallbacks = {
-  /** A raw stream-json line, forwarded to the client as is. */
-  onEvent: (line: string) => void;
-  /** First event carrying a session id. */
-  onSession?: (sid: string) => void;
-  /** Process ended; `error` is null on a clean exit. */
-  onFinish: (error: string | null) => void;
-};
-
-export const PERMISSION_MODES = ["acceptEdits", "bypassPermissions", "plan"] as const;
 export const SESSION_ID_RE = /^[a-f0-9-]{8,64}$/i;
 export const MODEL_RE = /^[a-z0-9._-]{1,64}$/i;
-
-/** Runtime command; `SPACE_CHAT_BIN` overrides it (tests, a wrapper script). */
-export function chatCommand(env: Record<string, string | undefined> = process.env): string[] {
-  const override = env.SPACE_CHAT_BIN?.trim();
-  return override ? override.split(/\s+/).filter(Boolean) : ["claude"];
-}
-
-/** Arguments after the binary; exported for tests. */
-export function chatArgs(t: ChatTurn): string[] {
-  const args = ["-p", t.message, "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
-  if (t.model) args.push("--model", t.model);
-  if (t.sessionId) args.push("--resume", t.sessionId);
-  if ((PERMISSION_MODES as readonly string[]).includes(t.permissionMode ?? "")) args.push("--permission-mode", t.permissionMode!);
-  if (t.systemPrompt) args.push("--append-system-prompt", t.systemPrompt);
-  if (t.allowedTools?.length) args.push("--allowedTools", t.allowedTools.join(","));
-  args.push(...(t.extraArgs ?? []));
-  return args;
-}
-
-/** Spawn one turn and forward its events line by line. Returns a handle to kill it. */
-export function chatStream(t: ChatTurn, cb: ChatCallbacks): { kill: () => void } {
-  let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
-  try {
-    proc = Bun.spawn([...chatCommand(t.env ?? process.env), ...chatArgs(t)], {
-      cwd: t.cwd,
-      env: t.env ?? process.env,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-  } catch (e) {
-    queueMicrotask(() => cb.onFinish(`could not start the runtime: ${(e as Error).message}`));
-    return { kill: () => {} };
-  }
-
-  let sessionSeen = false;
-  const stderr = new Response(proc.stderr).text();
-  const pump = async () => {
-    let rest = "";
-    const reader = proc.stdout.getReader();
-    const dec = new TextDecoder();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      rest += dec.decode(value, { stream: true });
-      const lines = rest.split("\n");
-      rest = lines.pop() ?? "";
-      for (const line of lines) emit(line);
-    }
-    if (rest.trim()) emit(rest);
-  };
-  const emit = (line: string) => {
-    if (!line.trim()) return;
-    if (!sessionSeen && cb.onSession && line.includes('"session_id"')) {
-      try {
-        const ev = JSON.parse(line) as { session_id?: unknown };
-        if (typeof ev.session_id === "string") {
-          sessionSeen = true;
-          cb.onSession(ev.session_id);
-        }
-      } catch {
-        /* partial line */
-      }
-    }
-    cb.onEvent(line);
-  };
-
-  void (async () => {
-    await pump().catch(() => {});
-    const code = await proc.exited;
-    const err = (await stderr).trim();
-    cb.onFinish(code === 0 ? null : (err || `runtime exited with ${code}`).slice(-800));
-  })();
-
-  return { kill: () => proc.kill() };
-}
 
 /**
  * A long tool call emits nothing. Proxies in between (a tunnel's edge) drop a
@@ -122,7 +28,7 @@ export const HEARTBEAT_MS = 20_000;
  * A comment line every `heartbeatMs` keeps the connection alive through a
  * long tool call. Closing the response (client gone) kills the process.
  */
-export function chatResponse(t: ChatTurn, hooks: { onSession?: (sid: string) => void } = {}, opts: { heartbeatMs?: number } = {}): Response {
+export function chatResponse(runtime: RuntimeAdapter, t: ChatTurn, hooks: { onSession?: (sid: string) => void } = {}, opts: { heartbeatMs?: number } = {}): Response {
   const enc = new TextEncoder();
   let handle: { kill: () => void } | undefined;
   let beat: ReturnType<typeof setInterval> | undefined;
@@ -138,22 +44,23 @@ export function chatResponse(t: ChatTurn, hooks: { onSession?: (sid: string) => 
         }
       };
       const send = (line: string) => write(`data: ${line}\n\n`);
+      const finish = (error: string | null) => {
+        clearInterval(beat);
+        if (error) send(JSON.stringify({ type: "error", error }));
+        send('{"type":"done"}');
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      };
       beat = setInterval(() => write(": keepalive\n\n"), opts.heartbeatMs ?? HEARTBEAT_MS);
-      handle = chatStream(t, {
-        onEvent: send,
-        onSession: hooks.onSession,
-        onFinish: (error) => {
-          clearInterval(beat);
-          if (error) send(JSON.stringify({ type: "error", error }));
-          send('{"type":"done"}');
-          closed = true;
-          try {
-            controller.close();
-          } catch {
-            /* already closed */
-          }
-        },
-      });
+      try {
+        handle = runtime.chat(t, { onEvent: send, onSession: hooks.onSession, onFinish: finish });
+      } catch (e) {
+        finish((e as Error).message);
+      }
     },
     cancel() {
       clearInterval(beat);

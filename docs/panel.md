@@ -75,7 +75,7 @@ Nothing panel-related is written into an app directory or into the workspace as 
 
 `POST /api/agents/:app/:agent/chat` runs one turn: ai-space spawns `claude -p <message> --output-format stream-json` in the agent's working directory with the identity from the manifest (`--append-system-prompt` from the prompt file plus the app title, description and `AGENTS.md`; `--allowedTools` from `tools`; `--model` from the request, the manifest, then `SPACE_CHAT_MODEL`) and streams the events back as server-sent events. Multi-turn continuity is `--resume <sid>`. The browser can pick a write tier (`acceptEdits`, `bypassPermissions`, `plan`); the default is the headless read-only behaviour. `SPACE_CHAT_ARGS` appends operator-chosen arguments to every run.
 
-Transcripts are read back from the CLI's own store (`~/.claude/projects/<cwd>/<sid>.jsonl`), so restoring a past session costs no extra storage. Only the `claude` runtime is supported for chat; a `codex` agent answers 501 until its event format is adapted.
+Transcripts are read back from the CLI's own store (`~/.claude/projects/<cwd>/<sid>.jsonl`), so restoring a past session costs no extra storage. The turn runs on the runtime the agent's manifest names ([runtimes.md](runtimes.md)); an agent naming a runtime the space lacks, or one without chat, answers 501. The browser reads Claude Code's `stream-json` events; other runtimes' events are a follow-up.
 
 ## Widgets
 

@@ -28,7 +28,7 @@ A task is a schedule and/or event triggers, a target, and bookkeeping state.
 | `app`, `name` | Identity. Manifest tasks are keyed by the pair, so re-syncing is an upsert. |
 | `schedule` | `at` (one ISO timestamp), `every` (fixed interval anchored to creation time), `cron` (5- or 6-field expression with optional IANA `tz`), or `manual` (no clock; only for a task with `triggers`). |
 | `triggers` | Event triggers, see [Event triggers](#event-triggers): `event` (`<app>/<event>` or `<app>/*`), optional `filter` on the event's data, optional `debounce`. |
-| `target` | `http` (request to an app endpoint), `command` (shell in the app directory), or `agent` (an agent runtime fed a prompt file). |
+| `target` | `http` (request to an app endpoint), `command` (shell in the app directory), or `agent` (one of the space's runtimes fed a prompt file). |
 | `timeoutMs` | Hard limit per run. Past it the request is aborted or the process tree is killed. Default 10 minutes. |
 | `enabled`, `overrides` | The manifest value and the operator's overrides (`enabled`, `schedule`). Overrides survive re-sync. |
 | `source` | `manifest` or `api`. |
@@ -70,7 +70,7 @@ Concurrency is a single limit for the whole scheduler (`SPACE_MAX_CONCURRENCY`).
 | --- | --- | --- |
 | `http` | Sends the request with interpolated url, headers and body. Any 2xx is `ok`. A 2xx JSON body of `{ "status": "ok" \| "error" \| "skipped", "error"?: string }` overrides that verdict. | An endpoint on `127.0.0.1` that does one round of work and reports honestly. |
 | `command` | Runs `sh -c <command>` with the app directory as cwd and the app's `.env` merged into the environment. Non-zero exit is an error. | A command that does one round of work and exits. |
-| `agent` | Starts the configured agent runtime in the app directory and feeds the prompt file on stdin. | A prompt file, and a runtime installed on the machine. |
+| `agent` | Runs the named runtime ([runtimes.md](runtimes.md); `claude` by default) in the app directory and feeds the prompt file on stdin. | A prompt file, and that runtime configured on the space. |
 
 `${VAR}` and `${VAR:-default}` placeholders in http urls, headers, string bodies and command strings resolve from the scheduler's own environment (`<workspace>/.env`). This keeps secrets and machine-specific paths out of manifests. Inside a command, shell variables are written as `$VAR` so the shell, not the scheduler, expands them.
 

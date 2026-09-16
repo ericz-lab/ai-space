@@ -32,7 +32,7 @@ Non-goals, for now:
 
 ## Backends
 
-The backend is chosen once for the workspace from `<workspace>/.env`, in this order:
+A call runs on one of the space's runtimes ([runtimes.md](runtimes.md)): the request's `model` names it as a prefix (`api/claude-haiku-4-5`), a bare model goes to the default runtime. Which runtimes exist is `<workspace>/runtimes.yaml`, or, without the file, the one Claude Code runtime the `.env` variables describe:
 
 | variable | backend | how a call runs |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ The backend is chosen once for the workspace from `<workspace>/.env`, in this or
 | `SPACE_MODEL_SSH_HOST` | `ssh:<host>` | `ssh <host> bash -lc 'claude -p --output-format json --model … [--allowedTools …]'` with the prompt on stdin, borrowing that machine's `claude` login. Every argument is validated against a safe character set before it becomes part of the remote command. |
 | neither | `local` | This machine's `claude -p …`, same arguments, same stdin. |
 
-The CLI backends start `claude` lean. Measured on one machine with a one-line translation prompt on `haiku`:
+The Claude Code runtime starts `claude` lean. Measured on one machine with a one-line translation prompt on `haiku`:
 
 | command | tokens ahead of the prompt |
 | --- | --- |
@@ -54,7 +54,7 @@ So every call gets `--system-prompt` (the request's `system`, or a two-sentence 
 
 Thinking is the other fixed cost. The CLI thinks before every answer; on that same translation it spent 500 to 800 thinking tokens for a 46-token answer, so output tokens, priced five times input, were nine tenths of the call. A request's `thinking` becomes `MAX_THINKING_TOKENS` in the runtime's environment: `0` turns thinking off (the translation then costs a third and takes a third of the time), a positive number caps it. Absent, the runtime's default applies. The API backend does not enable extended thinking at all.
 
-`SPACE_MODEL_BIN` replaces the `claude` command (a wrapper script, the test stand-in). `SPACE_MODEL_MAX_CONCURRENCY` (default 4) caps the calls running at once; the rest wait in order. `SPACE_MODEL_DEFAULT` (default `sonnet`) is the model when a request names none. `SPACE_MODEL_RETENTION_DAYS` limits how much ledger is kept (older rows are pruned on insert); the default, 0, keeps everything, since the panel's history reads from the ledger.
+`SPACE_MODEL_BIN` replaces the `claude` command (a wrapper script, the test stand-in); with a `runtimes.yaml` the runtime's `bin` does. `SPACE_MODEL_MAX_CONCURRENCY` (default 4) caps the calls running at once; the rest wait in order. `SPACE_MODEL_DEFAULT` (default `sonnet`) is the model when a request names none. `SPACE_MODEL_RETENTION_DAYS` limits how much ledger is kept (older rows are pruned on insert); the default, 0, keeps everything, since the panel's history reads from the ledger.
 
 The CLI answers with one JSON envelope (`type: result`): the text under `result`, token counts under `usage`, and its own cost figure under `total_cost_usd`. `is_error` in the envelope is a failure even though the process exited 0. A CLI that answers in plain text (an older one, or one started without the json flag) still works: the text is the answer and no usage is recorded.
 
@@ -98,7 +98,7 @@ An app that kept its own call table before the service existed can bring it alon
 
 ### Agent tasks
 
-A task with an `agent` target (`docs/scheduler.md`) spawns the runtime itself, inside the app directory with the prompt file on stdin. The target runner now reads the same json envelope: the answer becomes the run's output, `is_error` fails the run, and the usage and cost travel on the run result to a scheduler hook that writes the ledger row with `tag` = the task name and `origin: task`. The row exists even when no usage came back (a timeout, a `codex` runtime), so the count of calls stays honest.
+A task with an `agent` target (`docs/scheduler.md`) runs on the runtime the target names, from the scheduler, inside the app directory with the prompt file on stdin. The adapter reads the runtime's own envelope: the answer becomes the run's output, a reported error fails the run, and the usage and cost travel on the run result to a scheduler hook that writes the ledger row with `tag` = the task name, the runtime's name and `origin: task`. The row exists even when no usage came back (a timeout, an older CLI), so the count of calls stays honest.
 
 ## API
 

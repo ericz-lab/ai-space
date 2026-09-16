@@ -27,10 +27,11 @@ export type Target =
     }
   /** Shell command run inside the app directory with the app's .env loaded. */
   | { kind: "command"; command: string; cwd?: string; env?: Record<string, string> }
-  /** Agent session (claude / codex) fed a prompt file, run inside the app directory. */
+  /** A configured runtime (`claude`, `dsh`) fed a prompt file, run inside the app directory. */
   | {
       kind: "agent";
-      runtime: "claude" | "codex";
+      /** Name of a runtime in the space's registry; checked when the task runs. */
+      runtime: string;
       /** Path to the prompt file, relative to cwd. */
       prompt: string;
       cwd?: string;

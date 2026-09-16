@@ -6,7 +6,7 @@
  * answers, for timeouts). The answer echoes the prompt and the arguments so a
  * test can check what reached the runtime.
  *
- * Used as `SPACE_MODEL_BIN="bun <this file>"`; `fakeModelBin()` builds that string.
+ * Used as the `bin` of a claude-code runtime in tests; `fakeModelBin()` builds the command.
  */
 
 export function fakeModelBin(): string[] {

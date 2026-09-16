@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { API_MODELS, apiCost, cliArgs, cliEnv, createRunner, parseCliOutput, remoteCommand } from "./runner.ts";
+import { chatArgs, cliArgs, cliEnv, createClaudeCode, parseCliOutput, remoteCommand } from "./claude-code.ts";
 import { fakeModelBin } from "./testing.ts";
-import type { RunInput } from "./types.ts";
+import type { ClaudeCodeSpec, CompleteInput } from "./types.ts";
 
-const input = (over: Partial<RunInput> = {}): RunInput => ({ prompt: "hello", system: "Be brief.", model: "haiku", tag: "t", tools: [], timeoutMs: 5000, maxTokens: 100, ...over });
+const input = (over: Partial<CompleteInput> = {}): CompleteInput => ({ prompt: "hello", system: "Be brief.", model: "haiku", tag: "t", tools: [], timeoutMs: 5000, maxTokens: 100, ...over });
+const spec = (over: Partial<ClaudeCodeSpec> = {}): ClaudeCodeSpec => ({ name: "claude", kind: "claude-code", bin: fakeModelBin(), chatArgs: [], ...over });
 
 describe("cliArgs", () => {
   test("lean by default: own system prompt, no tools, no MCP; the prompt stays off the command line", () => {
@@ -52,12 +53,13 @@ describe("parseCliOutput", () => {
   });
 });
 
-describe("local backend", () => {
-  const runner = createRunner({ bin: fakeModelBin(), env: {} });
+describe("complete, locally", () => {
+  const runtime = createClaudeCode(spec());
 
   test("runs the CLI, feeds the prompt on stdin and returns usage and cost", async () => {
-    expect(runner.backend).toBe("local");
-    const r = await runner.run(input({ tools: ["WebSearch"] }));
+    expect(runtime.backend).toBe("local");
+    expect(runtime.capabilities).toEqual({ complete: true, agent: true, chat: true });
+    const r = await runtime.complete(input({ tools: ["WebSearch"] }));
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error(r.error);
     expect(r.text).toBe("answer to: hello [args: -p --output-format json --model haiku --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt Be brief.]");
@@ -66,16 +68,16 @@ describe("local backend", () => {
   });
 
   test("the thinking cap reaches the runtime's environment", async () => {
-    const r = await runner.run(input({ thinking: 0 }));
+    const r = await runtime.complete(input({ thinking: 0 }));
     expect(r).toMatchObject({ ok: true, text: expect.stringContaining("[thinking: 0]") });
-    const none = await runner.run(input());
+    const none = await runtime.complete(input());
     expect(none).toMatchObject({ ok: true, text: expect.not.stringContaining("[thinking:") });
   });
 
   test("plain output (an older CLI) is the answer with no usage", async () => {
     process.env.FAKE_MODEL_MODE = "plain";
     try {
-      const r = await runner.run(input());
+      const r = await runtime.complete(input());
       expect(r).toEqual({ ok: true, text: "plain answer to: hello", backend: "local" });
     } finally {
       delete process.env.FAKE_MODEL_MODE;
@@ -85,66 +87,60 @@ describe("local backend", () => {
   test("an is_error envelope, a crash and a timeout are failures with the reason", async () => {
     try {
       process.env.FAKE_MODEL_MODE = "error";
-      expect(await runner.run(input())).toMatchObject({ ok: false, error: "simulated runtime failure", usage: { inputTokens: 5 } });
+      expect(await runtime.complete(input())).toMatchObject({ ok: false, error: "simulated runtime failure", usage: { inputTokens: 5 } });
       process.env.FAKE_MODEL_MODE = "exit";
-      expect(await runner.run(input())).toMatchObject({ ok: false, error: "simulated crash" });
+      expect(await runtime.complete(input())).toMatchObject({ ok: false, error: "simulated crash" });
       process.env.FAKE_MODEL_MODE = "hang";
-      expect(await runner.run(input({ timeoutMs: 200 }))).toMatchObject({ ok: false, error: "timed out after 0s" });
+      expect(await runtime.complete(input({ timeoutMs: 200 }))).toMatchObject({ ok: false, error: "timed out after 0s" });
     } finally {
       delete process.env.FAKE_MODEL_MODE;
     }
   });
 
   test("a missing binary fails without throwing", async () => {
-    const r = await createRunner({ bin: ["/nonexistent/claude-bin"], env: {} }).run(input());
-    expect(r.ok).toBe(false);
+    const r = await createClaudeCode(spec({ bin: ["/nonexistent/claude-bin"] })).complete(input());
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining("could not start") });
   });
 });
 
-describe("ssh backend", () => {
+describe("complete, over ssh", () => {
   test("the remote command is built from validated pieces only", async () => {
-    const runner = createRunner({ sshHost: "box", env: {} });
-    expect(runner.backend).toBe("ssh:box");
-    const r = await runner.run(input({ model: "x y" }));
+    const runtime = createClaudeCode(spec({ sshHost: "box" }));
+    expect(runtime.backend).toBe("ssh:box");
+    const r = await runtime.complete(input({ model: "x y" }));
     expect(r).toMatchObject({ ok: false, error: "argument not allowed over ssh: x y", backend: "ssh:box" });
-    expect(() => createRunner({ sshHost: "box; rm", env: {} })).toThrow(/not a host name/);
+    expect(() => createClaudeCode(spec({ sshHost: "box; rm" }))).toThrow(/not a host name/);
   });
 });
 
-describe("api backend", () => {
-  const calls: { url: string; body: Record<string, unknown>; headers: Record<string, string> }[] = [];
-  const reply = { status: 200, body: {} as unknown };
-  const fakeFetch = (async (url: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown>, headers: init?.headers as Record<string, string> });
-    return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "content-type": "application/json" } });
-  }) as unknown as typeof fetch;
-  const runner = createRunner({ apiKey: "sk-test", fetch: fakeFetch, env: {} });
-
-  test("maps aliases to model ids, sends the key, reads usage and prices it", async () => {
-    reply.body = { content: [{ type: "text", text: "hi there" }], usage: { input_tokens: 1_000_000, output_tokens: 0 } };
-    const r = await runner.run(input());
-    expect(r).toEqual({ ok: true, text: "hi there", usage: { inputTokens: 1_000_000, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 }, costUsd: 1, backend: "api" });
-    expect(calls[0]!.body).toMatchObject({ model: API_MODELS.haiku, max_tokens: 100, system: "Be brief.", messages: [{ role: "user", content: "hello" }] });
-    expect(calls[0]!.headers["x-api-key"]).toBe("sk-test");
+describe("agent runs", () => {
+  test("stay local even when answers go over ssh, and read the same envelope", async () => {
+    const runtime = createClaudeCode(spec({ sshHost: "box" }));
+    const r = await runtime.runAgent({ prompt: "do it", cwd: process.cwd(), env: process.env, model: "sonnet", signal: new AbortController().signal });
+    expect(r).toMatchObject({ ok: true, backend: "local", text: expect.stringContaining("answer to: do it [args: -p --output-format json --model sonnet]"), usage: { inputTokens: 10 }, costUsd: 0.0123, timedOut: false });
+    expect(r.output).toContain('"type":"result"');
   });
 
-  test("an unknown model is passed through with no cost; errors carry the status", async () => {
-    reply.body = { content: [{ type: "text", text: "x" }], usage: { input_tokens: 1, output_tokens: 1 } };
-    const r = await runner.run(input({ model: "claude-future-9" }));
-    expect(r).toMatchObject({ ok: true, costUsd: undefined });
-    expect(calls.at(-1)!.body.model).toBe("claude-future-9");
-    reply.status = 429;
-    reply.body = { error: { message: "slow down" } };
-    expect(await runner.run(input())).toEqual({ ok: false, error: "API 429: slow down", backend: "api" });
-    reply.status = 200;
+  test("a stop is a timeout with whatever came out; a crash keeps the output", async () => {
+    const runtime = createClaudeCode(spec());
+    process.env.FAKE_MODEL_MODE = "hang";
+    try {
+      const r = await runtime.runAgent({ prompt: "x", cwd: process.cwd(), env: process.env, signal: AbortSignal.timeout(150) });
+      expect(r).toMatchObject({ ok: false, error: "timed out", timedOut: true });
+      process.env.FAKE_MODEL_MODE = "exit";
+      expect(await runtime.runAgent({ prompt: "x", cwd: process.cwd(), env: process.env, signal: new AbortController().signal })).toMatchObject({ ok: false, error: "exit code 3", output: expect.stringContaining("simulated crash") });
+    } finally {
+      delete process.env.FAKE_MODEL_MODE;
+    }
   });
+});
 
-  test("tools are refused rather than dropped", async () => {
-    expect(await runner.run(input({ tools: ["WebSearch"] }))).toMatchObject({ ok: false, error: expect.stringMatching(/tools need the CLI backend/) });
-  });
-
-  test("apiCost uses the list prices", () => {
-    expect(apiCost("claude-sonnet-5", { inputTokens: 1e6, cacheWriteTokens: 1e6, cacheReadTokens: 1e6, outputTokens: 1e6 })).toBeCloseTo(2 + 2.5 + 0.2 + 10);
-    expect(apiCost("nope", { inputTokens: 1, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 })).toBeUndefined();
+describe("chatArgs", () => {
+  test("builds the stream-json command line with the spec's extra arguments last", () => {
+    expect(chatArgs({ message: "hi", cwd: "/x" })).toEqual(["-p", "hi", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
+    expect(chatArgs({ message: "hi", cwd: "/x", model: "opus", sessionId: "abc12345", permissionMode: "acceptEdits", systemPrompt: "S", allowedTools: ["Read", "Bash(ls *)"] }, ["--z"])).toEqual([
+      "-p", "hi", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model", "opus", "--resume", "abc12345", "--permission-mode", "acceptEdits", "--append-system-prompt", "S", "--allowedTools", "Read,Bash(ls *)", "--z",
+    ]);
+    expect(chatArgs({ message: "hi", cwd: "/x", permissionMode: "root" })).not.toContain("--permission-mode");
   });
 });

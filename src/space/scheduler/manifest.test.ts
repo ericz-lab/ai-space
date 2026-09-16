@@ -61,7 +61,9 @@ describe("parseManifest", () => {
     expect(() => parseManifest("tasks:\n  - name: a\n    schedule: 'bad cron'\n    run: { command: x }", "/d")).toThrow(/invalid cron/);
     expect(() => parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { command: x }\n  - name: a\n    every: 1m\n    run: { command: y }", "/d")).toThrow(/duplicate/);
     expect(() => parseManifest("tasks:\n  - name: 'bad name'\n    every: 1m\n    run: { command: x }", "/d")).toThrow(/invalid or missing name/);
-    expect(() => parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, runtime: gpt } }", "/d")).toThrow(/runtime/);
+    expect(() => parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, runtime: 'Bad Name' } }", "/d")).toThrow(/runtime/);
+    // Any well-formed name is accepted here; whether the space has that runtime is checked when the task runs.
+    expect(parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, runtime: dsh } }", "/d").tasks[0]?.target).toMatchObject({ kind: "agent", runtime: "dsh" });
     expect(() => parseManifest("tasks: {}", "/d")).toThrow(/tasks must be a list/);
     expect(() => parseManifest("- not a mapping", "/d")).toThrow(/mapping/);
   });
@@ -168,7 +170,7 @@ widgets:
     expect(() => parseManifest("service: { command: x }", "/d")).toThrow(/service.port/);
     expect(() => parseManifest("service: { command: x, port: 80, health: healthz }", "/d")).toThrow(/service.health/);
     expect(() => parseManifest("agents:\n  - name: A", "/d")).toThrow(/invalid or missing name/);
-    expect(() => parseManifest("agents:\n  - name: a\n    runtime: gpt", "/d")).toThrow(/runtime must be/);
+    expect(() => parseManifest("agents:\n  - name: a\n    runtime: GPT", "/d")).toThrow(/runtime must be/);
     expect(() => parseManifest("agents:\n  - name: a\n  - name: a", "/d")).toThrow(/duplicate agents name/);
     expect(() => parseManifest("widgets:\n  - name: w", "/d")).toThrow(/source is required/);
     expect(() => parseManifest("widgets:\n  - name: w\n    source: api/w", "/d")).toThrow(/source must be/);

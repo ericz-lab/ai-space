@@ -7,8 +7,8 @@ import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts"
  * and merged with the other Space routes by the entry point.
  *
  *   POST /api/model/run                       run one call; 200 with the answer, 502 when the model failed
- *   GET  /api/model/status                    backend in use, concurrency, calls in flight
- *   GET  /api/model/usage?window=24h&app      sums by app, tag, model and backend over a window, plus the whole history by day
+ *   GET  /api/model/status                    the configured runtimes, concurrency, calls in flight
+ *   GET  /api/model/usage?window=24h&app      sums by app, tag, model, runtime and backend over a window, plus the whole history by day
  *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored)
  *
  * The caller of `run` is identified by its bearer token: an app's own
@@ -62,6 +62,8 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
           if (!body || typeof body !== "object") return error(400, "body must be a JSON object");
           app = await resolveApp(req, body);
           input = parseRunInput(body, { model: opts.defaultModel });
+          // An unknown `runtime/` prefix is the request's mistake, not a model failure.
+          service.resolve(input.model);
         } catch (e) {
           if (e instanceof Unauthorized) return error(401, "unauthorized");
           return error(400, (e as Error).message ?? String(e));
@@ -73,7 +75,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
     },
 
     "/api/model/status": {
-      GET: () => json({ ok: true, backend: service.backend, maxConcurrency: service.maxConcurrency, ...service.load }),
+      GET: () => json({ ok: true, backend: service.backend, runtimes: service.runtimes.list(), maxConcurrency: service.maxConcurrency, ...service.load }),
     },
 
     "/api/model/usage": {
@@ -99,6 +101,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
           byApp: store.groupBy(["app"], since, app),
           byTag: store.groupBy(["app", "tag", "model"], since, app),
           byModel: store.groupBy(["model"], since, app),
+          byRuntime: store.groupBy(["runtime", "model"], since, app),
           byBackend: store.groupBy(["backend", "origin"], since, app),
           // The whole history, by UTC day: what the panel's grid, weekly bars and lifetime cards read.
           history: { firstAt: firstAt === undefined ? undefined : new Date(firstAt).toISOString(), totals: store.totals(0, app), days: store.days(0) },
@@ -128,6 +131,7 @@ export function view(c: ModelCall) {
     app: c.app,
     tag: c.tag,
     model: c.model,
+    runtime: c.runtime,
     backend: c.backend,
     origin: c.origin,
     status: c.status,

@@ -5,10 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LayoutStore } from "../panel/layout.ts";
 import { AppRegistry } from "../panel/registry.ts";
+import { chatArgs } from "../runtimes/claude-code.ts";
+import { type RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
 import { loadManifest } from "../scheduler/manifest.ts";
 import { workspacePaths } from "../workspace.ts";
 import { createAgentRoutes } from "./api.ts";
-import { chatArgs, chatResponse } from "./runtime.ts";
+import { chatResponse } from "./runtime.ts";
 import { SessionStore } from "./sessions.ts";
 import { parseTranscript, transcriptPath } from "./transcript.ts";
 
@@ -30,6 +32,7 @@ let server: ReturnType<typeof Bun.serve>;
 let base = "";
 let home = "";
 let appDir = "";
+let runtimes: RuntimeRegistry;
 const sessions = new SessionStore(new Database(":memory:"));
 
 beforeAll(async () => {
@@ -41,21 +44,18 @@ beforeAll(async () => {
   await writeFile(join(appDir, "agents", "librarian.md"), "You are the librarian.");
   await writeFile(join(appDir, "AGENTS.md"), "# Notes\nRead this first.");
   await writeFile(join(home, "fake-claude.js"), FAKE_CLI);
-  process.env.SPACE_CHAT_BIN = `bun ${join(home, "fake-claude.js")}`;
+  runtimes = claudeOnly(["bun", join(home, "fake-claude.js")], { chatArgs: ["--extra"] });
   const registry = new AppRegistry();
   await registry.set(await loadManifest(appDir));
   server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    routes: createAgentRoutes({ ws, registry, layout: new LayoutStore(new Database(":memory:")), sessions, defaultModel: "sonnet", extraArgs: ["--extra"], home }),
+    routes: createAgentRoutes({ ws, registry, layout: new LayoutStore(new Database(":memory:")), sessions, runtimes, defaultModel: "sonnet", home }),
   });
   base = `http://127.0.0.1:${server.port}`;
 });
 
-afterAll(() => {
-  delete process.env.SPACE_CHAT_BIN;
-  server.stop(true);
-});
+afterAll(() => server.stop(true));
 
 const post = (path: string, body: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const events = async (r: Response) =>
@@ -67,7 +67,7 @@ const events = async (r: Response) =>
 describe("chat runtime", () => {
   test("chatArgs builds the claude command line", () => {
     expect(chatArgs({ message: "hi", cwd: "/x" })).toEqual(["-p", "hi", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
-    expect(chatArgs({ message: "hi", cwd: "/x", model: "opus", sessionId: "abc12345", permissionMode: "acceptEdits", systemPrompt: "S", allowedTools: ["Read", "Bash(ls *)"], extraArgs: ["--z"] })).toEqual([
+    expect(chatArgs({ message: "hi", cwd: "/x", model: "opus", sessionId: "abc12345", permissionMode: "acceptEdits", systemPrompt: "S", allowedTools: ["Read", "Bash(ls *)"] }, ["--z"])).toEqual([
       "-p", "hi", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model", "opus", "--resume", "abc12345", "--permission-mode", "acceptEdits", "--append-system-prompt", "S", "--allowedTools", "Read,Bash(ls *)", "--z",
     ]);
     expect(chatArgs({ message: "hi", cwd: "/x", permissionMode: "root" })).not.toContain("--permission-mode");
@@ -106,7 +106,7 @@ describe("agents api", () => {
   });
 
   test("keeps the stream alive with comment lines during a long tool call", async () => {
-    const r = chatResponse({ message: "slow", cwd: home }, {}, { heartbeatMs: 40 });
+    const r = chatResponse(runtimes.default, { message: "slow", cwd: home }, {}, { heartbeatMs: 40 });
     const text = await r.text();
     expect(text.split(": keepalive\n\n").length).toBeGreaterThan(2);
     expect(text.trim().endsWith('data: {"type":"done"}')).toBe(true);
@@ -120,7 +120,7 @@ describe("agents api", () => {
     expect(ev.at(-1)).toEqual({ type: "done" });
   });
 
-  test("validates input and refuses unsupported runtimes", async () => {
+  test("validates input and refuses runtimes the space lacks", async () => {
     expect((await post("/api/agents/notes/librarian/chat", { message: " " })).status).toBe(400);
     expect((await post("/api/agents/notes/nobody/chat", { message: "x" })).status).toBe(404);
     expect((await post("/api/agents/notes/coder/chat", { message: "x" })).status).toBe(501);

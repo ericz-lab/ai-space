@@ -11,7 +11,7 @@ Status: the `tasks`, `storage` and `notify` sections, the top-level identity fie
 An app is the unit of ownership in ai-space. It is one directory, one git repository, one `space.yaml`, and it owns everything it contributes to the space:
 
 - a **service** (optional): the app's own long-running process or HTTP server;
-- **agents** (zero or more): chat identities backed by a Claude Code or Codex session, configured with a prompt and a set of skills;
+- **agents** (zero or more): chat identities backed by a session of one of the space's runtimes ([runtimes.md](runtimes.md)), configured with a prompt and a set of skills;
 - **widgets** (zero or more): cards the home panel renders, fed by the app;
 - **skills** (zero or more): project skills shipped in the repository, used by the app's agents;
 - **tasks**: scheduled work the scheduler runs on the app's behalf;
@@ -126,7 +126,7 @@ Apps without a service (a pure agent app, a widget fed by a task) omit the secti
 
 ### `agents`
 
-An agent is a chat identity: a runtime session started in the app's directory with a system prompt, a tool allow-list and a set of skills. Declaring one costs no code. The panel lists every agent of every app and opens a chat with any of them; chat is currently backed by the `claude` runtime only.
+An agent is a chat identity: a runtime session started in the app's directory with a system prompt, a tool allow-list and a set of skills. Declaring one costs no code. The panel lists every agent of every app and opens a chat with any of them, on the runtime the agent names; a runtime the space lacks, or one without chat, answers 501.
 
 ```yaml
 agents:
@@ -134,7 +134,7 @@ agents:
     title: Assistant
     description: Answers questions about this app's data and runs its maintenance.
     avatar: agents/assistant.svg   # default: the app icon
-    runtime: claude                # claude (default) | codex
+    runtime: claude                # a runtime of the space (docs/runtimes.md); default claude
     model: sonnet                  # runtime-specific model name; default: the runtime's default
     prompt: agents/assistant.md    # system prompt file, relative to the app directory
     cwd: .                         # session working directory, relative to the app directory
@@ -151,7 +151,7 @@ agents:
 | Key | Notes |
 | --- | --- |
 | `name` | `[a-z0-9][a-z0-9-]*`. The agent's id is `<app>/<name>`. |
-| `runtime` | Which CLI backs the session. ai-space starts `claude` or `codex` with the prompt, tools and skills mounted; the app never spawns the runtime itself. |
+| `runtime` | Name of the runtime that backs the session, as configured in the space's `runtimes.yaml` (`claude` by default). ai-space starts it with the prompt, tools and skills mounted; the app never spawns the runtime itself. |
 | `prompt` | The system prompt. The app's `AGENTS.md` and `description` are appended so every agent knows the app it belongs to. |
 | `tools` | Passed to the runtime as its allow-list. Server-side only: the chat client cannot widen it. |
 | `skills` | App-local paths (`./...`) or shared skills (`space:<name>`). See [Skills](#skills). |

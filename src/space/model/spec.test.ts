@@ -23,7 +23,9 @@ describe("parseRunInput", () => {
     expect(() => parseRunInput({ prompt: "  " })).toThrow(/prompt is required/);
     expect(() => parseRunInput({ prompt: "x", system: " " })).toThrow(/system/);
     expect(() => parseRunInput({ prompt: "x", system: "x".repeat(200_001) })).toThrow(/system is longer/);
+    expect(parseRunInput({ prompt: "x", model: "api/claude-haiku-4-5" }).model).toBe("api/claude-haiku-4-5");
     expect(() => parseRunInput({ prompt: "x", model: "so nnet" })).toThrow(/model/);
+    expect(() => parseRunInput({ prompt: "x", model: "a/b/c" })).toThrow(/model/);
     expect(() => parseRunInput({ prompt: "x", model: "a;rm" })).toThrow(/model/);
     expect(() => parseRunInput({ prompt: "x", tag: "Bad Tag" })).toThrow(/tag/);
     expect(() => parseRunInput({ prompt: "x", tools: "WebSearch" })).toThrow(/tools must be an array/);
