@@ -13,6 +13,12 @@ test("loadConfig applies defaults relative to the workspace", () => {
   expect(c.extraAppDirs).toEqual([]);
   expect(c.apiToken).toBe("");
   expect(c.maxConcurrency).toBe(2);
+  expect(c.model).toEqual({ sshHost: "", apiKey: "", bin: [], maxConcurrency: 4, retentionDays: 90, defaultModel: "sonnet" });
+});
+
+test("loadConfig reads the model service keys", () => {
+  const c = loadConfig(ws, { SPACE_MODEL_SSH_HOST: " box ", SPACE_MODEL_BIN: "bun fake.ts", SPACE_MODEL_MAX_CONCURRENCY: "3", SPACE_MODEL_RETENTION_DAYS: "7", SPACE_MODEL_DEFAULT: "haiku" });
+  expect(c.model).toEqual({ sshHost: "box", apiKey: "", bin: ["bun", "fake.ts"], maxConcurrency: 3, retentionDays: 7, defaultModel: "haiku" });
 });
 
 test("loadConfig reads the environment and expands ~ in extra app dirs", () => {

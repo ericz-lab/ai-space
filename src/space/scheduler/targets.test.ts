@@ -116,6 +116,30 @@ describe("agent target", () => {
     expect(r.status).toBe("error");
     expect(r.error).toMatch(/prompt file not found/);
   });
+
+  test("the claude json envelope yields the answer, usage and cost; is_error is a failure", async () => {
+    const fake = join(appDir, "fake-claude.sh");
+    await writeFile(
+      fake,
+      `#!/bin/sh
+p=$(cat)
+if [ "$FAKE_AGENT_MODE" = "error" ]; then echo '{"type":"result","is_error":true,"result":"boom"}'; exit 0; fi
+printf '{"type":"result","result":"done: %s","total_cost_usd":0.25,"usage":{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":3,"cache_read_input_tokens":4}}' "$p"
+`,
+      { mode: 0o755 },
+    );
+    process.env.SPACE_AGENT_BIN_CLAUDE = fake;
+    try {
+      const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "haiku" }, ctx());
+      expect(r).toEqual({ status: "ok", output: "done: hello agent", usage: { inputTokens: 1, cacheWriteTokens: 3, cacheReadTokens: 4, outputTokens: 2 }, costUsd: 0.25, promptChars: 11 });
+      process.env.FAKE_AGENT_MODE = "error";
+      const bad = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx());
+      expect(bad).toMatchObject({ status: "error", error: "boom" });
+    } finally {
+      delete process.env.SPACE_AGENT_BIN_CLAUDE;
+      delete process.env.FAKE_AGENT_MODE;
+    }
+  });
 });
 
 describe("events in a run", () => {

@@ -19,6 +19,10 @@ export type RunResult = {
   status: RunStatus;
   error?: string;
   output?: string;
+  /** Agent targets: what the runtime reported about the model call, for the model ledger. */
+  usage?: { inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number };
+  costUsd?: number;
+  promptChars?: number;
 };
 
 export type RunContext = {
@@ -120,7 +124,32 @@ async function runAgent(target: Extract<Target, { kind: "agent" }>, ctx: RunCont
   const prompt = (await promptFile.text()) + (ctx.events?.length ? eventPromptSection(ctx.events) : "");
   const env = { ...process.env, ...(await loadAppEnv(cwd)), ...(ctx.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []) };
   const cmd = agentCommand(target.runtime, target.model);
-  return spawnAndWait(cmd, { cwd, env, signal: ctx.signal, stdin: prompt });
+  const result = await spawnAndWait(cmd, { cwd, env, signal: ctx.signal, stdin: prompt }, target.runtime === "claude" ? parseAgentOutput : undefined);
+  return { ...result, promptChars: prompt.length };
+}
+
+/**
+ * `claude -p --output-format json` answers with one envelope: the text under
+ * `result`, token counts under `usage`, and its own cost figure. A run whose
+ * envelope says `is_error` failed even though the process exited 0. Output
+ * that is not the envelope (an older CLI) is kept as it is.
+ */
+function parseAgentOutput(stdout: string): Partial<RunResult> {
+  let j: { type?: string; is_error?: boolean; result?: string; total_cost_usd?: number; usage?: Record<string, number> };
+  try {
+    j = JSON.parse(stdout) as typeof j;
+  } catch {
+    return {};
+  }
+  if (!j || typeof j !== "object" || j.type !== "result") return {};
+  const u = j.usage;
+  const out: Partial<RunResult> = {
+    ...(u ? { usage: { inputTokens: u.input_tokens ?? 0, cacheWriteTokens: u.cache_creation_input_tokens ?? 0, cacheReadTokens: u.cache_read_input_tokens ?? 0, outputTokens: u.output_tokens ?? 0 } } : {}),
+    ...(typeof j.total_cost_usd === "number" ? { costUsd: j.total_cost_usd } : {}),
+  };
+  if (j.is_error) return { ...out, status: "error", error: (j.result ?? "the runtime reported an error").trim().slice(0, 800) };
+  if (typeof j.result === "string") out.output = truncate(j.result);
+  return out;
 }
 
 /** Command line for an agent runtime; overridable per runtime via SPACE_AGENT_BIN_<RUNTIME> for tests. */
@@ -143,6 +172,7 @@ export function agentCommand(runtime: "claude" | "codex", model?: string): strin
 async function spawnAndWait(
   cmd: string[],
   opts: { cwd: string; env: Record<string, string | undefined>; signal: AbortSignal; stdin?: string },
+  parse?: (stdout: string) => Partial<RunResult>,
 ): Promise<RunResult> {
   const setsid = Bun.which("setsid");
   const proc = Bun.spawn(setsid ? [setsid, ...cmd] : cmd, {
@@ -169,9 +199,10 @@ async function spawnAndWait(
     return { status: "error", error: "timed out", output: truncate(joinOutput(partial[0], partial[1])) };
   }
 
-  const output = truncate(joinOutput(await stdout, await stderr));
+  const out = await stdout;
+  const output = truncate(joinOutput(out, await stderr));
   if (outcome !== 0) return { status: "error", error: `exit code ${outcome}`, output };
-  return { status: "ok", output };
+  return { status: "ok", output, ...(parse ? parse(out) : {}) };
 }
 
 function joinOutput(stdout: string, stderr: string): string {

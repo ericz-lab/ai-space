@@ -259,6 +259,29 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 }
 :root[data-theme="dark"] .run-out { background: rgba(0, 0, 0, 0.3); }
 
+/* Usage: the model ledger in the same floating panel; tables scroll sideways rather than the page. */
+.tasks.usage { width: min(720px, 94vw); }
+.usage-windows { margin-left: auto; display: flex; gap: 2px; }
+.usage-win {
+  border: 1px solid var(--glass-border); background: none; color: var(--muted); border-radius: 8px; padding: 3px 8px;
+  font: 11px/1 ui-monospace, "SF Mono", Menlo, monospace; cursor: pointer;
+}
+.usage-win.on { background: var(--glass-strong); color: var(--text); }
+.usage-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 4px 8px 12px; }
+.usage-card { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--glass-strong); border: 1px solid var(--glass-border); }
+.usage-card b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.usage-card span { font-size: 11px; color: var(--muted); }
+.usage-scroll { overflow-x: auto; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.usage-table th { text-align: right; font-weight: 500; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--glass-border); }
+.usage-table td { text-align: right; padding: 4px 8px; }
+.usage-table th:nth-child(-n + 3), .usage-table td:nth-child(-n + 3) { text-align: left; }
+.usage-table tbody tr:hover { background: var(--glass-strong); }
+.usage-table .usage-dim td { color: var(--muted); }
+.usage-err { font-style: normal; color: #ef4444; margin-left: 4px; }
+.usage-call { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 520px) { .usage-cards { grid-template-columns: repeat(2, 1fr); } }
+
 /* Chat: a floating panel in the middle of the page; the agent tabs sit along its left edge. */
 .chat {
   position: relative; width: min(720px, 94vw); height: min(82vh, 800px); display: flex; flex-direction: row;

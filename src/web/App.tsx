@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "re
 import Chat from "./Chat.tsx";
 import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
+import Usage from "./Usage.tsx";
 import { getJson, isImgIcon, relTime, repoUrl, sendJson, untilTime, type AgentInfo, type AppInfo, type BackupInfo, type PeerInfo, type ServiceInfo, type WidgetInfo } from "./api.ts";
 import { type Key, LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
 import { type PetChoice, type PetdexPet, loadPetdex, resolvePet, suggestPets } from "./petdex.ts";
@@ -403,6 +404,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const [chatOpen, setChatOpen] = useState(false);
   // One floating panel at a time: opening the settings, the chat or the tasks closes the others.
   const [tasksOpen, setTasksOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
   // The chat opens on the space agent by default; an agent tile switches to that agent.
   const [chatAgent, setChatAgent] = useState<AgentInfo>({ id: "space/assistant", app: "space", name: "assistant", title: "Base", i18n: { zh: { title: "基础" } }, avatar: "✨", appIcon: "✨", runtime: "claude" });
   const [prefs, setPrefs] = useState<Prefs>(() => {
@@ -837,6 +839,17 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 {t("settings.tasks")}
                 <span>›</span>
               </button>
+              <button
+                className="setrow setlink"
+                onClick={() => {
+                  setSetsOpen(false);
+                  setChatOpen(false);
+                  setUsageOpen(true);
+                }}
+              >
+                {t("settings.usage")}
+                <span>›</span>
+              </button>
               {services && services.peers.length > 0 && (
                 <>
                   <p className="sethead">{t("settings.peers")}</p>
@@ -911,6 +924,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         </div>
       )}
       <Tasks open={tasksOpen} onClose={() => setTasksOpen(false)} />
+      <Usage open={usageOpen} onClose={() => setUsageOpen(false)} />
       <Chat
         open={chatOpen}
         agent={chatAgent}

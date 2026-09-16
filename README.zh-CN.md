@@ -87,11 +87,12 @@ App 规范（什么是 app、目录布局、`space.yaml` 契约）见 [docs/app-
 - **存储**（`src/space/storage/`）：每个 app 一个 SQLite 或 PostgreSQL 数据库，以及一个放在文件系统或任意 S3 兼容桶上的对象存储，在 `space.yaml` 里声明，同步时开通，通过 `<workspace>/data/<app>/space.env` 交接（`DATABASE_URL`、`BLOB_URL`、`S3_*`）。设计中的托管 blob API 尚未实现。见 [docs/storage.md](docs/storage.md)。
 - **备份**（`src/space/storage/backup/`）：每个 app 的数据目录每天快照到 S3 桶（SQLite 用 `VACUUM INTO`，状态文件，每 app 一个 `tar.zst` 加一份清单），按数量保留，每周一次打开最新快照的校验任务，以及 `restore` 到目录或原地恢复。见 [docs/backup.md](docs/backup.md)。
 - **通知**（`src/space/notify/`）：向聊天软件的单向通知（Telegram、Discord、Slack、飞书、钉钉、企业微信、Bark、ntfy、通用 webhook）。渠道在工作区 `.env` 里以 `SPACE_NOTIFY_<NAME>` URL 配置一次；app 在 `space.yaml` 里声明可用的渠道，发一个 `POST /api/notify` 即可。投递有队列、限速、重试和记录；调度器通过它上报失败的任务。见 [docs/notify.md](docs/notify.md)。
+- **模型**（`src/space/model/`）：app 和 agent 任务的模型调用统一走一个 `POST /api/model/run`：后端（本机的 `claude`、经 ssh 借用另一台机器的、或 API）在工作区 `.env` 里配置一次，调用受并发上限约束，每次调用连同运行时上报的 token 数进入同一本账，面板按 app、用途和模型展示。见 [docs/model.md](docs/model.md)。
 - **面板**（`src/space/panel/`、`src/space/agents/`、`src/web/`）：`/` 上的 web 入口。工作区里每个 app 的启动器（图标、入口 URL、健康状态），以任意声明的 agent 或空间 agent 身份打开 Claude Code 会话的聊天窗口，由 app 提供数据的 widget 卡片，所有定时任务及其运行历史的只读视图，以及从链接添加 app、隐藏、排序或卸载的编辑模式。中英文跟随浏览器或设置；app 在 `space.yaml` 里翻译自己的标题（[docs/i18n.md](docs/i18n.md)）。见 [docs/panel.md](docs/panel.md)。
 
 ## 状态
 
-早期阶段。调度器（时间表和事件触发）、存储（数据库和对象存储交接）、备份、通知、面板（agent 聊天、widget、从链接添加、卸载）、peers（多台机器共用一个面板，[docs/peers.md](docs/peers.md)）和交互式 `setup` 已就位。后续工作，大致按顺序：
+早期阶段。调度器（时间表和事件触发）、存储（数据库和对象存储交接）、备份、通知、带用量账本的模型调用、面板（agent 聊天、widget、从链接添加、卸载）、peers（多台机器共用一个面板，[docs/peers.md](docs/peers.md)）和交互式 `setup` 已就位。后续工作，大致按顺序：
 
 - **服务托管**：启动 `service.command`，失败时重启，把日志收集到 `<workspace>/logs/<app>/`；在此之前服务是操作员自己安装的 systemd 单元，面板直接探测健康状态。
 - **Skills 挂载**：把 manifest 里的 `skills:` 和 `memory:` 提供给 agent 会话；目前两者只解析不挂载。

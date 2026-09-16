@@ -4,7 +4,8 @@ import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loa
 import { SessionStore, createAgentRoutes } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, LayoutStore, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
-import { type Manifest, Scheduler, Store, createRoutes, effectiveEnabled, loadManifest } from "./space/scheduler/index.ts";
+import { ModelService, ModelStore, createModelRoutes, createRunner, recordAgentRun } from "./space/model/index.ts";
+import { type Manifest, Scheduler, Store, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { type S3Config, StorageService, createStorageRoutes, openDatabase, parseStorageSpec, sqliteUrl } from "./space/storage/index.ts";
 import {
   BACKUP_COMMANDS,
@@ -41,7 +42,7 @@ import { createWebRoutes } from "./web/routes.ts";
  *
  * Configuration comes from the environment, then from `<workspace>/.env`
  * (process values win). See `.env.example`, `docs/scheduler.md`, `docs/storage.md`
- * `docs/notify.md`, `docs/panel.md` and `docs/peers.md`.
+ * `docs/notify.md`, `docs/model.md`, `docs/panel.md` and `docs/peers.md`.
  */
 
 export type Config = {
@@ -78,6 +79,21 @@ export type Config = {
   backupMaxAgeMs: number;
   /** Timeout of one backup run (SPACE_BACKUP_TIMEOUT_MIN). */
   backupTimeoutMs: number;
+  /** The model service (docs/model.md): where calls run and how many at once. */
+  model: {
+    /** Machine whose `claude` login the calls borrow over ssh (SPACE_MODEL_SSH_HOST); empty = this machine's `claude`. */
+    sshHost: string;
+    /** Messages API key (SPACE_MODEL_API_KEY); set = the API instead of the CLI. */
+    apiKey: string;
+    /** The CLI command (SPACE_MODEL_BIN); empty = `claude`. */
+    bin: string[];
+    /** Calls running at the same time (SPACE_MODEL_MAX_CONCURRENCY). */
+    maxConcurrency: number;
+    /** Days of ledger kept (SPACE_MODEL_RETENTION_DAYS). */
+    retentionDays: number;
+    /** Model when a request names none (SPACE_MODEL_DEFAULT). */
+    defaultModel: string;
+  };
 };
 
 export function loadConfig(ws: Workspace, env: Record<string, string | undefined> = process.env): Config {
@@ -108,6 +124,14 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     serviceStop: env.SPACE_SERVICE_STOP?.trim() ?? "",
     name,
     hubToken: env.SPACE_HUB_TOKEN?.trim() ?? "",
+    model: {
+      sshHost: env.SPACE_MODEL_SSH_HOST?.trim() ?? "",
+      apiKey: env.SPACE_MODEL_API_KEY?.trim() ?? "",
+      bin: (env.SPACE_MODEL_BIN ?? "").split(/\s+/).filter(Boolean),
+      maxConcurrency: Math.max(1, Number(env.SPACE_MODEL_MAX_CONCURRENCY ?? 4) || 4),
+      retentionDays: Math.max(1, Number(env.SPACE_MODEL_RETENTION_DAYS ?? 90) || 90),
+      defaultModel: env.SPACE_MODEL_DEFAULT?.trim() || "sonnet",
+    },
     ...(env.SPACE_S3_ACCESS_KEY_ID?.trim() && env.SPACE_S3_SECRET_ACCESS_KEY?.trim()
       ? {
           s3: {
@@ -173,10 +197,24 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     channelErrors,
     imageDir: (app) => join(storage.appDataDir(app), "notify"),
   });
+  const modelStore = new ModelStore(config.dbPath, { retentionDays: config.model.retentionDays });
+  const model = new ModelService({
+    store: modelStore,
+    runner: createRunner({ sshHost: config.model.sshHost, apiKey: config.model.apiKey, ...(config.model.bin.length ? { bin: config.model.bin } : {}), env }),
+    maxConcurrency: config.model.maxConcurrency,
+  });
+  // Agent tasks spawn the model runtime themselves; their usage reaches the ledger from the run result.
+  const recordAgent = recordAgentRun(model);
   const scheduler = new Scheduler({
     store,
     maxConcurrency: config.maxConcurrency,
     envFor: (app) => storage.envFor(app),
+    runner: async (task, ctx) => {
+      const startedAt = Date.now();
+      const result = await runTarget(task.target, ctx);
+      recordAgent(task, result, startedAt, Date.now());
+      return result;
+    },
     onFinish: createTaskNotifier({ notify, tasksChannel: config.notifyTasks }),
   });
   const registry = new AppRegistry();
@@ -280,6 +318,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         apps: () => scheduler.apps().filter((app) => store.findTask(app, BACKUP_TASK)?.orphaned === false),
       }),
       ...createNotifyRoutes({ notify, store: notifyStore, token: config.apiToken, appForToken: (t) => storage.appForToken(t) }),
+      ...createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), defaultModel: config.model.defaultModel }),
       ...panelRoutes,
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),
@@ -288,7 +327,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
     fetch: () => new Response(JSON.stringify({ ok: false, error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }),
   });
-  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}`);
+  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""} · model ${model.backend}`);
 
   const shutdown = async () => {
     console.log("[space] shutting down");
@@ -300,13 +339,14 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     await notify.idle();
     store.close();
     notifyStore.close();
+    modelStore.close();
     await backups.db.close();
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
 
-  return { store, storage, scheduler, notify, notifyStore, registry, peers, server, backups };
+  return { store, storage, scheduler, notify, notifyStore, model, modelStore, registry, peers, server, backups };
 }
 
 /**
