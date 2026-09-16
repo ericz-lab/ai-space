@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_TIMEOUT_MS, MAX_PROMPT_CHARS, MAX_TIMEOUT_MS, MODEL_PATTERN, type RunInput, TAG_PATTERN, TOOL_PATTERN, WINDOWS, type Window } from "./types.ts";
+import { DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_SYSTEM, DEFAULT_TIMEOUT_MS, MAX_PROMPT_CHARS, MAX_SYSTEM_CHARS, MAX_TIMEOUT_MS, MODEL_PATTERN, type RunInput, TAG_PATTERN, TOOL_PATTERN, WINDOWS, type Window } from "./types.ts";
 
 /**
  * Validation of what comes over the API. Strict like manifests: an unknown
@@ -8,6 +8,13 @@ import { DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_TIMEOUT_MS, MAX_PROMPT_CHARS
 export function parseRunInput(body: Record<string, unknown>, defaults: { model?: string } = {}): RunInput {
   if (typeof body.prompt !== "string" || !body.prompt.trim()) throw new Error("prompt is required");
   if (body.prompt.length > MAX_PROMPT_CHARS) throw new Error(`prompt is longer than ${MAX_PROMPT_CHARS} characters`);
+
+  let system = DEFAULT_SYSTEM;
+  if (body.system !== undefined) {
+    if (typeof body.system !== "string" || !body.system.trim()) throw new Error("system must be a non-empty string");
+    if (body.system.length > MAX_SYSTEM_CHARS) throw new Error(`system is longer than ${MAX_SYSTEM_CHARS} characters`);
+    system = body.system;
+  }
 
   const model = body.model === undefined ? (defaults.model ?? DEFAULT_MODEL) : body.model;
   if (typeof model !== "string" || !MODEL_PATTERN.test(model)) throw new Error("model must be a model alias or id (letters, digits, . _ : -)");
@@ -35,7 +42,7 @@ export function parseRunInput(body: Record<string, unknown>, defaults: { model?:
     maxTokens = Math.min(body.maxTokens, 128_000);
   }
 
-  return { prompt: body.prompt, model, tag, tools, timeoutMs, maxTokens };
+  return { prompt: body.prompt, system, model, tag, tools, timeoutMs, maxTokens };
 }
 
 export function parseWindow(raw: string | null | undefined): Window {

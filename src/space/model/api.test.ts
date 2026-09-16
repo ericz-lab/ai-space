@@ -7,6 +7,7 @@ import { createRunner } from "./runner.ts";
 import { ModelService } from "./service.ts";
 import { ModelStore } from "./store.ts";
 import { fakeModelBin } from "./testing.ts";
+import { DEFAULT_SYSTEM } from "./types.ts";
 
 let dir: string;
 let store: ModelStore;
@@ -49,7 +50,7 @@ describe("POST /api/model/run", () => {
     const res = await post("/api/model/run", { app: "someone-else", prompt: "hello", tag: "translate" }, "sat_my-app");
     expect(res.status).toBe(200);
     const body = (await res.json()) as RunBody;
-    expect(body.text).toBe("answer to: hello [args: -p --output-format json --model haiku]");
+    expect(body.text).toBe(`answer to: hello [args: -p --output-format json --model haiku --strict-mcp-config --tools  --system-prompt ${DEFAULT_SYSTEM}]`);
     expect(body.call).toMatchObject({ app: "my-app", tag: "translate", model: "haiku", status: "ok", usage: { inputTokens: 10 }, costUsd: 0.0123 });
     expect(store.get(body.call.id)).toMatchObject({ app: "my-app", promptChars: 5 });
   });

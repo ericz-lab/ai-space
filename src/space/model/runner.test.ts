@@ -1,14 +1,37 @@
 import { describe, expect, test } from "bun:test";
-import { API_MODELS, apiCost, cliArgs, createRunner, parseCliOutput } from "./runner.ts";
+import { API_MODELS, apiCost, cliArgs, createRunner, parseCliOutput, remoteCommand } from "./runner.ts";
 import { fakeModelBin } from "./testing.ts";
 import type { RunInput } from "./types.ts";
 
-const input = (over: Partial<RunInput> = {}): RunInput => ({ prompt: "hello", model: "haiku", tag: "t", tools: [], timeoutMs: 5000, maxTokens: 100, ...over });
+const input = (over: Partial<RunInput> = {}): RunInput => ({ prompt: "hello", system: "Be brief.", model: "haiku", tag: "t", tools: [], timeoutMs: 5000, maxTokens: 100, ...over });
 
 describe("cliArgs", () => {
-  test("prompt stays off the command line; tools become --allowedTools", () => {
-    expect(cliArgs(["claude"], input())).toEqual(["claude", "-p", "--output-format", "json", "--model", "haiku"]);
-    expect(cliArgs(["claude"], input({ tools: ["WebSearch", "WebFetch"] }))).toEqual(["claude", "-p", "--output-format", "json", "--model", "haiku", "--allowedTools", "WebSearch,WebFetch"]);
+  test("lean by default: own system prompt, no tools, no MCP; the prompt stays off the command line", () => {
+    expect(cliArgs(["claude"], input())).toEqual(["claude", "-p", "--output-format", "json", "--model", "haiku", "--strict-mcp-config", "--tools", "", "--system-prompt", "Be brief."]);
+    expect(cliArgs(["claude"], input({ tools: ["WebSearch", "WebFetch"] }))).toEqual([
+      "claude", "-p", "--output-format", "json", "--model", "haiku", "--strict-mcp-config", "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch", "--system-prompt", "Be brief.",
+    ]);
+  });
+});
+
+describe("remoteCommand", () => {
+  test("the system prompt goes base64, empty tools stay quoted, unsafe words are refused", () => {
+    const b64 = Buffer.from("Be brief.").toString("base64");
+    expect(remoteCommand(["claude"], input())).toEqual({ command: `claude -p --output-format json --model haiku --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)"` });
+    expect(remoteCommand(["claude"], input({ tools: ["WebSearch"] }))).toEqual({
+      command: `claude -p --output-format json --model haiku --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt "$(printf %s ${b64} | base64 -d)"`,
+    });
+    expect(remoteCommand(["claude"], input({ model: "x y" }))).toEqual({ bad: "x y" });
+    expect(remoteCommand(["claude"], input({ system: "'; rm -rf / #" }))).toMatchObject({ command: expect.not.stringContaining("rm -rf") });
+  });
+
+  test("the remote shell decodes the system prompt back to the original text", async () => {
+    const r = remoteCommand(["claude"], input({ system: "Ünïcode 中文 'quotes' $HOME `x`" }));
+    if ("bad" in r) throw new Error(r.bad);
+    // Run the same shell string with a stand-in for claude that prints its last argument: the decoded system prompt.
+    const script = `claude() { printf %s "\${@: -1}"; }; ${r.command}`;
+    const out = await new Response(Bun.spawn(["bash", "-c", script], { stdout: "pipe" }).stdout).text();
+    expect(out).toBe("Ünïcode 中文 'quotes' $HOME `x`");
   });
 });
 
@@ -34,7 +57,7 @@ describe("local backend", () => {
     const r = await runner.run(input({ tools: ["WebSearch"] }));
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error(r.error);
-    expect(r.text).toBe("answer to: hello [args: -p --output-format json --model haiku --allowedTools WebSearch]");
+    expect(r.text).toBe("answer to: hello [args: -p --output-format json --model haiku --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt Be brief.]");
     expect(r.usage).toEqual({ inputTokens: 10, cacheWriteTokens: 30, cacheReadTokens: 40, outputTokens: 20 });
     expect(r.costUsd).toBe(0.0123);
   });
@@ -91,7 +114,7 @@ describe("api backend", () => {
     reply.body = { content: [{ type: "text", text: "hi there" }], usage: { input_tokens: 1_000_000, output_tokens: 0 } };
     const r = await runner.run(input());
     expect(r).toEqual({ ok: true, text: "hi there", usage: { inputTokens: 1_000_000, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 }, costUsd: 1, backend: "api" });
-    expect(calls[0]!.body).toMatchObject({ model: API_MODELS.haiku, max_tokens: 100, messages: [{ role: "user", content: "hello" }] });
+    expect(calls[0]!.body).toMatchObject({ model: API_MODELS.haiku, max_tokens: 100, system: "Be brief.", messages: [{ role: "user", content: "hello" }] });
     expect(calls[0]!.headers["x-api-key"]).toBe("sk-test");
   });
 

@@ -12,6 +12,14 @@ export const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 export const TOOL_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\([^,\s()]{1,120}\))?$/;
 
 export const DEFAULT_MODEL = "sonnet";
+/**
+ * The system prompt when a request brings none. A `claude -p` run without
+ * `--system-prompt` carries Claude Code's own system prompt (rules, tool
+ * descriptions, the machine's CLAUDE.md files), around twenty thousand tokens
+ * per call; naming one replaces all of it.
+ */
+export const DEFAULT_SYSTEM = "You answer one request from an application. Reply with exactly what it asks for and nothing else.";
+export const MAX_SYSTEM_CHARS = 20_000;
 export const DEFAULT_TIMEOUT_MS = 120_000;
 export const MAX_TIMEOUT_MS = 30 * 60_000;
 export const DEFAULT_MAX_TOKENS = 4096;
@@ -20,6 +28,8 @@ export const MAX_PROMPT_CHARS = 2_000_000;
 /** What a call asks for, after validation. */
 export type RunInput = {
   prompt: string;
+  /** Replaces the runtime's own system prompt; `DEFAULT_SYSTEM` when the request brings none. */
+  system: string;
   model: string;
   /** Purpose of the call inside the app; `other` when not given. */
   tag: string;

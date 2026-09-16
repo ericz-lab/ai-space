@@ -8,7 +8,7 @@ Status: implemented in `src/space/model/` (runner with three backends, ledger, s
 
 Before this service every app carried its own copy of the same runner: pick a backend (an API key, an ssh host whose `claude` login to borrow, or the local `claude`), spawn `claude -p --output-format json`, feed the prompt on stdin, parse the envelope, time out, and keep a private table of calls if the author remembered to. The copies drifted the way the notification copies did (`docs/notify.md`): some recorded usage, most did not; the ssh host was configured in every app's `.env`; and the question "which calls are eating the subscription" could only be answered by reading the CLI's own session logs on every machine.
 
-The lesson from those logs is worth stating because it shapes the design: a `claude -p` call carries the CLI's system prompt and tool definitions as cached input on every call, on the order of twenty thousand tokens, whatever the prompt. An app that translates one headline per call spends nearly all of its tokens on that fixed overhead. The ledger records the four token kinds separately so this shows up as it is: a large cache-read column next to a small input column.
+The lesson from those logs is worth stating because it shapes the design: a `claude -p` call, left alone, carries the CLI's own system prompt, every built-in tool's description, the machine's MCP servers and its CLAUDE.md files as cached input on every call, on the order of twenty thousand tokens, whatever the prompt. An app that translates one headline per call spends nearly all of its tokens on that fixed overhead. The service therefore starts the CLI lean (see [Backends](#backends)), and the ledger records the four token kinds separately so whatever overhead remains shows up as it is: a cache-read column next to the input column.
 
 Moving the function down into ai-space follows app-spec rule 5, *declare, do not integrate*: an app sends one loopback HTTP call and gets an answer; where it ran, how many run at once, and what it cost are the workspace's business.
 
@@ -40,6 +40,18 @@ The backend is chosen once for the workspace from `<workspace>/.env`, in this or
 | `SPACE_MODEL_SSH_HOST` | `ssh:<host>` | `ssh <host> bash -lc 'claude -p --output-format json --model … [--allowedTools …]'` with the prompt on stdin, borrowing that machine's `claude` login. Every argument is validated against a safe character set before it becomes part of the remote command. |
 | neither | `local` | This machine's `claude -p …`, same arguments, same stdin. |
 
+The CLI backends start `claude` lean. Measured on one machine with a one-line translation prompt on `haiku`:
+
+| command | tokens ahead of the prompt |
+| --- | --- |
+| `claude -p` as is | 23,975 (cache read) |
+| `--system-prompt "…"` | 17,709 |
+| `--system-prompt "…" --strict-mcp-config` | 15,460 |
+| `--system-prompt "…" --strict-mcp-config --tools ""` | 393 in total, nothing cached |
+| the same with `--tools WebSearch --allowedTools WebSearch` | 1,538 |
+
+So every call gets `--system-prompt` (the request's `system`, or a two-sentence default), `--strict-mcp-config` (no MCP servers), and `--tools` set to exactly the tools the request named, with `""` when it named none. Over ssh the system prompt travels base64-encoded and is decoded by the remote shell, so free text never meets the command line.
+
 `SPACE_MODEL_BIN` replaces the `claude` command (a wrapper script, the test stand-in). `SPACE_MODEL_MAX_CONCURRENCY` (default 4) caps the calls running at once; the rest wait in order. `SPACE_MODEL_DEFAULT` (default `sonnet`) is the model when a request names none. `SPACE_MODEL_RETENTION_DAYS` (default 90) is how much ledger is kept; older rows are pruned on insert.
 
 The CLI answers with one JSON envelope (`type: result`): the text under `result`, token counts under `usage`, and its own cost figure under `total_cost_usd`. `is_error` in the envelope is a failure even though the process exited 0. A CLI that answers in plain text (an older one, or one started without the json flag) still works: the text is the answer and no usage is recorded.
@@ -53,6 +65,7 @@ What an app sends to `POST /api/model/run`:
 | field | type | meaning |
 | --- | --- | --- |
 | `prompt` | string | The whole prompt. Required; at most 2 MB. |
+| `system` | string? | The system prompt. Replaces the CLI's own; default: "You answer one request from an application. Reply with exactly what it asks for and nothing else." At most 20K characters. |
 | `model` | string? | A model alias or id as `claude --model` accepts it. Default `SPACE_MODEL_DEFAULT`. |
 | `tag` | string? | The purpose of the call inside the app: `translate`, `story`, `digest`. Default `other`. This is the grain the panel groups by. |
 | `tools` | string[]? | Tools the CLI may use, as `--allowedTools` takes them (`WebSearch`, `Bash(git:*)`). None by default; refused on the API backend. |

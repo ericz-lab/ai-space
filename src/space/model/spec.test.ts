@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { parseRunInput, parseWindow } from "./spec.ts";
+import { DEFAULT_SYSTEM } from "./types.ts";
 
 describe("parseRunInput", () => {
   test("fills the defaults and keeps what was given", () => {
-    expect(parseRunInput({ prompt: "hi" })).toEqual({ prompt: "hi", model: "sonnet", tag: "other", tools: [], timeoutMs: 120_000, maxTokens: 4096 });
+    expect(parseRunInput({ prompt: "hi" })).toEqual({ prompt: "hi", system: DEFAULT_SYSTEM, model: "sonnet", tag: "other", tools: [], timeoutMs: 120_000, maxTokens: 4096 });
     expect(parseRunInput({ prompt: "hi" }, { model: "haiku" }).model).toBe("haiku");
-    expect(parseRunInput({ prompt: "hi", model: "claude-opus-5", tag: "digest", tools: ["WebSearch", " WebFetch "], timeoutMs: 5000, maxTokens: 100 })).toEqual({
+    expect(parseRunInput({ prompt: "hi", system: "Be brief.", model: "claude-opus-5", tag: "digest", tools: ["WebSearch", " WebFetch "], timeoutMs: 5000, maxTokens: 100 })).toEqual({
       prompt: "hi",
+      system: "Be brief.",
       model: "claude-opus-5",
       tag: "digest",
       tools: ["WebSearch", "WebFetch"],
@@ -19,6 +21,8 @@ describe("parseRunInput", () => {
     expect(parseRunInput({ prompt: "hi", timeoutMs: 1e9 }).timeoutMs).toBe(30 * 60_000);
     expect(() => parseRunInput({})).toThrow(/prompt is required/);
     expect(() => parseRunInput({ prompt: "  " })).toThrow(/prompt is required/);
+    expect(() => parseRunInput({ prompt: "x", system: " " })).toThrow(/system/);
+    expect(() => parseRunInput({ prompt: "x", system: "x".repeat(20_001) })).toThrow(/system is longer/);
     expect(() => parseRunInput({ prompt: "x", model: "so nnet" })).toThrow(/model/);
     expect(() => parseRunInput({ prompt: "x", model: "a;rm" })).toThrow(/model/);
     expect(() => parseRunInput({ prompt: "x", tag: "Bad Tag" })).toThrow(/tag/);

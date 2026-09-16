@@ -13,6 +13,14 @@ import { type Backend, type RunInput, type RunOutcome, type Usage } from "./type
  * no usage recorded (nothing is estimated). Tools are a CLI-only feature: the
  * API backend refuses a call that asks for them instead of quietly dropping
  * them.
+ *
+ * The CLI is started lean. Left alone, `claude -p` sends its own system prompt,
+ * every built-in tool's description, the MCP servers of the machine and the
+ * CLAUDE.md files it finds: measured at 24K tokens ahead of a one-line prompt.
+ * `--system-prompt` replaces the prompt, `--tools ""` drops the tool set,
+ * `--strict-mcp-config` drops the servers; the same one-line prompt then costs
+ * 393 tokens. A call that asks for tools gets exactly those (about 1.1K more
+ * per tool) and nothing else.
  */
 
 export type RunnerOptions = {
@@ -37,14 +45,30 @@ export const API_MODELS: Record<string, string> = {
   opus: "claude-opus-5",
 };
 
-/** Command line for the CLI; exported for tests. */
+/** Command line for the CLI on this machine; exported for tests. */
 export function cliArgs(bin: string[], input: RunInput): string[] {
-  const args = [...bin, "-p", "--output-format", "json", "--model", input.model];
-  if (input.tools.length) args.push("--allowedTools", input.tools.join(","));
-  return args;
+  const tools = input.tools.join(",");
+  return [...bin, "-p", "--output-format", "json", "--model", input.model, "--strict-mcp-config", "--tools", tools, ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", input.system];
 }
 
 const SAFE_ARG = /^[A-Za-z0-9._:/@,()*-]+$/;
+
+/**
+ * The same command as one shell string for `ssh <host> bash -lc '…'`. Every
+ * bare word is checked against SAFE_ARG; the system prompt, which is free
+ * text, travels base64-encoded and is decoded by the remote shell, so no byte
+ * of it is interpreted. Returns the offending word instead of a command when
+ * one fails the check.
+ */
+export function remoteCommand(bin: string[], input: RunInput): { command: string } | { bad: string } {
+  const tools = input.tools.join(",");
+  const words = [...bin, "-p", "--output-format", "json", "--model", input.model, "--strict-mcp-config"];
+  const bad = [...words, ...(tools ? [tools] : [])].find((w) => !SAFE_ARG.test(w));
+  if (bad) return { bad };
+  const system = Buffer.from(input.system, "utf8").toString("base64");
+  const parts = [...words, "--tools", tools ? tools : '""', ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", `"$(printf %s ${system} | base64 -d)"`];
+  return { command: parts.join(" ") };
+}
 
 export function createRunner(opts: RunnerOptions = {}): Runner {
   const env = opts.env ?? process.env;
@@ -63,11 +87,9 @@ export function createRunner(opts: RunnerOptions = {}): Runner {
     return {
       backend,
       run: (input, signal) => {
-        // The remote command is a shell string; every piece is validated to a safe character set.
-        const parts = cliArgs(bin, input);
-        const bad = parts.find((p) => !SAFE_ARG.test(p));
-        if (bad) return Promise.resolve({ ok: false, error: `argument not allowed over ssh: ${bad}`, backend });
-        return runProcess(["ssh", "-o", "BatchMode=yes", sshHost, `bash -lc '${parts.join(" ")}'`], input, backend, signal);
+        const remote = remoteCommand(bin, input);
+        if ("bad" in remote) return Promise.resolve({ ok: false, error: `argument not allowed over ssh: ${remote.bad}`, backend });
+        return runProcess(["ssh", "-o", "BatchMode=yes", sshHost, `bash -lc '${remote.command}'`], input, backend, signal);
       },
     };
   }
@@ -168,7 +190,7 @@ async function runApi(input: RunInput, o: { apiKey: string; apiUrl: string; fetc
     res = await o.fetch(o.apiUrl, {
       method: "POST",
       headers: { "x-api-key": o.apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens: input.maxTokens, messages: [{ role: "user", content: input.prompt }] }),
+      body: JSON.stringify({ model, max_tokens: input.maxTokens, system: input.system, messages: [{ role: "user", content: input.prompt }] }),
       signal,
     });
   } catch (e) {
