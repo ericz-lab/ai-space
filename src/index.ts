@@ -4,7 +4,7 @@ import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loa
 import { SessionStore, createAgentRoutes } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, LayoutStore, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
-import { ModelService, ModelStore, createModelRoutes, createRunner, recordAgentRun } from "./space/model/index.ts";
+import { ModelService, ModelStore, createModelRoutes, createRunner, importCalls, recordAgentRun } from "./space/model/index.ts";
 import { type Manifest, Scheduler, Store, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { type S3Config, StorageService, createStorageRoutes, openDatabase, parseStorageSpec, sqliteUrl } from "./space/storage/index.ts";
 import {
@@ -39,6 +39,7 @@ import { createWebRoutes } from "./web/routes.ts";
  *   bun src/index.ts backup-verify        open the newest snapshot of every app
  *   bun src/index.ts backups [<app>]      list snapshots
  *   bun src/index.ts restore <app> …      unpack a snapshot (--to <dir> or --in-place)
+ *   bun src/index.ts model-import <app> <file.jsonl>   add an app's own call history to the model ledger (see `src/space/model/import.ts`)
  *
  * Configuration comes from the environment, then from `<workspace>/.env`
  * (process values win). See `.env.example`, `docs/scheduler.md`, `docs/storage.md`
@@ -89,7 +90,7 @@ export type Config = {
     bin: string[];
     /** Calls running at the same time (SPACE_MODEL_MAX_CONCURRENCY). */
     maxConcurrency: number;
-    /** Days of ledger kept (SPACE_MODEL_RETENTION_DAYS). */
+    /** Days of ledger kept (SPACE_MODEL_RETENTION_DAYS); 0 = everything. */
     retentionDays: number;
     /** Model when a request names none (SPACE_MODEL_DEFAULT). */
     defaultModel: string;
@@ -129,7 +130,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
       apiKey: env.SPACE_MODEL_API_KEY?.trim() ?? "",
       bin: (env.SPACE_MODEL_BIN ?? "").split(/\s+/).filter(Boolean),
       maxConcurrency: Math.max(1, Number(env.SPACE_MODEL_MAX_CONCURRENCY ?? 4) || 4),
-      retentionDays: Math.max(1, Number(env.SPACE_MODEL_RETENTION_DAYS ?? 90) || 90),
+      retentionDays: Math.max(0, Number(env.SPACE_MODEL_RETENTION_DAYS ?? 0) || 0),
       defaultModel: env.SPACE_MODEL_DEFAULT?.trim() || "sonnet",
     },
     ...(env.SPACE_S3_ACCESS_KEY_ID?.trim() && env.SPACE_S3_SECRET_ACCESS_KEY?.trim()
@@ -440,6 +441,24 @@ if (import.meta.main) {
     process.exit(0);
   }
   if (command === "notify") process.exit(await notifyCommand(process.argv.slice(3), config));
+  if (command === "model-import") {
+    const [app, file] = process.argv.slice(3);
+    if (!app || !file) {
+      console.error("[space] usage: bun src/index.ts model-import <app> <file.jsonl>");
+      process.exit(2);
+    }
+    const store = new ModelStore(config.dbPath, { retentionDays: config.model.retentionDays });
+    try {
+      const r = importCalls(store, app, await Bun.file(file).text());
+      console.error(`[space] model-import: ${app}: read ${r.read}, imported ${r.imported}, skipped ${r.skipped} already present`);
+    } catch (e) {
+      console.error(`[space] model-import: ${(e as Error).message}`);
+      process.exit(1);
+    } finally {
+      store.close();
+    }
+    process.exit(0);
+  }
   if ((BACKUP_COMMANDS as readonly string[]).includes(command)) {
     const storage = await openStorage(ws, config, () => {});
     const code = await backupCli(command as BackupCommand, process.argv.slice(3), {
@@ -465,7 +484,7 @@ if (import.meta.main) {
     process.exit(0);
   }
   if (command !== "start") {
-    console.error(`[space] unknown command: ${command} (expected start, init, env, notify, setup, backup, backup-verify, backups or restore)`);
+    console.error(`[space] unknown command: ${command} (expected start, init, env, notify, setup, model-import, backup, backup-verify, backups or restore)`);
     process.exit(2);
   }
   await boot(ws, config);

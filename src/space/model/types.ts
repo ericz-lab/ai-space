@@ -61,8 +61,8 @@ export type RunOutcome =
   | { ok: true; text: string; usage?: Usage; costUsd?: number; backend: Backend }
   | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend };
 
-/** Why a call happened: an app's request, or the scheduler running an agent task. */
-export type Origin = "run" | "task";
+/** Why a row exists: an app's request, the scheduler running an agent task, or an import of an app's own history. */
+export type Origin = "run" | "task" | "import";
 
 export type CallStatus = "ok" | "error";
 

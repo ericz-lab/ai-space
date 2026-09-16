@@ -5,3 +5,4 @@ export { ModelStore, DEFAULT_RETENTION_DAYS, type GroupTotals } from "./store.ts
 export { ModelService, type ModelServiceOptions, type RunResult } from "./service.ts";
 export { createModelRoutes, view as callView, type ModelApiOptions } from "./api.ts";
 export { recordAgentRun, type AgentRunRecorder } from "./tasks.ts";
+export { importCalls, parseImportLine, type ImportLine, type ImportSummary } from "./import.ts";

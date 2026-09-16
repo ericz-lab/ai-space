@@ -8,7 +8,7 @@ import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts"
  *
  *   POST /api/model/run                       run one call; 200 with the answer, 502 when the model failed
  *   GET  /api/model/status                    backend in use, concurrency, calls in flight
- *   GET  /api/model/usage?window=24h&app      sums by app, tag, model and backend over a window, plus per-day sums
+ *   GET  /api/model/usage?window=24h&app      sums by app, tag, model and backend over a window, plus the whole history by day
  *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored)
  *
  * The caller of `run` is identified by its bearer token: an app's own
@@ -89,6 +89,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
         if (app !== undefined && !APP_PATTERN.test(app)) return error(400, "invalid app");
         const since = Date.now() - WINDOW_MS[window];
         const store = service.store;
+        const firstAt = store.firstAt();
         return json({
           ok: true,
           window,
@@ -99,7 +100,8 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
           byTag: store.groupBy(["app", "tag", "model"], since, app),
           byModel: store.groupBy(["model"], since, app),
           byBackend: store.groupBy(["backend", "origin"], since, app),
-          days: store.days(Date.now() - WINDOW_MS["30d"]),
+          // The whole history, by UTC day: what the panel's grid, weekly bars and lifetime cards read.
+          history: { firstAt: firstAt === undefined ? undefined : new Date(firstAt).toISOString(), totals: store.totals(0, app), days: store.days(0) },
         });
       },
     },

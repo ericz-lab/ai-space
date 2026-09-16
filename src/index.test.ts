@@ -13,7 +13,7 @@ test("loadConfig applies defaults relative to the workspace", () => {
   expect(c.extraAppDirs).toEqual([]);
   expect(c.apiToken).toBe("");
   expect(c.maxConcurrency).toBe(2);
-  expect(c.model).toEqual({ sshHost: "", apiKey: "", bin: [], maxConcurrency: 4, retentionDays: 90, defaultModel: "sonnet" });
+  expect(c.model).toEqual({ sshHost: "", apiKey: "", bin: [], maxConcurrency: 4, retentionDays: 0, defaultModel: "sonnet" });
 });
 
 test("loadConfig reads the model service keys", () => {

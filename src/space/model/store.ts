@@ -4,8 +4,9 @@ import { type CallStatus, type ModelCall, type ModelCallInput, type Origin, type
 /**
  * The ledger: one row per model call, in ai-space's own database next to the
  * scheduler tables. Same migration rule: extend ADDED_COLUMNS with nullable
- * columns, never rewrite tables. Rows older than the retention are pruned on
- * insert, so the table stays a window, not an archive.
+ * columns, never rewrite tables. With a retention set, rows older than it are
+ * pruned on insert; by default everything is kept, since the panel's history
+ * (days recorded, totals, the daily grid) is read from here.
  */
 
 const SCHEMA = `
@@ -34,7 +35,8 @@ CREATE INDEX IF NOT EXISTS model_calls_app_started ON model_calls(app, started_a
 
 const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [];
 
-export const DEFAULT_RETENTION_DAYS = 90;
+/** Days of ledger kept; 0 keeps everything (the default: the ledger is the history the panel shows). */
+export const DEFAULT_RETENTION_DAYS = 0;
 
 type Row = {
   id: number;
@@ -82,7 +84,8 @@ export class ModelStore {
       const cols = this.db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all();
       if (!cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
     }
-    this.retentionMs = Math.max(1, opts.retentionDays ?? DEFAULT_RETENTION_DAYS) * 86400_000;
+    const days = opts.retentionDays ?? DEFAULT_RETENTION_DAYS;
+    this.retentionMs = days > 0 ? days * 86400_000 : 0;
   }
 
   close(): void {
@@ -114,8 +117,55 @@ export class ModelStore {
         c.usage?.outputTokens ?? null,
         c.costUsd ?? null,
       );
-    this.db.query("DELETE FROM model_calls WHERE started_at < ?").run(c.startedAt - this.retentionMs);
+    if (this.retentionMs) this.db.query("DELETE FROM model_calls WHERE started_at < ?").run(c.startedAt - this.retentionMs);
     return { id: Number(r.lastInsertRowid), ...c };
+  }
+
+  /** Insert imported rows in one transaction, skipping those already present (same app, start, tag, duration). */
+  addImported(rows: ModelCallInput[]): { imported: number; skipped: number } {
+    const exists = this.db.query<{ n: number }, [string, number, string, number]>(
+      "SELECT 1 AS n FROM model_calls WHERE app = ? AND started_at = ? AND tag = ? AND duration_ms = ? AND origin = 'import' LIMIT 1",
+    );
+    const insert = this.db.query(
+      `INSERT INTO model_calls (app, tag, model, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
+                                input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, cost_usd)
+       VALUES (?, ?, ?, ?, 'import', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const run = this.db.transaction((list: ModelCallInput[]) => {
+      let imported = 0;
+      let skipped = 0;
+      for (const c of list) {
+        if (exists.get(c.app, c.startedAt, c.tag, c.durationMs)) {
+          skipped++;
+          continue;
+        }
+        insert.run(
+          c.app,
+          c.tag,
+          c.model,
+          c.backend,
+          c.status,
+          c.error ?? null,
+          c.startedAt,
+          c.durationMs,
+          c.promptChars,
+          c.outputChars ?? null,
+          c.usage?.inputTokens ?? null,
+          c.usage?.cacheWriteTokens ?? null,
+          c.usage?.cacheReadTokens ?? null,
+          c.usage?.outputTokens ?? null,
+          c.costUsd ?? null,
+        );
+        imported++;
+      }
+      return { imported, skipped };
+    });
+    return run(rows);
+  }
+
+  /** Start of the earliest row, or undefined when the ledger is empty. */
+  firstAt(): number | undefined {
+    return this.db.query<{ t: number | null }, []>("SELECT MIN(started_at) AS t FROM model_calls").get()?.t ?? undefined;
   }
 
   get(id: number): ModelCall | undefined {

@@ -280,6 +280,17 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .usage-table .usage-dim td { color: var(--muted); }
 .usage-err { font-style: normal; color: #ef4444; margin-left: 4px; }
 .usage-call { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-grid { display: grid; grid-auto-rows: 11px; gap: 2px; padding: 6px 8px 4px; width: max-content; }
+.usage-month { grid-row: 1; font-size: 10px; color: var(--muted); line-height: 11px; white-space: nowrap; }
+.usage-day { display: block; width: 11px; height: 11px; border-radius: 2px; background: var(--glass-strong); }
+.usage-day.l1 { background: #9be9a8; } .usage-day.l2 { background: #40c463; } .usage-day.l3 { background: #30a14e; } .usage-day.l4 { background: #216e39; }
+.usage-day.lx { background: transparent; }
+:root[data-theme="dark"] .usage-day.l0 { background: rgba(255, 255, 255, 0.08); }
+.usage-bars { display: flex; align-items: flex-end; gap: 6px; height: 120px; padding: 12px 8px 4px; }
+.usage-bar { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; }
+.usage-bar i { display: block; width: 100%; border-radius: 4px 4px 0 0; background: #30a14e; }
+.usage-bar.partial i { background: #9be9a8; }
+.usage-bar-val, .usage-bar-lbl { font-size: 10px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 @media (max-width: 520px) { .usage-cards { grid-template-columns: repeat(2, 1fr); } }
 
 /* Chat: a floating panel in the middle of the page; the agent tabs sit along its left edge. */

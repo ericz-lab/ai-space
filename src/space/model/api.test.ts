@@ -103,14 +103,16 @@ describe("reads", () => {
       byApp: { app: string; calls: number }[];
       byTag: { app: string; tag: string; model: string }[];
       byModel: { model: string }[];
-      days: { day: string; calls: number }[];
+      history: { firstAt?: string; totals: { calls: number }; days: { day: string; calls: number }[] };
     };
     expect(usage.window).toBe("5h");
     expect(usage.totals).toMatchObject({ calls: 2, tokens: 200, costUsd: 0.0246 });
     expect(usage.byApp.map((a) => a.app).sort()).toEqual(["my-app", "other"]);
     expect(usage.byTag).toHaveLength(2);
     expect(usage.byModel.map((m) => m.model).sort()).toEqual(["haiku", "sonnet"]);
-    expect(usage.days).toHaveLength(1);
+    expect(usage.history.days).toHaveLength(1);
+    expect(usage.history.totals.calls).toBe(2);
+    expect(usage.history.firstAt).toMatch(/^\d{4}-/);
     const mine = (await (await fetch(`${base}/api/model/usage?app=my-app`)).json()) as { totals: { calls: number } };
     expect(mine.totals.calls).toBe(1);
     expect((await fetch(`${base}/api/model/usage?window=1y`)).status).toBe(400);

@@ -54,7 +54,7 @@ So every call gets `--system-prompt` (the request's `system`, or a two-sentence 
 
 Thinking is the other fixed cost. The CLI thinks before every answer; on that same translation it spent 500 to 800 thinking tokens for a 46-token answer, so output tokens, priced five times input, were nine tenths of the call. A request's `thinking` becomes `MAX_THINKING_TOKENS` in the runtime's environment: `0` turns thinking off (the translation then costs a third and takes a third of the time), a positive number caps it. Absent, the runtime's default applies. The API backend does not enable extended thinking at all.
 
-`SPACE_MODEL_BIN` replaces the `claude` command (a wrapper script, the test stand-in). `SPACE_MODEL_MAX_CONCURRENCY` (default 4) caps the calls running at once; the rest wait in order. `SPACE_MODEL_DEFAULT` (default `sonnet`) is the model when a request names none. `SPACE_MODEL_RETENTION_DAYS` (default 90) is how much ledger is kept; older rows are pruned on insert.
+`SPACE_MODEL_BIN` replaces the `claude` command (a wrapper script, the test stand-in). `SPACE_MODEL_MAX_CONCURRENCY` (default 4) caps the calls running at once; the rest wait in order. `SPACE_MODEL_DEFAULT` (default `sonnet`) is the model when a request names none. `SPACE_MODEL_RETENTION_DAYS` limits how much ledger is kept (older rows are pruned on insert); the default, 0, keeps everything, since the panel's history reads from the ledger.
 
 The CLI answers with one JSON envelope (`type: result`): the text under `result`, token counts under `usage`, and its own cost figure under `total_cost_usd`. `is_error` in the envelope is a failure even though the process exited 0. A CLI that answers in plain text (an older one, or one started without the json flag) still works: the text is the answer and no usage is recorded.
 
@@ -92,6 +92,10 @@ The answer is `200 { ok: true, text, call }` where `call` is the ledger row (id,
 | `usage` | `inputTokens`, `cacheWriteTokens`, `cacheReadTokens`, `outputTokens`, as reported; absent when the runtime reported none. |
 | `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend; absent otherwise. |
 
+### Imported history
+
+An app that kept its own call table before the service existed can bring it along: `bun src/index.ts model-import <app> <file.jsonl>` reads one JSON object per line (`ts`, `tag`, `model`, `backend`, `ok`, `durationMs`, `promptChars`, `outputChars`, `inputTokens`, `outputTokens`, `cacheReadTokens` / `cacheWriteTokens` or one combined `cacheTokens`, `costUsd`) and writes the rows with `origin: import`. A row already present (same app, start time, tag and duration) is skipped, so the command can be run again after an app exported more. The export itself is the app's business: one query over its table, one line per row.
+
 ### Agent tasks
 
 A task with an `agent` target (`docs/scheduler.md`) spawns the runtime itself, inside the app directory with the prompt file on stdin. The target runner now reads the same json envelope: the answer becomes the run's output, `is_error` fails the run, and the usage and cost travel on the run result to a scheduler hook that writes the ledger row with `tag` = the task name and `origin: task`. The row exists even when no usage came back (a timeout, a `codex` runtime), so the count of calls stays honest.
@@ -101,7 +105,7 @@ A task with an `agent` target (`docs/scheduler.md`) spawns the runtime itself, i
 ```
 POST /api/model/run                       run one call (app token, or operator token + app)
 GET  /api/model/status                    backend, concurrency cap, calls running and waiting
-GET  /api/model/usage?window=24h&app=x    totals and sums by app, by app/tag/model, by model, by backend/origin over 5h | 24h | 7d | 30d, plus per-day sums for 30 days
+GET  /api/model/usage?window=24h&app=x    totals and sums by app, by app/tag/model, by model, by backend/origin over 5h | 24h | 7d | 30d, plus `history`: lifetime totals and per-day sums since the first row
 GET  /api/model/calls?app&tag&limit       recent calls, newest first
 ```
 
@@ -109,7 +113,7 @@ The read routes carry no token, like the scheduler's: the panel runs in a browse
 
 ## Panel
 
-Settings → Scheduler → Model usage opens a floating window: the window selector (5 h matches a subscription's rolling quota), four cards (calls, tokens, cost, model time), a table by app, purpose and model with the four token kinds side by side, a table by model and backend, and the last thirty calls with their outcome. The panel refreshes every 30 s while open.
+Settings → Scheduler → Model usage opens a floating window: the window selector (5 h matches a subscription's rolling quota), four cards (calls, tokens, cost, model time), a table by app, purpose and model with the four token kinds side by side, a table by model and backend, and the last thirty calls with their outcome. Below the window comes the history: days recorded, lifetime calls, tokens and cost with the daily average, a day grid over the last year (one square per day, shade by that day's tokens, cost or calls) and weekly bars. The panel refreshes every 30 s while open.
 
 ## Adopting it in an app
 

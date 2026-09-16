@@ -11,6 +11,7 @@ let store: ModelStore;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "space-model-store-"));
   store = new ModelStore(join(dir, "space.db"), { retentionDays: 10 });
+  expect(new ModelStore(join(dir, "keep.db")).add(call({ startedAt: T0 - 400 * DAY })).startedAt).toBe(T0 - 400 * DAY);
 });
 
 afterEach(async () => {

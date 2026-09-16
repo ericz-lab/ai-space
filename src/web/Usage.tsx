@@ -18,8 +18,10 @@ type UsageInfo = {
   byTag: (Totals & { app: string; tag: string; model: string })[];
   byModel: (Totals & { model: string })[];
   byBackend: (Totals & { backend: string; origin: string })[];
-  days: (Totals & { day: string })[];
+  history: { firstAt?: string; totals: Totals; days: (Totals & { day: string })[] };
 };
+type Metric = "tokens" | "costUsd" | "calls";
+const METRICS: Metric[] = ["tokens", "costUsd", "calls"];
 type CallInfo = {
   id: number;
   app: string;
@@ -52,6 +54,110 @@ export const fmtCost = (usd: number | undefined): string => {
   return `$${usd.toFixed(3)}`;
 };
 
+const DAY = 86400_000;
+const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+/** Monday of the UTC week a day belongs to. */
+const weekStart = (ms: number) => ms - ((new Date(ms).getUTCDay() + 6) % 7) * DAY;
+const fmtMetric = (m: Metric, v: number) => (m === "costUsd" ? fmtCost(v) : m === "tokens" ? fmtTokens(v) : v.toLocaleString());
+
+/**
+ * The history: lifetime cards, a day grid over the last 52 weeks (one column per
+ * week, Monday at the top, shade by quartile of the chosen metric among days with
+ * calls) and weekly bars. Weeks are UTC, Monday-based, like the ledger's days.
+ */
+function History({ h, metric, setMetric }: { h: UsageInfo["history"]; metric: Metric; setMetric: (m: Metric) => void }) {
+  const { lang, t } = useLang();
+  const byDay = new Map(h.days.map((d) => [d.day, d]));
+  const today = weekStart(Date.now());
+  const firstWeek = today - 51 * 7 * DAY;
+  const weeks: number[] = [];
+  for (let w = firstWeek; w <= today; w += 7 * DAY) weeks.push(w);
+  const values = h.days.map((d) => d[metric]).filter((v) => v > 0).sort((a, b) => a - b);
+  const q = (p: number) => values[Math.min(values.length - 1, Math.floor(values.length * p))] ?? 0;
+  const cuts = [q(0.25), q(0.5), q(0.75)];
+  const level = (v: number) => (v <= 0 ? 0 : v <= cuts[0]! ? 1 : v <= cuts[1]! ? 2 : v <= cuts[2]! ? 3 : 4);
+  const daysRecorded = h.firstAt ? Math.max(1, Math.ceil((Date.now() - new Date(h.firstAt).getTime()) / DAY)) : 0;
+
+  const weekly = new Map<number, number>();
+  for (const d of h.days) {
+    const w = weekStart(Date.parse(`${d.day}T00:00:00Z`));
+    weekly.set(w, (weekly.get(w) ?? 0) + d[metric]);
+  }
+  const bars = [...weekly.entries()].sort(([a], [b]) => a - b).slice(-12);
+  const max = Math.max(1, ...bars.map(([, v]) => v));
+  const months: { col: number; label: string }[] = [];
+  let lastMonth = -1;
+  weeks.forEach((w, i) => {
+    const m = new Date(w).getUTCMonth();
+    if (m !== lastMonth) {
+      months.push({ col: i, label: new Date(w).toLocaleDateString(lang === "zh" ? "zh-CN" : "en", { month: "short", timeZone: "UTC" }) });
+      lastMonth = m;
+    }
+  });
+
+  return (
+    <section className="task-group">
+      <div className="task-app">
+        <span className="svc-name">{t("usage.history")}</span>
+        <span className="usage-windows">
+          {METRICS.map((m) => (
+            <button key={m} className={`usage-win${m === metric ? " on" : ""}`} onClick={() => setMetric(m)}>
+              {t(`usage.metric.${m}`)}
+            </button>
+          ))}
+        </span>
+      </div>
+      <div className="usage-cards">
+        <div className="usage-card">
+          <b>{daysRecorded}</b>
+          <span>{t("usage.daysRecorded")}</span>
+        </div>
+        <div className="usage-card">
+          <b>{h.totals.calls.toLocaleString()}</b>
+          <span>{t("usage.calls")}{h.totals.errors ? t("usage.errors", { n: h.totals.errors }) : ""}</span>
+        </div>
+        <div className="usage-card">
+          <b>{fmtTokens(h.totals.tokens)}</b>
+          <span>{t("usage.tokens")}</span>
+        </div>
+        <div className="usage-card">
+          <b>{fmtCost(h.totals.costUsd)}</b>
+          <span>{t("usage.costPerDay", { cost: fmtCost(daysRecorded ? h.totals.costUsd / daysRecorded : 0) })}</span>
+        </div>
+      </div>
+      <div className="usage-scroll">
+        <div className="usage-grid" style={{ gridTemplateColumns: `repeat(${weeks.length}, 11px)` }}>
+          {months.map((m) => (
+            <span key={m.col} className="usage-month" style={{ gridColumn: m.col + 1 }}>
+              {m.label}
+            </span>
+          ))}
+          {weeks.map((w, col) =>
+            [0, 1, 2, 3, 4, 5, 6].map((row) => {
+              const ms = w + row * DAY;
+              const d = byDay.get(dayKey(ms));
+              const v = d ? d[metric] : 0;
+              const future = ms > Date.now();
+              return <i key={`${col}-${row}`} className={`usage-day l${future ? "x" : level(v)}`} style={{ gridColumn: col + 1, gridRow: row + 2 }} title={`${dayKey(ms)} · ${d ? fmtMetric(metric, v) : t("usage.noCalls")}`} />;
+            }),
+          )}
+        </div>
+      </div>
+      {bars.length > 0 && (
+        <div className="usage-bars">
+          {bars.map(([w, v]) => (
+            <div key={w} className={`usage-bar${w === today ? " partial" : ""}`} title={`${dayKey(w)} · ${fmtMetric(metric, v)}`}>
+              <span className="usage-bar-val">{fmtMetric(metric, v)}</span>
+              <i style={{ height: `${Math.max(2, Math.round((v / max) * 100))}%` }} />
+              <span className="usage-bar-lbl">{dayKey(w).slice(5).replace("-", "/")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TokenCells({ t }: { t: { inputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number; outputTokens?: number } | undefined }) {
   return (
     <>
@@ -66,6 +172,7 @@ function TokenCells({ t }: { t: { inputTokens?: number; cacheWriteTokens?: numbe
 export default function Usage({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { lang, t } = useLang();
   const [window, setWindow] = useState<(typeof WINDOWS)[number]>("24h");
+  const [metric, setMetric] = useState<Metric>("tokens");
   const [usage, setUsage] = useState<UsageInfo | null>(null);
   const [calls, setCalls] = useState<CallInfo[]>([]);
   const [apps, setApps] = useState<Record<string, { title: string; i18n?: AppInfo["i18n"] }>>({});
@@ -212,7 +319,7 @@ export default function Usage({ open, onClose }: { open: boolean; onClose: () =>
                     {usage.byBackend.map((r) => (
                       <tr key={`${r.backend}/${r.origin}`} className="usage-dim">
                         <td>
-                          {r.backend} · {r.origin === "task" ? t("usage.originTask") : t("usage.originRun")}
+                          {r.backend} · {r.origin === "task" ? t("usage.originTask") : r.origin === "import" ? t("usage.originImport") : t("usage.originRun")}
                         </td>
                         <td>{r.calls}</td>
                         <TokenCells t={r} />
@@ -224,6 +331,7 @@ export default function Usage({ open, onClose }: { open: boolean; onClose: () =>
               </div>
             </section>
           )}
+          {usage && usage.history.totals.calls > 0 && <History h={usage.history} metric={metric} setMetric={setMetric} />}
           {calls.length > 0 && (
             <section className="task-group">
               <div className="task-app">
