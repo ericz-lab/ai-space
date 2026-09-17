@@ -331,6 +331,8 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .term-pane { position: absolute; inset: 6px 0 6px 8px; }
 .term-pane.hidden { visibility: hidden; pointer-events: none; }
 .term-pane .xterm { height: 100%; }
+/* xterm scrolls its own viewport; at either end the leftover does not spill onto the page. */
+.term-pane .xterm-viewport { overscroll-behavior: contain; }
 .term-state { position: absolute; right: 10px; top: 8px; font-size: 11px; color: var(--muted); }
 .term-note { flex: none; margin: 0; padding: 6px 14px calc(8px + env(safe-area-inset-bottom)); font-size: 11px; color: var(--muted); }
 
@@ -513,6 +515,9 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 }
 /* A mounted panel that is closed (the chat keeps its conversations). */
 .overlay.off { display: none; }
+/* A page under an open panel stays put: wheel and touch scrolling that a panel cannot use would
+   otherwise chain to the document and scroll the launcher behind it. */
+body:has(.overlay:not(.off)) { overflow: hidden; }
 /* Floating panels sit on a nearly opaque surface (--panel); the glass tokens stay for tiles and pop-overs. */
 /* Panels that belong near the top of the page, such as the settings. */
 .overlay.top { align-items: flex-start; padding-top: clamp(40px, 8vh, 80px); }
