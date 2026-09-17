@@ -25,6 +25,7 @@ import {
   spaceManifest,
 } from "./space/storage/backup/index.ts";
 import { type Workspace, discoverApps, ensureWorkspace, loadWorkspaceEnv, resolveHome } from "./space/workspace.ts";
+import { describeSkillLinks, linkSkills } from "./space/skills.ts";
 import { SetupAborted, realDeps, runSetup, terminalIO } from "./space/setup.ts";
 import { type TerminalConfig, TerminalService, TerminalStore, createTerminalRoutes, loadTerminalConfig, terminalWebSocket } from "./space/terminal/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
@@ -47,6 +48,9 @@ import { createWebRoutes } from "./web/routes.ts";
  * (process values win). See `.env.example`, `docs/scheduler.md`, `docs/storage.md`
  * `docs/notify.md`, `docs/model.md`, `docs/panel.md`, `docs/peers.md` and `docs/terminal.md`.
  */
+
+/** The shared skills apps reference as `space:<name>`: the checkout's `skills/` directory. */
+const SHARED_SKILLS = resolve(import.meta.dir, "..", "skills");
 
 export type Config = {
   host: string;
@@ -246,7 +250,17 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   };
 
   // Everything under apps/ plus SPACE_APPS; read again by `POST /api/apps/sync`.
-  const discover = async () => [...(await discoverApps(ws)), ...config.extraAppDirs];
+  // Each pass also refreshes the workspace skill links, so a session started by hand sees every app's skills.
+  const discover = async () => {
+    const dirs = [...(await discoverApps(ws)), ...config.extraAppDirs];
+    try {
+      const links = await linkSkills(ws.home, SHARED_SKILLS, dirs);
+      if (links.removed.length || links.renamed.length) console.error(`[space] skills: ${describeSkillLinks(links)}`);
+    } catch (e) {
+      console.error(`[space] skills: could not refresh ${ws.home}/.claude/skills: ${(e as Error).message}`);
+    }
+    return dirs;
+  };
   for (const dir of await discover()) {
     try {
       await syncDir(dir);
@@ -430,6 +444,7 @@ if (import.meta.main) {
   // stderr, so `eval "$(bun src/index.ts env <app>)"` only sees the variables.
   for (const p of created) console.error(`[space] created ${p}`);
   if (command === "init") {
+    console.error(`[space] skills: ${describeSkillLinks(await linkSkills(ws.home, SHARED_SKILLS, await discoverApps(ws)))}`);
     console.error(`[space] workspace ready at ${ws.home}`);
     process.exit(0);
   }

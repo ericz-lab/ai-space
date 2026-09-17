@@ -13,6 +13,7 @@ import { MANIFEST_FILE } from "./scheduler/manifest.ts";
  *   ├── apps/    one directory per app; an app with a space.yaml is picked up automatically
  *   ├── data/    runtime state: space.db, then one directory per app (its databases, blobs/ and space.env)
  *   ├── logs/
+ *   ├── .claude/skills/  links to every shared and app skill, for sessions started by hand (src/space/skills.ts)
  *   └── .env     ai-space configuration and the secrets app manifests reference
  */
 

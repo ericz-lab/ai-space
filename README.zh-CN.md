@@ -97,7 +97,7 @@ App 规范（什么是 app、目录布局、`space.yaml` 契约）见 [docs/app-
 早期阶段。调度器（时间表和事件触发）、存储（数据库和对象存储交接）、备份、通知、带用量账本的模型调用、面板（agent 聊天、widget、从链接添加、卸载）、peers（多台机器共用一个面板，[docs/peers.md](docs/peers.md)）、web 终端（[docs/terminal.md](docs/terminal.md)）和交互式 `setup` 已就位。后续工作，大致按顺序：
 
 - **服务托管**：启动 `service.command`，失败时重启，把日志收集到 `<workspace>/logs/<app>/`；在此之前服务是操作员自己安装的 systemd 单元，面板直接探测健康状态。
-- **Skills 挂载**：把 manifest 里的 `skills:` 和 `memory:` 提供给 agent 会话；目前两者只解析不挂载。
+- **Skills 挂载**：把 manifest 里的 `skills:` 和 `memory:` 提供给 agent 会话；目前两者只解析不挂载。所有共享 skill 和各 app 的 skill 已经链接到 `<workspace>/.claude/skills/`，手动启动的会话都能用。
 - **托管 blob API**：在已经开通并交接的对象存储之上加索引表、流式路由和预签名。
 - **App 工具链**：`schema/space.schema.json`、`validate`、`/api/spec` 和 `bun run new-app`；目前由共享 skill `skills/space-app/` 手工完成。
 

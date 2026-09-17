@@ -95,7 +95,7 @@ Then check the exact call ai-space makes, from a directory that will exist (the 
 claude -p "Say ok" --output-format json
 ```
 
-Optional, in `~/.claude/settings.json`: a default model and any global permissions. ai-space passes `--model` from the request, the agent manifest, then `SPACE_CHAT_MODEL` (default `sonnet`), so a setting here only affects sessions started by hand. Skills under `~/.claude/skills/` are this user's and are visible to every agent session; the space's shared skills are the `skills/` directory of the checkout.
+Optional, in `~/.claude/settings.json`: a default model and any global permissions. ai-space passes `--model` from the request, the agent manifest, then `SPACE_CHAT_MODEL` (default `sonnet`), so a setting here only affects sessions started by hand. Skills under `~/.claude/skills/` are this user's and are visible to every agent session. The space's shared skills are the `skills/` directory of the checkout; ai-space links them, and every app's skills, into `~/.ai-space/.claude/skills/` on boot, so `claude` started inside the workspace sees them all.
 
 ## 3. GitHub CLI
 

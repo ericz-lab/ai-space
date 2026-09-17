@@ -200,6 +200,8 @@ skills:
 
 When ai-space starts a session it mounts the union of the agent's skills into the runtime's skill path (for Claude Code, a `.claude/skills/` directory inside the session's working directory, populated with links). Apps do not commit `.claude/`; the runtime layout is ai-space's concern, so switching runtimes changes nothing in the app.
 
+Sessions a person starts by hand in the workspace get everything: ai-space keeps `<workspace>/.claude/skills/` holding one link per shared skill and per app skill (from `skills/`, or an app's own `.claude/skills/` when that is where they are), refreshed on boot, on `init` and on every `POST /api/apps/sync`. A skill keeps its directory name; when an app's skill has the name of a shared skill or of an earlier app's, it is linked as `<app>-<skill>` and the boot log says so. So `claude` run in `~/.ai-space` (or any app directory under it) lists every skill the space knows, and a skill an app adds appears at the next sync.
+
 ### `tasks`
 
 Scheduled work. The full reference is in [scheduler.md](scheduler.md); the shape is:
@@ -423,6 +425,6 @@ notify:
 | `agents`, chat route | Implemented for `claude` (`src/space/agents/`); `skills` and `memory` are parsed but not mounted yet |
 | `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |
 | Panel (web UI, layout, manifest-only apps) | Implemented ([panel.md](panel.md)) |
-| `skills`, shared skills under `skills/` | Planned |
+| `skills`, shared skills under `skills/` | Linked into `<workspace>/.claude/skills/` for sessions started by hand (`src/space/skills.ts`); per-agent mounting planned |
 | JSON Schema (`schema/space.schema.json`), `validate`, `/api/spec` | Planned |
 | `templates/app/`, `new-app`, GitHub repository creation | Planned; the shared skill `skills/space-app/` and its templates cover creation, adoption and edits by hand today |
