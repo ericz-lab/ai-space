@@ -152,7 +152,7 @@ SPACE_API_TOKEN=$(openssl rand -hex 32)     # paste the value; mutating routes r
 SPACE_MAX_CONCURRENCY=4                     # slow agent tasks hold a slot for minutes; 2 is tight
 SPACE_CHAT_MODEL=sonnet
 SPACE_SERVICE_STOP="sudo systemctl disable --now {app}"   # what the panel runs when it uninstalls an app; user units: systemctl --user disable --now {app}
-SPACE_NAME=<short machine name>             # what this space calls itself
+SPACE_NAME=<short machine name>             # what this space calls itself (machines.md)
 ```
 
 Restart and check:

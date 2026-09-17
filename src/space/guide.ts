@@ -83,7 +83,7 @@ This is the space host \`${m.name}\` (hostname \`${m.hostname}\`, user \`${m.use
 
 export const GUIDE_TEMPLATE = `## Layout
 
-- \`core/\` - the ai-space checkout that runs here (when deployed by \`git push\`). Its \`AGENTS.md\` and \`docs/\` are the reference: \`docs/app-spec.md\` (what an app is, \`space.yaml\`), \`docs/scheduler.md\`, \`docs/storage.md\`, \`docs/backup.md\`, \`docs/notify.md\`, \`docs/model.md\`, \`docs/runtimes.md\`, \`docs/panel.md\`, \`docs/peers.md\`, \`docs/terminal.md\`, \`docs/install.md\`.
+- \`core/\` - the ai-space checkout that runs here (when deployed by \`git push\`). Its \`AGENTS.md\` and \`docs/\` are the reference: \`docs/app-spec.md\` (what an app is, \`space.yaml\`), \`docs/scheduler.md\`, \`docs/storage.md\`, \`docs/backup.md\`, \`docs/notify.md\`, \`docs/model.md\`, \`docs/runtimes.md\`, \`docs/panel.md\`, \`docs/peers.md\`, \`docs/terminal.md\`, \`docs/install.md\`, \`docs/machines.md\` (why nothing here names a machine, and the pitfalls).
 - \`apps/<app>/\` - one directory per app, each its own git repository with a \`space.yaml\`. Change an app inside its own directory; it usually has its own \`CLAUDE.md\` or \`AGENTS.md\`, which applies on top of this one.
 - \`data/\` - runtime state: \`space.db\` (ai-space's own), then one directory per app holding its databases, \`blobs/\` and \`space.env\` (the variables ai-space hands the app).
 - \`logs/\` - task run logs.
