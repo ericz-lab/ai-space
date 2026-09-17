@@ -1,6 +1,7 @@
 import { chmod, mkdir, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { GUIDE_FILES, WORKSPACE_AGENTS_MD, WORKSPACE_CLAUDE_MD } from "./guide.ts";
 import { MANIFEST_FILE } from "./scheduler/manifest.ts";
 
 /**
@@ -14,6 +15,7 @@ import { MANIFEST_FILE } from "./scheduler/manifest.ts";
  *   ├── data/    runtime state: space.db, then one directory per app (its databases, blobs/ and space.env)
  *   ├── logs/
  *   ├── .claude/skills/  links to every shared and app skill, for sessions started by hand (src/space/skills.ts)
+ *   ├── CLAUDE.md, AGENTS.md  the workspace guide for such sessions, written once (src/space/guide.ts)
  *   └── .env     ai-space configuration and the secrets app manifests reference
  */
 
@@ -57,7 +59,7 @@ SPACE_MAX_CONCURRENCY=2
 SPACE_SERVICE_STOP=
 `;
 
-/** Create the workspace directories and a starter .env if missing. Safe to call every boot. */
+/** Create the workspace directories, a starter .env and the guide files if missing. Safe to call every boot. */
 export async function ensureWorkspace(home: string): Promise<{ ws: Workspace; created: string[] }> {
   const ws = workspacePaths(home);
   const created: string[] = [];
@@ -71,6 +73,12 @@ export async function ensureWorkspace(home: string): Promise<{ ws: Workspace; cr
     await Bun.write(ws.envFile, ENV_TEMPLATE);
     await chmod(ws.envFile, 0o600); // it will hold secrets; Bun.write follows the umask
     created.push(ws.envFile);
+  }
+  for (const [name, text] of [[GUIDE_FILES[0], WORKSPACE_CLAUDE_MD], [GUIDE_FILES[1], WORKSPACE_AGENTS_MD]] as const) {
+    const file = join(ws.home, name);
+    if (await Bun.file(file).exists()) continue; // the operator's after the first write
+    await Bun.write(file, text);
+    created.push(file);
   }
   return { ws, created };
 }
