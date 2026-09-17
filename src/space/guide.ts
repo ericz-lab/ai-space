@@ -48,6 +48,8 @@ Mutating routes take \`Authorization: Bearer $SPACE_API_TOKEN\` (the token is in
 - \`GET /api/backups\`, \`POST /api/apps/<app>/backups\` to snapshot now.
 - \`POST /api/model/run\`, \`GET /api/model/usage\` for model calls and their cost.
 
+Peers (\`docs/peers.md\`): when \`.env\` lists other ai-space machines as \`SPACE_PEER_<NAME>\`, this one is a hub and \`GET /api/peers\` shows each peer's health and what its panel holds. A peer app is addressed as \`<peer>/<app>\`; through \`/api/peers/<peer>/...\` the hub can chat with the peer's agents, read their sessions, show its widgets and uninstall one of its apps, and nothing else. A peer's tasks, data, backups and files stay on that machine: reach them through that machine's own ai-space or a shell there, not through this one.
+
 The same from the shell, run inside \`core/\`: \`bun src/index.ts env <app>\` (an app's provisioned variables), \`bun src/index.ts notify\`, \`backup <app>\`, \`backups\`, \`restore <app>\`.
 
 ## Rules
