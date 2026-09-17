@@ -1,7 +1,7 @@
 import { chmod, mkdir, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { syncGuide } from "./guide.ts";
+import { localMachine, syncGuide } from "./guide.ts";
 import { MANIFEST_FILE } from "./scheduler/manifest.ts";
 
 /**
@@ -62,9 +62,11 @@ SPACE_SERVICE_STOP=
 
 /**
  * Create the workspace directories and a starter .env if missing, and bring the
- * guide files up to date (`updated` names the regenerated ones). Safe to call every boot.
+ * guide files up to date (`updated` names the regenerated ones). The guide names
+ * the machine it is on: `SPACE_NAME` from `env` or the workspace `.env` (read
+ * here without loading it), the hostname otherwise. Safe to call every boot.
  */
-export async function ensureWorkspace(home: string): Promise<{ ws: Workspace; created: string[]; updated: string[] }> {
+export async function ensureWorkspace(home: string, env: Record<string, string | undefined> = process.env): Promise<{ ws: Workspace; created: string[]; updated: string[] }> {
   const ws = workspacePaths(home);
   const created: string[] = [];
   for (const dir of [ws.home, ws.apps, ws.data, ws.logs]) {
@@ -78,7 +80,8 @@ export async function ensureWorkspace(home: string): Promise<{ ws: Workspace; cr
     await chmod(ws.envFile, 0o600); // it will hold secrets; Bun.write follows the umask
     created.push(ws.envFile);
   }
-  const guide = await syncGuide(ws.home);
+  const name = env.SPACE_NAME ?? (await readWorkspaceEnv(ws)).SPACE_NAME;
+  const guide = await syncGuide(ws.home, localMachine(ws.home, name));
   created.push(...guide.created);
   return { ws, created, updated: guide.updated };
 }
@@ -100,23 +103,36 @@ export async function discoverApps(ws: Workspace): Promise<string[]> {
 }
 
 /**
- * Load `.env` from the workspace into process.env without overriding values
- * that are already set. Bun only auto-loads the .env in the cwd, and the
- * service runs from core/ while the config lives one level up.
+ * The workspace `.env` as a map, without touching process.env: `KEY=value`
+ * lines, `export` prefix and surrounding quotes stripped, comments and blank
+ * lines skipped. Empty when the file is missing.
  */
-export async function loadWorkspaceEnv(ws: Workspace, env: Record<string, string | undefined> = process.env): Promise<number> {
+export async function readWorkspaceEnv(ws: Workspace): Promise<Record<string, string>> {
   const file = Bun.file(ws.envFile);
-  if (!(await file.exists())) return 0;
-  let loaded = 0;
+  const out: Record<string, string> = {};
+  if (!(await file.exists())) return out;
   for (const raw of (await file.text()).split("\n")) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     const eq = line.indexOf("=");
     if (eq <= 0) continue;
     const key = line.slice(0, eq).trim().replace(/^export\s+/, "");
-    if (env[key] !== undefined) continue;
     let value = line.slice(eq + 1).trim();
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Load `.env` from the workspace into process.env without overriding values
+ * that are already set. Bun only auto-loads the .env in the cwd, and the
+ * service runs from core/ while the config lives one level up.
+ */
+export async function loadWorkspaceEnv(ws: Workspace, env: Record<string, string | undefined> = process.env): Promise<number> {
+  let loaded = 0;
+  for (const [key, value] of Object.entries(await readWorkspaceEnv(ws))) {
+    if (env[key] !== undefined) continue;
     env[key] = value;
     loaded++;
   }

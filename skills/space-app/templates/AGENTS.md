@@ -9,6 +9,7 @@ Read this before touching code. Users read [README.md](README.md). This reposito
 3. **Append, never rewrite.** History is added to, not edited.
 4. **Configuration is environment.** Real values live in `.env` (ignored) or in the `space.env` ai-space generates; the repository holds only `.env.example`.
 5. **Loopback only.** The service binds `127.0.0.1:${PORT}`; exposure is the space's job.
+6. **Portable.** Skills and prompts name no host, ssh alias or home directory and carry no "am I on the server" marker; they take paths from the environment (`SPACE_APP_DIR`, `SPACE_APP_DATA_DIR`, `DATABASE_URL`) and the machine from the workspace `AGENTS.md`. Deployment facts live in the Deployment section below and nowhere else.
 
 ## Stack and runtime model
 

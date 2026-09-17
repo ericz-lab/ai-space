@@ -26,7 +26,7 @@ import {
 } from "./space/storage/backup/index.ts";
 import { type Workspace, discoverApps, ensureWorkspace, loadWorkspaceEnv, resolveHome } from "./space/workspace.ts";
 import { describeSkillLinks, linkSkills } from "./space/skills.ts";
-import { syncGuide } from "./space/guide.ts";
+import { localMachine, syncGuide } from "./space/guide.ts";
 import { SetupAborted, realDeps, runSetup, terminalIO } from "./space/setup.ts";
 import { type TerminalConfig, TerminalService, TerminalStore, createTerminalRoutes, loadTerminalConfig, terminalWebSocket } from "./space/terminal/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
@@ -258,7 +258,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     try {
       const links = await linkSkills(ws.home, SHARED_SKILLS, dirs);
       if (links.removed.length || links.renamed.length) console.error(`[space] skills: ${describeSkillLinks(links)}`);
-      for (const p of (await syncGuide(ws.home)).updated) console.error(`[space] regenerated ${p}`);
+      for (const p of (await syncGuide(ws.home, localMachine(ws.home, config.name))).updated) console.error(`[space] regenerated ${p}`);
     } catch (e) {
       console.error(`[space] skills: could not refresh ${ws.home}/.claude/skills: ${(e as Error).message}`);
     }

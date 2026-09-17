@@ -74,14 +74,15 @@ To remove one: `curl -sS -X DELETE "$API/api/apps/<name>"`. This is the only kin
 2. **Service contract** (only if the app has a service): read `PORT`, bind `127.0.0.1` and nothing else, answer `GET /healthz` with 200, log to stdout, exit on `SIGTERM` within 10 seconds. The template does all of this; keep it when you replace the handler.
 3. **Widget** (optional): `GET <source>` returns `{ ok: true, items: [{ text, url?, time? }] }`, at most twenty items, and `{ ok: false, error }` on failure. A path `source` needs a `service`; without one give a full URL.
 4. **Agent** (optional): a prompt file per agent under `agents/`. Write the prompt self-contained (the app's `AGENTS.md` and description are appended automatically); keep `tools` read-only unless the operator wants writes, and make the prompt ask before any write; use `Bash(cmd *)` patterns, never bare `Bash`. **Every agent gets its own `avatar`** (`agents/<name>.svg`, 64x64 viewBox rounded square in the app's colours with a glyph that says what the agent does, or a single emoji); without one the panel falls back to the app icon and the agent is indistinguishable from the app. Check `GET /api/agents` shows the avatar after the sync.
-5. **Validate the manifest** from an ai-space checkout before deploying, so a rejected app never reaches the host:
+5. **Skills** (optional): one directory per skill under `skills/<name>/SKILL.md`, referenced from the agents that use them. Write each one for every machine the app runs on: no hostname, IP address, ssh alias, home directory or path outside the workspace, and no marker of its own to tell "the server" from "the dev machine". Paths come from the app's environment (`SPACE_APP_DIR`, `SPACE_APP_DATA_DIR`, `DATABASE_URL`, `BLOB_URL`, in `data/<app>/space.env` on the host), the API from `SPACE_API_URL`, and where the session runs from the workspace `AGENTS.md` ("This machine"). A skill that must reach another machine takes the host from the operator's notes (`AGENTS.local.md`) or asks. Machine facts the app needs go in the Deployment section of its `AGENTS.md`, not into skills or prompts.
+6. **Validate the manifest** from an ai-space checkout before deploying, so a rejected app never reaches the host:
 
    ```bash
    APP_DIR=/path/to/my-app bun -e 'import { loadManifest } from "./src/space/scheduler/manifest.ts"; const m = await loadManifest(process.env.APP_DIR!); console.log("ok", m.app)'
    ```
 
    Any error means the whole app would be skipped at sync; fix it here. This replaces `bun run validate` until that command exists.
-6. **Repository.** `git init`, first commit with the template, then a private repository named after the app under the operator's GitHub owner (`gh repo create <name> --private --source . --push`) unless `--no-github`. Put the origin URL into `repo:`. The repository never holds `.env`, `space.env`, `data/` or database files; the template `.gitignore` already says so.
+7. **Repository.** `git init`, first commit with the template, then a private repository named after the app under the operator's GitHub owner (`gh repo create <name> --private --source . --push`) unless `--no-github`. Put the origin URL into `repo:`. The repository never holds `.env`, `space.env`, `data/` or database files; the template `.gitignore` already says so.
 
 ## 4. Adopt an existing project
 
@@ -89,11 +90,12 @@ Same end state as a created app, reached by adding to what exists:
 
 - `space.yaml` at the repository root, name equal to the directory the app will live in;
 - the service contract from step 3.2 (`PORT`, loopback, `/healthz`, `SIGTERM`); keep the project's old variables as fallbacks so it still runs standalone;
+- its skills and prompts rewritten by step 3.5: a project that grew up on one machine usually has `ssh <host>` and `~/<project>/data/...` baked into them, and those send a session on the host over ssh to itself and to a path the workspace no longer uses;
 - storage read from `DATABASE_URL` / `DATABASE_URL_<NAME>` / `BLOB_URL` + `S3_*` first, old variables second. An existing SQLite file placed at `<workspace>/data/<app>/<database>.db` (`main.db` for the default database) before the first sync is kept as it is, never rewritten; see [docs/storage.md](../../docs/storage.md);
 - a widget endpoint if the panel should show anything; `.env.example` covering every variable; `AGENTS.md` with the app-spec skeleton; the template `.gitignore` entries; the unit loading `space.env`;
 - cron entries the project used to have become `tasks:` and leave the crontab.
 
-Validate as in step 3.5.
+Validate as in step 3.6.
 
 ## 5. Put it in the workspace
 
@@ -134,7 +136,7 @@ The manifest lives in the repository. Change it there, commit, deploy, sync; nev
 | hide from the panel | `PATCH /api/apps/<name>` with `{ "hidden": true }`; the app stays registered and scheduled | not a manifest field; the layout keeps it |
 | remove | delete `<workspace>/apps/<name>` and restart ai-space (the sync routes only add and update); tasks become orphaned, agents and widgets disappear | `<workspace>/data/<name>/` stays until the operator removes it by hand; confirm before deleting anything |
 
-Parsing is strict: an unknown key, a wrong type or an unresolvable `${VAR}` rejects the whole app. Validate locally (step 3.5) before every deploy.
+Parsing is strict: an unknown key, a wrong type or an unresolvable `${VAR}` rejects the whole app. Validate locally (step 3.6) before every deploy.
 
 ## 7. Verify
 
@@ -164,4 +166,5 @@ Then record what went live in the app's `AGENTS.md` (host, port, unit, deploy co
 - Task cron expressions live only in `space.yaml`; anything left in a crontab runs twice.
 - Deleting an app directory does not delete `<workspace>/data/<name>/`; that is a separate, confirmed step.
 - Bare `Bash` in an agent's `tools` is a shell for anyone who can reach the panel. Use `Bash(cmd *)` patterns.
+- A skill or prompt with a hostname, ssh alias, home directory or "am I on the server" marker of its own works on the machine it was written on and nowhere else: a query skill written on a dev machine kept ssh-ing from the host to the host, and to a data path from before the app moved into the workspace. Take paths from `space.env` and the machine from the workspace `AGENTS.md` (step 3.5).
 - An agent without `avatar` shows the app icon on the panel; an app that was shipped that way (portfolio, 2026-09-08) had to be patched afterwards. Add the avatar together with the prompt file.
