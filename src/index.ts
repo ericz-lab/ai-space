@@ -26,6 +26,7 @@ import {
 } from "./space/storage/backup/index.ts";
 import { type Workspace, discoverApps, ensureWorkspace, loadWorkspaceEnv, resolveHome } from "./space/workspace.ts";
 import { describeSkillLinks, linkSkills } from "./space/skills.ts";
+import { syncGuide } from "./space/guide.ts";
 import { SetupAborted, realDeps, runSetup, terminalIO } from "./space/setup.ts";
 import { type TerminalConfig, TerminalService, TerminalStore, createTerminalRoutes, loadTerminalConfig, terminalWebSocket } from "./space/terminal/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
@@ -250,12 +251,14 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   };
 
   // Everything under apps/ plus SPACE_APPS; read again by `POST /api/apps/sync`.
-  // Each pass also refreshes the workspace skill links, so a session started by hand sees every app's skills.
+  // Each pass also refreshes the workspace skill links and the guide, so a session started by hand
+  // sees every app's skills and the operator's latest AGENTS.local.md.
   const discover = async () => {
     const dirs = [...(await discoverApps(ws)), ...config.extraAppDirs];
     try {
       const links = await linkSkills(ws.home, SHARED_SKILLS, dirs);
       if (links.removed.length || links.renamed.length) console.error(`[space] skills: ${describeSkillLinks(links)}`);
+      for (const p of (await syncGuide(ws.home)).updated) console.error(`[space] regenerated ${p}`);
     } catch (e) {
       console.error(`[space] skills: could not refresh ${ws.home}/.claude/skills: ${(e as Error).message}`);
     }
@@ -440,9 +443,10 @@ export async function notifyCommand(argv: string[], config: Config, env: Record<
 
 if (import.meta.main) {
   const command = process.argv[2] ?? "start";
-  const { ws, created } = await ensureWorkspace(resolveHome());
+  const { ws, created, updated } = await ensureWorkspace(resolveHome());
   // stderr, so `eval "$(bun src/index.ts env <app>)"` only sees the variables.
   for (const p of created) console.error(`[space] created ${p}`);
+  for (const p of updated) console.error(`[space] regenerated ${p}`);
   if (command === "init") {
     console.error(`[space] skills: ${describeSkillLinks(await linkSkills(ws.home, SHARED_SKILLS, await discoverApps(ws)))}`);
     console.error(`[space] workspace ready at ${ws.home}`);

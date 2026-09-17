@@ -14,16 +14,17 @@ describe("workspace", () => {
   test("ensureWorkspace creates the layout once and is idempotent", async () => {
     const home = join(await mkdtemp(join(tmpdir(), "space-ws-")), "ws");
     const first = await ensureWorkspace(home);
-    expect(first.created).toHaveLength(7);
+    expect(first.created).toHaveLength(8);
+    expect(first.updated).toEqual([]);
     expect(await Bun.file(first.ws.envFile).text()).toContain("SPACE_PORT=8700");
-    expect(await Bun.file(join(home, "CLAUDE.md")).text()).toBe("@AGENTS.md\n");
-    expect(await Bun.file(join(home, "AGENTS.md")).text()).toContain("# AGENTS.md - ai-space workspace");
+    expect(await Bun.file(join(home, "CLAUDE.md")).text()).toContain("# AGENTS.md - ai-space workspace");
     await writeFile(first.ws.envFile, "SPACE_PORT=9999\n");
-    await writeFile(join(home, "AGENTS.md"), "mine\n");
+    await writeFile(join(home, "AGENTS.local.md"), "Mine.\n");
     const second = await ensureWorkspace(home);
     expect(second.created).toEqual([]);
+    expect(second.updated).toEqual([join(home, "AGENTS.md")]);
     expect(await Bun.file(second.ws.envFile).text()).toBe("SPACE_PORT=9999\n");
-    expect(await Bun.file(join(home, "AGENTS.md")).text()).toBe("mine\n");
+    expect(await Bun.file(join(home, "AGENTS.md")).text()).toEndWith("## Local notes\n\nMine.\n");
   });
 
   test("discoverApps lists only app dirs that carry a manifest", async () => {
