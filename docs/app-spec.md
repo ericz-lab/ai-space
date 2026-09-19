@@ -239,7 +239,7 @@ Databases and blob stores. The full reference is in [storage.md](storage.md); th
 ```yaml
 storage:
   database: sqlite                 # sqlite (default) | postgres; or a databases: list
-  blobs: file                      # none (default) | file | s3
+  blobs: file                      # none (default) | file | s3; { backend: s3, fallback: file } for an app that must install everywhere
 ```
 
 ai-space provisions what is declared and writes `DATABASE_URL`, `BLOB_URL`, `SPACE_APP_DATA_DIR` and, for S3, the `S3_*` credentials into `space.env`. Apps read the URL and connect with whatever client their language has; SQL written against the portable subset in storage.md runs on both backends.

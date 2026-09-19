@@ -313,9 +313,17 @@ export class StorageService {
    * on an existing s3 store is accepted and logged, because it is the app's
    * declaration and nothing on the old location is touched.
    */
-  private async provisionBlobs(app: string, spec: BlobSpec, current: ProvisionedBlobStore | undefined): Promise<{ createdPath?: string }> {
+  private async provisionBlobs(app: string, declared: BlobSpec, current: ProvisionedBlobStore | undefined): Promise<{ createdPath?: string }> {
+    // An s3 store with a fallback lands on a file store where the space has no S3, and moves to s3
+    // (nothing copied) once credentials appear; the app reads BLOB_URL and adapts.
+    let spec = declared;
+    if (declared.backend === "s3" && declared.fallback && !this.s3) {
+      spec = { backend: declared.fallback };
+      if (!current) this.log(`[storage] ${app}: no SPACE_S3_* credentials; blob store falls back to file`);
+    }
     if (current && current.backend !== spec.backend) {
-      throw new Error(`storage: blob store of ${app} is ${current.backend}; changing to ${spec.backend} is not supported by sync`);
+      if (!declared.fallback) throw new Error(`storage: blob store of ${app} is ${current.backend}; changing to ${spec.backend} is not supported by sync`);
+      this.log(`[storage] ${app}: blob store moves from ${current.backend} to ${spec.backend}; nothing was copied`);
     }
     let url: string;
     let createdPath: string | undefined;
@@ -340,7 +348,7 @@ export class StorageService {
     }
     const now = Date.now();
     if (current) {
-      await this.db.sql`UPDATE storage_blob_stores SET url = ${url}, orphaned = ${false}, updated_at = ${now} WHERE app = ${app}`;
+      await this.db.sql`UPDATE storage_blob_stores SET backend = ${spec.backend}, url = ${url}, orphaned = ${false}, updated_at = ${now} WHERE app = ${app}`;
     } else {
       await this.db.sql`INSERT INTO storage_blob_stores (app, backend, url, orphaned, created_at, updated_at)
         VALUES (${app}, ${spec.backend}, ${url}, ${false}, ${now}, ${now})`;

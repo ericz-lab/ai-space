@@ -10,6 +10,7 @@ import { type BlobBackend, type BlobSpec, DEFAULT_DATABASE_NAME, type DatabaseSp
  *       - { name: cache, backend: sqlite }
  *     blobs: s3                        # none (default) | file | s3
  *     # blobs: { backend: s3, bucket: my-bucket, prefix: "" }
+ *     # blobs: { backend: s3, fallback: file }   # a file store where the space has no S3
  *
  * Strict, like task parsing: an invalid section rejects the whole app.
  */
@@ -72,6 +73,11 @@ export function parseBlobs(raw: unknown): BlobSpec | undefined {
   if (raw.prefix !== undefined) {
     if (spec.backend !== "s3") throw new Error("storage.blobs.prefix only applies to the s3 backend");
     spec.prefix = parsePrefix(raw.prefix, "storage.blobs.prefix");
+  }
+  if (raw.fallback !== undefined) {
+    if (spec.backend !== "s3") throw new Error("storage.blobs.fallback only applies to the s3 backend");
+    if (raw.fallback !== "file") throw new Error("storage.blobs.fallback must be file");
+    spec.fallback = "file";
   }
   return spec;
 }

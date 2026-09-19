@@ -38,6 +38,9 @@ describe("parseStorageSpec blobs", () => {
   test("short forms", () => {
     expect(parseStorageSpec({ blobs: "none" })).toEqual({ databases: [] });
     expect(parseStorageSpec({ blobs: "file" })).toEqual({ databases: [], blobs: { backend: "file" } });
+    expect(parseStorageSpec({ blobs: { backend: "s3", fallback: "file" } })).toEqual({ databases: [], blobs: { backend: "s3", fallback: "file" } });
+    expect(() => parseStorageSpec({ blobs: { backend: "file", fallback: "file" } })).toThrow(/fallback only applies/);
+    expect(() => parseStorageSpec({ blobs: { backend: "s3", fallback: "none" } })).toThrow(/must be file/);
     expect(parseStorageSpec({ database: "sqlite", blobs: "s3" })).toEqual({
       databases: [{ name: "main", backend: "sqlite" }],
       blobs: { backend: "s3" },

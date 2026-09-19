@@ -172,6 +172,22 @@ describe("StorageService.syncApp blobs", () => {
     expect((await envLines("my-app")).BLOB_URL).toBe("s3://books/");
   });
 
+  test("s3 with a file fallback lands on a file store without credentials and moves to s3 once they exist", async () => {
+    const spec = { databases: [], blobs: { backend: "s3" as const, fallback: "file" as const } };
+    const r = await storage.syncApp("usage", spec);
+    const dir = join(ws.data, "usage", "blobs");
+    expect(r.blobs).toMatchObject({ backend: "file", url: `file://${dir}` });
+    expect((await envLines("usage")).BLOB_URL).toBe(`file://${dir}`);
+    // Without the fallback a backend change is still refused.
+    await expect(storage.syncApp("usage", { databases: [], blobs: { backend: "s3" } })).rejects.toThrow(/not supported by sync/);
+    // The same declaration on a space with S3: the store moves, the file directory stays.
+    const svc = await withS3();
+    const moved = await svc.syncApp("usage", spec);
+    expect(moved.blobs).toMatchObject({ backend: "s3", url: "s3://default-bucket/usage/" });
+    expect((await envLines("usage")).BLOB_URL).toBe("s3://default-bucket/usage/");
+    expect((await stat(dir)).isDirectory()).toBe(true);
+  });
+
   test("an unreachable bucket rejects the sync before anything is recorded", async () => {
     const svc = await withS3(async () => {
       throw new Error("403 Forbidden");

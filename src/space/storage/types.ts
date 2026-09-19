@@ -28,6 +28,8 @@ export type BlobSpec = {
   backend: BlobBackend;
   bucket?: string;
   prefix?: string;
+  /** For s3: what to provision instead on a space without S3 credentials (an app that must install everywhere). */
+  fallback?: "file";
 };
 
 /** The parsed `storage:` section of a manifest. */

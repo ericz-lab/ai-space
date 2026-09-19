@@ -173,7 +173,7 @@ Alternatives considered and rejected:
 
 Implemented today; the same shape as databases:
 
-1. **Declare.** `storage.blobs: file` or `storage.blobs: s3` in `space.yaml`. The mapping form names a bucket other than `SPACE_S3_BUCKET` or a prefix other than `<app>/`; `prefix: ""` hands the app the bucket root, for an app that already owns a bucket with its own layout.
+1. **Declare.** `storage.blobs: file` or `storage.blobs: s3` in `space.yaml`. The mapping form names a bucket other than `SPACE_S3_BUCKET` or a prefix other than `<app>/`; `prefix: ""` hands the app the bucket root, for an app that already owns a bucket with its own layout. `blobs: { backend: s3, fallback: file }` is for an app that must install on every space, with or without a bucket: where `SPACE_S3_*` is unset it gets a file store instead, and moves to s3 (nothing copied) once credentials appear; the app reads `BLOB_URL` and adapts. Because every space with the same credentials resolves to the same `s3://<bucket>/<app>/`, that prefix is the one place an app deployed on several machines shares data through.
 2. **Provision.** On sync ai-space creates `<workspace>/data/<app>/blobs/` for `file`. For `s3` it resolves bucket and prefix, runs one `list` call with the `SPACE_S3_*` credentials the first time the store (or a new bucket/prefix) is declared, and refuses the sync if that fails. Nothing is written to the bucket, and a store that was already recorded is not probed again, so a flaky bucket does not stop a later boot.
 3. **Hand over.** `space.env` gains `BLOB_URL` (`file:///…/blobs` or `s3://bucket/prefix/`) and, for `s3`, the `S3_*` variables above. `GET /api/apps/:app/storage` shows backend, bucket, prefix or path, never the keys.
 4. **Use.** The app opens the store with whatever client it already has: `Bun.s3` picks the `S3_*` variables up by itself, the AWS SDK and boto3 take them as constructor arguments, a shell script can call `aws s3` with them. Keys are `prefix + key`; the app owns everything under its prefix and nothing outside it. Switching backends is refused by sync, like databases; a bucket or prefix change is accepted and logged, and the app is responsible for moving objects.
@@ -279,6 +279,7 @@ storage:
   #   - { name: main, backend: postgres }
   #   - { name: cache, backend: sqlite }
   blobs: s3                   # none (default) | file | s3
+  # blobs: { backend: s3, fallback: file }   # s3 where the space has a bucket, a file store elsewhere
   # blobs:                    # mapping form
   #   backend: s3
   #   bucket: media           # default SPACE_S3_BUCKET
