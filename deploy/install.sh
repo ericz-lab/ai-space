@@ -21,6 +21,8 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 2
   if curl -fsS "http://127.0.0.1:${SPACE_PORT:-8700}/healthz"; then
     echo
+    # The default apps' own installers, now that ai-space has written their space.env.
+    SPACE_HOME="${SPACE_HOME:-$HOME/.ai-space}" "$BUN" src/index.ts install-defaults
     grep -qE '^SPACE_API_TOKEN=.+' "${SPACE_HOME:-$HOME/.ai-space}/.env" || echo "next: $BUN src/index.ts setup   (fills ${SPACE_HOME:-$HOME/.ai-space}/.env interactively; see docs/install.md)"
     exit 0
   fi

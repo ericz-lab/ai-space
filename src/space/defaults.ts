@@ -7,13 +7,15 @@ import type { Workspace } from "./workspace.ts";
  * Apps a space comes with, and the per-machine overrides that let a public
  * app's manifest stay generic.
  *
- * Default apps are cloned into `apps/` by `init` (so by `deploy/install.sh`)
- * when their directory is absent, and their own `deploy/install.sh` is run
- * when they ship one, so a fresh space has something on its panel before the
- * operator writes a line. `SPACE_DEFAULT_APPS` in the workspace `.env` (or
- * the environment) replaces the list: `none` installs nothing, otherwise a
- * comma-separated list of clone URLs, each optionally `name=url`. An app that
- * was uninstalled is not brought back: `init` runs once per install.
+ * Default apps are cloned into `apps/` by `init` when their directory is
+ * absent, and their own `deploy/install.sh` is run by `install-defaults`
+ * once ai-space is up (`deploy/install.sh` does both, in that order, so the
+ * app's `space.env` exists before its service starts), so a fresh space has
+ * something on its panel before the operator writes a line.
+ * `SPACE_DEFAULT_APPS` in the workspace `.env` (or the environment) replaces
+ * the list: `none` installs nothing, otherwise a comma-separated list of
+ * clone URLs, each optionally `name=url`. An app that was uninstalled is not
+ * brought back: cloning happens only when the directory is absent.
  *
  * `SPACE_APP_URL_<NAME>` (the app name uppercased, `-` and `.` as `_`)
  * replaces the `url` of that app's manifest, so an app checked out from a
@@ -45,7 +47,7 @@ export function parseDefaultApps(env: Record<string, string | undefined>): Defau
   return out;
 }
 
-export type InstallReport = { name: string; status: "present" | "cloned" | "installed" | "failed"; detail?: string };
+export type InstallReport = { name: string; status: "present" | "cloned" | "installed" | "absent" | "no-installer" | "failed"; detail?: string };
 
 export type InstallOptions = {
   /** Run a command in a directory; resolves to the exit code and the last lines of output. */
@@ -53,8 +55,10 @@ export type InstallOptions = {
   log?: (line: string) => void;
 };
 
-/** Clone every missing default app and run its installer; failures are reported, never thrown. */
-export async function installDefaultApps(ws: Workspace, apps: DefaultApp[], opts: InstallOptions = {}): Promise<InstallReport[]> {
+const lastLine = (output: string, fallback: string) => output.trim().split("\n").at(-1) || fallback;
+
+/** Clone every missing default app; failures are reported, never thrown. */
+export async function cloneDefaultApps(ws: Workspace, apps: DefaultApp[], opts: InstallOptions = {}): Promise<InstallReport[]> {
   const run = opts.run ?? runCommand;
   const log = opts.log ?? (() => {});
   const reports: InstallReport[] = [];
@@ -66,19 +70,32 @@ export async function installDefaultApps(ws: Workspace, apps: DefaultApp[], opts
     }
     log(`cloning ${app.repo} into ${dir}`);
     const clone = await run(["git", "clone", "--quiet", app.repo, dir], ws.apps);
-    if (clone.code !== 0) {
-      reports.push({ name: app.name, status: "failed", detail: `git clone: ${clone.output.trim().split("\n").at(-1) ?? `exit ${clone.code}`}` });
+    if (clone.code !== 0) reports.push({ name: app.name, status: "failed", detail: `git clone: ${lastLine(clone.output, `exit ${clone.code}`)}` });
+    else reports.push({ name: app.name, status: "cloned" });
+  }
+  return reports;
+}
+
+/** Run `deploy/install.sh` of every default app that is present and ships one; idempotent by the apps' contract. */
+export async function installDefaultApps(ws: Workspace, apps: DefaultApp[], opts: InstallOptions = {}): Promise<InstallReport[]> {
+  const run = opts.run ?? runCommand;
+  const log = opts.log ?? (() => {});
+  const reports: InstallReport[] = [];
+  for (const app of apps) {
+    const dir = join(ws.apps, app.name);
+    if (!(await exists(dir))) {
+      reports.push({ name: app.name, status: "absent" });
       continue;
     }
     const installer = join(dir, "deploy", "install.sh");
     if (!(await exists(installer))) {
-      reports.push({ name: app.name, status: "cloned" });
+      reports.push({ name: app.name, status: "no-installer" });
       continue;
     }
     log(`running ${installer}`);
     const inst = await run(["bash", installer], dir);
-    if (inst.code !== 0) reports.push({ name: app.name, status: "failed", detail: `deploy/install.sh: ${inst.output.trim().split("\n").at(-1) ?? `exit ${inst.code}`}` });
-    else reports.push({ name: app.name, status: "installed", detail: inst.output.trim().split("\n").at(-1) });
+    if (inst.code !== 0) reports.push({ name: app.name, status: "failed", detail: `deploy/install.sh: ${lastLine(inst.output, `exit ${inst.code}`)}` });
+    else reports.push({ name: app.name, status: "installed", detail: lastLine(inst.output, "") || undefined });
   }
   return reports;
 }

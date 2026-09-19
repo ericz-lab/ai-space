@@ -77,7 +77,7 @@ mkdir -p ~/.ai-space && git clone https://github.com/<owner>/ai-space.git ~/.ai-
 cd ~/.ai-space/core && bash deploy/install.sh
 ```
 
-`install.sh` installs dependencies, creates the workspace with a starter `.env`, clones and starts the default apps (`ai-usage`, its own user unit on port 8880; `SPACE_DEFAULT_APPS=none` skips it), installs and starts the ai-space unit, and waits for `/healthz`. If `systemctl --user` reports no bus, `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in again over SSH.
+`install.sh` installs dependencies, creates the workspace with a starter `.env`, clones the default apps (`ai-usage`; `SPACE_DEFAULT_APPS=none` skips it), installs and starts the ai-space unit, waits for `/healthz`, then runs the default apps' installers (ai-usage: its own user unit on port 8880). If `systemctl --user` reports no bus, `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in again over SSH.
 
 `bun run setup` is interactive and made for a terminal; do not drive it. Fill `~/.ai-space/.env` yourself from `.env.example`:
 

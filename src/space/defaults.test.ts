@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_APPS, applyEnvOverrides, describeInstalls, installDefaultApps, parseDefaultApps, urlOverrideKey } from "./defaults.ts";
+import { DEFAULT_APPS, applyEnvOverrides, cloneDefaultApps, describeInstalls, installDefaultApps, parseDefaultApps, urlOverrideKey } from "./defaults.ts";
 import { loadManifest } from "./scheduler/manifest.ts";
 import { workspacePaths } from "./workspace.ts";
 
@@ -20,8 +20,8 @@ describe("parseDefaultApps", () => {
   });
 });
 
-describe("installDefaultApps", () => {
-  test("clones what is missing from a local repository, runs its installer, skips what is present", async () => {
+describe("cloneDefaultApps and installDefaultApps", () => {
+  test("clones what is missing from a local repository, skips what is present; installers run separately", async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "space-defaults-")));
     const src = join(root, "src-app");
     await mkdir(join(src, "deploy"), { recursive: true });
@@ -38,28 +38,32 @@ describe("installDefaultApps", () => {
     const ws = workspacePaths(join(root, "ws"));
     await mkdir(join(ws.apps, "present"), { recursive: true });
     const log: string[] = [];
-    const reports = await installDefaultApps(
-      ws,
-      [
-        { name: "present", repo: src },
-        { name: "demo", repo: src },
-        { name: "broken", repo: join(root, "nowhere") },
-      ],
-      { log: (l) => log.push(l) },
-    );
-    expect(reports[0]).toEqual({ name: "present", status: "present" });
-    expect(reports[1]).toMatchObject({ name: "demo", status: "installed" });
-    expect(reports[1]?.detail).toBe(`installed in ${join(ws.apps, "demo")}`);
-    expect(reports[2]).toMatchObject({ name: "broken", status: "failed" });
-    expect(reports[2]?.detail).toMatch(/git clone/);
+    const apps = [
+      { name: "present", repo: src },
+      { name: "demo", repo: src },
+      { name: "broken", repo: join(root, "nowhere") },
+    ];
+    const cloned = await cloneDefaultApps(ws, apps, { log: (l) => log.push(l) });
+    expect(cloned).toEqual([
+      { name: "present", status: "present" },
+      { name: "demo", status: "cloned" },
+      { name: "broken", status: "failed", detail: expect.stringMatching(/^git clone: /) },
+    ]);
     expect(await readFile(join(ws.apps, "demo", "space.yaml"), "utf8")).toContain("name: demo");
     expect(log.some((l) => l.includes("cloning"))).toBe(true);
-    expect(describeInstalls(reports)).toMatch(/^present present, demo installed \(installed in .*\), broken failed \(git clone: .*\)$/);
+
+    const installed = await installDefaultApps(ws, apps, { log: (l) => log.push(l) });
+    expect(installed).toEqual([
+      { name: "present", status: "no-installer" },
+      { name: "demo", status: "installed", detail: `installed in ${join(ws.apps, "demo")}` },
+      { name: "broken", status: "absent" },
+    ]);
+    expect(describeInstalls(installed)).toMatch(/^present no-installer, demo installed \(installed in .*\), broken absent$/);
     expect(describeInstalls([])).toBe("none");
 
-    // Without an installer the app is only cloned.
-    const plain = await installDefaultApps(ws, [{ name: "plain", repo: src }], { run: async (cmd, cwd) => ({ code: cmd[0] === "git" ? (await Bun.spawn(cmd, { cwd, stdout: "ignore", stderr: "ignore" }).exited) : 1, output: "" }) });
-    expect(plain[0]?.status).toBe("failed");
+    // A failing installer is reported with its last line.
+    const failed = await installDefaultApps(ws, [{ name: "demo", repo: src }], { run: async () => ({ code: 1, output: "boom\nno bun here" }) });
+    expect(failed[0]).toEqual({ name: "demo", status: "failed", detail: "deploy/install.sh: no bun here" });
   });
 });
 
