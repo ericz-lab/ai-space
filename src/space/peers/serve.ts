@@ -12,6 +12,9 @@ import { SPACE_AGENT, SPACE_APP } from "../agents/api.ts";
  *   GET  /api/peer/apps/:app/appcolor              = /api/panel/appcolor?app=
  *   GET  /api/peer/agents/:app/:agent/avatar       = /api/agents/:app/:agent/avatar
  *   GET  /api/peer/widgets/:app/:name/embed        = /api/widgets/:app/:name/embed
+ *   GET  /api/peer/apps/:app/proxy/api/*           GET http://127.0.0.1:<service.port>/api/* on the app itself: an app on the
+ *                                                  hub reading a peer app's API (an app without a service, or a path outside
+ *                                                  /api/, is 404; only GET, so nothing is changed from afar)
  *   POST /api/peer/agents/:app/:agent/chat         = /api/agents/:app/:agent/chat
  *   GET  /api/peer/agents/:app/:agent/sessions[/:sid]
  *   GET  /api/peer/terminal                        = /api/terminal            ┐ only when the terminal is
@@ -33,7 +36,15 @@ export type PeerServeOptions = {
   agents: Routes;
   /** The terminal routes, when the terminal is enabled on this machine; absent = no terminal for the hub. */
   terminal?: Routes;
+  /** The loopback port of an app's service, for the app API proxy; undefined = no service, 404. */
+  servicePort?: (app: string) => number | undefined;
+  /** Loopback fetch for the proxy (tests substitute one). */
+  fetch?: typeof fetch;
+  /** How long a proxied app call may take; an export of months of rows is not instant. */
+  proxyTimeoutMs?: number;
 };
+
+const PROXY_TIMEOUT_MS = 60_000;
 
 export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
   if (!opts.token) return {};
@@ -95,6 +106,17 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
       }),
     },
     "/api/peer/agents/:app/:agent/avatar": { GET: guard(mirror(opts.panel, "/api/agents/:app/:agent/avatar", "GET")) },
+    "/api/peer/apps/:app/proxy/*": {
+      GET: guard(async (req) => {
+        const port = opts.servicePort?.(req.params.app ?? "");
+        if (!port) return json({ ok: false, error: `no service for app "${req.params.app ?? ""}"` }, 404);
+        const u = new URL(req.url);
+        const rest = u.pathname.replace(/^\/api\/peer\/apps\/[^/]+\/proxy/, "");
+        if (!rest.startsWith("/api/")) return json({ ok: false, error: "only the app's /api/ paths are proxied" }, 404);
+        const up = await (opts.fetch ?? fetch)(`http://127.0.0.1:${port}${rest}${u.search}`, { headers: { accept: req.headers.get("accept") ?? "application/json" }, signal: AbortSignal.any([req.signal, AbortSignal.timeout(opts.proxyTimeoutMs ?? PROXY_TIMEOUT_MS)]) });
+        return new Response(up.body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store" } });
+      }),
+    },
     "/api/peer/widgets/:app/:name/embed": { GET: guard(mirror(opts.panel, "/api/widgets/:app/:name/embed", "GET")) },
     "/api/peer/agents/:app/:agent/chat": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/chat", "POST")) },
     "/api/peer/agents/:app/:agent/sessions": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions", "GET")) },

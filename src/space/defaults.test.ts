@@ -1,0 +1,76 @@
+import { describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DEFAULT_APPS, applyEnvOverrides, describeInstalls, installDefaultApps, parseDefaultApps, urlOverrideKey } from "./defaults.ts";
+import { loadManifest } from "./scheduler/manifest.ts";
+import { workspacePaths } from "./workspace.ts";
+
+describe("parseDefaultApps", () => {
+  test("unset is the built-in list; none/off empty it; a list of URLs names apps after the repository", () => {
+    expect(parseDefaultApps({})).toBe(DEFAULT_APPS);
+    expect(parseDefaultApps({ SPACE_DEFAULT_APPS: "none" })).toEqual([]);
+    expect(parseDefaultApps({ SPACE_DEFAULT_APPS: "  " })).toEqual([]);
+    expect(parseDefaultApps({ SPACE_DEFAULT_APPS: "https://github.com/x/notes.git, usage=git@github.com:x/ai-usage.git" })).toEqual([
+      { name: "notes", repo: "https://github.com/x/notes.git" },
+      { name: "usage", repo: "git@github.com:x/ai-usage.git" },
+    ]);
+    expect(() => parseDefaultApps({ SPACE_DEFAULT_APPS: "Bad Name=https://x/y.git" })).toThrow(/not an app name/);
+    expect(() => parseDefaultApps({ SPACE_DEFAULT_APPS: "notes=ftp://x" })).toThrow(/clone URL/);
+  });
+});
+
+describe("installDefaultApps", () => {
+  test("clones what is missing from a local repository, runs its installer, skips what is present", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "space-defaults-")));
+    const src = join(root, "src-app");
+    await mkdir(join(src, "deploy"), { recursive: true });
+    await writeFile(join(src, "space.yaml"), "name: demo\ntitle: Demo\n");
+    await writeFile(join(src, "deploy", "install.sh"), "#!/bin/bash\necho installed in $(pwd)\n");
+    const git = async (...args: string[]) => {
+      const p = Bun.spawn(["git", ...args], { cwd: src, stdout: "pipe", stderr: "pipe", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@x", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@x" } });
+      if ((await p.exited) !== 0) throw new Error(await new Response(p.stderr).text());
+    };
+    await git("init", "-q", "-b", "main");
+    await git("add", ".");
+    await git("commit", "-qm", "init");
+
+    const ws = workspacePaths(join(root, "ws"));
+    await mkdir(join(ws.apps, "present"), { recursive: true });
+    const log: string[] = [];
+    const reports = await installDefaultApps(
+      ws,
+      [
+        { name: "present", repo: src },
+        { name: "demo", repo: src },
+        { name: "broken", repo: join(root, "nowhere") },
+      ],
+      { log: (l) => log.push(l) },
+    );
+    expect(reports[0]).toEqual({ name: "present", status: "present" });
+    expect(reports[1]).toMatchObject({ name: "demo", status: "installed" });
+    expect(reports[1]?.detail).toBe(`installed in ${join(ws.apps, "demo")}`);
+    expect(reports[2]).toMatchObject({ name: "broken", status: "failed" });
+    expect(reports[2]?.detail).toMatch(/git clone/);
+    expect(await readFile(join(ws.apps, "demo", "space.yaml"), "utf8")).toContain("name: demo");
+    expect(log.some((l) => l.includes("cloning"))).toBe(true);
+    expect(describeInstalls(reports)).toMatch(/^present present, demo installed \(installed in .*\), broken failed \(git clone: .*\)$/);
+    expect(describeInstalls([])).toBe("none");
+
+    // Without an installer the app is only cloned.
+    const plain = await installDefaultApps(ws, [{ name: "plain", repo: src }], { run: async (cmd, cwd) => ({ code: cmd[0] === "git" ? (await Bun.spawn(cmd, { cwd, stdout: "ignore", stderr: "ignore" }).exited) : 1, output: "" }) });
+    expect(plain[0]?.status).toBe("failed");
+  });
+});
+
+describe("applyEnvOverrides", () => {
+  test("SPACE_APP_URL_<NAME> replaces the manifest url and must be http(s)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "space-app-"));
+    await writeFile(join(dir, "space.yaml"), "name: ai-usage\nurl: http://127.0.0.1:8880/?lang={lang}\n");
+    const m = await loadManifest(dir);
+    expect(urlOverrideKey("ai-usage")).toBe("SPACE_APP_URL_AI_USAGE");
+    expect(applyEnvOverrides(m, {})).toBe(m);
+    expect(applyEnvOverrides(m, { SPACE_APP_URL_AI_USAGE: " https://usage.example.com/?lang={lang} " }).url).toBe("https://usage.example.com/?lang={lang}");
+    expect(() => applyEnvOverrides(m, { SPACE_APP_URL_AI_USAGE: "usage.example.com" })).toThrow(/http/);
+  });
+});

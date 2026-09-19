@@ -38,6 +38,8 @@ ai-space 在一台机器上拥有的一切都放在一个目录里，默认 `~/.
 └── .env     ai-space 配置，以及 app manifest 通过 ${VAR} 引用的密钥
 ```
 
+`bun run init` 还会装上默认应用：ai-space 自带的应用，每个都是一个公开仓库，克隆到 `apps/` 后由它自己的安装脚本启动。目前是 [ai-usage](https://github.com/ericz-lab/ai-usage)，一个统计本机和 peer 机器上 Claude Code 消耗的看板。在 `.env` 里设 `SPACE_DEFAULT_APPS=none` 跳过；给一串克隆地址则替换这个列表。
+
 ## 开发
 
 ```bash

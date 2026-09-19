@@ -130,6 +130,8 @@ cd ~/.ai-space/core && bash deploy/install.sh
 
 `deploy/install.sh` runs `bun install --frozen-lockfile`, creates the workspace (`bun run init`: `apps/`, `data/`, `logs/`, a starter `.env`), installs `deploy/ai-space.service` into `~/.config/systemd/user/`, enables linger so the unit survives logout, starts it and curls `/healthz`.
 
+`init` also installs the default apps (`src/space/defaults.ts`): each is cloned into `apps/<name>` when that directory is absent and its `deploy/install.sh` is run, which installs a user unit and starts it. Today the list is `ai-usage`, the usage dashboard; `SPACE_DEFAULT_APPS=none` in `.env` (or the environment of the `init` run) skips it, a comma-separated list of clone URLs replaces it. The default app binds loopback and its manifest names `http://127.0.0.1:<port>`; on a server with a hostname, set `SPACE_APP_URL_AI_USAGE=https://usage.<domain>/?lang={lang}` in `.env` and add the hostname to the tunnel (step 5) like any other app. Its dashboard merges the peers of step 9 that run it too.
+
 **Git-push deploys, from the laptop**
 
 ```bash
@@ -300,7 +302,7 @@ curl -s -X POST -H "Authorization: Bearer $SPACE_API_TOKEN" http://127.0.0.1:870
 Then check, in this order:
 
 1. `journalctl --user -u ai-space -n 50` shows the app synced: storage provisioned, tasks registered, no manifest error.
-2. `https://space.example.com` shows the tile; the settings pop-over lists the service with its health.
+2. `https://space.example.com` shows the tile (next to the default app's); the settings pop-over lists the service with its health.
 3. Chat with "Base" (the space agent) and with the app's agent; the answer streams. With `acceptEdits` the agent can write in the app directory. Sessions reopen from the list.
 4. Tasks drawer: run one task by hand (`POST /api/tasks/:id/run` with the token) and see the run and its output.
 5. `cat ~/.ai-space/data/<app>/space.env` holds `DATABASE_URL`, `BLOB_URL` and `SPACE_APP_TOKEN`; the app's unit has `EnvironmentFile=-%h/.ai-space/data/<app>/space.env`.

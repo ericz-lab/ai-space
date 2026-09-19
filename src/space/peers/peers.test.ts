@@ -34,7 +34,7 @@ out({ type: "result", session_id: "cafe0001-0000-4000-8000-000000000000", is_err
 const fakeLoopback = (async (input: string | URL | Request) => {
   const url = String(input instanceof Request ? input.url : input);
   if (url.endsWith("/healthz")) return new Response("ok");
-  if (url.endsWith("/api/latest")) return Response.json({ ok: true, items: [{ text: "Clip one", url: "https://media.example.com/1", time: "2026-09-05T08:00:00Z" }] });
+  if (url.includes("/api/latest")) return Response.json({ ok: true, items: [{ text: "Clip one", url: "https://media.example.com/1", time: "2026-09-05T08:00:00Z" }] });
   if (url.includes("/board?theme=")) return new Response(`<html>board ${url.split("theme=")[1]}</html>`, { headers: { "content-type": "text/html" } });
   return new Response("<html><head><meta name=\"theme-color\" content=\"#abcdef\"></head></html>", { headers: { "content-type": "text/html" } });
 }) as typeof fetch;
@@ -95,7 +95,7 @@ widgets:
   const peerPanel = createPanelRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, widgets: new WidgetFeed(peerRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback });
   const peerAgents = createAgentRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, sessions: new SessionStore(peerDb), runtimes, defaultModel: "sonnet", home: peerHome });
   // The peer routes may upgrade a socket (the terminal's), so the server declares a websocket handler.
-  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents }) }, websocket: { message() {} } });
+  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port, fetch: fakeLoopback }) }, websocket: { message() {} } });
   peerBase = `http://127.0.0.1:${peerServer.port}`;
 
   // ---- the hub: a local app, a link app that duplicates the peer's app, and the peer
@@ -228,6 +228,15 @@ describe("hub", () => {
     expect(ev.at(-1)).toEqual({ type: "done" });
     expect((await get(hub, "/api/peers/david/agents/media/helper/sessions")).body.sessions).toMatchObject([{ sid: "cafe0001-0000-4000-8000-000000000000", title: "hello" }]);
     expect((await get(hub, "/api/peers/david/agents/media/nobody/sessions")).status).toBe(404);
+
+    // A peer app's own API, read by an app on the hub: only GET, only /api/, only apps with a service.
+    const proxied = await get(hub, "/api/peers/david/apps/media/proxy/api/latest?since=1");
+    expect(proxied.status).toBe(200);
+    expect(proxied.body.items[0].text).toBe("Clip one");
+    expect((await fetch(`${hub}/api/peers/david/apps/notes-link/proxy/api/latest`)).status).toBe(404);
+    expect((await fetch(`${hub}/api/peers/david/apps/media/proxy/board`)).status).toBe(404);
+    expect((await fetch(`${hub}/api/peers/david/apps/media/proxy/api/latest`, { method: "POST" })).status).toBe(404);
+    expect((await fetch(`${peerBase}/api/peer/apps/media/proxy/api/latest`)).status).toBe(401);
 
     expect((await fetch(`${hub}/api/peers/nope/apps/media/icon`)).status).toBe(404);
     expect((await fetch(`${hub}/api/peers/david/apps/media`)).status).toBe(404);

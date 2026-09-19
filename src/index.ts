@@ -24,8 +24,9 @@ import {
   parseBackupSpec,
   spaceManifest,
 } from "./space/storage/backup/index.ts";
-import { type Workspace, discoverApps, ensureWorkspace, loadWorkspaceEnv, resolveHome } from "./space/workspace.ts";
+import { type Workspace, discoverApps, ensureWorkspace, loadWorkspaceEnv, readWorkspaceEnv, resolveHome } from "./space/workspace.ts";
 import { describeSkillLinks, linkSkills } from "./space/skills.ts";
+import { applyEnvOverrides, describeInstalls, installDefaultApps, parseDefaultApps } from "./space/defaults.ts";
 import { localMachine, syncGuide } from "./space/guide.ts";
 import { SetupAborted, realDeps, runSetup, terminalIO } from "./space/setup.ts";
 import { type TerminalConfig, TerminalService, TerminalStore, createTerminalRoutes, loadTerminalConfig, terminalWebSocket } from "./space/terminal/index.ts";
@@ -35,7 +36,7 @@ import { createWebRoutes } from "./web/routes.ts";
  * ai-space entry point.
  *
  *   bun src/index.ts                     boot: ensure the workspace, sync app manifests, serve the Space API
- *   bun src/index.ts init                create the workspace (~/.ai-space by default) and exit
+ *   bun src/index.ts init                create the workspace (~/.ai-space by default), install the default apps, and exit
  *   bun src/index.ts env <app>           print the variables storage provisioned for an app, in `export` form
  *   bun src/index.ts notify [opts] text  send a notification through the running ai-space (see `notifyCommand`)
  *   bun src/index.ts setup               interactive first-install walk-through that fills <workspace>/.env (see `src/space/setup.ts`)
@@ -245,7 +246,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   };
 
   const syncDir = async (dir: string) => {
-    const manifest = await loadManifest(dir);
+    const manifest = applyEnvOverrides(await loadManifest(dir), env);
     const extra = await provision(manifest);
     scheduler.syncManifest(Scheduler.schedulable(manifest), extra);
   };
@@ -343,7 +344,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),
       ...terminalRoutes,
-      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
+      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, servicePort: (app) => registry.get(app)?.manifest.service?.port, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
       ...createWebRoutes(),
     },
     websocket: terminalWebSocket,
@@ -448,6 +449,13 @@ if (import.meta.main) {
   for (const p of created) console.error(`[space] created ${p}`);
   for (const p of updated) console.error(`[space] regenerated ${p}`);
   if (command === "init") {
+    // Default apps (src/space/defaults.ts): SPACE_DEFAULT_APPS from the environment or the workspace .env.
+    try {
+      const reports = await installDefaultApps(ws, parseDefaultApps({ ...(await readWorkspaceEnv(ws)), ...process.env }), { log: (l) => console.error(`[space] default apps: ${l}`) });
+      console.error(`[space] default apps: ${describeInstalls(reports)}`);
+    } catch (e) {
+      console.error(`[space] default apps: ${(e as Error).message}`);
+    }
     console.error(`[space] skills: ${describeSkillLinks(await linkSkills(ws.home, SHARED_SKILLS, await discoverApps(ws)))}`);
     console.error(`[space] workspace ready at ${ws.home}`);
     process.exit(0);

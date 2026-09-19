@@ -77,7 +77,7 @@ mkdir -p ~/.ai-space && git clone https://github.com/<owner>/ai-space.git ~/.ai-
 cd ~/.ai-space/core && bash deploy/install.sh
 ```
 
-`install.sh` installs dependencies, creates the workspace with a starter `.env`, installs and starts the user unit, and waits for `/healthz`. If `systemctl --user` reports no bus, `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in again over SSH.
+`install.sh` installs dependencies, creates the workspace with a starter `.env`, clones and starts the default apps (`ai-usage`, its own user unit on port 8880; `SPACE_DEFAULT_APPS=none` skips it), installs and starts the ai-space unit, and waits for `/healthz`. If `systemctl --user` reports no bus, `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in again over SSH.
 
 `bun run setup` is interactive and made for a terminal; do not drive it. Fill `~/.ai-space/.env` yourself from `.env.example`:
 
@@ -93,7 +93,7 @@ SPACE_NAME=<machine name>
 
 Show the values, write them, `systemctl --user restart ai-space`.
 
-Proof: `curl -s 127.0.0.1:8700/healthz` is `{"ok":true}`; `curl -s 127.0.0.1:8700/api/apps` lists zero apps; `journalctl --user -u ai-space -n 20` shows `listening on` and no error. Also set up git-push deploys from the person's machine if you are in the first shape (install.md step 4, second block) and prove it with one push.
+Proof: `curl -s 127.0.0.1:8700/healthz` is `{"ok":true}`; `curl -s 127.0.0.1:8700/api/apps` lists the default app (`ai-usage`) and nothing else, and `curl -s 127.0.0.1:8880/healthz` answers; `journalctl --user -u ai-space -n 20` shows `listening on` and no error. Also set up git-push deploys from the person's machine if you are in the first shape (install.md step 4, second block) and prove it with one push.
 
 ### Phase 6: tunnel and Access (steps 5 and 6, only with a domain)
 

@@ -74,6 +74,7 @@ Present only when `SPACE_HUB_TOKEN` is set; every route requires `Authorization:
 | `GET /api/peer/widgets/:app/:name/embed` | `/api/widgets/:app/:name/embed` | The proxied embed page, `?theme=` passed through. |
 | `POST /api/peer/agents/:app/:agent/chat` | `/api/agents/:app/:agent/chat` | The same body, the same SSE stream. Sessions are recorded on the peer. |
 | `GET /api/peer/agents/:app/:agent/sessions[/:sid]` | `/api/agents/:app/:agent/sessions[/:sid]` | |
+| `GET /api/peer/apps/:app/proxy/api/*` | `http://127.0.0.1:<service.port>/api/*` | The peer app's own API, for an app on the hub that reads its counterpart on the peer (the usage app pulls each machine's rows this way). GET only, only paths under the app's `/api/`, only apps with a service; the query string is passed through, the answer streamed back as is, 60 s limit. |
 | `GET /api/peer/terminal`, `POST /api/peer/terminal/sessions`, `DELETE /api/peer/terminal/sessions/:id`, `GET /api/peer/terminal/ws` | `/api/terminal…` | Present only while the terminal is enabled on the peer (`SPACE_TERMINAL_ENABLED`); the snapshot then carries `terminal: true`. A session on the peer, opened and bridged by the hub ([terminal.md](terminal.md#peers)). |
 
 Nothing under `/api/peer/` mutates the peer's configuration: no create, no hide, no layout, no tasks, no storage, no notify. A chat turn and a terminal session run on the peer, of course; that is what they are for. The hub's operator changes a peer app on the peer, the same way as today.
@@ -92,7 +93,7 @@ Module `src/space/peers/`:
 | `merge.ts` | Turns a snapshot into hub views: prefixes ids, sets `peer`, rewrites icon, avatar and embed routes to the hub's proxy, applies the hub's hidden set, marks stale entries. |
 | `hub.ts` | Every configured peer and the merged lists the panel appends. |
 | `serve.ts` | The peer side (`/api/peer/*`). |
-| `api.ts` | `GET /api/peers`, the hub-side hide, the forwarded uninstall, and the `/api/peers/:peer/*` proxy routes. |
+| `api.ts` | `GET /api/peers`, the hub-side hide, the forwarded uninstall, and the `/api/peers/:peer/*` proxy routes, including `GET /api/peers/:peer/apps/:app/proxy/api/*` for an app on the hub that reads its counterpart's API on the peer (65 s limit, the peer's own 60 s inside it). |
 
 What changed in the existing modules:
 

@@ -14,7 +14,8 @@ import { peerId } from "./merge.ts";
  *   GET   /api/peers/:peer/agents/:app/:agent/avatar    │ forwarded to the peer's /api/peer/... with
  *   GET   /api/peers/:peer/widgets/:app/:name/embed     │ the token and extra headers added, the
  *   POST  /api/peers/:peer/agents/:app/:agent/chat      │ answer streamed back as is
- *   GET   /api/peers/:peer/agents/:app/:agent/sessions[/:sid] ┘
+ *   GET   /api/peers/:peer/agents/:app/:agent/sessions[/:sid] │
+ *   GET   /api/peers/:peer/apps/:app/proxy/api/*        ┘ (the peer app's own API; docs/peers.md)
  *
  * Only these paths are forwarded; anything else under /api/peers/ is 404 on
  * the hub without a call to the peer. Like the panel routes they carry no
@@ -31,6 +32,7 @@ type Handler = (req: Request & { params: Record<string, string> }) => Response |
 type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "PATCH" | "DELETE", Handler>>>;
 
 const FORWARD_TIMEOUT_MS = 8_000;
+const PROXY_TIMEOUT_MS = 65_000;
 
 export function createPeerRoutes(opts: PeerApiOptions): Routes {
   const { hub, layout, registry } = opts;
@@ -113,6 +115,8 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
     "/api/peers/:peer/agents/:app/:agent/chat": { POST: proxy() },
     "/api/peers/:peer/agents/:app/:agent/sessions": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/sessions/:sid": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    // An app on this hub reading a peer app's API; the peer bounds the call with its own timeout.
+    "/api/peers/:peer/apps/:app/proxy/*": { GET: proxy(PROXY_TIMEOUT_MS) },
   };
 
   /** Local manifest-only apps whose url is a peer app's url: link apps the peer makes unnecessary. */

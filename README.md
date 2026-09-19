@@ -38,6 +38,8 @@ Everything ai-space owns on a machine lives in one directory, `~/.ai-space` by d
 └── .env     ai-space configuration plus the secrets app manifests reference via ${VAR}
 ```
 
+`bun run init` also installs the default apps: the ones ai-space comes with, each a public repository cloned into `apps/` and started by its own installer. Today that is [ai-usage](https://github.com/ericz-lab/ai-usage), a dashboard of what Claude Code spent on this machine and its peers. `SPACE_DEFAULT_APPS=none` in `.env` skips them; a list of clone URLs replaces them.
+
 ## Development
 
 ```bash
