@@ -19,7 +19,7 @@ Renaming a machine has consequences: the default backup target moves to the new 
 
 The workspace `AGENTS.md` (`CLAUDE.md` is a link to it) opens with a "This machine" section that names the space, the hostname, the user and the workspace, and states that everything under the workspace is local: read the files, call the API on the loopback, never ssh. ai-space generates it on boot, on `init` and on every apps sync, from `SPACE_NAME` when the `.env` holds one (the guide sync reads the file itself, before the `.env` is loaded into the process) and from the hostname otherwise. Any agent tool started by hand anywhere in the workspace reads it, so the session knows where it is before it runs a command.
 
-Sessions ai-space starts for an app (agent chat, agent tasks, command tasks) also get the app's environment: `SPACE_APP`, `SPACE_APP_DIR`, `SPACE_APP_DATA_DIR`, `SPACE_API_URL`, `SPACE_APP_TOKEN` and the storage hand-over (`DATABASE_URL`, `DATABASE_URL_<NAME>`, `BLOB_URL`) from `data/<app>/space.env`. A hand session gets those from the same file, or from `bun src/index.ts env <app>` run in `core/`.
+Sessions ai-space starts for an app (agent chat, agent tasks, command tasks) also get the app's environment: `SPACE_APP`, `SPACE_APP_DIR`, `SPACE_APP_DATA_DIR`, `SPACE_API_URL`, `SPACE_APP_TOKEN`, `SPACE_NAME` and the storage hand-over (`DATABASE_URL`, `DATABASE_URL_<NAME>`, `BLOB_URL`) from `data/<app>/space.env`. A hand session gets those from the same file, or from `bun src/index.ts env <app>` run in `core/`.
 
 A development machine has none of this for the host's data. That is the whole difference: on the host the production files exist locally, elsewhere they do not. Test for that, not for a name.
 

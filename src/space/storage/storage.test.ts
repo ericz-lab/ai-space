@@ -117,8 +117,8 @@ describe("StorageService.syncApp", () => {
     const r = await storage.syncApp("plain", { databases: [] });
     expect(r.created).toEqual([join(ws.data, "plain")]);
     expect(await envLines("plain")).toEqual({ SPACE_APP: "plain", SPACE_APP_DATA_DIR: join(ws.data, "plain"), SPACE_APP_TOKEN: expect.stringMatching(/^sat_/) });
-    const withUrl = await StorageService.open({ ws, db, apiUrl: "http://127.0.0.1:8700" });
-    expect((await withUrl.envFor("plain")).SPACE_API_URL).toBe("http://127.0.0.1:8700");
+    const withUrl = await StorageService.open({ ws, db, apiUrl: "http://127.0.0.1:8700", spaceName: "box" });
+    expect(await withUrl.envFor("plain")).toMatchObject({ SPACE_API_URL: "http://127.0.0.1:8700", SPACE_NAME: "box" });
   });
 });
 

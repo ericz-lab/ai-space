@@ -156,7 +156,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
 /** Open the storage service on ai-space's own database. */
 export async function openStorage(ws: Workspace, config: Config, log?: (m: string) => void): Promise<StorageService> {
   const db = await openDatabase(sqliteUrl(config.dbPath));
-  return StorageService.open({ ws, db, pgAdminUrl: config.pgAdminUrl, s3: config.s3, apiUrl: `http://${config.host}:${config.port}`, log });
+  return StorageService.open({ ws, db, pgAdminUrl: config.pgAdminUrl, s3: config.s3, apiUrl: `http://${config.host}:${config.port}`, spaceName: config.name, log });
 }
 
 /** What the backup tasks need to spawn `bun src/index.ts backup <app>` from the scheduler. */

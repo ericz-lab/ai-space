@@ -121,7 +121,7 @@ export function applyEnvOverrides(manifest: Manifest, env: Record<string, string
 async function runCommand(cmd: string[], cwd: string): Promise<{ code: number; output: string }> {
   const proc = Bun.spawn(cmd, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: process.env });
   const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
-  return { code, output: (out + err).slice(-2000) };
+  return { code, output: (err + out).slice(-2000) };
 }
 
 async function exists(path: string): Promise<boolean> {

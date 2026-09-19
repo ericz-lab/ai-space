@@ -117,7 +117,7 @@ service:
 Contract for the process:
 
 - It reads `PORT`, binds `127.0.0.1:${PORT}` and nothing else.
-- Its environment is, in increasing precedence: the app's `.env`, `<workspace>/data/<name>/space.env`, `service.env`, then the values ai-space sets (`PORT`, `SPACE_APP`, `SPACE_APP_DIR`, `SPACE_APP_DATA_DIR`, `SPACE_API_URL`).
+- Its environment is, in increasing precedence: the app's `.env`, `<workspace>/data/<name>/space.env`, `service.env`, then the values ai-space sets (`PORT`, `SPACE_APP`, `SPACE_APP_DIR`, `SPACE_APP_DATA_DIR`, `SPACE_API_URL`, `SPACE_NAME`).
 - It logs to stdout and stderr; ai-space collects them under `<workspace>/logs/<name>/`.
 - It answers `GET <health>` with 200 when it can serve requests. The panel shows the app as down otherwise.
 - It exits on `SIGTERM` within 10 seconds.
@@ -344,6 +344,7 @@ Environment, always:
 | `SPACE_APP_DIR` | Absolute path of the app directory. |
 | `SPACE_APP_DATA_DIR` | Absolute path of `<workspace>/data/<name>/`. |
 | `SPACE_API_URL` | Base URL of the Space API, loopback. Written to `space.env`. |
+| `SPACE_NAME` | What this space calls itself ([machines.md](machines.md)); the name a hub and other machines know it by. Written to `space.env`. |
 | `SPACE_APP_TOKEN` | Per-app bearer token for the Space API; identifies the app on `POST /api/notify`, `POST /api/events` and `POST /api/model/run`. Written to `space.env`. |
 | `PORT` | For services: the declared port. |
 | `SPACE_TRIGGER` | For task runs: `schedule`, `manual` or `event`. With events, `SPACE_EVENT` (the latest) and `SPACE_EVENTS` (all) as JSON. |
