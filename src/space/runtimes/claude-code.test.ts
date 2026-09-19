@@ -18,11 +18,11 @@ describe("cliArgs", () => {
 describe("remoteCommand", () => {
   test("the system prompt goes base64, empty tools stay quoted, unsafe words are refused", () => {
     const b64 = Buffer.from("Be brief.").toString("base64");
-    expect(remoteCommand(["claude"], input())).toEqual({ command: `claude -p --output-format json --model haiku --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)"` });
+    expect(remoteCommand(["claude"], input())).toEqual({ command: `f=$(mktemp) && cat > "$f" && claude -p --output-format json --model haiku --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc` });
     expect(remoteCommand(["claude"], input({ tools: ["WebSearch"] }))).toEqual({
-      command: `claude -p --output-format json --model haiku --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt "$(printf %s ${b64} | base64 -d)"`,
+      command: `f=$(mktemp) && cat > "$f" && claude -p --output-format json --model haiku --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc`,
     });
-    expect(remoteCommand(["claude"], input({ thinking: 0 }))).toEqual({ command: `MAX_THINKING_TOKENS=0 claude -p --output-format json --model haiku --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)"` });
+    expect(remoteCommand(["claude"], input({ thinking: 0 }))).toEqual({ command: `f=$(mktemp) && cat > "$f" && MAX_THINKING_TOKENS=0 claude -p --output-format json --model haiku --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc` });
     expect(cliEnv(input(), { A: "1" })).toEqual({ A: "1" });
     expect(cliEnv(input({ thinking: 2048 }), { A: "1" })).toEqual({ A: "1", MAX_THINKING_TOKENS: "2048" });
     expect(remoteCommand(["claude"], input({ model: "x y" }))).toEqual({ bad: "x y" });
