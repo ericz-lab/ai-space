@@ -16,7 +16,9 @@ import { workspacePaths } from "../workspace.ts";
 import { createPeerRoutes } from "./api.ts";
 import { loadPeers, parseHeaders, parseRefresh } from "./config.ts";
 import { PeerHub } from "./hub.ts";
-import { peerRoute } from "./merge.ts";
+import type { AppView } from "../panel/view.ts";
+import type { WidgetView } from "../panel/widgets.ts";
+import { dropSameLink, dropSameUrl, peerRoute } from "./merge.ts";
 import { createPeerServeRoutes } from "./serve.ts";
 import { PeerStore } from "./store.ts";
 
@@ -51,7 +53,6 @@ let lastHeaders: Record<string, string> = {};
 const hubDb = new Database(":memory:");
 const hubRegistry = new AppRegistry();
 let peers: PeerHub;
-let layout: LayoutStore;
 
 // The hub's fetch: the real one towards the peer, with a switch that simulates the peer being unreachable.
 const hubFetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -107,7 +108,7 @@ widgets:
   await mkdir(join(hws.apps, "media-link"), { recursive: true });
   await writeFile(join(hws.apps, "media-link", "space.yaml"), "name: media-link\ntitle: Media (link)\nicon: '🎬'\nurl: https://media.example.com\n");
   for (const n of ["notes", "media-link"]) await hubRegistry.set(await loadManifest(join(hws.apps, n)));
-  layout = new LayoutStore(hubDb);
+  const layout = new LayoutStore(hubDb);
   peers = new PeerHub([{ name: "david", url: peerBase, token: "s3cret", headers: { "X-Access": "svc" }, refreshMs: 10_000 }], { store: new PeerStore(hubDb), fetch: hubFetch, now: () => clock });
   const hubPanel = createPanelRoutes({ ws: hws, registry: hubRegistry, layout, widgets: new WidgetFeed(hubRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback, peers });
   const hubAgents = createAgentRoutes({ ws: hws, registry: hubRegistry, layout, sessions: new SessionStore(hubDb), runtimes, defaultModel: "sonnet", home: hubHome, peers });
@@ -212,15 +213,6 @@ describe("hub", () => {
     const p = (await get(hub, "/api/peers")).body.peers[0];
     expect(p).toMatchObject({ name: "david", url: peerBase, health: "ok", duplicates: ["media-link"] });
     expect(typeof p.asOf).toBe("string");
-
-    // A peer app that opens the same url as a local app is the same page: one tile, one card. The
-    // hub's "media-link" points at media's url, so david's media is dropped while that link exists.
-    const merged = await get(hub, "/api/apps");
-    expect(merged.body.apps.map((a: Body) => a.id)).toEqual(["notes", "media-link"]);
-    expect((await get(hub, "/api/widgets")).body.widgets.map((w: Body) => w.id)).toEqual(["david/media/board", "david/media/latest"]);
-    layout.hide("media-link", true);
-    expect((await get(hub, "/api/apps")).body.apps.map((a: Body) => a.id)).toEqual(["notes", "david/media"]);
-    layout.hide("media-link", false);
 
     // Served as a peer itself, the hub hands out only what lives on it: david's entries stay out.
     const own = await get(hub, "/api/peer/snapshot", { headers: { authorization: "Bearer hubtok" } });
@@ -332,5 +324,19 @@ describe("hub", () => {
     expect((await get(hub, "/api/apps?all=1")).body.apps.map((a: Body) => a.id)).toEqual(["media-link", "notes"]);
     expect((await get(hub, "/api/services")).body.services).toEqual([]);
     expect((await get(hub, "/api/peers/david/apps/media", { method: "DELETE" })).status).toBe(404);
+  });
+});
+
+describe("one tile per url", () => {
+  const app = (id: string, url: string | undefined, extra: Partial<AppView> = {}): AppView =>
+    ({ id, name: id.split("/").at(-1)!, title: id, icon: "x", status: "active", manifestOnly: false, hidden: false, agents: [], widgets: [], ...(url ? { url } : {}), ...extra }) as AppView;
+  test("a peer app with a local real app's url, or an earlier peer's, is dropped; link apps and url-less entries do not count", () => {
+    const local = [app("usage", "https://usage.example.com/?lang={lang}"), app("media-link", "https://media.example.com", { manifestOnly: true }), app("agent-only", undefined)];
+    const remote = [app("a/usage", "https://usage.example.com/?lang={lang}"), app("a/media", "https://media.example.com"), app("a/tool", "https://tool.example.com"), app("b/usage", "https://usage.example.com/?lang={lang}"), app("b/tool", "https://tool.example.com"), app("b/silent", undefined)];
+    expect(dropSameUrl(local, remote).map((a) => a.id)).toEqual(["a/media", "a/tool", "b/silent"]);
+  });
+  test("widget cards follow the same rule by link", () => {
+    const w = (id: string, link: string) => ({ id, app: id.split("/").at(-1)!, name: "n", title: "t", kind: "items", size: "1x1", link, icon: "x", items: [] }) as unknown as WidgetView;
+    expect(dropSameLink([w("usage/usage", "https://usage.example.com/")], [w("a/usage/usage", "https://usage.example.com/"), w("a/media/latest", "https://media.example.com/#latest"), w("b/media/latest", "https://media.example.com/#latest")]).map((x) => x.id)).toEqual(["a/media/latest"]);
   });
 });

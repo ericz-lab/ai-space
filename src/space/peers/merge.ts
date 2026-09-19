@@ -55,10 +55,12 @@ export function mergeServices(peer: string, snap: PeerSnapshot, hidden: Set<stri
  * app's, or an earlier peer's) is the same thing to open, so it is dropped.
  * An app deployed on several machines that share their data (the usage
  * dashboard) gets every machine's `url` pointed at one hostname and shows
- * once, wherever the panel is. Entries without a url are kept.
+ * once, wherever the panel is. Entries without a url are kept, and a local
+ * link app does not suppress a peer's real app.
  */
 export function dropSameUrl(local: AppView[], remote: AppView[]): AppView[] {
-  const seen = new Set(local.map((a) => a.url).filter((u): u is string => !!u));
+  // A local link app (manifest only) does not count: the peer's real app supersedes it (docs/peers.md, duplicates).
+  const seen = new Set(local.filter((a) => !a.manifestOnly).map((a) => a.url).filter((u): u is string => !!u));
   const out: AppView[] = [];
   for (const a of remote) {
     if (a.url) {
