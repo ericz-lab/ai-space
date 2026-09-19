@@ -49,3 +49,37 @@ export function mergeWidgets(peer: string, snap: PeerSnapshot, hidden: Set<strin
 export function mergeServices(peer: string, snap: PeerSnapshot, hidden: Set<string>, stale: boolean): ServiceView[] {
   return snap.services.map((s) => ({ ...s, peer, icon: peerRoute(peer, s.icon), health: stale ? "unknown" : s.health, hidden: s.hidden || hidden.has(peerId(peer, s.app)) }));
 }
+
+/**
+ * One tile per page: a peer app whose `url` is already on the panel (a local
+ * app's, or an earlier peer's) is the same thing to open, so it is dropped.
+ * An app deployed on several machines that share their data (the usage
+ * dashboard) gets every machine's `url` pointed at one hostname and shows
+ * once, wherever the panel is. Entries without a url are kept.
+ */
+export function dropSameUrl(local: AppView[], remote: AppView[]): AppView[] {
+  const seen = new Set(local.map((a) => a.url).filter((u): u is string => !!u));
+  const out: AppView[] = [];
+  for (const a of remote) {
+    if (a.url) {
+      if (seen.has(a.url)) continue;
+      seen.add(a.url);
+    }
+    out.push(a);
+  }
+  return out;
+}
+
+/** The same rule for widget cards: a peer widget whose `link` is already on the panel is dropped. */
+export function dropSameLink(local: WidgetView[], remote: WidgetView[]): WidgetView[] {
+  const seen = new Set(local.map((w) => w.link).filter(Boolean));
+  const out: WidgetView[] = [];
+  for (const w of remote) {
+    if (w.link) {
+      if (seen.has(w.link)) continue;
+      seen.add(w.link);
+    }
+    out.push(w);
+  }
+  return out;
+}

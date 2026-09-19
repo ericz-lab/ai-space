@@ -18,7 +18,7 @@ So the panel is a set of routes in ai-space's `Bun.serve`, a React page bundled 
 
 | Section | Source | Notes |
 | --- | --- | --- |
-| Apps | every registered manifest that has a `url`, with `status` other than `archived`, minus the hidden set | Tile: `icon` and `title`, nothing else on the icon. Click opens `url`. Hover shows the description, the status (health when the app declares `service.health`) and the repository. |
+| Apps | every registered manifest that has a `url`, with `status` other than `archived`, minus the hidden set; peer apps follow, minus those whose `url` is already listed ([peers.md](peers.md)) | Tile: `icon` and `title`, nothing else on the icon. Click opens `url`. Hover shows the description, the status (health when the app declares `service.health`) and the repository. |
 | Agents | `agents:` of every visible app, plus the space agent | Tile shows the avatar and title, with the owning app's icon in the corner when it differs from the avatar; click opens the chat in a floating panel over the page, on that agent. |
 | Widgets | `widgets:` of every visible app | `items` cards render the list in the house style; `embed` cards load the app's page in a sandboxed iframe through ai-space. |
 | Settings | built in | The last tile of the Apps grid (the Terminal tile sits just before it), not hidden, reordered or uninstalled. It opens a floating panel near the top of the page with the browser preferences (hover details, desk pet, widgets, dark mode, language), the scheduled tasks, the peers and the services. |

@@ -1,5 +1,6 @@
 import { join, resolve, sep } from "node:path";
 import type { PeerHub } from "../peers/hub.ts";
+import { dropSameLink, dropSameUrl } from "../peers/merge.ts";
 import type { Workspace } from "../workspace.ts";
 import type { HealthProbe } from "./health.ts";
 import { type LayoutStore, orderBy } from "./layout.ts";
@@ -98,8 +99,12 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     const hidden = new Set(lay.hidden);
     const entries = registry.list().filter((e) => all || (e.manifest.url && !hidden.has(e.manifest.app) && e.manifest.status !== "archived"));
     const views = await Promise.all(entries.map((e) => viewOf(e.manifest.app, hidden)));
-    // Peer snapshots already exclude what the peer hides or archived; the hub's own hidden set applies on top.
-    const remote = peers?.apps(hidden).filter((v) => all || (v.url && !v.hidden)) ?? [];
+    // Peer snapshots already exclude what the peer hides or archived; the hub's own hidden set applies on top,
+    // and a peer app that opens the same url as one already listed is the same page: one tile (merge.ts).
+    const remote = dropSameUrl(
+      views,
+      peers?.apps(hidden).filter((v) => all || (v.url && !v.hidden)) ?? [],
+    );
     return orderBy([...views, ...remote], lay.order.apps, (v) => v.id, tier);
   };
 
@@ -193,7 +198,8 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
       GET: wrap(async () => {
         const lay = layout.read();
         const hidden = new Set(lay.hidden);
-        const all = [...(await widgets.all()).filter((w) => !hidden.has(w.app)), ...(peers?.widgets(hidden) ?? [])].map((w) => (lay.sizes[w.id] ? { ...w, size: lay.sizes[w.id] } : w));
+        const local = (await widgets.all()).filter((w) => !hidden.has(w.app));
+        const all = [...local, ...dropSameLink(local, peers?.widgets(hidden) ?? [])].map((w) => (lay.sizes[w.id] ? { ...w, size: lay.sizes[w.id] } : w));
         return json({ ok: true, widgets: orderBy(all, lay.order.widgets, (w) => w.id, tier), asOf: new Date().toISOString() });
       }),
     },

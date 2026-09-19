@@ -136,7 +136,7 @@ A peer that enables its terminal ([terminal.md](terminal.md)) offers it to the h
 
 ## Migration from link apps
 
-A link app on the hub whose `url` equals a peer app's `url` is superseded. `GET /api/peers` reports these under `duplicates`; the operator deletes the link apps from the panel. The hub does not delete them itself: a link app may be there on purpose (a different title, a public page of an app whose service is elsewhere).
+A peer app whose `url` is already on the panel (a local app's, or an earlier peer's) is not listed: it opens the same page, so one tile is enough, and the same holds for a widget card whose `link` is already there. This is how an app deployed on several machines that share their data (the usage dashboard) shows once wherever the panel is: every machine sets `SPACE_APP_URL_<NAME>` to the one hostname. A link app on the hub whose `url` equals a peer app's `url` is likewise the one listed, and `GET /api/peers` reports these under `duplicates`; the operator deletes the link apps from the panel. The hub does not delete them itself: a link app may be there on purpose (a different title, a public page of an app whose service is elsewhere).
 
 ## Deploying a peer
 

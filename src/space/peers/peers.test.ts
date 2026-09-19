@@ -51,6 +51,7 @@ let lastHeaders: Record<string, string> = {};
 const hubDb = new Database(":memory:");
 const hubRegistry = new AppRegistry();
 let peers: PeerHub;
+let layout: LayoutStore;
 
 // The hub's fetch: the real one towards the peer, with a switch that simulates the peer being unreachable.
 const hubFetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -106,7 +107,7 @@ widgets:
   await mkdir(join(hws.apps, "media-link"), { recursive: true });
   await writeFile(join(hws.apps, "media-link", "space.yaml"), "name: media-link\ntitle: Media (link)\nicon: '🎬'\nurl: https://media.example.com\n");
   for (const n of ["notes", "media-link"]) await hubRegistry.set(await loadManifest(join(hws.apps, n)));
-  const layout = new LayoutStore(hubDb);
+  layout = new LayoutStore(hubDb);
   peers = new PeerHub([{ name: "david", url: peerBase, token: "s3cret", headers: { "X-Access": "svc" }, refreshMs: 10_000 }], { store: new PeerStore(hubDb), fetch: hubFetch, now: () => clock });
   const hubPanel = createPanelRoutes({ ws: hws, registry: hubRegistry, layout, widgets: new WidgetFeed(hubRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback, peers });
   const hubAgents = createAgentRoutes({ ws: hws, registry: hubRegistry, layout, sessions: new SessionStore(hubDb), runtimes, defaultModel: "sonnet", home: hubHome, peers });
@@ -211,6 +212,15 @@ describe("hub", () => {
     const p = (await get(hub, "/api/peers")).body.peers[0];
     expect(p).toMatchObject({ name: "david", url: peerBase, health: "ok", duplicates: ["media-link"] });
     expect(typeof p.asOf).toBe("string");
+
+    // A peer app that opens the same url as a local app is the same page: one tile, one card. The
+    // hub's "media-link" points at media's url, so david's media is dropped while that link exists.
+    const merged = await get(hub, "/api/apps");
+    expect(merged.body.apps.map((a: Body) => a.id)).toEqual(["notes", "media-link"]);
+    expect((await get(hub, "/api/widgets")).body.widgets.map((w: Body) => w.id)).toEqual(["david/media/board", "david/media/latest"]);
+    layout.hide("media-link", true);
+    expect((await get(hub, "/api/apps")).body.apps.map((a: Body) => a.id)).toEqual(["notes", "david/media"]);
+    layout.hide("media-link", false);
 
     // Served as a peer itself, the hub hands out only what lives on it: david's entries stay out.
     const own = await get(hub, "/api/peer/snapshot", { headers: { authorization: "Bearer hubtok" } });
