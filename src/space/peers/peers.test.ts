@@ -110,7 +110,8 @@ widgets:
   peers = new PeerHub([{ name: "david", url: peerBase, token: "s3cret", headers: { "X-Access": "svc" }, refreshMs: 10_000 }], { store: new PeerStore(hubDb), fetch: hubFetch, now: () => clock });
   const hubPanel = createPanelRoutes({ ws: hws, registry: hubRegistry, layout, widgets: new WidgetFeed(hubRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback, peers });
   const hubAgents = createAgentRoutes({ ws: hws, registry: hubRegistry, layout, sessions: new SessionStore(hubDb), runtimes, defaultModel: "sonnet", home: hubHome, peers });
-  hubServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...hubPanel, ...hubAgents, ...createPeerRoutes({ hub: peers, layout, registry: hubRegistry }) } });
+  // The hub also serves as a peer (a hub of hubs), to check its snapshot carries only its own entries.
+  hubServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...hubPanel, ...hubAgents, ...createPeerRoutes({ hub: peers, layout, registry: hubRegistry }), ...createPeerServeRoutes({ token: "hubtok", name: "hub-box", panel: hubPanel, agents: hubAgents }) }, websocket: { message() {} } });
   hub = `http://127.0.0.1:${hubServer.port}`;
 });
 
@@ -210,6 +211,13 @@ describe("hub", () => {
     const p = (await get(hub, "/api/peers")).body.peers[0];
     expect(p).toMatchObject({ name: "david", url: peerBase, health: "ok", duplicates: ["media-link"] });
     expect(typeof p.asOf).toBe("string");
+
+    // Served as a peer itself, the hub hands out only what lives on it: david's entries stay out.
+    const own = await get(hub, "/api/peer/snapshot", { headers: { authorization: "Bearer hubtok" } });
+    expect(own.body.apps.map((a: Body) => a.id)).toEqual(["media-link", "notes"]);
+    expect(own.body.agents.map((a: Body) => a.id)).toEqual(["notes/librarian"]);
+    expect(own.body.widgets).toEqual([]);
+    expect(own.body.services).toEqual([]);
   });
 
   test("forwards icons, embed pages, chat and sessions to the peer; nothing else", async () => {

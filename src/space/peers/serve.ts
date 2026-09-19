@@ -83,14 +83,17 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
           local<{ widgets: unknown[] }>(opts.panel, "/api/widgets", base),
           local<{ agents: { id: string }[] }>(opts.agents, "/api/agents", base),
         ]);
+        // Only what lives here: a peer that is itself a hub does not pass its own peers on
+        // (a hub of hubs would list them twice, under the wrong name).
+        const own = <T extends { peer?: string }>(list: T[]) => list.filter((x) => !x.peer);
         return json({
           ok: true,
           name: opts.name,
-          apps: apps.apps,
-          services: services.services,
-          widgets: widgets.widgets,
+          apps: own(apps.apps as { peer?: string }[]),
+          services: own(services.services as { peer?: string }[]),
+          widgets: own(widgets.widgets as { peer?: string }[]),
           // The hub has its own space agent.
-          agents: agents.agents.filter((a) => a.id !== `${SPACE_APP}/${SPACE_AGENT}`),
+          agents: own(agents.agents as { id: string; peer?: string }[]).filter((a) => a.id !== `${SPACE_APP}/${SPACE_AGENT}`),
           terminal: opts.terminal !== undefined,
           asOf: new Date().toISOString(),
         });

@@ -66,7 +66,7 @@ Present only when `SPACE_HUB_TOKEN` is set; every route requires `Authorization:
 
 | Route | Mirrors | Notes |
 | --- | --- | --- |
-| `GET /api/peer/snapshot` | `/api/apps`, `/api/services`, `/api/widgets`, `/api/agents` | One call: `{ ok, name, apps, services, widgets, agents, asOf }`. Apps are the peer's visible ones (its own hidden set and `archived` applied, `manifestOnly` and `url` included), agents and widgets likewise, widgets with their current items payload, services with health. The space agent (`space/assistant`) is not included: the hub has its own. |
+| `GET /api/peer/snapshot` | `/api/apps`, `/api/services`, `/api/widgets`, `/api/agents` | One call: `{ ok, name, apps, services, widgets, agents, asOf }`. Apps are the peer's visible ones (its own hidden set and `archived` applied, `manifestOnly` and `url` included; entries the peer itself merged from its own peers are left out, so a hub of hubs lists each app once), agents and widgets likewise, widgets with their current items payload, services with health. The space agent (`space/assistant`) is not included: the hub has its own. |
 | `DELETE /api/peer/apps/:app` | `DELETE /api/apps/:app` | Uninstall on the peer: its stop command, its directory, its registry ([panel.md](panel.md#arranging-hiding-and-uninstalling-apps)). The hub refreshes the snapshot right after. |
 | `GET /api/peer/apps/:app/icon` | `/api/apps/:app/icon` | Icon files from the app directory. |
 | `GET /api/peer/apps/:app/appcolor` | `/api/panel/appcolor?app=` | |
