@@ -46,6 +46,9 @@ export type CompleteInput = {
   thinking?: number;
 };
 
+/** Text of the answer as it is produced; a runtime that cannot stream never calls it and the caller gets the whole answer at the end. */
+export type OnDelta = (text: string) => void;
+
 export type CompleteOutcome =
   | { ok: true; text: string; usage?: Usage; costUsd?: number; backend: Backend }
   | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend };
@@ -112,7 +115,7 @@ export type RuntimeAdapter = {
   /** Where `complete` runs; the status view and the log line show it. */
   readonly backend: Backend;
   readonly capabilities: Capabilities;
-  complete(input: CompleteInput, signal?: AbortSignal): Promise<CompleteOutcome>;
+  complete(input: CompleteInput, signal?: AbortSignal, onDelta?: OnDelta): Promise<CompleteOutcome>;
   runAgent(run: AgentRun): Promise<AgentOutcome>;
   /**
    * Spawn one turn and forward its events line by line. The lines are Claude

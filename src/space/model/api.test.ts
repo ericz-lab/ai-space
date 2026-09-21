@@ -43,6 +43,19 @@ const post = (path: string, body: unknown, token?: string) =>
     body: JSON.stringify(body),
   });
 
+/** Events of a text/event-stream body: name and parsed data; comment lines are skipped. */
+function parseSse(text: string): { event: string; data: unknown }[] {
+  return text
+    .split("\n\n")
+    .map((block) => block.trim())
+    .filter((block) => block && !block.startsWith(":"))
+    .map((block) => {
+      const event = block.match(/^event: (.*)$/m)?.[1] ?? "message";
+      const data = block.match(/^data: (.*)$/m)?.[1] ?? "null";
+      return { event, data: JSON.parse(data) };
+    });
+}
+
 type RunBody = { ok: boolean; text?: string; error?: string; call: { id: number; app: string; tag: string; model: string; status: string; usage?: { inputTokens: number }; costUsd?: number } };
 
 describe("POST /api/model/run", () => {
@@ -66,6 +79,30 @@ describe("POST /api/model/run", () => {
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error: string }).error).toBe("unknown runtime: dsh");
     expect(store.totals(0).calls).toBe(before);
+  });
+
+  test("stream: true answers with server-sent events: deltas, then done with the whole text and the ledger row", async () => {
+    const res = await post("/api/model/run", { prompt: "hello", tag: "chat", stream: true }, "sat_my-app");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toStartWith("text/event-stream");
+    const events = parseSse(await res.text());
+    expect(events.map((e) => e.event)).toEqual(["delta", "delta", "done"]);
+    const done = events[2]!.data as RunBody;
+    expect(done.ok).toBe(true);
+    expect(events.slice(0, 2).map((e) => (e.data as { text: string }).text).join("")).toBe(done.text!);
+    expect(done.text).toContain("--output-format stream-json");
+    expect(done.call).toMatchObject({ app: "my-app", tag: "chat", status: "ok", usage: { inputTokens: 10 }, costUsd: 0.0123 });
+    expect(store.get(done.call.id)).toMatchObject({ app: "my-app", status: "ok" });
+  });
+
+  test("a model failure on a stream is the error event with its row; a bad stream flag is 400", async () => {
+    process.env.FAKE_MODEL_MODE = "error";
+    const res = await post("/api/model/run", { prompt: "hello", stream: true }, "sat_my-app");
+    expect(res.status).toBe(200);
+    const events = parseSse(await res.text());
+    expect(events.map((e) => e.event)).toEqual(["error"]);
+    expect(events[0]!.data).toMatchObject({ ok: false, error: "simulated runtime failure", call: { status: "error" } });
+    expect((await post("/api/model/run", { prompt: "x", stream: "yes" }, "sat_my-app")).status).toBe(400);
   });
 
   test("the operator token needs an explicit app; wrong or missing tokens are 401", async () => {

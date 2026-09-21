@@ -74,10 +74,21 @@ What an app sends to `POST /api/model/run`:
 | `timeoutMs` | number? | Default 120 s, at most 30 min. |
 | `maxTokens` | number? | Output cap on the API backend; the CLI has none. Default 4096. |
 | `thinking` | number? | Cap on thinking tokens; `0` turns thinking off. Absent = the runtime's default. A translation or a rating needs none; a classification over a long list may want a few thousand. |
+| `stream` | boolean? | Answer as server-sent events while the text is produced (below). Default false: one JSON answer at the end. |
 
 The caller is identified by its bearer token, the same way as notify: an app's own `SPACE_APP_TOKEN` (handed over in its `space.env`) maps to that app; the operator's `SPACE_API_TOKEN` requires an explicit `app` in the body.
 
 The answer is `200 { ok: true, text, call }` where `call` is the ledger row (id, app, tag, model, backend, status, usage, costUsd, durationMs). A failed call is `502 { ok: false, error, call }`, still with its ledger row: a failure is a call that cost something and must be counted. A malformed request is `400` with the reason and leaves no row.
+
+With `stream: true` the same call answers `200 text/event-stream` as soon as the request is validated (a malformed one is still a `400` JSON), and the events are:
+
+| event | data | when |
+| --- | --- | --- |
+| `delta` | `{ text }` | a piece of the answer, in order, as the runtime produces it |
+| `done` | `{ ok: true, text, call }` | the whole answer and the ledger row; the last event |
+| `error` | `{ ok: false, error, call }` | the model failed; the last event, with its ledger row |
+
+A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a proxy or the server's own idle timeout does not close the connection while the model thinks. The Claude Code runtime streams (`--output-format stream-json --include-partial-messages`, text deltas only, the result envelope is the stream's last line); a runtime that cannot stream sends no `delta` and the answer arrives whole in `done`, so a client concatenates the deltas but takes `done.text` as the answer. A chat-shaped app (ai-notes) shows the deltas as they come; a pipeline has no reason to ask for them.
 
 ### Ledger row
 
@@ -132,6 +143,8 @@ return body.text;
 ```
 
 The app's own accounting can go once every call it makes goes through the service. Its `CLAUDE_SSH_HOST` and `ANTHROPIC_API_KEY` move to the workspace `.env` as `SPACE_MODEL_SSH_HOST` and `SPACE_MODEL_API_KEY`.
+
+An app that shows the answer while it is written adds `stream: true` and reads the body as `text/event-stream`: split on blank lines, skip blocks starting with `:`, take `event:` and `data:` (JSON), append every `delta` text to the page, and finish on `done` (the answer, authoritative) or `error`. A Bun client passes `timeout: false` to `fetch` on either shape: Bun drops a connection idle for five minutes, and a non-streamed call sends nothing until it answers.
 
 ## Failure modes
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chatArgs, cliArgs, cliEnv, createClaudeCode, parseCliOutput, remoteCommand } from "./claude-code.ts";
+import { chatArgs, cliArgs, cliEnv, createClaudeCode, parseCliOutput, readStreamLine, remoteCommand } from "./claude-code.ts";
 import { fakeModelBin } from "./testing.ts";
 import type { ClaudeCodeSpec, CompleteInput } from "./types.ts";
 
@@ -12,6 +12,25 @@ describe("cliArgs", () => {
     expect(cliArgs(["claude"], input({ tools: ["WebSearch", "WebFetch"] }))).toEqual([
       "claude", "-p", "--output-format", "json", "--model", "haiku", "--strict-mcp-config", "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch", "--system-prompt", "Be brief.",
     ]);
+  });
+});
+
+describe("cliArgs, streaming", () => {
+  test("asks for the event stream with partial messages", () => {
+    expect(cliArgs(["claude"], input(), true).slice(0, 7)).toEqual(["claude", "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model"]);
+    const r = remoteCommand(["claude"], input(), true);
+    expect("command" in r && r.command).toContain("claude -p --output-format stream-json --verbose --include-partial-messages --model haiku");
+  });
+});
+
+describe("readStreamLine", () => {
+  test("text deltas and the result line; thinking, init and noise are nothing", () => {
+    expect(readStreamLine(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } } }))).toEqual({ delta: "hi" });
+    expect(readStreamLine(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "x" } } }))).toBeUndefined();
+    expect(readStreamLine(JSON.stringify({ type: "system", subtype: "init" }))).toBeUndefined();
+    const result = JSON.stringify({ type: "result", result: "hi" });
+    expect(readStreamLine(result)).toEqual({ result });
+    expect(readStreamLine("not json")).toBeUndefined();
   });
 });
 
@@ -65,6 +84,16 @@ describe("complete, locally", () => {
     expect(r.text).toBe("answer to: hello [args: -p --output-format json --model haiku --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt Be brief.]");
     expect(r.usage).toEqual({ inputTokens: 10, cacheWriteTokens: 30, cacheReadTokens: 40, outputTokens: 20 });
     expect(r.costUsd).toBe(0.0123);
+  });
+
+  test("with a delta callback the text arrives in pieces and the envelope is still read", async () => {
+    const deltas: string[] = [];
+    const r = await runtime.complete(input(), undefined, (t) => deltas.push(t));
+    expect(r).toMatchObject({ ok: true, usage: { inputTokens: 10 }, costUsd: 0.0123 });
+    if (!r.ok) throw new Error(r.error);
+    expect(deltas.length).toBe(2);
+    expect(deltas.join("")).toBe(r.text);
+    expect(r.text).toContain("--output-format stream-json --verbose --include-partial-messages");
   });
 
   test("the thinking cap reaches the runtime's environment", async () => {

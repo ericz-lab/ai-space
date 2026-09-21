@@ -1,4 +1,4 @@
-import type { RuntimeAdapter } from "../runtimes/types.ts";
+import type { OnDelta, RuntimeAdapter } from "../runtimes/types.ts";
 import { RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
 import type { ModelStore } from "./store.ts";
 import { type ModelCall, type RunInput, type RunOutcome, type Usage } from "./types.ts";
@@ -57,8 +57,12 @@ export class ModelService {
     return r;
   }
 
-  /** Run one call for an app and record it. Never throws for a failed call: the outcome says so. */
-  async run(app: string, input: RunInput, signal?: AbortSignal): Promise<RunResult> {
+  /**
+   * Run one call for an app and record it. Never throws for a failed call: the outcome says so.
+   * With `onDelta`, the runtime hands the text over as it is produced when it can; the outcome
+   * still carries the whole answer.
+   */
+  async run(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta): Promise<RunResult> {
     let target: { runtime: RuntimeAdapter; model: string };
     try {
       target = this.resolve(input.model);
@@ -71,7 +75,7 @@ export class ModelService {
     const startedAt = this.now();
     let outcome: RunOutcome;
     try {
-      outcome = await target.runtime.complete({ ...input, model: target.model }, signal);
+      outcome = await target.runtime.complete({ ...input, model: target.model }, signal, onDelta);
     } catch (e) {
       outcome = { ok: false, error: (e as Error).message ?? String(e), backend: target.runtime.backend };
     } finally {

@@ -6,7 +6,11 @@ import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts"
  * HTTP surface for the model service, shaped as a Bun.serve `routes` table
  * and merged with the other Space routes by the entry point.
  *
- *   POST /api/model/run                       run one call; 200 with the answer, 502 when the model failed
+ *   POST /api/model/run                       run one call; 200 with the answer, 502 when the model failed.
+ *                                             With `stream: true` in the body the answer comes as server-sent
+ *                                             events instead: `delta` {text} as the text is produced, then one
+ *                                             `done` {ok, text, call} or `error` {ok, error, call}; a comment
+ *                                             line every 15 s keeps the connection alive while the model thinks
  *   GET  /api/model/status                    the configured runtimes, concurrency, calls in flight
  *   GET  /api/model/usage?window=24h&app      sums by app, tag, model, runtime and backend over a window, plus the whole history by day
  *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored)
@@ -57,9 +61,12 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
       POST: async (req) => {
         let app: string;
         let input: ReturnType<typeof parseRunInput>;
+        let body: Record<string, unknown>;
         try {
-          const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-          if (!body || typeof body !== "object") return error(400, "body must be a JSON object");
+          const parsed = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+          if (!parsed || typeof parsed !== "object") return error(400, "body must be a JSON object");
+          body = parsed;
+          if (body.stream !== undefined && typeof body.stream !== "boolean") return error(400, "stream must be a boolean");
           app = await resolveApp(req, body);
           input = parseRunInput(body, { model: opts.defaultModel });
           // An unknown `runtime/` prefix is the request's mistake, not a model failure.
@@ -68,6 +75,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
           if (e instanceof Unauthorized) return error(401, "unauthorized");
           return error(400, (e as Error).message ?? String(e));
         }
+        if (body.stream === true) return streamRun(service, app, input, req.signal);
         const { outcome, call } = await service.run(app, input, req.signal);
         if (!outcome.ok) return json({ ok: false, error: outcome.error, call: view(call) }, 502);
         return json({ ok: true, text: outcome.text, call: view(call) });
@@ -124,6 +132,49 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
 }
 
 class Unauthorized extends Error {}
+
+/** How often a comment line goes out on an idle event stream, so no proxy or server closes it while the model thinks. */
+export const STREAM_KEEPALIVE_MS = 15_000;
+
+/**
+ * The same call as an event stream. The response starts at once (200, since
+ * the request was already validated); a model failure is the `error` event,
+ * with its ledger row, not a status code.
+ */
+function streamRun(service: ModelService, app: string, input: ReturnType<typeof parseRunInput>, signal: AbortSignal): Response {
+  const enc = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let open = true;
+      const send = (chunk: string) => {
+        if (!open) return;
+        try {
+          controller.enqueue(enc.encode(chunk));
+        } catch {
+          open = false;
+        }
+      };
+      const event = (name: string, data: unknown) => send(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+      const keepalive = setInterval(() => send(": keepalive\n\n"), STREAM_KEEPALIVE_MS);
+      void service
+        .run(app, input, signal, (text) => event("delta", { text }))
+        .then(({ outcome, call }) => {
+          if (outcome.ok) event("done", { ok: true, text: outcome.text, call: view(call) });
+          else event("error", { ok: false, error: outcome.error, call: view(call) });
+        })
+        .finally(() => {
+          clearInterval(keepalive);
+          open = false;
+          try {
+            controller.close();
+          } catch {
+            /* already closed by the client */
+          }
+        });
+    },
+  });
+  return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" } });
+}
 
 export function view(c: ModelCall) {
   return {

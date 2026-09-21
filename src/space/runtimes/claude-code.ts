@@ -1,12 +1,14 @@
 import { pumpLines, spawnCollect } from "./process.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
-import type { AgentOutcome, AgentRun, Backend, ChatCallbacks, ChatTurn, ClaudeCodeSpec, CompleteInput, CompleteOutcome, RuntimeAdapter, Usage } from "./types.ts";
+import type { AgentOutcome, AgentRun, Backend, ChatCallbacks, ChatTurn, ClaudeCodeSpec, CompleteInput, CompleteOutcome, OnDelta, RuntimeAdapter, Usage } from "./types.ts";
 
 /**
  * Claude Code as a runtime. Three operations, one CLI:
  *
  *   complete   `claude -p --output-format json`, started lean (below), the prompt on stdin;
- *              over ssh when the spec names a host, borrowing that machine's login
+ *              over ssh when the spec names a host, borrowing that machine's login. A caller
+ *              that wants the text as it is produced gets `stream-json` instead and the
+ *              text deltas as they come; the result envelope is the stream's last line
  *   agent      `claude -p --output-format json` in the app directory with the CLI's own
  *              system prompt and tools, the prompt file on stdin; always local
  *   chat       `claude -p <message> --output-format stream-json`, events forwarded as is;
@@ -42,13 +44,14 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
     backend,
     capabilities: { complete: true, agent: true, chat: true },
 
-    async complete(input, signal) {
+    async complete(input, signal, onDelta) {
+      const stream = onDelta !== undefined;
       if (sshHost) {
-        const remote = remoteCommand(bin, input);
+        const remote = remoteCommand(bin, input, stream);
         if ("bad" in remote) return { ok: false, error: `argument not allowed over ssh: ${remote.bad}`, backend };
-        return runCompletion(["ssh", "-o", "BatchMode=yes", sshHost, `bash -lc '${remote.command}'`], input, backend, signal);
+        return runCompletion(["ssh", "-o", "BatchMode=yes", sshHost, `bash -lc '${remote.command}'`], input, backend, signal, onDelta);
       }
-      return runCompletion(cliArgs(bin, input), input, "local", signal);
+      return runCompletion(cliArgs(bin, input, stream), input, "local", signal, onDelta);
     },
 
     async runAgent(run) {
@@ -73,10 +76,15 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
 
 // ---------------------------------------------------------------- complete
 
+/** The output format flags: one json envelope, or the event stream with partial messages when the caller wants deltas. */
+function formatArgs(stream: boolean): string[] {
+  return stream ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"] : ["--output-format", "json"];
+}
+
 /** Command line for the CLI on this machine; exported for tests. */
-export function cliArgs(bin: string[], input: CompleteInput): string[] {
+export function cliArgs(bin: string[], input: CompleteInput, stream = false): string[] {
   const tools = input.tools.join(",");
-  return [...bin, "-p", "--output-format", "json", "--model", input.model, "--strict-mcp-config", "--tools", tools, ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", input.system];
+  return [...bin, "-p", ...formatArgs(stream), "--model", input.model, "--strict-mcp-config", "--tools", tools, ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", input.system];
 }
 
 const SAFE_ARG = /^[A-Za-z0-9._:/@,()*-]+$/;
@@ -88,9 +96,9 @@ const SAFE_ARG = /^[A-Za-z0-9._:/@,()*-]+$/;
  * of it is interpreted. Returns the offending word instead of a command when
  * one fails the check.
  */
-export function remoteCommand(bin: string[], input: CompleteInput): { command: string } | { bad: string } {
+export function remoteCommand(bin: string[], input: CompleteInput, stream = false): { command: string } | { bad: string } {
   const tools = input.tools.join(",");
-  const words = [...bin, "-p", "--output-format", "json", "--model", input.model, "--strict-mcp-config"];
+  const words = [...bin, "-p", ...formatArgs(stream), "--model", input.model, "--strict-mcp-config"];
   const bad = [...words, ...(tools ? [tools] : [])].find((w) => !SAFE_ARG.test(w));
   if (bad) return { bad };
   const system = Buffer.from(input.system, "utf8").toString("base64");
@@ -135,10 +143,39 @@ export function parseCliOutput(raw: string): { text?: string; error?: string; us
   return { text, usage, costUsd };
 }
 
-async function runCompletion(cmd: string[], input: CompleteInput, backend: Backend, signal?: AbortSignal): Promise<CompleteOutcome> {
+type StreamEvent = { type?: string; event?: { type?: string; delta?: { type?: string; text?: string } } };
+
+/**
+ * One line of the `stream-json` output: the text of a `content_block_delta`,
+ * or the `result` envelope when the line is that; anything else (init,
+ * whole assistant messages, tool events) is nothing to us.
+ */
+export function readStreamLine(line: string): { delta: string } | { result: string } | undefined {
+  let ev: StreamEvent;
+  try {
+    ev = JSON.parse(line) as StreamEvent;
+  } catch {
+    return undefined;
+  }
+  if (!ev || typeof ev !== "object") return undefined;
+  if (ev.type === "result") return { result: line };
+  if (ev.type === "stream_event" && ev.event?.type === "content_block_delta" && ev.event.delta?.type === "text_delta" && ev.event.delta.text) return { delta: ev.event.delta.text };
+  return undefined;
+}
+
+async function runCompletion(cmd: string[], input: CompleteInput, backend: Backend, signal?: AbortSignal, onDelta?: OnDelta): Promise<CompleteOutcome> {
+  let result: string | undefined;
+  const onLine = onDelta
+    ? (line: string) => {
+        const ev = readStreamLine(line);
+        if (!ev) return;
+        if ("result" in ev) result = ev.result;
+        else onDelta(ev.delta);
+      }
+    : undefined;
   let r: Awaited<ReturnType<typeof spawnCollect>>;
   try {
-    r = await spawnCollect(cmd, { env: cliEnv(input), stdin: input.prompt, signal, timeoutMs: input.timeoutMs });
+    r = await spawnCollect(cmd, { env: cliEnv(input), stdin: input.prompt, signal, timeoutMs: input.timeoutMs, onLine });
   } catch (e) {
     return { ok: false, error: `could not start ${cmd[0]}: ${(e as Error).message}`, backend };
   }
@@ -147,7 +184,7 @@ async function runCompletion(cmd: string[], input: CompleteInput, backend: Backe
   const out = r.stdout.trim();
   const err = r.stderr.trim();
   if (r.code !== 0) return { ok: false, error: (err || out || `exited with ${r.code}`).slice(-800), backend };
-  const parsed = parseCliOutput(out);
+  const parsed = parseCliOutput(result ?? out);
   if (!parsed) {
     // A CLI without `--output-format json`: the whole output is the answer, no usage is known.
     return out ? { ok: true, text: out, backend } : { ok: false, error: "empty answer", backend };

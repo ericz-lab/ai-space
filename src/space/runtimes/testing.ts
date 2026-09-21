@@ -4,7 +4,8 @@
  * behaviour: `ok` (default), `plain` (text without the envelope, like an older
  * CLI), `error` (an is_error envelope), `exit` (non-zero exit), `hang` (never
  * answers, for timeouts). The answer echoes the prompt and the arguments so a
- * test can check what reached the runtime.
+ * test can check what reached the runtime. Asked for `stream-json`, it prints
+ * an init line, the answer in two text deltas and the same result envelope last.
  *
  * Used as the `bin` of a claude-code runtime in tests; `fakeModelBin()` builds the command.
  */
@@ -30,12 +31,20 @@ if (import.meta.main) {
     console.log(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: "simulated runtime failure", usage: { input_tokens: 5, output_tokens: 0 } }));
     process.exit(0);
   }
+  const result = `answer to: ${prompt} [args: ${args.join(" ")}]${process.env.MAX_THINKING_TOKENS !== undefined ? ` [thinking: ${process.env.MAX_THINKING_TOKENS}]` : ""}`;
+  if (args.includes("stream-json")) {
+    const delta = (text: string) => JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } } });
+    console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "fake" }));
+    console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "hmm" } } }));
+    console.log(delta(result.slice(0, 10)));
+    console.log(delta(result.slice(10)));
+  }
   console.log(
     JSON.stringify({
       type: "result",
       subtype: "success",
       is_error: false,
-      result: `answer to: ${prompt} [args: ${args.join(" ")}]${process.env.MAX_THINKING_TOKENS !== undefined ? ` [thinking: ${process.env.MAX_THINKING_TOKENS}]` : ""}`,
+      result,
       total_cost_usd: 0.0123,
       usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 30, cache_read_input_tokens: 40 },
     }),

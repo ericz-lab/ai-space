@@ -13,6 +13,8 @@ export type SpawnOptions = {
   stdin?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Each line of stdout as it arrives (stdout is still collected whole). */
+  onLine?: (line: string) => void;
 };
 
 export type SpawnResult = {
@@ -39,7 +41,17 @@ export async function spawnCollect(cmd: string[], opts: SpawnOptions = {}): Prom
     stdin.write(opts.stdin);
     stdin.end();
   }
-  const stdout = new Response(proc.stdout).text();
+  const onLine = opts.onLine;
+  const stdout = onLine
+    ? (async () => {
+        const lines: string[] = [];
+        await pumpLines(proc.stdout, (line) => {
+          lines.push(line);
+          onLine(line);
+        });
+        return lines.join("\n");
+      })()
+    : new Response(proc.stdout).text();
   const stderr = new Response(proc.stderr).text();
 
   let timedOut = false;
