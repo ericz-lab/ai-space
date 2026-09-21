@@ -370,7 +370,7 @@ Mutating routes require the bearer token from `SPACE_API_TOKEN`, or the app's ow
 
 ### Chat
 
-An app that wants an AI conversation on its page does not build one: it proxies `/space/chat/*` on its own origin to `${SPACE_API_URL}/api/chat/*` with its `SPACE_APP_TOKEN` (the page never holds the token and cannot reach ai-space itself), loads `<script src="/space/chat/widget.js">` and mounts `SpaceChat.mount(el, { scope, context })`. The space keeps the threads, messages and images per app under the app's own `scope` (`note:12`, `calendar`); the app hands over, on every turn, what the model should read first (`context()`), its presets and the actions it wants under an answer, and styles the widget with `--sc-*` tokens. The rest, the model, streaming, images the model can see, the ledger, is the space's. See [chat.md](chat.md).
+An app that wants an AI conversation on its page does not build one: it proxies `/space/chat/*` on its own origin to `${SPACE_API_URL}/api/chat/*` with its `SPACE_APP_TOKEN` (the page never holds the token and cannot reach ai-space itself), loads `/space/chat/widget.js` (a script element created at runtime: a bundler that builds the page, like Bun's HTML import, would otherwise try to resolve it at build time) and mounts `SpaceChat.mount(el, { scope, context })`. The space keeps the threads, messages and images per app under the app's own `scope` (`note:12`, `calendar`); the app hands over, on every turn, what the model should read first (`context()`), its presets and the actions it wants under an answer, and styles the widget with `--sc-*` tokens. The rest, the model, streaming, images the model can see, the ledger, is the space's. See [chat.md](chat.md).
 
 ## Full example
 

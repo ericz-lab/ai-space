@@ -83,7 +83,7 @@ This is the space host \`${m.name}\` (hostname \`${m.hostname}\`, user \`${m.use
 
 export const GUIDE_TEMPLATE = `## Layout
 
-- \`core/\` - the ai-space checkout that runs here (when deployed by \`git push\`). Its \`AGENTS.md\` and \`docs/\` are the reference: \`docs/app-spec.md\` (what an app is, \`space.yaml\`), \`docs/scheduler.md\`, \`docs/storage.md\`, \`docs/backup.md\`, \`docs/notify.md\`, \`docs/model.md\`, \`docs/runtimes.md\`, \`docs/panel.md\`, \`docs/peers.md\`, \`docs/terminal.md\`, \`docs/install.md\`, \`docs/machines.md\` (why nothing here names a machine, and the pitfalls).
+- \`core/\` - the ai-space checkout that runs here (when deployed by \`git push\`). Its \`AGENTS.md\` and \`docs/\` are the reference: \`docs/app-spec.md\` (what an app is, \`space.yaml\`), \`docs/scheduler.md\`, \`docs/storage.md\`, \`docs/backup.md\`, \`docs/notify.md\`, \`docs/model.md\`, \`docs/chat.md\`, \`docs/runtimes.md\`, \`docs/panel.md\`, \`docs/peers.md\`, \`docs/terminal.md\`, \`docs/install.md\`, \`docs/machines.md\` (why nothing here names a machine, and the pitfalls).
 - \`apps/<app>/\` - one directory per app, each its own git repository with a \`space.yaml\`. Change an app inside its own directory; it usually has its own \`CLAUDE.md\` or \`AGENTS.md\`, which applies on top of this one.
 - \`data/\` - runtime state: \`space.db\` (ai-space's own), then one directory per app holding its databases, \`blobs/\` and \`space.env\` (the variables ai-space hands the app).
 - \`logs/\` - task run logs.
@@ -110,6 +110,7 @@ Mutating routes take \`Authorization: Bearer $SPACE_API_TOKEN\` (the token is in
 - \`POST /api/notify\` to send a message; \`GET /api/notify/channels\`.
 - \`GET /api/backups\`, \`POST /api/apps/<app>/backups\` to snapshot now.
 - \`POST /api/model/run\`, \`GET /api/model/usage\` for model calls and their cost.
+- \`/api/chat/threads…\` and \`/api/chat/widget.js\` for an AI conversation on an app's page (threads, images, a widget the app embeds through its own \`/space/chat/*\` proxy; \`docs/chat.md\`).
 
 Peers (\`docs/peers.md\`): when \`.env\` lists other ai-space machines as \`SPACE_PEER_<NAME>\`, this one is a hub and \`GET /api/peers\` shows each peer's health and what its panel holds. A peer app is addressed as \`<peer>/<app>\`; through \`/api/peers/<peer>/...\` the hub can chat with the peer's agents, read their sessions, show its widgets and uninstall one of its apps, and nothing else. A peer's tasks, data, backups and files stay on that machine: reach them through that machine's own ai-space or a shell there, not through this one.
 
