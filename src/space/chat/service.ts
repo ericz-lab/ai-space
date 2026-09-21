@@ -1,4 +1,4 @@
-import { mkdir, unlink } from "node:fs/promises";
+import { mkdir, rm, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ModelService } from "../model/service.ts";
 import { DEFAULT_SYSTEM, type ModelCall } from "../model/types.ts";
@@ -122,13 +122,19 @@ export class ChatService {
     const paths = this.store.deleteThread(app, id);
     if (!paths) return false;
     await this.unlinkAll(paths);
+    await rm(join(this.fileDir(app), String(id)), { recursive: true, force: true });
     return true;
   }
 
   async deleteScope(app: string, scope: string): Promise<number> {
-    const paths = this.store.deleteScope(app, scope);
-    await this.unlinkAll(paths);
-    return paths.length;
+    let n = 0;
+    for (const t of this.store.listThreads(app, scope, 100_000)) {
+      const paths = this.store.deleteThread(app, t.id) ?? [];
+      n += paths.length;
+      await this.unlinkAll(paths);
+      await rm(join(this.fileDir(app), String(t.id)), { recursive: true, force: true });
+    }
+    return n;
   }
 
   private async pruneOrphans(): Promise<void> {
