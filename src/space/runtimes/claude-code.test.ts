@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { chatArgs, cliArgs, cliEnv, createClaudeCode, parseCliOutput, readStreamLine, remoteCommand } from "./claude-code.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chatArgs, cliArgs, cliEnv, createClaudeCode, filesNote, parseCliOutput, readStreamLine, remoteCommand } from "./claude-code.ts";
 import { fakeModelBin } from "./testing.ts";
 import type { ClaudeCodeSpec, CompleteInput } from "./types.ts";
 
@@ -20,6 +23,58 @@ describe("cliArgs, streaming", () => {
     expect(cliArgs(["claude"], input(), true).slice(0, 7)).toEqual(["claude", "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model"]);
     const r = remoteCommand(["claude"], input(), true);
     expect("command" in r && r.command).toContain("claude -p --output-format stream-json --verbose --include-partial-messages --model haiku");
+  });
+});
+
+describe("files", () => {
+  test("Read joins the tools once and the prompt gets the note with the paths", () => {
+    const withFiles = input({ files: [{ name: "a1.png", path: "/x/a1.png" }] });
+    expect(cliArgs(["claude"], withFiles).slice(-6, -2)).toEqual(["--tools", "Read", "--allowedTools", "Read"]);
+    expect(cliArgs(["claude"], input({ files: withFiles.files, tools: ["Read", "WebSearch"] }))).toContain("Read,WebSearch");
+    expect(filesNote(withFiles.files!, (f) => f.path)).toBe("\n\nAttached files (open them with the Read tool; refer to them by these names):\n- a1.png: /x/a1.png\n");
+    expect(filesNote([], (f) => f.path)).toBe("");
+  });
+
+  test("over ssh the prompt and every file travel as one tar archive and the CLI reads the prompt file", () => {
+    const blobs = [{ name: "a1.png", bytes: new Uint8Array(812) }, { name: "a2.jpg", bytes: new Uint8Array(99) }];
+    const r = remoteCommand(["claude"], input({ files: [{ name: "a1.png", path: "/x" }, { name: "a2.jpg", path: "/y" }] }), false, blobs);
+    if ("bad" in r) throw new Error(r.bad);
+    expect(r.spool?.dir).toMatch(/^\/tmp\/sc-[0-9a-f]{16}$/);
+    const dir = r.spool!.dir;
+    expect(r.command).toBe(
+      `dir=${dir}; mkdir "$dir" && tar -xf - -C "$dir" && claude -p --output-format json --model haiku --strict-mcp-config --tools Read --allowedTools Read --system-prompt "$(printf %s ${Buffer.from("Be brief.").toString("base64")} | base64 -d)" < "$dir/prompt"; rc=$?; rm -rf "$dir"; exit $rc`,
+    );
+    const note = `hello\n\nAttached files (open them with the Read tool; refer to them by these names):\n- a1.png: ${dir}/a1.png\n- a2.jpg: ${dir}/a2.jpg\n`;
+    expect(new TextDecoder().decode(r.spool!.archive.slice(512, 512 + new TextEncoder().encode(note).byteLength))).toBe(note);
+    expect(r.spool!.archive.byteLength % 512).toBe(0);
+    expect(remoteCommand(["claude"], input(), false, [{ name: "../etc.png", bytes: new Uint8Array(1) }])).toEqual({ bad: "../etc.png" });
+    expect(remoteCommand(["claude"], input(), false, [{ name: "a.txt", bytes: new Uint8Array(1) }])).toEqual({ bad: "a.txt" });
+  });
+
+  test("the spool script delivers exact bytes from one stdin", async () => {
+    const blobs = [{ name: "a1.png", bytes: new Uint8Array([1, 2, 3, 4, 5]) }, { name: "a2.jpg", bytes: new TextEncoder().encode("jpeg-bytes") }];
+    const r = remoteCommand(["claude"], input({ prompt: "看图", files: [{ name: "a1.png", path: "" }, { name: "a2.jpg", path: "" }] }), false, blobs);
+    if ("bad" in r) throw new Error(r.bad);
+    // A stand-in for claude that prints the sizes of what was spooled next to the prompt file; the script removes the directory itself.
+    const script = `claude() { wc -c < "$dir/a1.png"; wc -c < "$dir/a2.jpg"; cat "$dir/prompt" | head -c 6; }; ${r.command}`;
+    const proc = Bun.spawn(["bash", "-c", script], { stdin: "pipe", stdout: "pipe" });
+    proc.stdin.write(r.spool!.archive);
+    proc.stdin.end();
+    const out = (await new Response(proc.stdout).text()).replace(/ +/g, "");
+    expect(out).toBe("5\n10\n看图");
+    expect(await Bun.file(`${r.spool!.dir}/prompt`).exists()).toBe(false);
+  });
+
+  test("locally the fake runtime finds the files on disk", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "space-files-"));
+    try {
+      await Bun.write(join(dir, "a1.png"), new Uint8Array(812));
+      const r = await createClaudeCode(spec()).complete(input({ files: [{ name: "a1.png", path: join(dir, "a1.png") }, { name: "a2.png", path: join(dir, "nope.png") }] }));
+      expect(r).toMatchObject({ ok: true, text: expect.stringContaining("[files: a1.png=812 a2.png=missing]") });
+      expect(await createClaudeCode(spec()).complete(input({ files: [{ name: "bad name.png", path: "/x" }] }))).toMatchObject({ ok: false, error: "file name not allowed: bad name.png" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

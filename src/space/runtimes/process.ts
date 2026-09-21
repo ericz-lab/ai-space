@@ -10,7 +10,8 @@
 export type SpawnOptions = {
   cwd?: string;
   env?: Record<string, string | undefined>;
-  stdin?: string;
+  /** What the process reads: text, bytes, or several byte parts written in order. */
+  stdin?: string | Uint8Array | Uint8Array[];
   signal?: AbortSignal;
   timeoutMs?: number;
   /** Each line of stdout as it arrives (stdout is still collected whole). */
@@ -38,7 +39,7 @@ export async function spawnCollect(cmd: string[], opts: SpawnOptions = {}): Prom
   });
   if (opts.stdin !== undefined) {
     const stdin = proc.stdin as Bun.FileSink;
-    stdin.write(opts.stdin);
+    for (const part of Array.isArray(opts.stdin) ? opts.stdin : [opts.stdin]) stdin.write(part);
     stdin.end();
   }
   const onLine = opts.onLine;

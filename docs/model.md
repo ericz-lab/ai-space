@@ -26,7 +26,7 @@ Non-goals, for now:
 
 - Prompt design and batching. Whether to translate one headline per call or twenty is the app's decision; the ledger makes the cost of that decision visible.
 - Conversations. One call is one prompt and one answer; there is no session or history.
-- Images and files in the prompt. Text only.
+- Images and files over `/api/model/run`. The route takes text. Files reach a runtime only through the chat service (`docs/chat.md`), which stores them and hands the runtime paths.
 - Switches and budgets (turning an app's calls off from the panel, refusing calls past a daily budget). The ledger is the prerequisite; the controls come after there is data to set them from.
 - Merging the ledgers of peer machines into the hub's view.
 
@@ -51,6 +51,8 @@ The Claude Code runtime starts `claude` lean. Measured on one machine with a one
 | the same with `--tools WebSearch --allowedTools WebSearch` | 1,538 |
 
 So every call gets `--system-prompt` (the request's `system`, or a two-sentence default), `--strict-mcp-config` (no MCP servers), and `--tools` set to exactly the tools the request named, with `""` when it named none. Over ssh the system prompt travels base64-encoded and is decoded by the remote shell, so free text never meets the command line. The prompt itself is spooled into a temporary file on the remote machine (`cat > "$f"`) before the CLI starts, because the CLI stops waiting for stdin after three seconds and a prompt of a few hundred KB can take longer than that to cross a slow link (measured 2026-09-19 over a Cloudflare-proxied ssh: 600 KB arrived at once, 780 KB only after three seconds, and the call failed).
+
+A call may carry files (`CompleteInput.files`, internal to the space: the chat service's image attachments). The Claude Code runtime then adds `Read` to the call's tools and ends the prompt with a note naming each file and where it is. Locally that is the path the caller gave. Over ssh the prompt and the files travel on the one stdin as a tar archive built in memory (`src/space/runtimes/tar.ts`); the remote command is `dir=/tmp/sc-<16 hex>; mkdir "$dir" && tar -xf - -C "$dir" && claude … < "$dir/prompt"; rc=$?; rm -rf "$dir"; exit $rc`, so the directory is gone whatever the CLI did. File names are generated (`a17.png`), never the person's, and are checked against the same safe character set as every other word. The API and dsh runtimes refuse a call with files.
 
 Thinking is the other fixed cost. The CLI thinks before every answer; on that same translation it spent 500 to 800 thinking tokens for a 46-token answer, so output tokens, priced five times input, were nine tenths of the call. A request's `thinking` becomes `MAX_THINKING_TOKENS` in the runtime's environment: `0` turns thinking off (the translation then costs a third and takes a third of the time), a positive number caps it. Absent, the runtime's default applies. The API backend does not enable extended thinking at all.
 

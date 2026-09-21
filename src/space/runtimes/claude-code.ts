@@ -1,6 +1,8 @@
+import { randomBytes } from "node:crypto";
 import { pumpLines, spawnCollect } from "./process.ts";
+import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
-import type { AgentOutcome, AgentRun, Backend, ChatCallbacks, ChatTurn, ClaudeCodeSpec, CompleteInput, CompleteOutcome, OnDelta, RuntimeAdapter, Usage } from "./types.ts";
+import { FILE_NAME_PATTERN, type AgentOutcome, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /**
  * Claude Code as a runtime. Three operations, one CLI:
@@ -24,6 +26,14 @@ import type { AgentOutcome, AgentRun, Backend, ChatCallbacks, ChatTurn, ClaudeCo
  * times a one-line translation's tokens; a request's `thinking` cap becomes
  * `MAX_THINKING_TOKENS` in the runtime's environment, 0 turning it off.
  *
+ * Files (the chat service's image attachments) are opened by the CLI's Read
+ * tool: the call gets `Read` among its tools and a note at the end of the
+ * prompt naming each file and where it is. Locally that is the path the
+ * caller gave. Over ssh the bytes travel on the same stdin as the prompt:
+ * the remote command spools the prompt and every file into a directory of
+ * its own with one `head -c <size>` each (GNU head reads exactly that many
+ * bytes from a pipe), runs the CLI, and removes the directory.
+ *
  * The CLI answers with one json envelope: the text under `result`, token counts
  * under `usage`, its own cost figure; `is_error` marks a failed run that exited
  * 0. An older CLI answering in plain text still works, with no usage recorded
@@ -46,12 +56,21 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
 
     async complete(input, signal, onDelta) {
       const stream = onDelta !== undefined;
+      const badName = input.files?.find((f) => !FILE_NAME_PATTERN.test(f.name));
+      if (badName) return { ok: false, error: `file name not allowed: ${badName.name}`, backend };
       if (sshHost) {
-        const remote = remoteCommand(bin, input, stream);
+        let blobs: FileBlob[];
+        try {
+          blobs = await readFiles(input.files ?? []);
+        } catch (e) {
+          return { ok: false, error: `could not read a file: ${(e as Error).message}`, backend };
+        }
+        const remote = remoteCommand(bin, input, stream, blobs);
         if ("bad" in remote) return { ok: false, error: `argument not allowed over ssh: ${remote.bad}`, backend };
-        return runCompletion(["ssh", "-o", "BatchMode=yes", sshHost, `bash -lc '${remote.command}'`], input, backend, signal, onDelta);
+        const stdin = remote.spool ? remote.spool.archive : input.prompt;
+        return runCompletion(["ssh", "-o", "BatchMode=yes", sshHost, `bash -lc '${remote.command}'`], input, stdin, backend, signal, onDelta);
       }
-      return runCompletion(cliArgs(bin, input, stream), input, "local", signal, onDelta);
+      return runCompletion(cliArgs(bin, input, stream), input, input.prompt + filesNote(input.files ?? [], (f) => f.path), "local", signal, onDelta);
     },
 
     async runAgent(run) {
@@ -81,10 +100,28 @@ function formatArgs(stream: boolean): string[] {
   return stream ? ["--output-format", "stream-json", "--verbose", "--include-partial-messages"] : ["--output-format", "json"];
 }
 
+/** The tools a call gets: what it asked for, plus Read when it carries files. */
+function toolList(input: CompleteInput): string {
+  const tools = input.files?.length && !input.tools.includes("Read") ? ["Read", ...input.tools] : input.tools;
+  return tools.join(",");
+}
+
+/** The lines appended to a prompt that carries files: each name and where the CLI finds it. */
+export function filesNote(files: CompleteFile[], pathOf: (f: CompleteFile) => string): string {
+  if (!files.length) return "";
+  return `\n\nAttached files (open them with the Read tool; refer to them by these names):\n${files.map((f) => `- ${f.name}: ${pathOf(f)}`).join("\n")}\n`;
+}
+
 /** Command line for the CLI on this machine; exported for tests. */
 export function cliArgs(bin: string[], input: CompleteInput, stream = false): string[] {
-  const tools = input.tools.join(",");
+  const tools = toolList(input);
   return [...bin, "-p", ...formatArgs(stream), "--model", input.model, "--strict-mcp-config", "--tools", tools, ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", input.system];
+}
+
+export type FileBlob = { name: string; bytes: Uint8Array };
+
+async function readFiles(files: CompleteFile[]): Promise<FileBlob[]> {
+  return Promise.all(files.map(async (f) => ({ name: f.name, bytes: await Bun.file(f.path).bytes() })));
 }
 
 const SAFE_ARG = /^[A-Za-z0-9._:/@,()*-]+$/;
@@ -96,17 +133,25 @@ const SAFE_ARG = /^[A-Za-z0-9._:/@,()*-]+$/;
  * of it is interpreted. Returns the offending word instead of a command when
  * one fails the check.
  */
-export function remoteCommand(bin: string[], input: CompleteInput, stream = false): { command: string } | { bad: string } {
-  const tools = input.tools.join(",");
+export function remoteCommand(bin: string[], input: CompleteInput, stream = false, blobs: FileBlob[] = []): { command: string; spool?: { dir: string; archive: Uint8Array } } | { bad: string } {
+  const tools = toolList(input);
   const words = [...bin, "-p", ...formatArgs(stream), "--model", input.model, "--strict-mcp-config"];
-  const bad = [...words, ...(tools ? [tools] : [])].find((w) => !SAFE_ARG.test(w));
+  const bad = [...words, ...(tools ? [tools] : []), ...blobs.map((b) => b.name)].find((w) => !SAFE_ARG.test(w) || (blobs.some((b) => b.name === w) && !FILE_NAME_PATTERN.test(w)));
   if (bad) return { bad };
   const system = Buffer.from(input.system, "utf8").toString("base64");
   const env = input.thinking === undefined ? [] : [`MAX_THINKING_TOKENS=${Math.trunc(input.thinking)}`];
   const parts = [...env, ...words, "--tools", tools ? tools : '""', ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", `"$(printf %s ${system} | base64 -d)"`];
   // The prompt is spooled to a file before the CLI starts: the CLI gives up on stdin after 3 s,
   // and a prompt of a few hundred KB can take longer than that to cross a slow ssh link.
-  return { command: `f=$(mktemp) && cat > "$f" && ${parts.join(" ")} < "$f"; rc=$?; rm -f "$f"; exit $rc` };
+  if (!blobs.length) return { command: `f=$(mktemp) && cat > "$f" && ${parts.join(" ")} < "$f"; rc=$?; rm -f "$f"; exit $rc` };
+  // With files, stdin is one tar archive of the prompt and every file; the directory name is
+  // chosen here so the prompt can name the paths, and `mkdir` without -p refuses a reused one.
+  const dir = `/tmp/sc-${randomBytes(8).toString("hex")}`;
+  const prompt = new TextEncoder().encode(input.prompt + filesNote(blobs.map((b) => ({ name: b.name, path: `${dir}/${b.name}` })), (f) => f.path));
+  return {
+    command: `dir=${dir}; mkdir "$dir" && tar -xf - -C "$dir" && ${parts.join(" ")} < "$dir/prompt"; rc=$?; rm -rf "$dir"; exit $rc`,
+    spool: { dir, archive: ustar([{ name: "prompt", bytes: prompt }, ...blobs]) },
+  };
 }
 
 /** Environment of a local CLI run: the process's own plus the thinking cap. */
@@ -163,7 +208,7 @@ export function readStreamLine(line: string): { delta: string } | { result: stri
   return undefined;
 }
 
-async function runCompletion(cmd: string[], input: CompleteInput, backend: Backend, signal?: AbortSignal, onDelta?: OnDelta): Promise<CompleteOutcome> {
+async function runCompletion(cmd: string[], input: CompleteInput, stdin: string | Uint8Array, backend: Backend, signal?: AbortSignal, onDelta?: OnDelta): Promise<CompleteOutcome> {
   let result: string | undefined;
   const onLine = onDelta
     ? (line: string) => {
@@ -175,7 +220,7 @@ async function runCompletion(cmd: string[], input: CompleteInput, backend: Backe
     : undefined;
   let r: Awaited<ReturnType<typeof spawnCollect>>;
   try {
-    r = await spawnCollect(cmd, { env: cliEnv(input), stdin: input.prompt, signal, timeoutMs: input.timeoutMs, onLine });
+    r = await spawnCollect(cmd, { env: cliEnv(input), stdin, signal, timeoutMs: input.timeoutMs, onLine });
   } catch (e) {
     return { ok: false, error: `could not start ${cmd[0]}: ${(e as Error).message}`, backend };
   }

@@ -39,7 +39,10 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
     kind: "anthropic-api",
     backend,
     capabilities: { complete: true, agent: false, chat: false },
-    complete: (input, signal) => runApi(input, { apiKey: spec.apiKey, apiUrl: spec.apiUrl || DEFAULT_API_URL, fetch: doFetch, signal }),
+    complete: (input, signal) =>
+      input.files?.length
+        ? Promise.resolve({ ok: false, error: "files need a runtime with a Read tool; the API backend takes text only", backend })
+        : runApi(input, { apiKey: spec.apiKey, apiUrl: spec.apiUrl || DEFAULT_API_URL, fetch: doFetch, signal }),
     runAgent: () => Promise.reject(new Unsupported(spec.name, "agent runs")),
     chat: () => {
       throw new Unsupported(spec.name, "chat");

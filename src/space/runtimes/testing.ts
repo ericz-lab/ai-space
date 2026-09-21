@@ -6,6 +6,9 @@
  * answers, for timeouts). The answer echoes the prompt and the arguments so a
  * test can check what reached the runtime. Asked for `stream-json`, it prints
  * an init line, the answer in two text deltas and the same result envelope last.
+ * A prompt that ends with an "Attached files" block makes it report each file's
+ * size on disk (`[files: a1.png=812 a2.jpg=missing]`), so a test can prove the
+ * bytes reached the runtime.
  *
  * Used as the `bin` of a claude-code runtime in tests; `fakeModelBin()` builds the command.
  */
@@ -31,7 +34,8 @@ if (import.meta.main) {
     console.log(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: "simulated runtime failure", usage: { input_tokens: 5, output_tokens: 0 } }));
     process.exit(0);
   }
-  const result = `answer to: ${prompt} [args: ${args.join(" ")}]${process.env.MAX_THINKING_TOKENS !== undefined ? ` [thinking: ${process.env.MAX_THINKING_TOKENS}]` : ""}`;
+  const files = [...prompt.matchAll(/^- ([a-z0-9]+\.[a-z]+): (.+)$/gm)].map(([, name, path]) => `${name}=${Bun.file(path!).size || "missing"}`);
+  const result = `answer to: ${prompt} [args: ${args.join(" ")}]${process.env.MAX_THINKING_TOKENS !== undefined ? ` [thinking: ${process.env.MAX_THINKING_TOKENS}]` : ""}${files.length ? ` [files: ${files.join(" ")}]` : ""}`;
   if (args.includes("stream-json")) {
     const delta = (text: string) => JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } } });
     console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "fake" }));

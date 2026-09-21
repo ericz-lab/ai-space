@@ -44,7 +44,20 @@ export type CompleteInput = {
   maxTokens: number;
   /** Cap on thinking tokens; 0 turns thinking off; absent = the runtime's default. */
   thinking?: number;
+  /**
+   * Files the model may open (images the chat service stores). `name` is the
+   * caller's short file name, unique inside the call and safe for a shell
+   * (`a17.png`); `path` is where the bytes are on the machine ai-space runs
+   * on. The prompt refers to files by name; the adapter appends where it put
+   * them, which may be another machine.
+   */
+  files?: CompleteFile[];
 };
+
+export type CompleteFile = { name: string; path: string };
+
+/** What a file name handed to a runtime must look like: the chat service generates them. */
+export const FILE_NAME_PATTERN = /^[a-z0-9]+\.(png|jpe?g|gif|webp)$/;
 
 /** Text of the answer as it is produced; a runtime that cannot stream never calls it and the caller gets the whole answer at the end. */
 export type OnDelta = (text: string) => void;

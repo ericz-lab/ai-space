@@ -184,6 +184,7 @@ export function createDeepseekHarness(spec: DeepseekHarnessSpec): RuntimeAdapter
     capabilities: { complete: true, agent: true, chat: true },
 
     async complete(input, signal) {
+      if (input.files?.length) return { ok: false, error: "files need a runtime with a Read tool; dsh has none", backend };
       const foreign = input.tools.filter((t) => !WEB_TOOLS.has(t));
       if (foreign.length) return { ok: false, error: `tools not available on this runtime: ${foreign.join(", ")}`, backend };
       const patch = buildPatch({ system: input.system, model: input.model, thinking: input.thinking, leanTools: input.tools });
