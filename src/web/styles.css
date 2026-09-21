@@ -131,7 +131,6 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .panel {
   position: relative; display: flex; flex-direction: column; max-height: 100%;
   background: var(--panel);
-  -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid var(--glass-border); border-radius: 18px; box-shadow: var(--shadow);
   overflow: hidden;
 }
@@ -208,8 +207,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 /* Tasks: the scheduler's task list, grouped by app, with run history per row, in a floating panel. */
 .tasks {
   position: relative; width: min(560px, 94vw); height: min(80vh, 760px); display: flex; flex-direction: column;
-  background: var(--panel); -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
+  background: var(--panel);
   border: 1px solid var(--glass-border); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden;
 }
 .task-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--glass-border); }
@@ -296,8 +294,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 /* Terminal: shells on this machine and on peers, one xterm per tab, in a floating panel. */
 .term {
   position: relative; width: min(960px, 96vw); height: min(84vh, 820px); display: flex; flex-direction: column;
-  background: var(--panel); -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
+  background: var(--panel);
   border: 1px solid var(--glass-border); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden;
 }
 .term .task-head { gap: 8px; }
@@ -337,8 +334,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 /* Chat: a floating panel in the middle of the page; the agent tabs sit along its left edge. */
 .chat {
   position: relative; width: min(720px, 94vw); height: min(82vh, 800px); display: flex; flex-direction: row;
-  background: var(--panel); -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
+  background: var(--panel);
   border: 1px solid var(--glass-border); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden;
 }
 .chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -506,10 +502,17 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .tile.add .tile-icon { background: transparent; border-style: dashed; font-size: 26px; }
 
 .overlay {
-  position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.3);
-  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  position: fixed; inset: 0; z-index: 40;
   display: flex; align-items: center; justify-content: center; padding: 20px;
   animation: fadeIn 0.18s ease;
+}
+/* The dim and the blur of the page live on a static layer behind the panel, not on the overlay
+   itself: a scroller inside a backdrop-filtered element makes the browser re-blur the backdrop
+   on every scroll frame, which stutters. Same reason the panels below carry no backdrop-filter
+   of their own: their surface (--panel) is nearly opaque, so the blur showed nothing anyway. */
+.overlay::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; background: rgba(0, 0, 0, 0.3);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
 }
 /* A mounted panel that is closed (the chat keeps its conversations). */
 .overlay.off { display: none; }
@@ -521,7 +524,6 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 html:has(.overlay:not(.off)) { overflow: hidden; }
 .overlay { touch-action: none; }
 .overlay * { overscroll-behavior: contain; }
-/* Floating panels sit on a nearly opaque surface (--panel); the glass tokens stay for tiles and pop-overs. */
 /* Panels that belong near the top of the page, such as the settings. */
 .overlay.top { align-items: flex-start; padding-top: clamp(40px, 8vh, 80px); }
 .overlay.top .panel { max-height: calc(100vh - clamp(40px, 8vh, 80px) - 20px); }
@@ -532,7 +534,6 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
 .modal {
   width: min(440px, 94vw); max-height: 90vh; overflow-y: auto;
   background: var(--glass-strong);
-  -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid var(--glass-border); border-radius: 18px; box-shadow: var(--shadow);
   padding: 24px;
 }
