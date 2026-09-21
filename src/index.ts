@@ -5,6 +5,8 @@ import { SessionStore, createAgentRoutes } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, LayoutStore, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
 import { ModelService, ModelStore, createModelRoutes, importCalls, recordAgentRun } from "./space/model/index.ts";
+import { ChatService, ChatStore, createChatRoutes, importThreads } from "./space/chat/index.ts";
+import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
 import { type Manifest, Scheduler, Store, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { type S3Config, StorageService, createStorageRoutes, openDatabase, parseStorageSpec, sqliteUrl } from "./space/storage/index.ts";
@@ -46,10 +48,11 @@ import { createWebRoutes } from "./web/routes.ts";
  *   bun src/index.ts backups [<app>]      list snapshots
  *   bun src/index.ts restore <app> …      unpack a snapshot (--to <dir> or --in-place)
  *   bun src/index.ts model-import <app> <file.jsonl>   add an app's own call history to the model ledger (see `src/space/model/import.ts`)
+ *   bun src/index.ts chat-import <app> <file.jsonl>    add an app's own conversations to the chat service (see `src/space/chat/import.ts`)
  *
  * Configuration comes from the environment, then from `<workspace>/.env`
  * (process values win). See `.env.example`, `docs/scheduler.md`, `docs/storage.md`
- * `docs/notify.md`, `docs/model.md`, `docs/panel.md`, `docs/peers.md` and `docs/terminal.md`.
+ * `docs/notify.md`, `docs/model.md`, `docs/chat.md`, `docs/panel.md`, `docs/peers.md` and `docs/terminal.md`.
  */
 
 /** The shared skills apps reference as `space:<name>`: the checkout's `skills/` directory. */
@@ -209,6 +212,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const runtimes = new RuntimeRegistry(loaded.config);
   const modelStore = new ModelStore(config.dbPath, { retentionDays: config.model.retentionDays });
   const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency });
+  const chatStore = new ChatStore(config.dbPath);
+  const chat = new ChatService({ store: chatStore, model, defaultModel: config.model.defaultModel, fileDir: (app) => join(storage.appDataDir(app), "chat") });
+  // The widget apps embed is bundled once at boot; SPACE_DEV=1 rebuilds it on every request.
+  const widget = buildWidget({ dev: process.env.SPACE_DEV === "1" });
   // Agent tasks run on their runtime from the scheduler; their usage reaches the ledger from the run result.
   const recordAgent = recordAgentRun(model);
   const scheduler = new Scheduler({
@@ -341,6 +348,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       }),
       ...createNotifyRoutes({ notify, store: notifyStore, token: config.apiToken, appForToken: (t) => storage.appForToken(t) }),
       ...createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), defaultModel: config.model.defaultModel }),
+      ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),
@@ -365,13 +373,14 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     store.close();
     notifyStore.close();
     modelStore.close();
+    chatStore.close();
     await backups.db.close();
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
 
-  return { store, storage, scheduler, notify, notifyStore, model, modelStore, registry, peers, server, backups };
+  return { store, storage, scheduler, notify, notifyStore, model, modelStore, chat, chatStore, registry, peers, server, backups };
 }
 
 /**
@@ -489,6 +498,24 @@ if (import.meta.main) {
       console.error(`[space] model-import: ${app}: read ${r.read}, imported ${r.imported}, skipped ${r.skipped} already present`);
     } catch (e) {
       console.error(`[space] model-import: ${(e as Error).message}`);
+      process.exit(1);
+    } finally {
+      store.close();
+    }
+    process.exit(0);
+  }
+  if (command === "chat-import") {
+    const [app, file] = process.argv.slice(3);
+    if (!app || !file) {
+      console.error("[space] usage: bun src/index.ts chat-import <app> <file.jsonl>");
+      process.exit(2);
+    }
+    const store = new ChatStore(config.dbPath);
+    try {
+      const r = importThreads(store, app, await Bun.file(file).text());
+      console.error(`[space] chat-import: ${app}: read ${r.read}, imported ${r.imported} threads (${r.messages} messages), skipped ${r.skipped} already present`);
+    } catch (e) {
+      console.error(`[space] chat-import: ${(e as Error).message}`);
       process.exit(1);
     } finally {
       store.close();

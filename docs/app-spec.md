@@ -345,7 +345,7 @@ Environment, always:
 | `SPACE_APP_DATA_DIR` | Absolute path of `<workspace>/data/<name>/`. |
 | `SPACE_API_URL` | Base URL of the Space API, loopback. Written to `space.env`. |
 | `SPACE_NAME` | What this space calls itself ([machines.md](machines.md)); the name a hub and other machines know it by. Written to `space.env`. |
-| `SPACE_APP_TOKEN` | Per-app bearer token for the Space API; identifies the app on `POST /api/notify`, `POST /api/events` and `POST /api/model/run`. Written to `space.env`. |
+| `SPACE_APP_TOKEN` | Per-app bearer token for the Space API; identifies the app on `POST /api/notify`, `POST /api/events`, `POST /api/model/run` and the `/api/chat/*` routes. Written to `space.env`. |
 | `PORT` | For services: the declared port. |
 | `SPACE_TRIGGER` | For task runs: `schedule`, `manual` or `event`. With events, `SPACE_EVENT` (the latest) and `SPACE_EVENTS` (all) as JSON. |
 
@@ -362,9 +362,15 @@ API, for apps and their agents:
 | `GET /api/widgets` | Every widget's latest payload (used by the panel). |
 | `POST /api/agents/:app/:agent/chat` | One chat turn, streamed as server-sent events; `sessionId` continues a session. |
 | `POST /api/notify`, `GET /api/notifications?app` | Send a notification; read the app's own delivery history. |
+| `POST /api/model/run` | One model call for the app, counted in the ledger ([model.md](model.md)). |
+| `/api/chat/threads…`, `/api/chat/widget.js` | Conversations with history and images, kept by the space per app, and the widget an app's page embeds to show them ([chat.md](chat.md)). |
 | `GET /api/spec` | The spec version and JSON Schema this ai-space enforces. |
 
 Mutating routes require the bearer token from `SPACE_API_TOKEN`, or the app's own `SPACE_APP_TOKEN` where the route acts on behalf of one app.
+
+### Chat
+
+An app that wants an AI conversation on its page does not build one: it proxies `/space/chat/*` on its own origin to `${SPACE_API_URL}/api/chat/*` with its `SPACE_APP_TOKEN` (the page never holds the token and cannot reach ai-space itself), loads `<script src="/space/chat/widget.js">` and mounts `SpaceChat.mount(el, { scope, context })`. The space keeps the threads, messages and images per app under the app's own `scope` (`note:12`, `calendar`); the app hands over, on every turn, what the model should read first (`context()`), its presets and the actions it wants under an answer, and styles the widget with `--sc-*` tokens. The rest, the model, streaming, images the model can see, the ledger, is the space's. See [chat.md](chat.md).
 
 ## Full example
 
@@ -426,6 +432,8 @@ notify:
 | Top-level `spec`, `title`, `description`, `icon`, `url`, `status`, `repo` | Implemented (`src/space/scheduler/manifest.ts`); `paused`/`archived` stop the app's tasks |
 | `service` | Parsed; health probed by the panel. Supervision (start, restart, logs, `PORT`) planned |
 | `agents`, chat route | Implemented for `claude` (`src/space/agents/`); `skills` and `memory` are parsed but not mounted yet |
+| Model service, `/api/model/run` | Implemented (`src/space/model/`) |
+| Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |
 | `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |
 | Panel (web UI, layout, manifest-only apps) | Implemented ([panel.md](panel.md)) |
 | `skills`, shared skills under `skills/` | Linked into `<workspace>/.claude/skills/` for sessions started by hand (`src/space/skills.ts`); per-agent mounting planned |
