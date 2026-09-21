@@ -119,7 +119,7 @@ const chat = SpaceChat.mount(el, {
   onReply: (message, thread) => …, onError: (error, message) => …,
   threads: true, attachments: true, theme: "auto", lang: "zh", placeholder, emptyText,
 });
-chat.send(text, files?) · chat.newThread() · chat.openThread(id) · chat.setScope(scope) · chat.setTheme(t) · chat.stop() · chat.destroy() · chat.thread · chat.messages
+chat.send(text, files?) · chat.fill(text) · chat.newThread() · chat.openThread(id) · chat.setScope(scope) · chat.setTheme(t) · chat.stop() · chat.destroy() · chat.thread · chat.messages
 ```
 
 Behaviour: on mount the threads of the scope are listed and the newest opened; the first message creates a thread when there is none. A send shows the message at once, the answer as it streams (Markdown re-rendered per animation frame), then swaps both for the stored rows; a failure keeps the partial text with the reason. Images: paste, drop on the box, or the `＋` button; each is uploaded at once and previewed, and its id travels with the message. `Enter` sends, `Shift+Enter` breaks a line, `Esc` stops. Theme `auto` follows the page's `data-theme` when set (both apps set it), else the system.

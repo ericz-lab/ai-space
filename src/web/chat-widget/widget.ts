@@ -63,6 +63,8 @@ export type Options = {
 
 export type Widget = {
   send(text: string, files?: File[]): Promise<void>;
+  /** Put text into the box without sending, and focus it. */
+  fill(text: string): void;
   newThread(): Promise<Thread>;
   openThread(id: number): Promise<void>;
   setScope(scope: string): Promise<void>;
@@ -385,15 +387,16 @@ function mount(host: HTMLElement, opts: Options): Widget {
 
     aborter = new AbortController();
     setBusy(true);
+    // Repaints are throttled with a timer, not requestAnimationFrame: a background tab gets no frames, and the answer should be there when the person comes back.
     let painted = false;
     const paint = () => {
       if (painted) return;
       painted = true;
-      requestAnimationFrame(() => {
+      setTimeout(() => {
         painted = false;
         liveEl.querySelector(".sc-md")!.innerHTML = renderMd(assistant.content);
         scrollDown();
-      });
+      }, 40);
     };
     let final: { ok: boolean; error?: string; user?: Message; assistant?: Message; thread?: Thread } | null = null;
     try {
@@ -484,6 +487,11 @@ function mount(host: HTMLElement, opts: Options): Widget {
 
   return {
     send,
+    fill(text) {
+      els.input.value = text;
+      els.input.focus();
+      els.input.setSelectionRange(text.length, text.length);
+    },
     newThread,
     openThread,
     async setScope(next: string) {
