@@ -125,7 +125,7 @@ export function agentView(m: Manifest, a: ManifestAgent): AgentView {
   };
 }
 
-export function appView(entry: RegisteredApp, opts: { hidden: boolean; health?: Health }): AppView {
+export function appView(entry: RegisteredApp, opts: { hidden: boolean; health?: Health | "unknown" }): AppView {
   const m = entry.manifest;
   return {
     id: m.app,

@@ -77,12 +77,14 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     "/api/peer/snapshot": {
       GET: guard(async (req) => {
         const base = new URL(req.url).origin;
-        const [apps, services, widgets, agents] = await Promise.all([
-          local<{ apps: unknown[] }>(opts.panel, "/api/apps", base),
+        // Services first: that list waits for the health probes, so the app views read after it
+        // carry the same fresh result instead of "unknown" for a service not probed yet.
+        const [services, widgets, agents] = await Promise.all([
           local<{ services: unknown[] }>(opts.panel, "/api/services", base),
           local<{ widgets: unknown[] }>(opts.panel, "/api/widgets", base),
           local<{ agents: { id: string }[] }>(opts.agents, "/api/agents", base),
         ]);
+        const apps = await local<{ apps: unknown[] }>(opts.panel, "/api/apps", base);
         // Only what lives here: a peer that is itself a hub does not pass its own peers on
         // (a hub of hubs would list them twice, under the wrong name).
         const own = <T extends { peer?: string }>(list: T[]) => list.filter((x) => !x.peer);

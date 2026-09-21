@@ -479,12 +479,18 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     setChatOpen(true);
   };
 
+  // The app list answers at once with the health the server has cached; a service it has not
+  // probed yet comes back "unknown", so the list is asked once more after the probes had their
+  // timeout to turn those dots green or red.
+  const PROBE_MS = 2_500;
   const reload = () =>
     Promise.all([getJson<{ apps: AppInfo[] }>("/api/apps"), getJson<{ agents: AgentInfo[] }>("/api/agents")])
       .then(([p, a]) => {
         setApps(p.apps);
         setAgents(a.agents);
         setLoaded(true);
+        if (p.apps.some((x) => x.service?.health === "unknown"))
+          setTimeout(() => getJson<{ apps: AppInfo[] }>("/api/apps").then((d) => setApps(d.apps)).catch(() => {}), PROBE_MS);
       })
       .catch(() => setLoaded(true));
 

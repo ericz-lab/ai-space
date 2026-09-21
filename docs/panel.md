@@ -84,7 +84,9 @@ Transcripts are read back from the runtime's own store (Claude Code: `~/.claude/
 
 ## Health
 
-Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<port><service.health>` when it lists apps, caches the result for fifteen seconds, and shows a green or red dot. Apps without `service.health` show no dot.
+Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<port><service.health>` (two-second timeout), caches the result for fifteen seconds, and shows a green or red dot. Apps without `service.health` show no dot.
+
+`GET /api/apps` never waits for a probe: it answers with the cached result, or `unknown` for a service not probed yet, and starts the probe behind the answer, so a service that is down or slow cannot hold the tiles back. The page asks for the list once more a moment later when any dot came back `unknown`. `GET /api/services` (the Settings list) waits for the probes.
 
 ## Routes
 

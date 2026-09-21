@@ -81,14 +81,24 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     return entry;
   };
 
-  const healthOf = async (entry: RegisteredApp) => {
+  // App views take the health the cache has (a fresh probe runs behind them); the Services list
+  // waits for the probe, since it is opened to look at the dots.
+  const probeOf = (entry: RegisteredApp) => {
     const s = entry.manifest.service;
-    return s?.health && entry.manifest.status === "active" ? await health.check(s.port, s.health) : undefined;
+    return s?.health && entry.manifest.status === "active" ? { port: s.port, path: s.health } : undefined;
+  };
+  const healthOf = async (entry: RegisteredApp) => {
+    const p = probeOf(entry);
+    return p ? await health.check(p.port, p.path) : undefined;
+  };
+  const lastHealthOf = (entry: RegisteredApp) => {
+    const p = probeOf(entry);
+    return p ? health.peek(p.port, p.path) : undefined;
   };
 
-  const viewOf = async (name: string, hidden: Set<string>): Promise<AppView> => {
+  const viewOf = (name: string, hidden: Set<string>): AppView => {
     const entry = entryOf(name);
-    return appView(entry, { hidden: hidden.has(name), health: await healthOf(entry) });
+    return appView(entry, { hidden: hidden.has(name), health: lastHealthOf(entry) });
   };
 
   // The grid holds what a person can open: apps with a `url`, not archived, not hidden by the
@@ -98,7 +108,7 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     const lay = layout.read();
     const hidden = new Set(lay.hidden);
     const entries = registry.list().filter((e) => all || (e.manifest.url && !hidden.has(e.manifest.app) && e.manifest.status !== "archived"));
-    const views = await Promise.all(entries.map((e) => viewOf(e.manifest.app, hidden)));
+    const views = entries.map((e) => viewOf(e.manifest.app, hidden));
     // Peer snapshots already exclude what the peer hides or archived; the hub's own hidden set applies on top,
     // and a peer app that opens the same url as one already listed is the same page: one tile (merge.ts).
     const remote = dropSameUrl(
@@ -137,19 +147,19 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
         if (registry.get(app.name)) return error(409, `app "${app.name}" already exists`);
         const dir = await createLinkApp(opts.ws, app);
         await opts.onCreate(dir);
-        return json({ ok: true, app: await viewOf(app.name, new Set(layout.read().hidden)) }, 201);
+        return json({ ok: true, app: viewOf(app.name, new Set(layout.read().hidden)) }, 201);
       }),
     },
 
     "/api/apps/:app": {
-      GET: wrap(async (req) => json({ ok: true, app: await viewOf(name(req.params.app), new Set(layout.read().hidden)) })),
+      GET: wrap(async (req) => json({ ok: true, app: viewOf(name(req.params.app), new Set(layout.read().hidden)) })),
       PATCH: wrap(async (req) => {
         const n = name(req.params.app);
         entryOf(n);
         const body = (await req.json().catch(() => ({}))) as { hidden?: unknown };
         if (typeof body.hidden !== "boolean") return error(400, "hidden must be a boolean");
         const lay = layout.hide(n, body.hidden);
-        return json({ ok: true, app: await viewOf(n, new Set(lay.hidden)) });
+        return json({ ok: true, app: viewOf(n, new Set(lay.hidden)) });
       }),
       // Uninstall: the service is stopped first (a stop that fails aborts, the app stays), then the
       // directory leaves the workspace (see uninstall.ts: code is never deleted) and the app is

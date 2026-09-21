@@ -28,6 +28,7 @@ const fakeFetch = (async (input: string | URL | Request) => {
   if (url.endsWith("/board?theme=light&lang=zh")) return new Response("<html>board zh</html>", { headers: { "content-type": "text/html" } });
   return new Response("<html><head><meta name=\"theme-color\" content=\"#123456\"></head></html>", { headers: { "content-type": "text/html" } });
 }) as typeof fetch;
+const health = new HealthProbe({ fetch: fakeFetch });
 
 beforeAll(async () => {
   home = await mkdtemp(join(tmpdir(), "space-panel-"));
@@ -71,7 +72,7 @@ widgets:
       registry,
       layout: new LayoutStore(db),
       widgets: new WidgetFeed(registry, { fetch: fakeFetch }),
-      health: new HealthProbe({ fetch: fakeFetch }),
+      health,
       onCreate: async (dir) => {
         await registry.set(await loadManifest(dir));
       },
@@ -98,8 +99,12 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({ method, head
 
 describe("panel api", () => {
   test("lists visible apps with health, agents and widgets; archived apps stay out", async () => {
+    // The first list does not wait for the probes: health is "unknown" until they answer.
+    const cold = await call("/api/apps");
+    expect(cold.status).toBe(200);
+    expect(cold.body.apps[1]).toMatchObject({ name: "notes", service: { port: 8712, health: "unknown" } });
+    await health.settle();
     const r = await call("/api/apps");
-    expect(r.status).toBe(200);
     expect(r.body.apps.map((a: Body) => a.name)).toEqual(["docs", "notes"]);
     const notes = r.body.apps[1];
     expect(notes).toMatchObject({ title: "Notes", icon: "/api/apps/notes/icon", url: "https://notes.example.com", manifestOnly: false, hidden: false, service: { port: 8712, health: "ok" } });
