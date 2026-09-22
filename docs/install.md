@@ -128,7 +128,7 @@ mkdir -p ~/.ai-space && git clone https://github.com/<you>/ai-space.git ~/.ai-sp
 cd ~/.ai-space/core && bash deploy/install.sh
 ```
 
-`deploy/install.sh` runs `bun install --frozen-lockfile`, creates the workspace (`bun run init`: `apps/`, `data/`, `logs/`, a starter `.env`), installs `deploy/ai-space.service` into `~/.config/systemd/user/`, enables linger so the unit survives logout, starts it and curls `/healthz`.
+`deploy/install.sh` runs `bun install --frozen-lockfile`, creates the workspace (`bun run init`: `apps/`, `data/`, `logs/`, a starter `.env`), links the `space` command into `~/.local/bin` ([cli.md](cli.md): `space status`, `space app ls`, `space task run …`, `space logs …`; `space help` lists the rest), installs `deploy/ai-space.service` into `~/.config/systemd/user/`, enables linger so the unit survives logout, starts it and curls `/healthz`.
 
 `init` also clones the default apps (`src/space/defaults.ts`) into `apps/<name>` when that directory is absent, and once ai-space answers, `install.sh` runs `bun src/index.ts install-defaults`, which runs each default app's own `deploy/install.sh` (a user unit, started) now that the app's `space.env` exists. Today the list is `ai-usage`, the usage dashboard; `SPACE_DEFAULT_APPS=none` in `.env` (or the environment of the `init` run) skips it, a comma-separated list of clone URLs replaces it. The default app binds loopback and its manifest names `http://127.0.0.1:<port>`; on a server with a hostname, set `SPACE_APP_URL_AI_USAGE=https://usage.<domain>/?lang={lang}` in `.env` and add the hostname to the tunnel (step 5) like any other app. Its dashboard merges the peers of step 9 that run it too.
 
@@ -143,7 +143,7 @@ git push <host> main      # checks out into ~/.ai-space/core, runs deploy/instal
 
 **Workspace `.env`**
 
-The interactive way: `bun run setup` in `~/.ai-space/core`. It checks the tools from steps 1 to 3 and step 5, asks for every value below and for the notification channel, R2 credentials and peers of steps 7 to 9 (each can be skipped and added on a later run), sends a test message, probes the bucket, shows a summary with secrets masked, writes `~/.ai-space/.env` keeping every line it did not touch, and restarts the unit. Existing values are the defaults, so re-running it is how a value is changed later.
+The interactive way: `space setup` (or `bun run setup` in `~/.ai-space/core`). It checks the tools from steps 1 to 3 and step 5, asks for every value below and for the notification channel, R2 credentials and peers of steps 7 to 9 (each can be skipped and added on a later run), sends a test message, probes the bucket, shows a summary with secrets masked, writes `~/.ai-space/.env` keeping every line it did not touch, and restarts the unit. Existing values are the defaults, so re-running it is how a value is changed later.
 
 By hand: edit `~/.ai-space/.env`; `.env.example` in the checkout lists every key. Set now:
 
@@ -154,6 +154,7 @@ SPACE_API_TOKEN=$(openssl rand -hex 32)     # paste the value; mutating routes r
 SPACE_MAX_CONCURRENCY=4                     # slow agent tasks hold a slot for minutes; 2 is tight
 SPACE_CHAT_MODEL=sonnet
 SPACE_SERVICE_STOP="sudo systemctl disable --now {app}"   # what the panel runs when it uninstalls an app; user units: systemctl --user disable --now {app}
+# SPACE_SERVICE_LOGS=                       # what `space logs <app>` runs; default journalctl --user -u {app} -n {lines} --no-pager {follow}
 SPACE_NAME=<short machine name>             # what this space calls itself (machines.md)
 ```
 
@@ -161,9 +162,9 @@ Restart and check:
 
 ```bash
 systemctl --user restart ai-space
-journalctl --user -u ai-space -n 30 --no-pager
-curl -s http://127.0.0.1:8700/healthz
-curl -s http://127.0.0.1:8700/api/apps
+space logs space -n 30          # journalctl --user -u ai-space -n 30 --no-pager
+space status                    # curl -s http://127.0.0.1:8700/healthz, and the rest
+space app ls
 ```
 
 If `systemctl --user` says the bus is not available, log out and back in once after `loginctl enable-linger`, or export `XDG_RUNTIME_DIR=/run/user/$(id -u)`.

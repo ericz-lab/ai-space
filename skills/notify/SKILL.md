@@ -2,7 +2,7 @@
 name: notify
 description: Send a one-way notification to the operator's chat apps (Telegram, Discord, Slack, Feishu, DingTalk, WeCom, Bark, ntfy) through ai-space. Use when a prompt asks to notify, alert, ping, report or message someone about a result, or when a scheduled agent run should announce what it did. 当用户说"通知我""发个提醒""推送到群里""告警""发报告"时触发。
 argument-hint: "[--level alert|warn|success|report|info] [--title ...] text"
-allowed-tools: Bash(curl *)
+allowed-tools: Bash(curl *), Bash(space notify *)
 user-invocable: true
 ---
 
@@ -12,7 +12,13 @@ ai-space delivers notifications for every app. You never touch bot tokens or cha
 
 ## How to send
 
-The environment of an app session carries `SPACE_API_URL` and the app's own `SPACE_APP_TOKEN` (from `space.env`). Send with `curl`:
+The environment of an app session carries `SPACE_API_URL` and the app's own `SPACE_APP_TOKEN` (from `space.env`). With the `space` command on `PATH` (every ai-space host has it):
+
+```bash
+space notify send --level warn --title "Import finished with gaps" --url https://example.test/report/42 "12 of 40 files imported. 28 were skipped: unknown format."
+```
+
+It picks up the app from `SPACE_APP` and the token from the environment; `--wait` returns once every channel answered, `--app <name>` names the app from an operator session. The same with `curl`:
 
 ```bash
 curl -sS -X POST "$SPACE_API_URL/api/notify" \

@@ -11,6 +11,9 @@ cd "$HERE"
 "$BUN" install --frozen-lockfile
 SPACE_HOME="${SPACE_HOME:-$HOME/.ai-space}" "$BUN" src/index.ts init
 
+# The `space` command on PATH (~/.local/bin is on the unit's and the profile's PATH; docs/cli.md).
+mkdir -p ~/.local/bin && ln -sfn "$HERE/bin/space" ~/.local/bin/space
+
 mkdir -p ~/.config/systemd/user
 sed "s|%h/.ai-space/core|$HERE|; s|%h/.bun/bin/bun|$BUN|" deploy/ai-space.service > ~/.config/systemd/user/ai-space.service
 loginctl enable-linger "$USER" 2>/dev/null || true

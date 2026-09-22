@@ -3,12 +3,17 @@
   "module": "src/index.ts",
   "type": "module",
   "private": true,
+  "bin": {
+    "space": "bin/space"
+  },
   "scripts": {
     "dev": "SPACE_DEV=1 bun --hot src/index.ts",
     "start": "bun src/index.ts",
     "test": "bun test",
     "init": "bun src/index.ts init",
     "setup": "bun src/index.ts setup",
+    "new-app": "bun src/index.ts app new",
+    "space": "bun src/index.ts",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test"
   },

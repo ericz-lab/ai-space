@@ -70,7 +70,7 @@ To remove one: `curl -sS -X DELETE "$API/api/apps/<name>"`. This is the only kin
 
 ## 3. Create a code app
 
-1. **Directory and template.** Create the project directory where the operator keeps projects (ask if unknown; never inside the ai-space checkout) and copy `templates/` from this skill into it: `space.yaml`, `README.md`, `AGENTS.md`, `env.example` (rename to `.env.example`), `gitignore` (rename to `.gitignore`), `icon.svg`, `src/index.ts`, `agents/assistant.md`, `agents/assistant.svg`, `deploy/app.service`, `deploy.sh`. Replace every `my-app` / `My App` / `8710` with the real name, title and port. Delete the sections the app does not need (`agents`, `widgets`, `tasks`, `storage`, `notify`); an empty section is worse than none.
+1. **Directory and template.** `space app new <name> --dir <projects>/<name> [--title T] [--port N] [--no-github]` does this step and step 7 in one go when the `space` command is on `PATH` (an ai-space checkout: `bin/space`); then continue at step 2. By hand: create the project directory where the operator keeps projects (ask if unknown; never inside the ai-space checkout) and copy `templates/` from this skill into it: `space.yaml`, `README.md`, `AGENTS.md`, `env.example` (rename to `.env.example`), `gitignore` (rename to `.gitignore`), `icon.svg`, `src/index.ts`, `agents/assistant.md`, `agents/assistant.svg`, `deploy/app.service`, `deploy.sh`. Replace every `my-app` / `My App` / `8710` with the real name, title and port. Delete the sections the app does not need (`agents`, `widgets`, `tasks`, `storage`, `notify`); an empty section is worse than none.
 2. **Service contract** (only if the app has a service): read `PORT`, bind `127.0.0.1` and nothing else, answer `GET /healthz` with 200, log to stdout, exit on `SIGTERM` within 10 seconds. The template does all of this; keep it when you replace the handler.
 3. **Widget** (optional): `GET <source>` returns `{ ok: true, items: [{ text, url?, time? }] }`, at most twenty items, and `{ ok: false, error }` on failure. A path `source` needs a `service`; without one give a full URL.
 4. **Agent** (optional): a prompt file per agent under `agents/`. Write the prompt self-contained (the app's `AGENTS.md` and description are appended automatically); keep `tools` read-only unless the operator wants writes, and make the prompt ask before any write; use `Bash(cmd *)` patterns, never bare `Bash`. **Every agent gets its own `avatar`** (`agents/<name>.svg`, 64x64 viewBox rounded square in the app's colours with a glyph that says what the agent does, or a single emoji); without one the panel falls back to the app icon and the agent is indistinguishable from the app. Check `GET /api/agents` shows the avatar after the sync.
@@ -106,14 +106,14 @@ Validate as in step 3.6.
    - A **new directory** is registered by the workspace-wide sync, which re-reads every `apps/*/space.yaml` the way boot does:
 
      ```bash
-     curl -sS -X POST "$API/api/apps/sync" -H "authorization: Bearer $TOKEN"
+     space app sync            # or: curl -sS -X POST "$API/api/apps/sync" -H "authorization: Bearer $TOKEN"
      ```
 
      The response has `synced` (one summary per app: tasks created, updated, orphaned) and `skipped` (directory and parse error for every rejected manifest; the others still sync). Your app must be in `synced`.
    - An **existing app** re-reads only its own manifest:
 
      ```bash
-     curl -sS -X POST "$API/api/apps/<name>/sync" -H "authorization: Bearer $TOKEN"
+     space app sync <name>     # or: curl -sS -X POST "$API/api/apps/<name>/sync" -H "authorization: Bearer $TOKEN"
      ```
 
      A 400 carries the parse error and the previous good state stays.

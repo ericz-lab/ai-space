@@ -324,7 +324,7 @@ Commit messages follow Conventional Commits, as in ai-space itself.
 
 | Step | Command | What happens |
 | --- | --- | --- |
-| Create | `bun run new-app <name> [--no-github]` | Copies `templates/app/`, fills in the name, `git init` and first commit, private GitHub repository when configured, registers nothing else: the directory under `apps/` is the registration. Until the command exists, the shared skill [`space-app`](../skills/space-app/SKILL.md) does the same by hand from its own templates, and also covers adopting an existing project and every later change. |
+| Create | `space app new <name> [--dir D] [--title T] [--port N] [--no-github]` (also `bun run new-app`) | Copies the `space-app` skill's `templates/`, fills in the name, title and port, `git init` and first commit, private GitHub repository under `SPACE_GITHUB_OWNER` when configured, registers nothing else: the directory under `apps/` is the registration. The shared skill [`space-app`](../skills/space-app/SKILL.md) covers adopting an existing project and every later change. |
 | Validate | `bun run validate [<dir>]` | Parses `space.yaml` against the schema and the semantic rules (unique ports, referenced files exist, placeholders resolvable). Exit code 1 with one line per problem. |
 | Sync | automatic on boot and on `POST /api/apps/sync` | Discovers every `apps/*/space.yaml`, provisions storage, registers tasks, starts services, publishes agents and widgets. Idempotent. |
 | Pause / archive | edit `status:` and sync | Tasks and service stop; storage stays. |
@@ -430,7 +430,7 @@ notify:
 | `backup` | Implemented (`src/space/storage/backup/`): daily snapshots, retention, weekly verify, `restore` |
 | `notify`, `/api/notify`, `SPACE_APP_TOKEN` | Implemented (`src/space/notify/`, `skills/notify/`) |
 | Top-level `spec`, `title`, `description`, `icon`, `url`, `status`, `repo` | Implemented (`src/space/scheduler/manifest.ts`); `paused`/`archived` stop the app's tasks |
-| `service` | Parsed; health probed by the panel. Supervision (start, restart, logs, `PORT`) planned |
+| `service` | Parsed; health probed by the panel; logs read through `SPACE_SERVICE_LOGS` (`GET /api/apps/:app/logs`, `space logs`). Supervision (start, restart, log collection, `PORT`) planned |
 | Router, `/api/router` | Implemented (`src/space/router/`): with `SPACE_ROUTER=caddy` every app's hostname is routed on the machine, no per-app registration ([router.md](router.md)) |
 | `agents`, chat route | Implemented for `claude` (`src/space/agents/`); `skills` and `memory` are parsed but not mounted yet |
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |

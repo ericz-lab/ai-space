@@ -97,10 +97,12 @@ export const GUIDE_TEMPLATE = `## Layout
 ai-space listens on the host and port in \`.env\` (\`SPACE_HOST\`, \`SPACE_PORT\`; default \`127.0.0.1:8700\`) as the user unit \`ai-space\`:
 
 \`\`\`sh
-curl -s http://127.0.0.1:8700/healthz
-journalctl --user -u ai-space -n 50          # logs
+space status                                  # health, services, failing tasks, backups, model load, peers
+space logs space -n 50                        # ai-space's own log (journalctl --user -u ai-space)
 systemctl --user restart ai-space             # after editing .env
 \`\`\`
+
+The \`space\` command (\`docs/cli.md\`; \`space help\` lists it all, \`space <noun> help\` one noun) is the shell for everything below: \`space app ls\`, \`space app sync [<app>]\`, \`space task ls\`, \`space task run <app>/<task> --wait\`, \`space task runs <app>/<task>\`, \`space task disable <app>/<task>\`, \`space logs <app> -f\`, \`space model usage\`, \`space notify send\`, \`space backup ls\`, \`space backup run <app>\`, \`space peer ls\`, \`space router show\`; \`--json\` prints what the route returned, \`space api <METHOD> <path> [body]\` calls any route with the token added. Inside a task's command it needs no \`--app\`: \`SPACE_APP\` and \`SPACE_APP_TOKEN\` are set.
 
 Mutating routes take \`Authorization: Bearer $SPACE_API_TOKEN\` (the token is in \`.env\`). The ones an operator reaches for:
 
@@ -114,7 +116,7 @@ Mutating routes take \`Authorization: Bearer $SPACE_API_TOKEN\` (the token is in
 
 Peers (\`docs/peers.md\`): when \`.env\` lists other ai-space machines as \`SPACE_PEER_<NAME>\`, this one is a hub and \`GET /api/peers\` shows each peer's health and what its panel holds. A peer app is addressed as \`<peer>/<app>\`; through \`/api/peers/<peer>/...\` the hub can chat with the peer's agents, read their sessions, show its widgets and uninstall one of its apps, and nothing else. A peer's tasks, data, backups and files stay on that machine: reach them through that machine's own ai-space or a shell there, not through this one.
 
-The same from the shell, run inside \`core/\`: \`bun src/index.ts env <app>\` (an app's provisioned variables), \`bun src/index.ts notify\`, \`backup <app>\`, \`backups\`, \`restore <app>\`.
+On this machine without a running ai-space: \`space app env <app>\` (an app's provisioned variables), \`space backup run <app>\`, \`space backup verify\`, \`space backup restore <app> …\`, \`space init\`, \`space setup\`.
 
 ## Rules
 
