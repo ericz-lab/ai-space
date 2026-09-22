@@ -57,9 +57,10 @@ Everything the operator does to the launcher happens in **edit mode**: long-pres
 - **Resize a widget.** In edit mode every widget card has a grip in its bottom-right corner; dragging it snaps the card to 1 or 2 columns and 1 or 2 rows (the head shows the size while dragging). The size is stored on release in the layout (`PUT /api/panel/layout { sizes: { "<app>/<widget>": "1x2" } }`) and overrides the manifest's `size` on this panel; `null` returns the widget to the manifest's size. The app's repository is not touched.
 - **Add.** The "Add" tile takes a link; see the previous section.
 - **Uninstall.** Below the app grid, edit mode shows an uninstall zone. Dropping a tile there opens a confirmation that says what will happen, then sends `DELETE /api/apps/:app` (for a peer's app `DELETE /api/peers/:peer/apps/:app`, which the hub forwards to the peer and then refreshes its snapshot). In order:
-  1. The service is stopped with the operator's stop command (`SPACE_SERVICE_STOP` in the workspace `.env`, `{app}` replaced by the name, e.g. `sudo systemctl disable --now {app}`). A stop that fails aborts the whole uninstall with 502 and the app stays as it was. With no stop command configured the service is left running and the response says `stopped: "unconfigured"`.
-  2. The directory leaves the workspace without losing code: a symlink is unlinked and its target left alone, a checkout under `apps/` is moved to `<workspace>/trash/<name>-<stamp>`, a manifest-only directory is deleted, a directory registered through `SPACE_APPS` is left where it is (`dir.kind` in the response: `unlinked`, `moved`, `deleted`, `kept`).
-  3. The app is forgotten: its manifest tasks become orphaned (run history kept), its agents and widgets leave the panel, its service leaves the list. The data directory `<workspace>/data/<name>/` is kept; the response names it.
+  1. A task of the app with a run in flight refuses the uninstall with 409 and names the tasks: stopping the service and moving the directory would pull the ground from under that run. `DELETE /api/apps/:app?force=1` (`space app uninstall APP --force`) goes ahead anyway.
+  2. The service is stopped with the operator's stop command (`SPACE_SERVICE_STOP` in the workspace `.env`, `{app}` replaced by the name, e.g. `sudo systemctl disable --now {app}`). A stop that fails aborts the whole uninstall with 502 and the app stays as it was. With no stop command configured the service is left running and the response says `stopped: "unconfigured"`.
+  3. The directory leaves the workspace without losing code: a symlink is unlinked and its target left alone, a checkout under `apps/` is moved to `<workspace>/trash/<name>-<stamp>`, a manifest-only directory is deleted, a directory registered through `SPACE_APPS` is left where it is (`dir.kind` in the response: `unlinked`, `moved`, `deleted`, `kept`).
+  4. The app is forgotten: its manifest tasks become orphaned (run history kept), its agents and widgets leave the panel, its service leaves the list. The data directory `<workspace>/data/<name>/` is kept; the response names it.
 
   Uninstalling does not touch the app's repository, its systemd unit file, its tunnel hostname or its data. Those are the operator's, and the [app spec](app-spec.md#lifecycle) lists them under retiring an app. Removing the directory by hand and calling `POST /api/apps/sync` has the same effect on the space, minus the stop command; the sync reports such apps under `gone`.
 
@@ -101,7 +102,7 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 | `GET /api/services` | every app with a `service`: port and health, for Settings; plus `peers`, one entry per peer machine |
 | `POST /api/apps` | create a manifest-only app from `{ link }` or identity fields |
 | `PATCH /api/apps/:app` | `{ hidden }` |
-| `DELETE /api/apps/:app` | uninstall: stop the service, take the directory out of the workspace, forget the app (see above) |
+| `DELETE /api/apps/:app[?force=1]` | uninstall: stop the service, take the directory out of the workspace, forget the app (see above); 409 while a task of the app is running, unless forced |
 | `GET /api/apps/:app/icon`, `GET /api/agents/:app/:agent/avatar` | icon files from the app directory; paths cannot escape it |
 | `GET /api/widgets`, `GET /api/widgets/:app/:name/embed` | widget payloads and embed pages |
 | `GET`/`PUT /api/panel/layout` | order and hidden set |

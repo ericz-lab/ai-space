@@ -16,7 +16,12 @@ ExecStart=%h/.bun/bin/bun src/index.ts
 Restart=on-failure
 RestartSec=5
 KillSignal=SIGTERM
-TimeoutStopSec=30
+# Only the main process is signalled on stop: the task runs and model calls it started
+# are children (ssh, bun, python), and control-group signalling would kill them the
+# moment a restart begins, which is exactly the work the drain is there to save.
+KillMode=mixed
+# Above SPACE_DRAIN_SECONDS (60 by default), so the drain finishes before systemd kills.
+TimeoutStopSec=120
 
 [Install]
 WantedBy=default.target

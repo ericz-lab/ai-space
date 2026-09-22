@@ -62,7 +62,7 @@ Rules:
 | `space app show APP` | the manifest as synced, storage, tasks, agents, widgets, last backup | `GET /api/apps/:app`, `.../storage`, `.../backups` |
 | `space app sync [APP]` | re-read one `space.yaml` or every app directory | `POST /api/apps/sync`, `POST /api/apps/:app/sync` |
 | `space app hide APP` / `unhide` | the panel's hidden flag | `PATCH /api/apps/:app` |
-| `space app uninstall APP [--yes]` | stop, remove, forget; asks unless `--yes` | `DELETE /api/apps/:app` |
+| `space app uninstall APP [--yes] [--force]` | stop, remove, forget; asks unless `--yes`; refuses while a task of the app runs unless `--force` | `DELETE /api/apps/:app` |
 | `space app env APP` | `export` lines of the provisioned variables | disk (`storage.envFor`) |
 | `space app new NAME [--dir D] [--title T] [--port N] [--no-github]` | the `new-app` command of [app-spec.md](app-spec.md): the `space-app` template filled in, `git init`, first commit, a private repository under `SPACE_GITHUB_OWNER` when set | disk (`newapp.ts`) |
 | `space task ls [--app APP] [--failing]` | task, schedule, enabled, last run, next run | `GET /api/tasks` |

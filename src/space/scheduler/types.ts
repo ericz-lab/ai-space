@@ -81,6 +81,8 @@ export type EventInput = {
 export type TaskState = {
   nextRunAt?: number;
   runningAt?: number;
+  /** What started the run in flight; kept so a run this process never finished can still be recorded. */
+  runningTrigger?: RunTrigger;
   lastRunAt?: number;
   lastStatus?: RunStatus;
   lastError?: string;

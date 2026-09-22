@@ -217,6 +217,31 @@ Everything lives under the workspace (`~/.ai-space` by default, `SPACE_HOME` to 
 
 ai-space runs as a user-level systemd unit (`deploy/ai-space.service`, installed by `deploy/install.sh`). Apps that need a long-running process run under their own unit, and the scheduler reaches them over `127.0.0.1`. A bare-repo `post-receive` hook (`deploy/post-receive`) turns `git push <host> main` into checkout, install and restart.
 
+## Stopping and restarting
+
+A restart is the most common way for work to vanish, because every deploy, every app install
+that changes the workspace `.env`, and every operator `systemctl restart` is one. The shutdown
+is therefore a drain, not a stop:
+
+1. The clock stops and no new run is launched; the bus, notify and peers stop too.
+2. The runs in flight, and the model calls apps are blocked on (`POST /api/model/run`), get
+   `SPACE_DRAIN_SECONDS` (60 by default) to finish. The HTTP server keeps serving while they do,
+   because a command task in flight may still be calling back into the space.
+3. Whatever is still going then is aborted: the run lands in the history as a failure and the
+   model call in the ledger as interrupted. Nothing disappears silently.
+
+Two unit settings have to agree with this, and `deploy/ai-space.service` sets both:
+
+- `KillMode=mixed`, so only the main process is signalled. The default (`control-group`) sends
+  SIGTERM to every child the moment the restart begins — the `ssh`, `bun` and `python` processes
+  that *are* the runs — which kills exactly the work the drain exists to save.
+- `TimeoutStopSec` above `SPACE_DRAIN_SECONDS`, or systemd SIGKILLs the process mid-drain.
+
+A run the process could not finish at all (SIGKILL, power loss) is recorded on the next start:
+the stale `runningAt` marker becomes a run with `interrupted: …` as its error, so the history
+shows it and a task with `notify: { when: [error] }` reports it. It does not count towards the
+error backoff — the run did not fail, it was cut off — and the task stays due, so it runs again.
+
 ## Migrating an app
 
 1. Add a `space.yaml` next to the app code. For each crontab entry, the `command` is usually the same line the crontab ran; for each in-process poller, expose one trigger endpoint and use an `http` target with the poller's interval.
@@ -229,7 +254,7 @@ What stays in the app: polling loops faster than a few minutes, loops that depen
 
 | Situation | Behaviour |
 | --- | --- |
-| Process restarts mid-run | Marker cleared on start; the task is due again and runs once. An app that is still busy with the previous round answers `skipped`. |
+| Process restarts mid-run | The run gets the drain's grace to finish; past it, it is aborted and recorded. A run killed outright is recorded as interrupted on the next start, and the task is due again and runs once. An app that is still busy with the previous round answers `skipped`. |
 | Target hangs forever | Aborted or killed at `timeoutMs`; recorded as an error; backoff applies. |
 | Target fails repeatedly | Backoff grows to one hour; the task keeps its natural schedule otherwise. |
 | Clock jumps forward | Timer fires within 60 s; every past-due task runs once. |

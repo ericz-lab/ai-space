@@ -10,6 +10,10 @@ import { type ModelCall, type RunInput, type RunOutcome, type Usage } from "./ty
  * to the ledger. The cap exists because every call is a process (or an API
  * request) and an app in a loop must not start fifty of them; excess calls
  * wait in order.
+ *
+ * Shutdown: `drain` waits for the calls in flight, because an app is blocked on
+ * each of them; the ones still running when the grace is over are written to the
+ * ledger as interrupted, so a restart that cuts a call is visible there.
  */
 
 export type ModelServiceOptions = {
@@ -23,6 +27,11 @@ export type ModelServiceOptions = {
 
 export type RunResult = { outcome: RunOutcome; call: ModelCall };
 
+/** Recorded for a call the process could not finish: a restart, or a drain that ran out of grace. */
+export const INTERRUPTED = "interrupted: ai-space stopped while the call was running";
+
+type Inflight = { app: string; tag: string; model: string; promptChars: number; startedAt: number };
+
 export class ModelService {
   readonly store: ModelStore;
   readonly runtimes: RuntimeRegistry;
@@ -31,6 +40,7 @@ export class ModelService {
   private readonly now: () => number;
   private running = 0;
   private readonly queue: (() => void)[] = [];
+  private readonly inflight = new Map<Promise<RunResult>, Inflight>();
 
   constructor(opts: ModelServiceOptions) {
     this.store = opts.store;
@@ -63,6 +73,38 @@ export class ModelService {
    * still carries the whole answer.
    */
   async run(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta): Promise<RunResult> {
+    const p = this.execute(app, input, signal, onDelta);
+    this.inflight.set(p, { app, tag: input.tag, model: input.model, promptChars: input.prompt.length, startedAt: this.now() });
+    try {
+      return await p;
+    } finally {
+      this.inflight.delete(p);
+    }
+  }
+
+  /** Resolves once no call is in flight. */
+  async idle(): Promise<void> {
+    while (this.inflight.size > 0) await Promise.allSettled([...this.inflight.keys()]);
+  }
+
+  /**
+   * Let the calls in flight finish, up to `graceMs`; whatever is still running then
+   * is recorded as interrupted, since the process is about to go away and the call
+   * would otherwise leave nothing in the ledger.
+   */
+  async drain(graceMs: number): Promise<{ finished: number; interrupted: number }> {
+    const started = this.inflight.size;
+    if (started && graceMs > 0) await Promise.race([this.idle(), sleep(graceMs)]);
+    const left = [...this.inflight.values()];
+    const at = this.now();
+    for (const e of left) {
+      this.store.add({ app: e.app, tag: e.tag, model: e.model, backend: this.backend as ModelCall["backend"], origin: "run", status: "error", error: INTERRUPTED, startedAt: e.startedAt, durationMs: Math.max(0, at - e.startedAt), promptChars: e.promptChars });
+      this.log(`${e.app}/${e.tag} (${e.model}): ${INTERRUPTED}`);
+    }
+    return { finished: started - left.length, interrupted: left.length };
+  }
+
+  private async execute(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta): Promise<RunResult> {
     let target: { runtime: RuntimeAdapter; model: string };
     try {
       target = this.resolve(input.model);
@@ -156,4 +198,11 @@ export class ModelService {
     this.running--;
     this.queue.shift()?.();
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    if (typeof t === "object" && "unref" in t) t.unref();
+  });
 }

@@ -105,6 +105,14 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 | `usage` | `inputTokens`, `cacheWriteTokens`, `cacheReadTokens`, `outputTokens`, as reported; absent when the runtime reported none. |
 | `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend; absent otherwise. |
 
+### Restarts
+
+A call is a process (`claude -p` over `ssh`, usually) and the calling app is blocked on it, so a
+restart of ai-space waits for the calls in flight: `SPACE_DRAIN_SECONDS` of grace, then a ledger
+row with `interrupted: …` for whatever is still running, so a cut call is visible next to the ones
+that cost money. `deploy/ai-space.service` uses `KillMode=mixed` for the same reason — with the
+systemd default the `ssh` children die the moment the restart begins. See `docs/scheduler.md`.
+
 ### Imported history
 
 An app that kept its own call table before the service existed can bring it along: `bun src/index.ts model-import <app> <file.jsonl>` reads one JSON object per line (`ts`, `tag`, `model`, `backend`, `ok`, `durationMs`, `promptChars`, `outputChars`, `inputTokens`, `outputTokens`, `cacheReadTokens` / `cacheWriteTokens` or one combined `cacheTokens`, `costUsd`) and writes the rows with `origin: import`. A row already present (same app, start time, tag and duration) is skipped, so the command can be run again after an app exported more. The export itself is the app's business: one query over its table, one line per row.

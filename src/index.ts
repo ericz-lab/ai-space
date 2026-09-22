@@ -197,6 +197,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     health,
     peers,
     onCreate: syncDir,
+    runningTasks: (app) => scheduler.runningTasks(app),
     onRemove: async (app) => {
       scheduler.forget(app);
       void router.sync();
@@ -263,6 +264,12 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   });
   console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}${terminal.enabled ? ` · terminal ${terminal.backend}` : ""}${router.enabled ? ` · router ${config.router.backend} :${config.router.port}` : ""} · runtimes ${runtimes.describe()} (${loaded.source})`);
 
+  // A restart must not cut the work in flight: no new runs are started, then the task runs and the
+  // model calls apps are blocked on get SPACE_DRAIN_SECONDS to finish. The server keeps serving while
+  // they do, because a command task in flight still calls /api/model/run. What is still going when the
+  // grace is over is aborted and recorded, so nothing disappears silently. The unit must give the
+  // process more than this: KillMode=mixed (children survive until the drain is over) and a
+  // TimeoutStopSec above SPACE_DRAIN_SECONDS. See deploy/ai-space.service and docs/scheduler.md.
   const shutdown = async () => {
     console.log("[space] shutting down");
     scheduler.stop();
@@ -271,8 +278,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     peers.stop();
     terminal.stop();
     router.stop();
+    const at = Date.now();
+    const [runs, calls] = await Promise.all([scheduler.drain(config.drainMs), model.drain(config.drainMs)]);
+    console.log(`[space] drained in ${Date.now() - at}ms: ${runs.finished} run(s) finished, ${runs.aborted} aborted; ${calls.finished} model call(s) finished, ${calls.interrupted} interrupted`);
     server.stop();
-    await scheduler.idle();
     await bus.idle();
     await notify.idle();
     store.close();

@@ -33,6 +33,12 @@ export type Config = {
   extraAppDirs: string[];
   apiToken: string;
   maxConcurrency: number;
+  /**
+   * How long a shutdown waits for the task runs and model calls in flight before it
+   * aborts them (SPACE_DRAIN_SECONDS). Keep the service unit's TimeoutStopSec above it,
+   * or systemd kills the process mid-drain.
+   */
+  drainMs: number;
   /** Superuser URL used only to create per-app postgres databases; empty disables postgres provisioning. */
   pgAdminUrl: string;
   /** Credentials for per-app s3 blob stores (SPACE_S3_*); undefined disables the s3 backend. */
@@ -109,6 +115,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
       .map((p) => resolve(p.replace(/^~(?=$|\/)/, process.env.HOME ?? "~"))),
     apiToken: env.SPACE_API_TOKEN?.trim() ?? "",
     maxConcurrency: Math.max(1, Number(env.SPACE_MAX_CONCURRENCY ?? 2) || 2),
+    drainMs: Math.max(0, Number(env.SPACE_DRAIN_SECONDS ?? 60) || 60) * 1000,
     pgAdminUrl: env.SPACE_PG_ADMIN_URL?.trim() ?? "",
     notifyTasks: env.SPACE_NOTIFY_TASKS?.trim() ?? "",
     eventRetentionMs: Math.max(1, Number(env.SPACE_EVENTS_RETENTION_DAYS ?? 30) || 30) * 24 * 3600_000,

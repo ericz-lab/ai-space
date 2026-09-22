@@ -120,12 +120,13 @@ const hidden = (value: boolean) => async (ctx: Ctx, argv: string[]) => {
 };
 
 const uninstall = async (ctx: Ctx, argv: string[]) => {
-  const { flags, positional } = parseArgs(argv, { yes: { kind: "bool", alias: "y" } });
+  const { flags, positional } = parseArgs(argv, { yes: { kind: "bool", alias: "y" }, force: { kind: "bool" } });
   const name = need(positional, 0, "APP");
   noMore(positional, 1);
   if (!(await confirm(ctx, flags.yes, `Uninstall ${name}: stop its service, take its directory out of the workspace and forget it (data is kept)?`))) return 1;
   const c = await ctx.client();
-  const res = await c.delete<{ app: string; stopped: string; dir: unknown; data: string }>(`/api/apps/${name}`, { timeoutMs: 120_000 });
+  // Without --force the space refuses while a task of the app is running (409 with their names).
+  const res = await c.delete<{ app: string; stopped: string; dir: unknown; data: string }>(`/api/apps/${name}${flags.force ? "?force=1" : ""}`, { timeoutMs: 120_000 });
   if (ctx.flags.json) return ctx.print.data(res), 0;
   const dir = res.dir as { kind: string; to?: string; reason?: string };
   ctx.print.line(`${res.app}: service ${res.stopped}; directory ${dir.kind}${dir.to ? ` to ${dir.to}` : dir.reason ? ` (${dir.reason})` : ""}; data kept at ${res.data}`);
@@ -157,7 +158,7 @@ export const appNoun: Noun = {
     sync: { usage: "[APP]", summary: "re-read one space.yaml, or every app directory", run: sync },
     hide: { usage: "APP", summary: "hide the app on the panel", run: hidden(true) },
     unhide: { usage: "APP", summary: "show the app on the panel again", run: hidden(false) },
-    uninstall: { usage: "APP [--yes]", summary: "stop, take out of the workspace, forget (data kept)", run: uninstall },
+    uninstall: { usage: "APP [--yes] [--force]", summary: "stop, take out of the workspace, forget (data kept; --force: even with a task running)", run: uninstall },
     env: { usage: "APP", summary: "the variables storage provisioned, as export lines (eval \"$(space app env APP)\")", run: env },
     new: { usage: "NAME [--dir DIR] [--title T] [--port N] [--no-github]", summary: "a new app from the template: git init, first commit, private GitHub repository when configured", run: newApp },
   },

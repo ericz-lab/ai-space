@@ -33,7 +33,13 @@ import {
  * - errors back off 30s → 1m → 5m → 15m → 60m, reset on success;
  * - a tick with nothing due only fills in missing nextRunAt values, it never
  *   advances a past-due one (that would silently skip a run);
- * - stale running markers are cleared on start and after STUCK_RUN_MS.
+ * - stale running markers are cleared on start and after STUCK_RUN_MS, and the
+ *   run they belonged to is recorded as interrupted, so a process that went away
+ *   mid-run leaves a trace instead of nothing.
+ *
+ * Shutdown: `drain` stops the clock, gives the runs in flight a grace period to
+ * finish, and aborts whatever is still going, so those runs reach the history as
+ * failures rather than disappearing with the process.
  *
  * Events: `publish` stores the event and queues it on every enabled task whose
  * triggers match (`state.pending`, due after the trigger's debounce). A task is
@@ -49,6 +55,10 @@ import {
 const MAX_TIMER_DELAY_MS = 60_000;
 const STUCK_RUN_MS = 2 * 3_600_000;
 const ERROR_BACKOFF_MS = [30_000, 60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
+/** How long an aborted run may take to unwind before the drain gives up on it. */
+const ABORT_GRACE_MS = 5_000;
+/** Recorded for a run the process could not finish: a restart, or a drain that ran out of grace. */
+export const INTERRUPTED = "interrupted: ai-space stopped while the task was running";
 /** Failed runs an event rides through before it is dropped from the task's queue. */
 export const MAX_EVENT_REDELIVERIES = 5;
 
@@ -82,7 +92,7 @@ export class Scheduler {
   private readonly appDirs = new Map<string, string>();
   /** Apps whose tasks ai-space itself contributes (`space`): a workspace sync must not forget them. */
   private readonly builtin = new Set<string>();
-  private readonly inflight = new Map<string, Promise<void>>();
+  private readonly inflight = new Map<string, { promise: Promise<void>; controller: AbortController }>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private ticking = false;
@@ -108,14 +118,14 @@ export class Scheduler {
     for (const task of this.store.listTasks()) {
       let changed = false;
       if (task.state.runningAt !== undefined) {
-        task.state.runningAt = undefined;
+        this.recordInterrupted(task, now);
         stale++;
         changed = true;
       }
       if (this.fillNextRun(task, now)) changed = true;
       if (changed) this.store.saveState(task.id, task.state, now);
     }
-    if (stale) this.log(`cleared ${stale} stale running marker(s) left by a previous process`);
+    if (stale) this.log(`${stale} run(s) were interrupted by a previous process and are recorded as such`);
     const tasks = this.store.listTasks();
     this.log(`started with ${tasks.length} task(s), ${tasks.filter(effectiveEnabled).length} enabled`);
     await this.tick();
@@ -129,7 +139,61 @@ export class Scheduler {
 
   /** Resolves once no run is in flight. Mostly for tests and graceful shutdown. */
   async idle(): Promise<void> {
-    while (this.inflight.size > 0) await Promise.allSettled([...this.inflight.values()]);
+    while (this.inflight.size > 0) await Promise.allSettled([...this.inflight.values()].map((r) => r.promise));
+  }
+
+  /**
+   * Shut the scheduler down without losing what is running: the clock stops, the
+   * runs in flight get `graceMs` to finish on their own, and the ones still going
+   * then are aborted so their failure is recorded. Returns what happened, for the log.
+   */
+  async drain(graceMs: number): Promise<{ finished: number; aborted: number }> {
+    this.stop();
+    const started = this.inflight.size;
+    if (started && graceMs > 0) await Promise.race([this.idle(), sleep(graceMs)]);
+    const left = [...this.inflight.values()];
+    if (left.length) {
+      this.log(`aborting ${left.length} run(s) still going after ${Math.round(graceMs / 1000)}s`);
+      for (const r of left) r.controller.abort(new Error("ai-space is shutting down"));
+      await Promise.race([this.idle(), sleep(ABORT_GRACE_MS)]);
+    }
+    return { finished: started - left.length, aborted: left.length };
+  }
+
+  /**
+   * A run whose process went away: `finish` never ran, so without this the run leaves
+   * no record at all and the task simply runs again. Recorded as a failure, but without
+   * the error backoff - the run did not fail, it was cut off.
+   */
+  private recordInterrupted(task: Task, now: number): void {
+    const startedAt = task.state.runningAt ?? now;
+    const state = task.state;
+    const before = { ...state };
+    state.runningAt = undefined;
+    state.lastRunAt = startedAt;
+    state.lastStatus = "error";
+    state.lastError = INTERRUPTED;
+    state.lastDurationMs = Math.max(0, now - startedAt);
+    const run = this.store.addRun({ taskId: task.id, startedAt, endedAt: now, status: "error", error: INTERRUPTED, trigger: state.runningTrigger ?? "schedule" });
+    state.runningTrigger = undefined;
+    this.log(`task ${task.app}/${task.name}: interrupted after ${state.lastDurationMs}ms`);
+    if (this.onFinish) {
+      try {
+        this.onFinish({ task, run, before });
+      } catch (e) {
+        this.log(`onFinish hook failed: ${(e as Error).message ?? String(e)}`);
+      }
+    }
+  }
+
+  /** Tasks of an app with a run in flight right now; an uninstall refuses to pull the ground from under them. */
+  runningTasks(app: string): string[] {
+    const names: string[] = [];
+    for (const id of this.inflight.keys()) {
+      const task = this.store.getTask(id);
+      if (task?.app === app) names.push(task.name);
+    }
+    return names.sort();
   }
 
   appDir(app: string): string | undefined {
@@ -258,6 +322,7 @@ export class Scheduler {
     const attempt = task.state.pending?.attempt ?? 0;
     task.state.pending = undefined;
     task.state.runningAt = startedAt;
+    task.state.runningTrigger = trigger;
     task.state.lastError = undefined;
     this.store.saveState(task.id, task.state, startedAt);
     this.log(`task ${task.app}/${task.name}: started (${trigger}${events.length ? `, ${events.length} event(s)` : ""})`);
@@ -276,7 +341,7 @@ export class Scheduler {
         this.inflight.delete(task.id);
         void this.tick().catch((e) => this.log(`tick failed: ${String(e)}`));
       });
-    this.inflight.set(task.id, p);
+    this.inflight.set(task.id, { promise: p, controller });
   }
 
   private finish(taskId: string, startedAt: number, result: RunResult, trigger: RunTrigger, events: SpaceEvent[], attempt = 0): void {
@@ -286,6 +351,7 @@ export class Scheduler {
     const before = { ...task.state };
     const s = task.state;
     s.runningAt = undefined;
+    s.runningTrigger = undefined;
     s.lastRunAt = startedAt;
     s.lastStatus = result.status;
     s.lastError = result.error;
@@ -525,6 +591,13 @@ export class Scheduler {
     this.armTimer();
     return summary;
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    if (typeof t === "object" && "unref" in t) t.unref();
+  });
 }
 
 /** When the task next wants to run: its clock or its pending events, whichever is earlier. */

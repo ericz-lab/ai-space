@@ -17,7 +17,7 @@ import { type WidgetFeed, sourceUrl } from "./widgets.ts";
  *   POST   /api/apps                     { link } or identity fields: create a manifest-only app
  *   GET    /api/apps/:app
  *   PATCH  /api/apps/:app                { hidden }
- *   DELETE /api/apps/:app                uninstall: stop the service, take the directory out, forget it
+ *   DELETE /api/apps/:app[?force=1]      uninstall: stop the service, take the directory out, forget it
  *   GET    /api/apps/:app/icon
  *   GET    /api/agents/:app/:agent/avatar
  *   GET    /api/services                 every app that declares a service, with its health; peers with theirs
@@ -45,6 +45,8 @@ export type PanelApiOptions = {
   onCreate: (dir: string) => Promise<void>;
   /** Forget an app the panel removed. */
   onRemove: (app: string) => Promise<void>;
+  /** Tasks of the app with a run in flight; an uninstall refuses unless it is forced. */
+  runningTasks?: (app: string) => string[];
   /** Stop an app's service before it is uninstalled (SPACE_SERVICE_STOP); undefined = nothing stops it. */
   stopService?: (app: string) => Promise<{ ok: boolean; error?: string }>;
   /** Turn a link into identity fields; default asks the claude runtime. */
@@ -161,12 +163,17 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
         const lay = layout.hide(n, body.hidden);
         return json({ ok: true, app: viewOf(n, new Set(lay.hidden)) });
       }),
-      // Uninstall: the service is stopped first (a stop that fails aborts, the app stays), then the
-      // directory leaves the workspace (see uninstall.ts: code is never deleted) and the app is
-      // forgotten. The data directory is kept.
+      // Uninstall: a run of the app in flight blocks it (?force=1 goes ahead anyway), because
+      // stopping the service and moving the directory pulls the ground from under that run. Then
+      // the service is stopped (a stop that fails aborts, the app stays), the directory leaves the
+      // workspace (see uninstall.ts: code is never deleted) and the app is forgotten. Data is kept.
       DELETE: wrap(async (req) => {
         const n = name(req.params.app);
         const entry = entryOf(n);
+        const running = opts.runningTasks?.(n) ?? [];
+        if (running.length && new URL(req.url).searchParams.get("force") !== "1") {
+          return error(409, `"${n}" has ${running.length} task run(s) in flight (${running.join(", ")}); wait for them to finish, or uninstall with force`);
+        }
         let stopped: "ok" | "none" | "unconfigured" = "none";
         if (entry.manifest.service) {
           if (!opts.stopService) stopped = "unconfigured";

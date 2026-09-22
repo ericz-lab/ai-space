@@ -457,3 +457,57 @@ describe("event redelivery", () => {
     expect(got).toEqual(["feed/x"]);
   });
 });
+
+describe("shutdown", () => {
+  test("drain waits for the run in flight and records it", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const h = harness({ runner: async () => (await gate, { status: "ok", output: "done" }) });
+    h.s.syncManifest(h.manifest([mt("a")]));
+    await h.s.start();
+    const task = h.store.findTask("demo", "a")!;
+    expect(task.state.runningAt).toBeDefined();
+
+    const drained = h.s.drain(2000);
+    release();
+    expect(await drained).toEqual({ finished: 1, aborted: 0 });
+    expect(h.store.listRuns(task.id)[0]!.status).toBe("ok");
+  });
+
+  test("a run still going when the grace is over is aborted, not lost", async () => {
+    const h = harness({
+      runner: (_task, ctx) =>
+        new Promise((resolve) => {
+          ctx.signal.addEventListener("abort", () => resolve({ status: "error", error: "aborted" }));
+        }),
+    });
+    h.s.syncManifest(h.manifest([mt("a")]));
+    await h.s.start();
+    const task = h.store.findTask("demo", "a")!;
+
+    expect(await h.s.drain(10)).toEqual({ finished: 0, aborted: 1 });
+    const run = h.store.listRuns(task.id)[0]!;
+    expect(run.status).toBe("error");
+    expect(h.store.getTask(task.id)!.state.runningAt).toBeUndefined();
+  });
+
+  test("a run the process never finished is recorded as interrupted on the next start", async () => {
+    const h = harness();
+    h.s.syncManifest(h.manifest([mt("a", { enabled: false })]));
+    const task = h.store.findTask("demo", "a")!;
+    task.state.runningAt = h.at() - 5_000;
+    task.state.runningTrigger = "manual";
+    h.store.saveState(task.id, task.state, h.at());
+
+    await h.s.start();
+    const after = h.store.getTask(task.id)!;
+    expect(after.state.runningAt).toBeUndefined();
+    expect(after.state.lastStatus).toBe("error");
+    expect(after.state.lastDurationMs).toBe(5_000);
+    const run = h.store.listRuns(task.id)[0]!;
+    expect(run.trigger).toBe("manual");
+    expect(run.error).toContain("interrupted");
+    // The run failed, but the task did not: no backoff on top of the next schedule.
+    expect(after.state.consecutiveErrors).toBe(0);
+  });
+});

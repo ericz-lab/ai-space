@@ -17,6 +17,8 @@ let home = "";
 const registry = new AppRegistry();
 const removed: string[] = [];
 const stopCalls: string[] = [];
+/** Task runs the fake scheduler reports as in flight, per app. */
+const running: Record<string, string[]> = {};
 
 // Loopback calls the panel makes (health, widget sources) are answered here.
 const fakeFetch = (async (input: string | URL | Request) => {
@@ -79,6 +81,7 @@ widgets:
       onRemove: async (app) => {
         removed.push(app);
       },
+      runningTasks: (app) => running[app] ?? [],
       stopService: async (app) => {
         stopCalls.push(app);
         return app === "stubborn" ? { ok: false, error: "exit 1: unit not found" } : { ok: true };
@@ -237,5 +240,24 @@ describe("panel api", () => {
     expect(registry.get("stubborn")).toBeDefined();
     expect(await Bun.file(join(apps, "stubborn", "space.yaml")).exists()).toBe(true);
     expect(removed).toEqual(["leaving", "linked"]);
+  });
+
+  test("uninstall waits for a running task unless it is forced", async () => {
+    const apps = join(home, "apps");
+    await mkdir(join(apps, "busy"), { recursive: true });
+    await writeFile(join(apps, "busy", "space.yaml"), "name: busy\ntitle: Busy\nurl: https://busy.example.com\n");
+    await registry.set(await loadManifest(join(apps, "busy")));
+    running.busy = ["digest", "sync"];
+
+    const refused = await call("/api/apps/busy", { method: "DELETE" });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toContain("digest, sync");
+    expect(registry.get("busy")).toBeDefined();
+    expect(await Bun.file(join(apps, "busy", "space.yaml")).exists()).toBe(true);
+
+    const forced = await call("/api/apps/busy?force=1", { method: "DELETE" });
+    expect(forced.body).toMatchObject({ ok: true, app: "busy" });
+    expect(registry.get("busy")).toBeUndefined();
+    delete running.busy;
   });
 });
