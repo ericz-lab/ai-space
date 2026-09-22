@@ -3,4 +3,5 @@
 # `bun src/index.ts <command>`, run from wherever the checkout is.
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")/.." && pwd)"
 BUN="${BUN:-$(command -v bun || echo "$HOME/.bun/bin/bun")}"
+[ $# -eq 0 ] && set -- help
 exec "$BUN" "$HERE/src/index.ts" "$@"

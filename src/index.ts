@@ -245,5 +245,6 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   return { store, storage, scheduler, notify, notifyStore, model, modelStore, chat, chatStore, registry, peers, server, backups };
 }
 if (import.meta.main) {
-  process.exit(await run(process.argv.slice(2), { boot }));
+  // The unit runs `bun src/index.ts` with no word: that is `start`. `bin/space` with no word is `help`.
+  process.exit(await run(process.argv.length > 2 ? process.argv.slice(2) : ["start"], { boot }));
 }
