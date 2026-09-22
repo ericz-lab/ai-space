@@ -250,6 +250,19 @@ export async function checkTools(d: SetupDeps): Promise<Check[]> {
   } else {
     checks.push({ name: "cloudflared", ok: false, detail: "not on PATH", hint: "see docs/install.md step 5 (the panel stays loopback-only until then)" });
   }
+
+  // The router (docs/router.md) is optional: checked when it is on, or when caddy is there anyway.
+  const caddy = await d.which("caddy");
+  if (d.env.SPACE_ROUTER?.trim() === "caddy" || caddy) {
+    const hint = "see docs/install.md step 5 (wildcard and router)";
+    if (!caddy) checks.push({ name: "caddy", ok: false, detail: "not on PATH", hint });
+    else if (!(await d.which("systemctl"))) checks.push({ name: "caddy", ok: true, detail: "installed (no systemd here; keep it running with a LaunchAgent)", hint });
+    else {
+      const unit = await d.run(["systemctl", "--user", "is-active", "caddy"]);
+      const active = unit.stdout.trim() === "active";
+      checks.push({ name: "caddy", ok: active, detail: active ? "router unit active" : "installed, user unit not active", hint });
+    }
+  }
   return checks;
 }
 
@@ -297,6 +310,9 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
   set("SPACE_MAX_CONCURRENCY", await askNumber(io, "Task runs at the same time (agent tasks hold a slot for minutes)", current("SPACE_MAX_CONCURRENCY") || "4"));
   set("SPACE_CHAT_MODEL", await io.ask("Default chat model", { default: current("SPACE_CHAT_MODEL") || "sonnet" }));
   set("SPACE_NAME", await io.ask("Name of this space (shown to a hub, badge on peer tiles)", { default: current("SPACE_NAME") || d.hostname() }));
+  const router = (await io.ask("Router: none (one tunnel rule per app) or caddy (one wildcard rule; docs/router.md)", { default: current("SPACE_ROUTER") || "none" })).trim().toLowerCase();
+  if (router !== "none" || current("SPACE_ROUTER")) set("SPACE_ROUTER", router);
+  if (router === "caddy") set("SPACE_DOMAIN", await io.ask("Domain of the wildcard rule (apps get <app>.<domain>)", { default: current("SPACE_DOMAIN") }));
   io.say();
 
   /* 3. notifications */

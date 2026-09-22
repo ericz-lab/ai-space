@@ -14,6 +14,7 @@ import { MANIFEST_FILE } from "./scheduler/manifest.ts";
  *   ├── apps/    one directory per app; an app with a space.yaml is picked up automatically
  *   ├── data/    runtime state: space.db, then one directory per app (its databases, blobs/ and space.env)
  *   ├── logs/
+ *   ├── run/     files ai-space writes for other programs: the router's Caddyfile and admin socket (src/space/router/)
  *   ├── .claude/skills/  links to every shared and app skill, for sessions started by hand (src/space/skills.ts)
  *   ├── AGENTS.md        the workspace guide for such sessions, generated from a template plus
  *   │                    AGENTS.local.md (the operator's notes); CLAUDE.md links to it (src/space/guide.ts)
@@ -25,6 +26,7 @@ export type Workspace = {
   apps: string;
   data: string;
   logs: string;
+  run: string;
   envFile: string;
 };
 
@@ -42,6 +44,7 @@ export function workspacePaths(home: string): Workspace {
     apps: join(home, "apps"),
     data: join(home, "data"),
     logs: join(home, "logs"),
+    run: join(home, "run"),
     envFile: join(home, ".env"),
   };
 }
@@ -69,7 +72,7 @@ SPACE_SERVICE_STOP=
 export async function ensureWorkspace(home: string, env: Record<string, string | undefined> = process.env): Promise<{ ws: Workspace; created: string[]; updated: string[] }> {
   const ws = workspacePaths(home);
   const created: string[] = [];
-  for (const dir of [ws.home, ws.apps, ws.data, ws.logs]) {
+  for (const dir of [ws.home, ws.apps, ws.data, ws.logs, ws.run]) {
     if (!(await exists(dir))) {
       await mkdir(dir, { recursive: true });
       created.push(dir);

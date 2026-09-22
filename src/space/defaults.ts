@@ -110,12 +110,27 @@ export function urlOverrideKey(app: string): string {
   return `SPACE_APP_URL_${app.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
 }
 
-/** The manifest with this machine's overrides applied; unchanged when none is set. */
-export function applyEnvOverrides(manifest: Manifest, env: Record<string, string | undefined>): Manifest {
+/**
+ * The manifest with this machine's overrides applied; unchanged when none is
+ * set. `SPACE_APP_URL_<NAME>` wins. Otherwise a path `url` (`/`, `/docs`)
+ * resolves to `https://<app>.<domain><path>` when the space has a domain
+ * (`SPACE_DOMAIN`, docs/router.md) and to the service's loopback address
+ * when it has none, so a public app can write `url: /` and be right on
+ * every machine. A path needs a service port to resolve against.
+ */
+export function applyEnvOverrides(manifest: Manifest, env: Record<string, string | undefined>, opts: { domain?: string } = {}): Manifest {
   const url = env[urlOverrideKey(manifest.app)]?.trim();
-  if (!url) return manifest;
-  if (!/^https?:\/\//.test(url)) throw new Error(`${urlOverrideKey(manifest.app)} must start with http:// or https://`);
-  return { ...manifest, url };
+  if (url) {
+    if (!/^https?:\/\//.test(url)) throw new Error(`${urlOverrideKey(manifest.app)} must start with http:// or https://`);
+    return { ...manifest, url };
+  }
+  if (manifest.url?.startsWith("/")) {
+    const port = manifest.service?.port;
+    if (!port) throw new Error(`url "${manifest.url}" is a path, which needs a service with a port to resolve against`);
+    const base = opts.domain ? `https://${manifest.app}.${opts.domain}` : `http://127.0.0.1:${port}`;
+    return { ...manifest, url: base + manifest.url };
+  }
+  return manifest;
 }
 
 async function runCommand(cmd: string[], cwd: string): Promise<{ code: number; output: string }> {

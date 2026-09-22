@@ -83,7 +83,7 @@ i18n:                              # translations of the display text, by langua
 | `title` | string | Shown on the panel. |
 | `description` | string | One sentence, shown on the panel card and to agents. |
 | `icon` | string | Repository path to an SVG or PNG, a single emoji, or an http(s) URL. |
-| `url` | string | Public entry URL; the panel shows a tile only for apps that have one. Widget and agent links are resolved relative to it. A `{lang}` placeholder in its query (`https://my-app.example.com/?lang={lang}`) is replaced by the panel's language when the tile is opened; without one the app sees only the browser's language. See [i18n](i18n.md#apps). An operator overrides it per machine with `SPACE_APP_URL_<NAME>` in the workspace `.env` (the app name uppercased, `-` and `.` as `_`), which is how a public app whose manifest names a loopback address gets a hostname on a server. |
+| `url` | string | Public entry URL; the panel shows a tile only for apps that have one. Widget and agent links are resolved relative to it. A `{lang}` placeholder in its query (`https://my-app.example.com/?lang={lang}`) is replaced by the panel's language when the tile is opened; without one the app sees only the browser's language. See [i18n](i18n.md#apps). A **path** (`/`, `/docs?lang={lang}`) means "my page, on the hostname the space assigns": it resolves to `https://<name>.<SPACE_DOMAIN><path>` on a space with a domain and to `http://127.0.0.1:<service.port><path>` on one without, so a public app writes `url: /` and is right on every machine; it needs a `service` with a `port`. See [router](router.md). An operator overrides either form per machine with `SPACE_APP_URL_<NAME>` in the workspace `.env` (the app name uppercased, `-` and `.` as `_`). |
 | `status` | enum | `paused` keeps the app listed but stops its tasks and service; `archived` hides it and stops everything. Storage is never dropped by a status change. |
 | `repo` | string | The origin URL. |
 | `i18n` | mapping | Translations of `title` and `description`, and by name of the agents' and widgets' text, keyed by language tag (`zh`, `zh-Hant`, `pt-BR`). The panel shows the reader's language when the manifest has it and the plain field otherwise; names are never translated. Only declared agent and widget names may appear. See [i18n](i18n.md). |
@@ -431,6 +431,7 @@ notify:
 | `notify`, `/api/notify`, `SPACE_APP_TOKEN` | Implemented (`src/space/notify/`, `skills/notify/`) |
 | Top-level `spec`, `title`, `description`, `icon`, `url`, `status`, `repo` | Implemented (`src/space/scheduler/manifest.ts`); `paused`/`archived` stop the app's tasks |
 | `service` | Parsed; health probed by the panel. Supervision (start, restart, logs, `PORT`) planned |
+| Router, `/api/router` | Implemented (`src/space/router/`): with `SPACE_ROUTER=caddy` every app's hostname is routed on the machine, no per-app registration ([router.md](router.md)) |
 | `agents`, chat route | Implemented for `claude` (`src/space/agents/`); `skills` and `memory` are parsed but not mounted yet |
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |
 | Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |

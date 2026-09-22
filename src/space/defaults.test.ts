@@ -77,4 +77,17 @@ describe("applyEnvOverrides", () => {
     expect(applyEnvOverrides(m, { SPACE_APP_URL_AI_USAGE: " https://usage.example.com/?lang={lang} " }).url).toBe("https://usage.example.com/?lang={lang}");
     expect(() => applyEnvOverrides(m, { SPACE_APP_URL_AI_USAGE: "usage.example.com" })).toThrow(/http/);
   });
+
+  test("a path url resolves under the space's domain, or to the service's loopback address without one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "space-app-"));
+    await writeFile(join(dir, "space.yaml"), "name: notes\nurl: /docs?lang={lang}\nservice: { command: bun run, port: 8710 }\n");
+    const m = await loadManifest(dir);
+    expect(m.url).toBe("/docs?lang={lang}");
+    expect(applyEnvOverrides(m, {}, { domain: "example.com" }).url).toBe("https://notes.example.com/docs?lang={lang}");
+    expect(applyEnvOverrides(m, {}).url).toBe("http://127.0.0.1:8710/docs?lang={lang}");
+    expect(applyEnvOverrides(m, { SPACE_APP_URL_NOTES: "https://n.example.org/" }, { domain: "example.com" }).url).toBe("https://n.example.org/");
+    await writeFile(join(dir, "space.yaml"), "name: notes\nurl: /\n");
+    const bare = await loadManifest(dir);
+    expect(() => applyEnvOverrides(bare, {}, { domain: "example.com" })).toThrow(/needs a service with a port/);
+  });
 });

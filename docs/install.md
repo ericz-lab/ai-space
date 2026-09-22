@@ -201,7 +201,38 @@ systemctl --user daemon-reload && systemctl --user enable --now cloudflared
 
 (`cloudflared service install <token>` does the same as a system service and needs sudo.)
 
-**Public hostnames** (Tunnel → Public Hostname → Add), one per thing you publish:
+**Wildcard and router (recommended)**
+
+One rule for every app, so installing an app never comes back here ([router.md](router.md)): the tunnel sends `*.example.com` to Caddy on loopback, and ai-space writes Caddy's configuration from the apps it knows. Caddy is one static binary, run as a user unit like `cloudflared`:
+
+```bash
+curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o ~/.local/bin/caddy && chmod +x ~/.local/bin/caddy
+cat > ~/.config/systemd/user/caddy.service <<'EOF'
+[Unit]
+Description=caddy (ai-space router)
+After=network-online.target
+Wants=network-online.target
+[Service]
+ExecStart=%h/.local/bin/caddy run --config %h/.ai-space/run/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=default.target
+EOF
+```
+
+In `~/.ai-space/.env`: `SPACE_ROUTER=caddy` and `SPACE_DOMAIN=example.com` (`setup` asks for both). Then `bun src/index.ts init` writes an empty `~/.ai-space/run/Caddyfile`, and `systemctl --user daemon-reload && systemctl --user enable --now caddy` starts the unit; ai-space rewrites the file and reloads Caddy whenever an app is added or removed (`GET /api/router` lists the routes). On macOS the same binary (`os=darwin&arch=arm64`) runs from a LaunchAgent with the same command line.
+
+On the tunnel (Tunnel → Public Hostname → Add):
+
+| Hostname | Service | Notes |
+| --- | --- | --- |
+| `space.example.com` | `http://127.0.0.1:8700` | the panel; put Access on it before creating it (step 6). Or set `SPACE_PANEL_HOST=space.example.com` and let the wildcard carry it |
+| `*.example.com` | `http://127.0.0.1:8080` | every app; a wildcard hostname is accepted, but the dashboard does not create its DNS record |
+
+Then in DNS (the zone's DNS page, not Zero Trust): a proxied CNAME `*` to `<tunnel-id>.cfargotunnel.com`, which is the record the dashboard creates for an ordinary hostname. Apps keep working under their own explicit hostnames too: an explicit record wins over the wildcard, so an existing install migrates app by app, or not at all.
+
+**Public hostnames, one per app (the alternative)**, one per thing you publish:
 
 | Hostname | Service | Notes |
 | --- | --- | --- |
@@ -221,7 +252,7 @@ Zero Trust → Access → Applications → Add → Self-hosted:
 - Application domain: `space.example.com`. Session duration: as you like (24 h is common).
 - Identity: at minimum the One-time PIN login method; add an IdP (Google, GitHub) if you want one click instead of an emailed code.
 - Policy `allow`: Emails = your address(es). Nothing else.
-- Repeat for every `<app>.example.com` that is not meant to be public. A public app (a read-only page, a feed) gets no Access app.
+- Repeat for every `<app>.example.com` that is not meant to be public. A public app (a read-only page, a feed) gets no Access app. With the wildcard and router, one Access application on `*.example.com` covers every app under it; a public app then needs its own hostname outside the wildcard, or a bypass policy for its host.
 
 Bypass rules the space needs later:
 
@@ -298,6 +329,8 @@ cd ~/.ai-space/apps && git clone https://github.com/<you>/<app>.git      # or wr
 # the app's own .env (its secrets), its runtime, its user unit if it has a service
 curl -s -X POST -H "Authorization: Bearer $SPACE_API_TOKEN" http://127.0.0.1:8700/api/apps/sync
 ```
+
+With the wildcard and router from step 5 the app is reachable at `https://<app>.example.com` as soon as the sync returns (a manifest with `url: /`, or one naming that hostname). Without them, add the app's hostname and its Access application on the dashboard now (steps 5 and 6).
 
 Then check, in this order:
 

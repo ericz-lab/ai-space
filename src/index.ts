@@ -32,6 +32,7 @@ import { applyEnvOverrides, cloneDefaultApps, describeInstalls, installDefaultAp
 import { localMachine, syncGuide } from "./space/guide.ts";
 import { SetupAborted, realDeps, runSetup, terminalIO } from "./space/setup.ts";
 import { type TerminalConfig, TerminalService, TerminalStore, createTerminalRoutes, loadTerminalConfig, terminalWebSocket } from "./space/terminal/index.ts";
+import { Router, type RouterConfig, createRouterRoutes, loadRouterConfig, renderCaddyfile } from "./space/router/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
 
 /**
@@ -52,7 +53,7 @@ import { createWebRoutes } from "./web/routes.ts";
  *
  * Configuration comes from the environment, then from `<workspace>/.env`
  * (process values win). See `.env.example`, `docs/scheduler.md`, `docs/storage.md`
- * `docs/notify.md`, `docs/model.md`, `docs/chat.md`, `docs/panel.md`, `docs/peers.md` and `docs/terminal.md`.
+ * `docs/notify.md`, `docs/model.md`, `docs/chat.md`, `docs/panel.md`, `docs/peers.md`, `docs/terminal.md` and `docs/router.md`.
  */
 
 /** The shared skills apps reference as `space:<name>`: the checkout's `skills/` directory. */
@@ -82,6 +83,8 @@ export type Config = {
   hubToken: string;
   /** The web terminal (docs/terminal.md): off unless SPACE_TERMINAL_ENABLED is set. */
   terminal: TerminalConfig;
+  /** The router (docs/router.md): off unless SPACE_ROUTER=caddy, with SPACE_DOMAIN as the wildcard's domain. */
+  router: RouterConfig;
   /** Where snapshots go (SPACE_BACKUP_URL); default s3://<SPACE_S3_BUCKET>/backups/<SPACE_NAME>/ when S3 is configured; empty = backup tasks fail until set. */
   backupUrl: string;
   /** Cron for the per-app backup tasks (SPACE_BACKUP_SCHEDULE); each app gets its own minute. */
@@ -113,6 +116,8 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
   const name = env.SPACE_NAME?.trim() || hostname();
   const terminal = loadTerminalConfig(env);
   for (const w of terminal.warnings) console.warn(`[terminal] ${w}`);
+  const router = loadRouterConfig(env);
+  for (const w of router.warnings) console.warn(`[router] ${w}`);
   return {
     // One prefix per machine: several spaces sharing a bucket must not mix their `space/` (and same-named apps') snapshots.
     backupUrl: env.SPACE_BACKUP_URL?.trim() || (s3Configured && s3Bucket ? `s3://${s3Bucket}/backups/${name}/` : ""),
@@ -137,6 +142,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     name,
     hubToken: env.SPACE_HUB_TOKEN?.trim() ?? "",
     terminal: terminal.config,
+    router: router.config,
     model: {
       maxConcurrency: Math.max(1, Number(env.SPACE_MODEL_MAX_CONCURRENCY ?? 4) || 4),
       retentionDays: Math.max(0, Number(env.SPACE_MODEL_RETENTION_DAYS ?? 0) || 0),
@@ -238,6 +244,16 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const { peers: peerConfigs, errors: peerErrors } = loadPeers(env);
   for (const [name, reason] of peerErrors) console.error(`[peers] ${name}: ${reason}`);
   const peers = new PeerHub(peerConfigs, { store: new PeerStore(store.db) });
+  // The proxy's configuration follows the registry (docs/router.md); a failed write never stops a sync.
+  const router = new Router({
+    config: config.router,
+    apps: () => registry.list().map((e) => e.manifest),
+    panelPort: config.port,
+    file: join(ws.run, "Caddyfile"),
+    socket: join(ws.run, "caddy.sock"),
+    logDir: join(ws.logs, "router"),
+    log: (l) => console.error(`[router] ${l}`),
+  });
 
   // Storage first, so a command task started right after sync already sees its DATABASE_URL.
   // Returns the tasks the services contribute for the app: its backup task, unless the manifest opts out.
@@ -248,13 +264,14 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     for (const n of result.orphaned) console.log(`[storage] ${manifest.app}: ${n} left the manifest, kept as orphaned`);
     notify.syncApp(manifest.app, parseNotifySpec(manifest.notify, { title: manifest.title }));
     await registry.set(manifest);
+    void router.sync();
     const backup = backupTask(manifest.app, parseBackupSpec(manifest.backup), taskDefaults);
     if (backup && manifest.tasks.some((t) => t.name === BACKUP_TASK)) throw new Error(`task name "${BACKUP_TASK}" is reserved for ai-space's backup task; rename it, or set backup: false to bring your own`);
     return backup ? [backup] : [];
   };
 
   const syncDir = async (dir: string) => {
-    const manifest = applyEnvOverrides(await loadManifest(dir), env);
+    const manifest = applyEnvOverrides(await loadManifest(dir), env, { domain: config.router.domain });
     const extra = await provision(manifest);
     scheduler.syncManifest(Scheduler.schedulable(manifest), extra);
   };
@@ -292,6 +309,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   notify.start();
   await scheduler.start();
   peers.start();
+  void router.sync();
 
   const panelRoutes = createPanelRoutes({
     ws,
@@ -303,6 +321,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     onCreate: syncDir,
     onRemove: async (app) => {
       scheduler.forget(app);
+      void router.sync();
     },
     ...(config.serviceStop ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) } : {}),
   });
@@ -329,6 +348,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         discover,
         onGone: async (app) => {
           registry.remove(app);
+          void router.sync();
           console.log(`[space] ${app}: directory gone, deregistered`);
         },
         appForToken: (t) => storage.appForToken(t),
@@ -350,6 +370,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), defaultModel: config.model.defaultModel }),
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
+      ...createRouterRoutes({ router }),
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),
       ...terminalRoutes,
@@ -359,7 +380,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     websocket: terminalWebSocket,
     fetch: () => new Response(JSON.stringify({ ok: false, error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }),
   });
-  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}${terminal.enabled ? ` · terminal ${terminal.backend}` : ""} · runtimes ${runtimes.describe()} (${loaded.source})`);
+  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}${terminal.enabled ? ` · terminal ${terminal.backend}` : ""}${router.enabled ? ` · router ${config.router.backend} :${config.router.port}` : ""} · runtimes ${runtimes.describe()} (${loaded.source})`);
 
   const shutdown = async () => {
     console.log("[space] shutting down");
@@ -367,6 +388,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     notify.stop();
     peers.stop();
     terminal.stop();
+    router.stop();
     server.stop();
     await scheduler.idle();
     await notify.idle();
@@ -470,6 +492,13 @@ if (import.meta.main) {
     }
     if (command === "install-defaults") process.exit(0);
     console.error(`[space] skills: ${describeSkillLinks(await linkSkills(ws.home, SHARED_SKILLS, await discoverApps(ws)))}`);
+    // With the router on, the caddy unit needs a file to start from before any app exists.
+    const router = loadRouterConfig({ ...(await readWorkspaceEnv(ws)), ...process.env }).config;
+    const caddyfile = join(ws.run, "Caddyfile");
+    if (router.backend === "caddy" && !(await Bun.file(caddyfile).exists())) {
+      await Bun.write(caddyfile, renderCaddyfile([], { port: router.port, socket: join(ws.run, "caddy.sock"), logDir: join(ws.logs, "router") }));
+      console.error(`[space] router: wrote ${caddyfile} with no routes yet; the caddy unit can start`);
+    }
     console.error(`[space] workspace ready at ${ws.home}`);
     process.exit(0);
   }

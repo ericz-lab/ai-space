@@ -14,7 +14,7 @@ describe("workspace", () => {
   test("ensureWorkspace creates the layout once and is idempotent", async () => {
     const home = join(await mkdtemp(join(tmpdir(), "space-ws-")), "ws");
     const first = await ensureWorkspace(home);
-    expect(first.created).toHaveLength(8);
+    expect(first.created).toHaveLength(9);
     expect(first.updated).toEqual([]);
     expect(await Bun.file(first.ws.envFile).text()).toContain("SPACE_PORT=8700");
     expect(await Bun.file(join(home, "CLAUDE.md")).text()).toContain("# AGENTS.md - ai-space workspace");

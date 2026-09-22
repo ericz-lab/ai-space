@@ -151,7 +151,8 @@ export function parseManifest(yaml: string, dir: string): Manifest {
   const description = optionalString(doc.description, "description");
   const icon = optionalString(doc.icon, "icon");
   const url = optionalString(doc.url, "url");
-  if (url !== undefined && !/^https?:\/\//.test(url)) throw new Error("url must start with http:// or https://");
+  // A path is "my page, on the hostname the space assigns"; resolved by the entry point (docs/router.md).
+  if (url !== undefined && !/^(https?:\/\/|\/)/.test(url)) throw new Error("url must start with http://, https:// or / (a path on the hostname the space assigns)");
   const repo = optionalString(doc.repo, "repo");
   const status = doc.status === undefined ? "active" : doc.status;
   if (status !== "active" && status !== "paused" && status !== "archived") throw new Error("status must be active, paused or archived");
