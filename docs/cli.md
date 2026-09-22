@@ -70,7 +70,7 @@ Rules:
 | `space task run TASK [--wait] [--timeout D]` | force a run; `--wait` polls the run history to its end, prints the output and exits with its status | `POST /api/tasks/:id/run`, then `GET .../runs` |
 | `space task runs TASK [-n 20] [--output]` | history, newest first (`--output`: each run's captured output) | `GET /api/tasks/:id/runs` |
 | `space task enable` / `disable TASK` | `{ enabled }` override; `--reset` clears it | `PATCH /api/tasks/:id` |
-| `space task create` / `rm TASK [--yes]` | an API task from flags (`--app --name --cron\|--every\|--at --http\|--command`), a JSON argument, `-` or `--json-file`; delete an API task (a manifest task is removed in `space.yaml`) | `POST`, `DELETE /api/tasks` |
+| `space task create` / `rm TASK [--yes]` | an API task from flags (`--app --name --cron\|--every\|--at --http\|--command`), a JSON argument, `-` or `--json-file`; delete an API task or an orphaned manifest task with its history (a live manifest task is removed in `space.yaml`) | `POST`, `DELETE /api/tasks` |
 | `space logs APP [-n N] [-f]` | the app's log, tail or follow; `space logs space` for ai-space | `GET /api/apps/:app/logs` (new, below) |
 | `space model usage [--window 24h] [--app APP]` | sums by app, tag, model, runtime; the same numbers as the panel's Model usage | `GET /api/model/usage` |
 | `space model calls [--app] [--tag] [-n]` | recent calls | `GET /api/model/calls` |

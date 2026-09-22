@@ -182,8 +182,9 @@ const rm = async (ctx: Ctx, argv: string[]) => {
   noMore(positional, 1);
   const c = await ctx.client();
   const task = await resolveTask(c, ref);
-  if (task.source !== "api") throw new UsageError(`${taskRef(task)} comes from ${task.source === "manifest" ? "space.yaml: remove it there and sync" : task.source}; only API tasks are deleted here`);
-  if (!(await confirm(ctx, flags.yes, `Delete task ${taskRef(task)} and its run history?`))) return 1;
+  // What the API deletes: API tasks, and manifest tasks that are orphaned (gone from their manifest or their app).
+  if (task.source === "manifest" && !task.orphaned) throw new UsageError(`${taskRef(task)} is in space.yaml: remove it there and sync`);
+  if (!(await confirm(ctx, flags.yes, `Delete task ${taskRef(task)}${task.orphaned ? " (orphaned)" : ""} and its run history?`))) return 1;
   await c.delete(`/api/tasks/${task.id}`);
   if (ctx.flags.json) return ctx.print.data({ ok: true, id: task.id }), 0;
   ctx.print.line(`${taskRef(task)}: deleted`);
@@ -201,6 +202,6 @@ export const taskNoun: Noun = {
     enable: { usage: "TASK [--reset]", summary: "enable (--reset clears the override, back to the manifest)", run: enabled(true) },
     disable: { usage: "TASK [--reset]", summary: "disable until enabled again", run: enabled(false) },
     create: { usage: "--app A --name N [--cron E|--every D|--at T] --http URL|--command C", summary: "an API task (or a JSON body: argument, - for stdin, --json-file F)", run: create },
-    rm: { usage: "TASK [--yes]", summary: "delete an API task and its history", run: rm },
+    rm: { usage: "TASK [--yes]", summary: "delete an API task, or an orphaned manifest task, with its history", run: rm },
   },
 };

@@ -151,6 +151,12 @@ describe("task", () => {
     const rm = await runCli(["task", "rm", "demo/tick", "--yes"], (t) => t.scripted.reply({ status: 200, body: { ok: true, tasks: [task()] } }));
     expect(rm.code).toBe(EXIT.usage);
     expect(rm.err[0]).toContain("space.yaml");
+    expect(rm.calls).toHaveLength(1);
+    // An orphaned manifest task (gone from its manifest, or its app left) is deleted like an API task.
+    const orphan = await runCli(["task", "rm", "demo/tick", "--yes"], (t) => t.scripted.reply({ status: 200, body: { ok: true, tasks: [task({ orphaned: true, enabled: false })] } }, { status: 200, body: { ok: true } }));
+    expect(orphan.code).toBe(0);
+    expect(orphan.calls[1]).toMatchObject({ method: "DELETE" });
+    expect(orphan.out).toEqual(["demo/tick: deleted"]);
     const ok = await runCli(["task", "rm", "demo/tick", "--yes"], (t) => t.scripted.reply({ status: 200, body: { ok: true, tasks: [task({ source: "api" })] } }, { status: 200, body: { ok: true } }));
     expect(ok.calls[1]).toMatchObject({ method: "DELETE" });
   });
