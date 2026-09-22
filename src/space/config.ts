@@ -35,8 +35,10 @@ export type Config = {
   maxConcurrency: number;
   /**
    * How long a shutdown waits for the task runs and model calls in flight before it
-   * aborts them (SPACE_DRAIN_SECONDS). Keep the service unit's TimeoutStopSec above it,
-   * or systemd kills the process mid-drain.
+   * aborts them (SPACE_DRAIN_SECONDS, 300). The default covers the observed p99 of both:
+   * a scraper or a model call of a few minutes survives a deploy, and a restart that
+   * catches nothing in flight still returns at once. Keep the service unit's
+   * TimeoutStopSec above it, or systemd kills the process mid-drain.
    */
   drainMs: number;
   /** Superuser URL used only to create per-app postgres databases; empty disables postgres provisioning. */
@@ -115,7 +117,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
       .map((p) => resolve(p.replace(/^~(?=$|\/)/, process.env.HOME ?? "~"))),
     apiToken: env.SPACE_API_TOKEN?.trim() ?? "",
     maxConcurrency: Math.max(1, Number(env.SPACE_MAX_CONCURRENCY ?? 2) || 2),
-    drainMs: Math.max(0, Number(env.SPACE_DRAIN_SECONDS ?? 60) || 60) * 1000,
+    drainMs: Math.max(0, Number(env.SPACE_DRAIN_SECONDS ?? 300) || 300) * 1000,
     pgAdminUrl: env.SPACE_PG_ADMIN_URL?.trim() ?? "",
     notifyTasks: env.SPACE_NOTIFY_TASKS?.trim() ?? "",
     eventRetentionMs: Math.max(1, Number(env.SPACE_EVENTS_RETENTION_DAYS ?? 30) || 30) * 24 * 3600_000,

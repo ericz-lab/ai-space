@@ -108,7 +108,8 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 ### Restarts
 
 A call is a process (`claude -p` over `ssh`, usually) and the calling app is blocked on it, so a
-restart of ai-space waits for the calls in flight: `SPACE_DRAIN_SECONDS` of grace, then a ledger
+restart of ai-space waits for the calls in flight: `SPACE_DRAIN_SECONDS` of grace (300, enough for
+the long-form calls that take minutes), then a ledger
 row with `interrupted: …` for whatever is still running, so a cut call is visible next to the ones
 that cost money. `deploy/ai-space.service` uses `KillMode=mixed` for the same reason — with the
 systemd default the `ssh` children die the moment the restart begins. See `docs/scheduler.md`.

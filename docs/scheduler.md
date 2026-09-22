@@ -225,7 +225,7 @@ is therefore a drain, not a stop:
 
 1. The clock stops and no new run is launched; the bus, notify and peers stop too.
 2. The runs in flight, and the model calls apps are blocked on (`POST /api/model/run`), get
-   `SPACE_DRAIN_SECONDS` (60 by default) to finish. The HTTP server keeps serving while they do,
+   `SPACE_DRAIN_SECONDS` (300 by default) to finish. The HTTP server keeps serving while they do,
    because a command task in flight may still be calling back into the space.
 3. Whatever is still going then is aborted: the run lands in the history as a failure and the
    model call in the ledger as interrupted. Nothing disappears silently.
@@ -236,6 +236,12 @@ Two unit settings have to agree with this, and `deploy/ai-space.service` sets bo
   SIGTERM to every child the moment the restart begins — the `ssh`, `bun` and `python` processes
   that *are* the runs — which kills exactly the work the drain exists to save.
 - `TimeoutStopSec` above `SPACE_DRAIN_SECONDS`, or systemd SIGKILLs the process mid-drain.
+
+Why five minutes: a drain returns as soon as the work is done, and on this space nothing is in
+flight 88% of the time, so the window costs nothing on a normal deploy. It only decides how much
+of the tail survives. Measured over 18 days of run history and 9,000 model calls: task runs are
+p95 97s and p99 191s, model calls p99 80s with an app's long-form calls averaging four minutes.
+A deploy waits longer than a minute about 3% of the time and longer than five about 0.4%.
 
 A run the process could not finish at all (SIGKILL, power loss) is recorded on the next start:
 the stale `runningAt` marker becomes a run with `interrupted: …` as its error, so the history
