@@ -78,8 +78,11 @@ export type TaskState = {
   lastDurationMs?: number;
   /** Consecutive failures, drives backoff; reset to 0 on success. */
   consecutiveErrors: number;
-  /** Events waiting for a run: delivered together once `dueAt` has passed and the task is free. */
-  pending?: { eventIds: number[]; dueAt: number };
+  /**
+   * Events waiting for a run: delivered together once `dueAt` has passed and the task is free.
+   * `attempt` counts the failed runs these events already went through (redelivery); absent = first delivery.
+   */
+  pending?: { eventIds: number[]; dueAt: number; attempt?: number };
 };
 
 export type TaskSource = "manifest" | "api";

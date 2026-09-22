@@ -232,6 +232,29 @@ tasks:
 
 At most one of `at` / `every` / `schedule`, and/or `triggers` (events other apps publish with `POST /api/events`; a task with only triggers has no clock), and exactly one of `run.http` / `run.command` / `run.agent` per task. Commands and agent runs execute in the app directory with the app's environment (`.env` and `space.env` merged). Real cron expressions live only here, never in a machine's crontab.
 
+### `events` and `provides`
+
+What the app tells other apps and what it does for them ([events.md](events.md)). Tasks are one way to consume an event (`tasks[].triggers`); `events.consumes` adds the other two and can also name a task.
+
+```yaml
+events:
+  publishes:
+    - { name: digest.added, description: A video got its digest., example: { id: abc, channel: Weekly } }
+  consumes:
+    - { event: video-digest/digest.added, filter: { channel: Weekly }, task: import-weekly }   # a trigger on that task
+    - { event: feed/item.added, http: { method: POST, path: /api/ingest } }                     # one POST per event, retried
+    - { event: portfolio/* }                                                                     # read from GET /api/events/stream, acked
+
+provides:
+  research:                                          # POST /api/call/<app>/research from another app
+    description: Research a symbol and return a verdict.
+    http: { method: POST, path: /api/research }
+    timeout: 2m
+    callers: [portfolio]                             # default: every app on this space
+```
+
+http deliveries and calls reach the app's declared `service` on loopback; the app trusts `x-space-event-id` / `x-space-caller` from there and dedupes deliveries on the event id (at-least-once).
+
 ### `storage`
 
 Databases and blob stores. The full reference is in [storage.md](storage.md); the shape is:
@@ -345,7 +368,7 @@ Environment, always:
 | `SPACE_APP_DATA_DIR` | Absolute path of `<workspace>/data/<name>/`. |
 | `SPACE_API_URL` | Base URL of the Space API, loopback. Written to `space.env`. |
 | `SPACE_NAME` | What this space calls itself ([machines.md](machines.md)); the name a hub and other machines know it by. Written to `space.env`. |
-| `SPACE_APP_TOKEN` | Per-app bearer token for the Space API; identifies the app on `POST /api/notify`, `POST /api/events`, `POST /api/model/run` and the `/api/chat/*` routes. Written to `space.env`. |
+| `SPACE_APP_TOKEN` | Per-app bearer token for the Space API; identifies the app on `POST /api/notify`, `POST /api/events`, `GET /api/events/stream`, `POST /api/call/*`, `POST /api/model/run` and the `/api/chat/*` routes. Written to `space.env`. |
 | `PORT` | For services: the declared port. |
 | `SPACE_TRIGGER` | For task runs: `schedule`, `manual` or `event`. With events, `SPACE_EVENT` (the latest) and `SPACE_EVENTS` (all) as JSON. |
 
@@ -358,7 +381,9 @@ API, for apps and their agents:
 | `GET /api/apps` | Every app with its status, agents and widgets. |
 | `POST /api/apps`, `PATCH`/`DELETE /api/apps/:app` | Create a manifest-only app, hide an app, delete a manifest-only app. |
 | `GET /api/tasks`, `POST /api/tasks/:id/run` | Inspect and trigger the app's own tasks. |
-| `POST /api/events`, `GET /api/events` | Publish an event for other apps' tasks (`{ name, data }`, stored as `<app>/<name>`); read recent events. |
+| `POST /api/events`, `GET /api/events` | Publish an event for other apps (`{ name, data }`, stored as `<app>/<name>`); read recent events. |
+| `GET /api/events/stream`, `POST /api/events/ack`, `GET /api/events/:id`, `GET /api/deliveries` | Stream deliveries to the app, ack them, read an event with its deliveries ([events.md](events.md)). |
+| `POST /api/call/:app/:capability`, `GET /api/capabilities`, `GET /api/calls` | Call another app's capability as this app; the catalogue; call history. |
 | `GET /api/widgets` | Every widget's latest payload (used by the panel). |
 | `POST /api/agents/:app/:agent/chat` | One chat turn, streamed as server-sent events; `sessionId` continues a session. |
 | `POST /api/notify`, `GET /api/notifications?app` | Send a notification; read the app's own delivery history. |
@@ -426,6 +451,7 @@ notify:
 | --- | --- |
 | Workspace layout, app discovery, `space.env` | Implemented (`src/space/workspace.ts`, `src/space/storage/`) |
 | `tasks`, `triggers`, `/api/events` | Implemented (`src/space/scheduler/`) |
+| `events` (`publishes`, `consumes`), `provides`, deliveries, `/api/call` | Implemented (`src/space/bus/`, [events.md](events.md)); peers forwarding and agent prompt injection pending |
 | `storage` databases and blob hand-over | Implemented; managed blob API pending |
 | `backup` | Implemented (`src/space/storage/backup/`): daily snapshots, retention, weekly verify, `restore` |
 | `notify`, `/api/notify`, `SPACE_APP_TOKEN` | Implemented (`src/space/notify/`, `skills/notify/`) |

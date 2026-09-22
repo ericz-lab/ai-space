@@ -8,6 +8,7 @@ import { ModelService, ModelStore, createModelRoutes, importCalls, recordAgentRu
 import { ChatService, ChatStore, createChatRoutes, importThreads } from "./space/chat/index.ts";
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
+import { Bus, BusStore, createBusRoutes } from "./space/bus/index.ts";
 import { type Manifest, Scheduler, Store, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { type S3Config, StorageService, createStorageRoutes, openDatabase, parseStorageSpec, sqliteUrl } from "./space/storage/index.ts";
 import {
@@ -53,7 +54,7 @@ import { createWebRoutes } from "./web/routes.ts";
  *
  * Configuration comes from the environment, then from `<workspace>/.env`
  * (process values win). See `.env.example`, `docs/scheduler.md`, `docs/storage.md`
- * `docs/notify.md`, `docs/model.md`, `docs/chat.md`, `docs/panel.md`, `docs/peers.md`, `docs/terminal.md` and `docs/router.md`.
+ * `docs/events.md`, `docs/notify.md`, `docs/model.md`, `docs/chat.md`, `docs/panel.md`, `docs/peers.md`, `docs/terminal.md` and `docs/router.md`.
  */
 
 /** The shared skills apps reference as `space:<name>`: the checkout's `skills/` directory. */
@@ -73,6 +74,8 @@ export type Config = {
   s3?: S3Config;
   /** Channel the scheduler reports failing tasks to (SPACE_NOTIFY_TASKS); empty disables it. */
   notifyTasks: string;
+  /** How long published events are kept (SPACE_EVENTS_RETENTION_DAYS); deliveries and run history reference them. */
+  eventRetentionMs: number;
   /** Chat model when neither the request nor the manifest names one (SPACE_CHAT_MODEL). */
   chatModel: string;
   /** Command that stops an app's service when the panel uninstalls it (SPACE_SERVICE_STOP), `{app}` = name; empty = services are not stopped. */
@@ -137,6 +140,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     maxConcurrency: Math.max(1, Number(env.SPACE_MAX_CONCURRENCY ?? 2) || 2),
     pgAdminUrl: env.SPACE_PG_ADMIN_URL?.trim() ?? "",
     notifyTasks: env.SPACE_NOTIFY_TASKS?.trim() ?? "",
+    eventRetentionMs: Math.max(1, Number(env.SPACE_EVENTS_RETENTION_DAYS ?? 30) || 30) * 24 * 3600_000,
     chatModel: env.SPACE_CHAT_MODEL?.trim() ?? "sonnet",
     serviceStop: env.SPACE_SERVICE_STOP?.trim() ?? "",
     name,
@@ -201,7 +205,7 @@ export async function openBackups(config: Config, log: (m: string) => void = (m)
 }
 
 export async function boot(ws: Workspace, config: Config, env: Record<string, string | undefined> = process.env) {
-  const store = new Store(config.dbPath);
+  const store = new Store(config.dbPath, { eventRetentionMs: config.eventRetentionMs });
   const storage = await openStorage(ws, config);
   const backups = await openBackups(config);
   const taskDefaults = backupTaskDefaults(ws, config);
@@ -235,8 +239,20 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       return result;
     },
     onFinish: createTaskNotifier({ notify, tasksChannel: config.notifyTasks }),
+    onPublish: (event) => bus.onEvent(event),
   });
   const registry = new AppRegistry();
+  // The bus (docs/events.md): http and stream deliveries of every stored event, and calls between apps.
+  const busStore = new BusStore(config.dbPath);
+  const bus = new Bus({
+    store: busStore,
+    events: store,
+    servicePort: (app) => registry.get(app)?.manifest.service?.port,
+    onDead: (d, event) =>
+      void notify
+        .send(d.app, { level: "alert", title: `event ${d.event} not delivered`, text: `Delivery #${d.id} (${d.kind}) gave up after ${d.attempts} attempt(s): ${d.lastError ?? "no error text"}${event ? `\nEvent #${event.id} from ${event.app} at ${new Date(event.at).toISOString()}` : ""}`, key: `bus:${d.app}:${d.event}`, windowMs: 3_600_000 })
+        .catch((e) => console.error(`[bus] ${d.app}: dead-delivery notification rejected: ${(e as Error).message}`)),
+  });
   const layout = new LayoutStore(store.db);
   const sessions = new SessionStore(store.db);
   const health = new HealthProbe();
@@ -263,6 +279,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     for (const p of result.created) console.log(`[storage] ${manifest.app}: created ${p}`);
     for (const n of result.orphaned) console.log(`[storage] ${manifest.app}: ${n} left the manifest, kept as orphaned`);
     notify.syncApp(manifest.app, parseNotifySpec(manifest.notify, { title: manifest.title }));
+    bus.syncApp(manifest.app, { events: manifest.events, provides: manifest.provides });
     await registry.set(manifest);
     void router.sync();
     const backup = backupTask(manifest.app, parseBackupSpec(manifest.backup), taskDefaults);
@@ -307,6 +324,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // ai-space's own tasks: the space.db snapshot and the weekly verification of every app's newest snapshot.
   scheduler.syncBuiltin(spaceManifest(taskDefaults));
   notify.start();
+  bus.start();
   await scheduler.start();
   peers.start();
   void router.sync();
@@ -348,11 +366,13 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         discover,
         onGone: async (app) => {
           registry.remove(app);
+          bus.forget(app);
           void router.sync();
           console.log(`[space] ${app}: directory gone, deregistered`);
         },
         appForToken: (t) => storage.appForToken(t),
       }),
+      ...createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t) }),
       ...createStorageRoutes({ storage, token: config.apiToken }),
       ...createBackupRoutes({
         store: backups.store,
@@ -385,14 +405,17 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const shutdown = async () => {
     console.log("[space] shutting down");
     scheduler.stop();
+    bus.stop();
     notify.stop();
     peers.stop();
     terminal.stop();
     router.stop();
     server.stop();
     await scheduler.idle();
+    await bus.idle();
     await notify.idle();
     store.close();
+    busStore.close();
     notifyStore.close();
     modelStore.close();
     chatStore.close();
@@ -402,7 +425,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
 
-  return { store, storage, scheduler, notify, notifyStore, model, modelStore, chat, chatStore, registry, peers, server, backups };
+  return { store, storage, scheduler, bus, busStore, notify, notifyStore, model, modelStore, chat, chatStore, registry, peers, server, backups };
 }
 
 /**

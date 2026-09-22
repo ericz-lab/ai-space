@@ -92,9 +92,23 @@ describe("Store", () => {
     expect(s.listEvents({ app: "other" }).map((e) => e.id)).toEqual([c.id]);
     const run = s.addRun({ taskId: "t1", startedAt: 1, endedAt: 2, status: "ok", trigger: "event", eventIds: [a.id, b.id] });
     expect(s.listRuns("t1")[0]).toMatchObject({ id: run.id, trigger: "event", eventIds: [a.id, b.id] });
-    for (let i = 0; i < 2100; i++) s.addEvent({ app: "feed", name: "x" }, i);
-    expect(s.listEvents({ limit: 5000 })).toHaveLength(2000);
-    expect(s.getEvents([a.id])).toHaveLength(0);
+    expect(s.getEvent(a.id)?.data).toEqual({ id: 1 });
+    s.close();
+  });
+
+  test("events are pruned by age on insert, and by a hard cap", () => {
+    const s = new Store(":memory:", { eventRetentionMs: 60_000 });
+    const old = s.addEvent({ app: "feed", name: "x" }, 1_000);
+    s.addEvent({ app: "feed", name: "x" }, 30_000);
+    expect(s.listEvents()).toHaveLength(2);
+    // 61 s later the first one is older than the retention.
+    s.addEvent({ app: "feed", name: "x" }, 62_000);
+    expect(s.listEvents().map((e) => e.id)).not.toContain(old.id);
+    expect(s.getEvent(old.id)).toBeUndefined();
+    expect(s.listEvents()).toHaveLength(2);
+    // The page size is capped whatever the limit asked for.
+    for (let i = 0; i < 1100; i++) s.addEvent({ app: "feed", name: "x" }, 62_000);
+    expect(s.listEvents({ limit: 5000 })).toHaveLength(1000);
     s.close();
   });
 });

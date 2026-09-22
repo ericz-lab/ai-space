@@ -178,3 +178,37 @@ widgets:
     expect(() => parseManifest("widgets:\n  - name: w\n    source: /w\n    size: 3x3", "/d")).toThrow(/size must be/);
   });
 });
+
+describe("events and provides sections", () => {
+  test("consumes with task become triggers on that task; http and stream stay on the manifest", () => {
+    const m = parseManifest(
+      `name: cal
+tasks:
+  - name: import
+    triggers: [{ event: feed/x }]
+    run: { command: "true" }
+events:
+  publishes: [{ name: imported, description: Events were imported. }]
+  consumes:
+    - { event: video-digest/digest.added, filter: { channel: Weekly }, task: import, debounce: 5m }
+    - { event: pulse/clue.found, http: { path: /api/leads } }
+    - portfolio/*
+provides:
+  lookup:
+    http: { method: GET, path: /api/lookup }
+`,
+      "/apps/cal",
+    );
+    expect(m.tasks[0]?.triggers).toEqual([{ event: "feed/x" }, { event: "video-digest/digest.added", filter: { channel: "Weekly" }, debounceMs: 300_000 }]);
+    expect(m.events?.publishes).toEqual([{ name: "imported", description: "Events were imported." }]);
+    expect(m.events?.consumes.map((c) => c.kind)).toEqual(["task", "http", "stream"]);
+    expect(m.provides).toEqual([{ name: "lookup", method: "GET", path: "/api/lookup", timeoutMs: 60_000 }]);
+  });
+
+  test("a consumes entry naming an unknown task, or a task with only that subscription, is handled", () => {
+    expect(() => parseManifest("name: a\nevents:\n  consumes: [{ event: b/c, task: nope }]\n", "/apps/a")).toThrow(/task "nope" is not declared/);
+    // A task with no time form and no triggers of its own is rejected before the events section can add one.
+    expect(() => parseManifest("name: a\ntasks:\n  - { name: t, run: { command: x } }\nevents:\n  consumes: [{ event: b/c, task: t }]\n", "/apps/a")).toThrow(/declare exactly one of/);
+    expect(() => parseManifest("name: a\nprovides: [1]\n", "/apps/a")).toThrow(/must map capability names/);
+  });
+});

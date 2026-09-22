@@ -89,13 +89,22 @@ type RunRow = {
 type EventRow = { id: number; name: string; app: string; data: string; at: number };
 
 const MAX_RUNS_PER_TASK = 500;
-/** Events kept for history and late delivery; older rows are dropped on insert. */
-const MAX_EVENTS = 2000;
+/** Events older than this are dropped on insert (`SPACE_EVENTS_RETENTION`, days). */
+export const DEFAULT_EVENT_RETENTION_MS = 30 * 24 * 3_600_000;
+/** Hard cap on the events table whatever the retention, so a runaway publisher cannot fill the disk. */
+export const MAX_EVENTS = 50_000;
+/** `GET /api/events` never returns more than this many rows at once. */
+export const MAX_EVENT_PAGE = 1000;
+
+export type StoreOptions = { eventRetentionMs?: number };
 
 export class Store {
   readonly db: Database;
 
-  constructor(path: string) {
+  private readonly eventRetentionMs: number;
+
+  constructor(path: string, opts: StoreOptions = {}) {
+    this.eventRetentionMs = Math.max(60_000, opts.eventRetentionMs ?? DEFAULT_EVENT_RETENTION_MS);
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
@@ -221,8 +230,13 @@ export class Store {
     const name = `${input.app}/${input.name}`;
     const data = input.data ?? {};
     const r = this.db.query("INSERT INTO events (name, app, data, at) VALUES (?, ?, ?, ?)").run(name, input.app, JSON.stringify(data), at);
-    this.db.query("DELETE FROM events WHERE id <= (SELECT MAX(id) FROM events) - ?").run(MAX_EVENTS);
+    this.db.query("DELETE FROM events WHERE at < ? OR id <= (SELECT MAX(id) FROM events) - ?").run(at - this.eventRetentionMs, MAX_EVENTS);
     return { id: Number(r.lastInsertRowid), name, app: input.app, data, at };
+  }
+
+  getEvent(id: number): SpaceEvent | undefined {
+    const row = this.db.query<EventRow, [number]>("SELECT * FROM events WHERE id = ?").get(id);
+    return row ? rowToEvent(row) : undefined;
   }
 
   /** The events with these ids, oldest first; ids already pruned are silently missing. */
@@ -237,7 +251,7 @@ export class Store {
 
   /** Newest first, optionally one qualified name or one app's events. */
   listEvents(opts: { limit?: number; name?: string; app?: string } = {}): SpaceEvent[] {
-    const limit = Math.max(1, Math.min(opts.limit ?? 50, MAX_EVENTS));
+    const limit = Math.max(1, Math.min(opts.limit ?? 50, MAX_EVENT_PAGE));
     const where: string[] = [];
     const args: (string | number)[] = [];
     if (opts.name) {

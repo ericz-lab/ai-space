@@ -41,7 +41,7 @@ Every execution produces a run record: start, end, status (`ok`, `error`, `skipp
 
 ## Storage
 
-One SQLite file, `<workspace>/data/space.db`, with a `tasks` table (indexed identity columns plus JSON blobs for schedule, target, triggers, overrides, state), a `runs` table and an `events` table (the last 2000 published events). Ticks write only the state blob. Schema migrations follow the additive rule: new nullable columns only, applied on open.
+One SQLite file, `<workspace>/data/space.db`, with a `tasks` table (indexed identity columns plus JSON blobs for schedule, target, triggers, overrides, state), a `runs` table and an `events` table (published events, kept for `SPACE_EVENTS_RETENTION_DAYS`, default 30, at most 50 000 rows). Ticks write only the state blob. Schema migrations follow the additive rule: new nullable columns only, applied on open.
 
 ## Engine
 
@@ -116,7 +116,10 @@ Events are per machine, like tasks: a task subscribes to the apps on its own ai-
 - **One run for a burst.** When the task is due and free, one run starts with every pending event, oldest first. Events that arrive while the task is running queue for exactly one more run, however many they are. This is what makes "a video was ingested" safe to publish per video.
 - **Clock and events share the task.** A run started by the schedule or by hand while events are pending takes them along; they are delivered once, never twice. `runs[].trigger` says what started the run and `runs[].eventIds` which events it carried.
 - **Disabled means dropped.** A disabled, paused or orphaned task is not queued, and disabling a task drops what it had pending. The event itself stays in the history.
+- **A failed run gives its events back.** When a run that carried events ends in error, they go back in front of whatever queued meanwhile, due after the error backoff, and are delivered again; after five failed runs they are dropped and the drop is logged. A `skipped` run counts as delivered.
 - **Everything else is unchanged.** Concurrency slots, timeouts, error backoff (a failing task's next clock run backs off; its pending events wait for the task to be free), `notify` and run records apply the same way.
+
+Tasks are one of three ways an app can consume an event; the other two (`http` and `stream` deliveries, retried by the bus) and calls between apps are in [events.md](events.md).
 
 ### What a run sees
 
@@ -130,13 +133,13 @@ Each event is `{ name, app, at, data }`.
 
 ### Restart and loss
 
-Pending events live in the task state in `space.db`, so a restart delivers them. Events published while ai-space is down get a connection error; the publisher decides whether to retry, and a task that also keeps a time schedule sweeps up what was missed. The `events` table keeps the last 2000 events for `GET /api/events` and for run history; a run whose events were pruned still lists their ids.
+Pending events live in the task state in `space.db`, so a restart delivers them. Events published while ai-space is down get a connection error; the publisher decides whether to retry, and a task that also keeps a time schedule sweeps up what was missed. The `events` table keeps events for `SPACE_EVENTS_RETENTION_DAYS` (30 by default) for `GET /api/events`, run history and the bus's deliveries; a run whose events were pruned still lists their ids.
 
 ### Not yet
 
 - Events ai-space itself publishes (`space/task.finished`, `space/service.down`), with a loop guard.
 - External webhooks (`POST /api/hooks/:app/:hook` with a per-hook secret) turned into events.
-- Forwarding between peers.
+- Forwarding between peers (planned on the bus, see events.md).
 
 ## Registering tasks
 
@@ -236,3 +239,4 @@ What stays in the app: polling loops faster than a few minutes, loops that depen
 | Fifty events in a minute for one task | One run (after the debounce) with all fifty; anything published during it makes one more run. |
 | Event for a task that is disabled | Not queued; `matched` is empty. The event is still in `GET /api/events`. |
 | Publisher calls while ai-space is restarting | Connection refused; nothing stored. The publisher retries or the task's clock catches up. |
+| Task fails with events aboard | The events are queued again, due after the backoff; five failed runs and they are dropped (logged). |

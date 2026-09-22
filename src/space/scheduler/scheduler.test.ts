@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Manifest } from "./manifest.ts";
-import { type Runner, Scheduler } from "./scheduler.ts";
+import { MAX_EVENT_REDELIVERIES, type Runner, Scheduler } from "./scheduler.ts";
 import { Store } from "./store.ts";
 import type { Task } from "./types.ts";
 
@@ -373,5 +373,68 @@ describe("built-in apps", () => {
     expect(h.store.findTask("space", "backup")?.orphaned).toBe(false);
     expect(h.s.apps()).toEqual(["space"]);
     expect(h.s.isBuiltin("space")).toBe(true);
+  });
+});
+
+describe("event redelivery", () => {
+  test("a failed run's events are queued again after the backoff, ahead of newer ones, then dropped after too many failures", async () => {
+    let fail = true;
+    const seen: number[][] = [];
+    const h = harness({
+      runner: async (_task, ctx) => {
+        seen.push((ctx.events ?? []).map((e) => e.id));
+        return fail ? { status: "error", error: "boom" } : { status: "ok" };
+      },
+    });
+    h.s.syncManifest(h.manifest([mt("consume", { schedule: { kind: "manual" }, triggers: [{ event: "feed/x" }] })]));
+    const a = h.s.publish({ app: "feed", name: "x" }).event;
+    await h.s.tick();
+    await h.s.idle();
+    expect(seen).toEqual([[a.id]]);
+    let task = h.store.findTask("demo", "consume")!;
+    expect(task.state.pending).toEqual({ eventIds: [a.id], dueAt: h.at() + 30_000, attempt: 1 });
+
+    // A newer event joins behind the redelivered one; nothing runs before the backoff has passed.
+    const b = h.s.publish({ app: "feed", name: "x" }).event;
+    await h.s.tick();
+    await h.s.idle();
+    expect(seen).toHaveLength(1);
+    h.advance(30_000);
+    await h.s.tick();
+    await h.s.idle();
+    expect(seen[1]).toEqual([a.id, b.id]);
+    task = h.store.findTask("demo", "consume")!;
+    expect(task.state.pending?.attempt).toBe(2);
+
+    // Success ends it: nothing pending, and the run carried both events.
+    fail = false;
+    h.advance(60_000);
+    await h.s.tick();
+    await h.s.idle();
+    expect(seen[2]).toEqual([a.id, b.id]);
+    expect(h.store.findTask("demo", "consume")!.state.pending).toBeUndefined();
+    expect(h.store.listRuns(task.id)[0]).toMatchObject({ status: "ok", eventIds: [a.id, b.id] });
+  });
+
+  test("events are dropped once they rode through MAX_EVENT_REDELIVERIES failed runs", async () => {
+    const h = harness({ runner: async () => ({ status: "error", error: "boom" }) });
+    h.s.syncManifest(h.manifest([mt("consume", { schedule: { kind: "manual" }, triggers: [{ event: "feed/x" }] })]));
+    h.s.publish({ app: "feed", name: "x" });
+    for (let i = 0; i < MAX_EVENT_REDELIVERIES; i++) {
+      await h.s.tick();
+      await h.s.idle();
+      h.advance(3_600_000);
+    }
+    const task = h.store.findTask("demo", "consume")!;
+    expect(task.state.pending).toBeUndefined();
+    expect(h.store.listRuns(task.id)).toHaveLength(MAX_EVENT_REDELIVERIES);
+  });
+
+  test("onPublish sees every stored event", () => {
+    const got: string[] = [];
+    const store = new Store(":memory:");
+    const s = new Scheduler({ store, log: () => {}, onPublish: (e) => got.push(e.name) });
+    s.publish({ app: "feed", name: "x" });
+    expect(got).toEqual(["feed/x"]);
   });
 });

@@ -86,6 +86,7 @@ App 规范（什么是 app、目录布局、`space.yaml` 契约）见 [docs/app-
 ## 服务
 
 - **调度器**（`src/space/scheduler/`）：app 的定时任务和事件驱动任务。`at` / `every` / `cron` 三种时间表，由 `POST /api/events` 喂入的事件 `triggers`（去抖、合并，作为运行的 payload 传入），`http` / `command` / `agent` 三种目标，在每个 app 的 `space.yaml` 里声明，通过 `/api/tasks` 管理。见 [docs/scheduler.md](docs/scheduler.md)。
+- **总线**（`src/space/bus/`）：app 之间的事件与调用。app 声明它发布什么、消费什么（作为任务触发器；作为投递到自己服务的 http 请求，重试直到应答；或作为自己读取并确认的流）、提供什么；ai-space 以至少一次的语义投递每一条事件，把 `POST /api/call/<app>/<capability>` 带着调用方的名字转发给提供方，并保留目录和两者的历史。见 [docs/events.md](docs/events.md)。
 - **存储**（`src/space/storage/`）：每个 app 一个 SQLite 或 PostgreSQL 数据库，以及一个放在文件系统或任意 S3 兼容桶上的对象存储，在 `space.yaml` 里声明，同步时开通，通过 `<workspace>/data/<app>/space.env` 交接（`DATABASE_URL`、`BLOB_URL`、`S3_*`）。设计中的托管 blob API 尚未实现。见 [docs/storage.md](docs/storage.md)。
 - **备份**（`src/space/storage/backup/`）：每个 app 的数据目录每天快照到 S3 桶（SQLite 用 `VACUUM INTO`，状态文件，每 app 一个 `tar.zst` 加一份清单），按数量保留，每周一次打开最新快照的校验任务，以及 `restore` 到目录或原地恢复。见 [docs/backup.md](docs/backup.md)。
 - **通知**（`src/space/notify/`）：向聊天软件的单向通知（Telegram、Discord、Slack、飞书、钉钉、企业微信、Bark、ntfy、通用 webhook）。渠道在工作区 `.env` 里以 `SPACE_NOTIFY_<NAME>` URL 配置一次；app 在 `space.yaml` 里声明可用的渠道，发一个 `POST /api/notify` 即可。投递有队列、限速、重试和记录；调度器通过它上报失败的任务。见 [docs/notify.md](docs/notify.md)。
