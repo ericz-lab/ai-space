@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { eventPayload, parseEventInput } from "./events.ts";
 import { type Manifest, type ManifestTask, loadManifest, parseTriggers } from "./manifest.ts";
 import { Scheduler, type SyncSummary } from "./scheduler.ts";
@@ -150,13 +150,16 @@ export function createRoutes(opts: ApiOptions): Routes {
         // An app the scheduler knows but discovery no longer lists has left the workspace
         // (directory or symlink removed). Its manifest must really be missing: a directory
         // whose manifest merely failed to parse is reported in `skipped` and stays registered.
+        // A leftover (tasks in the store, no directory seen since boot) is gone the same way,
+        // unless a skipped directory carries its name.
         const gone: SyncSummary[] = [];
         if (opts.discover) {
           const seen = new Set(synced.map((s) => s.app));
           const skippedDirs = new Set(skipped.map((s) => s.dir));
-          for (const app of scheduler.apps()) {
+          const skippedNames = new Set(skipped.map((s) => basename(s.dir)));
+          for (const app of [...scheduler.apps(), ...scheduler.leftovers()]) {
             const dir = scheduler.appDir(app);
-            if (seen.has(app) || !dir || skippedDirs.has(dir) || (await Bun.file(join(dir, "space.yaml")).exists())) continue;
+            if (seen.has(app) || (dir ? skippedDirs.has(dir) || (await Bun.file(join(dir, "space.yaml")).exists()) : skippedNames.has(app))) continue;
             const summary = scheduler.forget(app);
             if (!summary) continue;
             if (opts.onGone) await opts.onGone(app);

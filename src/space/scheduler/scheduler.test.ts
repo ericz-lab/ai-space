@@ -374,6 +374,25 @@ describe("built-in apps", () => {
     expect(h.s.apps()).toEqual(["space"]);
     expect(h.s.isBuiltin("space")).toBe(true);
   });
+
+  test("a leftover (tasks in the store, no sync since the restart) is listed and can be forgotten", () => {
+    const h = harness();
+    h.s.syncBuiltin(h.manifest([{ name: "backup", schedule: every(60_000), target: cmd("true"), timeoutMs: 1000, enabled: true }], "space"));
+    h.s.syncManifest(h.manifest([{ name: "job", schedule: every(60_000), target: cmd("true"), timeoutMs: 1000, enabled: true }], "ghost"));
+    h.s.syncManifest(h.manifest([{ name: "job", schedule: every(60_000), target: cmd("true"), timeoutMs: 1000, enabled: true }], "kept"));
+    // ai-space restarts; the directories of ghost are gone, so boot syncs only kept (and the built-in).
+    const again = new Scheduler({ store: h.store, now: h.at, runner: async () => ({ status: "ok" }), log: () => {} });
+    again.syncBuiltin(h.manifest([{ name: "backup", schedule: every(60_000), target: cmd("true"), timeoutMs: 1000, enabled: true }], "space"));
+    again.syncManifest(h.manifest([{ name: "job", schedule: every(60_000), target: cmd("true"), timeoutMs: 1000, enabled: true }], "kept"));
+    expect(again.apps()).toEqual(["kept", "space"]);
+    expect(again.leftovers()).toEqual(["ghost"]);
+    expect(again.forget("ghost")?.orphaned).toEqual(["job"]);
+    expect(h.store.findTask("ghost", "job")?.orphaned).toBe(true);
+    expect(again.leftovers()).toEqual([]);
+    expect(again.forget("ghost")).toBeUndefined();
+    expect(again.forget("never-seen")).toBeUndefined();
+    expect(h.store.findTask("kept", "job")?.orphaned).toBe(false);
+  });
 });
 
 describe("event redelivery", () => {

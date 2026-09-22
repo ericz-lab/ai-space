@@ -192,6 +192,37 @@ describe("scheduler api", () => {
     }
   });
 
+  test("workspace sync forgets a leftover whose directory vanished before the restart, not a broken one", async () => {
+    const root = await mkdtemp(join(tmpdir(), "space-ws-"));
+    const broken = join(root, "broken");
+    await mkdir(broken);
+    await writeFile(join(broken, "space.yaml"), "name: [\n");
+    // Before the restart, both apps synced from directories that no longer exist.
+    const fresh = new Store(":memory:");
+    const before = new Scheduler({ store: fresh, log: () => {} });
+    for (const app of ["ghost", "broken"]) before.syncManifest({ app, dir: join(root, "gone", app), spec: 1, status: "active", agents: [], widgets: [], tasks: [{ name: "tick", schedule: { kind: "every", everyMs: 3_600_000 }, target: { kind: "command", command: "true" }, timeoutMs: 1000, enabled: true }] });
+    before.stop();
+    // After it: boot registered nothing for them; a directory named `broken` exists but does not parse.
+    const after = new Scheduler({ store: fresh, log: () => {} });
+    const goneApps: string[] = [];
+    const routes = createRoutes({ scheduler: after, store: fresh, token: "t0k", discover: async () => [broken], onGone: async (app) => void goneApps.push(app) });
+    const srv = Bun.serve({ port: 0, hostname: "127.0.0.1", routes });
+    const at = (path: string, init?: RequestInit) => fetch(`http://127.0.0.1:${srv.port}${path}`, init).then(async (r) => ({ status: r.status, body: (await r.json()) as Body }));
+    try {
+      const res = await at("/api/apps/sync", { method: "POST", headers: auth });
+      expect(res.body.skipped.map((s: { dir: string }) => s.dir)).toEqual([broken]);
+      expect(res.body.gone).toEqual([{ app: "ghost", created: [], updated: [], orphaned: ["tick"] }]);
+      expect(goneApps).toEqual(["ghost"]);
+      expect(fresh.findTask("ghost", "tick")?.orphaned).toBe(true);
+      expect(fresh.findTask("broken", "tick")?.orphaned).toBe(false);
+      expect((await at("/api/apps/sync", { method: "POST", headers: auth })).body.gone).toEqual([]);
+    } finally {
+      after.stop();
+      srv.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("manifest override via PATCH and re-sync through the API", async () => {
     const list = await call("/api/tasks");
     const echo = list.body.tasks.find((t: { name: string }) => t.name === "echo");

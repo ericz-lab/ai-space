@@ -141,6 +141,18 @@ export class Scheduler {
     return [...this.appDirs.keys()].sort();
   }
 
+  /**
+   * Apps the store still runs manifest tasks for although no sync in this
+   * process has seen them: their directory disappeared while ai-space was
+   * down, so boot never registered them and their tasks kept firing. Boot
+   * and the workspace sync forget them.
+   */
+  leftovers(): string[] {
+    const out = new Set<string>();
+    for (const t of this.store.listTasks()) if (t.source === "manifest" && !t.orphaned && !this.appDirs.has(t.app) && !this.builtin.has(t.app)) out.add(t.app);
+    return [...out].sort();
+  }
+
   /** Sync a manifest ai-space itself owns; `forget` ignores the app from then on. */
   syncBuiltin(manifest: Manifest, extra: ManifestTask[] = []): SyncSummary {
     this.builtin.add(manifest.app);
@@ -156,9 +168,11 @@ export class Scheduler {
    * the store with their run history) and the per-app sync route stops knowing it.
    */
   forget(app: string): SyncSummary | undefined {
+    if (this.builtin.has(app)) return undefined;
+    // A leftover (see `leftovers`) has no directory on record; an empty one is fine, it is deleted right after.
     const dir = this.appDirs.get(app);
-    if (dir === undefined || this.builtin.has(app)) return undefined;
-    const summary = this.syncManifest({ app, dir, spec: 1, status: "archived", agents: [], widgets: [], tasks: [] });
+    if (dir === undefined && !this.leftovers().includes(app)) return undefined;
+    const summary = this.syncManifest({ app, dir: dir ?? "", spec: 1, status: "archived", agents: [], widgets: [], tasks: [] });
     this.appDirs.delete(app);
     return summary;
   }

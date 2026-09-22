@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
 import { SessionStore, createAgentRoutes } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, LayoutStore, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
@@ -156,10 +156,12 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     }
     return dirs;
   };
+  const skippedNames = new Set<string>();
   for (const dir of await discover()) {
     try {
       await syncDir(dir);
     } catch (e) {
+      skippedNames.add(basename(dir));
       console.error(`[space] skipping ${dir}: ${(e as Error).message}`);
     }
   }
@@ -172,6 +174,15 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   }
   // ai-space's own tasks: the space.db snapshot and the weekly verification of every app's newest snapshot.
   scheduler.syncBuiltin(spaceManifest(taskDefaults));
+  // After the built-in: tasks of an app whose directory disappeared while ai-space was down: no sync registered
+  // it, so nothing would ever forget it. A skipped directory of that name is not gone, only broken.
+  for (const app of scheduler.leftovers()) {
+    if (skippedNames.has(app)) continue;
+    const s = scheduler.forget(app);
+    if (!s) continue;
+    bus.forget(app);
+    console.error(`[space] ${app}: no directory in the workspace, ${s.orphaned.length} task(s) orphaned`);
+  }
   notify.start();
   bus.start();
   await scheduler.start();
