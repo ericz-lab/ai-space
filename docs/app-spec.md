@@ -451,7 +451,7 @@ notify:
 | --- | --- |
 | Workspace layout, app discovery, `space.env` | Implemented (`src/space/workspace.ts`, `src/space/storage/`) |
 | `tasks`, `triggers`, `/api/events` | Implemented (`src/space/scheduler/`) |
-| `events` (`publishes`, `consumes`), `provides`, deliveries, `/api/call` | Implemented (`src/space/bus/`, [events.md](events.md)); peers forwarding and agent prompt injection pending |
+| `events` (`publishes`, `consumes`), `provides`, deliveries, `/api/call` | Implemented (`src/space/bus/`, [events.md](events.md)): local and across peers, in agents' prompts, in the panel |
 | `storage` databases and blob hand-over | Implemented; managed blob API pending |
 | `backup` | Implemented (`src/space/storage/backup/`): daily snapshots, retention, weekly verify, `restore` |
 | `notify`, `/api/notify`, `SPACE_APP_TOKEN` | Implemented (`src/space/notify/`, `skills/notify/`) |

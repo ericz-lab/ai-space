@@ -65,9 +65,18 @@ export type SpaceEvent = {
   app: string;
   data: Record<string, unknown>;
   at: number;
+  /** The peer it was mirrored from (docs/peers.md); absent = published on this machine. */
+  peer?: string;
 };
 
-export type EventInput = { app: string; name: string; data?: Record<string, unknown> };
+export type EventInput = {
+  app: string;
+  name: string;
+  data?: Record<string, unknown>;
+  /** Mirrored from a peer: its name, and the moment it was published there. */
+  peer?: string;
+  at?: number;
+};
 
 export type TaskState = {
   nextRunAt?: number;

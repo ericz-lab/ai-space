@@ -93,13 +93,13 @@ export type CallRecord = {
 /** What a stream consumer and an http target receive. */
 export type DeliveryPayload = {
   delivery: { id: number; attempt: number };
-  event: { id: number; name: string; app: string; at: string; data: Record<string, unknown> };
+  event: { id: number; name: string; app: string; at: string; data: Record<string, unknown>; peer?: string };
   /** Always one element; the same shape a task's http target gets. */
   events: DeliveryPayload["event"][];
 };
 
 export function deliveryPayload(d: Delivery, e: SpaceEvent): DeliveryPayload {
-  const event = { id: e.id, name: e.name, app: e.app, at: new Date(e.at).toISOString(), data: e.data };
+  const event = { id: e.id, name: e.name, app: e.app, at: new Date(e.at).toISOString(), data: e.data, ...(e.peer ? { peer: e.peer } : {}) };
   return { delivery: { id: d.id, attempt: d.attempts }, event, events: [event] };
 }
 

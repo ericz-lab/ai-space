@@ -82,6 +82,10 @@ Transcripts are read back from the runtime's own store (Claude Code: `~/.claude/
 
 `GET /api/widgets` fetches every `kind: items` source through ai-space, caches each payload for the widget's `refresh`, and returns at most twenty items with only the contract fields (`text`, `url`, `time`). A failing source yields `{ ok: false, error }` and the card shows the error as is. Sources are resolved server-side: a path is joined to `http://127.0.0.1:<service.port>`, a full URL is used unchanged; neither reaches the browser. `kind: embed` widgets are proxied at `GET /api/widgets/:app/:name/embed?theme=&lang=` because the browser cannot reach loopback (both parameters are forwarded to the page, `lang` only when it is a language tag); the page must be self-contained (inline assets or absolute public URLs).
 
+## Events
+
+The settings open an Events window next to Tasks and Model usage: the bus's catalogue (what every app, local or on a peer, provides, publishes and consumes, with call counts) and the last hundred events, each opening to its http and stream deliveries with status, attempts and last error ([events.md](events.md)). Read-only, like Tasks.
+
 ## Health
 
 Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<port><service.health>` (two-second timeout), caches the result for fifteen seconds, and shows a green or red dot. Apps without `service.health` show no dot.

@@ -58,7 +58,7 @@ beforeAll(() => {
     idleTimeout: 30,
     routes: {
       ...createRoutes({ scheduler, store: events, token: "op", appForToken }),
-      ...createBusRoutes({ bus, store: busStore, events, token: "op", appForToken, keepaliveMs: 100 }),
+      ...createBusRoutes({ bus, store: busStore, events, token: "op", appForToken, keepaliveMs: 100, remote }),
     },
   });
   base = `http://127.0.0.1:${space.port}`;
@@ -70,6 +70,23 @@ afterAll(() => {
   space.stop(true);
   app.stop(true);
 });
+
+/** A stand-in for the peer hub: one peer holding `thesis/summarize`, and an app two peers both claim. */
+const forwarded: { path: string; caller: string | null; body: string }[] = [];
+const fakePeer = (name: string) => ({
+  name,
+  forward: async (req: Request, path: string, o?: { headers?: Record<string, string> }) => {
+    forwarded.push({ path, caller: o?.headers?.["x-space-caller"] ?? null, body: await req.text() });
+    return Response.json({ from: name }, { headers: { "content-type": "application/json" } });
+  },
+});
+const peersByName = { dailie: fakePeer("dailie"), david: fakePeer("david") };
+const remote = {
+  name: "seoul",
+  capabilities: () => [{ app: "dailie/thesis", peer: "dailie", provides: [{ name: "summarize", method: "POST" as const, path: "/s", timeoutMs: 1000 }], publishes: [], consumes: [] }],
+  providerOf: (app: string) => (app === "thesis" ? { peer: peersByName.dailie } : app === "twin" ? { ambiguous: ["dailie", "david"] } : undefined),
+  get: (n: string) => peersByName[n as keyof typeof peersByName],
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Body = any;
@@ -157,6 +174,21 @@ describe("bus api", () => {
     expect(busStore.getDelivery(second.id)?.status).toBe("sent");
   });
 
+  test("a call to an app a peer provides is forwarded there; ambiguity and unknown peers are refused", async () => {
+    const r = await fetch(`${base}/api/call/thesis/summarize`, { method: "POST", headers: { authorization: "Bearer portfolio-token", "content-type": "application/json" }, body: JSON.stringify({ text: "…" }) });
+    expect(r.status).toBe(200);
+    expect(r.headers.get("x-space-call-peer")).toBe("dailie");
+    expect(await r.json()).toEqual({ from: "dailie" });
+    expect(forwarded.pop()).toEqual({ path: "/api/peer/call/thesis/summarize", caller: "seoul/portfolio", body: JSON.stringify({ text: "…" }) });
+    expect((await call("/api/call/twin/x", { method: "POST", headers: { authorization: "Bearer portfolio-token" } })).status).toBe(409);
+    expect((await call("/api/call/nowhere/thesis/summarize", { method: "POST", headers: { authorization: "Bearer portfolio-token" } })).status).toBe(404);
+    const named = await fetch(`${base}/api/call/david/thesis/summarize`, { method: "POST", headers: { authorization: "Bearer portfolio-token" } });
+    expect(await named.json()).toEqual({ from: "david" });
+    expect((await call("/api/calls?app=dailie/thesis")).body.calls[0]).toMatchObject({ caller: "portfolio", app: "dailie/thesis", capability: "summarize", status: 200, ok: true });
+    const cat = await call("/api/capabilities");
+    expect(cat.body.apps.find((a: Body) => a.app === "dailie/thesis")).toMatchObject({ peer: "dailie" });
+  });
+
   test("calls are forwarded as the calling app and recorded; the catalogue lists it all", async () => {
     const r = await fetch(`${base}/api/call/insight/research`, { method: "POST", headers: { authorization: "Bearer portfolio-token", "content-type": "application/json" }, body: JSON.stringify({ symbol: "BTC" }) });
     expect(r.status).toBe(200);
@@ -168,7 +200,7 @@ describe("bus api", () => {
     const calls = await call("/api/calls?app=insight");
     expect(calls.body.calls).toEqual([expect.objectContaining({ caller: "portfolio", capability: "research", status: 200, ok: true })]);
     const cat = await call("/api/capabilities");
-    expect(cat.body.apps.map((a: Body) => a.app)).toEqual(["cal", "insight"]);
+    expect(cat.body.apps.map((a: Body) => a.app)).toEqual(["cal", "insight", "dailie/thesis"]);
     expect(cat.body.apps[1]).toMatchObject({
       provides: [{ name: "research", method: "POST", path: "/api/research", timeoutMs: 5000, callers: ["portfolio"] }],
       publishes: [{ name: "report.ready", description: "A report is done." }],

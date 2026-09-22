@@ -53,6 +53,7 @@ const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [
   { table: "tasks", column: "triggers", ddl: "TEXT" },
   { table: "runs", column: "trigger", ddl: "TEXT" },
   { table: "runs", column: "events", ddl: "TEXT" },
+  { table: "events", column: "peer", ddl: "TEXT" },
 ];
 
 type TaskRow = {
@@ -86,7 +87,7 @@ type RunRow = {
   events: string | null;
 };
 
-type EventRow = { id: number; name: string; app: string; data: string; at: number };
+type EventRow = { id: number; name: string; app: string; data: string; at: number; peer: string | null };
 
 const MAX_RUNS_PER_TASK = 500;
 /** Events older than this are dropped on insert (`SPACE_EVENTS_RETENTION`, days). */
@@ -229,9 +230,21 @@ export class Store {
   addEvent(input: EventInput, at: number): SpaceEvent {
     const name = `${input.app}/${input.name}`;
     const data = input.data ?? {};
-    const r = this.db.query("INSERT INTO events (name, app, data, at) VALUES (?, ?, ?, ?)").run(name, input.app, JSON.stringify(data), at);
+    const r = this.db.query("INSERT INTO events (name, app, data, at, peer) VALUES (?, ?, ?, ?, ?)").run(name, input.app, JSON.stringify(data), at, input.peer ?? null);
     this.db.query("DELETE FROM events WHERE at < ? OR id <= (SELECT MAX(id) FROM events) - ?").run(at - this.eventRetentionMs, MAX_EVENTS);
-    return { id: Number(r.lastInsertRowid), name, app: input.app, data, at };
+    return { id: Number(r.lastInsertRowid), name, app: input.app, data, at, ...(input.peer ? { peer: input.peer } : {}) };
+  }
+
+  /** Events after an id, oldest first; `localOnly` leaves out the ones mirrored from peers (what a peer exports). */
+  listEventsSince(sinceId: number, limit = 200, opts: { localOnly?: boolean } = {}): SpaceEvent[] {
+    const cap = Math.max(1, Math.min(limit, MAX_EVENT_PAGE));
+    const sql = `SELECT * FROM events WHERE id > ? ${opts.localOnly ? "AND peer IS NULL " : ""}ORDER BY id LIMIT ?`;
+    return this.db.query<EventRow, [number, number]>(sql).all(sinceId, cap).map(rowToEvent);
+  }
+
+  /** The newest event id, 0 when the table is empty. */
+  latestEventId(): number {
+    return this.db.query<{ id: number | null }, []>("SELECT MAX(id) AS id FROM events").get()?.id ?? 0;
   }
 
   getEvent(id: number): SpaceEvent | undefined {
@@ -268,7 +281,7 @@ export class Store {
 }
 
 function rowToEvent(r: EventRow): SpaceEvent {
-  return { id: r.id, name: r.name, app: r.app, data: JSON.parse(r.data), at: r.at };
+  return { id: r.id, name: r.name, app: r.app, data: JSON.parse(r.data), at: r.at, ...(r.peer ? { peer: r.peer } : {}) };
 }
 
 function rowToTask(r: TaskRow): Task {

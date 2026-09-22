@@ -1,6 +1,6 @@
 # Events and calls between apps (the bus)
 
-Status: implemented in `src/space/bus/` (spec, store, engine, routes) on top of the scheduler's events (`docs/scheduler.md`). Not yet: forwarding between peers, capabilities in agents' prompts, a panel view.
+Status: implemented in `src/space/bus/` (spec, store, engine, routes, the agents' prompt section) on top of the scheduler's events (`docs/scheduler.md`); peers mirror events and forward calls (`src/space/peers/`); the panel has an Events window (`src/web/Events.tsx`).
 
 The bus is the Space-layer service that carries what one app has to tell another. An app publishes an event and never learns who listens; other apps declare what they consume and how they want it delivered. An app that needs an answer from another app calls a capability the other app declared, through ai-space, which forwards the request and records it. Both directions go through one process on loopback, so no app holds another app's address or token.
 
@@ -95,7 +95,9 @@ A provider only has to trust requests that come from loopback and carry `x-space
 
 ## Catalogue
 
-`GET /api/capabilities` lists, per app, what it provides (with description, method, path, timeout, callers), what it publishes (with description and example) and what it consumes, plus call counts, failures and mean duration per capability. This is what an agent reads to learn that "save this link" is `keep/save-link`, and what a new app reads to find which events exist. Injecting it into agents' prompts is the next step.
+`GET /api/capabilities` lists, per app, what it provides (with description, method, path, timeout, callers), what it publishes (with description and example) and what it consumes, plus call counts, failures and mean duration per capability. Peers' apps follow under `<peer>/<app>` with a `peer` field. This is what an agent reads to learn that "save this link" is `keep/save-link`, and what a new app reads to find which events exist.
+
+Every agent chat session gets a condensed copy as the last section of its system prompt (`src/space/bus/prompt.ts`): one line per capability and per published event, with the `curl` for a call and for publishing, capped at 6 000 characters. An app's agent calls with its `SPACE_APP_TOKEN`, the space agent with the operator's `SPACE_API_TOKEN`.
 
 ## Storage
 
@@ -136,6 +138,16 @@ events:
 Pulse's code changes from "call Insight" to `POST ${SPACE_API_URL}/api/events`; Insight's `/api/leads` replaces the token check with "loopback and `x-space-event-id` present" and dedupes on that id. A third app that wants the clues adds one `consumes` line; Pulse does not know.
 
 When Portfolio needs Insight to research a symbol and wants the verdict back, that is a call, not an event: Insight declares `provides.research`, Portfolio POSTs `/api/call/insight/research` and reads the answer.
+
+## Across machines (peers)
+
+A hub ([peers.md](peers.md)) mirrors every event its peers publish: after each snapshot refresh it asks `GET /api/peer/events?since=<cursor>` for what is new, publishes each one here under the same app name with `peer: <name>` and the original time, and advances the cursor (kept in `peer_cursors` in `space.db`). Subscriptions on the hub then match a peer app's events exactly as a local app's: `consumes: [{ event: pulse/clue.found }]` works whether Pulse runs here or on a peer. Only events published on the peer itself are exported (mirrored ones are not), so a hub that is also someone's peer never passes events on twice, and a peer whose ids went backwards (a rebuilt database) restarts the cursor at its newest id. Latency is the peer's refresh period (30 s by default).
+
+A call to an app the hub does not hold is forwarded to the one peer whose snapshot lists that capability, through `POST /api/peer/call/<app>/<capability>`; the peer's bus runs it as the caller `<hub name>/<app>` (a provider that restricts `callers` must list that form to accept remote callers). Two peers holding the same app is an ambiguity the hub refuses (409); `POST /api/call/<peer>/<app>/<capability>` names the peer. Both sides record the call. Deliveries stay on the machine that made them: a peer's http subscription to a hub event is not a thing, the peer subscribes to what reaches its own bus.
+
+## The panel
+
+The settings' Events window lists the catalogue (what each app, and each peer's app, provides, publishes and consumes, with call counts) and the last hundred events; a row opens to its http and stream deliveries with their status, attempts and last error. It is read-only like the Tasks window: replaying a dead delivery needs the operator token.
 
 ## When not to use it
 

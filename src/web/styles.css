@@ -257,6 +257,20 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 }
 :root[data-theme="dark"] .run-out { background: rgba(0, 0, 0, 0.3); }
 
+/* Events: the bus in the same floating panel (docs/events.md). */
+.ev-toggle { width: 100%; border: none; background: none; cursor: pointer; font: inherit; }
+.ev-toggle .svc-port { margin-left: auto; }
+.ev-cat { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px; }
+.ev-app-name { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.ev-line { display: flex; align-items: baseline; gap: 8px; font-size: 12px; padding: 2px 0 2px 8px; min-width: 0; }
+.ev-line b { font-weight: 600; white-space: nowrap; }
+.ev-kind { width: 58px; text-align: center; }
+.ev-desc { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ev-stat { margin-left: auto; flex: none; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ev-data { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.ev-target { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ev-path { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Usage: the model ledger in the same floating panel; tables scroll sideways rather than the page. */
 .tasks.usage { width: min(720px, 94vw); }
 .usage-windows { margin-left: auto; display: flex; gap: 2px; }

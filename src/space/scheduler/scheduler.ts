@@ -338,7 +338,7 @@ export class Scheduler {
    */
   publish(input: EventInput): { event: SpaceEvent; matched: Task[] } {
     const now = this.now();
-    const event = this.store.addEvent(input, now);
+    const event = this.store.addEvent(input, input.at ?? now);
     const matched: Task[] = [];
     for (const task of this.store.listTasks()) {
       if (!effectiveEnabled(task)) continue;

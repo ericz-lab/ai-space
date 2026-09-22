@@ -259,7 +259,20 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const widgets = new WidgetFeed(registry);
   const { peers: peerConfigs, errors: peerErrors } = loadPeers(env);
   for (const [name, reason] of peerErrors) console.error(`[peers] ${name}: ${reason}`);
-  const peers = new PeerHub(peerConfigs, { store: new PeerStore(store.db) });
+  // Peers' events are mirrored here (docs/events.md): published under the same app name, marked with the peer.
+  const peers = new PeerHub(peerConfigs, {
+    store: new PeerStore(store.db),
+    onEvents: (peer, list) => {
+      for (const e of list) {
+        try {
+          scheduler.publish(e);
+        } catch (err) {
+          console.error(`[peers] ${peer}: event ${e.app}/${e.name} not mirrored: ${(err as Error).message}`);
+        }
+      }
+    },
+  });
+  const remote = { name: config.name, capabilities: () => peers.capabilities(), providerOf: (app: string, cap?: string) => peers.providerOf(app, cap), get: (name: string) => peers.get(name) };
   // The proxy's configuration follows the registry (docs/router.md); a failed write never stops a sync.
   const router = new Router({
     config: config.router,
@@ -343,7 +356,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
     ...(config.serviceStop ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) } : {}),
   });
-  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, envFor: (app) => storage.envFor(app), peers });
+  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, envFor: (app) => storage.envFor(app), peers, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");
@@ -372,7 +385,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         },
         appForToken: (t) => storage.appForToken(t),
       }),
-      ...createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t) }),
+      ...createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t), remote }),
       ...createStorageRoutes({ storage, token: config.apiToken }),
       ...createBackupRoutes({
         store: backups.store,
@@ -394,7 +407,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),
       ...terminalRoutes,
-      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, servicePort: (app) => registry.get(app)?.manifest.service?.port, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
+      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, servicePort: (app) => registry.get(app)?.manifest.service?.port, bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
       ...createWebRoutes(),
     },
     websocket: terminalWebSocket,

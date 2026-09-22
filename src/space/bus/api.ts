@@ -1,9 +1,9 @@
 import { eventPayload } from "../scheduler/events.ts";
 import type { Store } from "../scheduler/store.ts";
 import type { SpaceEvent } from "../scheduler/types.ts";
-import { type Bus, CallError } from "./bus.ts";
+import { type AppCapabilities, type Bus, CallError } from "./bus.ts";
 import type { BusStore } from "./store.ts";
-import { type CallRecord, type Delivery, type DeliveryStatus, MAX_CALL_BODY_BYTES } from "./types.ts";
+import { type CallRecord, type Delivery, type DeliveryStatus, MAX_CALL_BODY_BYTES, MAX_CALL_TIMEOUT_MS } from "./types.ts";
 
 /**
  * HTTP surface of the bus, next to the scheduler's `/api/events`.
@@ -14,7 +14,9 @@ import { type CallRecord, type Delivery, type DeliveryStatus, MAX_CALL_BODY_BYTE
  *   GET  /api/deliveries?app&status&limit   deliveries, newest first
  *   POST /api/deliveries/:id/retry          queue a dead or skipped delivery again (operator token)
  *   GET  /api/capabilities                  what every app provides, publishes and consumes
- *   POST /api/call/:app/:capability         forward the request to the app's capability as the calling app
+ *   POST /api/call/:app/:capability         forward the request to the app's capability as the calling app; an app
+ *                                           that is not here but on exactly one peer is reached through that peer
+ *   POST /api/call/:peer/:app/:capability   the same, naming the peer
  *   GET  /api/calls?app&caller&limit        call history, newest first
  *
  * `stream`, `ack` and `call` identify the app by its `SPACE_APP_TOKEN`; the operator token
@@ -31,6 +33,21 @@ export type BusApiOptions = {
   appForToken?: (token: string) => Promise<string | undefined>;
   /** Comment lines keeping a stream open through proxies; tests shorten it. */
   keepaliveMs?: number;
+  /** The peers (docs/peers.md): their catalogues join `/api/capabilities`, and a call to an app they hold is forwarded. */
+  remote?: RemoteBus;
+};
+
+/** What the bus routes need from the peer hub; `name` is this space's own name, prefixed onto forwarded callers. */
+export type RemoteBus = {
+  name: string;
+  capabilities(): (AppCapabilities & { peer: string })[];
+  providerOf(app: string, capability?: string): { peer: RemotePeer } | { ambiguous: string[] } | undefined;
+  get(name: string): RemotePeer | undefined;
+};
+
+export type RemotePeer = {
+  name: string;
+  forward(req: Request, path: string, opts?: { timeoutMs?: number; headers?: Record<string, string> }): Promise<Response>;
 };
 
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
@@ -69,6 +86,49 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
         return error(400, (e as Error).message ?? String(e));
       }
     };
+
+  const callLocal = async (req: Request, caller: string, app: string, name: string): Promise<Response> => {
+    const length = Number(req.headers.get("content-length") ?? 0);
+    if (length > MAX_CALL_BODY_BYTES) return error(413, `body is ${length} bytes; the limit is ${MAX_CALL_BODY_BYTES}`);
+    const body = await req.arrayBuffer();
+    if (body.byteLength > MAX_CALL_BODY_BYTES) return error(413, `body is ${body.byteLength} bytes; the limit is ${MAX_CALL_BODY_BYTES}`);
+    try {
+      const r = await bus.call(caller, app, name, {
+        body: body.byteLength ? body : null,
+        contentType: req.headers.get("content-type") ?? undefined,
+        accept: req.headers.get("accept") ?? undefined,
+        signal: req.signal,
+      });
+      return new Response(r.body, {
+        status: r.status,
+        headers: { ...(r.contentType ? { "content-type": r.contentType } : {}), "cache-control": "no-store", "x-space-call-id": String(r.record.id), "x-space-call-ms": String(r.record.durationMs) },
+      });
+    } catch (e) {
+      if (e instanceof CallError) return error(e.status, e.message);
+      return error(500, (e as Error).message ?? String(e));
+    }
+  };
+
+  /** Forward to the peer's `/api/peer/call/...` as `<this space>/<caller>`; recorded here under `<peer>/<app>` too. */
+  const callRemote = async (req: Request, caller: string, peer: RemotePeer, app: string, name: string): Promise<Response> => {
+    const length = Number(req.headers.get("content-length") ?? 0);
+    if (length > MAX_CALL_BODY_BYTES) return error(413, `body is ${length} bytes; the limit is ${MAX_CALL_BODY_BYTES}`);
+    const startedAt = Date.now();
+    const record = (status: number, ok: boolean, err?: string) => store.addCall({ caller, app: `${peer.name}/${app}`, capability: name, status, ok, durationMs: Date.now() - startedAt, ...(err ? { error: err } : {}), at: startedAt });
+    let res: Response;
+    try {
+      res = await peer.forward(req, `/api/peer/call/${encodeURIComponent(app)}/${encodeURIComponent(name)}`, { timeoutMs: MAX_CALL_TIMEOUT_MS, headers: { "x-space-caller": `${opts.remote!.name}/${caller}`, ...(req.headers.get("accept") ? { accept: req.headers.get("accept")! } : {}) } });
+    } catch (e) {
+      const rec = record(0, false, `peer ${peer.name} unreachable: ${(e as Error).message ?? String(e)}`);
+      return error(502, rec.error ?? "peer unreachable");
+    }
+    const rec = record(res.status, res.ok, res.ok ? undefined : `${res.status}`);
+    const headers = new Headers(res.headers);
+    headers.set("x-space-call-id", String(rec.id));
+    headers.set("x-space-call-ms", String(rec.durationMs));
+    headers.set("x-space-call-peer", peer.name);
+    return new Response(res.body, { status: res.status, headers });
+  };
 
   return {
     "/api/events/stream": {
@@ -129,13 +189,10 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
       GET: () =>
         json({
           ok: true,
-          apps: bus.capabilities().map((a) => ({
-            app: a.app,
-            provides: a.provides,
-            publishes: a.publishes,
-            consumes: a.consumes,
-            stats: store.callStats(a.app),
-          })),
+          apps: [
+            ...bus.capabilities().map((a) => ({ app: a.app, provides: a.provides, publishes: a.publishes, consumes: a.consumes, stats: store.callStats(a.app) })),
+            ...(opts.remote?.capabilities() ?? []).map((a) => ({ app: a.app, peer: a.peer, provides: a.provides, publishes: a.publishes, consumes: a.consumes, stats: store.callStats(a.app) })),
+          ],
         }),
     },
 
@@ -145,30 +202,23 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
         if (!caller) return error(401, "unauthorized");
         const app = req.params.app ?? "";
         const name = req.params.capability ?? "";
-        const length = Number(req.headers.get("content-length") ?? 0);
-        if (length > MAX_CALL_BODY_BYTES) return error(413, `body is ${length} bytes; the limit is ${MAX_CALL_BODY_BYTES}`);
-        const body = await req.arrayBuffer();
-        if (body.byteLength > MAX_CALL_BODY_BYTES) return error(413, `body is ${body.byteLength} bytes; the limit is ${MAX_CALL_BODY_BYTES}`);
-        try {
-          const r = await bus.call(caller, app, name, {
-            body: body.byteLength ? body : null,
-            contentType: req.headers.get("content-type") ?? undefined,
-            accept: req.headers.get("accept") ?? undefined,
-            signal: req.signal,
-          });
-          return new Response(r.body, {
-            status: r.status,
-            headers: {
-              ...(r.contentType ? { "content-type": r.contentType } : {}),
-              "cache-control": "no-store",
-              "x-space-call-id": String(r.record.id),
-              "x-space-call-ms": String(r.record.durationMs),
-            },
-          });
-        } catch (e) {
-          if (e instanceof CallError) return error(e.status, e.message);
-          return error(500, (e as Error).message ?? String(e));
+        // Not provided here but on exactly one peer: the peer answers. Anything else is the local bus's answer.
+        if (opts.remote && !bus.capability(app, name)) {
+          const where = opts.remote.providerOf(app, name);
+          if (where && "ambiguous" in where) return error(409, `${app}/${name} is provided on several peers (${where.ambiguous.join(", ")}); call /api/call/<peer>/${app}/${name}`);
+          if (where) return callRemote(req, caller, where.peer, app, name);
         }
+        return callLocal(req, caller, app, name);
+      },
+    },
+
+    "/api/call/:peer/:app/:capability": {
+      POST: async (req) => {
+        const caller = await identify(req);
+        if (!caller) return error(401, "unauthorized");
+        const peer = opts.remote?.get(req.params.peer ?? "");
+        if (!peer) return error(404, `unknown peer: ${req.params.peer ?? ""}`);
+        return callRemote(req, caller, peer, req.params.app ?? "", req.params.capability ?? "");
       },
     },
 

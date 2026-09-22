@@ -61,10 +61,10 @@ export function matchingTriggers(triggers: EventTrigger[] | undefined, event: Sp
 }
 
 /** What a run sees of its events, in the order they were published. */
-export type EventPayload = { name: string; app: string; at: string; data: Record<string, unknown> };
+export type EventPayload = { name: string; app: string; at: string; data: Record<string, unknown>; peer?: string };
 
 export function eventPayload(e: SpaceEvent): EventPayload {
-  return { name: e.name, app: e.app, at: new Date(e.at).toISOString(), data: e.data };
+  return { name: e.name, app: e.app, at: new Date(e.at).toISOString(), data: e.data, ...(e.peer ? { peer: e.peer } : {}) };
 }
 
 /**

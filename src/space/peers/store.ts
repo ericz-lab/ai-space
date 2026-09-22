@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS peer_snapshots (
   json  TEXT NOT NULL,
   as_of TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS peer_cursors (
+  peer           TEXT PRIMARY KEY,
+  last_event_id  INTEGER NOT NULL
+);
 `;
 
 export class PeerStore {
@@ -33,11 +37,22 @@ export class PeerStore {
     this.db.query("INSERT INTO peer_snapshots (peer, json, as_of) VALUES (?, ?, ?) ON CONFLICT(peer) DO UPDATE SET json = excluded.json, as_of = excluded.as_of").run(peer, JSON.stringify(snapshot), snapshot.asOf);
   }
 
-  /** Drop snapshots of peers that are no longer configured. */
+  /** The id of the last event mirrored from the peer (docs/events.md); 0 = nothing yet. */
+  cursor(peer: string): number {
+    return this.db.query<{ last_event_id: number }, [string]>("SELECT last_event_id FROM peer_cursors WHERE peer = ?").get(peer)?.last_event_id ?? 0;
+  }
+
+  setCursor(peer: string, lastEventId: number): void {
+    this.db.query("INSERT INTO peer_cursors (peer, last_event_id) VALUES (?, ?) ON CONFLICT(peer) DO UPDATE SET last_event_id = excluded.last_event_id").run(peer, lastEventId);
+  }
+
+  /** Drop snapshots and cursors of peers that are no longer configured. */
   prune(keep: string[]): void {
     const names = new Set(keep);
-    for (const { peer } of this.db.query<{ peer: string }, []>("SELECT peer FROM peer_snapshots").all()) {
-      if (!names.has(peer)) this.db.query("DELETE FROM peer_snapshots WHERE peer = ?").run(peer);
+    for (const table of ["peer_snapshots", "peer_cursors"]) {
+      for (const { peer } of this.db.query<{ peer: string }, []>(`SELECT peer FROM ${table}`).all()) {
+        if (!names.has(peer)) this.db.query(`DELETE FROM ${table} WHERE peer = ?`).run(peer);
+      }
     }
   }
 }
