@@ -133,6 +133,56 @@ const uninstall = async (ctx: Ctx, argv: string[]) => {
   return 0;
 };
 
+type ServiceStatus = {
+  app: string;
+  supervisor: "space" | "operator";
+  unit: string;
+  scope: "user" | "system";
+  managed: boolean;
+  state?: { loadState: string; activeState: string; subState: string; unitFileState: string; restarts: number; since?: string; mainPid: number };
+  last?: { action: string; at: number; error?: string; health?: string; skippedEnv?: string[] };
+};
+
+function printService(ctx: Ctx, s: ServiceStatus) {
+  const now = Date.now();
+  const st = s.state;
+  ctx.print.kv([
+    ["app", s.app],
+    ["supervisor", s.supervisor],
+    ["unit", `${s.unit}${s.scope === "system" ? " (system)" : ""}${s.supervisor === "space" && !s.managed ? " (not written)" : ""}`],
+    ["state", st && st.loadState !== "not-found" ? `${st.activeState} (${st.subState})${st.mainPid ? ` pid ${st.mainPid}` : ""}` : "no such unit"],
+    ["since", st?.since ? ago(st.since, now) : ""],
+    ["restarts", st && st.loadState !== "not-found" ? st.restarts : ""],
+    ["enabled", st?.unitFileState ?? ""],
+    ["last sync", s.last ? `${s.last.action} ${ago(new Date(s.last.at).toISOString(), now)}${s.last.health ? ` · health ${s.last.health}` : ""}` : ""],
+    ["error", s.last?.error ?? ""],
+    ["env left out", s.last?.skippedEnv?.join(", ") ?? ""],
+  ]);
+}
+
+const service = async (ctx: Ctx, argv: string[]) => {
+  const { positional } = parseArgs(argv, {});
+  const name = need(positional, 0, "APP");
+  noMore(positional, 1);
+  const c = await ctx.client();
+  const res = await c.get<{ service: ServiceStatus }>(`/api/apps/${name}/service`);
+  if (ctx.flags.json) return ctx.print.data(res), 0;
+  printService(ctx, res.service);
+  return 0;
+};
+
+// Under SPACE_SUPERVISOR=operator the space answers 409 with the command to run instead.
+const control = (action: "start" | "stop" | "restart") => async (ctx: Ctx, argv: string[]) => {
+  const { positional } = parseArgs(argv, {});
+  const name = need(positional, 0, "APP");
+  noMore(positional, 1);
+  const c = await ctx.client();
+  const res = await c.post<{ service: ServiceStatus }>(`/api/apps/${name}/service`, { action }, { timeoutMs: 120_000 });
+  if (ctx.flags.json) return ctx.print.data(res), 0;
+  printService(ctx, res.service);
+  return 0;
+};
+
 const env = async (ctx: Ctx, argv: string[]) => {
   const { positional } = parseArgs(argv, {});
   const name = need(positional, 0, "APP");
@@ -151,11 +201,15 @@ export function shellQuote(v: string): string {
 
 export const appNoun: Noun = {
   name: "app",
-  summary: "the apps of the workspace: list, show, sync, hide, uninstall, env, new",
+  summary: "the apps of the workspace: list, show, sync, service, start/stop/restart, hide, uninstall, env, new",
   verbs: {
     ls: { usage: "[--panel]", summary: "every app (--panel: only what the panel shows)", run: ls },
     show: { usage: "APP", summary: "manifest, storage, backups and tasks of one app", run: show },
     sync: { usage: "[APP]", summary: "re-read one space.yaml, or every app directory", run: sync },
+    service: { usage: "APP", summary: "who runs the app's service, its unit, state, restarts, the last sync's outcome", run: service },
+    start: { usage: "APP", summary: "start the app's unit (SPACE_SUPERVISOR=space)", run: control("start") },
+    stop: { usage: "APP", summary: "stop the app's unit until its next sync (set status: paused to keep it stopped)", run: control("stop") },
+    restart: { usage: "APP", summary: "restart the app's unit (SPACE_SUPERVISOR=space)", run: control("restart") },
     hide: { usage: "APP", summary: "hide the app on the panel", run: hidden(true) },
     unhide: { usage: "APP", summary: "show the app on the panel again", run: hidden(false) },
     uninstall: { usage: "APP [--yes] [--force]", summary: "stop, take out of the workspace, forget (data kept; --force: even with a task running)", run: uninstall },

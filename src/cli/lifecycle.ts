@@ -26,7 +26,7 @@ const init = (installDefaults: boolean) => async (ctx: Ctx, argv: string[]) => {
   try {
     const apps = parseDefaultApps(env);
     const log = (l: string) => err(`[space] default apps: ${l}`);
-    const reports = installDefaults ? await installDefaultApps(ws, apps, { log }) : await cloneDefaultApps(ws, apps, { log });
+    const reports = installDefaults ? await installDefaultApps(ws, apps, { log, supervisor: env.SPACE_SUPERVISOR?.trim() === "space" ? "space" : "operator" }) : await cloneDefaultApps(ws, apps, { log });
     err(`[space] default apps: ${describeInstalls(reports)}`);
   } catch (e) {
     err(`[space] default apps: ${(e as Error).message}`);

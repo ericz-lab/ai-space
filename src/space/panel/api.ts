@@ -20,7 +20,7 @@ import { type WidgetFeed, sourceUrl } from "./widgets.ts";
  *   DELETE /api/apps/:app[?force=1]      uninstall: stop the service, take the directory out, forget it
  *   GET    /api/apps/:app/icon
  *   GET    /api/agents/:app/:agent/avatar
- *   GET    /api/services                 every app that declares a service, with its health; peers with theirs
+ *   GET    /api/services                 every app that declares a service, with its health and who supervises it; peers with theirs
  *   GET    /api/widgets                  every widget's latest payload
  *   GET    /api/widgets/:app/:name/embed the page of a `kind: embed` widget, proxied from its source
  *   GET    /api/panel/layout             order + hidden
@@ -47,7 +47,9 @@ export type PanelApiOptions = {
   onRemove: (app: string) => Promise<void>;
   /** Tasks of the app with a run in flight; an uninstall refuses unless it is forced. */
   runningTasks?: (app: string) => string[];
-  /** Stop an app's service before it is uninstalled (SPACE_SERVICE_STOP); undefined = nothing stops it. */
+  /** Who runs the services (SPACE_SUPERVISOR) and the supervisor's last outcome per app, for the Services list. */
+  supervision?: { mode: "space" | "operator"; lastOf: (app: string) => { action: string; error?: string; health?: string } | undefined };
+  /** Stop an app's service before it is uninstalled (the supervisor's unit, or SPACE_SERVICE_STOP); undefined = nothing stops it. */
   stopService?: (app: string) => Promise<{ ok: boolean; error?: string }>;
   /** Turn a link into identity fields; default asks the claude runtime. */
   resolveLink?: (link: string) => Promise<Record<string, unknown>>;
@@ -122,7 +124,19 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
 
   const listServices = async (): Promise<ServiceView[]> => {
     const hidden = new Set(layout.read().hidden);
-    const rows = await Promise.all(registry.list().map(async (e) => serviceView(e, { hidden: hidden.has(e.manifest.app), health: await healthOf(e) })));
+    const sup = opts.supervision;
+    const rows = await Promise.all(
+      registry.list().map(async (e) => {
+        const last = sup?.lastOf(e.manifest.app);
+        const { action, error, health: h } = last ?? { action: "" };
+        return serviceView(e, {
+          hidden: hidden.has(e.manifest.app),
+          health: await healthOf(e),
+          ...(sup ? { supervisor: sup.mode } : {}),
+          ...(last ? { supervision: { action, ...(error ? { error } : {}), ...(h ? { health: h } : {}) } } : {}),
+        });
+      }),
+    );
     return [...rows.filter((r): r is ServiceView => r !== undefined), ...(peers?.services(hidden) ?? [])];
   };
 
@@ -208,7 +222,7 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     },
 
     "/api/services": {
-      GET: wrap(async () => json({ ok: true, services: await listServices(), peers: peers?.status() ?? [], asOf: new Date().toISOString() })),
+      GET: wrap(async () => json({ ok: true, services: await listServices(), peers: peers?.status() ?? [], ...(opts.supervision ? { supervisor: opts.supervision.mode } : {}), asOf: new Date().toISOString() })),
     },
 
     "/api/widgets": {

@@ -49,6 +49,10 @@ export type ServiceInfo = {
   health: "ok" | "down" | "unknown";
   status: "active" | "paused" | "archived";
   hidden: boolean;
+  /** Who runs the process (docs/supervision.md). */
+  supervisor?: "space" | "operator";
+  /** Under the space: the last sync's outcome for the unit. */
+  supervision?: { action: string; error?: string; health?: string };
 };
 
 export type WidgetItem = { text: string; url: string; time: string };

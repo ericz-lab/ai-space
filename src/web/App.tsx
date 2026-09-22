@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Chat from "./Chat.tsx";
 import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
@@ -423,12 +423,29 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // panels this one merges. Loaded each time the settings open so the health dots are fresh (the
   // server caches probes for 15 s and peer snapshots for their refresh period).
   const [services, setServices] = useState<{ services: ServiceInfo[]; peers: PeerInfo[] } | null>(null);
-  useEffect(() => {
-    if (!setsOpen) return;
+  const loadServices = useCallback(() => {
     getJson<{ services: ServiceInfo[]; peers: PeerInfo[] }>("/api/services")
       .then((d) => setServices({ services: d.services || [], peers: d.peers || [] }))
       .catch(() => setServices({ services: [], peers: [] }));
-  }, [setsOpen]);
+  }, []);
+  useEffect(() => {
+    if (setsOpen) loadServices();
+  }, [setsOpen, loadServices]);
+  // Start / stop / restart of a unit the space supervises (docs/supervision.md); one at a time per row.
+  const [svcBusy, setSvcBusy] = useState<string | null>(null);
+  const [svcError, setSvcError] = useState<string | null>(null);
+  const controlService = async (app: string, action: "start" | "stop" | "restart") => {
+    setSvcBusy(app);
+    setSvcError(null);
+    try {
+      await sendJson("POST", `/api/apps/${encodeURIComponent(app)}/service`, { action });
+    } catch (e) {
+      setSvcError(`${app}: ${(e as Error).message}`);
+    } finally {
+      setSvcBusy(null);
+      loadServices();
+    }
+  };
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);
   useEffect(() => {
     if (!setsOpen) return;
@@ -909,16 +926,27 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 <p className="setnote">{t("common.loading")}</p>
               ) : services.services.length ? (
                 services.services.map((s) => {
-                  const statusKey = s.status === "active" ? HEALTH[s.health] : STATUS[s.status];
+                  const unitProblem = s.supervision?.action === "conflict" || s.supervision?.action === "failed";
+                  const statusKey = unitProblem ? "services.unitProblem" : s.status === "active" ? HEALTH[s.health] : STATUS[s.status];
+                  const supervised = !s.peer && s.supervisor === "space" && s.status === "active";
                   return (
-                  <div key={`${s.peer ?? ""}/${s.app}`} className="svcrow" title={`${s.peer ? `${s.peer}/` : ""}${s.app} · 127.0.0.1:${s.port}${s.hidden ? ` · ${t("status.hidden")}` : ""}`}>
+                  <div key={`${s.peer ?? ""}/${s.app}`} className="svcrow" title={`${s.peer ? `${s.peer}/` : ""}${s.app} · 127.0.0.1:${s.port}${s.supervisor ? ` · ${t(s.supervisor === "space" ? "services.bySpace" : "services.byOperator")}` : ""}${s.supervision ? ` · ${s.supervision.action}` : ""}${s.supervision?.error ? `\n${s.supervision.error}` : ""}${s.hidden ? ` · ${t("status.hidden")}` : ""}`}>
                     <span className="svc-ico">
                       <Icon icon={s.icon} fallback="📦" />
                     </span>
                     <span className="svc-name">{localized(lang, s).title}</span>
                     {s.peer && <span className="svc-peer">{s.peer}</span>}
                     <span className="svc-port">:{s.port}</span>
-                    <span className={`status ${s.status === "active" ? s.health : s.status}`}>
+                    {supervised && (
+                      <span className="svc-ctl">
+                        {(["start", "stop", "restart"] as const).map((a) => (
+                          <button key={a} type="button" disabled={svcBusy === s.app} title={t(`services.${a}`)} aria-label={t(`services.${a}`)} onClick={() => void controlService(s.app, a)}>
+                            {a === "start" ? "▶" : a === "stop" ? "■" : "↻"}
+                          </button>
+                        ))}
+                      </span>
+                    )}
+                    <span className={`status ${unitProblem ? "down" : s.status === "active" ? s.health : s.status}`}>
                       <i />
                       {statusKey ? t(statusKey) : "?"}
                     </span>
@@ -928,6 +956,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               ) : (
                 <p className="setnote">{t("settings.noServices")}</p>
               )}
+              {svcError && <p className="setnote">{svcError}</p>}
               <p className="sethead">{t("settings.backups")}</p>
               {backups === null ? (
                 <p className="setnote">{t("common.loading")}</p>

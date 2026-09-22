@@ -13,7 +13,8 @@ export const SPACE_UNIT = "ai-space";
 export const APP_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export const MAX_LINES = 10_000;
 
-export type LogsRequest = { app: string; lines: number; follow: boolean };
+/** `unit` overrides the unit behind `app` (the space's own `space-<app>.service` under SPACE_SUPERVISOR=space). */
+export type LogsRequest = { app: string; lines: number; follow: boolean; unit?: string };
 
 /** The unit behind an app name: the space's own service for `space`, the app itself otherwise. */
 export function unitFor(app: string): string {
@@ -22,9 +23,10 @@ export function unitFor(app: string): string {
 
 export function renderLogsCommand(template: string, req: LogsRequest): string {
   if (!APP_RE.test(req.app)) throw new Error("invalid app name");
+  if (req.unit !== undefined && !/^[a-z0-9][a-z0-9._@-]{0,80}$/i.test(req.unit)) throw new Error("invalid unit name");
   const lines = Math.min(MAX_LINES, Math.max(1, Math.floor(req.lines) || 100));
   return template
-    .replaceAll("{app}", unitFor(req.app))
+    .replaceAll("{app}", req.unit ?? unitFor(req.app))
     .replaceAll("{lines}", String(lines))
     .replaceAll("{follow}", req.follow ? "-f" : "")
     .replace(/\s+$/, "");

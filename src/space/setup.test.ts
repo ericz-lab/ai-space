@@ -168,6 +168,52 @@ describe("runSetup", () => {
     expect(io.log).toContain("Nothing changed.");
   });
 
+  describe("who runs the services", () => {
+    // systemd with a user manager; lingering as given.
+    const systemd = (linger: boolean): Partial<SetupDeps> => ({
+      which: async (cmd) => (["claude", "gh", "tar", "zstd", "systemctl"].includes(cmd) ? `/usr/bin/${cmd}` : undefined),
+      async run(cmd) {
+        const [bin, ...rest] = cmd;
+        if (bin === "systemctl" && rest[1] === "is-system-running") return { code: 0, stdout: "running\n", stderr: "" };
+        if (bin === "systemctl") return { code: 0, stdout: rest[1] === "is-enabled" ? "enabled\n" : "", stderr: "" };
+        if (bin === "loginctl") return { code: 0, stdout: `Linger=${linger ? "yes" : "no"}\n`, stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    const quiet: [string, string | boolean][] = [["Configure a notification channel now?", false], ["Configure one now?", false], ["Will a hub", false], ["Add a peer", false], ["Write them?", true], ["Restart the ai-space unit", false]];
+
+    test("a fresh machine with lingering gets space by default", async () => {
+      const io = scripted([...quiet]);
+      const d = await deps(io, { SPACE_API_TOKEN: "t", USER: "me" }, systemd(true));
+      const out = await runSetup(d);
+      expect(out.written).toContain("SPACE_SUPERVISOR");
+      expect(await Bun.file(d.ws.envFile).text()).toContain("SPACE_SUPERVISOR=space");
+    });
+
+    test("a machine on the operator's templates keeps operator unless asked; choosing space clears them", async () => {
+      const env = { SPACE_API_TOKEN: "t", SPACE_SERVICE_STOP: "systemctl --user disable --now {app}" };
+      const kept = await runSetup(await deps(scripted([...quiet]), env, systemd(true)));
+      expect(kept.written).not.toContain("SPACE_SUPERVISOR");
+      const io = scripted([["Who runs the apps' services", "space"], ...quiet]);
+      const d = await deps(io, env, systemd(true));
+      const out = await runSetup(d);
+      expect(out.written).toEqual(expect.arrayContaining(["SPACE_SUPERVISOR", "SPACE_SERVICE_STOP"]));
+      const text = await Bun.file(d.ws.envFile).text();
+      expect(text).toContain("SPACE_SUPERVISOR=space");
+      expect(text).toContain('SPACE_SERVICE_STOP=""');
+      expect(io.log.join("\n")).toContain("show `conflict`");
+    });
+
+    test("without lingering only operator is offered, and the tools list says why", async () => {
+      const io = scripted([...quiet]);
+      const d = await deps(io, { SPACE_API_TOKEN: "t", SPACE_SUPERVISOR: "space" }, systemd(false));
+      const out = await runSetup(d);
+      expect(out.missing).toContain("systemd user");
+      expect(io.log.join("\n")).toContain("Only operator here: user manager up, lingering off");
+      expect(await Bun.file(d.ws.envFile).text()).toContain("SPACE_SUPERVISOR=operator");
+    });
+  });
+
   test("a failed S3 probe is dropped unless kept; a rejected peer token is reported", async () => {
     const io = scripted([
       ["Configure a notification channel now?", false],

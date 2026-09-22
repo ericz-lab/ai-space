@@ -4,7 +4,7 @@ This document is the contract between ai-space and the apps that run inside it. 
 
 Spec version: `1`. An app states the version it targets with `spec: 1` at the top of `space.yaml`. Breaking changes bump the number; ai-space keeps accepting older versions for at least one release.
 
-Status: the `tasks`, `storage` and `notify` sections, the top-level identity fields, `agents` (chat), `widgets`, the panel, the workspace layout and the `space.env` hand-over are implemented. `service` supervision, `skills` mounting, the JSON Schema, `validate` and `new-app` are specified here first and implemented next; the [status table](#implementation-status) at the end tracks it.
+Status: the `tasks`, `storage` and `notify` sections, the top-level identity fields, `agents` (chat), `widgets`, the panel, the workspace layout and the `space.env` hand-over are implemented. `skills` mounting, the JSON Schema, `validate` and `new-app` are specified here first and implemented next; the [status table](#implementation-status) at the end tracks it.
 
 ## What an app is
 
@@ -103,7 +103,7 @@ i18n:
 
 ### `service`
 
-The app's own process, if it has one. ai-space starts it, restarts it on failure, forwards its logs and checks its health.
+The app's own process, if it has one. Where the machine runs `SPACE_SUPERVISOR=space`, ai-space starts it as the user unit `space-<name>.service`, restarts it on failure, stops it when the app is paused, archived or uninstalled, and reads its journal; elsewhere the operator's own unit runs it. ai-space checks its health either way. See [supervision](supervision.md).
 
 ```yaml
 service:
@@ -118,7 +118,7 @@ Contract for the process:
 
 - It reads `PORT`, binds `127.0.0.1:${PORT}` and nothing else.
 - Its environment is, in increasing precedence: the app's `.env`, `<workspace>/data/<name>/space.env`, `service.env`, then the values ai-space sets (`PORT`, `SPACE_APP`, `SPACE_APP_DIR`, `SPACE_APP_DATA_DIR`, `SPACE_API_URL`, `SPACE_NAME`).
-- It logs to stdout and stderr; ai-space collects them under `<workspace>/logs/<name>/`.
+- It logs to stdout and stderr; under the space's supervision they go to the journal of its unit (`space logs <name>`).
 - It answers `GET <health>` with 200 when it can serve requests. The panel shows the app as down otherwise.
 - It exits on `SIGTERM` within 10 seconds.
 
@@ -351,7 +351,7 @@ Commit messages follow Conventional Commits, as in ai-space itself.
 | Validate | `bun run validate [<dir>]` | Parses `space.yaml` against the schema and the semantic rules (unique ports, referenced files exist, placeholders resolvable). Exit code 1 with one line per problem. |
 | Sync | automatic on boot and on `POST /api/apps/sync` | Discovers every `apps/*/space.yaml`, provisions storage, registers tasks, starts services, publishes agents and widgets. Idempotent. |
 | Pause / archive | edit `status:` and sync | Tasks and service stop; storage stays. |
-| Remove | drop the app on the panel's uninstall zone, or `DELETE /api/apps/<name>`, or delete the directory and sync | The service is stopped (through the operator's `SPACE_SERVICE_STOP` command; not when removing by hand), the directory leaves `apps/` (a checkout goes to `<workspace>/trash/`, a symlink is unlinked), tasks are marked orphaned, agents and widgets disappear. `<workspace>/data/<name>/` is kept until removed by hand, and so are the repository, the unit file and the hostname: retiring an app for good means also `systemctl disable` of its unit, dropping its tunnel ingress and archiving its repository. See [panel.md](panel.md#arranging-hiding-and-uninstalling-apps). |
+| Remove | drop the app on the panel's uninstall zone, or `DELETE /api/apps/<name>`, or delete the directory and sync | The service is stopped (the space's unit is removed under `SPACE_SUPERVISOR=space`, even when removing by hand and syncing; otherwise through the operator's `SPACE_SERVICE_STOP` command, not when removing by hand), the directory leaves `apps/` (a checkout goes to `<workspace>/trash/`, a symlink is unlinked), tasks are marked orphaned, agents and widgets disappear. `<workspace>/data/<name>/` is kept until removed by hand, and so are the repository, an operator's unit file and the hostname: retiring an app for good means also `systemctl disable` of such a unit, dropping its tunnel ingress and archiving its repository. See [panel.md](panel.md#arranging-hiding-and-uninstalling-apps). |
 
 Sync rejects an app whose manifest fails validation and keeps the previous good state for that app; other apps are unaffected.
 
@@ -456,7 +456,7 @@ notify:
 | `backup` | Implemented (`src/space/storage/backup/`): daily snapshots, retention, weekly verify, `restore` |
 | `notify`, `/api/notify`, `SPACE_APP_TOKEN` | Implemented (`src/space/notify/`, `skills/notify/`) |
 | Top-level `spec`, `title`, `description`, `icon`, `url`, `status`, `repo` | Implemented (`src/space/scheduler/manifest.ts`); `paused`/`archived` stop the app's tasks |
-| `service` | Parsed; health probed by the panel; logs read through `SPACE_SERVICE_LOGS` (`GET /api/apps/:app/logs`, `space logs`). Supervision (start, restart, log collection, `PORT`) planned |
+| `service` | Implemented (`src/space/services/`): under `SPACE_SUPERVISOR=space` one user unit per app, reconciled on every sync, the environment file with `PORT`, logs from its journal; under `operator` the operator's units, probed, stopped through `SPACE_SERVICE_STOP`, logs through `SPACE_SERVICE_LOGS` |
 | Router, `/api/router` | Implemented (`src/space/router/`): with `SPACE_ROUTER=caddy` every app's hostname is routed on the machine, no per-app registration ([router.md](router.md)) |
 | `agents`, chat route | Implemented for `claude` (`src/space/agents/`); `skills` and `memory` are parsed but not mounted yet |
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |

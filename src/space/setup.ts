@@ -10,8 +10,8 @@ import type { Workspace } from "./workspace.ts";
  * `bun src/index.ts setup`: the interactive first-install walk-through.
  *
  * Checks the tools ai-space spawns (bun, git, tar, zstd, claude, gh, cloudflared), then
- * asks for every workspace `.env` value section by section (core, notification
- * channel, S3 blob store, peers), verifies what can be verified from the
+ * asks for every workspace `.env` value section by section (core, who runs
+ * the services, notification channel, S3 blob store, peers), verifies what can be verified from the
  * machine (a test message, one S3 list call), writes `<workspace>/.env`
  * keeping every line it does not touch, and prints what remains to be done
  * elsewhere (tunnel hostnames, the access layer). Re-runnable: existing
@@ -251,6 +251,10 @@ export async function checkTools(d: SetupDeps): Promise<Check[]> {
     checks.push({ name: "cloudflared", ok: false, detail: "not on PATH", hint: "see docs/install.md step 5 (the panel stays loopback-only until then)" });
   }
 
+  // Service supervision (docs/supervision.md) needs a user manager that outlives the login session.
+  const sd = await userSystemd(d);
+  if (sd) checks.push({ name: "systemd user", ok: sd.ok, detail: sd.detail, hint: `sudo loginctl enable-linger ${d.env.USER ?? "$USER"} (SPACE_SUPERVISOR=space needs it; docs/supervision.md)` });
+
   // The router (docs/router.md) is optional: checked when it is on, or when caddy is there anyway.
   const caddy = await d.which("caddy");
   if (d.env.SPACE_ROUTER?.trim() === "caddy" || caddy) {
@@ -264,6 +268,19 @@ export async function checkTools(d: SetupDeps): Promise<Check[]> {
     }
   }
   return checks;
+}
+
+/**
+ * Whether this machine can run `SPACE_SUPERVISOR=space`: a systemd user manager that answers and
+ * lingering on, so the units keep running with nobody logged in. Undefined without systemd at all.
+ */
+export async function userSystemd(d: SetupDeps): Promise<{ ok: boolean; detail: string } | undefined> {
+  if (!(await d.which("systemctl"))) return undefined;
+  const manager = await d.run(["systemctl", "--user", "is-system-running"]);
+  if (!/^(running|degraded|starting|initializing|maintenance)/.test(manager.stdout.trim())) return { ok: false, detail: "no user manager answers (systemctl --user)" };
+  const linger = await d.run(["loginctl", "show-user", d.env.USER ?? "", "-p", "Linger"]);
+  if (linger.stdout.trim() !== "Linger=yes") return { ok: false, detail: "user manager up, lingering off: units stop at logout" };
+  return { ok: true, detail: "user manager, lingering on" };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -285,7 +302,7 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
   io.say();
 
   /* 1. tools */
-  io.say("[1/5] Tools");
+  io.say("[1/6] Tools");
   const checks = await checkTools(d);
   const missing: string[] = [];
   for (const c of checks) {
@@ -295,7 +312,7 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
   io.say();
 
   /* 2. core */
-  io.say("[2/5] Core");
+  io.say("[2/6] Core");
   set("SPACE_HOST", await io.ask("Bind address (keep loopback; the tunnel is the way in)", { default: current("SPACE_HOST") || "127.0.0.1" }));
   set("SPACE_PORT", await askNumber(io, "Port", current("SPACE_PORT") || "8700"));
   const token = current("SPACE_API_TOKEN");
@@ -315,8 +332,33 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
   if (router === "caddy") set("SPACE_DOMAIN", await io.ask("Domain of the wildcard rule (apps get <app>.<domain>)", { default: current("SPACE_DOMAIN") }));
   io.say();
 
-  /* 3. notifications */
-  io.say("[3/5] Notifications");
+  /* 3. services */
+  io.say("[3/6] Services (docs/supervision.md)");
+  const operatorTemplates = ["SPACE_SERVICE_STOP", "SPACE_SERVICE_LOGS"].filter((k) => current(k));
+  const sd = await userSystemd(d);
+  const was = current("SPACE_SUPERVISOR") || "operator";
+  let supervisor = was;
+  if (!sd?.ok) {
+    io.say(`  Only operator here: ${sd ? sd.detail : "no systemd on this machine"}. The apps' services are units you install.`);
+    supervisor = "operator";
+  } else {
+    io.say("  space: ai-space writes one user unit per app and starts, restarts and removes it with the manifest.");
+    io.say("  operator: units you install yourself; ai-space only probes them and stops them on uninstall.");
+    // A fresh machine gets the space; one whose .env already names the operator's templates keeps them.
+    const def = current("SPACE_SUPERVISOR") || (operatorTemplates.length ? "operator" : "space");
+    supervisor = (await io.ask("Who runs the apps' services", { default: def, choices: ["space", "operator"] })).trim();
+  }
+  if (supervisor !== was) set("SPACE_SUPERVISOR", supervisor);
+  if (supervisor === "space" && operatorTemplates.length) {
+    for (const k of operatorTemplates) set(k, "");
+    io.say(`  ${operatorTemplates.join(" and ")} cleared: they describe the operator's units.`);
+    io.say("  Apps whose own unit is still enabled keep running under it and show `conflict` until you");
+    io.say("  disable that unit (systemctl --user disable --now <app>) and run `space app sync <app>`.");
+  }
+  io.say();
+
+  /* 4. notifications */
+  io.say("[4/6] Notifications");
   const existingDefault = current("SPACE_NOTIFY_DEFAULT");
   if (existingDefault) io.say(`  default channel is set (${existingDefault.split("://")[0]}://…)`);
   if (await io.confirm(existingDefault ? "Replace the default channel?" : "Configure a notification channel now?", !existingDefault)) {
@@ -330,8 +372,8 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
   }
   io.say();
 
-  /* 4. blob store */
-  io.say("[4/5] Blob store (S3-compatible, e.g. Cloudflare R2)");
+  /* 5. blob store */
+  io.say("[5/6] Blob store (S3-compatible, e.g. Cloudflare R2)");
   const hasS3 = Boolean(current("SPACE_S3_ACCESS_KEY_ID"));
   if (hasS3) io.say(`  configured: ${current("SPACE_S3_ENDPOINT") || "aws"} bucket ${current("SPACE_S3_BUCKET") || "(per app)"}`);
   io.say("  Backups go to s3://<default bucket>/backups/ with these credentials unless SPACE_BACKUP_URL says otherwise (docs/backup.md).");
@@ -342,8 +384,8 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
   }
   io.say();
 
-  /* 5. peers */
-  io.say("[5/5] Peers (only with a second machine; see docs/peers.md)");
+  /* 6. peers */
+  io.say("[6/6] Peers (only with a second machine; see docs/peers.md)");
   const hub = current("SPACE_HUB_TOKEN");
   if (hub) io.say(`  SPACE_HUB_TOKEN is set (${mask(hub)}): a hub may list this machine.`);
   if (await io.confirm(hub ? "Rotate the hub token?" : "Will a hub on another machine list this one as a peer?", false)) {

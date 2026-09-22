@@ -18,7 +18,7 @@ One executable, `space`, on `PATH` on every machine that runs ai-space, and on t
 
 ```
 space status                          the machine at a glance
-space app     ls | show | sync | hide | unhide | uninstall | env | new
+space app     ls | show | sync | service | start | stop | restart | hide | unhide | uninstall | env | new
 space task    ls | show | run | runs | enable | disable | create | rm
 space logs    <app> [-n 100] [-f]     an app's log, or `space logs space` for ai-space itself
 space model   usage | calls | status | run | import
@@ -61,6 +61,8 @@ Rules:
 | `space app ls [--panel]` | every app: title, status, service health, url, hidden (`--panel`: only what the panel shows) | `GET /api/apps?all=1` |
 | `space app show APP` | the manifest as synced, storage, tasks, agents, widgets, last backup | `GET /api/apps/:app`, `.../storage`, `.../backups` |
 | `space app sync [APP]` | re-read one `space.yaml` or every app directory | `POST /api/apps/sync`, `POST /api/apps/:app/sync` |
+| `space app service APP` | who runs the service (`SPACE_SUPERVISOR`), the unit, its state, restarts, since when, the last sync's outcome ([supervision.md](supervision.md)) | `GET /api/apps/:app/service` |
+| `space app start` / `stop` / `restart APP` | the space's unit of the app, by hand; under `operator` the answer names the `systemctl` command instead | `POST /api/apps/:app/service` |
 | `space app hide APP` / `unhide` | the panel's hidden flag | `PATCH /api/apps/:app` |
 | `space app uninstall APP [--yes] [--force]` | stop, remove, forget; asks unless `--yes`; refuses while a task of the app runs unless `--force` | `DELETE /api/apps/:app` |
 | `space app env APP` | `export` lines of the provisioned variables | disk (`storage.envFor`) |
@@ -108,7 +110,7 @@ GET /api/apps/:app/logs?follow=1           the same, then new lines as they come
 GET /api/apps/space/logs                   ai-space's own log (the `ai-space` unit)
 ```
 
-The backend is a per-machine command template, like `SPACE_SERVICE_STOP`: `SPACE_SERVICE_LOGS` in the workspace `.env`, with `{app}` (the unit), `{lines}` and `{follow}` (`-f` or nothing) substituted, default `journalctl --user -u {app} -n {lines} --no-pager {follow}`; on a machine without journald, `tail -n {lines} {follow} <dir>/{app}.log` does. Only those three words are substituted, only for a plain app name, and only for an app the space knows (or `space`), so the request cannot smuggle a shell word into the operator's template. The command runs under a shell wrapper that forwards the kill to its child: when the reader leaves, `journalctl -f` dies with it instead of living on under init. Operator token required: a log is not panel data. When supervision lands and ai-space writes the files itself, the route reads them and the template becomes a fallback; the CLI does not change.
+The backend is a per-machine command template, like `SPACE_SERVICE_STOP`: `SPACE_SERVICE_LOGS` in the workspace `.env`, with `{app}` (the unit), `{lines}` and `{follow}` (`-f` or nothing) substituted, default `journalctl --user -u {app} -n {lines} --no-pager {follow}`; on a machine without journald, `tail -n {lines} {follow} <dir>/{app}.log` does. Only those three words are substituted, only for a plain app name, and only for an app the space knows (or `space`), so the request cannot smuggle a shell word into the operator's template. The command runs under a shell wrapper that forwards the kill to its child: when the reader leaves, `journalctl -f` dies with it instead of living on under init. Operator token required: a log is not panel data. Under `SPACE_SUPERVISOR=space` ([supervision.md](supervision.md)) the template is not set and `{app}` is the space's unit, `space-<app>.service`, so the default reads its journal; the CLI does not change.
 
 ## Where it lives
 
@@ -136,10 +138,9 @@ URL and token resolution follows what the process already has. URL: `--url`, the
 
 ## What shipped
 
-Everything in the table, in one change: the skeleton with help and exit codes, the older commands under their nouns with aliases, every read and write verb, the logs route with `SPACE_SERVICE_LOGS`, `task run --wait`, `app new`, `completion`, the `install.sh` link and the `bin` entry. Still to come, behind the same route and verbs: the supervisor's own log files once service supervision ships.
+Everything in the table, in one change: the skeleton with help and exit codes, the older commands under their nouns with aliases, every read and write verb, the logs route with `SPACE_SERVICE_LOGS`, `task run --wait`, `app new`, `completion`, the `install.sh` link and the `bin` entry. Service supervision reads the journal of the space's unit through the same route and verbs.
 
 ## Not in this design
 
 - **Remote operation through the hub.** `space --on david task ls` would need the peer to expose its whole API to the hub, which [peers.md](peers.md) deliberately does not. `ssh david space task ls` is the same keystrokes and keeps the boundary.
 - **A TUI.** Tables and `-f` are enough; the panel is the interactive view.
-- **Service control** (`space app restart`). It belongs to supervision, with logs; until then the unit is the unit.

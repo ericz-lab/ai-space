@@ -87,9 +87,11 @@ SPACE_PORT=8700
 SPACE_API_TOKEN=<openssl rand -hex 32>
 SPACE_MAX_CONCURRENCY=2            # 4 on a box with 4 GB or more
 SPACE_CHAT_MODEL=sonnet
-SPACE_SERVICE_STOP=systemctl --user disable --now {app}
+SPACE_SUPERVISOR=space             # operator only when `loginctl show-user $USER -p Linger` is not Linger=yes
 SPACE_NAME=<machine name>
 ```
+
+With `SPACE_SUPERVISOR=operator` add `SPACE_SERVICE_STOP=systemctl --user disable --now {app}`; with `space` leave `SPACE_SERVICE_STOP` and `SPACE_SERVICE_LOGS` out, or ai-space will not start ([supervision.md](supervision.md)).
 
 Show the values, write them, `systemctl --user restart ai-space`.
 
@@ -132,7 +134,8 @@ Base, required on every install:
 - [ ] `systemctl --user is-active ai-space` is `active`, `is-enabled` is `enabled`, `loginctl show-user <user> -p Linger` is `yes`
 - [ ] `curl -s 127.0.0.1:8700/healthz` is `{"ok":true}`
 - [ ] `ss -ltn` shows 8700 on 127.0.0.1 only
-- [ ] `~/.ai-space/.env` has `SPACE_API_TOKEN`, `SPACE_NAME`, `SPACE_SERVICE_STOP`; mode 600; not in any git repository
+- [ ] `~/.ai-space/.env` has `SPACE_API_TOKEN`, `SPACE_NAME`, `SPACE_SUPERVISOR` (and `SPACE_SERVICE_STOP` only under `operator`); mode 600; not in any git repository
+- [ ] under `space`: `space app service ai-usage` shows `space-ai-usage.service` active, and no `ai-usage.service` of its own is enabled
 - [ ] `journalctl --user -u ai-space -n 50` has no error lines
 - [ ] The person has a copy of `.env` in their password manager (it is never in a backup)
 

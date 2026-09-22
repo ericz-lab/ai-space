@@ -61,6 +61,10 @@ export type ServiceView = {
   health: Health | "unknown";
   status: Manifest["status"];
   hidden: boolean;
+  /** Who runs the process (docs/supervision.md); absent on a peer's row from an older space. */
+  supervisor?: "space" | "operator";
+  /** Under the space's supervision: what the last sync did to the unit (installed, unchanged, conflict, failed, …) and the health wait after a start. */
+  supervision?: { action: string; error?: string; health?: string };
 };
 
 /** The manifest's translations of the app's own text, or of one agent's / widget's, as `{ i18n }` or nothing. */
@@ -145,8 +149,19 @@ export function appView(entry: RegisteredApp, opts: { hidden: boolean; health?: 
   };
 }
 
-export function serviceView(entry: RegisteredApp, opts: { hidden: boolean; health?: Health }): ServiceView | undefined {
+export function serviceView(entry: RegisteredApp, opts: { hidden: boolean; health?: Health; supervisor?: ServiceView["supervisor"]; supervision?: ServiceView["supervision"] }): ServiceView | undefined {
   const m = entry.manifest;
   if (!m.service) return undefined;
-  return { app: m.app, title: m.title ?? m.app, ...appI18n(m), icon: iconUrl(m), port: m.service.port, health: opts.health ?? "unknown", status: m.status, hidden: opts.hidden };
+  return {
+    app: m.app,
+    title: m.title ?? m.app,
+    ...appI18n(m),
+    icon: iconUrl(m),
+    port: m.service.port,
+    health: opts.health ?? "unknown",
+    status: m.status,
+    hidden: opts.hidden,
+    ...(opts.supervisor ? { supervisor: opts.supervisor } : {}),
+    ...(opts.supervision ? { supervision: opts.supervision } : {}),
+  };
 }

@@ -64,6 +64,12 @@ describe("cloneDefaultApps and installDefaultApps", () => {
     // A failing installer is reported with its last line.
     const failed = await installDefaultApps(ws, [{ name: "demo", repo: src }], { run: async () => ({ code: 1, output: "boom\nno bun here" }) });
     expect(failed[0]).toEqual({ name: "demo", status: "failed", detail: "deploy/install.sh: no bun here" });
+
+    // The installer learns who runs the service, so under the space it leaves the unit alone.
+    const envs: (Record<string, string> | undefined)[] = [];
+    await installDefaultApps(ws, [{ name: "demo", repo: src }], { supervisor: "space", run: async (_c, _d, env) => (envs.push(env), { code: 0, output: "" }) });
+    await installDefaultApps(ws, [{ name: "demo", repo: src }], { run: async (_c, _d, env) => (envs.push(env), { code: 0, output: "" }) });
+    expect(envs).toEqual([{ SPACE_SUPERVISOR: "space" }, { SPACE_SUPERVISOR: "operator" }]);
   });
 });
 

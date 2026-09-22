@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
 import { SessionStore, createAgentRoutes } from "./space/agents/index.ts";
@@ -18,6 +19,7 @@ import { localMachine, syncGuide } from "./space/guide.ts";
 import { TerminalService, TerminalStore, createTerminalRoutes, terminalWebSocket } from "./space/terminal/index.ts";
 import { Router, createRouterRoutes } from "./space/router/index.ts";
 import { createLogsRoutes } from "./space/logs/index.ts";
+import { Supervisor, Systemctl, createServiceRoutes, unitName } from "./space/services/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
@@ -120,6 +122,26 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     log: (l) => console.error(`[router] ${l}`),
   });
 
+  // Service supervision (docs/supervision.md): under SPACE_SUPERVISOR=space one user unit per app,
+  // kept in step with its manifest on every sync; under operator, the operator's units as before.
+  const systemctl = new Systemctl();
+  const supervisor = new Supervisor({
+    mode: config.supervisor,
+    unitDir: join(env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"), "systemd", "user"),
+    envDir: join(ws.run, "env"),
+    systemctl,
+    envFor: (app) => storage.envFor(app),
+    probe: async (port, path) => {
+      try {
+        return (await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(2_000) })).ok ? "ok" : "down";
+      } catch {
+        return "down";
+      }
+    },
+    log: (l) => console.error(`[services] ${l}`),
+  });
+  if (config.supervisor === "space" && !(await systemctl.available())) console.error("[services] SPACE_SUPERVISOR=space, but no systemd user manager answers (systemctl --user); services cannot start. Enable lingering (loginctl enable-linger) or set SPACE_SUPERVISOR=operator");
+
   // Storage first, so a command task started right after sync already sees its DATABASE_URL.
   // Returns the tasks the services contribute for the app: its backup task, unless the manifest opts out.
   const provision = async (manifest: Manifest) => {
@@ -129,10 +151,13 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     for (const n of result.orphaned) console.log(`[storage] ${manifest.app}: ${n} left the manifest, kept as orphaned`);
     notify.syncApp(manifest.app, parseNotifySpec(manifest.notify, { title: manifest.title }));
     bus.syncApp(manifest.app, { events: manifest.events, provides: manifest.provides });
-    await registry.set(manifest);
-    void router.sync();
     const backup = backupTask(manifest.app, parseBackupSpec(manifest.backup), taskDefaults);
     if (backup && manifest.tasks.some((t) => t.name === BACKUP_TASK)) throw new Error(`task name "${BACKUP_TASK}" is reserved for ai-space's backup task; rename it, or set backup: false to bring your own`);
+    await registry.set(manifest);
+    // After storage, so the unit's environment has the app's space.env. Never throws: a unit that
+    // fails is recorded and shows on the Services list, the rest of the app still registers.
+    await supervisor.apply(manifest);
+    void router.sync();
     return backup ? [backup] : [];
   };
 
@@ -185,6 +210,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     bus.forget(app);
     console.error(`[space] ${app}: no directory in the workspace, ${s.orphaned.length} task(s) orphaned`);
   }
+  // The units of apps that left while the space was down; a skipped directory still owns its unit.
+  for (const app of await supervisor.sweep(new Set([...registry.list().map((e) => e.manifest.app), ...skippedNames]))) console.error(`[services] ${app}: no app of that name, its unit was removed`);
   notify.start();
   bus.start();
   await scheduler.start();
@@ -204,7 +231,21 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       scheduler.forget(app);
       void router.sync();
     },
-    ...(config.serviceStop ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) } : {}),
+    supervision: { mode: supervisor.mode, lastOf: (app) => (supervisor.mode === "space" ? supervisor.lastOf(app) : undefined) },
+    ...(supervisor.mode === "space"
+      ? {
+          stopService: async (app: string) => {
+            try {
+              await supervisor.remove(app);
+              return { ok: true };
+            } catch (e) {
+              return { ok: false, error: (e as Error).message };
+            }
+          },
+        }
+      : config.serviceStop
+        ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) }
+        : {}),
   });
   const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, envFor: (app) => storage.envFor(app), peers, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
@@ -229,6 +270,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         onManifest: provision,
         discover,
         onGone: async (app) => {
+          await supervisor.remove(app).catch((e) => console.error(`[services] ${app}: unit not removed: ${(e as Error).message}`));
           registry.remove(app);
           bus.forget(app);
           void router.sync();
@@ -255,7 +297,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
       ...createRouterRoutes({ router }),
-      ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)) }),
+      ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode === "space" ? { unitOf: (app: string) => unitName(app) } : {}) }),
+      ...createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; } }),
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),
       ...terminalRoutes,
@@ -265,7 +308,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     websocket: terminalWebSocket,
     fetch: () => new Response(JSON.stringify({ ok: false, error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }),
   });
-  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}${terminal.enabled ? ` · terminal ${terminal.backend}` : ""}${router.enabled ? ` · router ${config.router.backend} :${config.router.port}` : ""} · runtimes ${runtimes.describe()} (${loaded.source})`);
+  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}${terminal.enabled ? ` · terminal ${terminal.backend}` : ""}${router.enabled ? ` · router ${config.router.backend} :${config.router.port}` : ""} · services by ${supervisor.mode} · runtimes ${runtimes.describe()} (${loaded.source})`);
 
   // A restart must not cut the work in flight: no new runs are started, then the task runs and the
   // model calls apps are blocked on get SPACE_DRAIN_SECONDS to finish. The server keeps serving while
@@ -298,7 +341,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
 
-  return { store, storage, scheduler, bus, busStore, notify, notifyStore, model, modelStore, chat, chatStore, registry, peers, server, backups };
+  return { supervisor, store, storage, scheduler, bus, busStore, notify, notifyStore, model, modelStore, chat, chatStore, registry, peers, server, backups };
 }
 if (import.meta.main) {
   // The unit runs `bun src/index.ts` with no word: that is `start`. `bin/space` with no word is `help`.

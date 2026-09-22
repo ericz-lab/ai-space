@@ -16,8 +16,8 @@ out to be an event bus.
 
 | Concept | In a space today | What is missing |
 | --- | --- | --- |
-| **init, process management** | Nothing. An app's service is a unit the operator installed; the space probes its health and, on uninstall, runs the operator's stop command. | Starting, restarting after a crash, listing processes, memory and CPU limits, an ordered teardown. Everything below that needs a process to hold on to. |
-| **Process lifecycle, graceful stop** | Half of it: the space drains its own work on SIGTERM — the clock stops, the runs and model calls in flight get their grace, the rest is aborted and recorded ([scheduler.md](scheduler.md#stopping-and-restarting)). | The apps' half. Restarting an app still cuts whatever that app was doing, because its process is not the space's to signal. Same root as the row above. |
+| **init, process management** | Yes, opt-in per machine: under `SPACE_SUPERVISOR=space` the space writes a user unit per app and starts, restarts, stops and removes it with the manifest ([supervision.md](supervision.md)). Under `operator` (the default), the operator's units as before. | Memory and CPU limits, ordering between apps, a guided hand-over of an app from the operator's unit, and the machines still on `operator`. |
+| **Process lifecycle, graceful stop** | The space drains its own work on SIGTERM ([scheduler.md](scheduler.md#stopping-and-restarting)); a supervised app gets SIGTERM and 30 seconds from its unit. | An app's own drain: what the app does with the SIGTERM is still up to the app. |
 | **cron, scheduling** | Yes: interval, cron and one-shot schedules, event triggers, http/command/agent targets, run history, backoff ([scheduler.md](scheduler.md)). | A global queue: priorities, a per-app concurrency limit, backpressure. Today one global limit decides who runs, in due-time order. |
 | **IPC, message bus** | Yes: events with persisted, retried http and stream deliveries, calls between apps, mirroring across peers ([events.md](events.md)). | Finer permissions on a delivery, versioned contracts. |
 | **System calls, intents** | Yes: an app declares `events:` and `provides:` in its manifest, the catalogue reaches agents and the panel ([events.md](events.md#catalogue)). | System-wide verbs a person or an agent can invoke anywhere ("save this", "send it to X"), rather than per-app endpoints. |
@@ -40,8 +40,9 @@ out to be an event bus.
 1. **Service supervision.** The space starts, restarts and limits an app's process instead of
    probing something the operator installed. It is the prerequisite for upgrades with rollback,
    for resource limits, and for an uninstall that stops the app's work before moving its
-   directory. It also finishes the lifecycle row: today a space can stop itself cleanly, but not
-   its apps.
+   directory. The supervisor itself is in ([supervision.md](supervision.md)); what remains is
+   `setup` offering it, fresh installs defaulting to it, and handing the running machines over
+   app by app.
 2. **Metrics and tracing.** With tens of apps, "what was running when that restart happened, and
    what did it cost" has to be answerable from one place. The log routes are the start; per-app rates and a trace with cost are the rest.
 3. **Budgets.** The ledger without a limit only tells you afterwards what a loop cost.

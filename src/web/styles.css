@@ -199,6 +199,10 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .svc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .svc-port { font: 11px/1 ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); }
 .svcrow .status { font-size: 11px; }
+.svc-ctl { display: inline-flex; gap: 2px; }
+.svc-ctl button { border: none; background: none; color: var(--muted); font-size: 11px; line-height: 1; padding: 3px 4px; border-radius: 5px; cursor: pointer; }
+.svc-ctl button:hover:not(:disabled) { background: var(--glass); color: var(--text); }
+.svc-ctl button:disabled { opacity: 0.4; cursor: default; }
 
 /* A row in the settings pop-over that opens something instead of toggling a preference. */
 .setlink { width: 100%; border: none; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; }
