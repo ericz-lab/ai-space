@@ -538,13 +538,14 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
    tasks, xterm viewport) keep their own touch behaviour and stop chaining at either end. */
 html:has(.overlay:not(.off)) { overflow: hidden; }
 .overlay { touch-action: none; }
-.overlay * { overscroll-behavior: contain; }
-/* Sideways scrollers (tables, code blocks, the terminal's tabs) must still pass a vertical wheel
-   or swipe up to the panel's scroller: Chrome latches a scroll to the innermost scroll container
-   under the pointer, and one that cannot move that way but has overscroll-behavior: contain in
-   that axis swallows the gesture instead of chaining it, so the panel would not scroll while the
-   pointer rests on a table that overflows by a few pixels. */
-.overlay .usage-scroll, .overlay .term-tabs, .overlay .md pre, .overlay .md .tblwrap { overscroll-behavior-y: auto; }
+/* Containment goes on the real scrollers only, never on a blanket `.overlay *`: Chrome latches a
+   scroll to the innermost scroll container under the pointer, and one that cannot move that way
+   but has overscroll-behavior: contain swallows the gesture instead of chaining it. Every
+   overflow: hidden box counts, so an ellipsised name in a list row froze the panel whenever a
+   wheel or swipe started over it. Sideways scrollers (tables, code blocks, run output, the
+   terminal's tabs) contain x only, so a vertical gesture over them still reaches the panel. */
+.overlay :is(.setbody, .task-body, .term-hist, .chat-tabs, .chat-hist, .chat-body, .xterm-viewport, textarea, .modal) { overscroll-behavior: contain; }
+.overlay :is(.usage-scroll, .term-tabs, .run-out, .md pre, .md .tblwrap) { overscroll-behavior-x: contain; }
 /* Panels that belong near the top of the page, such as the settings. */
 .overlay.top { align-items: flex-start; padding-top: clamp(40px, 8vh, 80px); }
 .overlay.top .panel { max-height: calc(100vh - clamp(40px, 8vh, 80px) - 20px); }
