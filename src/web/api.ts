@@ -196,6 +196,31 @@ export const untilTime = (iso: string, lang: Lang = "en") => {
   return h < 24 ? translate(lang, "time.inH", { n: h }) : translate(lang, "time.inD", { n: Math.round(h / 24) });
 };
 
+export type DeliveryInfo = {
+  id: number;
+  eventId: number;
+  event: string;
+  app: string;
+  kind: "http" | "stream";
+  method?: string;
+  path?: string;
+  status: "pending" | "sent" | "ok" | "dead" | "skipped";
+  attempts: number;
+  nextAt?: string;
+  lastError?: string;
+  lastStatus?: number;
+  createdAt: string;
+};
+export type EventInfo = { id: number; name: string; app: string; at: string; data: Record<string, unknown>; peer?: string };
+export type CapabilityApp = {
+  app: string;
+  peer?: string;
+  provides: { name: string; description?: string; method: string; path: string; timeoutMs: number; callers?: string[] }[];
+  publishes: { name: string; description?: string }[];
+  consumes: { event: string; kind: "task" | "http" | "stream"; task?: string; method?: string; path?: string }[];
+  stats?: { capability: string; calls: number; failures: number; meanMs: number }[];
+};
+
 export type BackupInfo = {
   app: string;
   count: number;

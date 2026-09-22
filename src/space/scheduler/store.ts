@@ -53,6 +53,7 @@ const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [
   { table: "tasks", column: "triggers", ddl: "TEXT" },
   { table: "runs", column: "trigger", ddl: "TEXT" },
   { table: "runs", column: "events", ddl: "TEXT" },
+  { table: "events", column: "peer", ddl: "TEXT" },
 ];
 
 type TaskRow = {
@@ -86,16 +87,25 @@ type RunRow = {
   events: string | null;
 };
 
-type EventRow = { id: number; name: string; app: string; data: string; at: number };
+type EventRow = { id: number; name: string; app: string; data: string; at: number; peer: string | null };
 
 const MAX_RUNS_PER_TASK = 500;
-/** Events kept for history and late delivery; older rows are dropped on insert. */
-const MAX_EVENTS = 2000;
+/** Events older than this are dropped on insert (`SPACE_EVENTS_RETENTION`, days). */
+export const DEFAULT_EVENT_RETENTION_MS = 30 * 24 * 3_600_000;
+/** Hard cap on the events table whatever the retention, so a runaway publisher cannot fill the disk. */
+export const MAX_EVENTS = 50_000;
+/** `GET /api/events` never returns more than this many rows at once. */
+export const MAX_EVENT_PAGE = 1000;
+
+export type StoreOptions = { eventRetentionMs?: number };
 
 export class Store {
   readonly db: Database;
 
-  constructor(path: string) {
+  private readonly eventRetentionMs: number;
+
+  constructor(path: string, opts: StoreOptions = {}) {
+    this.eventRetentionMs = Math.max(60_000, opts.eventRetentionMs ?? DEFAULT_EVENT_RETENTION_MS);
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA foreign_keys = ON");
@@ -220,9 +230,26 @@ export class Store {
   addEvent(input: EventInput, at: number): SpaceEvent {
     const name = `${input.app}/${input.name}`;
     const data = input.data ?? {};
-    const r = this.db.query("INSERT INTO events (name, app, data, at) VALUES (?, ?, ?, ?)").run(name, input.app, JSON.stringify(data), at);
-    this.db.query("DELETE FROM events WHERE id <= (SELECT MAX(id) FROM events) - ?").run(MAX_EVENTS);
-    return { id: Number(r.lastInsertRowid), name, app: input.app, data, at };
+    const r = this.db.query("INSERT INTO events (name, app, data, at, peer) VALUES (?, ?, ?, ?, ?)").run(name, input.app, JSON.stringify(data), at, input.peer ?? null);
+    this.db.query("DELETE FROM events WHERE at < ? OR id <= (SELECT MAX(id) FROM events) - ?").run(at - this.eventRetentionMs, MAX_EVENTS);
+    return { id: Number(r.lastInsertRowid), name, app: input.app, data, at, ...(input.peer ? { peer: input.peer } : {}) };
+  }
+
+  /** Events after an id, oldest first; `localOnly` leaves out the ones mirrored from peers (what a peer exports). */
+  listEventsSince(sinceId: number, limit = 200, opts: { localOnly?: boolean } = {}): SpaceEvent[] {
+    const cap = Math.max(1, Math.min(limit, MAX_EVENT_PAGE));
+    const sql = `SELECT * FROM events WHERE id > ? ${opts.localOnly ? "AND peer IS NULL " : ""}ORDER BY id LIMIT ?`;
+    return this.db.query<EventRow, [number, number]>(sql).all(sinceId, cap).map(rowToEvent);
+  }
+
+  /** The newest event id, 0 when the table is empty. */
+  latestEventId(): number {
+    return this.db.query<{ id: number | null }, []>("SELECT MAX(id) AS id FROM events").get()?.id ?? 0;
+  }
+
+  getEvent(id: number): SpaceEvent | undefined {
+    const row = this.db.query<EventRow, [number]>("SELECT * FROM events WHERE id = ?").get(id);
+    return row ? rowToEvent(row) : undefined;
   }
 
   /** The events with these ids, oldest first; ids already pruned are silently missing. */
@@ -237,7 +264,7 @@ export class Store {
 
   /** Newest first, optionally one qualified name or one app's events. */
   listEvents(opts: { limit?: number; name?: string; app?: string } = {}): SpaceEvent[] {
-    const limit = Math.max(1, Math.min(opts.limit ?? 50, MAX_EVENTS));
+    const limit = Math.max(1, Math.min(opts.limit ?? 50, MAX_EVENT_PAGE));
     const where: string[] = [];
     const args: (string | number)[] = [];
     if (opts.name) {
@@ -254,7 +281,7 @@ export class Store {
 }
 
 function rowToEvent(r: EventRow): SpaceEvent {
-  return { id: r.id, name: r.name, app: r.app, data: JSON.parse(r.data), at: r.at };
+  return { id: r.id, name: r.name, app: r.app, data: JSON.parse(r.data), at: r.at, ...(r.peer ? { peer: r.peer } : {}) };
 }
 
 function rowToTask(r: TaskRow): Task {

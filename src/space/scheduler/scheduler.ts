@@ -39,12 +39,18 @@ import {
  * triggers match (`state.pending`, due after the trigger's debounce). A task is
  * due when its clock or its pending events say so; whichever launch comes first
  * takes the pending events along, so a burst of events, or events arriving
- * while the task runs, produce one more run, never one per event.
+ * while the task runs, produce one more run, never one per event. A run that
+ * fails with events aboard puts them back in front of the queue (redelivery),
+ * due after the error backoff, up to MAX_EVENT_REDELIVERIES times; then they
+ * are dropped and the drop is logged. `onPublish` lets another service (the bus)
+ * see every stored event.
  */
 
 const MAX_TIMER_DELAY_MS = 60_000;
 const STUCK_RUN_MS = 2 * 3_600_000;
 const ERROR_BACKOFF_MS = [30_000, 60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
+/** Failed runs an event rides through before it is dropped from the task's queue. */
+export const MAX_EVENT_REDELIVERIES = 5;
 
 export type Runner = (task: Task, ctx: RunContext) => Promise<RunResult>;
 
@@ -58,6 +64,8 @@ export type SchedulerOptions = {
   envFor?: (app: string) => Promise<Record<string, string>>;
   /** Called after every run is recorded, with the task's updated state and the state before the run. */
   onFinish?: (event: { task: Task; run: Run; before: TaskState }) => void;
+  /** Called with every stored event, after the tasks it matched were queued (the bus delivers it to subscriptions). */
+  onPublish?: (event: SpaceEvent) => void;
 };
 
 export type SyncSummary = { app: string; created: string[]; updated: string[]; orphaned: string[] };
@@ -70,6 +78,7 @@ export class Scheduler {
   private readonly log: (message: string) => void;
   private readonly envFor?: (app: string) => Promise<Record<string, string>>;
   private readonly onFinish?: SchedulerOptions["onFinish"];
+  private readonly onPublish?: SchedulerOptions["onPublish"];
   private readonly appDirs = new Map<string, string>();
   /** Apps whose tasks ai-space itself contributes (`space`): a workspace sync must not forget them. */
   private readonly builtin = new Set<string>();
@@ -86,6 +95,7 @@ export class Scheduler {
     this.log = opts.log ?? ((m) => console.log(`[scheduler] ${m}`));
     this.envFor = opts.envFor;
     this.onFinish = opts.onFinish;
+    this.onPublish = opts.onPublish;
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -231,6 +241,7 @@ export class Scheduler {
   private launch(task: Task, trigger: RunTrigger): void {
     const startedAt = this.now();
     const events = this.store.getEvents(task.state.pending?.eventIds ?? []);
+    const attempt = task.state.pending?.attempt ?? 0;
     task.state.pending = undefined;
     task.state.runningAt = startedAt;
     task.state.lastError = undefined;
@@ -245,7 +256,7 @@ export class Scheduler {
       .catch((e): RunResult => ({ status: "error", error: (e as Error).message ?? String(e) }))
       .then((result) => {
         clearTimeout(timeout);
-        this.finish(task.id, startedAt, result, trigger, events);
+        this.finish(task.id, startedAt, result, trigger, events, attempt);
       })
       .finally(() => {
         this.inflight.delete(task.id);
@@ -254,7 +265,7 @@ export class Scheduler {
     this.inflight.set(task.id, p);
   }
 
-  private finish(taskId: string, startedAt: number, result: RunResult, trigger: RunTrigger, events: SpaceEvent[]): void {
+  private finish(taskId: string, startedAt: number, result: RunResult, trigger: RunTrigger, events: SpaceEvent[], attempt = 0): void {
     const endedAt = this.now();
     const task = this.store.getTask(taskId);
     if (!task) return; // deleted while running
@@ -269,11 +280,22 @@ export class Scheduler {
 
     const schedule = effectiveSchedule(task);
     const natural = effectiveEnabled(task) ? nextRunAt(schedule, endedAt) : undefined;
+    const backoff = ERROR_BACKOFF_MS[Math.min(s.consecutiveErrors - 1, ERROR_BACKOFF_MS.length - 1)] ?? 0;
     if (result.status === "error" && natural !== undefined) {
-      const backoff = ERROR_BACKOFF_MS[Math.min(s.consecutiveErrors - 1, ERROR_BACKOFF_MS.length - 1)] ?? 0;
       s.nextRunAt = Math.max(natural, endedAt + backoff);
     } else {
       s.nextRunAt = natural;
+    }
+    // Redelivery: a failed run's events go back in front of whatever queued meanwhile, due after
+    // the backoff, until they have failed too often; a disabled task drops them like any pending.
+    if (result.status === "error" && events.length && effectiveEnabled(task)) {
+      const ids = events.map((e) => e.id);
+      if (attempt + 1 < MAX_EVENT_REDELIVERIES) {
+        const later = s.pending?.eventIds.filter((id) => !ids.includes(id)) ?? [];
+        s.pending = { eventIds: [...ids, ...later], dueAt: Math.max(s.pending?.dueAt ?? 0, endedAt + backoff), attempt: attempt + 1 };
+      } else {
+        this.log(`task ${task.app}/${task.name}: dropping ${ids.length} event(s) after ${attempt + 1} failed deliveries`);
+      }
     }
 
     this.store.saveState(task.id, s, endedAt);
@@ -316,7 +338,7 @@ export class Scheduler {
    */
   publish(input: EventInput): { event: SpaceEvent; matched: Task[] } {
     const now = this.now();
-    const event = this.store.addEvent(input, now);
+    const event = this.store.addEvent(input, input.at ?? now);
     const matched: Task[] = [];
     for (const task of this.store.listTasks()) {
       if (!effectiveEnabled(task)) continue;
@@ -333,6 +355,13 @@ export class Scheduler {
     }
     this.log(`event ${event.name} #${event.id}: ${matched.length ? matched.map((t) => `${t.app}/${t.name}`).join(", ") : "no task"}`);
     if (matched.length) void this.tick().catch((e) => this.log(`tick failed: ${String(e)}`));
+    if (this.onPublish) {
+      try {
+        this.onPublish(event);
+      } catch (e) {
+        this.log(`onPublish hook failed: ${(e as Error).message ?? String(e)}`);
+      }
+    }
     return { event, matched };
   }
 

@@ -65,9 +65,18 @@ export type SpaceEvent = {
   app: string;
   data: Record<string, unknown>;
   at: number;
+  /** The peer it was mirrored from (docs/peers.md); absent = published on this machine. */
+  peer?: string;
 };
 
-export type EventInput = { app: string; name: string; data?: Record<string, unknown> };
+export type EventInput = {
+  app: string;
+  name: string;
+  data?: Record<string, unknown>;
+  /** Mirrored from a peer: its name, and the moment it was published there. */
+  peer?: string;
+  at?: number;
+};
 
 export type TaskState = {
   nextRunAt?: number;
@@ -78,8 +87,11 @@ export type TaskState = {
   lastDurationMs?: number;
   /** Consecutive failures, drives backoff; reset to 0 on success. */
   consecutiveErrors: number;
-  /** Events waiting for a run: delivered together once `dueAt` has passed and the task is free. */
-  pending?: { eventIds: number[]; dueAt: number };
+  /**
+   * Events waiting for a run: delivered together once `dueAt` has passed and the task is free.
+   * `attempt` counts the failed runs these events already went through (redelivery); absent = first delivery.
+   */
+  pending?: { eventIds: number[]; dueAt: number; attempt?: number };
 };
 
 export type TaskSource = "manifest" | "api";

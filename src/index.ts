@@ -7,6 +7,7 @@ import { ModelService, ModelStore, createModelRoutes, recordAgentRun } from "./s
 import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts";
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
+import { Bus, BusStore, createBusRoutes } from "./space/bus/index.ts";
 import { type Manifest, Scheduler, Store, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts";
 import { BACKUP_TASK, SPACE_APP, backupTask, createBackupRoutes, parseBackupSpec, spaceManifest } from "./space/storage/backup/index.ts";
@@ -33,14 +34,14 @@ import { run } from "./cli/main.ts";
  *
  * Configuration comes from the environment, then from `<workspace>/.env`
  * (process values win); see `src/space/config.ts`, `.env.example`, `docs/scheduler.md`, `docs/storage.md`
- * `docs/notify.md`, `docs/model.md`, `docs/chat.md`, `docs/panel.md`, `docs/peers.md`, `docs/terminal.md` and `docs/router.md`.
+ * `docs/events.md`, `docs/notify.md`, `docs/model.md`, `docs/chat.md`, `docs/panel.md`, `docs/peers.md`, `docs/terminal.md` and `docs/router.md`.
  */
 
 export { type Config, loadConfig, openBackups, openStorage, backupTaskDefaults } from "./space/config.ts";
 export { parseNotifyArgs } from "./cli/notify.ts";
 
 export async function boot(ws: Workspace, config: Config, env: Record<string, string | undefined> = process.env) {
-  const store = new Store(config.dbPath);
+  const store = new Store(config.dbPath, { eventRetentionMs: config.eventRetentionMs });
   const storage = await openStorage(ws, config);
   const backups = await openBackups(config);
   const taskDefaults = backupTaskDefaults(ws, config);
@@ -74,15 +75,40 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       return result;
     },
     onFinish: createTaskNotifier({ notify, tasksChannel: config.notifyTasks }),
+    onPublish: (event) => bus.onEvent(event),
   });
   const registry = new AppRegistry();
+  // The bus (docs/events.md): http and stream deliveries of every stored event, and calls between apps.
+  const busStore = new BusStore(config.dbPath);
+  const bus = new Bus({
+    store: busStore,
+    events: store,
+    servicePort: (app) => registry.get(app)?.manifest.service?.port,
+    onDead: (d, event) =>
+      void notify
+        .send(d.app, { level: "alert", title: `event ${d.event} not delivered`, text: `Delivery #${d.id} (${d.kind}) gave up after ${d.attempts} attempt(s): ${d.lastError ?? "no error text"}${event ? `\nEvent #${event.id} from ${event.app} at ${new Date(event.at).toISOString()}` : ""}`, key: `bus:${d.app}:${d.event}`, windowMs: 3_600_000 })
+        .catch((e) => console.error(`[bus] ${d.app}: dead-delivery notification rejected: ${(e as Error).message}`)),
+  });
   const layout = new LayoutStore(store.db);
   const sessions = new SessionStore(store.db);
   const health = new HealthProbe();
   const widgets = new WidgetFeed(registry);
   const { peers: peerConfigs, errors: peerErrors } = loadPeers(env);
   for (const [name, reason] of peerErrors) console.error(`[peers] ${name}: ${reason}`);
-  const peers = new PeerHub(peerConfigs, { store: new PeerStore(store.db) });
+  // Peers' events are mirrored here (docs/events.md): published under the same app name, marked with the peer.
+  const peers = new PeerHub(peerConfigs, {
+    store: new PeerStore(store.db),
+    onEvents: (peer, list) => {
+      for (const e of list) {
+        try {
+          scheduler.publish(e);
+        } catch (err) {
+          console.error(`[peers] ${peer}: event ${e.app}/${e.name} not mirrored: ${(err as Error).message}`);
+        }
+      }
+    },
+  });
+  const remote = { name: config.name, capabilities: () => peers.capabilities(), providerOf: (app: string, cap?: string) => peers.providerOf(app, cap), get: (name: string) => peers.get(name) };
   // The proxy's configuration follows the registry (docs/router.md); a failed write never stops a sync.
   const router = new Router({
     config: config.router,
@@ -102,6 +128,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     for (const p of result.created) console.log(`[storage] ${manifest.app}: created ${p}`);
     for (const n of result.orphaned) console.log(`[storage] ${manifest.app}: ${n} left the manifest, kept as orphaned`);
     notify.syncApp(manifest.app, parseNotifySpec(manifest.notify, { title: manifest.title }));
+    bus.syncApp(manifest.app, { events: manifest.events, provides: manifest.provides });
     await registry.set(manifest);
     void router.sync();
     const backup = backupTask(manifest.app, parseBackupSpec(manifest.backup), taskDefaults);
@@ -146,6 +173,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // ai-space's own tasks: the space.db snapshot and the weekly verification of every app's newest snapshot.
   scheduler.syncBuiltin(spaceManifest(taskDefaults));
   notify.start();
+  bus.start();
   await scheduler.start();
   peers.start();
   void router.sync();
@@ -164,7 +192,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
     ...(config.serviceStop ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) } : {}),
   });
-  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, envFor: (app) => storage.envFor(app), peers });
+  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, envFor: (app) => storage.envFor(app), peers, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");
@@ -187,11 +215,13 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         discover,
         onGone: async (app) => {
           registry.remove(app);
+          bus.forget(app);
           void router.sync();
           console.log(`[space] ${app}: directory gone, deregistered`);
         },
         appForToken: (t) => storage.appForToken(t),
       }),
+      ...createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t), remote }),
       ...createStorageRoutes({ storage, token: config.apiToken }),
       ...createBackupRoutes({
         store: backups.store,
@@ -214,7 +244,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),
       ...terminalRoutes,
-      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, servicePort: (app) => registry.get(app)?.manifest.service?.port, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
+      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, servicePort: (app) => registry.get(app)?.manifest.service?.port, bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
       ...createWebRoutes(),
     },
     websocket: terminalWebSocket,
@@ -225,14 +255,17 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const shutdown = async () => {
     console.log("[space] shutting down");
     scheduler.stop();
+    bus.stop();
     notify.stop();
     peers.stop();
     terminal.stop();
     router.stop();
     server.stop();
     await scheduler.idle();
+    await bus.idle();
     await notify.idle();
     store.close();
+    busStore.close();
     notifyStore.close();
     modelStore.close();
     chatStore.close();
@@ -242,7 +275,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
 
-  return { store, storage, scheduler, notify, notifyStore, model, modelStore, chat, chatStore, registry, peers, server, backups };
+  return { store, storage, scheduler, bus, busStore, notify, notifyStore, model, modelStore, chat, chatStore, registry, peers, server, backups };
 }
 if (import.meta.main) {
   // The unit runs `bun src/index.ts` with no word: that is `start`. `bin/space` with no word is `help`.

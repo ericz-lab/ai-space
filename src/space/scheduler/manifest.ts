@@ -1,14 +1,20 @@
 import { basename, join } from "node:path";
+import { parseEventsSpec, parseProvidesSpec, triggersFromConsumes } from "../bus/spec.ts";
+import type { Capability, EventsSpec } from "../bus/types.ts";
 import { RUNTIME_NAME_PATTERN } from "../runtimes/types.ts";
-import { assertTriggerEvent } from "./events.ts";
+import { parseTriggers } from "./events.ts";
 import { assertSchedule, parseDuration } from "./schedule.ts";
+
+export { parseTriggers };
 import { DEFAULT_TIMEOUT_MS, type EventTrigger, TASK_NOTIFY_EVENTS, type Schedule, type Target, type TaskNotify, type TaskNotifyEvent } from "./types.ts";
 
 /**
  * App manifest (`space.yaml`) parsing.
  *
  * The top level (identity, `service`, `agents`, `widgets`) and the `tasks`
- * section are interpreted here; `storage`, `notify` and `skills` are passed
+ * section are interpreted here; `events` and `provides` by the bus's parser
+ * (`src/space/bus/spec.ts`, and a `consumes` entry with `task:` becomes a
+ * trigger on that task); `storage`, `notify` and `skills` are passed
  * through raw for their services (`backup` likewise for the backup module). Each task declares when it runs
  * (one schedule form, `at` / `every` / `schedule` for cron, and/or event
  * `triggers`) and one `run` target (`http` / `command` / `agent`). Parsing is
@@ -20,7 +26,7 @@ export const MANIFEST_FILE = "space.yaml";
 export const SPEC_VERSION = 1;
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]*$/i;
-const TOP_LEVEL_KEYS = ["spec", "name", "title", "description", "icon", "url", "status", "repo", "i18n", "service", "agents", "widgets", "skills", "tasks", "storage", "notify", "backup"];
+const TOP_LEVEL_KEYS = ["spec", "name", "title", "description", "icon", "url", "status", "repo", "i18n", "service", "agents", "widgets", "skills", "tasks", "storage", "notify", "backup", "events", "provides"];
 /** A language tag as `i18n:` keys use it: a primary tag and optional subtags (`zh`, `zh-Hant`, `pt-BR`). */
 const LANG_TAG_RE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
@@ -120,6 +126,10 @@ export type Manifest = {
   notify?: unknown;
   /** Raw `backup:` section, interpreted by the backup module. */
   backup?: unknown;
+  /** The `events:` section (docs/events.md); `consumes` entries with `task:` are already merged into the tasks' triggers. */
+  events?: EventsSpec;
+  /** The `provides:` section: capabilities other apps call through the bus. */
+  provides?: Capability[];
 };
 
 export async function loadManifest(dir: string): Promise<Manifest> {
@@ -173,6 +183,15 @@ export function parseManifest(yaml: string, dir: string): Manifest {
     tasks.push(t);
   });
 
+  const events = doc.events === undefined ? undefined : parseEventsSpec(doc.events);
+  const provides = doc.provides === undefined ? undefined : parseProvidesSpec(doc.provides);
+  if (events) {
+    for (const [name, triggers] of triggersFromConsumes(events, tasks.map((t) => t.name))) {
+      const task = tasks.find((t) => t.name === name)!;
+      task.triggers = [...(task.triggers ?? []), ...triggers];
+    }
+  }
+
   return {
     app,
     dir,
@@ -191,6 +210,8 @@ export function parseManifest(yaml: string, dir: string): Manifest {
     ...(doc.storage !== undefined ? { storage: doc.storage } : {}),
     ...(doc.notify !== undefined ? { notify: doc.notify } : {}),
     ...(doc.backup !== undefined ? { backup: doc.backup } : {}),
+    ...(events ? { events } : {}),
+    ...(provides?.length ? { provides } : {}),
   };
 }
 
@@ -348,40 +369,6 @@ function parseTask(raw: unknown, index: number): ManifestTask {
 }
 
 /**
- * `triggers: [{ event: other-app/thing.happened, filter: { kind: [a, b] }, debounce: 5m }]`;
- * a bare string is `{ event }`. The key is `triggers` rather than `on` for the
- * same reason notify uses `when`: YAML 1.1 reads a bare `on` as true.
- */
-export function parseTriggers(raw: unknown, ctx: string): EventTrigger[] {
-  const list = Array.isArray(raw) ? raw : [raw];
-  if (list.length === 0) throw new Error(`${ctx}: triggers must name at least one event`);
-  return list.map((item, i) => {
-    const where = `${ctx}: triggers[${i}]`;
-    const t = typeof item === "string" ? { event: item } : item;
-    if (!isRecord(t)) throw new Error(`${where} must be an event name or a mapping with event / filter / debounce`);
-    for (const key of Object.keys(t)) if (!["event", "filter", "debounce"].includes(key)) throw new Error(`${where} has unknown key "${key}"`);
-    if (typeof t.event !== "string" || !t.event.trim()) throw new Error(`${where}: event is required`);
-    const event = t.event.trim();
-    assertTriggerEvent(event);
-    const out: EventTrigger = { event };
-    if (t.filter !== undefined) {
-      if (!isRecord(t.filter)) throw new Error(`${where}: filter must map data fields to a value or a list of values`);
-      const filter: Record<string, string | string[]> = {};
-      for (const [k, v] of Object.entries(t.filter)) {
-        if (Array.isArray(v)) {
-          if (!v.length || !v.every(isScalar)) throw new Error(`${where}: filter.${k} must be a scalar or a non-empty list of scalars`);
-          filter[k] = v.map(String);
-        } else if (isScalar(v)) filter[k] = String(v);
-        else throw new Error(`${where}: filter.${k} must be a scalar or a non-empty list of scalars`);
-      }
-      out.filter = filter;
-    }
-    if (t.debounce !== undefined) out.debounceMs = parseDuration(t.debounce as string | number);
-    return out;
-  });
-}
-
-/**
  * `notify: { when: [error, ok], channel: ops }`; `when` defaults to `[error]`.
  * The key is `when` rather than `on` because YAML 1.1 reads a bare `on` as the
  * boolean true.
@@ -466,9 +453,6 @@ function stringList(v: unknown, what: string): string[] {
   return v.map((x: string) => x.trim());
 }
 
-function isScalar(v: unknown): v is string | number | boolean {
-  return typeof v === "string" || typeof v === "number" || typeof v === "boolean";
-}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);

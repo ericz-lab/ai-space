@@ -1,5 +1,7 @@
 import { realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import type { AppCapabilities } from "../bus/bus.ts";
+import { capabilitiesPrompt } from "../bus/prompt.ts";
 import { type LayoutStore, orderBy } from "../panel/layout.ts";
 import type { AppRegistry } from "../panel/registry.ts";
 import { type AgentView, agentView } from "../panel/view.ts";
@@ -38,6 +40,8 @@ export type AgentsApiOptions = {
   home?: string;
   /** Other machines whose agents this panel lists; chat with them is forwarded by the peer routes. */
   peers?: PeerHub;
+  /** The bus catalogue (local apps and peers'), appended to every agent's system prompt (docs/events.md). */
+  capabilities?: () => (AppCapabilities & { peer?: string })[];
 };
 
 /** The space's own agent: the default chat identity, working in the workspace root. */
@@ -95,9 +99,14 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
       }
     };
 
+  const withCatalogue = (prompt: string | undefined, app: string): string | undefined => {
+    const section = opts.capabilities ? capabilitiesPrompt(opts.capabilities(), { self: app, operator: app === SPACE_APP }) : undefined;
+    return section ? [prompt, section].filter(Boolean).join("\n\n") : prompt;
+  };
+
   const resolveAgent = async (app: string, name: string): Promise<ResolvedAgent> => {
     if (app === SPACE_APP && name === SPACE_AGENT) {
-      return { id: `${SPACE_APP}/${SPACE_AGENT}`, runtime: "claude", cwd: opts.ws.home, systemPrompt: spaceAgentPrompt(opts.ws), tools: [], app: SPACE_APP };
+      return { id: `${SPACE_APP}/${SPACE_AGENT}`, runtime: "claude", cwd: opts.ws.home, systemPrompt: withCatalogue(spaceAgentPrompt(opts.ws), SPACE_APP), tools: [], app: SPACE_APP };
     }
     const entry = registry.get(app);
     const a = entry?.manifest.agents.find((x) => x.name === name);
@@ -109,7 +118,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
       // The real path: the runtime files its transcripts under the directory it actually runs in,
       // and an app directory may be a symlink into the repository checkout.
       cwd: await realDir(resolve(entry.manifest.dir, a.cwd)),
-      systemPrompt: await systemPromptFor(entry.manifest, a),
+      systemPrompt: withCatalogue(await systemPromptFor(entry.manifest, a), app),
       tools: a.tools,
       app,
     };

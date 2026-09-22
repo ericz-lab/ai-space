@@ -1,4 +1,8 @@
 import { SPACE_AGENT, SPACE_APP } from "../agents/api.ts";
+import { type Bus, CallError } from "../bus/bus.ts";
+import { MAX_CALL_BODY_BYTES } from "../bus/types.ts";
+import { eventPayload } from "../scheduler/events.ts";
+import type { Store } from "../scheduler/store.ts";
 
 /**
  * The peer side: `/api/peer/*`, present only when `SPACE_HUB_TOKEN` is set.
@@ -21,6 +25,10 @@ import { SPACE_AGENT, SPACE_APP } from "../agents/api.ts";
  *   POST /api/peer/terminal/sessions               = /api/terminal/sessions   │ enabled here; the snapshot
  *   DELETE /api/peer/terminal/sessions/:id         = /api/terminal/sessions/:id │ says so with `terminal: true`
  *   GET  /api/peer/terminal/ws                     = /api/terminal/ws         ┘ (docs/terminal.md)
+ *   GET  /api/peer/events?since&limit              events published here (not mirrored ones) after an id, oldest first,
+ *                                                  with `latestId`; the hub mirrors them (docs/events.md)
+ *   POST /api/peer/call/:app/:capability           a call from the hub: forwarded to the local bus as the caller named in
+ *                                                  `x-space-caller` (the hub writes `<hub name>/<app>`)
  */
 
 // The server argument only matters to the terminal's socket route, which upgrades the request.
@@ -42,6 +50,9 @@ export type PeerServeOptions = {
   fetch?: typeof fetch;
   /** How long a proxied app call may take; an export of months of rows is not instant. */
   proxyTimeoutMs?: number;
+  /** The bus and the scheduler's store: present, the snapshot lists capabilities and the events / call routes exist. */
+  bus?: Bus;
+  events?: Store;
 };
 
 const PROXY_TIMEOUT_MS = 60_000;
@@ -97,6 +108,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
           // The hub has its own space agent.
           agents: own(agents.agents as { id: string; peer?: string }[]).filter((a) => a.id !== `${SPACE_APP}/${SPACE_AGENT}`),
           terminal: opts.terminal !== undefined,
+          capabilities: opts.bus?.capabilities() ?? [],
           asOf: new Date().toISOString(),
         });
       }),
@@ -123,6 +135,43 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
       }),
     },
     "/api/peer/widgets/:app/:name/embed": { GET: guard(mirror(opts.panel, "/api/widgets/:app/:name/embed", "GET")) },
+    ...(opts.events
+      ? {
+          "/api/peer/events": {
+            GET: guard((req) => {
+              const q = new URL(req.url).searchParams;
+              const since = Math.max(0, Number(q.get("since") ?? 0) || 0);
+              const limit = Number(q.get("limit") ?? 200);
+              const events = opts.events!.listEventsSince(since, Number.isFinite(limit) ? limit : 200, { localOnly: true });
+              return json({ ok: true, events: events.map((e) => ({ id: e.id, ...eventPayload(e) })), latestId: opts.events!.latestEventId() });
+            }),
+          },
+        }
+      : {}),
+    ...(opts.bus
+      ? {
+          "/api/peer/call/:app/:capability": {
+            POST: guard(async (req) => {
+              const caller = req.headers.get("x-space-caller")?.trim() ?? "";
+              if (!caller) return json({ ok: false, error: "x-space-caller is required" }, 400);
+              const body = await req.arrayBuffer();
+              if (body.byteLength > MAX_CALL_BODY_BYTES) return json({ ok: false, error: `body is ${body.byteLength} bytes; the limit is ${MAX_CALL_BODY_BYTES}` }, 413);
+              try {
+                const r = await opts.bus!.call(caller, req.params.app ?? "", req.params.capability ?? "", {
+                  body: body.byteLength ? body : null,
+                  contentType: req.headers.get("content-type") ?? undefined,
+                  accept: req.headers.get("accept") ?? undefined,
+                  signal: req.signal,
+                });
+                return new Response(r.body, { status: r.status, headers: { ...(r.contentType ? { "content-type": r.contentType } : {}), "cache-control": "no-store", "x-space-call-id": String(r.record.id), "x-space-call-ms": String(r.record.durationMs) } });
+              } catch (e) {
+                if (e instanceof CallError) return json({ ok: false, error: e.message }, e.status);
+                throw e;
+              }
+            }),
+          },
+        }
+      : {}),
     "/api/peer/agents/:app/:agent/chat": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/chat", "POST")) },
     "/api/peer/agents/:app/:agent/sessions": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions", "GET")) },
     "/api/peer/agents/:app/:agent/sessions/:sid": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions/:sid", "GET")) },

@@ -1,3 +1,4 @@
+import { parseDuration } from "./schedule.ts";
 import type { EventInput, EventTrigger, SpaceEvent } from "./types.ts";
 
 /**
@@ -60,10 +61,10 @@ export function matchingTriggers(triggers: EventTrigger[] | undefined, event: Sp
 }
 
 /** What a run sees of its events, in the order they were published. */
-export type EventPayload = { name: string; app: string; at: string; data: Record<string, unknown> };
+export type EventPayload = { name: string; app: string; at: string; data: Record<string, unknown>; peer?: string };
 
 export function eventPayload(e: SpaceEvent): EventPayload {
-  return { name: e.name, app: e.app, at: new Date(e.at).toISOString(), data: e.data };
+  return { name: e.name, app: e.app, at: new Date(e.at).toISOString(), data: e.data, ...(e.peer ? { peer: e.peer } : {}) };
 }
 
 /**
@@ -85,4 +86,42 @@ export function eventPromptSection(events: SpaceEvent[]): string {
   const payloads = events.map(eventPayload);
   const head = payloads.length === 1 ? "This run was triggered by one event:" : `This run was triggered by ${payloads.length} events, oldest first:`;
   return `\n\n## Events\n\n${head}\n\n\`\`\`json\n${JSON.stringify(payloads, null, 2)}\n\`\`\`\n`;
+}
+
+/**
+ * `triggers: [{ event: other-app/thing.happened, filter: { kind: [a, b] }, debounce: 5m }]`;
+ * a bare string is `{ event }`. The key is `triggers` rather than `on` for the
+ * same reason notify uses `when`: YAML 1.1 reads a bare `on` as true.
+ */
+export function parseTriggers(raw: unknown, ctx: string): EventTrigger[] {
+  const list = Array.isArray(raw) ? raw : [raw];
+  if (list.length === 0) throw new Error(`${ctx}: triggers must name at least one event`);
+  return list.map((item, i) => {
+    const where = `${ctx}: triggers[${i}]`;
+    const t = (typeof item === "string" ? { event: item } : item) as Record<string, unknown>;
+    if (typeof t !== "object" || t === null || Array.isArray(t)) throw new Error(`${where} must be an event name or a mapping with event / filter / debounce`);
+    for (const key of Object.keys(t)) if (!["event", "filter", "debounce"].includes(key)) throw new Error(`${where} has unknown key "${key}"`);
+    if (typeof t.event !== "string" || !t.event.trim()) throw new Error(`${where}: event is required`);
+    const event = t.event.trim();
+    assertTriggerEvent(event);
+    const out: EventTrigger = { event };
+    if (t.filter !== undefined) {
+      if (typeof t.filter !== "object" || t.filter === null || Array.isArray(t.filter)) throw new Error(`${where}: filter must map data fields to a value or a list of values`);
+      const filter: Record<string, string | string[]> = {};
+      for (const [k, v] of Object.entries(t.filter)) {
+        if (Array.isArray(v)) {
+          if (!v.length || !v.every(isScalar)) throw new Error(`${where}: filter.${k} must be a scalar or a non-empty list of scalars`);
+          filter[k] = v.map(String);
+        } else if (isScalar(v)) filter[k] = String(v);
+        else throw new Error(`${where}: filter.${k} must be a scalar or a non-empty list of scalars`);
+      }
+      out.filter = filter;
+    }
+    if (t.debounce !== undefined) out.debounceMs = parseDuration(t.debounce as string | number);
+    return out;
+  });
+}
+
+function isScalar(v: unknown): v is string | number | boolean {
+  return typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 }

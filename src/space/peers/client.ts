@@ -1,4 +1,6 @@
+import type { AppCapabilities } from "../bus/bus.ts";
 import type { AgentView, AppView, ServiceView } from "../panel/view.ts";
+import type { EventInput } from "../scheduler/types.ts";
 import type { WidgetView } from "../panel/widgets.ts";
 import type { PeerConfig } from "./config.ts";
 import type { PeerStore } from "./store.ts";
@@ -19,7 +21,20 @@ export type PeerSnapshot = {
   agents: AgentView[];
   /** Whether the peer offers a terminal to the hub (docs/terminal.md). */
   terminal: boolean;
+  /** What the peer's apps provide, publish and consume (docs/events.md); empty for a peer without the bus. */
+  capabilities: AppCapabilities[];
   asOf: string;
+};
+
+/** What a peer answers on `/api/peer/events`. */
+export type PeerEvent = { id: number; name: string; app: string; at: string; data: Record<string, unknown> };
+
+export type PeerClientOptions = {
+  store?: PeerStore;
+  fetch?: typeof fetch;
+  now?: () => number;
+  /** Called with the events pulled from the peer after each refresh, oldest first, as inputs ready to publish here. */
+  onEvents?: (peer: string, events: EventInput[]) => void;
 };
 
 export type PeerHealth = "ok" | "down";
@@ -41,7 +56,10 @@ export type PeerStatus = {
 };
 
 export const SNAPSHOT_PATH = "/api/peer/snapshot";
+export const EVENTS_PATH = "/api/peer/events";
 const SNAPSHOT_TIMEOUT_MS = 8_000;
+/** Events pulled per refresh; a peer that published more is caught up over the next refreshes. */
+const EVENTS_PAGE = 200;
 /** A snapshot older than this many refresh periods counts as stale. */
 const STALE_PERIODS = 2;
 
@@ -52,11 +70,15 @@ export class PeerClient {
   private timer: ReturnType<typeof setInterval> | undefined;
   private inFlight: Promise<void> | undefined;
 
+  /** Id of the last event mirrored from the peer. */
+  private cursor: number;
+
   constructor(
     readonly config: PeerConfig,
-    private readonly opts: { store?: PeerStore; fetch?: typeof fetch; now?: () => number } = {},
+    private readonly opts: PeerClientOptions = {},
   ) {
     this.snapshot = opts.store?.get(config.name);
+    this.cursor = opts.store?.cursor(config.name) ?? 0;
   }
 
   get name(): string {
@@ -111,9 +133,41 @@ export class PeerClient {
       this.error = undefined;
       this.lastOkAt = this.now();
       this.opts.store?.set(this.name, snap);
+      if (this.opts.onEvents) await this.pullEvents();
     } catch (e) {
       this.error = String((e as Error).message ?? e).slice(0, 200);
     }
+  }
+
+  /**
+   * Mirror the peer's new events: everything after the cursor, oldest first, handed to `onEvents`
+   * as inputs that carry the peer's name and the original time. A peer whose ids went backwards
+   * (a reset database) restarts the cursor at its newest id, so nothing old is mirrored twice.
+   * A peer without the route (older version) is left alone.
+   */
+  async pullEvents(): Promise<number> {
+    const r = await this.fetch(`${this.config.url}${EVENTS_PATH}?since=${this.cursor}&limit=${EVENTS_PAGE}`, { headers: this.authHeaders(), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) });
+    if (r.status === 404) return 0;
+    if (!r.ok) throw new Error(`events: HTTP ${r.status}`);
+    const body = (await r.json()) as { ok?: boolean; events?: PeerEvent[]; latestId?: number };
+    if (body.ok !== true || !Array.isArray(body.events)) throw new Error("events: not an event list");
+    const latest = typeof body.latestId === "number" ? body.latestId : undefined;
+    const events = body.events.filter((e) => typeof e.id === "number" && typeof e.app === "string" && typeof e.name === "string");
+    if (events.length) {
+      const inputs: EventInput[] = events.map((e) => ({ app: e.app, name: e.name.slice(e.app.length + 1), data: e.data && typeof e.data === "object" ? e.data : {}, peer: this.name, at: Date.parse(e.at) || this.now() }));
+      this.opts.onEvents?.(this.name, inputs);
+      this.cursor = events[events.length - 1]!.id;
+    } else if (latest !== undefined && latest < this.cursor) {
+      this.cursor = latest;
+    }
+    this.opts.store?.setCursor(this.name, this.cursor);
+    return events.length;
+  }
+
+  /** Whether the peer's snapshot says one of its apps provides the capability. */
+  provides(app: string, capability?: string): boolean {
+    const a = this.snapshot?.capabilities.find((c) => c.app === app);
+    return Boolean(a && (capability === undefined || a.provides.some((c) => c.name === capability)));
   }
 
   /**
@@ -157,6 +211,7 @@ export function parseSnapshot(j: unknown): PeerSnapshot {
     widgets: o.widgets as WidgetView[],
     agents: o.agents as AgentView[],
     terminal: o.terminal === true,
+    capabilities: Array.isArray(o.capabilities) ? (o.capabilities as AppCapabilities[]) : [],
     asOf: typeof o.asOf === "string" ? o.asOf : new Date().toISOString(),
   };
 }

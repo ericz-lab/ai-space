@@ -68,6 +68,8 @@ Present only when `SPACE_HUB_TOKEN` is set; every route requires `Authorization:
 | --- | --- | --- |
 | `GET /api/peer/snapshot` | `/api/apps`, `/api/services`, `/api/widgets`, `/api/agents` | One call: `{ ok, name, apps, services, widgets, agents, asOf }`. Apps are the peer's visible ones (its own hidden set and `archived` applied, `manifestOnly` and `url` included; entries the peer itself merged from its own peers are left out, so a hub of hubs lists each app once), agents and widgets likewise, widgets with their current items payload, services with health. The space agent (`space/assistant`) is not included: the hub has its own. |
 | `DELETE /api/peer/apps/:app` | `DELETE /api/apps/:app` | Uninstall on the peer: its stop command, its directory, its registry ([panel.md](panel.md#arranging-hiding-and-uninstalling-apps)). The hub refreshes the snapshot right after. |
+| `GET /api/peer/events?since&limit` | the scheduler's events | The events published on this machine after an id, oldest first, with `latestId`; the hub mirrors them after every snapshot ([events.md](events.md#across-machines-peers)). Mirrored events are not exported again. |
+| `POST /api/peer/call/:app/:capability` | `POST /api/call/:app/:capability` | A call from the hub, run on this machine's bus as the caller named in `x-space-caller` (`<hub name>/<app>`). The snapshot carries `capabilities` so the hub knows what to forward. |
 | `GET /api/peer/apps/:app/icon` | `/api/apps/:app/icon` | Icon files from the app directory. |
 | `GET /api/peer/apps/:app/appcolor` | `/api/panel/appcolor?app=` | |
 | `GET /api/peer/agents/:app/:agent/avatar` | `/api/agents/:app/:agent/avatar` | |
@@ -151,6 +153,7 @@ A peer app whose `url` is already on the panel (a local app's, or an earlier pee
 
 - **Peer tasks**: `GET /api/peer/tasks` and `/api/peer/tasks/:id/runs`, read-only, so the Tasks drawer groups tasks by machine. Running or toggling a task stays on the machine that owns it.
 - **Peer storage inventory** in the settings, read-only.
+- **Peer deliveries**: a peer's http or stream subscription to an event that only reaches the hub. Today each machine subscribes to what reaches its own bus; events flow peer → hub only.
 - **Peer notifications**: none needed; each machine notifies through its own channels. Backups likewise: each machine snapshots its own data under its own prefix; the hub's Backups list shows local apps only.
 - **A peer behind no tunnel** (a laptop): a reverse connection the peer opens to the hub. Out of scope until a machine needs it.
 

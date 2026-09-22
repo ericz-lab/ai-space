@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentRoutes } from "../agents/api.ts";
 import { SessionStore } from "../agents/sessions.ts";
+import { createBusRoutes } from "../bus/api.ts";
+import { Bus } from "../bus/bus.ts";
+import { BusStore } from "../bus/store.ts";
+import { Store } from "../scheduler/store.ts";
 import { createPanelRoutes } from "../panel/api.ts";
 import { HealthProbe } from "../panel/health.ts";
 import { LayoutStore } from "../panel/layout.ts";
@@ -53,6 +57,10 @@ let lastHeaders: Record<string, string> = {};
 const hubDb = new Database(":memory:");
 const hubRegistry = new AppRegistry();
 let peers: PeerHub;
+// The bus on both sides: the peer's media app provides `clip` and publishes `clip.added`; the hub mirrors and forwards.
+let peerEvents: Store;
+let hubEvents: Store;
+const mirrored: { peer: string; app: string; name: string }[] = [];
 
 // The hub's fetch: the real one towards the peer, with a switch that simulates the peer being unreachable.
 const hubFetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -96,8 +104,18 @@ widgets:
   peerLayout.hide("secret", true); // hidden on the peer: never reaches the hub
   const peerPanel = createPanelRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, widgets: new WidgetFeed(peerRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback });
   const peerAgents = createAgentRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, sessions: new SessionStore(peerDb), runtimes, defaultModel: "sonnet", home: peerHome });
+  peerEvents = new Store(":memory:");
+  // The port is fixed here: an earlier test uninstalls media from the peer's registry, the bus keeps its manifest until re-sync.
+  const peerBus = new Bus({
+    store: new BusStore(":memory:"),
+    events: peerEvents,
+    servicePort: (app) => (app === "media" ? 8731 : undefined),
+    fetch: async (url, init) => Response.json({ echo: new Headers(init.headers).get("x-space-caller"), url }),
+    log: () => {},
+  });
+  peerBus.syncApp("media", { events: { publishes: [{ name: "clip.added" }], consumes: [] }, provides: [{ name: "clip", method: "POST", path: "/api/clip", timeoutMs: 5000 }] });
   // The peer routes may upgrade a socket (the terminal's), so the server declares a websocket handler.
-  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port, fetch: fakeLoopback }) }, websocket: { message() {} } });
+  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents }) }, websocket: { message() {} } });
   peerBase = `http://127.0.0.1:${peerServer.port}`;
 
   // ---- the hub: a local app, a link app that duplicates the peer's app, and the peer
@@ -109,11 +127,24 @@ widgets:
   await writeFile(join(hws.apps, "media-link", "space.yaml"), "name: media-link\ntitle: Media (link)\nicon: '🎬'\nurl: https://media.example.com\n");
   for (const n of ["notes", "media-link"]) await hubRegistry.set(await loadManifest(join(hws.apps, n)));
   const layout = new LayoutStore(hubDb);
-  peers = new PeerHub([{ name: "david", url: peerBase, token: "s3cret", headers: { "X-Access": "svc" }, refreshMs: 10_000 }], { store: new PeerStore(hubDb), fetch: hubFetch, now: () => clock });
+  hubEvents = new Store(":memory:");
+  peers = new PeerHub([{ name: "david", url: peerBase, token: "s3cret", headers: { "X-Access": "svc" }, refreshMs: 10_000 }], {
+    store: new PeerStore(hubDb),
+    fetch: hubFetch,
+    now: () => clock,
+    onEvents: (peer, list) => {
+      for (const e of list) {
+        hubEvents.addEvent(e, e.at ?? clock);
+        mirrored.push({ peer, app: e.app, name: e.name });
+      }
+    },
+  });
+  const hubBus = new Bus({ store: new BusStore(":memory:"), events: hubEvents, servicePort: () => undefined, log: () => {} });
+  const hubBusRoutes = createBusRoutes({ bus: hubBus, store: new BusStore(":memory:"), events: hubEvents, remote: { name: "hub-box", capabilities: () => peers.capabilities(), providerOf: (a, c) => peers.providerOf(a, c), get: (n) => peers.get(n) } });
   const hubPanel = createPanelRoutes({ ws: hws, registry: hubRegistry, layout, widgets: new WidgetFeed(hubRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback, peers });
   const hubAgents = createAgentRoutes({ ws: hws, registry: hubRegistry, layout, sessions: new SessionStore(hubDb), runtimes, defaultModel: "sonnet", home: hubHome, peers });
   // The hub also serves as a peer (a hub of hubs), to check its snapshot carries only its own entries.
-  hubServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...hubPanel, ...hubAgents, ...createPeerRoutes({ hub: peers, layout, registry: hubRegistry }), ...createPeerServeRoutes({ token: "hubtok", name: "hub-box", panel: hubPanel, agents: hubAgents }) }, websocket: { message() {} } });
+  hubServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...hubPanel, ...hubAgents, ...hubBusRoutes, ...createPeerRoutes({ hub: peers, layout, registry: hubRegistry }), ...createPeerServeRoutes({ token: "hubtok", name: "hub-box", panel: hubPanel, agents: hubAgents, events: hubEvents }) }, websocket: { message() {} } });
   hub = `http://127.0.0.1:${hubServer.port}`;
 });
 
@@ -324,6 +355,52 @@ describe("hub", () => {
     expect((await get(hub, "/api/apps?all=1")).body.apps.map((a: Body) => a.id)).toEqual(["media-link", "notes"]);
     expect((await get(hub, "/api/services")).body.services).toEqual([]);
     expect((await get(hub, "/api/peers/david/apps/media", { method: "DELETE" })).status).toBe(404);
+  });
+});
+
+describe("bus over peers", () => {
+  const auth = { headers: { authorization: "Bearer s3cret" } };
+
+  test("the peer exports the events published there (not mirrored ones) after an id, and its snapshot lists capabilities", async () => {
+    const a = peerEvents.addEvent({ app: "media", name: "clip.added", data: { id: "c1" } }, 5_000);
+    peerEvents.addEvent({ app: "other", name: "x", peer: "elsewhere" }, 6_000);
+    expect((await get(peerBase, "/api/peer/events")).status).toBe(401);
+    const r = await get(peerBase, "/api/peer/events?since=0", auth);
+    expect(r.body.events).toEqual([{ id: a.id, name: "media/clip.added", app: "media", at: new Date(5_000).toISOString(), data: { id: "c1" } }]);
+    expect(r.body.latestId).toBe(a.id + 1);
+    expect((await get(peerBase, `/api/peer/events?since=${a.id}`, auth)).body.events).toEqual([]);
+    const snap = await get(peerBase, "/api/peer/snapshot", auth);
+    expect(snap.body.capabilities).toEqual([{ app: "media", provides: [{ name: "clip", method: "POST", path: "/api/clip", timeoutMs: 5000 }], publishes: [{ name: "clip.added" }], consumes: [] }]);
+  });
+
+  test("the hub mirrors the peer's events on refresh, each once, and keeps the cursor in its store", async () => {
+    outage = false;
+    await peers.refreshAll();
+    expect(mirrored).toEqual([{ peer: "david", app: "media", name: "clip.added" }]);
+    expect(hubEvents.listEvents({ app: "media" })[0]).toMatchObject({ name: "media/clip.added", app: "media", peer: "david", at: 5_000, data: { id: "c1" } });
+    await peers.refreshAll();
+    expect(mirrored).toHaveLength(1);
+    const b = peerEvents.addEvent({ app: "media", name: "clip.added", data: { id: "c2" } }, 7_000);
+    await peers.refreshAll();
+    expect(mirrored).toHaveLength(2);
+    expect(new PeerStore(hubDb).cursor("david")).toBe(b.id);
+    // The hub, serving as a peer itself, does not pass mirrored events on.
+    expect((await get(hub, "/api/peer/events?since=0", { headers: { authorization: "Bearer hubtok" } })).body.events).toEqual([]);
+  });
+
+  test("a call to an app only the peer provides is forwarded there as <hub>/<caller>, and the catalogue merges the peer's", async () => {
+    const r = await fetch(`${hub}/api/call/media/clip`, jsonInit("POST", { n: 1 }));
+    expect(r.status).toBe(200);
+    expect(r.headers.get("x-space-call-peer")).toBe("david");
+    expect(await r.json()).toEqual({ echo: "hub-box/space", url: "http://127.0.0.1:8731/api/clip" });
+    expect((await fetch(`${hub}/api/call/david/media/clip`, { method: "POST" })).status).toBe(200);
+    expect((await get(hub, "/api/call/nowhere/media/clip", { method: "POST" })).status).toBe(404);
+    expect((await get(hub, "/api/call/media/nope", { method: "POST" })).status).toBe(404);
+    expect((await get(peerBase, "/api/peer/call/media/clip", { method: "POST", headers: { authorization: "Bearer s3cret" } })).status).toBe(400);
+    const cat = await get(hub, "/api/capabilities");
+    expect(cat.body.apps.map((a: Body) => a.app)).toContain("david/media");
+    expect(cat.body.apps.find((a: Body) => a.app === "david/media")).toMatchObject({ peer: "david", provides: [{ name: "clip" }] });
+    expect((await get(hub, "/api/calls?app=david/media")).body.calls[0]).toMatchObject({ caller: "space", app: "david/media", capability: "clip", status: 200, ok: true });
   });
 });
 

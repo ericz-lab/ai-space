@@ -39,6 +39,8 @@ export type Config = {
   s3?: S3Config;
   /** Channel the scheduler reports failing tasks to (SPACE_NOTIFY_TASKS); empty disables it. */
   notifyTasks: string;
+  /** How long published events are kept (SPACE_EVENTS_RETENTION_DAYS); deliveries and run history reference them. */
+  eventRetentionMs: number;
   /** Chat model when neither the request nor the manifest names one (SPACE_CHAT_MODEL). */
   chatModel: string;
   /** Command that stops an app's service when the panel uninstalls it (SPACE_SERVICE_STOP), `{app}` = name; empty = services are not stopped. */
@@ -109,6 +111,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     maxConcurrency: Math.max(1, Number(env.SPACE_MAX_CONCURRENCY ?? 2) || 2),
     pgAdminUrl: env.SPACE_PG_ADMIN_URL?.trim() ?? "",
     notifyTasks: env.SPACE_NOTIFY_TASKS?.trim() ?? "",
+    eventRetentionMs: Math.max(1, Number(env.SPACE_EVENTS_RETENTION_DAYS ?? 30) || 30) * 24 * 3600_000,
     chatModel: env.SPACE_CHAT_MODEL?.trim() ?? "sonnet",
     serviceStop: env.SPACE_SERVICE_STOP?.trim() ?? "",
     serviceLogs: env.SPACE_SERVICE_LOGS?.trim() || DEFAULT_SERVICE_LOGS,
