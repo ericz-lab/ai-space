@@ -99,7 +99,7 @@ function Catalogue({ apps }: { apps: CapabilityApp[] }) {
   );
 }
 
-export default function Events({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function Events({ open, onClose, onBack }: { open: boolean; onClose: () => void; onBack?: () => void }) {
   const { lang, t } = useLang();
   const [events, setEvents] = useState<EventInfo[] | null>(null);
   const [apps, setApps] = useState<CapabilityApp[]>([]);
@@ -138,6 +138,11 @@ export default function Events({ open, onClose }: { open: boolean; onClose: () =
     <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="tasks" role="dialog" aria-label={t("events.title")}>
         <div className="task-head">
+          {onBack && (
+            <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
+              ‹
+            </button>
+          )}
           <b>{t("events.title")}</b>
           <span className="chat-sub">{events === null ? "" : t("events.summary", { n: events.length, providers, publishers })}</span>
           <button className="chat-hbtn" title={t("common.close")} onClick={onClose}>

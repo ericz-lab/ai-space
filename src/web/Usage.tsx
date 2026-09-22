@@ -170,7 +170,7 @@ function TokenCells({ t }: { t: { inputTokens?: number; cacheWriteTokens?: numbe
   );
 }
 
-export default function Usage({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function Usage({ open, onClose, onBack }: { open: boolean; onClose: () => void; onBack?: () => void }) {
   const { lang, t } = useLang();
   const [window, setWindow] = useState<(typeof WINDOWS)[number]>("24h");
   const [metric, setMetric] = useState<Metric>("tokens");
@@ -214,6 +214,11 @@ export default function Usage({ open, onClose }: { open: boolean; onClose: () =>
     <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="tasks usage" role="dialog" aria-label={t("usage.title")}>
         <div className="task-head">
+          {onBack && (
+            <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
+              ‹
+            </button>
+          )}
           <b>{t("usage.title")}</b>
           <span className="chat-sub">{usage ? t("usage.backend", { backend: usage.backend }) : ""}</span>
           <span className="usage-windows">

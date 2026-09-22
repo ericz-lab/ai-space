@@ -121,7 +121,7 @@ function TaskRow({ t, open, onToggle }: { t: TaskInfo; open: boolean; onToggle: 
   );
 }
 
-export default function Tasks({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function Tasks({ open, onClose, onBack }: { open: boolean; onClose: () => void; onBack?: () => void }) {
   const { lang, t } = useLang();
   const [tasks, setTasks] = useState<TaskInfo[] | null>(null);
   const [apps, setApps] = useState<Record<string, AppLabel>>({});
@@ -172,6 +172,11 @@ export default function Tasks({ open, onClose }: { open: boolean; onClose: () =>
     <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="tasks" role="dialog" aria-label={t("tasks.title")}>
       <div className="task-head">
+        {onBack && (
+          <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
+            ‹
+          </button>
+        )}
         <b>{t("tasks.title")}</b>
         <span className="chat-sub">
           {tasks === null ? "" : `${t("tasks.summary", { active, total })}${failing ? t("tasks.failing", { n: failing }) : ""}`}

@@ -962,9 +962,18 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
           </div>
         </div>
       )}
-      <Tasks open={tasksOpen} onClose={() => setTasksOpen(false)} />
-      <Usage open={usageOpen} onClose={() => setUsageOpen(false)} />
-      <Events open={eventsOpen} onClose={() => setEventsOpen(false)} />
+      <Tasks open={tasksOpen} onClose={() => setTasksOpen(false)} onBack={() => {
+          setTasksOpen(false);
+          openSettings();
+        }} />
+      <Usage open={usageOpen} onClose={() => setUsageOpen(false)} onBack={() => {
+          setUsageOpen(false);
+          openSettings();
+        }} />
+      <Events open={eventsOpen} onClose={() => setEventsOpen(false)} onBack={() => {
+          setEventsOpen(false);
+          openSettings();
+        }} />
       <Terminal open={termOpen} onClose={() => setTermOpen(false)} />
       <Chat
         open={chatOpen}
