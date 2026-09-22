@@ -11,7 +11,7 @@ import { type Ctx, type Noun } from "./types.ts";
  * what the scheduler's backup task spawns (`bun src/index.ts backup <app>`).
  */
 
-type Overview = { target: string | null; maxAgeHours: number; backups: { app: string; count: number; lastAt?: number; lastStatus?: string; lastError?: string; lastOkAt?: number; lastOkBytes?: number; lastVerifiedAt?: number; lastVerifyOk?: boolean; stale: boolean; nextRunAt?: number; enabled?: boolean }[] };
+type Overview = { target: string | null; maxAgeHours: number; backups: { app: string; count: number; lastAt?: number; lastStatus?: string; lastError?: string; lastOkAt?: number; lastOkBytes?: number; lastVerifiedAt?: number; lastVerifyOk?: boolean; stale: boolean; retired: boolean; nextRunAt?: number; enabled?: boolean }[] };
 type Snapshots = { snapshots: { key: string; at: number; bytes: number; status: string; error?: string; entries: number; verifiedAt?: number; verifyOk?: boolean; verifyError?: string }[] };
 
 const ls = async (ctx: Ctx, argv: string[]) => {
@@ -47,9 +47,9 @@ const ls = async (ctx: Ctx, argv: string[]) => {
     { title: "app", get: (b) => b.app },
     { title: "snapshots", get: (b) => b.count, align: "right" },
     { title: "last ok", get: (b) => (b.lastOkAt ? `${ago(new Date(b.lastOkAt).toISOString(), now)} ${bytes(b.lastOkBytes)}` : "never") },
-    { title: "state", get: (b) => (b.stale ? "STALE" : b.lastStatus === "error" ? "last run failed" : "fresh") },
+    { title: "state", get: (b) => (b.retired ? "retired" : b.stale ? "STALE" : b.lastStatus === "error" ? "last run failed" : "fresh") },
     { title: "verified", get: (b) => (b.lastVerifiedAt ? `${b.lastVerifyOk ? "ok" : "FAILED"} ${ago(new Date(b.lastVerifiedAt).toISOString(), now)}` : "") },
-    { title: "next", get: (b) => (b.enabled === false ? "disabled" : b.nextRunAt ? until(new Date(b.nextRunAt).toISOString(), now) : "") },
+    { title: "next", get: (b) => (b.retired ? "" : b.enabled === false ? "disabled" : b.nextRunAt ? until(new Date(b.nextRunAt).toISOString(), now) : "") },
     { title: "error", get: (b) => (b.lastError ?? "").slice(0, 60) },
   ]);
   return 0;

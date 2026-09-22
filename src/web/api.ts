@@ -234,6 +234,8 @@ export type BackupInfo = {
   lastVerifyOk?: boolean;
   lastVerifyError?: string;
   stale: boolean;
+  /** No backup task will run again (the app left, or opted out); the snapshots are history. */
+  retired: boolean;
   taskId?: string;
   nextRunAt?: number;
   enabled?: boolean;

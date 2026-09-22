@@ -284,16 +284,19 @@ describe("restore", () => {
 });
 
 describe("api", () => {
-  test("overview marks apps without a fresh snapshot stale and runs a backup on POST", async () => {
+  test("overview marks apps without a fresh snapshot stale, retired ones not, and runs a backup on POST", async () => {
     const dataDir = await seedApp("keep");
     await runBackup(deps, { app: "keep", dataDir, spec: parseBackupSpec(undefined) });
+    // Two apps with old snapshots and no future: one left the workspace (task orphaned), one opted out (no task).
+    await runBackup(deps, { app: "left", dataDir: await seedApp("left"), spec: parseBackupSpec(undefined) });
+    await runBackup(deps, { app: "optout", dataDir: await seedApp("optout"), spec: parseBackupSpec(undefined) });
     const ran: string[] = [];
     const routes = createBackupRoutes({
       store: deps.store,
       target: deps.target,
       token: "t",
       maxAgeMs: 48 * 3600_000,
-      taskFor: (app) => (app === "keep" || app === "hive" ? { id: `${app}:backup`, nextRunAt: 1, enabled: true } : undefined),
+      taskFor: (app) => (app === "keep" || app === "hive" ? { id: `${app}:backup`, nextRunAt: 1, enabled: true } : app === "left" ? { id: "left:backup", enabled: false, orphaned: true } : undefined),
       runNow: (id) => (ran.push(id), true),
       apps: () => ["hive", "keep", "space"],
       now: () => Date.UTC(2026, 8, 8),
@@ -305,10 +308,13 @@ describe("api", () => {
     };
     const overview = await call("/api/backups");
     expect(overview.status).toBe(200);
-    const byApp = Object.fromEntries((overview.body.backups as { app: string; stale: boolean; taskId?: string; count: number }[]).map((b) => [b.app, b]));
-    expect(byApp.keep).toMatchObject({ stale: true, taskId: "keep:backup", count: 1 }); // three days later
-    expect(byApp.hive).toMatchObject({ stale: true, taskId: "hive:backup", count: 0 });
-    expect(byApp.space).toMatchObject({ stale: true, count: 0 });
+    const byApp = Object.fromEntries((overview.body.backups as { app: string; stale: boolean; retired: boolean; taskId?: string; count: number }[]).map((b) => [b.app, b]));
+    expect(byApp.keep).toMatchObject({ stale: true, retired: false, taskId: "keep:backup", count: 1 }); // three days later
+    expect(byApp.hive).toMatchObject({ stale: true, retired: false, taskId: "hive:backup", count: 0 });
+    expect(byApp.space).toMatchObject({ stale: false, retired: true, count: 0 }); // no task in this fixture: retired, never stale
+    expect(byApp.left).toMatchObject({ stale: false, retired: true, taskId: "left:backup", enabled: false, count: 1 });
+    expect(byApp.optout).toMatchObject({ stale: false, retired: true, count: 1 });
+    expect(byApp.optout?.taskId).toBeUndefined();
 
     expect((await call("/api/apps/keep/backups")).body).toMatchObject({ app: "keep", taskId: "keep:backup" });
     expect((await call("/api/apps/keep/backups", "POST")).status).toBe(401);

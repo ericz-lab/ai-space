@@ -4,7 +4,9 @@ import type { BackupTarget } from "./target.ts";
 /**
  * HTTP surface for backups, merged into the Space API routes.
  *
- *   GET  /api/backups                every app: last snapshot, last ok, last verified, next run
+ *   GET  /api/backups                every app: last snapshot, last ok, last verified, next run; `stale` when the
+ *                                    last good snapshot is older than the limit, `retired` when no task will ever
+ *                                    refresh it (the app left the workspace, or opted out) and its snapshots are history
  *   GET  /api/apps/:app/backups      one app's snapshots, newest first
  *   POST /api/apps/:app/backups      run the app's backup task now
  *
@@ -17,8 +19,8 @@ export type BackupApiOptions = {
   token?: string;
   /** A last successful snapshot older than this is reported `stale`. */
   maxAgeMs: number;
-  /** The app's backup task, when the scheduler has one. */
-  taskFor: (app: string) => { id: string; nextRunAt?: number; enabled: boolean } | undefined;
+  /** The app's backup task, when the scheduler has one; `orphaned` once the app left the workspace. */
+  taskFor: (app: string) => { id: string; nextRunAt?: number; enabled: boolean; orphaned?: boolean } | undefined;
   runNow: (taskId: string) => boolean;
   /** Every app that has a backup task, so apps without a snapshot yet still appear. */
   apps: () => string[];
@@ -29,7 +31,10 @@ type Handler = (req: Request & { params: Record<string, string> }) => Response |
 type Routes = Record<string, Handler | Partial<Record<"GET" | "POST", Handler>>>;
 
 export type BackupView = BackupSummary & {
+  /** The last good snapshot is older than the limit, and a task should have refreshed it. Never true for a retired app. */
   stale: boolean;
+  /** No backup task will run again: the app left the workspace (task orphaned) or opted out. The snapshots stay as history. */
+  retired: boolean;
   taskId?: string;
   nextRunAt?: number;
   enabled?: boolean;
@@ -55,9 +60,11 @@ export function createBackupRoutes(opts: BackupApiOptions): Routes {
     return [...apps].sort().map((app) => {
       const s = byApp.get(app) ?? { app, count: 0 };
       const task = opts.taskFor(app);
+      const retired = !task || task.orphaned === true;
       return {
         ...s,
-        stale: s.lastOkAt === undefined || now - s.lastOkAt > opts.maxAgeMs,
+        stale: !retired && (s.lastOkAt === undefined || now - s.lastOkAt > opts.maxAgeMs),
+        retired,
         ...(task ? { taskId: task.id, nextRunAt: task.nextRunAt, enabled: task.enabled } : {}),
       };
     });

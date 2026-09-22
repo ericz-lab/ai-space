@@ -241,7 +241,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         maxAgeMs: config.backupMaxAgeMs,
         taskFor: (app) => {
           const t = store.findTask(app, BACKUP_TASK);
-          return t ? { id: t.id, nextRunAt: t.state.nextRunAt, enabled: effectiveEnabled(t) } : undefined;
+          return t ? { id: t.id, nextRunAt: t.state.nextRunAt, enabled: effectiveEnabled(t), orphaned: t.orphaned } : undefined;
         },
         runNow: (id) => scheduler.runNow(id),
         apps: () => scheduler.apps().filter((app) => store.findTask(app, BACKUP_TASK)?.orphaned === false),

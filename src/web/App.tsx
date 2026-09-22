@@ -940,7 +940,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                       b.lastOkKey ?? "",
                       b.lastStatus === "error" && b.lastError ? t("backup.lastError", { error: b.lastError }) : "",
                       b.lastVerifiedAt !== undefined ? (b.lastVerifyOk ? t("backup.verified", { time: relTime(b.lastVerifiedAt, lang) }) : t("backup.verifyFailed", { error: b.lastVerifyError ?? "" })) : "",
-                      b.nextRunAt ? t("backup.nextRun", { time: untilTime(new Date(b.nextRunAt).toISOString(), lang) }) : "",
+                      b.nextRunAt && !b.retired ? t("backup.nextRun", { time: untilTime(new Date(b.nextRunAt).toISOString(), lang) }) : "",
+                      b.retired ? t("backup.retiredHint") : "",
                     ]
                       .filter(Boolean)
                       .join("\n")}
@@ -948,9 +949,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                     <span className="svc-ico">🗄</span>
                     <span className="svc-name">{b.app}</span>
                     <span className="svc-port">{b.lastOkAt ? relTime(b.lastOkAt, lang) : t("backup.never")}</span>
-                    <span className={`status ${b.stale ? "down" : "ok"}`}>
+                    <span className={`status ${b.retired ? "archived" : b.stale ? "down" : "ok"}`}>
                       <i />
-                      {t(b.stale ? "backup.stale" : "backup.fresh")}
+                      {t(b.retired ? "backup.retired" : b.stale ? "backup.stale" : "backup.fresh")}
                     </span>
                   </div>
                 ))
