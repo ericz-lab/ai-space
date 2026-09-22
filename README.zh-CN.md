@@ -107,4 +107,4 @@ App 规范（什么是 app、目录布局、`space.yaml` 契约）见 [docs/app-
 - **托管 blob API**：在已经开通并交接的对象存储之上加索引表、流式路由和预签名。
 - **App 工具链**：`schema/space.schema.json`、`validate`、`/api/spec` 和 `bun run new-app`；目前由共享 skill `skills/space-app/` 手工完成。
 
-分区状态表见 [docs/app-spec.md](docs/app-spec.md#implementation-status)。
+分区状态表见 [docs/app-spec.md](docs/app-spec.md#implementation-status)。更长远的视角——对照操作系统给程序的东西，一个空间还欠住在里面的 app 什么，以及这些空缺值得按什么顺序补上——见 [docs/roadmap.md](docs/roadmap.md)。

@@ -107,4 +107,7 @@ Early stage. Scheduler (schedules and event triggers), storage (databases and bl
 - **Managed blob API** - index table, streaming routes and presigning on top of the blob stores that are already provisioned and handed over.
 - **App tooling** - `schema/space.schema.json`, `validate` and `/api/spec`; `space app new` creates an app from the template, the shared skill `skills/space-app/` covers adopting and changing one.
 
-The per-area table is in [docs/app-spec.md](docs/app-spec.md#implementation-status).
+The per-area table is in [docs/app-spec.md](docs/app-spec.md#implementation-status). The longer
+view - what a space still owes the apps living in it, measured against what an operating system
+gives its programs, and the order those gaps are worth closing in - is in
+[docs/roadmap.md](docs/roadmap.md).
