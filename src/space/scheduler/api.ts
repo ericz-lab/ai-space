@@ -30,6 +30,8 @@ export type ApiOptions = {
   store: Store;
   /** Bearer token for mutating routes; empty disables the check (rely on 127.0.0.1). */
   token?: string;
+  /** This machine's view of a freshly loaded manifest (the `SPACE_APP_URL_<NAME>` override, a path `url` resolved against the domain); identity by default. Applied before `onManifest`, so the sync routes register what boot registers. */
+  resolve?: (manifest: Manifest) => Manifest;
   /** Called with a freshly loaded manifest before the scheduler syncs it (storage provisioning); may return tasks to sync alongside the manifest's (the backup task). */
   onManifest?: (manifest: Manifest) => Promise<ManifestTask[] | void>;
   /** Every app directory the workspace holds right now; `POST /api/apps/sync` re-reads them all. */
@@ -84,7 +86,8 @@ export function createRoutes(opts: ApiOptions): Routes {
 
   // Load, provision and register one app directory. Shared by both sync routes.
   const syncDir = async (dir: string): Promise<SyncSummary> => {
-    const manifest = await loadManifest(dir);
+    const loaded = await loadManifest(dir);
+    const manifest = opts.resolve ? opts.resolve(loaded) : loaded;
     const extra = opts.onManifest ? await opts.onManifest(manifest) : undefined;
     return scheduler.syncManifest(Scheduler.schedulable(manifest), extra ?? []);
   };
@@ -195,10 +198,9 @@ export function createRoutes(opts: ApiOptions): Routes {
         const app = req.params.app ?? "";
         const dir = scheduler.appDir(app);
         if (!dir) return error(404, `unknown app: ${app}; POST /api/apps/sync registers new directories`);
-        const manifest = await loadManifest(dir);
-        if (manifest.app !== app) return error(400, `manifest in ${dir} names app "${manifest.app}", expected "${app}"`);
-        const extra = opts.onManifest ? await opts.onManifest(manifest) : undefined;
-        return json({ ok: true, sync: scheduler.syncManifest(Scheduler.schedulable(manifest), extra ?? []) });
+        const loaded = await loadManifest(dir);
+        if (loaded.app !== app) return error(400, `manifest in ${dir} names app "${loaded.app}", expected "${app}"`);
+        return json({ ok: true, sync: await syncDir(dir) });
       }),
     },
   };

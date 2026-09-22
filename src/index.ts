@@ -136,8 +136,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     return backup ? [backup] : [];
   };
 
+  // What this machine registers for a manifest: boot and the sync routes go through the same step.
+  const resolve = (manifest: Manifest) => applyEnvOverrides(manifest, env, { domain: config.router.domain });
   const syncDir = async (dir: string) => {
-    const manifest = applyEnvOverrides(await loadManifest(dir), env, { domain: config.router.domain });
+    const manifest = resolve(await loadManifest(dir));
     const extra = await provision(manifest);
     scheduler.syncManifest(Scheduler.schedulable(manifest), extra);
   };
@@ -223,6 +225,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         scheduler,
         store,
         token: config.apiToken,
+        resolve,
         onManifest: provision,
         discover,
         onGone: async (app) => {

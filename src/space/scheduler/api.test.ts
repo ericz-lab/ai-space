@@ -132,6 +132,29 @@ describe("scheduler api", () => {
     expect(r.body.error).toMatch(/invalid cron/);
   });
 
+  test("the sync routes register the resolved manifest, as boot does", async () => {
+    const root = await mkdtemp(join(tmpdir(), "space-ws-"));
+    const dir = join(root, "pathed");
+    await mkdir(dir);
+    await writeFile(join(dir, "space.yaml"), "name: pathed\nurl: /\nservice: { command: 'true', port: 8123 }\n");
+    const seen: string[] = [];
+    const routes = createRoutes({
+      scheduler, store, token: "t0k", discover: async () => [dir],
+      resolve: (m) => (m.url?.startsWith("/") ? { ...m, url: `https://${m.app}.example.test${m.url}` } : m),
+      onManifest: async (m) => { seen.push(m.url ?? ""); },
+    });
+    const srv = Bun.serve({ port: 0, hostname: "127.0.0.1", routes });
+    const at = (path: string, init?: RequestInit) => fetch(`http://127.0.0.1:${srv.port}${path}`, init).then(async (r) => ({ status: r.status, body: (await r.json()) as Body }));
+    try {
+      expect((await at("/api/apps/sync", { method: "POST", headers: auth })).body.synced.map((s: { app: string }) => s.app)).toContain("pathed");
+      expect((await at("/api/apps/pathed/sync", { method: "POST", headers: auth })).status).toBe(200);
+      expect(seen).toEqual(["https://pathed.example.test/", "https://pathed.example.test/"]);
+    } finally {
+      srv.stop(true);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("workspace sync registers new directories and reports broken ones", async () => {
     const root = await mkdtemp(join(tmpdir(), "space-ws-"));
     const fresh = join(root, "fresh");
