@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { codexArgs, codexRemoteCommand, createCodexCli, parseCodexOutput } from "./codex-cli.ts";
+import { codexArgs, codexChatArgs, codexRemoteCommand, createCodexCli, parseCodexOutput } from "./codex-cli.ts";
 import { spawnCollect } from "./process.ts";
 import { fakeCodexBin } from "./testing-codex.ts";
-import type { CompleteInput } from "./types.ts";
+import type { ChatTurn, CompleteInput } from "./types.ts";
 
 const input = (over: Partial<CompleteInput> = {}): CompleteInput => ({ model: "gpt-6-luna", system: "Translate into Chinese. Only JSON.", prompt: "hello", tools: [], tag: "test", maxTokens: 100, timeoutMs: 3000, ...over });
 const adapter = (mode = "ok") => createCodexCli({ name: "codex", kind: "codex-cli", bin: fakeCodexBin(mode) });
@@ -66,7 +66,7 @@ describe("Codex completions", () => {
     expect(await adapter().complete(input({ files: [{ name: "a.png", path: "/missing" }] }))).toMatchObject({ ok: false });
     expect(await adapter().complete(input({ thinking: 2048 }))).toMatchObject({ ok: true });
     expect(await createCodexCli({ name: "x", kind: "codex-cli", bin: ["/no-codex-here"] }).complete(input())).toMatchObject({ ok: false });
-    expect(adapter().capabilities).toEqual({ complete: true, agent: false, chat: false });
+    expect(adapter().capabilities).toEqual({ complete: true, agent: false, chat: true });
     expect(() => createCodexCli({ name: "x", kind: "codex-cli", bin: [], sshHost: "-oProxyCommand=bad" })).toThrow(/host/);
   });
   test("remote wrapper transfers hostile text exactly and cleans the request directory", async () => {
@@ -89,4 +89,66 @@ describe("Codex completions", () => {
     expect(parseCodexOutput("null").error).toBe("invalid Codex event");
     expect(parseCodexOutput('{"type":"turn.completed"}').error).toBe("empty Codex answer");
   });
+});
+
+
+describe("Codex chat", () => {
+  const turn = (over: Partial<ChatTurn> = {}): ChatTurn => ({ message: "hello", cwd: process.cwd(), model: "gpt-6-luna", systemPrompt: "Workspace identity", ...over });
+  const run = (mode = "ok", over: Partial<ChatTurn> = {}) => new Promise<{ events: Record<string, any>[]; sid?: string; error: string | null }>((resolve) => {
+    const events: Record<string, any>[] = [];
+    let sid: string | undefined;
+    const handle = adapter(mode).chat(turn(over), { onEvent: (line) => events.push(JSON.parse(line)), onSession: (value) => { sid = value; }, onFinish: (error) => resolve({ events, sid, error }) });
+    if (mode === "hang") setTimeout(handle.kill, 50);
+  });
+
+  test("streams persistent sessions with full context and a separate identity", async () => {
+    const result = await run();
+    expect(result.error).toBeNull();
+    expect(result.sid).toBe("c0de0001-0000-4000-8000-000000000000");
+    expect(result.events[0]).toMatchObject({ type: "system", subtype: "init" });
+    const answer = JSON.parse(result.events.filter((e) => e.type === "assistant").at(-1)!.message.content[0].text);
+    expect(answer.prompt).toBe("hello");
+    expect(answer.cwd).toBe(process.cwd());
+    expect(answer.args).toContain('developer_instructions="Workspace identity"');
+    for (const flag of ["--ephemeral", "--ignore-user-config", "--ignore-rules", "--disable", "model_instructions_file"]) expect(answer.args).not.toContain(flag);
+    expect(result.events.at(-1)).toMatchObject({ type: "result", is_error: false });
+  });
+
+  test("applies permissions on both new and resumed sessions", () => {
+    for (const sessionId of [undefined, "c0de0001-0000-4000-8000-000000000000"]) {
+      for (const [permissionMode, sandbox] of [[undefined, "read-only"], ["acceptEdits", "workspace-write"], ["bypassPermissions", "danger-full-access"], ["invalid", "read-only"]]) {
+        const args = codexChatArgs(turn({ sessionId, permissionMode }));
+        expect(args[args.indexOf("--sandbox") + 1]).toBe(sandbox!);
+        expect(args).toContain('approval_policy="never"');
+        if (sessionId) expect(args.slice(-3)).toEqual(["resume", sessionId, "-"]);
+      }
+    }
+  });
+
+  test("surfaces crashes, invalid streams, auth failures, partial output and cancellation", async () => {
+    for (const mode of ["exit", "malformed", "error", "partial", "hang"]) expect((await run(mode)).error).toBeTruthy();
+    expect((await run("ok", { allowedTools: ["Read"] })).error).toContain("allow-lists");
+  });
+});
+
+test("Codex transcript restores user text and assistant tools only for the matching workspace", async () => {
+  const { mkdtemp, mkdir, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { readCodexTranscript } = await import("./transcripts.ts");
+  const home = await mkdtemp(join(tmpdir(), "codex-transcript-"));
+  const sid = "c0de0001-0000-4000-8000-000000000000";
+  try {
+    await mkdir(join(home, "sessions/2026/09/23"), { recursive: true });
+    await Bun.write(join(home, `sessions/2026/09/23/rollout-2026-09-23-${sid}.jsonl`), [
+      { type: "session_meta", payload: { id: sid, cwd: "/workspace" } },
+      { type: "response_item", payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "hidden instructions" }] } },
+      { type: "event_msg", payload: { type: "user_message", message: "hello" } },
+      { type: "response_item", payload: { type: "function_call", name: "exec_command", arguments: '{"command":"pwd"}' } },
+      { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "done" }] } },
+    ].map((e) => JSON.stringify(e)).join("\n"));
+    expect(await readCodexTranscript("/workspace", sid, home)).toEqual([{ role: "user", text: "hello" }, { role: "ai", text: "done", tools: [{ name: "exec_command", hint: "pwd" }] }]);
+    expect(await readCodexTranscript("/other", sid, home)).toBeNull();
+    expect(await readCodexTranscript("/workspace", "missing-session", home)).toBeNull();
+  } finally { await rm(home, { recursive: true, force: true }); }
 });

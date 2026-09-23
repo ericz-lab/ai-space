@@ -132,7 +132,7 @@ runtimes:
       ["intermediate", "opus", "gpt-6-sol"], ["advanced", "fable", "gpt-6-astra"],
     ]) {
       expect(registry.resolve(tier!).model).toBe(claude!);
-      expect(registry.resolve(`codex/${tier}`)).toMatchObject({ model: codex, runtime: { name: "codex", capabilities: { complete: true, agent: false, chat: false } } });
+      expect(registry.resolve(`codex/${tier}`)).toMatchObject({ model: codex, runtime: { name: "codex", capabilities: { complete: true, agent: false, chat: true } } });
     }
     const overridden = new RuntimeRegistry(parseRuntimesYaml("runtimes:\n  codex: { kind: codex-cli, models: { basic: my-luna-version } }").config);
     expect(overridden.resolve("basic").model).toBe("my-luna-version");

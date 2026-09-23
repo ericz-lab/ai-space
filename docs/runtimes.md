@@ -2,7 +2,7 @@
 
 For detailed model selection and request examples, see [Model Tiers and Request Modes](model-tiers-and-modes.md).
 
-Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`), the Anthropic Messages API (`anthropic-api`), and Codex CLI text completions (`codex-cli`). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
+Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`), the Anthropic Messages API (`anthropic-api`), and Codex CLI text completions and local chat (`codex-cli`). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
 
 ## Why one layer
 
@@ -26,7 +26,7 @@ Every operation reports what the runtime said about the model call, token counts
 | --- | --- | --- | --- | --- | --- |
 | `claude-code` | yes, local or ssh | yes | yes | the CLI's own (`claude login`) | `claude -p --output-format json` for answers and agent runs, `stream-json` for chat, `--resume` for continuity. Answers over ssh: every argument validated, the system prompt base64-encoded. Files (chat attachments) are opened with `Read`; over ssh they travel with the prompt as one tar archive unpacked into a temporary directory. |
 | `deepseek-harness` | yes, local or ssh | yes | yes | a DeepSeek API key in the harness home | `dsh --profile headless --json` for everything, the task on stdin; `--session-id` for continuity. A `--patch` overlay per run sets the system prompt, model, thinking (`reasoningEffort`) and tool rows: an answer runs with the harness identity, runtime context and every tool off (6,872 input tokens as shipped → 32), a chat keeps them and adds the agent's prompt as persona. Usage from the `step_end` events, cost from DeepSeek's list prices at peak (off-peak is half). Chat events are translated into Claude Code's `stream-json`; transcripts read from the harness's session log. Files refused. |
-| `codex-cli` | yes, local or ssh | no | no | the CLI’s own Codex login | Slim or full completions with per-request instructions; see below. |
+| `codex-cli` | yes, local or ssh | no | yes, local | the CLI’s own Codex login | Slim or full completions with per-request instructions; persistent full-context chat with `exec resume`; see below. |
 | `anthropic-api` | yes | no | no | an API key | `POST /v1/messages`. Tools and files refused. Cost from list prices for known models. |
 
 ## Configuration
@@ -95,7 +95,7 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 - Further kinds: another coding agent's CLI (its one-shot mode for answers and agent runs, its event stream for chat, usage read from where it records it), model APIs of other vendors.
 - Chat events normalised across runtimes, with ai-space keeping its own transcripts; today the browser reads Claude Code's `stream-json` (other runtimes' adapters translate into it) and past sessions are read from each runtime's own files.
 - DeepSeek off-peak pricing in the ledger (the price table takes the peak rate), and a price table in `runtimes.yaml` for models the adapters do not know.
-- Per-app default runtime and routing by tag, fallback chains, budgets; a runtime picker in the chat panel.
+- Per-app default runtime and routing by tag, fallback chains, budgets; runtime selection for app agents. Base already offers a runtime and model-tier picker.
 
 ## Capability tiers
 
@@ -128,11 +128,11 @@ runtimes:
       advanced: gpt-6-astra
 ```
 
-To default only application model calls to Codex, set `SPACE_MODEL_DEFAULT=codex/basic`. Keep the runtime default on a chat-capable runtime when the panel still needs it. Explicit application model settings take precedence; change those individually.
+To default only application model calls to Codex, set `SPACE_MODEL_DEFAULT=codex/basic`. Base can select either configured CLI runtime independently of the model service default. Explicit application model settings take precedence; change those individually.
 
 ## Codex CLI completions
 
-Motivation: applications must be able to use a Codex login independently of a failed Claude login, with inexpensive models and their own instructions. `codex-cli` implements `complete` only, locally or through SSH; agent tasks and panel chat return unsupported. Requires a Codex CLI with `--ignore-user-config`, `--ignore-rules` and `--ephemeral` (validated with 0.156.1); the SSH host needs Bash, tar and GNU timeout. Authenticate on the machine that actually runs Codex, using `codex login`. Credentials remain in that machine's Codex home.
+Motivation: applications must be able to use a Codex login independently of a failed Claude login, with inexpensive models and their own instructions. `codex-cli` implements `complete` locally or through SSH, and `chat` locally; scheduled agent tasks remain unsupported. Requires a Codex CLI with `--ignore-user-config`, `--ignore-rules` and `--ephemeral` (validated with 0.156.1); the SSH host needs Bash, tar and GNU timeout. Authenticate on the machine that actually runs Codex, using `codex login`. Credentials remain in that machine's Codex home.
 
 In the default slim mode, the adapter runs `codex exec --json` in a fresh temporary directory. The request's `system` becomes `model_instructions_file`, replacing Codex's built-in model instructions; `prompt` arrives on stdin separately. Quotes, Unicode, newlines and large instructions travel as file bytes, never interpolated shell code. Over SSH both files arrive in one tar stream before the CLI starts. Request files are removed afterwards. A remote timeout bounds execution if the SSH connection drops; cancellation kills the local process group immediately, while a disconnected remote call can remain until its timeout.
 
@@ -201,3 +201,14 @@ disabled; these are example measurements, not a fixed budget.
 
 These modes apply to model completions. Scheduler agent execution and persistent
 panel chat keep their existing contracts.
+
+
+## Base agent runtime and model selection
+
+Motivation: the workspace assistant should use either CLI login and all four model tiers without editing server configuration for each conversation. Configure `claude-code` and `codex-cli` entries in `runtimes.yaml` (as in the tier example above), then select the runtime and tier in Base's model menu. Only configured chat-capable runtimes are offered; model aliases and overrides come from the same registry as model calls and scheduled tasks. Other agents keep their manifest runtime. `SPACE_CHAT_MODEL=codex/junior` sets a Codex Base default; unqualified legacy defaults such as `sonnet` apply to Claude. A Codex-only installation starts Base at the intermediate tier unless a qualified default is set.
+
+Base chat always uses full native context: project instructions, configured skills, tools and user configuration remain available. The workspace identity is appended to Claude's system prompt and supplied as Codex developer instructions. Codex runs locally in the workspace even when its completion backend has `ssh` configured, matching the other CLI adapters' chat contract. The local CLI must be installed and authenticated.
+
+Execution permissions remain separate. Codex maps the read-only default (and `plan`) to `read-only`, edit permission to `workspace-write`, and all permissions to `danger-full-access`. Workspace-write allows commands within Codex's sandbox, not just individual file edits. Headless turns use `approval_policy="never"`; unsupported actions fail instead of waiting for approval. Chat does not use the slim completion flags or ephemeral sessions. Custom app tool allow-lists are rejected because Codex cannot enforce Claude tool names.
+
+Codex JSON events are translated into the panel's text and tool events. Sessions persist in Codex's own home and resume with `codex exec resume`. The session index stores the runtime and concrete model; existing rows remain readable as legacy Claude Base sessions. Switching runtime in the menu starts a new conversation, and the API rejects cross-runtime resumes. Restoring history reads the recorded runtime's transcript, verifying the workspace for Codex rollouts. Authentication errors, incomplete output and cancellation are surfaced without falling back to another runtime.

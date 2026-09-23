@@ -12,6 +12,7 @@ if (import.meta.main) {
     console.log(JSON.stringify({ type: "turn.failed", error: { message: "OAuth session expired" } }));
     process.exit(0);
   }
+  if (!args.includes("--ephemeral")) console.log(JSON.stringify({ type: "thread.started", thread_id: "c0de0001-0000-4000-8000-000000000000" }));
   const systemArg = args.find((s) => s.startsWith("model_instructions_file="));
   const systemFile = systemArg ? JSON.parse(systemArg.slice(systemArg.indexOf("=") + 1)) : undefined;
   const text = JSON.stringify({ prompt, system: systemFile ? await Bun.file(systemFile).text() : null, cwd: process.cwd(), args });

@@ -159,3 +159,70 @@ describe("transcript", () => {
     ]);
   });
 });
+
+describe("Base runtime selection", () => {
+  test("advertises tiers, resolves both runtimes, and resumes using the recorded runtime", async () => {
+    const { RuntimeRegistry } = await import("../runtimes/registry.ts");
+    const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
+    const configured = new RuntimeRegistry({ default: "claude", runtimes: [
+      { name: "claude", kind: "claude-code", bin: ["bun", join(home, "fake-claude.js")], chatArgs: [] },
+      { name: "codex", kind: "codex-cli", bin: fakeCodexBin() },
+    ] });
+    const store = new SessionStore(new Database(":memory:"));
+    const registry = new AppRegistry();
+    await registry.set(await loadManifest(appDir));
+    const local = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createAgentRoutes({ ws: workspacePaths(home), registry, layout: new LayoutStore(new Database(":memory:")), sessions: store, runtimes: configured }) });
+    const url = `http://127.0.0.1:${local.port}`;
+    const chat = (body: unknown, app = "space/assistant") => fetch(`${url}/api/agents/${app}/chat`, { method: "POST", body: JSON.stringify(body) });
+    try {
+      const list = await (await fetch(`${url}/api/agents`)).json() as { agents: { id: string; modelOptions?: { value: string }[] }[] };
+      expect(list.agents.find((a) => a.id === "space/assistant")!.modelOptions).toHaveLength(8);
+      for (const runtime of ["claude", "codex"]) {
+        for (const tier of ["basic", "junior", "intermediate", "advanced"]) {
+          const result = await events(await chat({ message: "hello", model: `${runtime}/${tier}` }));
+          expect(result.some((e) => e.type === "error")).toBe(false);
+          const session = store.list("space/assistant").find((s) => s.runtime === runtime)!;
+          expect(session.model).toBe(configured.resolve(`${runtime}/${tier}`).model);
+        }
+      }
+      const session = store.list("space/assistant").find((s) => s.runtime === "codex")!;
+      const resumed = await events(await chat({ message: "again", sessionId: session.sid }));
+      const answer = JSON.parse((resumed.filter((e) => e.type === "assistant").at(-1)!.message as { content: { text: string }[] }).content[0]!.text);
+      expect(answer.args).toContain("resume");
+      expect(answer.args).toContain("gpt-6-astra");
+      expect((await chat({ message: "x", sessionId: session.sid, model: "claude/basic" })).status).toBe(400);
+      expect((await chat({ message: "x", model: "missing/basic" })).status).toBe(501);
+      expect((await chat({ message: "x", model: "codex/invalid/model" })).status).toBe(400);
+      expect((await chat({ message: "x", model: "codex/basic" }, "notes/librarian")).status).toBe(400);
+      configured.get("codex")!.transcript = async () => [{ role: "user", text: "Codex transcript" }];
+      const transcript = await (await fetch(`${url}/api/agents/space/assistant/sessions/${session.sid}`)).json();
+      expect(transcript).toMatchObject({ messages: [{ text: "Codex transcript" }] });
+    } finally { local.stop(true); }
+  });
+
+  test("migrates existing session rows without losing history", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE chat_sessions (agent TEXT, sid TEXT, title TEXT, ts INTEGER, PRIMARY KEY(agent, sid)); INSERT INTO chat_sessions VALUES ('space/assistant', 'old-session', 'Existing chat', 1)");
+    const store = new SessionStore(db);
+    expect(store.get("space/assistant", "old-session")).toMatchObject({ title: "Existing chat", runtime: null, model: null });
+    store.record("space/assistant", "new-session", "old-session", "new title", "claude", "sonnet");
+    expect(store.list("space/assistant")).toMatchObject([{ sid: "new-session", title: "Existing chat", runtime: "claude", model: "sonnet" }]);
+    expect(store.list("space/assistant")).toHaveLength(1);
+    db.close();
+  });
+});
+
+test("Codex-only Base ignores legacy Claude defaults and honors qualified defaults", async () => {
+  const { RuntimeRegistry } = await import("../runtimes/registry.ts");
+  const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
+  for (const defaultModel of ["sonnet", "codex/basic"]) {
+    const configured = new RuntimeRegistry({ default: "codex", runtimes: [{ name: "codex", kind: "codex-cli", bin: fakeCodexBin() }] });
+    const store = new SessionStore(new Database(":memory:"));
+    const local = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createAgentRoutes({ ws: workspacePaths(home), registry: new AppRegistry(), layout: new LayoutStore(new Database(":memory:")), sessions: store, runtimes: configured, defaultModel }) });
+    try {
+      const result = await events(await fetch(`http://127.0.0.1:${local.port}/api/agents/space/assistant/chat`, { method: "POST", body: JSON.stringify({ message: "hello" }) }));
+      expect(result.some((e) => e.type === "error")).toBe(false);
+      expect(store.list("space/assistant")[0]).toMatchObject({ runtime: "codex", model: defaultModel === "sonnet" ? "gpt-6-sol" : "gpt-6-luna" });
+    } finally { local.stop(true); }
+  }
+});

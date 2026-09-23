@@ -194,7 +194,7 @@ export type DeepseekHarnessSpec = {
   sshHost?: string;
 };
 
-/** Codex CLI: slim or full completions using the CLI's saved login. */
+/** Codex CLI: slim/full completions and persistent local chat using the CLI's saved login. */
 export type CodexCliSpec = {
   name: string;
   kind: "codex-cli";

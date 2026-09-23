@@ -161,6 +161,14 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
   const [input, setInput] = useState("");
   const [stick, setStick] = useState(true); // stick to the bottom unless the user scrolled up
   const [model, setModel] = useState(localStorage.getItem("chat-model") || "");
+  const [baseChoices, setBaseChoices] = useState<Record<string, string>>({});
+  const choicesRef = useRef<Record<string, string>>({});
+  const baseChoice = (id: string) => choicesRef.current[id] ?? localStorage.getItem(`chat-base-model:${id}`) ?? "";
+  const saveBaseChoice = (id: string, value: string) => {
+    choicesRef.current[id] = value;
+    setBaseChoices({ ...choicesRef.current });
+    localStorage.setItem(`chat-base-model:${id}`, value);
+  };
   const [perm, setPerm] = useState(localStorage.getItem("chat-perm") || ""); // '' read-only | acceptEdits | bypassPermissions
   const [hist, setHist] = useState<ChatSession[] | null>(null); // null = history panel closed
   const modelRef = useRef(model);
@@ -184,6 +192,16 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
   const conv = convs[key] || EMPTY_CONV;
   const patch = (k: string, fn: (v: Conv) => Conv) => setConvs((c) => ({ ...c, [k]: fn(c[k] || { ...EMPTY_CONV }) }));
   const base = agentBase(agent);
+  const selectedBaseModel = baseChoices[key] ?? baseChoice(key);
+  const pickBaseModel = (value: string) => {
+    const previousRuntime = (selectedBaseModel || agent.runtime).split("/")[0];
+    const nextRuntime = (value || agent.runtime).split("/")[0];
+    if (previousRuntime !== nextRuntime) {
+      patch(key, (v) => ({ ...v, msgs: [], sid: null }));
+      setHist(null);
+    }
+    saveBaseChoice(key, value);
+  };
 
   useEffect(() => {
     patch(key, (v) => ({ ...v, agent: agent || v.agent }));
@@ -267,7 +285,7 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
         body: JSON.stringify({
           message: text,
           sessionId: convsRef.current[turnKey]?.sid || undefined,
-          model: modelRef.current || undefined,
+          model: (convsRef.current[turnKey]?.agent?.modelOptions ? baseChoice(turnKey) : modelRef.current) || undefined,
           permissionMode: permRef.current || undefined,
         }),
         signal: ctrl.signal,
@@ -412,6 +430,11 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
   // Pick a past session: restore its transcript and resume it; without a transcript the session still resumes.
   const pickSession = async (s: ChatSession) => {
     setHist(null);
+    if (agent.modelOptions) {
+      const runtime = s.runtime ?? agent.runtime;
+      const option = agent.modelOptions.find((o) => o.runtime === runtime && o.model === s.model);
+      saveBaseChoice(key, option?.value ?? (s.model ? `${runtime}/${s.model}` : ""));
+    }
     const r = runner(key);
     r.queue = [];
     r.active?.ctrl.abort();
@@ -475,13 +498,25 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
             </button>
           </div>
           <div className="chat-opts">
-            <select className="chat-model" value={model} onChange={pickModel} title={t("chat.modelTitle")}>
-              <option value="">{t("chat.modelDefault")}</option>
-              <option value="haiku">{t("chat.modelHaiku")}</option>
-              <option value="sonnet">{t("chat.modelSonnet")}</option>
-              <option value="opus">{t("chat.modelOpus")}</option>
-              <option value="fable">{t("chat.modelFable")}</option>
-            </select>
+            {agent.modelOptions ? (
+              <select className="chat-model" value={selectedBaseModel} disabled={conv.busy} onChange={(e) => pickBaseModel(e.target.value)} title={t("chat.runtimeModelTitle")}>
+                <option value="">{t("chat.modelDefault")} · {agent.runtime}</option>
+                {selectedBaseModel && !agent.modelOptions.some((o) => o.value === selectedBaseModel) && <option value={selectedBaseModel}>{selectedBaseModel}</option>}
+                {[...new Set(agent.modelOptions.map((o) => o.runtime))].map((runtime) => (
+                  <optgroup key={runtime} label={runtime}>
+                    {agent.modelOptions!.filter((o) => o.runtime === runtime).map((o) => <option key={o.value} value={o.value}>{runtime} · {t(`modelTier.${o.tier}`)} · {o.model}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            ) : (
+              <select className="chat-model" value={model} onChange={pickModel} title={t("chat.modelTitle")}>
+                <option value="">{t("chat.modelDefault")}</option>
+                <option value="haiku">{t("chat.modelHaiku")}</option>
+                <option value="sonnet">{t("chat.modelSonnet")}</option>
+                <option value="opus">{t("chat.modelOpus")}</option>
+                <option value="fable">{t("chat.modelFable")}</option>
+              </select>
+            )}
             <select className="chat-model" value={perm} onChange={pickPerm} title={t("chat.permTitle")}>
               <option value="">{t("chat.permRead")}</option>
               <option value="acceptEdits">{t("chat.permEdit")}</option>

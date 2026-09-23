@@ -3,10 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnCollect } from "./process.ts";
+import { readCodexTranscript, SESSION_ID_RE } from "./transcripts.ts";
 import { ustar } from "./tar.ts";
-import { assertCompletionMode, Unsupported, type Backend, type CodexCliSpec, type CompleteInput, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, Unsupported, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type RuntimeAdapter, type Usage } from "./types.ts";
 
-/** Single-turn Codex completions. Auth stays in the CLI home; request files never do. */
+/** Codex completions and persistent local chat. Authentication stays in the CLI home. */
 export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
   const host = spec.sshHost?.trim();
   if (host && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(host)) throw new Error(`runtime ${spec.name}: ssh is not a host name`);
@@ -14,7 +15,7 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
   const backend: Backend = host ? `ssh:${host}` : "local";
   return {
     name: spec.name, kind: "codex-cli", backend,
-    capabilities: { complete: true, agent: false, chat: false },
+    capabilities: { complete: true, agent: false, chat: true },
     async complete(input, signal, onDelta) {
       assertCompletionMode(input);
       if (input.tools.length || input.files?.length) return { ok: false, error: "codex-cli completions do not support custom tool lists or file attachments", backend };
@@ -47,7 +48,8 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
       }
     },
     async runAgent() { throw new Unsupported(spec.name, "agent"); },
-    chat() { throw new Unsupported(spec.name, "chat"); },
+    chat(turn, cb) { return codexChat(bin, turn, cb); },
+    transcript: (cwd, sid) => readCodexTranscript(cwd, sid),
   };
 }
 
@@ -118,4 +120,51 @@ export function parseCodexOutput(raw: string): { text?: string; error?: string; 
     }
   }
   return { text, usage, ...(error ? { error } : !completed ? { error: "Codex stream ended without turn.completed" } : !text?.trim() ? { error: "empty Codex answer" } : {}) };
+}
+
+/** Persistent local chat with native context, skills and tools; permissions remain explicit. */
+export function codexChatArgs(turn: ChatTurn): string[] {
+  const sandbox = turn.permissionMode === "bypassPermissions" ? "danger-full-access" : turn.permissionMode === "acceptEdits" ? "workspace-write" : "read-only";
+  return ["exec", "--skip-git-repo-check", "--json", "--sandbox", sandbox, "-c", 'approval_policy="never"',
+    ...(turn.model ? ["--model", turn.model] : []),
+    ...(turn.systemPrompt ? ["-c", `developer_instructions=${JSON.stringify(turn.systemPrompt)}`] : []),
+    ...(turn.sessionId ? ["resume", turn.sessionId] : []), "-"];
+}
+
+function codexChat(bin: string[], turn: ChatTurn, cb: ChatCallbacks): { kill: () => void } {
+  const controller = new AbortController();
+  const emit = (event: unknown) => cb.onEvent(JSON.stringify(event));
+  void (async () => {
+    try {
+      if (turn.allowedTools?.length) throw new Error("Codex chat does not support custom tool allow-lists");
+      let sid = turn.sessionId;
+      const result = await spawnCollect([...bin, ...codexChatArgs(turn)], {
+        cwd: turn.cwd, env: turn.env, stdin: turn.message, signal: controller.signal,
+        onLine(line) {
+          let event;
+          try { event = JSON.parse(line); } catch { return; }
+          if (event?.type === "thread.started" && typeof event.thread_id === "string" && SESSION_ID_RE.test(event.thread_id)) {
+            sid = event.thread_id;
+            cb.onSession?.(sid!);
+            emit({ type: "system", subtype: "init", session_id: sid, model: turn.model ?? "codex" });
+          }
+          const item = event?.item;
+          if (event?.type === "item.completed" && item?.type === "agent_message" && typeof item.text === "string") {
+            emit({ type: "assistant", message: { content: [{ type: "text", text: item.text }] } });
+          } else if ((event?.type === "item.started" || event?.type === "item.completed") && item && ["command_execution", "file_change", "mcp_tool_call", "web_search"].includes(item.type)) {
+            const name = item.type === "command_execution" ? "Bash" : item.type === "file_change" ? "Edit" : item.tool ?? item.type;
+            emit({ type: "assistant", message: { content: [{ type: "tool_use", id: item.id, name, input: { command: item.command ?? item.query ?? item.changes?.map((c: { path: string }) => c.path).join(", ") ?? "" } }] } });
+            if (item.status === "failed") emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: item.id, is_error: true, content: item.aggregated_output ?? item.error?.message ?? "Tool failed" }] } });
+          }
+        },
+      });
+      const parsed = parseCodexOutput(result.stdout);
+      const error = result.aborted ? "aborted" : result.code !== 0 ? (result.stderr.trim() || `runtime exited with ${result.code}`).slice(-800) : parsed.error ?? null;
+      if (!error) emit({ type: "result", session_id: sid, is_error: false });
+      cb.onFinish(error);
+    } catch (e) {
+      cb.onFinish(`could not run Codex: ${(e as Error).message}`);
+    }
+  })();
+  return { kill: () => controller.abort() };
 }

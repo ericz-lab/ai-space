@@ -6,7 +6,7 @@ import type { Database } from "bun:sqlite";
  * previous id is replaced in place so a conversation stays one row.
  */
 
-export type ChatSession = { sid: string; title: string; ts: number };
+export type ChatSession = { sid: string; title: string; ts: number; runtime?: string | null; model?: string | null };
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -25,21 +25,29 @@ export class SessionStore {
     private readonly keep = 10,
   ) {
     db.exec(SCHEMA);
+    const columns = db.query<{ name: string }, []>("PRAGMA table_info(chat_sessions)").all();
+    for (const name of ["runtime", "model"]) {
+      if (!columns.some((c) => c.name === name)) db.exec(`ALTER TABLE chat_sessions ADD COLUMN ${name} TEXT`);
+    }
   }
 
   list(agent: string): ChatSession[] {
-    return this.db.query<ChatSession, [string, number]>("SELECT sid, title, ts FROM chat_sessions WHERE agent = ? ORDER BY ts DESC LIMIT ?").all(agent, this.keep);
+    return this.db.query<ChatSession, [string, number]>("SELECT sid, title, ts, runtime, model FROM chat_sessions WHERE agent = ? ORDER BY ts DESC LIMIT ?").all(agent, this.keep);
+  }
+
+  get(agent: string, sid: string): ChatSession | null {
+    return this.db.query<ChatSession, [string, string]>("SELECT sid, title, ts, runtime, model FROM chat_sessions WHERE agent = ? AND sid = ?").get(agent, sid);
   }
 
   /** Record `sid` for `agent`; when `prevSid` is known, that row is renamed instead of adding one. */
-  record(agent: string, sid: string, prevSid: string | undefined, title: string): void {
+  record(agent: string, sid: string, prevSid: string | undefined, title: string, runtime?: string, model?: string): void {
     const now = Date.now();
     const tx = this.db.transaction(() => {
       const prev = prevSid ? this.db.query<{ title: string }, [string, string]>("SELECT title FROM chat_sessions WHERE agent = ? AND sid = ?").get(agent, prevSid) : null;
       if (prev && prevSid && prevSid !== sid) this.db.query("DELETE FROM chat_sessions WHERE agent = ? AND sid = ?").run(agent, prevSid);
       this.db
-        .query("INSERT INTO chat_sessions (agent, sid, title, ts) VALUES (?, ?, ?, ?) ON CONFLICT(agent, sid) DO UPDATE SET ts = excluded.ts")
-        .run(agent, sid, prev?.title || title.slice(0, 80), now);
+        .query("INSERT INTO chat_sessions (agent, sid, title, ts, runtime, model) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(agent, sid) DO UPDATE SET ts = excluded.ts, runtime = excluded.runtime, model = excluded.model")
+        .run(agent, sid, prev?.title || title.slice(0, 80), now, runtime ?? null, model ?? null);
       this.db.query("DELETE FROM chat_sessions WHERE agent = ? AND sid NOT IN (SELECT sid FROM chat_sessions WHERE agent = ? ORDER BY ts DESC LIMIT ?)").run(agent, agent, this.keep);
     });
     tx();
