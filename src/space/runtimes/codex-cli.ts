@@ -18,7 +18,9 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
     capabilities: { complete: true, agent: false, chat: true },
     async complete(input, signal, onDelta) {
       assertCompletionMode(input);
-      if (input.tools.length || input.files?.length) return { ok: false, error: "codex-cli completions do not support custom tool lists or file attachments", backend };
+      if (input.files?.length) return { ok: false, error: "codex-cli completions do not support file attachments", backend };
+      const unsupported = input.tools.filter((tool) => tool !== "WebSearch" && tool !== "WebFetch");
+      if (unsupported.length) return { ok: false, error: `codex-cli completions support only WebSearch and WebFetch tool lists; unsupported: ${unsupported.join(", ")}`, backend };
       if (signal?.aborted) return { ok: false, error: "aborted", backend };
       let dir: string | undefined;
       try {
@@ -57,7 +59,8 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
 export function codexArgs(bin: string[], input: CompleteInput, dir: string, fullCwd = process.cwd()): string[] {
   assertCompletionMode(input);
   const common = ["--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", "read-only", "--model", input.model];
-  if (input.mode === "full") {
+  // Explicit web-only lists must not inherit native shell, plugins or MCP tools.
+  if (input.mode === "full" && !input.tools.length) {
     return [...bin, "exec", ...common, "--cd", fullCwd, "-c", 'approval_policy="never"',
       ...(input.system ? ["-c", `model_instructions_file=${JSON.stringify(join(dir, "system.txt"))}`] : []), "-"];
   }
@@ -71,7 +74,7 @@ export function codexArgs(bin: string[], input: CompleteInput, dir: string, full
     include_permissions_instructions: false,
     project_doc_max_bytes: 0,
     model_reasoning_effort: "low",
-    web_search: "disabled",
+    web_search: input.tools.length ? "live" : "disabled",
     approval_policy: "never",
     "skills.include_instructions": false,
     "skills.bundled.enabled": false,
@@ -79,10 +82,12 @@ export function codexArgs(bin: string[], input: CompleteInput, dir: string, full
     "tools.experimental_request_user_input.enabled": false,
     suppress_unstable_features_warning: true,
   };
-  const disabled = ["code_mode", "code_mode_host", "code_mode_only", "multi_agent_v2", "image_generation", "hooks", "tool_suggest", "default_mode_request_user_input", "send_message_to_user_async", "shell_tool", "unified_exec", "plugins", "apps", "multi_agent", "memories", "shell_snapshot", "view_image", "browser_use", "computer_use", "goals", "sleep_tool", "skill_search", "skill_mcp_dependency_install"];
+  // Current Codex routes web calls through Code Mode; its host is required even with shell disabled.
+  const disabled = [...(input.tools.length ? [] : ["code_mode", "code_mode_host", "code_mode_only"]), "multi_agent_v2", "image_generation", "hooks", "tool_suggest", "default_mode_request_user_input", "send_message_to_user_async", "shell_tool", "unified_exec", "plugins", "apps", "multi_agent", "memories", "shell_snapshot", "view_image", "browser_use", "computer_use", "goals", "sleep_tool", "skill_search", "skill_mcp_dependency_install"];
   return [...bin, "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", "read-only", "--cd", dir, "--model", input.model,
     ...Object.entries(config).flatMap(([key, value]) => ["-c", `${key}=${JSON.stringify(value)}`]),
-    ...disabled.flatMap((key) => ["--disable", key]), "--enable", "skip_host_skill_discovery", "-"];
+    ...disabled.flatMap((key) => ["--disable", key]),
+    ...(input.tools.length ? ["--enable", "code_mode", "--enable", "code_mode_host"] : []), "--enable", "skip_host_skill_discovery", "-"];
 }
 
 /** Quote an entire shell argument, including embedded quotes, dollars and newlines. */

@@ -152,3 +152,31 @@ test("Codex transcript restores user text and assistant tools only for the match
     expect(await readCodexTranscript("/workspace", "missing-session", home)).toBeNull();
   } finally { await rm(home, { recursive: true, force: true }); }
 });
+
+
+test("web tool lists enable native web access locally and over SSH without enabling other tools", async () => {
+  for (const tools of [["WebSearch"], ["WebFetch"], ["WebSearch", "WebFetch"]]) {
+    const request = input({ tools });
+    const result = await adapter().complete(request);
+    if (!result.ok) throw new Error(result.error);
+    const args = JSON.parse(result.text).args as string[];
+    expect(args).toContain('web_search="live"');
+    for (const feature of ["code_mode", "code_mode_host"]) {
+      expect(args.some((value, i) => value === "--enable" && args[i + 1] === feature)).toBe(true);
+      expect(args.some((value, i) => value === "--disable" && args[i + 1] === feature)).toBe(false);
+    }
+    expect(args).toContain("--ignore-user-config");
+    for (const feature of ["shell_tool", "unified_exec", "plugins", "apps", "view_image"]) {
+      expect(args.some((value, i) => value === "--disable" && args[i + 1] === feature)).toBe(true);
+    }
+    const remote = codexRemoteCommand(fakeCodexBin(), request);
+    const output = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 5000 });
+    expect(output.code).toBe(0);
+    expect(JSON.parse(parseCodexOutput(output.stdout).text!).args).toContain('web_search="live"');
+  }
+  const full = codexArgs(["codex"], input({ mode: "full", tools: ["WebSearch", "WebFetch"] }), "/tmp/web-only");
+  expect(full).toContain("--ignore-user-config");
+  expect(full).toContain('web_search="live"');
+  expect(await adapter().complete(input({ tools: ["WebSearch", "Bash"] }))).toMatchObject({ ok: false, error: expect.stringContaining("Bash") });
+  await expect(adapter().complete(input({ mode: "slim", tools: ["WebSearch"] }))).rejects.toThrow(/slim/);
+});

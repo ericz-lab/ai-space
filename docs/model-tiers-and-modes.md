@@ -336,7 +336,7 @@ operator usage.
 | Detail | Claude Code | Codex CLI |
 | --- | --- | --- |
 | Slim tool configuration | Empty built-in tool list; strict MCP configuration; safe mode | Optional tool facilities disabled; residual definitions may remain |
-| Full tool configuration | Native tool set; an explicit list can select tools | Native tool set; custom tool lists are rejected |
+| Full tool configuration | Native tool set; an explicit list can select tools | Native tool set when no list is supplied; explicit WebSearch/WebFetch lists use isolated web-only execution |
 | Custom system prompt | `--system-prompt` | `model_instructions_file` |
 | Internal file attachments | Supported outside explicit slim mode; may activate `Read` | Unsupported in either mode |
 | Reasoning control | Request `thinking` is passed through `MAX_THINKING_TOKENS`; behavior depends on the CLI/model | Slim uses low effort; full uses the CLI default; numeric `thinking` does not control the budget |
@@ -456,3 +456,17 @@ The updated ai-todo, ai-calendar and ai-notes ignore legacy `TODO_MODEL`,
 follow Settings. Scheduled agent tasks retain
 the model declared in their task configuration.
 
+### App web tools on Codex
+
+App requests with `WebSearch` and/or `WebFetch` use Codex's native live web tool
+(`web_search = "live"`), which combines search and page retrieval. The Code Mode
+host is enabled for these calls because current Codex routes web tools through it. This supports
+ai-todo execution and the web-enabled Todo/Notes chat contexts while inheriting
+the workspace default model. Shell, plugins, apps and other optional tools remain
+disabled for explicit web-only requests, including those marked `full`. Other
+custom tool names and attachments still return explicit unsupported errors.
+Explicit `slim` requests continue to reject tool lists; omitting tools keeps web
+access disabled outside native full mode.
+
+See the [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+for the `web_search` setting.
