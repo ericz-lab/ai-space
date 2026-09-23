@@ -113,3 +113,37 @@ describe("RuntimeRegistry", () => {
     expect(claudeOnly().default.name).toBe("claude");
   });
 });
+
+describe("model tiers", () => {
+  test("resolves all four tiers by provider and allows version overrides", () => {
+    const { config } = parseRuntimesYaml(`default: claude
+runtimes:
+  claude: { kind: claude-code }
+  codex:
+    kind: codex-cli
+    ssh: box
+    bin: /opt/codex
+    models: { junior: gpt-5.6-terra }
+`);
+    const registry = new RuntimeRegistry(config);
+    expect(config.runtimes[1]).toMatchObject({ kind: "codex-cli", sshHost: "box", bin: ["/opt/codex"] });
+    for (const [tier, claude, codex] of [
+      ["basic", "haiku", "gpt-6-luna"], ["junior", "sonnet", "gpt-5.6-terra"],
+      ["intermediate", "opus", "gpt-6-sol"], ["advanced", "fable", "gpt-6-astra"],
+    ]) {
+      expect(registry.resolve(tier!).model).toBe(claude!);
+      expect(registry.resolve(`codex/${tier}`)).toMatchObject({ model: codex, runtime: { name: "codex", capabilities: { complete: true, agent: false, chat: false } } });
+    }
+    const overridden = new RuntimeRegistry(parseRuntimesYaml("runtimes:\n  codex: { kind: codex-cli, models: { basic: my-luna-version } }").config);
+    expect(overridden.resolve("basic").model).toBe("my-luna-version");
+    expect(overridden.resolve("gpt-6-sol").model).toBe("gpt-6-sol");
+  });
+  test("rejects invalid tier mappings, unsupported tiers and option-like SSH hosts", () => {
+    for (const models of ["[]", "{ premium: x }", "{ basic: codex/x }", "{ basic: advanced }", "{ basic: 4 }"]) {
+      expect(() => parseRuntimesYaml(`runtimes:\n  codex: { kind: codex-cli, models: ${models} }`)).toThrow();
+    }
+    expect(() => parseRuntimesYaml("runtimes:\n  codex: { kind: codex-cli, ssh: '-bad' }")).toThrow();
+    const registry = new RuntimeRegistry({ default: "dsh", runtimes: [{ name: "dsh", kind: "deepseek-harness", bin: [], profile: "headless" }] });
+    expect(() => registry.resolve("advanced")).toThrow(/no model for tier/);
+  });
+});

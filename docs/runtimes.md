@@ -1,6 +1,6 @@
 # Runtimes
 
-Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`) and the Anthropic Messages API (`anthropic-api`). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
+Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`) the Anthropic Messages API (`anthropic-api`), and Codex CLI text completions (`codex-cli`). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
 
 ## Why one layer
 
@@ -24,6 +24,7 @@ Every operation reports what the runtime said about the model call, token counts
 | --- | --- | --- | --- | --- | --- |
 | `claude-code` | yes, local or ssh | yes | yes | the CLI's own (`claude login`) | `claude -p --output-format json` for answers and agent runs, `stream-json` for chat, `--resume` for continuity. Answers over ssh: every argument validated, the system prompt base64-encoded. Files (chat attachments) are opened with `Read`; over ssh they travel with the prompt as one tar archive unpacked into a temporary directory. |
 | `deepseek-harness` | yes, local or ssh | yes | yes | a DeepSeek API key in the harness home | `dsh --profile headless --json` for everything, the task on stdin; `--session-id` for continuity. A `--patch` overlay per run sets the system prompt, model, thinking (`reasoningEffort`) and tool rows: an answer runs with the harness identity, runtime context and every tool off (6,872 input tokens as shipped → 32), a chat keeps them and adds the agent's prompt as persona. Usage from the `step_end` events, cost from DeepSeek's list prices at peak (off-peak is half). Chat events are translated into Claude Code's `stream-json`; transcripts read from the harness's session log. Files refused. |
+| `codex-cli` | yes, local or ssh | no | no | the CLI’s own Codex login | Isolated text completions with per-request instructions; see below. |
 | `anthropic-api` | yes | no | no | an API key | `POST /v1/messages`. Tools and files refused. Cost from list prices for known models. |
 
 ## Configuration
@@ -93,3 +94,61 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 - Chat events normalised across runtimes, with ai-space keeping its own transcripts; today the browser reads Claude Code's `stream-json` (other runtimes' adapters translate into it) and past sessions are read from each runtime's own files.
 - DeepSeek off-peak pricing in the ledger (the price table takes the peak rate), and a price table in `runtimes.yaml` for models the adapters do not know.
 - Per-app default runtime and routing by tag, fallback chains, budgets; a runtime picker in the chat panel.
+
+## Capability tiers
+
+Use these four names consistently when discussing models or selecting them in requests:
+
+| Tier | Request alias | Claude Code | Codex CLI default |
+| --- | --- | --- | --- |
+| Basic (基础) | `basic` | Haiku (`haiku`) | Luna (`gpt-6-luna`) |
+| Junior (初级) | `junior` | Sonnet (`sonnet`) | Terra (`gpt-5.6-terra`) |
+| Intermediate (中级) | `intermediate` | Opus (`opus`) | Sol (`gpt-6-sol`) |
+| Advanced (高级) | `advanced` | Fable (`fable`) | Astra (`gpt-6-astra`) |
+
+These are operator-defined tiers, not a claim that two providers' models perform identically. Availability depends on the CLI and account. `codex/basic` selects Codex Luna; `claude/advanced` selects Claude Fable. A bare `advanced` uses the default runtime. Concrete model IDs still work. Unknown or unavailable models fail without silently switching provider or using a more expensive model. Other runtime kinds need explicit tier mappings.
+
+Each runtime may override versions with a `models` mapping. The ledger records the resolved concrete model, not the alias:
+
+```yaml
+default: claude
+runtimes:
+  claude:
+    kind: claude-code
+  codex:
+    kind: codex-cli
+    ssh: box                         # omit for local execution
+    bin: /home/operator/.local/bin/codex
+    models:
+      basic: gpt-6-luna
+      junior: gpt-5.6-terra
+      intermediate: gpt-6-sol
+      advanced: gpt-6-astra
+```
+
+To default only application model calls to Codex, set `SPACE_MODEL_DEFAULT=codex/basic`. Keep the runtime default on a chat-capable runtime when the panel still needs it. Explicit application model settings take precedence; change those individually.
+
+## Codex CLI completions
+
+Motivation: applications must be able to use a Codex login independently of a failed Claude login, with inexpensive models and their own instructions. `codex-cli` implements `complete` only, locally or through SSH; agent tasks and panel chat return unsupported. Requires a Codex CLI with `--ignore-user-config`, `--ignore-rules` and `--ephemeral` (validated with 0.156.1); the SSH host needs Bash, tar and GNU timeout. Authenticate on the machine that actually runs Codex, using `codex login`. Credentials remain in that machine's Codex home.
+
+The adapter runs `codex exec --json` in a fresh temporary directory. The request's `system` becomes `model_instructions_file`, replacing Codex's built-in model instructions; `prompt` arrives on stdin separately. Quotes, Unicode, newlines and large instructions travel as file bytes, never interpolated shell code. Over SSH both files arrive in one tar stream before the CLI starts. Request files are removed afterwards. A remote timeout bounds execution if the SSH connection drops; cancellation kills the local process group immediately, while a disconnected remote call can remain until its timeout.
+
+User configuration and exec rules are skipped, project instructions and skill instructions disabled, and shell, browser, apps, plugins, memories and subagents disabled. Execution uses a read-only sandbox. This is a text-completion adapter: requested tools and file attachments are rejected, not silently ignored. Machine-wide managed policies still apply.
+
+Reasoning effort is fixed to `low` to control usage. The existing `thinking` field is accepted for compatibility but does not impose a numeric budget or disable reasoning (including `thinking: 0`). As with other CLI adapters, `maxTokens` is not a hard output cap. Requests are single-turn and ephemeral; no automatic model fallback or adapter retry is performed. The CLI itself may retry transient transport failures.
+
+Only a complete successful JSON event stream with a nonempty final message is accepted. A zero exit code with `turn.failed`, malformed output or an incomplete stream is a failure. Streaming callers receive one final text chunk after validation. Usage is recorded from Codex's actual counters; cached input is separated from total input, and no dollar cost is invented for subscription usage.
+
+Example request (sent with the app's bearer token):
+
+```json
+{
+  "model": "codex/basic",
+  "system": "Translate financial news into Chinese. Return only JSON with key translation.",
+  "prompt": "The Federal Reserve held interest rates steady.",
+  "tag": "translate"
+}
+```
+
+References: [non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode), [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference), [Codex pricing](https://learn.chatgpt.com/docs/pricing). Standard mode is used; no fast service tier is requested.

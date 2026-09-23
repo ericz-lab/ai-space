@@ -12,7 +12,7 @@
  * runs.
  */
 
-export const RUNTIME_KINDS = ["claude-code", "anthropic-api", "deepseek-harness"] as const;
+export const RUNTIME_KINDS = ["claude-code", "anthropic-api", "deepseek-harness", "codex-cli"] as const;
 export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 
 /** A runtime's name in the configuration and in the ledger (`claude`, `api`, `dsh`). */
@@ -183,7 +183,19 @@ export type DeepseekHarnessSpec = {
   sshHost?: string;
 };
 
-export type RuntimeSpec = ClaudeCodeSpec | AnthropicApiSpec | DeepseekHarnessSpec;
+/** Codex CLI: isolated text completions using the CLI's saved login. */
+export type CodexCliSpec = {
+  name: string;
+  kind: "codex-cli";
+  bin: string[];
+  sshHost?: string;
+};
+
+export const MODEL_TIERS = ["basic", "junior", "intermediate", "advanced"] as const;
+export type ModelTier = (typeof MODEL_TIERS)[number];
+export type TierModels = Partial<Record<ModelTier, string>>;
+
+export type RuntimeSpec = (ClaudeCodeSpec | AnthropicApiSpec | DeepseekHarnessSpec | CodexCliSpec) & { models?: TierModels };
 
 export type RuntimesConfig = {
   /** Runtime a bare model name (no `runtime/` prefix) goes to. */
