@@ -1,6 +1,6 @@
 # Runtimes
 
-Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`) the Anthropic Messages API (`anthropic-api`), and Codex CLI text completions (`codex-cli`). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
+Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`), the Anthropic Messages API (`anthropic-api`), and Codex CLI text completions (`codex-cli`). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
 
 ## Why one layer
 
