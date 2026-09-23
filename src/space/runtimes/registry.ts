@@ -64,6 +64,10 @@ export class RuntimeRegistry {
     return [...this.byName.values()].map((r) => ({ name: r.name, kind: r.kind, backend: r.backend, capabilities: r.capabilities, default: r === this.default }));
   }
 
+  tierOptions() {
+    return this.list().flatMap((runtime) => Object.entries(this.models.get(runtime.name) ?? {}).map(([tier, model]) => ({ value: `${runtime.name}/${tier}`, runtime: runtime.name, tier: tier as ModelTier, model: model!, capabilities: runtime.capabilities })));
+  }
+
   /** One line for the boot log: `claude (claude-code, ssh:box)*, api (anthropic-api, api)`. */
   describe(): string {
     return this.list()

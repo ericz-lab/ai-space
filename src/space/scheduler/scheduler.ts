@@ -17,6 +17,9 @@ import {
   type TaskState,
   effectiveEnabled,
   effectiveSchedule,
+  effectiveTarget,
+  assertTaskModel,
+  taskSupportsModel,
 } from "./types.ts";
 
 /**
@@ -331,7 +334,7 @@ export class Scheduler {
     const timeout = setTimeout(() => controller.abort(), task.timeoutMs);
     const env = this.envFor ? this.envFor(task.app) : Promise.resolve(undefined);
     const p = env
-      .then((extra) => this.runner(task, { appDir: this.appDirs.get(task.app), env: extra, signal: controller.signal, trigger, events }))
+      .then((extra) => this.runner({ ...task, target: effectiveTarget(task) }, { appDir: this.appDirs.get(task.app), env: extra, signal: controller.signal, trigger, events }))
       .catch((e): RunResult => ({ status: "error", error: (e as Error).message ?? String(e) }))
       .then((result) => {
         clearTimeout(timeout);
@@ -448,6 +451,7 @@ export class Scheduler {
   // ---------------------------------------------------------------- CRUD
 
   addTask(input: TaskCreate): Task {
+    if (input.target.kind !== "agent" && input.target.model !== undefined) assertTaskModel(input.target.model);
     assertSchedule(input.schedule);
     assertTriggers(input.triggers);
     if (input.schedule.kind === "manual" && !input.triggers?.length) throw new Error(`task ${input.app}/${input.name} has neither a schedule nor triggers`);
@@ -487,6 +491,12 @@ export class Scheduler {
     const now = this.now();
     const before = JSON.stringify(effectiveSchedule(task));
     if (patch.schedule) assertSchedule(patch.schedule);
+    if (patch.model !== undefined && patch.model !== null) {
+      assertTaskModel(patch.model);
+      if (!taskSupportsModel(task)) throw new Error("this task has not opted in to model selection");
+    }
+    if (patch.model === null) delete task.overrides.model;
+    else if (patch.model !== undefined) task.overrides.model = patch.model;
 
     if (task.source === "manifest") {
       if (patch.enabled === null) delete task.overrides.enabled;

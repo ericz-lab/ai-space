@@ -27,6 +27,8 @@ export type RunResult = {
   promptChars?: number;
   /** Agent targets: where the runtime ran (`local`, `ssh:<host>`), for the ledger. */
   backend?: string;
+  runtime?: string;
+  model?: string;
 };
 
 export type RunContext = {
@@ -76,6 +78,10 @@ export async function runTarget(target: Target, ctx: RunContext): Promise<RunRes
 async function runHttp(target: Extract<Target, { kind: "http" }>, ctx: RunContext): Promise<RunResult> {
   const headers: Record<string, string> = { "x-space-trigger": ctx.trigger ?? "schedule" };
   for (const [k, v] of Object.entries(target.headers ?? {})) headers[k] = interpolate(v);
+  if (target.model) {
+    for (const key of Object.keys(headers)) if (key.toLowerCase() === "x-space-model") delete headers[key];
+    headers["x-space-model"] = target.model;
+  }
   let body: string | undefined;
   const events = ctx.events ?? [];
   // Events ride along in the JSON body. A string body is the app's own format and is sent as is.
@@ -116,7 +122,7 @@ function parseVerdict(raw: string): { status: RunStatus; error?: string } | unde
 
 async function runCommand(target: Extract<Target, { kind: "command" }>, ctx: RunContext): Promise<RunResult> {
   const cwd = target.cwd ?? ctx.appDir ?? process.cwd();
-  const env = { ...process.env, ...(await loadAppEnv(cwd)), ...(ctx.env ?? {}), ...(target.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []) };
+  const env = { ...process.env, ...(await loadAppEnv(cwd)), ...(ctx.env ?? {}), ...(target.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []), ...(target.model ? { SPACE_TASK_MODEL: target.model } : {}) };
   // ${VAR} placeholders resolve from the scheduler environment, same as http targets,
   // so machine-specific paths (a venv python, a token) stay out of the manifest.
   const r = await spawnCollect(["sh", "-c", interpolate(target.command)], { cwd, env, signal: ctx.signal });
@@ -134,7 +140,8 @@ async function runCommand(target: Extract<Target, { kind: "command" }>, ctx: Run
  * result for the ledger.
  */
 async function runAgent(target: Extract<Target, { kind: "agent" }>, ctx: RunContext): Promise<RunResult> {
-  const runtime = ctx.runtimes?.get(target.runtime);
+  const selected = target.model && ctx.runtimes ? ctx.runtimes.resolve(target.model.includes("/") ? target.model : `${target.runtime}/${target.model}`) : undefined;
+  const runtime = selected?.runtime ?? ctx.runtimes?.get(target.runtime);
   if (!runtime) return { status: "error", error: `runtime ${target.runtime} is not configured` };
   if (!runtime.capabilities.agent) return { status: "error", error: `runtime ${target.runtime} does not run agent tasks` };
   const cwd = target.cwd ?? ctx.appDir ?? process.cwd();
@@ -143,8 +150,8 @@ async function runAgent(target: Extract<Target, { kind: "agent" }>, ctx: RunCont
   if (!(await promptFile.exists())) return { status: "error", error: `prompt file not found: ${promptPath}` };
   const prompt = (await promptFile.text()) + (ctx.events?.length ? eventPromptSection(ctx.events) : "");
   const env = { ...process.env, ...(await loadAppEnv(cwd)), ...(ctx.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []) };
-  const r = await runtime.runAgent({ prompt, cwd, env, model: target.model, signal: ctx.signal });
-  const base = { promptChars: prompt.length, backend: r.backend, ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
+  const r = await runtime.runAgent({ prompt, cwd, env, model: selected?.model ?? target.model, signal: ctx.signal });
+  const base = { runtime: runtime.name, model: selected?.model ?? target.model, promptChars: prompt.length, backend: r.backend, ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
   if (!r.ok) return { status: "error", error: r.error ?? "failed", output: truncate(r.output), ...base };
   return { status: "ok", output: truncate(r.text ?? r.output), ...base };
 }

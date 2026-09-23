@@ -224,6 +224,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createRoutes({
         scheduler,
         store,
+        runtimes,
         token: config.apiToken,
         resolve,
         onManifest: provision,

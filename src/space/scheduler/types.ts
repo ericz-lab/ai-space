@@ -24,9 +24,11 @@ export type Target =
       url: string;
       headers?: Record<string, string>;
       body?: unknown;
+      /** Opt in to x-space-model; the app must use it for this run's model calls. */
+      model?: string;
     }
   /** Shell command run inside the app directory with the app's .env loaded. */
-  | { kind: "command"; command: string; cwd?: string; env?: Record<string, string> }
+  | { kind: "command"; command: string; cwd?: string; env?: Record<string, string>; model?: string }
   /** A configured runtime (`claude`, `dsh`) fed a prompt file, run inside the app directory. */
   | {
       kind: "agent";
@@ -120,7 +122,7 @@ export type Task = {
   /** Base enabled flag (from the manifest or API create). */
   enabled: boolean;
   /** Operator overrides; survive manifest re-sync. */
-  overrides: { enabled?: boolean; schedule?: Schedule };
+  overrides: { enabled?: boolean; schedule?: Schedule; model?: string };
   source: TaskSource;
   /** Manifest task that disappeared from its manifest; kept for history, never runs. */
   orphaned: boolean;
@@ -162,7 +164,37 @@ export type TaskCreate = {
 export type TaskPatch = {
   enabled?: boolean | null;
   schedule?: Schedule | null;
+  /** runtime/model or runtime/tier; null restores the task's declared model. */
+  model?: string | null;
 };
+
+export function assertTaskModel(model: unknown): asserts model is string {
+  if (typeof model !== "string" || !/^[a-z][a-z0-9-]{0,31}\/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(model)) throw new Error("model must be runtime/model or runtime/tier");
+}
+
+export function taskSupportsModel(task: Task): boolean {
+  return task.target.kind === "agent" || task.target.model !== undefined;
+}
+
+export function baseTaskModel(task: Task): string | undefined {
+  const t = task.target;
+  return t.kind === "agent" && t.model && !t.model.includes("/") ? `${t.runtime}/${t.model}` : t.model;
+}
+
+export function effectiveTaskModel(task: Task): string | undefined {
+  return taskSupportsModel(task) ? task.overrides.model ?? baseTaskModel(task) : undefined;
+}
+
+/** A run gets a copy: editing a task never changes a run already in flight. */
+export function effectiveTarget(task: Task): Target {
+  const model = effectiveTaskModel(task);
+  if (!model) return { ...task.target };
+  if (task.target.kind === "agent") {
+    const slash = model.indexOf("/");
+    return { ...task.target, runtime: model.slice(0, slash), model: model.slice(slash + 1) };
+  }
+  return { ...task.target, model };
+}
 
 export function effectiveEnabled(task: Task): boolean {
   if (task.orphaned) return false;

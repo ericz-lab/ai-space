@@ -147,7 +147,10 @@ export type TaskInfo = {
   target: { kind: "http" | "command" | "agent" };
   timeoutMs: number;
   triggers: TriggerInfo[];
-  overrides: { enabled?: boolean; schedule?: Schedule };
+  overrides: { enabled?: boolean; schedule?: Schedule; model?: string };
+  model?: string;
+  modelSelectable?: boolean;
+  base?: { model?: string };
   state: {
     nextRunAt?: string;
     runningAt?: string;

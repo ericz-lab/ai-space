@@ -6,7 +6,7 @@ import { parseTriggers } from "./events.ts";
 import { assertSchedule, parseDuration } from "./schedule.ts";
 
 export { parseTriggers };
-import { DEFAULT_TIMEOUT_MS, type EventTrigger, TASK_NOTIFY_EVENTS, type Schedule, type Target, type TaskNotify, type TaskNotifyEvent } from "./types.ts";
+import { assertTaskModel, DEFAULT_TIMEOUT_MS, type EventTrigger, TASK_NOTIFY_EVENTS, type Schedule, type Target, type TaskNotify, type TaskNotifyEvent } from "./types.ts";
 
 /**
  * App manifest (`space.yaml`) parsing.
@@ -361,6 +361,10 @@ function parseTask(raw: unknown, index: number): ManifestTask {
   const schedule = parseSchedule(raw, ctx, triggers !== undefined);
   assertSchedule(schedule);
   const target = parseTarget(raw.run, ctx);
+  if (raw.model !== undefined) {
+    assertTaskModel(raw.model);
+    target.model = raw.model;
+  }
   const timeoutMs = raw.timeout === undefined ? DEFAULT_TIMEOUT_MS : parseDuration(raw.timeout as string | number);
   const enabled = raw.enabled === undefined ? true : raw.enabled === true;
   const description = typeof raw.description === "string" ? raw.description : undefined;

@@ -3,7 +3,9 @@ import { eventPayload, parseEventInput } from "./events.ts";
 import { type Manifest, type ManifestTask, loadManifest, parseTriggers } from "./manifest.ts";
 import { Scheduler, type SyncSummary } from "./scheduler.ts";
 import type { Store } from "./store.ts";
-import { type Schedule, type SpaceEvent, type Task, type TaskCreate, type TaskPatch, effectiveEnabled, effectiveSchedule } from "./types.ts";
+import type { RuntimeRegistry } from "../runtimes/registry.ts";
+import { sameOrigin } from "../terminal/api.ts";
+import { type Schedule, type SpaceEvent, type Task, type TaskCreate, type TaskPatch, assertTaskModel, baseTaskModel, effectiveTaskModel, taskSupportsModel, effectiveEnabled, effectiveSchedule } from "./types.ts";
 
 /**
  * HTTP surface for the scheduler, shaped as a Bun.serve `routes` table.
@@ -28,6 +30,7 @@ import { type Schedule, type SpaceEvent, type Task, type TaskCreate, type TaskPa
 export type ApiOptions = {
   scheduler: Scheduler;
   store: Store;
+  runtimes?: RuntimeRegistry;
   /** Bearer token for mutating routes; empty disables the check (rely on 127.0.0.1). */
   token?: string;
   /** This machine's view of a freshly loaded manifest (the `SPACE_APP_URL_<NAME>` override, a path `url` resolved against the domain); identity by default. Applied before `onManifest`, so the sync routes register what boot registers. */
@@ -84,6 +87,16 @@ export function createRoutes(opts: ApiOptions): Routes {
     return task;
   };
 
+  const validateModel = (task: Task, model: unknown) => {
+    if (model === undefined || model === null) return;
+    assertTaskModel(model);
+    if (!taskSupportsModel(task)) throw new Error("this task has not opted in to model selection");
+    if (!opts.runtimes) throw new Error("model runtimes are unavailable");
+    const { runtime } = opts.runtimes.resolve(model);
+    const operation = task.target.kind === "agent" ? "agent" : "complete";
+    if (!runtime.capabilities[operation]) throw new Error(`runtime ${runtime.name} does not support ${operation}`);
+  };
+
   // Load, provision and register one app directory. Shared by both sync routes.
   const syncDir = async (dir: string): Promise<SyncSummary> => {
     const loaded = await loadManifest(dir);
@@ -94,6 +107,26 @@ export function createRoutes(opts: ApiOptions): Routes {
 
   return {
     "/healthz": () => json({ ok: true }),
+
+    "/api/tasks/models": { GET: () => json({ ok: true, models: opts.runtimes?.tierOptions() ?? [] }) },
+
+    // Narrow panel mutation, behind the same access perimeter as chat and terminal.
+    // Never send the operator bearer token to the browser.
+    "/api/panel/tasks/:id/model": {
+      PATCH: async (req) => {
+        if (!req.headers.get("origin") || !sameOrigin(req)) return error(403, "same-origin browser request required");
+        if (req.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return error(415, "application/json required");
+        try {
+          const task = withTask(req);
+          const body = await req.json();
+          if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || !("model" in body)) throw new Error("only model may be changed here");
+          validateModel(task, body.model);
+          return json({ ok: true, task: view(scheduler.patchTask(task.id, parsePatch(body))) });
+        } catch (e) {
+          return error(e instanceof NotFound ? 404 : 400, (e as Error).message);
+        }
+      },
+    },
 
     "/api/tasks": {
       GET: () => json({ ok: true, tasks: store.listTasks().map(view) }),
@@ -109,6 +142,7 @@ export function createRoutes(opts: ApiOptions): Routes {
       PATCH: guard(async (req) => {
         const task = withTask(req);
         const body = (await req.json()) as Record<string, unknown>;
+        validateModel(task, body.model);
         return json({ ok: true, task: view(scheduler.patchTask(task.id, parsePatch(body))) });
       }),
       DELETE: guard((req) => {
@@ -244,11 +278,13 @@ export function view(task: Task) {
     enabled: effectiveEnabled(task),
     schedule: effectiveSchedule(task),
     target: task.target,
+    model: effectiveTaskModel(task),
+    modelSelectable: taskSupportsModel(task),
     timeoutMs: task.timeoutMs,
     notify: task.notify,
     triggers: task.triggers ?? [],
     overrides: task.overrides,
-    base: { enabled: task.enabled, schedule: task.schedule },
+    base: { enabled: task.enabled, schedule: task.schedule, model: baseTaskModel(task) },
     state: {
       ...task.state,
       nextRunAt: iso(task.state.nextRunAt),
@@ -318,5 +354,9 @@ function parsePatch(body: Record<string, unknown>): TaskPatch {
     patch.enabled = body.enabled as boolean | null;
   }
   if ("schedule" in body) patch.schedule = body.schedule === null ? null : parseSchedule(body.schedule);
+  if ("model" in body) {
+    if (body.model !== null) assertTaskModel(body.model);
+    patch.model = body.model as string | null;
+  }
   return patch;
 }
