@@ -181,6 +181,12 @@ An app that shows the answer while it is written adds `stream: true` and reads t
 
 ### GPT cost estimates
 
-`src/space/model/pricing.ts` holds the model-specific rates from [OpenAI pricing](https://developers.openai.com/api/docs/pricing). The ledger estimates costs per call at read time, including existing rows, without rewriting the stored cost. Non-cached input, cache writes, cache reads and output are charged separately. Above 272,000 total input tokens per call, input/cache rates double and output rates multiply by 1.5. The same expression feeds recent calls, grouped totals and daily history. Reported costs (including zero) always win. Unknown models and missing input/output usage stay unpriced and contribute nothing to cost totals.
+`src/space/model/gpt-prices.json` holds the model-specific rates from [OpenAI pricing](https://developers.openai.com/api/docs/pricing). The ledger estimates costs per call at read time, including existing rows, without rewriting the stored cost. Non-cached input, cache writes, cache reads and output are charged separately. Above 272,000 total input tokens per call, input/cache rates double and output rates multiply by 1.5. The same expression feeds recent calls, grouped totals and daily history. Reported costs (including zero) always win. Unknown models and missing input/output usage stay unpriced and contribute nothing to cost totals.
 
 These are standard API-equivalent estimates, not subscription bills. The ledger does not record service tier, regional processing or tool charges, so those adjustments are excluded. Historical estimates follow the checked-in price table.
+
+### Shared GPT price catalogue
+
+`GET /api/model/pricing` is a read-only route, with the same loopback access boundary as model usage. It returns `{ ok: true, version: 1, asOf, currency: "USD", unitTokens: 1000000, source, models }`. Each model has `input`, `cacheWrite`, `cacheRead`, `output`, `longContext` (`{ threshold, inputMultiplier, outputMultiplier }` or null), and `fastMultiplier` (number or null). Null means unavailable, not zero. Rates and policy values come from `gpt-prices.json`; both the ledger SQL and the HTTP route consume that file. It also covers GPT-5.4 and GPT-5.3 Codex so consumers can price their older history. Date-suffixed snapshot ids use the base model rate.
+
+ai-usage fetches and caches this catalogue instead of maintaining GPT prices itself. Updating this configuration and deploying ai-space updates consumer estimates after their next refresh; historical rows use the current catalogue. The ledger assumes Standard because it has no service-tier data, while ai-usage can apply Fast multipliers when its transcript records a tier.

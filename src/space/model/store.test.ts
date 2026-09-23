@@ -145,3 +145,11 @@ describe("GPT API-equivalent costs", () => {
     expect(c.costUsd).toBeCloseTo(expected, 10);
   });
 });
+
+test("shared catalogue covers older GPT models and snapshot ids without guessing cache writes", () => {
+  const usage = { inputTokens: 1000, cacheWriteTokens: 0, cacheReadTokens: 2000, outputTokens: 1000 };
+  expect(store.add(call({ model: "gpt-5.3-codex", usage, costUsd: undefined })).costUsd).toBeCloseTo(0.0161, 10);
+  expect(store.add(call({ model: "gpt-5.4", usage, costUsd: undefined })).costUsd).toBeCloseTo(0.018, 10);
+  expect(store.add(call({ model: "gpt-6-luna-2026-09-22", usage, costUsd: undefined })).costUsd).toBeCloseTo(0.00062, 10);
+  expect(store.add(call({ model: "gpt-5.4", usage: { ...usage, cacheWriteTokens: 1 }, costUsd: undefined })).costUsd).toBeUndefined();
+});

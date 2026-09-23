@@ -191,3 +191,14 @@ describe("reads", () => {
     expect((await fetch(`${base}/api/model/calls?tag=Bad Tag`)).status).toBe(400);
   });
 });
+
+test("pricing endpoint exposes the same versioned catalogue used by the ledger", async () => {
+  const { GPT_PRICING } = await import("./pricing.ts");
+  const res = await fetch(`${base}/api/model/pricing`);
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true, ...GPT_PRICING });
+  const p = GPT_PRICING.models["gpt-6-luna"];
+  const c = store.add({ app: "news", tag: "translate", model: "gpt-6-luna", backend: "local", origin: "run", status: "ok", startedAt: Date.now(), durationMs: 1, promptChars: 1,
+    usage: { inputTokens: 1000, cacheWriteTokens: 2000, cacheReadTokens: 3000, outputTokens: 4000 } });
+  expect(c.costUsd).toBeCloseTo((1000 * p.input + 2000 * p.cacheWrite + 3000 * p.cacheRead + 4000 * p.output) / GPT_PRICING.unitTokens, 10);
+});

@@ -1,3 +1,4 @@
+import { GPT_PRICING } from "./pricing.ts";
 import type { ModelService } from "./service.ts";
 import { parseRunInput, parseWindow } from "./spec.ts";
 import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts";
@@ -57,6 +58,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
   };
 
   return {
+    "/api/model/pricing": { GET: () => json({ ok: true, ...GPT_PRICING }) },
     "/api/model/run": {
       POST: async (req) => {
         let app: string;
