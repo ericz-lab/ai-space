@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
-import { Unsupported, type Backend, type CodexCliSpec, type CompleteInput, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, Unsupported, type Backend, type CodexCliSpec, type CompleteInput, type RuntimeAdapter, type Usage } from "./types.ts";
 
-/** Text-only, single-turn Codex. Auth stays in the CLI home; request files never do. */
+/** Single-turn Codex completions. Auth stays in the CLI home; request files never do. */
 export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
   const host = spec.sshHost?.trim();
   if (host && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(host)) throw new Error(`runtime ${spec.name}: ssh is not a host name`);
@@ -16,7 +16,8 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
     name: spec.name, kind: "codex-cli", backend,
     capabilities: { complete: true, agent: false, chat: false },
     async complete(input, signal, onDelta) {
-      if (input.tools.length || input.files?.length) return { ok: false, error: "codex-cli completions do not support tools or files", backend };
+      assertCompletionMode(input);
+      if (input.tools.length || input.files?.length) return { ok: false, error: "codex-cli completions do not support custom tool lists or file attachments", backend };
       if (signal?.aborted) return { ok: false, error: "aborted", backend };
       let dir: string | undefined;
       try {
@@ -31,7 +32,7 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
           await Bun.write(join(dir, "system.txt"), input.system);
           cmd = codexArgs(bin, input, dir);
         }
-        const r = await spawnCollect(cmd, { cwd: dir, stdin, signal, timeoutMs: input.timeoutMs });
+        const r = await spawnCollect(cmd, { cwd: input.mode === "full" ? undefined : dir, stdin, signal, timeoutMs: input.timeoutMs });
         if (r.aborted) return { ok: false, error: "aborted", backend };
         if (r.timedOut || r.code === 124) return { ok: false, error: `timed out after ${Math.round(input.timeoutMs / 1000)}s`, backend };
         const parsed = parseCodexOutput(r.stdout);
@@ -51,10 +52,21 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
 }
 
 /** Use the request as model instructions, not as a second user message. */
-export function codexArgs(bin: string[], input: CompleteInput, dir: string): string[] {
+export function codexArgs(bin: string[], input: CompleteInput, dir: string, fullCwd = process.cwd()): string[] {
+  assertCompletionMode(input);
+  const common = ["--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", "read-only", "--model", input.model];
+  if (input.mode === "full") {
+    return [...bin, "exec", ...common, "--cd", fullCwd, "-c", 'approval_policy="never"',
+      ...(input.system ? ["-c", `model_instructions_file=${JSON.stringify(join(dir, "system.txt"))}`] : []), "-"];
+  }
   const config: Record<string, string | number | boolean> = {
     model_instructions_file: join(dir, "system.txt"),
     developer_instructions: "",
+    "agents.enabled": false,
+    include_apps_instructions: false,
+    include_collaboration_mode_instructions: false,
+    include_environment_context: false,
+    include_permissions_instructions: false,
     project_doc_max_bytes: 0,
     model_reasoning_effort: "low",
     web_search: "disabled",
@@ -65,7 +77,7 @@ export function codexArgs(bin: string[], input: CompleteInput, dir: string): str
     "tools.experimental_request_user_input.enabled": false,
     suppress_unstable_features_warning: true,
   };
-  const disabled = ["shell_tool", "unified_exec", "plugins", "apps", "multi_agent", "memories", "shell_snapshot", "view_image", "browser_use", "computer_use", "goals", "sleep_tool", "skill_search", "skill_mcp_dependency_install"];
+  const disabled = ["code_mode", "code_mode_host", "code_mode_only", "multi_agent_v2", "image_generation", "hooks", "tool_suggest", "default_mode_request_user_input", "send_message_to_user_async", "shell_tool", "unified_exec", "plugins", "apps", "multi_agent", "memories", "shell_snapshot", "view_image", "browser_use", "computer_use", "goals", "sleep_tool", "skill_search", "skill_mcp_dependency_install"];
   return [...bin, "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", "read-only", "--cd", dir, "--model", input.model,
     ...Object.entries(config).flatMap(([key, value]) => ["-c", `${key}=${JSON.stringify(value)}`]),
     ...disabled.flatMap((key) => ["--disable", key]), "--enable", "skip_host_skill_discovery", "-"];
@@ -78,7 +90,7 @@ export function codexRemoteCommand(bin: string[], input: CompleteInput): { comma
   const dir = `/tmp/space-codex-${randomUUID()}`;
   const encode = (s: string) => new TextEncoder().encode(s);
   // The remote timeout bounds orphan lifetime after SSH disconnects. No retry or model fallback.
-  const command = `umask 077; mkdir ${quote(dir)} || exit 1; trap ${quote(`rm -rf -- ${quote(dir)}`)} EXIT; tar -xf - -C ${quote(dir)} || exit 1; cd ${quote(dir)} || exit 1; timeout --signal=TERM --kill-after=5s ${Math.ceil(input.timeoutMs / 1000)}s ${codexArgs(bin, input, dir).map(quote).join(" ")} < prompt.txt`;
+  const command = `umask 077; mkdir ${quote(dir)} || exit 1; trap ${quote(`rm -rf -- ${quote(dir)}`)} EXIT; tar -xf - -C ${quote(dir)} || exit 1; ${input.mode === "full" ? "" : `cd ${quote(dir)} || exit 1; `}timeout --signal=TERM --kill-after=5s ${Math.ceil(input.timeoutMs / 1000)}s ${codexArgs(bin, input, dir, ".").map(quote).join(" ")} < ${quote(join(dir, "prompt.txt"))}`;
   return { command, dir, archive: ustar([{ name: "prompt.txt", bytes: encode(input.prompt) }, { name: "system.txt", bytes: encode(input.system) }]) };
 }
 

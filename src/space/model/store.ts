@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS model_calls_started ON model_calls(started_at DESC);
 CREATE INDEX IF NOT EXISTS model_calls_app_started ON model_calls(app, started_at DESC);
 `;
 
-const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [{ table: "model_calls", column: "runtime", ddl: "TEXT" }];
+const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [{ table: "model_calls", column: "runtime", ddl: "TEXT" }, { table: "model_calls", column: "mode", ddl: "TEXT" }];
 
 /** Days of ledger kept; 0 keeps everything (the default: the ledger is the history the panel shows). */
 export const DEFAULT_RETENTION_DAYS = 0;
@@ -44,6 +44,7 @@ type Row = {
   tag: string;
   model: string;
   runtime: string | null;
+  mode: ModelCall["mode"] | null;
   backend: string;
   origin: string;
   status: string;
@@ -96,15 +97,16 @@ export class ModelStore {
   add(c: ModelCallInput): ModelCall {
     const r = this.db
       .query(
-        `INSERT INTO model_calls (app, tag, model, runtime, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
+        `INSERT INTO model_calls (app, tag, model, runtime, mode, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
                                   input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, cost_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         c.app,
         c.tag,
         c.model,
         c.runtime ?? null,
+        c.mode ?? null,
         c.backend,
         c.origin,
         c.status,
@@ -263,6 +265,7 @@ function rowToCall(r: Row): ModelCall {
     tag: r.tag,
     model: r.model,
     runtime: r.runtime ?? undefined,
+    ...(r.mode ? { mode: r.mode } : {}),
     backend: r.backend,
     origin: r.origin as Origin,
     status: r.status as CallStatus,

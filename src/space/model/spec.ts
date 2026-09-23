@@ -9,7 +9,9 @@ export function parseRunInput(body: Record<string, unknown>, defaults: { model?:
   if (typeof body.prompt !== "string" || !body.prompt.trim()) throw new Error("prompt is required");
   if (body.prompt.length > MAX_PROMPT_CHARS) throw new Error(`prompt is longer than ${MAX_PROMPT_CHARS} characters`);
 
-  let system = DEFAULT_SYSTEM;
+  const mode = body.mode;
+  if (mode !== undefined && mode !== "slim" && mode !== "full") throw new Error("mode must be slim or full");
+  let system = mode === "full" ? "" : DEFAULT_SYSTEM;
   if (body.system !== undefined) {
     if (typeof body.system !== "string" || !body.system.trim()) throw new Error("system must be a non-empty string");
     if (body.system.length > MAX_SYSTEM_CHARS) throw new Error(`system is longer than ${MAX_SYSTEM_CHARS} characters`);
@@ -30,6 +32,8 @@ export function parseRunInput(body: Record<string, unknown>, defaults: { model?:
     if (tools.length > 20) throw new Error("at most 20 tools");
   }
 
+  if (mode === "slim" && tools.length) throw new Error("slim mode does not support tools; use full mode");
+
   let timeoutMs = DEFAULT_TIMEOUT_MS;
   if (body.timeoutMs !== undefined) {
     if (typeof body.timeoutMs !== "number" || !Number.isFinite(body.timeoutMs) || body.timeoutMs <= 0) throw new Error("timeoutMs must be a positive number");
@@ -48,7 +52,7 @@ export function parseRunInput(body: Record<string, unknown>, defaults: { model?:
     thinking = Math.min(body.thinking, MAX_THINKING_TOKENS);
   }
 
-  return { prompt: body.prompt, system, model, tag, tools, timeoutMs, maxTokens, ...(thinking !== undefined ? { thinking } : {}) };
+  return { prompt: body.prompt, system, model, tag, tools, timeoutMs, maxTokens, ...(mode !== undefined ? { mode } : {}), ...(thinking !== undefined ? { thinking } : {}) };
 }
 
 export function parseWindow(raw: string | null | undefined): Window {

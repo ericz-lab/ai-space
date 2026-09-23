@@ -59,11 +59,28 @@ function parseSse(text: string): { event: string; data: unknown }[] {
 type RunBody = { ok: boolean; text?: string; error?: string; call: { id: number; app: string; tag: string; model: string; status: string; usage?: { inputTokens: number }; costUsd?: number } };
 
 describe("POST /api/model/run", () => {
+  test("modes reach the CLI and persist in the ledger, including full without a custom system", async () => {
+    for (const mode of ["slim", "full"]) {
+      const res = await post("/api/model/run", { prompt: "hello", mode, system: "Custom persona" }, "sat_my-app");
+      expect(res.status).toBe(200);
+      const body = await res.json() as RunBody;
+      expect(body.text).toContain("--system-prompt Custom persona");
+      expect(body.text?.includes("--safe-mode")).toBe(mode === "slim");
+      expect(store.get(body.call.id)).toMatchObject({ mode });
+    }
+    const native = await (await post("/api/model/run", { prompt: "hello", mode: "full" }, "sat_my-app")).json() as RunBody;
+    expect(native.text).not.toContain("--system-prompt");
+    const count = store.totals(0).calls;
+    for (const bad of [{ mode: "unknown" }, { mode: "slim", tools: ["Read"] }]) {
+      expect((await post("/api/model/run", { prompt: "hello", ...bad }, "sat_my-app")).status).toBe(400);
+    }
+    expect(store.totals(0).calls).toBe(count);
+  });
   test("an app token identifies the app; the answer and the ledger row come back", async () => {
     const res = await post("/api/model/run", { app: "someone-else", prompt: "hello", tag: "translate" }, "sat_my-app");
     expect(res.status).toBe(200);
     const body = (await res.json()) as RunBody;
-    expect(body.text).toBe(`answer to: hello [args: -p --output-format json --model haiku --strict-mcp-config --tools  --system-prompt ${DEFAULT_SYSTEM}]`);
+    expect(body.text).toBe(`answer to: hello [args: -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools  --system-prompt ${DEFAULT_SYSTEM}]`);
     expect(body.call).toMatchObject({ app: "my-app", tag: "translate", model: "haiku", runtime: "claude", backend: "local", status: "ok", usage: { inputTokens: 10 }, costUsd: 0.0123 });
     expect(store.get(body.call.id)).toMatchObject({ app: "my-app", promptChars: 5, runtime: "claude" });
   });

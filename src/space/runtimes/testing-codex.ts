@@ -12,9 +12,9 @@ if (import.meta.main) {
     console.log(JSON.stringify({ type: "turn.failed", error: { message: "OAuth session expired" } }));
     process.exit(0);
   }
-  const systemArg = args.find((s) => s.startsWith("model_instructions_file="))!;
-  const systemFile = JSON.parse(systemArg.slice(systemArg.indexOf("=") + 1));
-  const text = JSON.stringify({ prompt, system: await Bun.file(systemFile).text(), cwd: process.cwd(), args });
+  const systemArg = args.find((s) => s.startsWith("model_instructions_file="));
+  const systemFile = systemArg ? JSON.parse(systemArg.slice(systemArg.indexOf("=") + 1)) : undefined;
+  const text = JSON.stringify({ prompt, system: systemFile ? await Bun.file(systemFile).text() : null, cwd: process.cwd(), args });
   console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "intermediate", phase: "commentary" } }));
   console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }));
   if (mode !== "partial") console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 120, cached_input_tokens: 100, output_tokens: 12 } }));

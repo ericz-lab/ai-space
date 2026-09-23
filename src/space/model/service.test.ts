@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeOnly } from "../runtimes/registry.ts";
+import { RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
 import { fakeModelBin } from "../runtimes/testing.ts";
 import { ModelService } from "./service.ts";
 import { ModelStore } from "./store.ts";
@@ -68,4 +68,16 @@ test("Codex tier calls record the concrete model and failures without an invente
     expect(r.call.costUsd).toBeUndefined();
     expect(r.outcome.ok).toBe(mode === "ok");
   }
+});
+
+
+test("unsupported full mode is recorded without calling a bare API", async () => {
+  let fetched = false;
+  const runtimes = new RuntimeRegistry({ default: "api", runtimes: [{ name: "api", kind: "anthropic-api", apiKey: "test", apiUrl: "" }] },
+    { fetch: (() => { fetched = true; throw new Error("must not call"); }) as unknown as typeof fetch });
+  const api = new ModelService({ store, runtimes, log: () => {} });
+  const r = await api.run("demo", { ...input(), mode: "full" });
+  expect(r.outcome).toMatchObject({ ok: false, error: expect.stringContaining("does not support full") });
+  expect(r.call.mode).toBe("full");
+  expect(fetched).toBe(false);
 });

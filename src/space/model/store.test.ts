@@ -83,3 +83,17 @@ describe("ModelStore", () => {
     expect(store.list({ since: 0 }).map((c) => c.startedAt)).toEqual([T0, T0 - 9 * DAY]);
   });
 });
+
+
+test("the mode migration preserves older rows and survives reopening", () => {
+  const old = store.add(call());
+  store.db.exec("ALTER TABLE model_calls DROP COLUMN mode");
+  store.close();
+  store = new ModelStore(join(dir, "space.db"));
+  expect(store.get(old.id)?.mode).toBeUndefined();
+  const fresh = store.add(call({ mode: "full" }));
+  store.close();
+  store = new ModelStore(join(dir, "space.db"));
+  expect(store.get(fresh.id)?.mode).toBe("full");
+  expect(store.get(old.id)?.app).toBe("news");
+});

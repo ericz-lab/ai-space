@@ -143,3 +143,7 @@ Everything in the table, in one change: the skeleton with help and exit codes, t
 - **Remote operation through the hub.** `space --on david task ls` would need the peer to expose its whole API to the hub, which [peers.md](peers.md) deliberately does not. `ssh david space task ls` is the same keystrokes and keeps the boundary.
 - **A TUI.** Tables and `-f` are enough; the panel is the interactive view.
 - **Service control** (`space app restart`). It belongs to supervision, with logs; until then the unit is the unit.
+
+Model calls accept `space model run --mode slim|full --system "Custom instructions" PROMPT`.
+The default text-only mode is slim. Full retains native runtime context and tools;
+custom system instructions are supported in either mode. See [completion modes](runtimes.md#completion-modes).

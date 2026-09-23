@@ -3,6 +3,14 @@ import { parseRunInput, parseWindow } from "./spec.ts";
 import { DEFAULT_SYSTEM } from "./types.ts";
 
 describe("parseRunInput", () => {
+  test("validates modes and preserves native full instructions unless customized", () => {
+    expect(parseRunInput({ prompt: "x", mode: "full" })).toMatchObject({ mode: "full", system: "" });
+    for (const mode of ["slim", "full"]) expect(parseRunInput({ prompt: "x", mode, system: "Custom role" })).toMatchObject({ mode, system: "Custom role" });
+    expect(parseRunInput({ prompt: "x", mode: "slim" }).system).toBe(DEFAULT_SYSTEM);
+    for (const mode of ["lean", "", null, false]) expect(() => parseRunInput({ prompt: "x", mode })).toThrow(/mode/);
+    expect(() => parseRunInput({ prompt: "x", mode: "slim", tools: ["Read"] })).toThrow(/slim/);
+    expect(parseRunInput({ prompt: "x", mode: "full", tools: ["Read"] }).tools).toEqual(["Read"]);
+  });
   test("fills the defaults and keeps what was given", () => {
     expect(parseRunInput({ prompt: "hi" })).toEqual({ prompt: "hi", system: DEFAULT_SYSTEM, model: "sonnet", tag: "other", tools: [], timeoutMs: 120_000, maxTokens: 4096 });
     expect(parseRunInput({ prompt: "hi" }, { model: "haiku" }).model).toBe("haiku");

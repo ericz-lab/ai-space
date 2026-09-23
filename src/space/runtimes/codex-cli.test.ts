@@ -8,6 +8,29 @@ const input = (over: Partial<CompleteInput> = {}): CompleteInput => ({ model: "g
 const adapter = (mode = "ok") => createCodexCli({ name: "codex", kind: "codex-cli", bin: fakeCodexBin(mode) });
 
 describe("Codex completions", () => {
+  test("full mode retains native context and supports both native and custom system prompts", async () => {
+    for (const system of ["", "Custom instructions: ' $HOME `id`\n"]) {
+      const request = input({ mode: "full", system });
+      const r = await adapter().complete(request);
+      if (!r.ok) throw new Error(r.error);
+      const answer = JSON.parse(r.text);
+      expect(answer.system).toBe(system || null);
+      expect(answer.cwd).toBe(process.cwd());
+      for (const flag of ["--ignore-user-config", "--ignore-rules", "--disable", "project_doc_max_bytes=0"]) expect(answer.args).not.toContain(flag);
+      expect(answer.args).toContain("read-only");
+      const remote = codexRemoteCommand(fakeCodexBin(), request);
+      const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 5000 });
+      expect(result.code).toBe(0);
+      expect(JSON.parse(parseCodexOutput(result.stdout).text!).system).toBe(system || null);
+      expect(await Bun.file(`${remote.dir}/system.txt`).exists()).toBe(false);
+    }
+  });
+
+  test("slim removes optional context and rejects attachments before launch", async () => {
+    const args = codexArgs(["codex"], input({ mode: "slim" }), "/tmp/example");
+    for (const flag of ["agents.enabled=false", "include_environment_context=false", "include_permissions_instructions=false", "include_collaboration_mode_instructions=false", "code_mode_host"]) expect(args).toContain(flag);
+    await expect(adapter().complete(input({ mode: "slim", files: [{ name: "a.png", path: "/missing" }] }))).rejects.toThrow(/slim/);
+  });
   test("keeps custom system and user text separate, records uncached usage, and cleans up", async () => {
     const prompt = "用户\n\"' $HOME `id` $(id)\\n";
     const system = "系统\nonly JSON\n".repeat(400);

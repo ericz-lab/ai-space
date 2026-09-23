@@ -132,11 +132,11 @@ To default only application model calls to Codex, set `SPACE_MODEL_DEFAULT=codex
 
 Motivation: applications must be able to use a Codex login independently of a failed Claude login, with inexpensive models and their own instructions. `codex-cli` implements `complete` only, locally or through SSH; agent tasks and panel chat return unsupported. Requires a Codex CLI with `--ignore-user-config`, `--ignore-rules` and `--ephemeral` (validated with 0.156.1); the SSH host needs Bash, tar and GNU timeout. Authenticate on the machine that actually runs Codex, using `codex login`. Credentials remain in that machine's Codex home.
 
-The adapter runs `codex exec --json` in a fresh temporary directory. The request's `system` becomes `model_instructions_file`, replacing Codex's built-in model instructions; `prompt` arrives on stdin separately. Quotes, Unicode, newlines and large instructions travel as file bytes, never interpolated shell code. Over SSH both files arrive in one tar stream before the CLI starts. Request files are removed afterwards. A remote timeout bounds execution if the SSH connection drops; cancellation kills the local process group immediately, while a disconnected remote call can remain until its timeout.
+In the default slim mode, the adapter runs `codex exec --json` in a fresh temporary directory. The request's `system` becomes `model_instructions_file`, replacing Codex's built-in model instructions; `prompt` arrives on stdin separately. Quotes, Unicode, newlines and large instructions travel as file bytes, never interpolated shell code. Over SSH both files arrive in one tar stream before the CLI starts. Request files are removed afterwards. A remote timeout bounds execution if the SSH connection drops; cancellation kills the local process group immediately, while a disconnected remote call can remain until its timeout.
 
-User configuration and exec rules are skipped, project instructions and skill instructions disabled, and shell, browser, apps, plugins, memories and subagents disabled. Execution uses a read-only sandbox. This is a text-completion adapter: requested tools and file attachments are rejected, not silently ignored. Machine-wide managed policies still apply.
+In slim mode, user configuration and exec rules are skipped, project instructions and skill instructions disabled, and shell, browser, apps, plugins, memories and subagents disabled. Execution uses a read-only sandbox. This is a text-completion adapter: requested tools and file attachments are rejected, not silently ignored. Machine-wide managed policies still apply.
 
-Reasoning effort is fixed to `low` to control usage. The existing `thinking` field is accepted for compatibility but does not impose a numeric budget or disable reasoning (including `thinking: 0`). As with other CLI adapters, `maxTokens` is not a hard output cap. Requests are single-turn and ephemeral; no automatic model fallback or adapter retry is performed. The CLI itself may retry transient transport failures.
+In slim mode, reasoning effort is fixed to `low` to control usage. Full mode uses the CLI default. The existing `thinking` field is accepted for compatibility but does not impose a numeric budget or disable reasoning (including `thinking: 0`). As with other CLI adapters, `maxTokens` is not a hard output cap. Requests are single-turn and ephemeral; no automatic model fallback or adapter retry is performed. The CLI itself may retry transient transport failures.
 
 Only a complete successful JSON event stream with a nonempty final message is accepted. A zero exit code with `turn.failed`, malformed output or an incomplete stream is a failure. Streaming callers receive one final text chunk after validation. Usage is recorded from Codex's actual counters; cached input is separated from total input, and no dollar cost is invented for subscription usage.
 
@@ -152,3 +152,50 @@ Example request (sent with the app's bearer token):
 ```
 
 References: [non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode), [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference), [Codex pricing](https://learn.chatgpt.com/docs/pricing). Standard mode is used; no fast service tier is requested.
+
+## Completion modes
+
+The model API and `space model run --mode slim|full` share two modes for both
+`claude-code` and `codex-cli`. The model tier and the completion mode are independent.
+
+| Behavior | `slim` | `full` |
+| --- | --- | --- |
+| Context | Isolated application request; optional CLI context disabled | Native CLI configuration, project instructions, skills, MCP and available tools |
+| System prompt | Custom `system`, or the application default | Custom `system` replaces the native base instructions; omit it to keep the native base instructions |
+| Tools | Explicit tool lists and attachments rejected | Native tool set; Claude also accepts a selective `tools` list and internal attachments |
+| Working directory | Codex uses a temporary directory; Claude uses safe mode | Local service working directory, or the SSH login directory on the execution host |
+| History | One request | One request with native context, not an automatic resume of earlier conversations |
+
+The default for existing text-only calls is slim. For compatibility, requests that
+omit `mode` may still request the legacy selective tool/attachment behavior. Other
+runtime kinds reject explicit `full` instead of silently treating it as slim.
+The ledger records the mode for new mode-aware and text-only model calls; older,
+imported and legacy selective-tool records may have no mode.
+
+Claude slim uses `--safe-mode --strict-mcp-config --tools "" --system-prompt ...`.
+Safe mode requires a CLI version that supports that flag; it disables project
+customizations, skills, plugins and hooks. Full omits those context restrictions.
+Codex slim skips user configuration and rules, disables optional context messages,
+sets `agents.enabled=false`, and disables execution, code-mode host, integrations
+and discovery features. Full retains native configuration and tools. Both Codex
+modes retain the read-only sandbox and never-approve policy: full context does not
+authorize unrestricted writes. Full uses the CLI's reasoning default; slim uses
+low reasoning. Codex custom tool lists and file attachments remain unsupported;
+full exposes its native tools instead.
+
+**Codex 0.156.1 limitation:** even with tool execution disabled, this CLI still sends
+`exec`, `wait` and asynchronous-input definitions. Slim disables optional tool facilities, but cannot promise a completely empty
+tool surface or zero tool-schema tokens in this CLI version. A measured
+single-line translation dropped from 4,097 to 1,688 input tokens with optional context
+disabled; these are example measurements, not a fixed budget.
+
+```json
+{"model":"codex/basic","mode":"slim","system":"Translate to Chinese. Return JSON only.","prompt":"Hello"}
+```
+
+```json
+{"model":"claude/intermediate","mode":"full","system":"You are a code reviewer. Report concrete defects with file references.","prompt":"Review this workspace without changing files."}
+```
+
+These modes apply to model completions. Scheduler agent execution and persistent
+panel chat keep their existing contracts.
