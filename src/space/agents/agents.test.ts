@@ -226,3 +226,34 @@ test("Codex-only Base ignores legacy Claude defaults and honors qualified defaul
     } finally { local.stop(true); }
   }
 });
+
+test("Base reads the live default for new chats but retains a resumed session's model", async () => {
+  const { RuntimeRegistry } = await import("../runtimes/registry.ts");
+  const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
+  const configured = new RuntimeRegistry({ default: "claude", runtimes: [
+    { name: "claude", kind: "claude-code", bin: ["bun", join(home, "fake-claude.js")], chatArgs: [] },
+    { name: "codex", kind: "codex-cli", bin: fakeCodexBin() },
+  ] });
+  const db = new Database(":memory:");
+  const store = new SessionStore(db);
+  let preference = "claude/basic";
+  const local = Bun.serve({ port: 0, routes: createAgentRoutes({ ws: workspacePaths(home), registry: new AppRegistry(), layout: new LayoutStore(db), sessions: store, runtimes: configured, baseDefaultModel: () => preference }) });
+  const url = `http://localhost:${local.port}`;
+  const chat = async (body: unknown) => {
+    const response = await fetch(`${url}/api/agents/space/assistant/chat`, { method: "POST", body: JSON.stringify(body) });
+    expect(response.status).toBe(200);
+    await response.text();
+  };
+  try {
+    await chat({ message: "first" });
+    const first = store.list("space/assistant")[0]!;
+    expect(first).toMatchObject({ runtime: "claude", model: "haiku" });
+    preference = "codex/advanced";
+    const list = await (await fetch(`${url}/api/agents`)).json();
+    expect(list.agents[0].runtime).toBe("codex");
+    await chat({ message: "continue", sessionId: first.sid });
+    expect(store.list("space/assistant").find((s) => s.model === "haiku")).toBeDefined();
+    await chat({ message: "new" });
+    expect(store.list("space/assistant")[0]).toMatchObject({ runtime: "codex", model: "gpt-6-astra" });
+  } finally { local.stop(true); db.close(); }
+});

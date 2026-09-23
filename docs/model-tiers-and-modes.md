@@ -434,3 +434,25 @@ The repository is the source of truth for this contract:
 - [Codex CLI adapter](../src/space/runtimes/codex-cli.ts): context switches and CLI limitations.
 - [Model service](../src/space/model/service.ts): execution and ledger recording.
 - [Model CLI](../src/cli/model.ts): command-line request handling.
+
+## Workspace default model
+
+Settings → Default model selects a configured Claude Code or Codex CLI runtime and
+one of its four tiers. The preference is persisted in `space.db` and applies immediately
+to model-service requests and app chat turns that omit `model`, plus new Base chats.
+This includes ai-todo, ai-calendar and ai-notes, which omit app-level model defaults.
+Explicit request models take precedence. Base resumes keep their recorded runtime
+and model; choose a new conversation to use a changed workspace default.
+
+`GET /api/model/preferences` returns `defaultModel`, `appDefault`, `baseDefault` and
+available `options`. `PUT /api/model/preferences` accepts
+`{"defaultModel":"codex/intermediate"}`. Passing `null` restores the environment
+fallbacks: `SPACE_MODEL_DEFAULT` for apps and `SPACE_CHAT_MODEL` for Base. These
+routes use the same access boundary as other panel preferences.
+
+App deployments must also use versions that omit hardcoded model defaults.
+The updated ai-todo, ai-calendar and ai-notes ignore legacy `TODO_MODEL`,
+`AI_MODEL` and `NOTES_MODEL` environment values so existing deployments also
+follow Settings. Scheduled agent tasks retain
+the model declared in their task configuration.
+
