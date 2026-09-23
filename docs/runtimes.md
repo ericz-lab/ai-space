@@ -1,5 +1,7 @@
 # Runtimes
 
+For detailed model selection and request examples, see [Model Tiers and Request Modes](model-tiers-and-modes.md).
+
 Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`), the Anthropic Messages API (`anthropic-api`), and Codex CLI text completions (`codex-cli`). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
 
 ## Why one layer
@@ -10,7 +12,7 @@ ai-space starts an AI runtime in three places: the model service answers an app'
 
 | operation | caller | what it is |
 | --- | --- | --- |
-| `complete` | model service | One answer to one prompt with the request's own system prompt, model, tools and thinking cap. No agent behaviour: the runtime is started lean (see [model.md](model.md#backends)). May run on another machine over ssh, borrowing its login. |
+| `complete` | model service | One answer to one prompt with the request's own system prompt, model, tools and thinking cap. Uses slim mode by default; full mode retains native CLI context and tools (see [completion modes](#completion-modes)). May run on another machine over ssh, borrowing its login. |
 | `agent` | scheduler | A coding agent at work: the runtime's own system prompt and tools, the prompt file on stdin, inside the app directory. Always local: it needs the directory. |
 | `chat` | panel | One turn of a conversation, streamed as the runtime's own events; a session id gives continuity. Always local, for the same reason. |
 
@@ -24,7 +26,7 @@ Every operation reports what the runtime said about the model call, token counts
 | --- | --- | --- | --- | --- | --- |
 | `claude-code` | yes, local or ssh | yes | yes | the CLI's own (`claude login`) | `claude -p --output-format json` for answers and agent runs, `stream-json` for chat, `--resume` for continuity. Answers over ssh: every argument validated, the system prompt base64-encoded. Files (chat attachments) are opened with `Read`; over ssh they travel with the prompt as one tar archive unpacked into a temporary directory. |
 | `deepseek-harness` | yes, local or ssh | yes | yes | a DeepSeek API key in the harness home | `dsh --profile headless --json` for everything, the task on stdin; `--session-id` for continuity. A `--patch` overlay per run sets the system prompt, model, thinking (`reasoningEffort`) and tool rows: an answer runs with the harness identity, runtime context and every tool off (6,872 input tokens as shipped → 32), a chat keeps them and adds the agent's prompt as persona. Usage from the `step_end` events, cost from DeepSeek's list prices at peak (off-peak is half). Chat events are translated into Claude Code's `stream-json`; transcripts read from the harness's session log. Files refused. |
-| `codex-cli` | yes, local or ssh | no | no | the CLI’s own Codex login | Isolated text completions with per-request instructions; see below. |
+| `codex-cli` | yes, local or ssh | no | no | the CLI’s own Codex login | Slim or full completions with per-request instructions; see below. |
 | `anthropic-api` | yes | no | no | an API key | `POST /v1/messages`. Tools and files refused. Cost from list prices for known models. |
 
 ## Configuration
@@ -101,10 +103,10 @@ Use these four names consistently when discussing models or selecting them in re
 
 | Tier | Request alias | Claude Code | Codex CLI default |
 | --- | --- | --- | --- |
-| Basic (基础) | `basic` | Haiku (`haiku`) | Luna (`gpt-6-luna`) |
-| Junior (初级) | `junior` | Sonnet (`sonnet`) | Terra (`gpt-5.6-terra`) |
-| Intermediate (中级) | `intermediate` | Opus (`opus`) | Sol (`gpt-6-sol`) |
-| Advanced (高级) | `advanced` | Fable (`fable`) | Astra (`gpt-6-astra`) |
+| Basic | `basic` | Haiku (`haiku`) | Luna (`gpt-6-luna`) |
+| Junior | `junior` | Sonnet (`sonnet`) | Terra (`gpt-5.6-terra`) |
+| Intermediate | `intermediate` | Opus (`opus`) | Sol (`gpt-6-sol`) |
+| Advanced | `advanced` | Fable (`fable`) | Astra (`gpt-6-astra`) |
 
 These are operator-defined tiers, not a claim that two providers' models perform identically. Availability depends on the CLI and account. `codex/basic` selects Codex Luna; `claude/advanced` selects Claude Fable. A bare `advanced` uses the default runtime. Concrete model IDs still work. Unknown or unavailable models fail without silently switching provider or using a more expensive model. Other runtime kinds need explicit tier mappings.
 

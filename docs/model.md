@@ -1,5 +1,7 @@
 # Model service design
 
+For the operator guide to capability tiers, request modes, and custom system prompts, see [Model Tiers and Request Modes](model-tiers-and-modes.md).
+
 The model service is the Space-layer answer to "run this prompt through a model". An app hands ai-space a prompt and a purpose; ai-space runs it on the backend the workspace is configured for, returns the answer with the usage the runtime reported, and writes one row to a ledger. Agent tasks the scheduler runs land in the same ledger. The panel shows the ledger by app, purpose, model and backend over a rolling window.
 
 Status: implemented in `src/space/model/` (runner with three backends, ledger, service, API, scheduler hook, panel view).
