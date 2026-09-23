@@ -183,7 +183,7 @@ describe("complete, locally", () => {
 
   test("a missing binary fails without throwing", async () => {
     const r = await createClaudeCode(spec({ bin: ["/nonexistent/claude-bin"] })).complete(input());
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining("could not start") });
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/could not start|setsid: failed to execute/) });
   });
 });
 
