@@ -57,7 +57,7 @@ describe("drain", () => {
   });
 });
 
-test("Codex tier calls record the concrete model and failures without an invented cost", async () => {
+test("Codex tier calls estimate the concrete model cost only when usage is available", async () => {
   const { RuntimeRegistry } = await import("../runtimes/registry.ts");
   const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
   for (const mode of ["ok", "error"]) {
@@ -65,7 +65,8 @@ test("Codex tier calls record the concrete model and failures without an invente
     const model = new ModelService({ store, runtimes, log: () => {} });
     const r = await model.run("news", { ...input(), model: "codex/basic" });
     expect(r.call).toMatchObject({ model: "gpt-6-luna", runtime: "codex", backend: "local", status: mode === "ok" ? "ok" : "error" });
-    expect(r.call.costUsd).toBeUndefined();
+    if (mode === "ok") expect(r.call.costUsd).toBeCloseTo(0.000009, 10);
+    else expect(r.call.costUsd).toBeUndefined();
     expect(r.outcome.ok).toBe(mode === "ok");
   }
 });
