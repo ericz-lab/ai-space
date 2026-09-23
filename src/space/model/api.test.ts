@@ -66,6 +66,7 @@ describe("POST /api/model/run", () => {
       const body = await res.json() as RunBody;
       expect(body.text).toContain("--system-prompt Custom persona");
       expect(body.text?.includes("--safe-mode")).toBe(mode === "slim");
+      expect(body.call).toMatchObject({ mode });
       expect(store.get(body.call.id)).toMatchObject({ mode });
     }
     const native = await (await post("/api/model/run", { prompt: "hello", mode: "full" }, "sat_my-app")).json() as RunBody;

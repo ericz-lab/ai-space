@@ -183,6 +183,7 @@ export function view(c: ModelCall) {
     tag: c.tag,
     model: c.model,
     runtime: c.runtime,
+    mode: c.mode,
     backend: c.backend,
     origin: c.origin,
     status: c.status,
