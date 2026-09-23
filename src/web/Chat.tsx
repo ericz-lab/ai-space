@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime } from "./api.ts";
+import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
 import { localized, useLang } from "./i18n.ts";
 
 // Chat window (a floating panel). The server streams the runtime's stream-json events over SSE.
@@ -149,7 +150,7 @@ const Ava = ({ icon, fallback = "✨" }: { icon?: string; fallback?: string }) =
 type Msg = { role: "user"; text: string } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; status?: string | null; live?: boolean };
 type Conv = { agent: AgentInfo | null; msgs: Msg[]; sid: string | null; busy: boolean; queued: number };
 const EMPTY_CONV: Conv = { agent: null, msgs: [], sid: null, busy: false, queued: 0 };
-type Runner = { queue: string[]; running: boolean; active: { ctrl: AbortController; typer: { target: string } } | null };
+type Runner = { queue: QueuedChatTurn[]; running: boolean; active: { ctrl: AbortController; typer: { target: string } } | null };
 
 export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean; agent: AgentInfo; onClose: () => void; onSwitch?: (a: AgentInfo) => void }) {
   const { lang, t } = useLang();
@@ -204,7 +205,10 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
   };
 
   useEffect(() => {
-    patch(key, (v) => ({ ...v, agent: agent || v.agent }));
+    patch(key, (v) => ({ ...v, agent }));
+  }, [agent]);
+
+  useEffect(() => {
     setHist(null);
     setStick(true);
     inputRef.current?.focus();
@@ -227,15 +231,17 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
   };
   const pickModel = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setModel(e.target.value);
+    modelRef.current = e.target.value;
     localStorage.setItem("chat-model", e.target.value);
   };
   const pickPerm = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setPerm(e.target.value);
+    permRef.current = e.target.value;
     localStorage.setItem("chat-perm", e.target.value);
   };
 
   // One turn: append an AI bubble to the agent's conversation and fill it from the SSE stream.
-  const runTurn = async (turnKey: string, chatBase: string, text: string) => {
+  const runTurn = async (turnKey: string, chatBase: string, turn: QueuedChatTurn) => {
     let aiIdx = -1;
     patch(turnKey, (v) => {
       aiIdx = v.msgs.length;
@@ -283,10 +289,8 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          message: text,
+          ...turn,
           sessionId: convsRef.current[turnKey]?.sid || undefined,
-          model: (convsRef.current[turnKey]?.agent?.modelOptions ? baseChoice(turnKey) : modelRef.current) || undefined,
-          permissionMode: permRef.current || undefined,
         }),
         signal: ctrl.signal,
       });
@@ -375,10 +379,10 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
     r.running = true;
     patch(k, (v) => ({ ...v, busy: true }));
     while (r.queue.length) {
-      const text = r.queue.shift() as string;
+      const turn = r.queue.shift()!;
       const queued = r.queue.length; // read before the lazy state update runs
       patch(k, (v) => ({ ...v, queued }));
-      await runTurn(k, chatBase, text);
+      await runTurn(k, chatBase, turn);
     }
     r.running = false;
     patch(k, (v) => ({ ...v, busy: false, queued: 0 }));
@@ -386,7 +390,7 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
 
   const send = (text: string) => {
     patch(key, (v) => ({ ...v, agent: agent || v.agent, msgs: [...v.msgs, { role: "user", text }] }));
-    runner(key).queue.push(text);
+    runner(key).queue.push(queuedChatTurn(agent, text, modelRef.current, baseChoice(key), permRef.current));
     drain(key, base);
   };
   const submit = () => {

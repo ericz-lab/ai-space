@@ -490,6 +490,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       .then(([p, a]) => {
         setApps(p.apps);
         setAgents(a.agents);
+        setChatAgent((current) => a.agents.find((agent) => agent.id === current.id) ?? current);
         setLoaded(true);
         if (p.apps.some((x) => x.service?.health === "unknown"))
           setTimeout(() => getJson<{ apps: AppInfo[] }>("/api/apps").then((d) => setApps(d.apps)).catch(() => {}), PROBE_MS);
