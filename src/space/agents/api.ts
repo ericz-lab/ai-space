@@ -34,6 +34,8 @@ export type AgentsApiOptions = {
   runtimes: RuntimeRegistry;
   /** Model when neither the request nor the manifest names one (SPACE_CHAT_MODEL). */
   defaultModel?: string;
+  /** Live workspace preference, applied only to Base. */
+  baseDefaultModel?: () => string;
   /** Provisioned variables for an app, merged into the session environment. */
   envFor?: (app: string) => Promise<Record<string, string>>;
   /** Home directory for transcripts; default: the process's. */
@@ -94,6 +96,7 @@ const MAX_CONTEXT = 24_000;
 
 export function createAgentRoutes(opts: AgentsApiOptions): Routes {
   const { registry, layout, sessions } = opts;
+  const baseDefault = () => opts.baseDefaultModel?.() ?? opts.defaultModel;
 
   const wrap =
     (h: Handler): Handler =>
@@ -112,7 +115,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
 
   const resolveAgent = async (app: string, name: string): Promise<ResolvedAgent> => {
     if (app === SPACE_APP && name === SPACE_AGENT) {
-      return { id: `${SPACE_APP}/${SPACE_AGENT}`, runtime: baseRuntime(opts.runtimes, opts.defaultModel), cwd: opts.ws.home, systemPrompt: withCatalogue(spaceAgentPrompt(opts.ws), SPACE_APP), tools: [], app: SPACE_APP };
+      return { id: `${SPACE_APP}/${SPACE_AGENT}`, runtime: baseRuntime(opts.runtimes, baseDefault()), cwd: opts.ws.home, systemPrompt: withCatalogue(spaceAgentPrompt(opts.ws), SPACE_APP), tools: [], app: SPACE_APP };
     }
     const entry = registry.get(app);
     const a = entry?.manifest.agents.find((x) => x.name === name);
@@ -135,7 +138,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
       GET: () => {
         const lay = layout.read();
         const hidden = new Set(lay.hidden);
-        const agents: AgentView[] = [spaceAgentView(opts.runtimes, opts.defaultModel)];
+        const agents: AgentView[] = [spaceAgentView(opts.runtimes, baseDefault())];
         for (const { manifest } of registry.list()) {
           if (hidden.has(manifest.app) || manifest.status === "archived") continue;
           for (const a of manifest.agents) agents.push(agentView(manifest, a));
@@ -160,7 +163,8 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const previous = sessionId ? sessions.get(agent.id, sessionId) : null;
         const runtimeName = previous?.runtime ?? (previous && isBase ? "claude" : agent.runtime);
         // A legacy bare SPACE_CHAT_MODEL (normally sonnet) belongs to Claude, not a Codex-only installation.
-        const defaultModel = !isBase || opts.defaultModel?.includes("/") || opts.runtimes.get(runtimeName)?.kind === "claude-code" ? opts.defaultModel : undefined;
+        const configuredDefault = isBase ? baseDefault() : opts.defaultModel;
+        const defaultModel = !isBase || configuredDefault?.includes("/") || opts.runtimes.get(runtimeName)?.kind === "claude-code" ? configuredDefault : undefined;
         const requested = reqModel ?? previous?.model ?? agent.model ?? (runtimeName === agent.runtime ? defaultModel : undefined);
         const selected = requested?.includes("/") ? requested : `${runtimeName}/${requested ?? "intermediate"}`;
         const selectedName = selected.slice(0, selected.indexOf("/"));

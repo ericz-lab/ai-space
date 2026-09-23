@@ -41,6 +41,8 @@ When the user starts development from the ai-space source checkout and asks to w
 
 ## Repository Map
 
+- `.ai-space/app-src/` - ignored, independent app source checkouts used during app development.
+
 - `src/` - source code. Entry point is `src/index.ts` (boots Space services and serves the Space API). Tests sit next to the code they test and are named `*.test.ts`.
 - `src/space/` - Space layer services shared by every app. One directory per service. `workspace.ts` defines the `~/.ai-space` layout, creates it, discovers apps and loads the workspace `.env`. `skills.ts` links the shared skills and every app's skills into `<workspace>/.claude/skills/` on boot, `init` and each workspace sync. `guide.ts` generates the workspace `AGENTS.md` (template with a "This machine" section from `SPACE_NAME`, hostname, user and workspace path, plus the operator's `AGENTS.local.md`, written once) and links `CLAUDE.md` to it, on boot, `init` and each workspace sync, for sessions of any agent tool started by hand there.
 - `src/space/scheduler/` - scheduled and event-driven tasks: `types.ts` (data model), `schedule.ts` (at/every/cron next-run math), `events.ts` (event names, trigger matching, run payload), `store.ts` (bun:sqlite: tasks, runs, events), `targets.ts` (http/command/agent runners), `manifest.ts` (`space.yaml` parsing), `scheduler.ts` (engine: ticks, publish, pending delivery), `api.ts` (HTTP routes). Design notes in `docs/scheduler.md`.
