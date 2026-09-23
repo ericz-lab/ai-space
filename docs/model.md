@@ -20,7 +20,7 @@ Goals:
 
 - One backend configuration per workspace. Apps never hold an API key or an ssh host.
 - One ledger for every model call on the machine, whether an app asked for it or the scheduler ran an agent task.
-- Honest figures: token counts and cost are what the runtime reported. A call whose runtime reported nothing is recorded with the count of calls and no token figures; nothing is estimated from prompt length.
+- Honest figures: token counts are what the runtime reported. Reported costs take precedence; GPT calls without a reported cost use the standard API-equivalent estimate described below. A call whose runtime reported nothing is recorded with the count of calls and no token figures; nothing is estimated from prompt length.
 - A concurrency cap, so an app in a loop cannot start fifty runtimes at once.
 - Apps in any language can participate. The contract is one HTTP request.
 
@@ -106,7 +106,7 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 | `startedAt`, `durationMs` | Wall clock of the whole call including any wait for a slot. |
 | `promptChars`, `outputChars` | Sizes only; prompts and answers are not stored. |
 | `usage` | `inputTokens`, `cacheWriteTokens`, `cacheReadTokens`, `outputTokens`, as reported; absent when the runtime reported none. |
-| `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend; absent otherwise. |
+| `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend. GPT-6 Astra/Sol/Luna and GPT-5.6 Sol/Terra/Luna calls without a reported cost use standard API list prices (verified 2026-09-23); absent for unknown models or incomplete usage. |
 
 ### Restarts
 
@@ -178,3 +178,9 @@ An app that shows the answer while it is written adds `stream: true` and reads t
 - Daily budgets that turn a call into `429 budget exceeded`, which an app treats as skipped.
 - Peer ledgers in the hub's view (`docs/peers.md`).
 - Batch hints: the service could tell an app, from its own ledger, that its calls are mostly fixed overhead.
+
+### GPT cost estimates
+
+`src/space/model/pricing.ts` holds the model-specific rates from [OpenAI pricing](https://developers.openai.com/api/docs/pricing). The ledger estimates costs per call at read time, including existing rows, without rewriting the stored cost. Non-cached input, cache writes, cache reads and output are charged separately. Above 272,000 total input tokens per call, input/cache rates double and output rates multiply by 1.5. The same expression feeds recent calls, grouped totals and daily history. Reported costs (including zero) always win. Unknown models and missing input/output usage stay unpriced and contribute nothing to cost totals.
+
+These are standard API-equivalent estimates, not subscription bills. The ledger does not record service tier, regional processing or tool charges, so those adjustments are excluded. Historical estimates follow the checked-in price table.

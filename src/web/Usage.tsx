@@ -233,6 +233,7 @@ export default function Usage({ open, onClose, onBack }: { open: boolean; onClos
           </button>
         </div>
         <div className="task-body">
+          <p className="task-note">{t("usage.costNote")}</p>
           {err && <p className="task-note">{t("common.unavailable", { error: err })}</p>}
           {usage === null && !err && <p className="task-note">{t("common.loading")}</p>}
           {tot && (
