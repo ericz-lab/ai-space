@@ -22,6 +22,14 @@ English is the default language of this repository. Write code identifiers, comm
 - For new features, larger refactors, new dependencies, or runtime changes, open an issue or state the motivation in the PR description before starting.
 - Run the local checks in [Validation](#validation) before every push. Do not push unverified code.
 
+## App Development Mode
+
+When the user starts development from the ai-space source checkout and asks to work on an app, establish the app's source directory before editing:
+
+- Use the app source directory specified by the user when one is provided.
+- Otherwise, default to `.ai-space/app-src/<app-name>/` relative to the ai-space repository root. State the resolved path and proceed with this default without requiring confirmation.
+- Keep app source changes in that directory and follow its own `AGENTS.md` instructions. Run the app's commands and Git operations from its source directory; keep ai-space platform changes in the ai-space checkout.
+
 ## Stack And Conventions
 
 - TypeScript with `strict` mode and ESM imports. Local imports include the `.ts` extension (`allowImportingTsExtensions`).
