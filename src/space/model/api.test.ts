@@ -59,11 +59,29 @@ function parseSse(text: string): { event: string; data: unknown }[] {
 type RunBody = { ok: boolean; text?: string; error?: string; call: { id: number; app: string; tag: string; model: string; status: string; usage?: { inputTokens: number }; costUsd?: number } };
 
 describe("POST /api/model/run", () => {
+  test("modes reach the CLI and persist in the ledger, including full without a custom system", async () => {
+    for (const mode of ["slim", "full"]) {
+      const res = await post("/api/model/run", { prompt: "hello", mode, system: "Custom persona" }, "sat_my-app");
+      expect(res.status).toBe(200);
+      const body = await res.json() as RunBody;
+      expect(body.text).toContain("--system-prompt Custom persona");
+      expect(body.text?.includes("--safe-mode")).toBe(mode === "slim");
+      expect(body.call).toMatchObject({ mode });
+      expect(store.get(body.call.id)).toMatchObject({ mode });
+    }
+    const native = await (await post("/api/model/run", { prompt: "hello", mode: "full" }, "sat_my-app")).json() as RunBody;
+    expect(native.text).not.toContain("--system-prompt");
+    const count = store.totals(0).calls;
+    for (const bad of [{ mode: "unknown" }, { mode: "slim", tools: ["Read"] }]) {
+      expect((await post("/api/model/run", { prompt: "hello", ...bad }, "sat_my-app")).status).toBe(400);
+    }
+    expect(store.totals(0).calls).toBe(count);
+  });
   test("an app token identifies the app; the answer and the ledger row come back", async () => {
     const res = await post("/api/model/run", { app: "someone-else", prompt: "hello", tag: "translate" }, "sat_my-app");
     expect(res.status).toBe(200);
     const body = (await res.json()) as RunBody;
-    expect(body.text).toBe(`answer to: hello [args: -p --output-format json --model haiku --strict-mcp-config --tools  --system-prompt ${DEFAULT_SYSTEM}]`);
+    expect(body.text).toBe(`answer to: hello [args: -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools  --system-prompt ${DEFAULT_SYSTEM}]`);
     expect(body.call).toMatchObject({ app: "my-app", tag: "translate", model: "haiku", runtime: "claude", backend: "local", status: "ok", usage: { inputTokens: 10 }, costUsd: 0.0123 });
     expect(store.get(body.call.id)).toMatchObject({ app: "my-app", promptChars: 5, runtime: "claude" });
   });
@@ -172,4 +190,15 @@ describe("reads", () => {
     expect(calls.calls[0]!.startedAt).toMatch(/^\d{4}-/);
     expect((await fetch(`${base}/api/model/calls?tag=Bad Tag`)).status).toBe(400);
   });
+});
+
+test("pricing endpoint exposes the same versioned catalogue used by the ledger", async () => {
+  const { GPT_PRICING } = await import("./pricing.ts");
+  const res = await fetch(`${base}/api/model/pricing`);
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ ok: true, ...GPT_PRICING });
+  const p = GPT_PRICING.models["gpt-6-luna"];
+  const c = store.add({ app: "news", tag: "translate", model: "gpt-6-luna", backend: "local", origin: "run", status: "ok", startedAt: Date.now(), durationMs: 1, promptChars: 1,
+    usage: { inputTokens: 1000, cacheWriteTokens: 2000, cacheReadTokens: 3000, outputTokens: 4000 } });
+  expect(c.costUsd).toBeCloseTo((1000 * p.input + 2000 * p.cacheWrite + 3000 * p.cacheRead + 4000 * p.output) / GPT_PRICING.unitTokens, 10);
 });

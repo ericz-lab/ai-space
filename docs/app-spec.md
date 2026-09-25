@@ -466,3 +466,7 @@ notify:
 | `skills`, shared skills under `skills/` | Linked into `<workspace>/.claude/skills/` for sessions started by hand (`src/space/skills.ts`); per-agent mounting planned |
 | JSON Schema (`schema/space.schema.json`), `validate`, `/api/spec` | Planned |
 | `templates/app/`, `new-app`, GitHub repository creation | Planned; the shared skill `skills/space-app/` and its templates cover creation, adoption and edits by hand today |
+
+### Per-task model choice
+
+An HTTP or command task that uses Space model calls may declare `model: codex/junior` next to `name` and `every`. This opts the task into operator model selection in the task panel. Honor the `x-space-model` request header (HTTP) or `SPACE_TASK_MODEL` environment variable (command) ahead of the app's default when calling `/api/model/run`. Use request-local state for concurrent HTTP tasks. Without this integration, omit `model`; the panel then makes no claim that it can change the task's model. See [scheduler.md](scheduler.md#model-selection-in-the-task-panel) for the contract and [runtimes.md](runtimes.md#capability-tiers) for the four tiers.

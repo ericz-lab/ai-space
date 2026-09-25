@@ -34,6 +34,8 @@ export type AgentsApiOptions = {
   runtimes: RuntimeRegistry;
   /** Model when neither the request nor the manifest names one (SPACE_CHAT_MODEL). */
   defaultModel?: string;
+  /** Live workspace preference, applied only to Base. */
+  baseDefaultModel?: () => string;
   /** Provisioned variables for an app, merged into the session environment. */
   envFor?: (app: string) => Promise<Record<string, string>>;
   /** Home directory for transcripts; default: the process's. */
@@ -48,7 +50,7 @@ export type AgentsApiOptions = {
 export const SPACE_APP = "space";
 export const SPACE_AGENT = "assistant";
 
-export function spaceAgentView(): AgentView {
+export function spaceAgentView(runtimes?: RuntimeRegistry, defaultModel?: string): AgentView {
   return {
     id: `${SPACE_APP}/${SPACE_AGENT}`,
     app: SPACE_APP,
@@ -58,8 +60,14 @@ export function spaceAgentView(): AgentView {
     i18n: { zh: { title: "基础", description: "工作区助手：了解各个应用，读取它们的清单和文件，协助运维这个空间。" } },
     avatar: "✨",
     appIcon: "✨",
-    runtime: "claude",
+    runtime: runtimes ? baseRuntime(runtimes, defaultModel) : "claude",
+    ...(runtimes ? { modelOptions: runtimes.tierOptions().filter((o) => o.capabilities.chat) } : {}),
   };
+}
+
+function baseRuntime(runtimes: RuntimeRegistry, defaultModel?: string): string {
+  if (defaultModel?.includes("/")) return defaultModel.split("/")[0]!;
+  return runtimes.get("claude")?.capabilities.chat ? "claude" : runtimes.list().find((r) => r.capabilities.chat)?.name ?? runtimes.default.name;
 }
 
 function spaceAgentPrompt(ws: Workspace): string {
@@ -88,6 +96,7 @@ const MAX_CONTEXT = 24_000;
 
 export function createAgentRoutes(opts: AgentsApiOptions): Routes {
   const { registry, layout, sessions } = opts;
+  const baseDefault = () => opts.baseDefaultModel?.() ?? opts.defaultModel;
 
   const wrap =
     (h: Handler): Handler =>
@@ -106,7 +115,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
 
   const resolveAgent = async (app: string, name: string): Promise<ResolvedAgent> => {
     if (app === SPACE_APP && name === SPACE_AGENT) {
-      return { id: `${SPACE_APP}/${SPACE_AGENT}`, runtime: "claude", cwd: opts.ws.home, systemPrompt: withCatalogue(spaceAgentPrompt(opts.ws), SPACE_APP), tools: [], app: SPACE_APP };
+      return { id: `${SPACE_APP}/${SPACE_AGENT}`, runtime: baseRuntime(opts.runtimes, baseDefault()), cwd: opts.ws.home, systemPrompt: withCatalogue(spaceAgentPrompt(opts.ws), SPACE_APP), tools: [], app: SPACE_APP };
     }
     const entry = registry.get(app);
     const a = entry?.manifest.agents.find((x) => x.name === name);
@@ -129,7 +138,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
       GET: () => {
         const lay = layout.read();
         const hidden = new Set(lay.hidden);
-        const agents: AgentView[] = [spaceAgentView()];
+        const agents: AgentView[] = [spaceAgentView(opts.runtimes, baseDefault())];
         for (const { manifest } of registry.list()) {
           if (hidden.has(manifest.app) || manifest.status === "archived") continue;
           for (const a of manifest.agents) agents.push(agentView(manifest, a));
@@ -142,23 +151,36 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     "/api/agents/:app/:agent/chat": {
       POST: wrap(async (req) => {
         const agent = await resolveAgent(req.params.app ?? "", req.params.agent ?? "");
-        const runtime = opts.runtimes.get(agent.runtime);
-        if (!runtime) return error(501, `runtime ${agent.runtime} is not configured on this space`);
-        if (!runtime.capabilities.chat) return error(501, `runtime ${agent.runtime} does not support chat`);
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
         if (!body) return error(400, "body must be JSON");
         const message = typeof body.message === "string" ? body.message.trim() : "";
         if (!message) return error(400, "message is required");
         if (message.length > MAX_MESSAGE) return error(400, `message is longer than ${MAX_MESSAGE} characters`);
         const sessionId = typeof body.sessionId === "string" && SESSION_ID_RE.test(body.sessionId) ? body.sessionId : undefined;
+        if (body.model !== undefined && (typeof body.model !== "string" || !MODEL_RE.test(body.model))) return error(400, "invalid model");
         const reqModel = typeof body.model === "string" && MODEL_RE.test(body.model) ? body.model : undefined;
-        const model = reqModel ?? agent.model ?? opts.defaultModel;
+        const isBase = agent.id === `${SPACE_APP}/${SPACE_AGENT}`;
+        const previous = sessionId ? sessions.get(agent.id, sessionId) : null;
+        const runtimeName = previous?.runtime ?? (previous && isBase ? "claude" : agent.runtime);
+        // A legacy bare SPACE_CHAT_MODEL (normally sonnet) belongs to Claude, not a Codex-only installation.
+        const configuredDefault = isBase ? baseDefault() : opts.defaultModel;
+        const defaultModel = !isBase || configuredDefault?.includes("/") || opts.runtimes.get(runtimeName)?.kind === "claude-code" ? configuredDefault : undefined;
+        const requested = reqModel ?? previous?.model ?? agent.model ?? (runtimeName === agent.runtime ? defaultModel : undefined);
+        const selected = requested?.includes("/") ? requested : `${runtimeName}/${requested ?? "intermediate"}`;
+        const selectedName = selected.slice(0, selected.indexOf("/"));
+        if (!isBase && selectedName !== agent.runtime) return error(400, "an app agent must use its manifest runtime");
+        if (sessionId && selectedName !== runtimeName) return error(400, "start a new conversation to switch runtimes");
+        const configured = opts.runtimes.get(selectedName);
+        if (!configured) return error(501, `runtime ${selectedName} is not configured on this space`);
+        if (!configured.capabilities.chat) return error(501, `runtime ${selectedName} does not support chat`);
+        const runtime = configured;
+        const model = requested || (isBase && opts.runtimes.tierOptions().some((o) => o.value === selected)) ? opts.runtimes.resolve(selected).model : undefined;
         const permissionMode = typeof body.permissionMode === "string" ? body.permissionMode : undefined;
         const env: Record<string, string | undefined> = { ...process.env, ...(await loadAppEnv(agent.cwd)), ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}) };
         return chatResponse(
           runtime,
           { message, sessionId, model, permissionMode, systemPrompt: agent.systemPrompt, allowedTools: agent.tools, cwd: agent.cwd, env },
-          { onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40)) },
+          { onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model) },
         );
       }),
     },
@@ -176,8 +198,9 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const sid = req.params.sid ?? "";
         if (!SESSION_ID_RE.test(sid)) return error(400, "invalid session id");
         // The runtime that ran the session keeps its record; `home` (tests) reads Claude Code's from elsewhere.
-        const runtime = opts.runtimes.get(agent.runtime);
-        const messages = opts.home ? await readTranscript(agent.cwd, sid, opts.home) : runtime?.transcript ? await runtime.transcript(agent.cwd, sid) : null;
+        const previous = sessions.get(agent.id, sid);
+        const runtime = opts.runtimes.get(previous?.runtime ?? (previous && agent.id === `${SPACE_APP}/${SPACE_AGENT}` ? "claude" : agent.runtime));
+        const messages = opts.home && runtime?.kind === "claude-code" ? await readTranscript(agent.cwd, sid, opts.home) : runtime?.transcript ? await runtime.transcript(agent.cwd, sid) : null;
         if (!messages) return error(404, "transcript not found");
         return json({ ok: true, messages });
       }),

@@ -20,8 +20,8 @@ export function recordAgentRun(service: ModelService, log: (m: string) => void =
       service.recordExternal({
         app: task.app,
         tag: task.name,
-        model: task.target.model ?? "default",
-        runtime: task.target.runtime,
+        model: result.model ?? task.target.model ?? "default",
+        runtime: result.runtime ?? task.target.runtime,
         backend: result.backend ?? "local",
         ok: result.status === "ok",
         error: result.status === "ok" ? undefined : (result.error ?? result.status),

@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
-import { FILE_NAME_PATTERN, type AgentOutcome, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, FILE_NAME_PATTERN, type AgentOutcome, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /**
  * Claude Code as a runtime. Three operations, one CLI:
@@ -55,6 +55,7 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
     capabilities: { complete: true, agent: true, chat: true },
 
     async complete(input, signal, onDelta) {
+      assertCompletionMode(input);
       const stream = onDelta !== undefined;
       const badName = input.files?.find((f) => !FILE_NAME_PATTERN.test(f.name));
       if (badName) return { ok: false, error: `file name not allowed: ${badName.name}`, backend };
@@ -114,8 +115,12 @@ export function filesNote(files: CompleteFile[], pathOf: (f: CompleteFile) => st
 
 /** Command line for the CLI on this machine; exported for tests. */
 export function cliArgs(bin: string[], input: CompleteInput, stream = false): string[] {
+  assertCompletionMode(input);
   const tools = toolList(input);
-  return [...bin, "-p", ...formatArgs(stream), "--model", input.model, "--strict-mcp-config", "--tools", tools, ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", input.system];
+  const context = input.mode === "full" ? [] : ["--safe-mode", "--strict-mcp-config"];
+  const toolArgs = input.mode === "full" && !tools ? [] : ["--tools", tools, ...(tools ? ["--allowedTools", tools] : [])];
+  return [...bin, "-p", ...formatArgs(stream), "--model", input.model, ...context, ...toolArgs,
+    ...(input.system ? ["--system-prompt", input.system] : [])];
 }
 
 export type FileBlob = { name: string; bytes: Uint8Array };
@@ -135,12 +140,13 @@ const SAFE_ARG = /^[A-Za-z0-9._:/@,()*-]+$/;
  */
 export function remoteCommand(bin: string[], input: CompleteInput, stream = false, blobs: FileBlob[] = []): { command: string; spool?: { dir: string; archive: Uint8Array } } | { bad: string } {
   const tools = toolList(input);
-  const words = [...bin, "-p", ...formatArgs(stream), "--model", input.model, "--strict-mcp-config"];
+  assertCompletionMode(input);
+  const words = [...bin, "-p", ...formatArgs(stream), "--model", input.model, ...(input.mode === "full" ? [] : ["--safe-mode", "--strict-mcp-config"])];
   const bad = [...words, ...(tools ? [tools] : []), ...blobs.map((b) => b.name)].find((w) => !SAFE_ARG.test(w) || (blobs.some((b) => b.name === w) && !FILE_NAME_PATTERN.test(w)));
   if (bad) return { bad };
   const system = Buffer.from(input.system, "utf8").toString("base64");
   const env = input.thinking === undefined ? [] : [`MAX_THINKING_TOKENS=${Math.trunc(input.thinking)}`];
-  const parts = [...env, ...words, "--tools", tools ? tools : '""', ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", `"$(printf %s ${system} | base64 -d)"`];
+  const parts = [...env, ...words, ...(input.mode === "full" && !tools ? [] : ["--tools", tools ? tools : '""', ...(tools ? ["--allowedTools", tools] : [])]), ...(input.system ? ["--system-prompt", `"$(printf %s ${system} | base64 -d)"`] : [])];
   // The prompt is spooled to a file before the CLI starts: the CLI gives up on stdin after 3 s,
   // and a prompt of a few hundred KB can take longer than that to cross a slow ssh link.
   if (!blobs.length) return { command: `f=$(mktemp) && cat > "$f" && ${parts.join(" ")} < "$f"; rc=$?; rm -f "$f"; exit $rc` };

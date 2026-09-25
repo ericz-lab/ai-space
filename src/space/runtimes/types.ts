@@ -12,7 +12,7 @@
  * runs.
  */
 
-export const RUNTIME_KINDS = ["claude-code", "anthropic-api", "deepseek-harness"] as const;
+export const RUNTIME_KINDS = ["claude-code", "anthropic-api", "deepseek-harness", "codex-cli"] as const;
 export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 
 /** A runtime's name in the configuration and in the ledger (`claude`, `api`, `dsh`). */
@@ -31,13 +31,15 @@ export type Usage = {
 /** One request for an answer, after validation (the model service's request body). */
 export type CompleteInput = {
   prompt: string;
-  /** Replaces the runtime's own system prompt. */
+  /** Omitted preserves legacy behavior; text-only calls default to slim. */
+  mode?: CompletionMode;
+  /** Custom system instructions replace native base instructions in either mode. */
   system: string;
   /** Model as the runtime names it, without the `runtime/` prefix. */
   model: string;
   /** Purpose of the call inside the app; `other` when not given. */
   tag: string;
-  /** Tools the runtime may use; none by default. */
+  /** Explicit tool selection; slim rejects it, full uses native tools when empty. */
   tools: string[];
   timeoutMs: number;
   /** Output cap where the runtime has one (the API); a CLI has none. */
@@ -53,6 +55,15 @@ export type CompleteInput = {
    */
   files?: CompleteFile[];
 };
+
+export const COMPLETION_MODES = ["slim", "full"] as const;
+export type CompletionMode = (typeof COMPLETION_MODES)[number];
+
+/** Explicit slim calls never silently acquire tools through attachments. */
+export function assertCompletionMode(input: CompleteInput): void {
+  if (input.mode !== undefined && !COMPLETION_MODES.includes(input.mode)) throw new Error("mode must be slim or full");
+  if (input.mode === "slim" && (input.tools.length || input.files?.length)) throw new Error("slim mode does not support tools or files; use full mode");
+}
 
 export type CompleteFile = { name: string; path: string };
 
@@ -183,7 +194,19 @@ export type DeepseekHarnessSpec = {
   sshHost?: string;
 };
 
-export type RuntimeSpec = ClaudeCodeSpec | AnthropicApiSpec | DeepseekHarnessSpec;
+/** Codex CLI: slim/full completions and persistent local chat using the CLI's saved login. */
+export type CodexCliSpec = {
+  name: string;
+  kind: "codex-cli";
+  bin: string[];
+  sshHost?: string;
+};
+
+export const MODEL_TIERS = ["basic", "junior", "intermediate", "advanced"] as const;
+export type ModelTier = (typeof MODEL_TIERS)[number];
+export type TierModels = Partial<Record<ModelTier, string>>;
+
+export type RuntimeSpec = (ClaudeCodeSpec | AnthropicApiSpec | DeepseekHarnessSpec | CodexCliSpec) & { models?: TierModels };
 
 export type RuntimesConfig = {
   /** Runtime a bare model name (no `runtime/` prefix) goes to. */

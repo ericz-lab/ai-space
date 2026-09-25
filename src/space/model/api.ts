@@ -1,3 +1,4 @@
+import { GPT_PRICING } from "./pricing.ts";
 import type { ModelService } from "./service.ts";
 import { parseRunInput, parseWindow } from "./spec.ts";
 import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts";
@@ -28,7 +29,7 @@ export type ModelApiOptions = {
   /** Resolve an app's own token to its name. */
   appForToken?: (token: string) => Promise<string | undefined>;
   /** Model when the request names none (SPACE_MODEL_DEFAULT). */
-  defaultModel?: string;
+  defaultModel?: string | (() => string);
 };
 
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
@@ -57,6 +58,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
   };
 
   return {
+    "/api/model/pricing": { GET: () => json({ ok: true, ...GPT_PRICING }) },
     "/api/model/run": {
       POST: async (req) => {
         let app: string;
@@ -68,7 +70,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
           body = parsed;
           if (body.stream !== undefined && typeof body.stream !== "boolean") return error(400, "stream must be a boolean");
           app = await resolveApp(req, body);
-          input = parseRunInput(body, { model: opts.defaultModel });
+          input = parseRunInput(body, { model: typeof opts.defaultModel === "function" ? opts.defaultModel() : opts.defaultModel });
           // An unknown `runtime/` prefix is the request's mistake, not a model failure.
           service.resolve(input.model);
         } catch (e) {
@@ -183,6 +185,7 @@ export function view(c: ModelCall) {
     tag: c.tag,
     model: c.model,
     runtime: c.runtime,
+    mode: c.mode,
     backend: c.backend,
     origin: c.origin,
     status: c.status,

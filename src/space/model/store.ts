@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { MODEL_COST_SQL } from "./pricing.ts";
 import { type CallStatus, type ModelCall, type ModelCallInput, type Origin, type Usage, type UsageTotals } from "./types.ts";
 
 /**
@@ -33,7 +34,7 @@ CREATE INDEX IF NOT EXISTS model_calls_started ON model_calls(started_at DESC);
 CREATE INDEX IF NOT EXISTS model_calls_app_started ON model_calls(app, started_at DESC);
 `;
 
-const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [{ table: "model_calls", column: "runtime", ddl: "TEXT" }];
+const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [{ table: "model_calls", column: "runtime", ddl: "TEXT" }, { table: "model_calls", column: "mode", ddl: "TEXT" }];
 
 /** Days of ledger kept; 0 keeps everything (the default: the ledger is the history the panel shows). */
 export const DEFAULT_RETENTION_DAYS = 0;
@@ -44,6 +45,7 @@ type Row = {
   tag: string;
   model: string;
   runtime: string | null;
+  mode: ModelCall["mode"] | null;
   backend: string;
   origin: string;
   status: string;
@@ -57,6 +59,7 @@ type Row = {
   cache_read_tokens: number | null;
   output_tokens: number | null;
   cost_usd: number | null;
+  effective_cost_usd: number | null;
 };
 
 const TOTALS_SQL = `
@@ -66,7 +69,7 @@ const TOTALS_SQL = `
   COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
   COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
   COALESCE(SUM(output_tokens), 0) AS output_tokens,
-  COALESCE(SUM(cost_usd), 0) AS cost_usd,
+  COALESCE(SUM(${MODEL_COST_SQL}), 0) AS cost_usd,
   COALESCE(SUM(duration_ms), 0) AS duration_ms`;
 
 type TotalsRow = { calls: number; errors: number; input_tokens: number; cache_write_tokens: number; cache_read_tokens: number; output_tokens: number; cost_usd: number; duration_ms: number };
@@ -96,15 +99,16 @@ export class ModelStore {
   add(c: ModelCallInput): ModelCall {
     const r = this.db
       .query(
-        `INSERT INTO model_calls (app, tag, model, runtime, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
+        `INSERT INTO model_calls (app, tag, model, runtime, mode, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
                                   input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, cost_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         c.app,
         c.tag,
         c.model,
         c.runtime ?? null,
+        c.mode ?? null,
         c.backend,
         c.origin,
         c.status,
@@ -120,7 +124,7 @@ export class ModelStore {
         c.costUsd ?? null,
       );
     if (this.retentionMs) this.db.query("DELETE FROM model_calls WHERE started_at < ?").run(c.startedAt - this.retentionMs);
-    return { id: Number(r.lastInsertRowid), ...c };
+    return { ...c, id: Number(r.lastInsertRowid), costUsd: this.get(Number(r.lastInsertRowid))?.costUsd };
   }
 
   /** Insert imported rows in one transaction, skipping those already present (same app, start, tag, duration). */
@@ -171,7 +175,7 @@ export class ModelStore {
   }
 
   get(id: number): ModelCall | undefined {
-    const row = this.db.query<Row, [number]>("SELECT * FROM model_calls WHERE id = ?").get(id);
+    const row = this.db.query<Row, [number]>(`SELECT *, ${MODEL_COST_SQL} AS effective_cost_usd FROM model_calls WHERE id = ?`).get(id);
     return row ? rowToCall(row) : undefined;
   }
 
@@ -191,7 +195,7 @@ export class ModelStore {
       where.push("started_at >= ?");
       args.push(opts.since);
     }
-    const sql = `SELECT * FROM model_calls ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY started_at DESC, id DESC LIMIT ?`;
+    const sql = `SELECT *, ${MODEL_COST_SQL} AS effective_cost_usd FROM model_calls ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY started_at DESC, id DESC LIMIT ?`;
     return this.db.query<Row, (string | number)[]>(sql).all(...args, limit).map(rowToCall);
   }
 
@@ -263,6 +267,7 @@ function rowToCall(r: Row): ModelCall {
     tag: r.tag,
     model: r.model,
     runtime: r.runtime ?? undefined,
+    ...(r.mode ? { mode: r.mode } : {}),
     backend: r.backend,
     origin: r.origin as Origin,
     status: r.status as CallStatus,
@@ -272,6 +277,6 @@ function rowToCall(r: Row): ModelCall {
     promptChars: r.prompt_chars,
     outputChars: r.output_chars ?? undefined,
     usage,
-    costUsd: r.cost_usd ?? undefined,
+    costUsd: r.effective_cost_usd ?? undefined,
   };
 }

@@ -212,3 +212,19 @@ provides:
     expect(() => parseManifest("name: a\nprovides: [1]\n", "/apps/a")).toThrow(/must map capability names/);
   });
 });
+
+test("task-level model opts HTTP and command tasks into model selection", () => {
+  const manifest = parseManifest(`name: demo
+tasks:
+  - name: news
+    every: 5m
+    model: codex/junior
+    run: { http: { url: "http://localhost:8000/run" } }
+  - name: command
+    every: 1h
+    model: claude/intermediate
+    run: { command: "true" }
+`, "/demo");
+  expect(manifest.tasks.map((t) => t.target.model)).toEqual(["codex/junior", "claude/intermediate"]);
+  expect(() => parseManifest("name: demo\ntasks:\n  - name: test\n    every: 5m\n    model: bad\n    run: { command: 'true' }", "/demo")).toThrow(/runtime\/model/);
+});

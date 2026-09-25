@@ -4,6 +4,7 @@ import { SessionStore, createAgentRoutes } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, LayoutStore, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
 import { ModelService, ModelStore, createModelRoutes, recordAgentRun } from "./space/model/index.ts";
+import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
 import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts";
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
@@ -56,10 +57,13 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const loaded = await loadRuntimes(ws.home, env);
   for (const w of loaded.warnings) console.warn(`[runtimes] ${w}`);
   const runtimes = new RuntimeRegistry(loaded.config);
+  const modelPreferences = new ModelPreferences(store.db, runtimes);
+  const appDefaultModel = () => modelPreferences.read() ?? config.model.defaultModel;
+  const baseDefaultModel = () => modelPreferences.read() ?? config.chatModel;
   const modelStore = new ModelStore(config.dbPath, { retentionDays: config.model.retentionDays });
   const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency });
   const chatStore = new ChatStore(config.dbPath);
-  const chat = new ChatService({ store: chatStore, model, defaultModel: config.model.defaultModel, fileDir: (app) => join(storage.appDataDir(app), "chat") });
+  const chat = new ChatService({ store: chatStore, model, defaultModel: appDefaultModel, fileDir: (app) => join(storage.appDataDir(app), "chat") });
   // The widget apps embed is bundled once at boot; SPACE_DEV=1 rebuilds it on every request.
   const widget = buildWidget({ dev: process.env.SPACE_DEV === "1" });
   // Agent tasks run on their runtime from the scheduler; their usage reaches the ledger from the run result.
@@ -206,7 +210,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
     ...(config.serviceStop ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) } : {}),
   });
-  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, envFor: (app) => storage.envFor(app), peers, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
+  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, baseDefaultModel, envFor: (app) => storage.envFor(app), peers, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");
@@ -224,6 +228,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createRoutes({
         scheduler,
         store,
+        runtimes,
         token: config.apiToken,
         resolve,
         onManifest: provision,
@@ -251,7 +256,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         apps: () => scheduler.apps().filter((app) => store.findTask(app, BACKUP_TASK)?.orphaned === false),
       }),
       ...createNotifyRoutes({ notify, store: notifyStore, token: config.apiToken, appForToken: (t) => storage.appForToken(t) }),
-      ...createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), defaultModel: config.model.defaultModel }),
+      ...createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel }),
+      ...createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), defaultModel: appDefaultModel }),
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
       ...createRouterRoutes({ router }),

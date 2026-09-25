@@ -511,3 +511,38 @@ describe("shutdown", () => {
     expect(after.state.consecutiveErrors).toBe(0);
   });
 });
+
+describe("task model overrides", () => {
+  test("survive sync, restore defaults and apply to scheduled and manual runs", async () => {
+    const seen: (string | undefined)[] = [];
+    const h = harness({ runner: async (task) => { seen.push(task.target.model); return { status: "ok" }; } });
+    const manifest = h.manifest([mt("ai", { target: { kind: "command", command: "true", model: "codex/junior" } })]);
+    h.s.syncManifest(manifest);
+    const task = h.store.findTask("demo", "ai")!;
+    h.s.patchTask(task.id, { model: "codex/intermediate" });
+    h.s.syncManifest(manifest);
+    expect(h.store.getTask(task.id)!.overrides.model).toBe("codex/intermediate");
+    await h.s.tick(); await h.s.idle();
+    expect(seen).toEqual(["codex/intermediate"]);
+    h.s.patchTask(task.id, { model: null });
+    expect(h.s.runNow(task.id)).toBe(true); await h.s.idle();
+    expect(seen).toEqual(["codex/intermediate", "codex/junior"]);
+    expect(h.store.getTask(task.id)!.target.model).toBe("codex/junior");
+    h.s.stop(); h.store.close();
+  });
+  test("an in-flight run retains its selection; unsupported tasks reject overrides", async () => {
+    let finish!: () => void;
+    let running: Task | undefined;
+    const h = harness({ runner: async (task) => { running = task; await new Promise<void>((r) => { finish = r; }); return { status: "ok" }; } });
+    const task = h.s.addTask({ app: "demo", name: "ai", schedule: every(60_000), target: { kind: "agent", runtime: "claude", prompt: "p.md", model: "sonnet" } });
+    h.s.patchTask(task.id, { model: "claude/intermediate" });
+    h.s.runNow(task.id); await Bun.sleep(0);
+    h.s.patchTask(task.id, { model: "claude/advanced" });
+    expect(running!.target).toMatchObject({ runtime: "claude", model: "intermediate" });
+    finish(); await h.s.idle();
+    const plain = h.s.addTask({ app: "demo", name: "plain", schedule: every(60_000), target: cmd("true") });
+    expect(() => h.s.patchTask(plain.id, { model: "codex/basic" })).toThrow(/not opted/);
+    expect(() => h.s.patchTask(task.id, { model: "oops\nvalue" })).toThrow(/runtime/);
+    h.s.stop(); h.store.close();
+  });
+});

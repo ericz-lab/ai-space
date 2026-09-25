@@ -26,7 +26,7 @@ export type ChatServiceOptions = {
   /** Directory for an app's attachment files (`<workspace>/data/<app>/chat`). */
   fileDir: (app: string) => string;
   /** Model when a turn names none (SPACE_MODEL_DEFAULT). */
-  defaultModel: string;
+  defaultModel: string | (() => string);
   log?: (message: string) => void;
   now?: () => number;
 };
@@ -64,7 +64,7 @@ export class ChatService {
   readonly store: ChatStore;
   private readonly model: ModelService;
   private readonly fileDir: (app: string) => string;
-  readonly defaultModel: string;
+  readonly defaultModel: string | (() => string);
   private readonly log: (m: string) => void;
   private readonly now: () => number;
   private readonly running = new Set<number>();
@@ -180,7 +180,7 @@ export class ChatService {
       const { outcome, call } = await this.model.run(
         app,
         {
-          prompt, system: input.context?.system ?? DEFAULT_SYSTEM, model: input.model ?? this.defaultModel, tag: "chat", tools: input.tools,
+          prompt, system: input.context?.system ?? DEFAULT_SYSTEM, model: input.model ?? (typeof this.defaultModel === "function" ? this.defaultModel() : this.defaultModel), tag: "chat", tools: input.tools,
           timeoutMs: input.timeoutMs, maxTokens: MAX_OUTPUT_TOKENS, ...(input.thinking !== undefined ? { thinking: input.thinking } : {}), ...(files.length ? { files } : {}),
         },
         signal,

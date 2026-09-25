@@ -1,5 +1,7 @@
 # Model service design
 
+For the operator guide to capability tiers, request modes, and custom system prompts, see [Model Tiers and Request Modes](model-tiers-and-modes.md).
+
 The model service is the Space-layer answer to "run this prompt through a model". An app hands ai-space a prompt and a purpose; ai-space runs it on the backend the workspace is configured for, returns the answer with the usage the runtime reported, and writes one row to a ledger. Agent tasks the scheduler runs land in the same ledger. The panel shows the ledger by app, purpose, model and backend over a rolling window.
 
 Status: implemented in `src/space/model/` (runner with three backends, ledger, service, API, scheduler hook, panel view).
@@ -18,7 +20,7 @@ Goals:
 
 - One backend configuration per workspace. Apps never hold an API key or an ssh host.
 - One ledger for every model call on the machine, whether an app asked for it or the scheduler ran an agent task.
-- Honest figures: token counts and cost are what the runtime reported. A call whose runtime reported nothing is recorded with the count of calls and no token figures; nothing is estimated from prompt length.
+- Honest figures: token counts are what the runtime reported. Reported costs take precedence; GPT calls without a reported cost use the standard API-equivalent estimate described below. A call whose runtime reported nothing is recorded with the count of calls and no token figures; nothing is estimated from prompt length.
 - A concurrency cap, so an app in a loop cannot start fifty runtimes at once.
 - Apps in any language can participate. The contract is one HTTP request.
 
@@ -50,7 +52,7 @@ The Claude Code runtime starts `claude` lean. Measured on one machine with a one
 | `--system-prompt "…" --strict-mcp-config --tools ""` | 393 in total, nothing cached |
 | the same with `--tools WebSearch --allowedTools WebSearch` | 1,538 |
 
-So every call gets `--system-prompt` (the request's `system`, or a two-sentence default), `--strict-mcp-config` (no MCP servers), and `--tools` set to exactly the tools the request named, with `""` when it named none. Over ssh the system prompt travels base64-encoded and is decoded by the remote shell, so free text never meets the command line. The prompt itself is spooled into a temporary file on the remote machine (`cat > "$f"`) before the CLI starts, because the CLI stops waiting for stdin after three seconds and a prompt of a few hundred KB can take longer than that to cross a slow link (measured 2026-09-19 over a Cloudflare-proxied ssh: 600 KB arrived at once, 780 KB only after three seconds, and the call failed).
+So a default slim call gets `--system-prompt` (the request's `system`, or a two-sentence default), `--strict-mcp-config` (no MCP servers), and `--tools` set to exactly the tools the request named, with `""` when it named none. Over ssh the system prompt travels base64-encoded and is decoded by the remote shell, so free text never meets the command line. The prompt itself is spooled into a temporary file on the remote machine (`cat > "$f"`) before the CLI starts, because the CLI stops waiting for stdin after three seconds and a prompt of a few hundred KB can take longer than that to cross a slow link (measured 2026-09-19 over a Cloudflare-proxied ssh: 600 KB arrived at once, 780 KB only after three seconds, and the call failed).
 
 A call may carry files (`CompleteInput.files`, internal to the space: the chat service's image attachments). The Claude Code runtime then adds `Read` to the call's tools and ends the prompt with a note naming each file and where it is. Locally that is the path the caller gave. Over ssh the prompt and the files travel on the one stdin as a tar archive built in memory (`src/space/runtimes/tar.ts`); the remote command is `dir=/tmp/sc-<16 hex>; mkdir "$dir" && tar -xf - -C "$dir" && claude … < "$dir/prompt"; rc=$?; rm -rf "$dir"; exit $rc`, so the directory is gone whatever the CLI did. File names are generated (`a17.png`), never the person's, and are checked against the same safe character set as every other word. The API and dsh runtimes refuse a call with files.
 
@@ -69,10 +71,11 @@ What an app sends to `POST /api/model/run`:
 | field | type | meaning |
 | --- | --- | --- |
 | `prompt` | string | The whole prompt. Required; at most 2 MB. |
-| `system` | string? | The system prompt. Replaces the CLI's own; default: "You answer one request from an application. Reply with exactly what it asks for and nothing else." At most 200K characters: an app may put a slowly changing reference list (the catalogue a classification maps onto) here, where the CLI caches it across calls, and keep only the varying material in `prompt`. |
+| `mode` | `"slim"` or `"full"`? | Text-only calls default to slim. Full retains the native CLI context and tools; supported by Claude Code and Codex CLI. See [completion modes](runtimes.md#completion-modes). |
+| `system` | string? | The system prompt. Replaces the CLI's native base instructions in either mode. Full without `system` retains native instructions; slim default: "You answer one request from an application. Reply with exactly what it asks for and nothing else." At most 200K characters: an app may put a slowly changing reference list (the catalogue a classification maps onto) here, where the CLI caches it across calls, and keep only the varying material in `prompt`. |
 | `model` | string? | A model alias or id as `claude --model` accepts it. Default `SPACE_MODEL_DEFAULT`. |
 | `tag` | string? | The purpose of the call inside the app: `translate`, `story`, `digest`. Default `other`. This is the grain the panel groups by. |
-| `tools` | string[]? | Tools the CLI may use, as `--allowedTools` takes them (`WebSearch`, `Bash(git:*)`). None by default; refused on the API backend. |
+| `tools` | string[]? | Tools the CLI may use, as `--allowedTools` takes them (`WebSearch`, `Bash(git:*)`). None in slim (nonempty lists are rejected); native tools in full when omitted. Explicit lists are supported by Claude Code, refused by Codex and the API backend. Omitting mode retains the legacy selective-tool behavior. |
 | `timeoutMs` | number? | Default 120 s, at most 30 min. |
 | `maxTokens` | number? | Output cap on the API backend; the CLI has none. Default 4096. |
 | `thinking` | number? | Cap on thinking tokens; `0` turns thinking off. Absent = the runtime's default. A translation or a rating needs none; a classification over a long list may want a few thousand. |
@@ -103,7 +106,7 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 | `startedAt`, `durationMs` | Wall clock of the whole call including any wait for a slot. |
 | `promptChars`, `outputChars` | Sizes only; prompts and answers are not stored. |
 | `usage` | `inputTokens`, `cacheWriteTokens`, `cacheReadTokens`, `outputTokens`, as reported; absent when the runtime reported none. |
-| `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend; absent otherwise. |
+| `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend. GPT-6 Astra/Sol/Luna and GPT-5.6 Sol/Terra/Luna calls without a reported cost use standard API list prices (verified 2026-09-23); absent for unknown models or incomplete usage. |
 
 ### Restarts
 
@@ -175,3 +178,15 @@ An app that shows the answer while it is written adds `stream: true` and reads t
 - Daily budgets that turn a call into `429 budget exceeded`, which an app treats as skipped.
 - Peer ledgers in the hub's view (`docs/peers.md`).
 - Batch hints: the service could tell an app, from its own ledger, that its calls are mostly fixed overhead.
+
+### GPT cost estimates
+
+`src/space/model/gpt-prices.json` holds the model-specific rates from [OpenAI pricing](https://developers.openai.com/api/docs/pricing). The ledger estimates costs per call at read time, including existing rows, without rewriting the stored cost. Non-cached input, cache writes, cache reads and output are charged separately. Above 272,000 total input tokens per call, input/cache rates double and output rates multiply by 1.5. The same expression feeds recent calls, grouped totals and daily history. Reported costs (including zero) always win. Unknown models and missing input/output usage stay unpriced and contribute nothing to cost totals.
+
+These are standard API-equivalent estimates, not subscription bills. The ledger does not record service tier, regional processing or tool charges, so those adjustments are excluded. Historical estimates follow the checked-in price table.
+
+### Shared GPT price catalogue
+
+`GET /api/model/pricing` is a read-only route, with the same loopback access boundary as model usage. It returns `{ ok: true, version: 1, asOf, currency: "USD", unitTokens: 1000000, source, models }`. Each model has `input`, `cacheWrite`, `cacheRead`, `output`, `longContext` (`{ threshold, inputMultiplier, outputMultiplier }` or null), and `fastMultiplier` (number or null). Null means unavailable, not zero. Rates and policy values come from `gpt-prices.json`; both the ledger SQL and the HTTP route consume that file. It also covers GPT-5.4 and GPT-5.3 Codex so consumers can price their older history. Date-suffixed snapshot ids use the base model rate.
+
+ai-usage fetches and caches this catalogue instead of maintaining GPT prices itself. Updating this configuration and deploying ai-space updates consumer estimates after their next refresh; historical rows use the current catalogue. The ledger assumes Standard because it has no service-tier data, while ai-usage can apply Fast multipliers when its transcript records a tier.

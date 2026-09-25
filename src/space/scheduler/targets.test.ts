@@ -134,7 +134,7 @@ printf '{"type":"result","result":"done: %s","total_cost_usd":0.25,"usage":{"inp
     );
     try {
       const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "haiku" }, ctx(1000, [fake]));
-      expect(r).toEqual({ status: "ok", output: "done: hello agent", usage: { inputTokens: 1, cacheWriteTokens: 3, cacheReadTokens: 4, outputTokens: 2 }, costUsd: 0.25, promptChars: 11, backend: "local" });
+      expect(r).toEqual({ status: "ok", output: "done: hello agent", usage: { inputTokens: 1, cacheWriteTokens: 3, cacheReadTokens: 4, outputTokens: 2 }, costUsd: 0.25, promptChars: 11, backend: "local", runtime: "claude", model: "haiku" });
       process.env.FAKE_AGENT_MODE = "error";
       const bad = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx(1000, [fake]));
       expect(bad).toMatchObject({ status: "error", error: "boom" });
@@ -206,4 +206,24 @@ describe("extra env from the scheduler", () => {
     expect(r.status).toBe("ok");
     expect(r.output).toBe("from space/sqlite:///x.db");
   });
+});
+
+test("model selection reaches HTTP and command tasks without leaking between runs", async () => {
+  const receiver = Bun.serve({ port: 0, fetch: (req) => Response.json({ model: req.headers.get("x-space-model") }) });
+  try {
+    const request = { kind: "http" as const, method: "POST" as const, url: `http://localhost:${receiver.port}`, model: "codex/junior", headers: { "X-Space-Model": "claude/basic" } };
+    const result = await runTarget(request, ctx());
+    expect(JSON.parse(result.output!).model).toBe("codex/junior");
+    const plain = await runTarget({ ...request, model: undefined, headers: {} }, ctx());
+    expect(JSON.parse(plain.output!).model).toBeNull();
+    const command = await runTarget({ kind: "command", command: 'printf %s "$SPACE_TASK_MODEL"', model: "codex/intermediate", env: { SPACE_TASK_MODEL: "old" } }, ctx());
+    expect(command.output).toBe("codex/intermediate");
+  } finally { receiver.stop(true); }
+});
+
+test("agent tier resolves before execution and reports the actual model", async () => {
+  const { fakeModelBin } = await import("../runtimes/testing.ts");
+  const result = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "intermediate" }, ctx(2000, fakeModelBin()));
+  expect(result).toMatchObject({ status: "ok", runtime: "claude", model: "opus" });
+  expect(result.output).toContain("--model opus");
 });

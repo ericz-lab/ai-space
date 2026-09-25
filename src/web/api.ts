@@ -16,6 +16,7 @@ export type AgentInfo = {
   /** The owning app's icon, shown in the corner of the tile. */
   appIcon: string;
   runtime: string;
+  modelOptions?: { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string }[];
 };
 
 export type AppInfo = {
@@ -82,7 +83,7 @@ export type PeerInfo = {
 
 export type Layout = { order: { apps: string[]; agents: string[]; widgets: string[] }; hidden: string[]; sizes: Record<string, string> };
 
-export type ChatSession = { sid: string; title: string; ts: number };
+export type ChatSession = { sid: string; title: string; ts: number; runtime?: string | null; model?: string | null };
 
 export async function getJson<T>(path: string): Promise<T> {
   const r = await fetch(path);
@@ -147,7 +148,10 @@ export type TaskInfo = {
   target: { kind: "http" | "command" | "agent" };
   timeoutMs: number;
   triggers: TriggerInfo[];
-  overrides: { enabled?: boolean; schedule?: Schedule };
+  overrides: { enabled?: boolean; schedule?: Schedule; model?: string };
+  model?: string;
+  modelSelectable?: boolean;
+  base?: { model?: string };
   state: {
     nextRunAt?: string;
     runningAt?: string;

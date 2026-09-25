@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type RuntimeKind, type RuntimeSpec, type RuntimesConfig } from "./types.ts";
+import { MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type ModelTier, type RuntimeKind, type RuntimeSpec, type RuntimesConfig, type TierModels } from "./types.ts";
 
 /**
  * Which runtimes a space has: `<workspace>/runtimes.yaml`, or, when the file
@@ -64,7 +64,19 @@ export function parseRuntimesYaml(text: string, env: Record<string, string | und
     if (typeof kind !== "string" || !(RUNTIME_KINDS as readonly string[]).includes(kind)) throw new Error(`${RUNTIMES_FILE}: runtime ${name}: kind must be one of ${RUNTIME_KINDS.join(", ")}`);
     const spec = parseSpec(name, kind as RuntimeKind, raw, env);
     if ("warning" in spec) warnings.push(spec.warning);
-    else runtimes.push(spec);
+    else {
+      if (raw.models !== undefined) {
+        if (!isRecord(raw.models)) throw new Error(`${RUNTIMES_FILE}: runtime ${name}: models must be a mapping`);
+        const models: TierModels = {};
+        for (const [tier, model] of Object.entries(raw.models)) {
+          if (!(MODEL_TIERS as readonly string[]).includes(tier)) throw new Error(`${RUNTIMES_FILE}: unknown model tier ${tier}`);
+          if (typeof model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(model) || (MODEL_TIERS as readonly string[]).includes(model)) throw new Error(`${RUNTIMES_FILE}: ${tier} must name a concrete model`);
+          models[tier as ModelTier] = model;
+        }
+        spec.models = models;
+      }
+      runtimes.push(spec);
+    }
   }
   if (runtimes.length === 0) throw new Error(`${RUNTIMES_FILE}: no usable runtime (${warnings.join("; ")})`);
 
@@ -79,9 +91,15 @@ function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>
     "claude-code": ["kind", "ssh", "bin", "chatArgs"],
     "anthropic-api": ["kind", "apiKeyEnv", "url"],
     "deepseek-harness": ["kind", "ssh", "bin", "home", "profile"],
+    "codex-cli": ["kind", "ssh", "bin"],
   };
-  for (const key of Object.keys(raw)) if (!allowed[kind].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
+  for (const key of Object.keys(raw)) if (key !== "models" && !allowed[kind].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
   switch (kind) {
+    case "codex-cli": {
+      const sshHost = optionalString(raw.ssh, `${ctx}: ssh`);
+      if (sshHost && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);
+      return { name, kind, bin: command(raw.bin, `${ctx}: bin`), ...(sshHost ? { sshHost } : {}) };
+    }
     case "claude-code": {
       const sshHost = optionalString(raw.ssh, `${ctx}: ssh`);
       if (sshHost && !/^[A-Za-z0-9._@-]+$/.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);

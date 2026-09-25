@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import ModelPreference from "./ModelPreference.tsx";
 import Chat from "./Chat.tsx";
 import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
@@ -508,6 +509,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       .then(([p, a]) => {
         setApps(p.apps);
         setAgents(a.agents);
+        setChatAgent((current) => a.agents.find((agent) => agent.id === current.id) ?? current);
         setLoaded(true);
         if (p.apps.some((x) => x.service?.health === "unknown"))
           setTimeout(() => getJson<{ apps: AppInfo[] }>("/api/apps").then((d) => setApps(d.apps)).catch(() => {}), PROBE_MS);
@@ -870,6 +872,12 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                   ))}
                 </select>
               </label>
+              <ModelPreference onSaved={() => {
+                void getJson<{ agents: AgentInfo[] }>("/api/agents").then((d) => {
+                  setAgents(d.agents);
+                  setChatAgent((current) => d.agents.find((a) => a.id === current.id) ?? current);
+                }).catch(() => {});
+              }} />
               <p className="sethead">{t("settings.scheduler")}</p>
               <button
                 className="setrow setlink"

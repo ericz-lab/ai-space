@@ -662,3 +662,11 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
 .tile[data-drop="after"]::after, .widget[data-drop="after"]::after { right: -8px; }
 
 /* Health dot on an app tile (service declared a health path). */
+
+.task-model { margin: 12px 0; }
+.task-model label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+.task-model-controls { display: flex; align-items: center; gap: 8px; }
+.task-model-controls select { min-width: 0; flex: 1; padding: 7px; border-radius: 6px; border: 1px solid var(--hairline); color: inherit; background: var(--bg); }
+.task-model-controls button { padding: 7px 12px; border-radius: 6px; border: 1px solid var(--hairline); cursor: pointer; color: inherit; background: var(--bg); }
+.task-model-controls :disabled { opacity: .5; cursor: default; }
+.task-model .task-note { padding: 6px 0 0; }

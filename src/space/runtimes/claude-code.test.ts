@@ -10,10 +10,31 @@ const input = (over: Partial<CompleteInput> = {}): CompleteInput => ({ prompt: "
 const spec = (over: Partial<ClaudeCodeSpec> = {}): ClaudeCodeSpec => ({ name: "claude", kind: "claude-code", bin: fakeModelBin(), chatArgs: [], ...over });
 
 describe("cliArgs", () => {
+  test("explicit modes retain custom instructions and separate tools from context", async () => {
+    for (const mode of ["slim", "full"] as const) {
+      const request = input({ mode, system: "Custom ' \" $HOME `id`\nEnd" });
+      const args = cliArgs(["claude"], request);
+      expect(args[args.indexOf("--system-prompt") + 1]).toBe(request.system);
+      expect(args.includes("--safe-mode")).toBe(mode === "slim");
+      expect(args.includes("--tools")).toBe(mode === "slim");
+      const r = await createClaudeCode(spec()).complete(request);
+      expect(r.ok).toBe(true);
+      const remote = remoteCommand(fakeModelBin(), request);
+      if ("bad" in remote) throw new Error(remote.bad);
+      const { spawnCollect } = await import("./process.ts");
+      const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: request.prompt, timeoutMs: 5000 });
+      expect(result.code).toBe(0);
+      expect(parseCliOutput(result.stdout)?.text).toContain(request.system);
+    }
+    const native = cliArgs(["claude"], input({ mode: "full", system: "" }));
+    expect(native).not.toContain("--system-prompt");
+    expect(() => cliArgs(["claude"], input({ mode: "slim", tools: ["Read"] }))).toThrow(/slim/);
+    expect(() => cliArgs(["claude"], input({ mode: "slim", files: [{ name: "a.png", path: "/missing" }] }))).toThrow(/slim/);
+  });
   test("lean by default: own system prompt, no tools, no MCP; the prompt stays off the command line", () => {
-    expect(cliArgs(["claude"], input())).toEqual(["claude", "-p", "--output-format", "json", "--model", "haiku", "--strict-mcp-config", "--tools", "", "--system-prompt", "Be brief."]);
+    expect(cliArgs(["claude"], input())).toEqual(["claude", "-p", "--output-format", "json", "--model", "haiku", "--safe-mode", "--strict-mcp-config", "--tools", "", "--system-prompt", "Be brief."]);
     expect(cliArgs(["claude"], input({ tools: ["WebSearch", "WebFetch"] }))).toEqual([
-      "claude", "-p", "--output-format", "json", "--model", "haiku", "--strict-mcp-config", "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch", "--system-prompt", "Be brief.",
+      "claude", "-p", "--output-format", "json", "--model", "haiku", "--safe-mode", "--strict-mcp-config", "--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch", "--system-prompt", "Be brief.",
     ]);
   });
 });
@@ -42,7 +63,7 @@ describe("files", () => {
     expect(r.spool?.dir).toMatch(/^\/tmp\/sc-[0-9a-f]{16}$/);
     const dir = r.spool!.dir;
     expect(r.command).toBe(
-      `dir=${dir}; mkdir "$dir" && tar -xf - -C "$dir" && claude -p --output-format json --model haiku --strict-mcp-config --tools Read --allowedTools Read --system-prompt "$(printf %s ${Buffer.from("Be brief.").toString("base64")} | base64 -d)" < "$dir/prompt"; rc=$?; rm -rf "$dir"; exit $rc`,
+      `dir=${dir}; mkdir "$dir" && tar -xf - -C "$dir" && claude -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools Read --allowedTools Read --system-prompt "$(printf %s ${Buffer.from("Be brief.").toString("base64")} | base64 -d)" < "$dir/prompt"; rc=$?; rm -rf "$dir"; exit $rc`,
     );
     const note = `hello\n\nAttached files (open them with the Read tool; refer to them by these names):\n- a1.png: ${dir}/a1.png\n- a2.jpg: ${dir}/a2.jpg\n`;
     expect(new TextDecoder().decode(r.spool!.archive.slice(512, 512 + new TextEncoder().encode(note).byteLength))).toBe(note);
@@ -92,11 +113,11 @@ describe("readStreamLine", () => {
 describe("remoteCommand", () => {
   test("the system prompt goes base64, empty tools stay quoted, unsafe words are refused", () => {
     const b64 = Buffer.from("Be brief.").toString("base64");
-    expect(remoteCommand(["claude"], input())).toEqual({ command: `f=$(mktemp) && cat > "$f" && claude -p --output-format json --model haiku --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc` });
+    expect(remoteCommand(["claude"], input())).toEqual({ command: `f=$(mktemp) && cat > "$f" && claude -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc` });
     expect(remoteCommand(["claude"], input({ tools: ["WebSearch"] }))).toEqual({
-      command: `f=$(mktemp) && cat > "$f" && claude -p --output-format json --model haiku --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc`,
+      command: `f=$(mktemp) && cat > "$f" && claude -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc`,
     });
-    expect(remoteCommand(["claude"], input({ thinking: 0 }))).toEqual({ command: `f=$(mktemp) && cat > "$f" && MAX_THINKING_TOKENS=0 claude -p --output-format json --model haiku --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc` });
+    expect(remoteCommand(["claude"], input({ thinking: 0 }))).toEqual({ command: `f=$(mktemp) && cat > "$f" && MAX_THINKING_TOKENS=0 claude -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc` });
     expect(cliEnv(input(), { A: "1" })).toEqual({ A: "1" });
     expect(cliEnv(input({ thinking: 2048 }), { A: "1" })).toEqual({ A: "1", MAX_THINKING_TOKENS: "2048" });
     expect(remoteCommand(["claude"], input({ model: "x y" }))).toEqual({ bad: "x y" });
@@ -136,7 +157,7 @@ describe("complete, locally", () => {
     const r = await runtime.complete(input({ tools: ["WebSearch"] }));
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error(r.error);
-    expect(r.text).toBe("answer to: hello [args: -p --output-format json --model haiku --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt Be brief.]");
+    expect(r.text).toBe("answer to: hello [args: -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt Be brief.]");
     expect(r.usage).toEqual({ inputTokens: 10, cacheWriteTokens: 30, cacheReadTokens: 40, outputTokens: 20 });
     expect(r.costUsd).toBe(0.0123);
   });
@@ -183,7 +204,7 @@ describe("complete, locally", () => {
 
   test("a missing binary fails without throwing", async () => {
     const r = await createClaudeCode(spec({ bin: ["/nonexistent/claude-bin"] })).complete(input());
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining("could not start") });
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/could not start|setsid: failed to execute/) });
   });
 });
 

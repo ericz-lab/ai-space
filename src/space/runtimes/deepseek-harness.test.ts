@@ -94,7 +94,7 @@ describe("complete", () => {
     expect(await runtime.complete(input())).toMatchObject({ ok: false, error: "dsh: simulated crash" });
     process.env.FAKE_DSH_MODE = "hang";
     expect(await runtime.complete(input({ timeoutMs: 200 }))).toMatchObject({ ok: false, error: "timed out after 0s" });
-    expect(await createDeepseekHarness(spec({ bin: ["/nonexistent/dsh"] })).complete(input())).toMatchObject({ ok: false, error: expect.stringContaining("could not start") });
+    expect(await createDeepseekHarness(spec({ bin: ["/nonexistent/dsh"] })).complete(input())).toMatchObject({ ok: false, error: expect.stringMatching(/could not start|setsid: failed to execute/) });
   });
 
   test("over ssh the overlay travels base64 into a remote temp file; unsafe words are refused", async () => {

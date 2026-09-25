@@ -16,6 +16,7 @@ let store: ChatStore;
 let service: ChatService;
 let server: ReturnType<typeof Bun.serve>;
 let base: string;
+let defaultModel: string;
 
 const TOKENS: Record<string, string> = { sat_notes: "notes", sat_cal: "cal" };
 
@@ -24,7 +25,8 @@ beforeEach(async () => {
   modelStore = new ModelStore(join(dir, "space.db"));
   store = new ChatStore(join(dir, "space.db"));
   const model = new ModelService({ store: modelStore, runtimes: claudeOnly(fakeModelBin()), maxConcurrency: 2, log: () => {} });
-  service = new ChatService({ store, model, defaultModel: "haiku", fileDir: (app) => join(dir, app, "chat"), log: () => {} });
+  defaultModel = "haiku";
+  service = new ChatService({ store, model, defaultModel: () => defaultModel, fileDir: (app) => join(dir, app, "chat"), log: () => {} });
   server = Bun.serve({
     port: 0,
     routes: createChatRoutes({ service, token: "op-token", appForToken: async (t) => TOKENS[t], widget: async () => ({ js: "window.SpaceChat={}", css: ".sc{}", etag: '"w1"' }) }),
@@ -184,4 +186,15 @@ describe("widget", () => {
     expect((await fetch(`${base}/api/chat/widget.js`, { headers: { "if-none-match": '"w1"' } })).status).toBe(304);
     expect(await (await fetch(`${base}/api/chat/widget.css`)).text()).toBe(".sc{}");
   });
+});
+
+
+test("chat inherits a changed workspace default and preserves explicit request models", async () => {
+  const { thread } = await (await call("POST", "/api/chat/threads", { scope: "note:1" })).json() as any;
+  for (const [preference, explicit, expected] of [["haiku", undefined, "haiku"], ["sonnet", undefined, "sonnet"], ["sonnet", "opus", "opus"]]) {
+    defaultModel = preference!;
+    const response = await call("POST", `/api/chat/threads/${thread.id}/turn`, { message: "hello", model: explicit });
+    const done = parseSse(await response.text()).find((e) => e.event === "done");
+    expect(done?.data.assistant.model).toBe(expected);
+  }
 });
