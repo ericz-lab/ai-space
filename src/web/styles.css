@@ -203,6 +203,12 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 /* A row in the settings pop-over that opens something instead of toggling a preference. */
 .setlink { width: 100%; border: none; background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; }
 .setlink span { color: var(--muted); font-size: 16px; line-height: 1; }
+.setlink .svc-name { color: var(--text); font-size: 13px; line-height: 1.5; }
+.setlink .status { font-size: 11px; line-height: 1.5; }
+/* The status summary's chevron turns down while its rows are shown; the rows' headings sit lighter. */
+.setchev { transition: transform 0.15s ease; }
+.setchev.open { transform: rotate(90deg); }
+.sethead.sub { border-top: none; padding-top: 4px; }
 
 /* Tasks: the scheduler's task list, grouped by app, with run history per row, in a floating panel. */
 .tasks {
