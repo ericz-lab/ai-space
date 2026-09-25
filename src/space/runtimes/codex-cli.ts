@@ -97,7 +97,9 @@ export function codexRemoteCommand(bin: string[], input: CompleteInput): { comma
   const dir = `/tmp/space-codex-${randomUUID()}`;
   const encode = (s: string) => new TextEncoder().encode(s);
   // The remote timeout bounds orphan lifetime after SSH disconnects. No retry or model fallback.
-  const command = `umask 077; mkdir ${quote(dir)} || exit 1; trap ${quote(`rm -rf -- ${quote(dir)}`)} EXIT; tar -xf - -C ${quote(dir)} || exit 1; ${input.mode === "full" ? "" : `cd ${quote(dir)} || exit 1; `}timeout --signal=TERM --kill-after=5s ${Math.ceil(input.timeoutMs / 1000)}s ${codexArgs(bin, input, dir, ".").map(quote).join(" ")} < ${quote(join(dir, "prompt.txt"))}`;
+  // `builtin cd`: the login shell may load a profile that wraps `cd` in a function, and RVM's
+  // wrapper runs `trap - EXIT`, which dropped the cleanup and left the request files behind.
+  const command = `umask 077; mkdir ${quote(dir)} || exit 1; trap ${quote(`rm -rf -- ${quote(dir)}`)} EXIT; tar -xf - -C ${quote(dir)} || exit 1; ${input.mode === "full" ? "" : `builtin cd ${quote(dir)} || exit 1; `}timeout --signal=TERM --kill-after=5s ${Math.ceil(input.timeoutMs / 1000)}s ${codexArgs(bin, input, dir, ".").map(quote).join(" ")} < ${quote(join(dir, "prompt.txt"))}`;
   return { command, dir, archive: ustar([{ name: "prompt.txt", bytes: encode(input.prompt) }, { name: "system.txt", bytes: encode(input.system) }]) };
 }
 

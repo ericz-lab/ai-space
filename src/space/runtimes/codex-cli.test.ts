@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { codexArgs, codexChatArgs, codexRemoteCommand, createCodexCli, parseCodexOutput } from "./codex-cli.ts";
 import { spawnCollect } from "./process.ts";
 import { fakeCodexBin } from "./testing-codex.ts";
@@ -75,7 +77,8 @@ describe("Codex completions", () => {
     const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 5000 });
     expect(result.code).toBe(0);
     const output = parseCodexOutput(result.stdout);
-    expect(JSON.parse(output.text!)).toMatchObject({ prompt: request.prompt, system: request.system, cwd: remote.dir });
+    // The CLI reports its real working directory; /tmp is a symlink on macOS.
+    expect(JSON.parse(output.text!)).toMatchObject({ prompt: request.prompt, system: request.system, cwd: join(realpathSync(dirname(remote.dir)), basename(remote.dir)) });
     expect(await Bun.file(`${remote.dir}/system.txt`).exists()).toBe(false);
   });
   test("remote timeout kills the CLI and removes request files", async () => {
