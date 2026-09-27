@@ -1,5 +1,6 @@
 import { mkdir, rm, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { sniffImage } from "../model/images.ts";
 import type { ModelService } from "../model/service.ts";
 import { DEFAULT_SYSTEM, type ModelCall } from "../model/types.ts";
 import type { CompleteFile, OnDelta } from "../runtimes/types.ts";
@@ -48,14 +49,7 @@ export class Refused extends Error {
   }
 }
 
-/** Sniff the image type from the first bytes; the browser's declared type is not trusted. */
-export function sniffImage(b: Uint8Array): string | null {
-  if (b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
-  if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
-  if (b.length > 6 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return "image/gif";
-  if (b.length > 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "image/webp";
-  return null;
-}
+export { sniffImage };
 
 /** The name a file has for the runtime: short, unique in the call, shell-safe. */
 export const fileNameOf = (a: Attachment): string => `a${a.id}.${IMAGE_TYPES[a.type] ?? "png"}`;

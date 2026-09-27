@@ -77,6 +77,30 @@ describe("POST /api/model/run", () => {
     }
     expect(store.totals(0).calls).toBe(count);
   });
+  test("images travel as files for the call and are removed after it, streamed or not; bad ones are 400", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    const images = [{ data: Buffer.from(png).toString("base64") }, { data: `data:image/png;base64,${Buffer.from(png).toString("base64")}` }];
+    const res = await post("/api/model/run", { prompt: "look", images }, "sat_my-app");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as RunBody;
+    expect(body.text).toContain("--tools Read --allowedTools Read");
+    expect(body.text).toContain("[files: img1.png=12 img2.png=12]");
+    const path = body.text!.match(/- img1\.png: (\S+)/)![1]!;
+    expect(await Bun.file(path).exists()).toBe(false);
+
+    const streamed = parseSse(await (await post("/api/model/run", { prompt: "look", images, stream: true }, "sat_my-app")).text());
+    const done = streamed.find((e) => e.event === "done")!.data as { text: string };
+    expect(done.text).toContain("[files: img1.png=12 img2.png=12]");
+    await Bun.sleep(50);
+    expect(await Bun.file(done.text.match(/- img1\.png: (\S+)/)![1]!).exists()).toBe(false);
+
+    const count = store.totals(0).calls;
+    for (const bad of [{ images: "x" }, { images: [{ data: Buffer.from("not an image").toString("base64") }] }, { images: [{ data: "%%%" }] }, { images: Array(9).fill(images[0]) }]) {
+      expect((await post("/api/model/run", { prompt: "look", ...bad }, "sat_my-app")).status).toBe(400);
+    }
+    expect(store.totals(0).calls).toBe(count);
+  });
+
   test("an app token identifies the app; the answer and the ledger row come back", async () => {
     const res = await post("/api/model/run", { app: "someone-else", prompt: "hello", tag: "translate" }, "sat_my-app");
     expect(res.status).toBe(200);
