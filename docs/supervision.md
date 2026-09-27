@@ -54,7 +54,7 @@ EnvironmentFile=<workspace>/run/env/<app>.env
 ExecStart=/bin/sh -c "<service.command>"
 Restart=on-failure
 RestartSec=5
-KillMode=mixed
+KillMode=control-group
 TimeoutStopSec=30
 
 [Install]
@@ -66,8 +66,10 @@ WantedBy=default.target
 - The command is escaped for systemd (`\`, `"`, and `%` and `$` doubled), so the shell sees exactly
   the manifest's command, with `${VAR}` placeholders already resolved from the workspace `.env` as
   for tasks. A command over several lines is refused: put the lines into a script.
-- `KillMode=mixed` sends SIGTERM to the main process only; `TimeoutStopSec=30` leaves the 10 seconds
-  the app contract promises plus room before systemd kills what is left.
+- The main process is `/bin/sh`, which runs the command as its child (dash does not `exec` it), so
+  `KillMode=control-group` sends SIGTERM to every process of the unit at once; `KillMode=mixed`
+  would signal only the shell and SIGKILL the app (seen on Seoul, 2026-09-28). `TimeoutStopSec=30`
+  leaves the 10 seconds the app contract promises plus room before systemd kills what is left.
 
 ### The environment file
 

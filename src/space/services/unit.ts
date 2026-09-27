@@ -25,9 +25,12 @@ export type UnitInput = {
 };
 
 /**
- * The unit text. `KillMode=mixed` and `TimeoutStopSec=30` give the app's
- * main process the SIGTERM the contract promises (app-spec.md: exit within
- * 10 seconds) with room to spare before systemd kills what is left.
+ * The unit text. The main process is `/bin/sh`, which runs the command as a
+ * child (dash does not exec it), so `KillMode=control-group` sends SIGTERM
+ * to every process of the unit at once: the app gets the SIGTERM the
+ * contract promises (app-spec.md: exit within 10 seconds), and
+ * `TimeoutStopSec=30` leaves room to spare before systemd kills what is left.
+ * `KillMode=mixed` would signal only the shell and SIGKILL the app.
  */
 export function renderUnit(u: UnitInput): string {
   return [
@@ -44,7 +47,7 @@ export function renderUnit(u: UnitInput): string {
     `ExecStart=/bin/sh -c ${execArg(u.command)}`,
     "Restart=on-failure",
     "RestartSec=5",
-    "KillMode=mixed",
+    "KillMode=control-group",
     "TimeoutStopSec=30",
     "",
     "[Install]",

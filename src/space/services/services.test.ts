@@ -40,7 +40,7 @@ describe("unit", () => {
         'ExecStart=/bin/sh -c "bun src/index.ts --name \\"x\\" $$HOME"',
         "Restart=on-failure",
         "RestartSec=5",
-        "KillMode=mixed",
+        "KillMode=control-group",
         "TimeoutStopSec=30",
         "",
         "[Install]",
