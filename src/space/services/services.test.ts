@@ -84,6 +84,8 @@ function fakeSystemd(init: Record<string, { active?: string; enabled?: string; s
   const calls: string[] = [];
   const failOn = new Set<string>();
   const run = async (cmd: string[]): Promise<RunResult> => {
+    const sudo = cmd[0] === "sudo";
+    if (sudo) cmd = cmd.slice(2);
     const args = cmd.slice(1).filter((a) => a !== "--");
     const scope = args[0] === "--user" ? "user" : "system";
     const rest = scope === "user" ? args.slice(1) : args;
@@ -97,15 +99,15 @@ function fakeSystemd(init: Record<string, { active?: string; enabled?: string; s
         : "LoadState=not-found\nActiveState=inactive\nSubState=dead\nUnitFileState=\nNRestarts=0\nMainPID=0\n";
       return { code: 0, stdout, stderr: "" };
     }
-    calls.push(rest.join(" "));
+    calls.push((sudo ? "sudo " : "") + rest.join(" "));
     if (failOn.has(verb)) return { code: 1, stdout: "", stderr: `Job for ${rest.at(-1)} failed.` };
     const name = rest.at(-1)!;
-    const u = units.get(`user:${name}`) ?? { active: "inactive", enabled: "disabled" };
+    const u = units.get(`${scope}:${name}`) ?? { active: "inactive", enabled: "disabled" };
     if (verb === "enable") Object.assign(u, { enabled: "enabled", ...(rest.includes("--now") ? { active: "active" } : {}) });
     if (verb === "disable") Object.assign(u, { enabled: "disabled", ...(rest.includes("--now") ? { active: "inactive" } : {}) });
     if (verb === "start" || verb === "restart") u.active = "active";
     if (verb === "stop") u.active = "inactive";
-    if (verb !== "daemon-reload" && verb !== "reset-failed") units.set(`user:${name}`, u);
+    if (verb !== "daemon-reload" && verb !== "reset-failed") units.set(`${scope}:${name}`, u);
     return { code: 0, stdout: "", stderr: "" };
   };
   return { run, calls, units, failOn };
@@ -260,6 +262,64 @@ describe("supervisor", () => {
     expect(r.health).toBe("pending");
     await Bun.sleep(1_200);
     expect(sup.lastOf("demo")?.health).toBe("ok");
+  });
+});
+
+describe("handover", () => {
+  const healthy = { probe: async () => "ok" as const, healthWaitMs: 50 };
+  const withHealth = (app = "demo") => mf(app, { service: { command: "bun run start", port: 8710, health: "/healthz" } });
+
+  test("to the space: the operator's unit is disabled, the space's installed, health waited for", async () => {
+    const t = await setup({ "demo.service": { active: "active", enabled: "enabled" } }, "space", healthy);
+    const r = await t.sup.handover(withHealth(), "space");
+    expect(r).toMatchObject({ ok: true, steps: ["disabled the user unit demo.service", "installed space-demo.service", "healthy"] });
+    expect(t.sd.calls).toEqual(["disable --now demo.service", "daemon-reload", "enable --now space-demo.service"]);
+    expect(t.sd.units.get("user:demo.service")).toEqual({ active: "inactive", enabled: "disabled" });
+    expect(t.sup.lastOf("demo")?.action).toBe("installed");
+  });
+
+  test("an operator's system unit is stopped through sudo -n", async () => {
+    const t = await setup({ "demo.service": { active: "active", enabled: "enabled", scope: "system" } }, "space", healthy);
+    expect((await t.sup.handover(withHealth(), "space")).ok).toBe(true);
+    expect(t.sd.calls[0]).toBe("sudo disable --now demo.service");
+  });
+
+  test("not healthy in time: the space's unit is removed and the operator's comes back as it was", async () => {
+    const t = await setup({ "demo.service": { active: "active", enabled: "enabled" } }, "space", { probe: async () => "down", healthWaitMs: 50 });
+    const r = await t.sup.handover(withHealth(), "space");
+    expect(r).toMatchObject({ ok: false, rolledBack: true, error: expect.stringMatching(/not healthy/) });
+    expect(r.steps).toEqual(["disabled the user unit demo.service", "installed space-demo.service", "removed space-demo.service", "restored the user unit demo.service"]);
+    expect(await Bun.file(t.unitPath).exists()).toBe(false);
+    expect(t.sd.units.get("user:demo.service")).toEqual({ active: "active", enabled: "enabled" });
+    expect(t.sup.lastOf("demo")).toMatchObject({ action: "conflict", error: expect.stringMatching(/hand-over failed/) });
+  });
+
+  test("a unit that fails to start is rolled back without waiting out the health window", async () => {
+    const t = await setup({ "demo.service": { active: "active", enabled: "disabled" } }, "space", { probe: async () => "down", healthWaitMs: 60_000 });
+    t.sd.failOn.add("enable");
+    const r = await t.sup.handover(withHealth(), "space");
+    expect(r).toMatchObject({ ok: false, rolledBack: true });
+    // Only running before, not enabled: it is started again, not enabled.
+    expect(t.sd.calls.at(-1)).toBe("start demo.service");
+  });
+
+  test("back to the operator: the space's unit goes, the operator's is enabled, later syncs leave it alone", async () => {
+    const t = await setup({ "demo.service": { active: "inactive", enabled: "disabled" } }, "space", healthy);
+    await t.sup.apply(withHealth());
+    t.sd.calls.length = 0;
+    const r = await t.sup.handover(withHealth(), "operator");
+    expect(r).toMatchObject({ ok: true, steps: ["removed space-demo.service", "enabled the user unit demo.service", "healthy"] });
+    expect(await Bun.file(t.unitPath).exists()).toBe(false);
+    expect(t.sd.units.get("user:demo.service")).toEqual({ active: "active", enabled: "enabled" });
+    expect((await t.sup.apply(withHealth())).action).toBe("conflict");
+  });
+
+  test("refused under operator, without an operator unit to hand back to, and for a paused app", async () => {
+    const op = await setup({}, "operator");
+    await expect(op.sup.handover(withHealth(), "space")).rejects.toMatchObject({ status: 409 });
+    const t = await setup({}, "space", healthy);
+    await expect(t.sup.handover(withHealth(), "operator")).rejects.toThrow(/no operator unit/);
+    await expect(t.sup.handover(mf("demo", { status: "paused" }), "space")).rejects.toThrow(/paused/);
   });
 });
 

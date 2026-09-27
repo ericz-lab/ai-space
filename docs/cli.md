@@ -63,6 +63,7 @@ Rules:
 | `space app sync [APP]` | re-read one `space.yaml` or every app directory | `POST /api/apps/sync`, `POST /api/apps/:app/sync` |
 | `space app service APP` | who runs the service (`SPACE_SUPERVISOR`), the unit, its state, restarts, since when, the last sync's outcome ([supervision.md](supervision.md)) | `GET /api/apps/:app/service` |
 | `space app start` / `stop` / `restart APP` | the space's unit of the app, by hand; under `operator` the answer names the `systemctl` command instead | `POST /api/apps/:app/service` |
+| `space app supervise APP [space\|operator]` | hand the app from the operator's unit to the space's (or back), waiting for health and rolling back on failure; exit 1 when rolled back ([supervision.md](supervision.md#hand-over)) | `POST /api/apps/:app/service` `{ action: "supervise" }` |
 | `space app hide APP` / `unhide` | the panel's hidden flag | `PATCH /api/apps/:app` |
 | `space app uninstall APP [--yes] [--force]` | stop, remove, forget; asks unless `--yes`; refuses while a task of the app runs unless `--force` | `DELETE /api/apps/:app` |
 | `space app env APP` | `export` lines of the provisioned variables | disk (`storage.envFor`) |

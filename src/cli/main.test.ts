@@ -227,6 +227,18 @@ describe("other nouns", () => {
     expect(noService.out[0]).toBe("a: unchanged");
   });
 
+  test("app supervise prints the steps, and a rolled-back hand-over exits 1", async () => {
+    const ok = await runCli(["app", "supervise", "a"], (t) => t.scripted.reply({ status: 200, body: { ok: true, handover: { ok: true, steps: ["disabled the user unit a.service", "installed space-a.service", "healthy"] } } }));
+    expect(ok.calls[0]).toMatchObject({ method: "POST", url: "http://127.0.0.1:8700/api/apps/a/service", body: { action: "supervise", to: "space" } });
+    expect(ok.out).toEqual(["  disabled the user unit a.service", "  installed space-a.service", "  healthy", "a: now run by the space"]);
+    const back = await runCli(["app", "supervise", "a", "operator"], (t) => t.scripted.reply({ status: 502, body: { ok: false, handover: { ok: false, steps: ["removed space-a.service"], error: "a.service failed to start", rolledBack: true } } }));
+    expect(back.calls[0]!.body).toEqual({ action: "supervise", to: "operator" });
+    expect(back.code).toBe(1);
+    expect(back.err[0]).toBe("a: hand-over failed: a.service failed to start (rolled back)");
+    const bad = await runCli(["app", "supervise", "a", "nobody"]);
+    expect(bad.code).toBe(EXIT.usage);
+  });
+
   test("model usage prints the totals line and the by-app table", async () => {
     const totals = { calls: 3, errors: 1, inputTokens: 1000, cacheWriteTokens: 0, cacheReadTokens: 500, outputTokens: 200, tokens: 1700, costUsd: 0.05, durationMs: 3000 };
     const r = await runCli(["model", "usage", "--window", "7d"], (t) => t.scripted.reply({ status: 200, body: { ok: true, window: "7d", since: "x", backend: "b", totals, byApp: [{ app: "demo", ...totals }], byTag: [], byModel: [], byRuntime: [], history: { totals } } }));

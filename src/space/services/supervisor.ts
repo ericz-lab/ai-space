@@ -42,6 +42,16 @@ export type ApplyResult = {
   health?: "pending" | "ok" | "down";
 };
 
+/** What `handover` did, step by step; `ok: false` after a rollback, with the reason. */
+export type HandoverResult = {
+  app: string;
+  to: SupervisorMode;
+  ok: boolean;
+  steps: string[];
+  error?: string;
+  rolledBack?: boolean;
+};
+
 export type ServiceStatus = {
   app: string;
   supervisor: SupervisorMode;
@@ -184,6 +194,136 @@ export class Supervisor {
       await this.requireManager();
       await this.opts.systemctl[action](unitName(app));
     });
+  }
+
+  /**
+   * Move an app between the operator's unit and the space's, under
+   * `SPACE_SUPERVISOR=space`, and wait for its health path to answer.
+   *
+   *   to space     disable --now <app>.service (user, or system with sudo -n),
+   *                reconcile (write, enable --now space-<app>.service), wait for health;
+   *                on failure remove the space's unit and bring the operator's back as it was
+   *   to operator  remove the space's unit, enable --now <app>.service, wait for health;
+   *                on failure disable it again and give the app back to the space
+   *
+   * The app stays down between the stop and the first healthy answer: a few seconds.
+   */
+  handover(m: Manifest, to: SupervisorMode): Promise<HandoverResult> {
+    return this.serial(m.app, async () => {
+      if (this.opts.mode !== "space") throw new SupervisorError(409, "hand-over needs SPACE_SUPERVISOR=space: under operator the operator's units run every app");
+      if (!m.service) throw new SupervisorError(409, `"${m.app}" declares no service`);
+      if (to === "space" && m.status !== "active") throw new SupervisorError(409, `"${m.app}" is ${m.status}; only an active app runs under the space`);
+      await this.requireManager();
+      return to === "space" ? this.toSpace(m) : this.toOperator(m);
+    });
+  }
+
+  private async toSpace(m: Manifest): Promise<HandoverResult> {
+    const app = m.app;
+    const sysctl = this.opts.systemctl;
+    const steps: string[] = [];
+    const op = await this.operatorUnit(app);
+    const wasEnabled = op?.state.unitFileState === "enabled";
+    const wasActive = op ? isRunning(op.state.activeState) : false;
+    const hadUnit = Boolean((await this.readUnit(app))?.startsWith(UNIT_MARKER));
+    const fail = async (error: string): Promise<HandoverResult> => {
+      try {
+        if (!hadUnit && (await this.readUnit(app))?.startsWith(UNIT_MARKER)) {
+          await this.teardown(app);
+          steps.push(`removed ${unitName(app)}`);
+        }
+        if (op && wasEnabled) await sysctl.enableNow(`${app}.service`, op.scope);
+        else if (op && wasActive) await sysctl.start(`${app}.service`, op.scope);
+        if (op && (wasEnabled || wasActive)) steps.push(`restored the ${op.scope} unit ${app}.service`);
+        this.record({ app, action: "conflict", at: Date.now(), error: `hand-over failed: ${error}` });
+      } catch (e) {
+        return { app, to: "space", ok: false, steps, error: `${error}; rollback failed too: ${(e as Error).message}`, rolledBack: false };
+      }
+      return { app, to: "space", ok: false, steps, error, rolledBack: true };
+    };
+    if (op && (wasEnabled || wasActive)) {
+      try {
+        await sysctl.disableNow(`${app}.service`, op.scope);
+      } catch (e) {
+        return { app, to: "space", ok: false, steps, error: `could not stop the operator's unit: ${(e as Error).message}` };
+      }
+      steps.push(`disabled the ${op.scope} unit ${app}.service`);
+    }
+    let r: ApplyResult;
+    try {
+      r = await this.reconcile(m);
+    } catch (e) {
+      return fail((e as Error).message);
+    }
+    this.record(r);
+    if (r.action === "conflict" || r.action === "failed") return fail(r.error ?? r.action);
+    steps.push(`${r.action} ${unitName(app)}`);
+    const health = await this.waitHealthy(m, unitName(app), "user");
+    if (health !== "ok") return fail(health);
+    steps.push("healthy");
+    this.log(`${app}: handed over to the space`);
+    return { app, to: "space", ok: true, steps };
+  }
+
+  private async toOperator(m: Manifest): Promise<HandoverResult> {
+    const app = m.app;
+    const sysctl = this.opts.systemctl;
+    const steps: string[] = [];
+    const op = await this.operatorUnit(app);
+    if (!op) throw new SupervisorError(409, `there is no operator unit ${app}.service (user or system) to hand "${app}" back to; install one first`);
+    if ((await this.readUnit(app))?.startsWith(UNIT_MARKER)) {
+      await this.teardown(app);
+      steps.push(`removed ${unitName(app)}`);
+    }
+    const giveBack = async (error: string): Promise<HandoverResult> => {
+      try {
+        await sysctl.disableNow(`${app}.service`, op.scope);
+        const r = this.record(await this.reconcile(m));
+        steps.push(`gave the app back to the space (${r.action})`);
+      } catch (e) {
+        return { app, to: "operator", ok: false, steps, error: `${error}; rollback failed too: ${(e as Error).message}`, rolledBack: false };
+      }
+      return { app, to: "operator", ok: false, steps, error, rolledBack: true };
+    };
+    try {
+      await sysctl.enableNow(`${app}.service`, op.scope);
+    } catch (e) {
+      return giveBack((e as Error).message);
+    }
+    steps.push(`enabled the ${op.scope} unit ${app}.service`);
+    const health = await this.waitHealthy(m, `${app}.service`, op.scope);
+    if (health !== "ok") return giveBack(health);
+    steps.push("healthy");
+    // Syncs from now on record the operator's unit as a conflict, and leave it running.
+    this.record({ app, action: "conflict", at: Date.now(), error: `handed back to the operator's ${op.scope} unit ${app}.service` });
+    this.log(`${app}: handed back to the operator`);
+    return { app, to: "operator", ok: true, steps };
+  }
+
+  /** The operator's unit named after the app, user first; absent when neither manager knows one. */
+  private async operatorUnit(app: string): Promise<{ scope: "user" | "system"; state: UnitState } | undefined> {
+    for (const scope of ["user", "system"] as const) {
+      const state = await this.opts.systemctl.show(`${app}.service`, scope);
+      if (state.loadState && state.loadState !== "not-found") return { scope, state };
+    }
+    return undefined;
+  }
+
+  /** "ok", or why not: the health path never answered, or the unit is not running (no health path). */
+  private async waitHealthy(m: Manifest, unit: string, scope: "user" | "system"): Promise<string> {
+    const wait = this.opts.healthWaitMs ?? 30_000;
+    const deadline = Date.now() + wait;
+    const health = m.service?.health;
+    const probe = this.opts.probe;
+    for (;;) {
+      const state = await this.opts.systemctl.show(unit, scope).catch(() => undefined);
+      if (state && state.activeState === "failed") return `${unit} failed to start; see journalctl ${scope === "user" ? "--user " : ""}-u ${unit}`;
+      if (probe && health && m.service) {
+        if ((await probe(m.service.port, health).catch(() => "down")) === "ok") return "ok";
+      } else if (state && state.activeState === "active") return "ok";
+      if (Date.now() >= deadline) return probe && health && m.service ? `not healthy ${Math.round(wait / 1000)} s after start (GET 127.0.0.1:${m.service.port}${health})` : `${unit} is ${state?.activeState ?? "unknown"}`;
+      await Bun.sleep(Math.min(1_000, wait));
+    }
   }
 
   // ------------------------------------------------------------ reconcile
@@ -339,6 +479,10 @@ export class SupervisorError extends Error {
   ) {
     super(message);
   }
+}
+
+function isRunning(activeState: string): boolean {
+  return ["active", "activating", "reloading"].includes(activeState);
 }
 
 async function readText(path: string): Promise<string | undefined> {

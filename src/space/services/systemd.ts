@@ -61,14 +61,15 @@ export class Systemctl {
   daemonReload(): Promise<void> {
     return this.user(["daemon-reload"]);
   }
-  enableNow(unit: string): Promise<void> {
-    return this.user(["enable", "--now", "--", unit]);
+  /** `system` goes through `sudo -n`: only a hand-over touches an operator's system unit, and it must not prompt. */
+  enableNow(unit: string, scope: "user" | "system" = "user"): Promise<void> {
+    return this.exec(["enable", "--now", "--", unit], scope);
   }
-  disableNow(unit: string): Promise<void> {
-    return this.user(["disable", "--now", "--", unit]);
+  disableNow(unit: string, scope: "user" | "system" = "user"): Promise<void> {
+    return this.exec(["disable", "--now", "--", unit], scope);
   }
-  start(unit: string): Promise<void> {
-    return this.user(["start", "--", unit]);
+  start(unit: string, scope: "user" | "system" = "user"): Promise<void> {
+    return this.exec(["start", "--", unit], scope);
   }
   stop(unit: string): Promise<void> {
     return this.user(["stop", "--", unit]);
@@ -81,9 +82,14 @@ export class Systemctl {
     await this.run(["systemctl", "--user", "reset-failed", "--", unit]);
   }
 
-  private async user(args: string[]): Promise<void> {
-    const r = await this.run(["systemctl", "--user", ...args]);
-    if (r.code !== 0) throw new Error(`systemctl --user ${args.filter((a) => a !== "--").join(" ")}: ${lastLine(r.stderr || r.stdout) || `exit ${r.code}`}`);
+  private user(args: string[]): Promise<void> {
+    return this.exec(args, "user");
+  }
+
+  private async exec(args: string[], scope: "user" | "system"): Promise<void> {
+    const cmd = scope === "user" ? ["systemctl", "--user", ...args] : ["sudo", "-n", "systemctl", ...args];
+    const r = await this.run(cmd);
+    if (r.code !== 0) throw new Error(`${cmd.filter((a) => a !== "--").join(" ")}: ${lastLine(r.stderr || r.stdout) || `exit ${r.code}`}`);
   }
 }
 

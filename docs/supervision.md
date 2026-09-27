@@ -153,6 +153,8 @@ would duplicate that, so the promise in app-spec.md was changed to the journal.
 ```
 GET  /api/apps/:app/service                     supervisor, unit, state, restarts, since, last sync
 POST /api/apps/:app/service  { action }         start | stop | restart (space only; 409 under operator, naming the command)
+POST /api/apps/:app/service  { action: "supervise", to? }
+                                                hand-over to the space (default) or back to the operator; 502 with the steps when rolled back
 ```
 
 Panel routes, no bearer token, like uninstall. `GET /api/services` carries `supervisor` at the top
@@ -161,11 +163,25 @@ and on each local row, and the last sync's outcome as `supervision`.
 ```
 space app service APP           who runs it, the unit, state, restarts, since when, the last sync
 space app start|stop|restart APP
+space app supervise APP [space|operator]
 space status                    one line more: the supervisor and any unit in conflict or failed
 ```
 
 A `stop` lasts until the next sync of the app, which starts it again; to keep an app stopped, set
 `status: paused`.
+
+### Hand-over
+
+`space app supervise APP` moves one app from the operator's unit to the space's, on a machine
+already set to `SPACE_SUPERVISOR=space`: it disables the operator's `<app>.service` (a system unit
+through `sudo -n`, so it needs passwordless sudo for `systemctl`), syncs the app so the space writes
+and starts `space-<app>.service`, and waits up to 30 s for the health path (or, without one, for the
+unit to be active). If the unit fails or the app never answers, the space's unit is removed and the
+operator's comes back as it was: enabled again if it was enabled, only started if it was only
+running. `space app supervise APP operator` is the way back, for an app whose operator unit is still
+installed: the space's unit goes, the operator's is enabled, and later syncs record it as a
+conflict and leave it running. The app is down for the seconds between the stop and the first
+healthy answer.
 
 ## Rollout
 
@@ -182,8 +198,7 @@ A `stop` lasts until the next sync of the app, which starts it again; to keep an
    `space` is chosen; install.md and install-by-agent.md write `SPACE_SUPERVISOR=space` for a fresh
    install. The default app's installer (ai-usage) must honour `SPACE_SUPERVISOR=space` before a
    fresh install relies on it.
-4. Machine by machine, app by app. A `space app supervise <app>` that does the hand-over with a health
-   check and rolls back on failure is the next piece of code.
+4. Machine by machine, app by app, with `space app supervise <app>` ([hand-over](#hand-over)).
 
 ## Not in v1
 

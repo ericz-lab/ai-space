@@ -3,7 +3,7 @@ import { parseArgs, need, noMore } from "./args.ts";
 import { type TaskView, confirm, listTasks, scheduleText, taskRef } from "./common.ts";
 import { newApp } from "./newapp.ts";
 import { ago, bytes, until } from "./output.ts";
-import { type Ctx, type Noun } from "./types.ts";
+import { ApiError, type Ctx, type Noun, UsageError } from "./types.ts";
 
 /** `space app`: the apps of the workspace, as the panel sees them, plus the disk-bound `env` and `new`. */
 
@@ -186,6 +186,34 @@ const control = (action: "start" | "stop" | "restart") => async (ctx: Ctx, argv:
   return 0;
 };
 
+// The hand-over waits for health (30 s) and may roll back; the answer lists what was done either way.
+const supervise = async (ctx: Ctx, argv: string[]) => {
+  const { positional } = parseArgs(argv, {});
+  const name = need(positional, 0, "APP");
+  const to = positional[1] ?? "space";
+  noMore(positional, 2);
+  if (to !== "space" && to !== "operator") throw new UsageError("the second argument is space or operator");
+  const c = await ctx.client();
+  type Answer = { ok: boolean; error?: string; handover?: { ok: boolean; steps: string[]; error?: string; rolledBack?: boolean }; service?: ServiceStatus };
+  let res: Answer;
+  try {
+    res = await c.post<Answer>(`/api/apps/${name}/service`, { action: "supervise", to }, { timeoutMs: 180_000 });
+  } catch (e) {
+    const body = (e as ApiError).body as Answer | undefined;
+    if (!(e instanceof ApiError) || !body?.handover) throw e;
+    res = body;
+  }
+  if (ctx.flags.json) return ctx.print.data(res), res.ok ? 0 : 1;
+  const h = res.handover!;
+  for (const step of h.steps) ctx.print.line(`  ${step}`);
+  if (h.ok) {
+    ctx.print.line(`${name}: now run by ${to === "space" ? "the space" : "the operator's unit"}`);
+    return 0;
+  }
+  ctx.io.err(`${name}: hand-over failed: ${h.error}${h.rolledBack ? " (rolled back)" : h.rolledBack === false ? " (NOT rolled back: check the units by hand)" : ""}`);
+  return 1;
+};
+
 const env = async (ctx: Ctx, argv: string[]) => {
   const { positional } = parseArgs(argv, {});
   const name = need(positional, 0, "APP");
@@ -204,7 +232,7 @@ export function shellQuote(v: string): string {
 
 export const appNoun: Noun = {
   name: "app",
-  summary: "the apps of the workspace: list, show, sync, service, start/stop/restart, hide, uninstall, env, new",
+  summary: "the apps of the workspace: list, show, sync, service, start/stop/restart, supervise, hide, uninstall, env, new",
   verbs: {
     ls: { usage: "[--panel]", summary: "every app (--panel: only what the panel shows)", run: ls },
     show: { usage: "APP", summary: "manifest, storage, backups and tasks of one app", run: show },
@@ -213,6 +241,7 @@ export const appNoun: Noun = {
     start: { usage: "APP", summary: "start the app's unit (SPACE_SUPERVISOR=space)", run: control("start") },
     stop: { usage: "APP", summary: "stop the app's unit until its next sync (set status: paused to keep it stopped)", run: control("stop") },
     restart: { usage: "APP", summary: "restart the app's unit (SPACE_SUPERVISOR=space)", run: control("restart") },
+    supervise: { usage: "APP [space|operator]", summary: "hand the app from the operator's unit to the space's (or back), rolled back unless healthy", run: supervise },
     hide: { usage: "APP", summary: "hide the app on the panel", run: hidden(true) },
     unhide: { usage: "APP", summary: "show the app on the panel again", run: hidden(false) },
     uninstall: { usage: "APP [--yes] [--force]", summary: "stop, take out of the workspace, forget (data kept; --force: even with a task running)", run: uninstall },

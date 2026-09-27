@@ -320,7 +320,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...panelRoutes,
       ...createRouterRoutes({ router }),
       ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode === "space" ? { unitOf: (app: string) => unitName(app) } : {}) }),
-      ...createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; } }),
+      ...createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest }),
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),
       ...terminalRoutes,
