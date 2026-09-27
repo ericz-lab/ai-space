@@ -64,6 +64,9 @@ describe("parseManifest", () => {
     expect(() => parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, runtime: 'Bad Name' } }", "/d")).toThrow(/runtime/);
     // Any well-formed name is accepted here; whether the space has that runtime is checked when the task runs.
     expect(parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, runtime: dsh } }", "/d").tasks[0]?.target).toMatchObject({ kind: "agent", runtime: "dsh" });
+    expect(parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, permissionMode: bypassPermissions, tools: [Read, 'Bash(sqlite3 *)'] } }", "/d").tasks[0]?.target).toEqual({ kind: "agent", runtime: "claude", prompt: "p", permissionMode: "bypassPermissions", tools: ["Read", "Bash(sqlite3 *)"] });
+    expect(() => parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, permissionMode: yolo } }", "/d")).toThrow(/permissionMode must be one of/);
+    expect(() => parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, tools: Read } }", "/d")).toThrow(/tools must be a list/);
     expect(() => parseManifest("tasks: {}", "/d")).toThrow(/tasks must be a list/);
     expect(() => parseManifest("- not a mapping", "/d")).toThrow(/mapping/);
   });

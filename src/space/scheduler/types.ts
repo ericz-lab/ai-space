@@ -1,3 +1,5 @@
+import type { PermissionMode } from "../runtimes/types.ts";
+
 /**
  * Scheduler data model.
  *
@@ -38,6 +40,10 @@ export type Target =
       prompt: string;
       cwd?: string;
       model?: string;
+      /** Write tier (`acceptEdits`, `bypassPermissions`, `plan`); absent = the runtime's read-only headless default. */
+      permissionMode?: PermissionMode;
+      /** Tools the run may use without asking (`--allowedTools`). */
+      tools?: string[];
     };
 
 export type RunStatus = "ok" | "error" | "skipped";

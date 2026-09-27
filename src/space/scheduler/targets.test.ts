@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeOnly } from "../runtimes/registry.ts";
+import { claudeOnly, RuntimeRegistry } from "../runtimes/registry.ts";
+import { fakeModelBin } from "../runtimes/testing.ts";
 import { interpolate, loadAppEnv, runTarget } from "./targets.ts";
 
 let server: ReturnType<typeof Bun.serve>;
@@ -113,6 +114,16 @@ describe("agent target", () => {
     // A runtime the space lacks, or no registry at all, is an error rather than a crash.
     expect(await runTarget({ kind: "agent", runtime: "dsh", prompt: "prompt.md" }, ctx())).toMatchObject({ status: "error", error: "runtime dsh is not configured" });
     expect(await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, { appDir, signal: AbortSignal.timeout(1000) })).toMatchObject({ status: "error", error: expect.stringMatching(/not configured/) });
+  });
+
+  test("the task's permission mode and tools reach the CLI; a runtime that cannot honour them refuses", async () => {
+    const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", permissionMode: "bypassPermissions", tools: ["Bash(sqlite3 *)", "Read"] }, ctx(5000, fakeModelBin()));
+    expect(r.status).toBe("ok");
+    expect(r.output).toContain("[args: -p --output-format json --permission-mode bypassPermissions --allowedTools Bash(sqlite3 *),Read]");
+    const plain = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx(5000, fakeModelBin()));
+    expect(plain.output).toContain("[args: -p --output-format json]");
+    const dsh = new RuntimeRegistry({ default: "dsh", runtimes: [{ name: "dsh", kind: "deepseek-harness", bin: ["sh", "-c", "cat"], profile: "headless" }] });
+    expect(await runTarget({ kind: "agent", runtime: "dsh", prompt: "prompt.md", permissionMode: "acceptEdits" }, { appDir, signal: AbortSignal.timeout(1000), runtimes: dsh })).toMatchObject({ status: "error", error: expect.stringMatching(/from its profile/) });
   });
 
   test("missing prompt file is an error", async () => {
