@@ -143,7 +143,7 @@ git push <host> main      # checks out into ~/.ai-space/core, runs deploy/instal
 
 **Workspace `.env`**
 
-The interactive way: `space setup` (or `bun run setup` in `~/.ai-space/core`). It checks the tools from steps 1 to 3 and step 5, asks for every value below and for the notification channel, R2 credentials and peers of steps 7 to 9 (each can be skipped and added on a later run), sends a test message, probes the bucket, shows a summary with secrets masked, writes `~/.ai-space/.env` keeping every line it did not touch, and restarts the unit. Existing values are the defaults, so re-running it is how a value is changed later.
+The interactive way: `space setup` (or `bun run setup` in `~/.ai-space/core`). It checks the tools from steps 1 to 3 and step 5 (and lingering for the systemd user manager), asks for every value below, who runs the apps' services, and for the notification channel, R2 credentials and peers of steps 7 to 9 (each can be skipped and added on a later run), sends a test message, probes the bucket, shows a summary with secrets masked, writes `~/.ai-space/.env` keeping every line it did not touch, and restarts the unit. Existing values are the defaults, so re-running it is how a value is changed later.
 
 By hand: edit `~/.ai-space/.env`; `.env.example` in the checkout lists every key. Set now:
 
@@ -153,10 +153,19 @@ SPACE_PORT=8700
 SPACE_API_TOKEN=$(openssl rand -hex 32)     # paste the value; mutating routes require it
 SPACE_MAX_CONCURRENCY=4                     # slow agent tasks hold a slot for minutes; 2 is tight
 SPACE_CHAT_MODEL=sonnet
-SPACE_SERVICE_STOP="sudo systemctl disable --now {app}"   # what the panel runs when it uninstalls an app; user units: systemctl --user disable --now {app}
-# SPACE_SERVICE_LOGS=                       # what `space logs <app>` runs; default journalctl --user -u {app} -n {lines} --no-pager {follow}
+SPACE_SUPERVISOR=space                      # ai-space runs each app's service as space-<app>.service (supervision.md)
 SPACE_NAME=<short machine name>             # what this space calls itself (machines.md)
 ```
+
+`SPACE_SUPERVISOR=space` needs the lingering that `install.sh` enabled; `setup` checks it and offers only `operator` without it. With `operator` (the default when the line is absent) the apps' services are units you install yourself, and two more lines tell the space how to handle them:
+
+```bash
+SPACE_SUPERVISOR=operator
+SPACE_SERVICE_STOP="sudo systemctl disable --now {app}"   # what the panel runs when it uninstalls an app; user units: systemctl --user disable --now {app}
+# SPACE_SERVICE_LOGS=                       # what `space logs <app>` runs; default journalctl --user -u {app} -n {lines} --no-pager {follow}
+```
+
+ai-space refuses to start with `SPACE_SUPERVISOR=space` and either template set: they describe the operator's units.
 
 Restart and check:
 
@@ -327,7 +336,7 @@ Put an app in place and walk through every service once. The `space-app` skill (
 
 ```bash
 cd ~/.ai-space/apps && git clone https://github.com/<you>/<app>.git      # or write apps/<name>/space.yaml for a link app
-# the app's own .env (its secrets), its runtime, its user unit if it has a service
+# the app's own .env (its secrets) and its dependencies (bun install); under SPACE_SUPERVISOR=operator also its user unit
 curl -s -X POST -H "Authorization: Bearer $SPACE_API_TOKEN" http://127.0.0.1:8700/api/apps/sync
 ```
 
@@ -339,14 +348,14 @@ Then check, in this order:
 2. `https://space.example.com` shows the tile (next to the default app's); the settings pop-over lists the service with its health.
 3. Chat with "Base" (the space agent) and with the app's agent; the answer streams. With `acceptEdits` the agent can write in the app directory. Sessions reopen from the list.
 4. Tasks drawer: run one task by hand (`POST /api/tasks/:id/run` with the token) and see the run and its output.
-5. `cat ~/.ai-space/data/<app>/space.env` holds `DATABASE_URL`, `BLOB_URL` and `SPACE_APP_TOKEN`; the app's unit has `EnvironmentFile=-%h/.ai-space/data/<app>/space.env`.
+5. `cat ~/.ai-space/data/<app>/space.env` holds `DATABASE_URL`, `BLOB_URL` and `SPACE_APP_TOKEN`. Under `space`, `space app service <app>` shows `space-<app>.service` active and the last sync `installed` or `unchanged`, and `~/.ai-space/run/env/<app>.env` carries those variables plus `PORT`; under `operator`, the app's own unit has `EnvironmentFile=-%h/.ai-space/data/<app>/space.env`.
 6. Stop a task's target once so it fails three times, or post a test notification: the message arrives on the default channel.
 7. `git push <host> main` from the laptop redeploys and the unit comes back within seconds.
 
 ## What is not covered yet
 
 - **The workspace `.env`.** `~/.ai-space/data/` is snapshotted daily to the R2 bucket once step 7 is done (see [backup.md](backup.md); `bun src/index.ts backups` lists them, `backup-verify` opens the newest). `~/.ai-space/.env` is never in a snapshot: keep a copy in the password manager.
-- **Service supervision.** Apps with a `service` run under their own user unit; ai-space probes health but does not start them. Install the unit from the app's `deploy/` directory and `daemon-reload` by hand.
+- **Handing a running machine over to `SPACE_SUPERVISOR=space`.** Done by hand, app by app, as [supervision.md](supervision.md#rollout) describes; a command that does it with a health check and a rollback is still to come. An app installer that writes its own unit must skip that when it sees `SPACE_SUPERVISOR=space` in its environment (`install-defaults` passes it), or its unit and the space's conflict.
 - **PostgreSQL.** Only if an app declares `storage.database: postgres`: install the server, create a superuser for ai-space, set `SPACE_PG_ADMIN_URL`.
 - **Codex.** The chat runtime is Claude Code only; a `codex` agent answers 501.
 

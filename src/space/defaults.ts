@@ -51,8 +51,13 @@ export type InstallReport = { name: string; status: "present" | "cloned" | "inst
 
 export type InstallOptions = {
   /** Run a command in a directory; resolves to the exit code and the last lines of output. */
-  run?: (cmd: string[], cwd: string) => Promise<{ code: number; output: string }>;
+  run?: (cmd: string[], cwd: string, env?: Record<string, string>) => Promise<{ code: number; output: string }>;
   log?: (line: string) => void;
+  /**
+   * Who runs the services here (SPACE_SUPERVISOR), handed to each installer. Under `space` the space
+   * already wrote the app's unit at boot; the installer only installs dependencies (docs/supervision.md).
+   */
+  supervisor?: "space" | "operator";
 };
 
 const lastLine = (output: string, fallback: string) => output.trim().split("\n").at(-1) || fallback;
@@ -93,7 +98,7 @@ export async function installDefaultApps(ws: Workspace, apps: DefaultApp[], opts
       continue;
     }
     log(`running ${installer}`);
-    const inst = await run(["bash", installer], dir);
+    const inst = await run(["bash", installer], dir, { SPACE_SUPERVISOR: opts.supervisor ?? "operator" });
     if (inst.code !== 0) reports.push({ name: app.name, status: "failed", detail: `deploy/install.sh: ${lastLine(inst.output, `exit ${inst.code}`)}` });
     else reports.push({ name: app.name, status: "installed", detail: lastLine(inst.output, "") || undefined });
   }
@@ -133,8 +138,8 @@ export function applyEnvOverrides(manifest: Manifest, env: Record<string, string
   return manifest;
 }
 
-async function runCommand(cmd: string[], cwd: string): Promise<{ code: number; output: string }> {
-  const proc = Bun.spawn(cmd, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: process.env });
+async function runCommand(cmd: string[], cwd: string, env: Record<string, string> = {}): Promise<{ code: number; output: string }> {
+  const proc = Bun.spawn(cmd, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, ...env } });
   const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   return { code, output: (err + out).slice(-2000) };
 }

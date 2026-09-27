@@ -20,6 +20,8 @@ export type LogsApiOptions = {
   template: string;
   token?: string;
   knownApp: (app: string) => boolean;
+  /** The unit of an app when it is not named after the app (the supervisor's `space-<app>.service`). */
+  unitOf?: (app: string) => string | undefined;
   spawn?: (req: LogsRequest) => LogsProcess;
   /** Keepalive period for the stream, ms. */
   keepaliveMs?: number;
@@ -42,7 +44,8 @@ export function createLogsRoutes(opts: LogsApiOptions): Record<string, { GET: Ha
         const lines = Number(q.get("lines") ?? 100);
         if (!Number.isFinite(lines) || lines < 1) return error(400, "lines must be a positive number");
         const follow = q.get("follow") === "1";
-        const proc = spawn({ app, lines, follow });
+        const unit = app === "space" ? undefined : opts.unitOf?.(app);
+        const proc = spawn({ app, lines, follow, ...(unit ? { unit } : {}) });
         if (!follow) {
           const out: string[] = [];
           for await (const line of proc.lines) out.push(line);

@@ -8,7 +8,7 @@ import { type TaskView, taskRef } from "./common.ts";
  * load and peers. There is no `/api/status`: this is the only reader.
  */
 
-type Services = { services: { app: string; peer?: string; port: number; health: string; status: string }[]; peers: unknown[] };
+type Services = { services: { app: string; peer?: string; port: number; health: string; status: string; supervision?: { action: string; error?: string } }[]; peers: unknown[]; supervisor?: string };
 type Backups = { target: string | null; backups: { app: string; lastOkAt?: number; lastStatus?: string; lastError?: string; stale: boolean; nextRunAt?: number }[] };
 type Model = { backend: string; runtimes: { name: string; kind: string; backend: string; default: boolean }[]; maxConcurrency: number; running: number; waiting: number };
 type Peers = { peers: { name: string; url: string; health: string; asOf?: string; stale: boolean; apps: number; error?: string }[] };
@@ -46,6 +46,10 @@ export const statusNoun: Noun = {
         p.line("");
         const svc = services?.services ?? [];
         p.line(`services  ${svc.length} · ${svc.filter((s) => s.health === "ok").length} up${down.length ? ` · ${down.length} DOWN: ${down.map((s) => (s.peer ? `${s.peer}/${s.app}` : s.app)).join(", ")}` : ""}`);
+        if (services?.supervisor) {
+          const bad = svc.filter((s) => !s.peer && (s.supervision?.action === "failed" || s.supervision?.action === "conflict"));
+          p.line(`supervisor ${services.supervisor}${bad.length ? ` · ${bad.length} UNIT PROBLEM(S): ${bad.map((s) => `${s.app} (${s.supervision!.action})`).join(", ")}` : ""}`);
+        }
         const all = tasks?.tasks ?? [];
         p.line(`tasks     ${all.length} · ${all.filter((t) => t.enabled).length} enabled${running.length ? ` · ${running.length} running` : ""}${failing.length ? ` · ${failing.length} FAILING: ${failing.map(taskRef).join(", ")}` : ""}${overdue.length ? ` · ${overdue.length} overdue: ${overdue.map(taskRef).join(", ")}` : ""}`);
         if (backups) {

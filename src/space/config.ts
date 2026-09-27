@@ -51,6 +51,12 @@ export type Config = {
   eventRetentionMs: number;
   /** Chat model when neither the request nor the manifest names one (SPACE_CHAT_MODEL). */
   chatModel: string;
+  /**
+   * Who runs the apps' services (SPACE_SUPERVISOR, docs/supervision.md): `space` writes and keeps a user
+   * unit per app (`space-<app>.service`); `operator` (the default) leaves them to units the operator
+   * installed, which the space only probes, stops through SPACE_SERVICE_STOP and reads through SPACE_SERVICE_LOGS.
+   */
+  supervisor: "space" | "operator";
   /** Command that stops an app's service when the panel uninstalls it (SPACE_SERVICE_STOP), `{app}` = name; empty = services are not stopped. */
   serviceStop: string;
   /**
@@ -100,6 +106,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
   for (const w of terminal.warnings) console.warn(`[terminal] ${w}`);
   const router = loadRouterConfig(env);
   for (const w of router.warnings) console.warn(`[router] ${w}`);
+  const supervisor = loadSupervisor(env);
   return {
     // One prefix per machine: several spaces sharing a bucket must not mix their `space/` (and same-named apps') snapshots.
     backupUrl: env.SPACE_BACKUP_URL?.trim() || (s3Configured && s3Bucket ? `s3://${s3Bucket}/backups/${name}/` : ""),
@@ -122,6 +129,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     notifyTasks: env.SPACE_NOTIFY_TASKS?.trim() ?? "",
     eventRetentionMs: Math.max(1, Number(env.SPACE_EVENTS_RETENTION_DAYS ?? 30) || 30) * 24 * 3600_000,
     chatModel: env.SPACE_CHAT_MODEL?.trim() ?? "sonnet",
+    supervisor,
     serviceStop: env.SPACE_SERVICE_STOP?.trim() ?? "",
     serviceLogs: env.SPACE_SERVICE_LOGS?.trim() || DEFAULT_SERVICE_LOGS,
     name,
@@ -145,6 +153,21 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
         }
       : {}),
   };
+}
+
+/**
+ * SPACE_SUPERVISOR: `operator` when unset, so a machine whose services are the operator's units keeps
+ * them until it is switched on purpose. The two operator templates belong to the operator's units: set
+ * together with `space` they would describe units that no longer run the apps, so that is refused.
+ */
+export function loadSupervisor(env: Record<string, string | undefined>): "space" | "operator" {
+  const raw = env.SPACE_SUPERVISOR?.trim() || "operator";
+  if (raw !== "space" && raw !== "operator") throw new Error(`SPACE_SUPERVISOR must be space or operator, not "${raw}"`);
+  if (raw === "space") {
+    const set = ["SPACE_SERVICE_STOP", "SPACE_SERVICE_LOGS"].filter((k) => env[k]?.trim());
+    if (set.length) throw new Error(`SPACE_SUPERVISOR=space runs the services itself; remove ${set.join(" and ")} from the workspace .env (they describe the operator's units)`);
+  }
+  return raw;
 }
 
 /** Open the storage service on ai-space's own database. */
