@@ -80,7 +80,9 @@ describe("unit", () => {
 
 /** A user manager in memory: units by name, with the states `systemctl show` reports. */
 function fakeSystemd(init: Record<string, { active?: string; enabled?: string; scope?: "user" | "system" }> = {}) {
-  const units = new Map(Object.entries(init).map(([k, v]) => [`${v.scope ?? "user"}:${k}`, { active: v.active ?? "inactive", enabled: v.enabled ?? "disabled" }]));
+  const units = new Map<string, { active: string; enabled: string; sub?: string }>(Object.entries(init).map(([k, v]) => [`${v.scope ?? "user"}:${k}`, { active: v.active ?? "inactive", enabled: v.enabled ?? "disabled" }]));
+  /** Units whose command exits at once: started, they loop through auto-restart as systemd does. */
+  const crashing = new Set<string>();
   const calls: string[] = [];
   const failOn = new Set<string>();
   const run = async (cmd: string[]): Promise<RunResult> => {
@@ -95,7 +97,7 @@ function fakeSystemd(init: Record<string, { active?: string; enabled?: string; s
       const name = rest.at(-1)!;
       const u = units.get(`${scope}:${name}`);
       const stdout = u
-        ? `LoadState=loaded\nActiveState=${u.active}\nSubState=${u.active === "active" ? "running" : "dead"}\nUnitFileState=${u.enabled}\nNRestarts=0\nMainPID=${u.active === "active" ? 42 : 0}\nActiveEnterTimestamp=\n`
+        ? `LoadState=loaded\nActiveState=${u.active}\nSubState=${u.sub ?? (u.active === "active" ? "running" : "dead")}\nUnitFileState=${u.enabled}\nNRestarts=0\nMainPID=${u.active === "active" ? 42 : 0}\nActiveEnterTimestamp=\n`
         : "LoadState=not-found\nActiveState=inactive\nSubState=dead\nUnitFileState=\nNRestarts=0\nMainPID=0\n";
       return { code: 0, stdout, stderr: "" };
     }
@@ -107,10 +109,11 @@ function fakeSystemd(init: Record<string, { active?: string; enabled?: string; s
     if (verb === "disable") Object.assign(u, { enabled: "disabled", ...(rest.includes("--now") ? { active: "inactive" } : {}) });
     if (verb === "start" || verb === "restart") u.active = "active";
     if (verb === "stop") u.active = "inactive";
+    if (crashing.has(name) && u.active === "active") Object.assign(u, { active: "activating", sub: "auto-restart" });
     if (verb !== "daemon-reload" && verb !== "reset-failed") units.set(`${scope}:${name}`, u);
     return { code: 0, stdout: "", stderr: "" };
   };
-  return { run, calls, units, failOn };
+  return { run, calls, units, failOn, crashing };
 }
 
 async function setup(init?: Parameters<typeof fakeSystemd>[0], mode: "space" | "operator" = "space", extra: Partial<ConstructorParameters<typeof Supervisor>[0]> = {}) {
@@ -301,6 +304,16 @@ describe("handover", () => {
     expect(r).toMatchObject({ ok: false, rolledBack: true });
     // Only running before, not enabled: it is started again, not enabled.
     expect(t.sd.calls.at(-1)).toBe("start demo.service");
+  });
+
+  test("a command that keeps exiting is caught in auto-restart, not after the whole health window", async () => {
+    const t = await setup({ "demo.service": { active: "active", enabled: "enabled" } }, "space", { probe: async () => "down", healthWaitMs: 60_000 });
+    t.sd.crashing.add("space-demo.service");
+    const started = Date.now();
+    const r = await t.sup.handover(withHealth(), "space");
+    expect(r).toMatchObject({ ok: false, rolledBack: true, error: expect.stringMatching(/keeps exiting/) });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(t.sd.units.get("user:demo.service")).toMatchObject({ active: "active", enabled: "enabled" });
   });
 
   test("back to the operator: the space's unit goes, the operator's is enabled, later syncs leave it alone", async () => {

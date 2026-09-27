@@ -317,7 +317,8 @@ export class Supervisor {
     const probe = this.opts.probe;
     for (;;) {
       const state = await this.opts.systemctl.show(unit, scope).catch(() => undefined);
-      if (state && state.activeState === "failed") return `${unit} failed to start; see journalctl ${scope === "user" ? "--user " : ""}-u ${unit}`;
+      // A crashing command never reaches "failed" under Restart=on-failure: it loops through auto-restart.
+      if (state && (state.activeState === "failed" || state.subState === "auto-restart" || state.restarts > 0)) return `${unit} ${state.activeState === "failed" ? "failed to start" : "keeps exiting"}; see journalctl ${scope === "user" ? "--user " : ""}-u ${unit}`;
       if (probe && health && m.service) {
         if ((await probe(m.service.port, health).catch(() => "down")) === "ok") return "ok";
       } else if (state && state.activeState === "active") return "ok";
