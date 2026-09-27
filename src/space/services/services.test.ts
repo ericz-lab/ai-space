@@ -7,7 +7,7 @@ import { renderLogsCommand } from "../logs/logs.ts";
 import type { Manifest } from "../scheduler/manifest.ts";
 import { createServiceRoutes } from "./api.ts";
 import { Supervisor } from "./supervisor.ts";
-import { type RunResult, Systemctl } from "./systemd.ts";
+import { parseTimestamp, type RunResult, Systemctl } from "./systemd.ts";
 import { UNIT_MARKER, execArg, renderEnvFile, renderUnit, serviceEnv, unitName } from "./unit.ts";
 
 const mf = (app: string, extra: Partial<Manifest> = {}): Manifest => ({
@@ -260,6 +260,16 @@ describe("supervisor", () => {
     expect(r.health).toBe("pending");
     await Bun.sleep(1_200);
     expect(sup.lastOf("demo")?.health).toBe("ok");
+  });
+});
+
+describe("systemctl", () => {
+  test("a show timestamp is local wall-clock time, whatever zone abbreviation follows", () => {
+    // `CST` is China here; JavaScript alone would read it as US Central, 14 hours off.
+    expect(parseTimestamp("Sun 2026-09-27 17:18:09 CST")).toEqual(new Date(2026, 8, 27, 17, 18, 9));
+    expect(parseTimestamp("Mon 2026-09-28 10:00:00 KST")).toEqual(new Date(2026, 8, 28, 10, 0, 0));
+    expect(parseTimestamp("@1790500689")).toEqual(new Date(1790500689 * 1000));
+    expect(parseTimestamp("n/a")).toBeUndefined();
   });
 });
 

@@ -45,7 +45,7 @@ export class Systemctl {
       const i = line.indexOf("=");
       if (i > 0) kv[line.slice(0, i)] = line.slice(i + 1).trim();
     }
-    const since = kv.ActiveEnterTimestamp ? new Date(kv.ActiveEnterTimestamp.replace(/^\w{3} /, "")) : undefined;
+    const since = kv.ActiveEnterTimestamp ? parseTimestamp(kv.ActiveEnterTimestamp) : undefined;
     return {
       loadState: kv.LoadState ?? "",
       activeState: kv.ActiveState ?? "",
@@ -85,6 +85,22 @@ export class Systemctl {
     const r = await this.run(["systemctl", "--user", ...args]);
     if (r.code !== 0) throw new Error(`systemctl --user ${args.filter((a) => a !== "--").join(" ")}: ${lastLine(r.stderr || r.stdout) || `exit ${r.code}`}`);
   }
+}
+
+/**
+ * A `systemctl show` timestamp, `Sun 2026-09-27 17:18:09 CST`, as local time.
+ * The zone is an abbreviation JavaScript either misreads (`CST` is taken as
+ * US Central, not China) or rejects (`KST`); systemd prints in the machine's
+ * zone, which is this process's too, so the wall-clock part is enough.
+ * `@<seconds>` (`--timestamp=unix`) is taken as is.
+ */
+export function parseTimestamp(text: string): Date | undefined {
+  const unix = /^@(\d+)$/.exec(text);
+  if (unix) return new Date(Number(unix[1]) * 1000);
+  const m = /(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(text);
+  if (!m) return undefined;
+  const [y, mo, d, h, mi, se] = m.slice(1).map(Number) as [number, number, number, number, number, number];
+  return new Date(y, mo - 1, d, h, mi, se);
 }
 
 function lastLine(text: string): string {
