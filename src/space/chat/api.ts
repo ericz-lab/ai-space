@@ -106,7 +106,7 @@ export function createChatRoutes(opts: ChatApiOptions): Routes {
       choice: choice ?? null,
       ...(choice !== undefined && effective.source !== "choice" ? { choiceUnavailable: true } : {}),
       appModel: requested ?? null,
-      defaultModel: service.spaceDefaultModel(),
+      defaultModel: service.spaceDefaultModel(app).model,
       effective,
       /** What "default" in the picker means right now: the app's model, else the space's. */
       fallback: service.effectiveModel(app, requested, { ignoreChoice: true }),

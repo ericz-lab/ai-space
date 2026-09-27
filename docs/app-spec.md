@@ -88,7 +88,7 @@ i18n:                              # translations of the display text, by langua
 | `repo` | string | The origin URL. |
 | `i18n` | mapping | Translations of `title` and `description`, and by name of the agents' and widgets' text, keyed by language tag (`zh`, `zh-Hant`, `pt-BR`). The panel shows the reader's language when the manifest has it and the plain field otherwise; names are never translated. Only declared agent and widget names may appear. See [i18n](i18n.md). |
 
-Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `storage`, `notify`. Each is optional.
+Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `storage`, `notify`, `model`. Each is optional.
 
 ```yaml
 i18n:
@@ -281,6 +281,20 @@ backup:
 ```
 
 The task it registers is named `backup`; an app may not declare a task with that name unless it sets `backup: false`.
+
+### `model`
+
+The model tier the app's calls run on when a request to `/api/model/run` names no `model`, as a whole and per `tag`. Name tiers (`basic`, `junior`, `intermediate`, `advanced`) so the manifest fits any machine; they run on the runtime of the space's default. `runtime/tier` pins a runtime.
+
+```yaml
+model:
+  default: junior                  # default: the space's default model
+  tags:                            # keyed by the tag the app sends
+    translate: basic
+    curate: intermediate
+```
+
+`model: basic` is short for `model: { default: basic }`. The operator can override any of it per app and tag in Settings → App models; a model the request itself names is above both, so leave `model` out of requests and declare it here. The resolution order and the ledger's `modelSource` are in [model.md](model.md#app-models).
 
 ### `notify`
 

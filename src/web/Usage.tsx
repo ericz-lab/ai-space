@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { type AppInfo, dateTime, fmtDuration, getJson, relTime } from "./api.ts";
-import { type Lang, localized, useLang } from "./i18n.ts";
+import { type Key, type Lang, localized, useLang } from "./i18n.ts";
 
 // Usage window (a floating panel): what the model service recorded, read-only.
 // - Reads `GET /api/model/usage?window=…` when opened and every 30 s while open.
@@ -27,6 +27,7 @@ type CallInfo = {
   app: string;
   tag: string;
   model: string;
+  modelSource?: string;
   backend: string;
   origin: string;
   status: "ok" | "error";
@@ -346,7 +347,7 @@ export default function Usage({ open, onClose, onBack }: { open: boolean; onClos
               </div>
               <div className="runs">
                 {calls.map((c) => (
-                  <div key={c.id} className="runrow" title={c.error || `${c.app}/${c.tag} · ${c.backend}`}>
+                  <div key={c.id} className="runrow" title={c.error || `${c.app}/${c.tag} · ${c.backend}${c.modelSource ? ` · ${t(`appModels.source.${c.modelSource}` as Key)}` : ""}`}>
                     <div className="run-line">
                       <span className={`status ${c.status === "ok" ? "ok" : "down"}`}>
                         <i />

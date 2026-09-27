@@ -5,6 +5,7 @@ import { AppRegistry, HealthProbe, LayoutStore, WidgetFeed, createPanelRoutes, r
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
 import { ModelService, ModelStore, createModelRoutes, recordAgentRun } from "./space/model/index.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
+import { AppModels, createAppModelRoutes } from "./space/model/app-models.ts";
 import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts";
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
@@ -62,8 +63,22 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const baseDefaultModel = () => modelPreferences.read() ?? config.chatModel;
   const modelStore = new ModelStore(config.dbPath, { retentionDays: config.model.retentionDays });
   const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency });
+  // Per app and tag, when a call names no model (docs/model.md#app-models): panel overrides, the manifest, then the default above.
+  const appModels = new AppModels(store.db, {
+    manifest: (app) => registry.get(app)?.manifest.model,
+    fallback: appDefaultModel,
+    runnable: (m) => {
+      try {
+        model.resolve(m);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    options: () => modelPreferences.options(),
+  });
   const chatStore = new ChatStore(config.dbPath);
-  const chat = new ChatService({ store: chatStore, model, defaultModel: appDefaultModel, fileDir: (app) => join(storage.appDataDir(app), "chat") });
+  const chat = new ChatService({ store: chatStore, model, defaultModel: (app, tag) => appModels.resolve(app, tag), fileDir: (app) => join(storage.appDataDir(app), "chat") });
   // The widget apps embed is bundled once at boot; SPACE_DEV=1 rebuilds it on every request.
   const widget = buildWidget({ dev: process.env.SPACE_DEV === "1" });
   // Agent tasks run on their runtime from the scheduler; their usage reaches the ledger from the run result.
@@ -257,7 +272,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       }),
       ...createNotifyRoutes({ notify, store: notifyStore, token: config.apiToken, appForToken: (t) => storage.appForToken(t) }),
       ...createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel }),
-      ...createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), defaultModel: appDefaultModel }),
+      ...createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag) }),
+      ...createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) }),
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
       ...createRouterRoutes({ router }),
