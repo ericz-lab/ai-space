@@ -1,5 +1,6 @@
 import { mkdir, rm, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import type { ResolvedModel } from "../model/app-models.ts";
 import type { ModelService } from "../model/service.ts";
 import { DEFAULT_SYSTEM, type ModelCall } from "../model/types.ts";
 import type { CompleteFile, OnDelta } from "../runtimes/types.ts";
@@ -25,8 +26,8 @@ export type ChatServiceOptions = {
   model: ModelService;
   /** Directory for an app's attachment files (`<workspace>/data/<app>/chat`). */
   fileDir: (app: string) => string;
-  /** Model when a turn names none (SPACE_MODEL_DEFAULT). */
-  defaultModel: string | (() => string);
+  /** Model when a turn names none: a fixed name, or the app's layers for the `chat` tag (app-models.ts). */
+  defaultModel: string | ((app: string, tag: string) => string | ResolvedModel);
   log?: (message: string) => void;
   now?: () => number;
 };
@@ -64,7 +65,7 @@ export class ChatService {
   readonly store: ChatStore;
   private readonly model: ModelService;
   private readonly fileDir: (app: string) => string;
-  readonly defaultModel: string | (() => string);
+  readonly defaultModel: ChatServiceOptions["defaultModel"];
   private readonly log: (m: string) => void;
   private readonly now: () => number;
   private readonly running = new Set<number>();
@@ -76,6 +77,13 @@ export class ChatService {
     this.defaultModel = opts.defaultModel;
     this.log = opts.log ?? ((m) => console.log(`[chat] ${m}`));
     this.now = opts.now ?? Date.now;
+  }
+
+  /** The turn's model and the layer that chose it. */
+  private pickModel(app: string, requested: string | undefined): ResolvedModel {
+    if (requested !== undefined) return { model: requested, source: "request" };
+    const d = typeof this.defaultModel === "function" ? this.defaultModel(app, "chat") : this.defaultModel;
+    return typeof d === "string" ? { model: d, source: "default" } : d;
   }
 
   isRunning(threadId: number): boolean {
@@ -177,10 +185,11 @@ export class ChatService {
       });
 
       let partial = "";
+      const chosen = this.pickModel(app, input.model);
       const { outcome, call } = await this.model.run(
         app,
         {
-          prompt, system: input.context?.system ?? DEFAULT_SYSTEM, model: input.model ?? (typeof this.defaultModel === "function" ? this.defaultModel() : this.defaultModel), tag: "chat", tools: input.tools,
+          prompt, system: input.context?.system ?? DEFAULT_SYSTEM, model: chosen.model, tag: "chat", tools: input.tools,
           timeoutMs: input.timeoutMs, maxTokens: MAX_OUTPUT_TOKENS, ...(input.thinking !== undefined ? { thinking: input.thinking } : {}), ...(files.length ? { files } : {}),
         },
         signal,
@@ -188,6 +197,7 @@ export class ChatService {
           partial += text;
           onDelta?.(text);
         },
+        chosen.source,
       );
       const at = this.now();
       const assistant = outcome.ok

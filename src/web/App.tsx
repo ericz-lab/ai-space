@@ -5,6 +5,7 @@ import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
 import Usage from "./Usage.tsx";
+import AppModels from "./AppModels.tsx";
 import Events from "./Events.tsx";
 import { getJson, isImgIcon, relTime, repoUrl, sendJson, untilTime, type AgentInfo, type AppInfo, type BackupInfo, type PeerInfo, type ServiceInfo, type WidgetInfo } from "./api.ts";
 import { type Key, LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
@@ -408,6 +409,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // One floating panel at a time: opening the settings, the chat or the tasks closes the others.
   const [tasksOpen, setTasksOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [appModelsOpen, setAppModelsOpen] = useState(false);
   const [eventsOpen, setEventsOpen] = useState(false);
   const [termOpen, setTermOpen] = useState(false);
   // The chat opens on the space agent by default; an agent tile switches to that agent.
@@ -906,6 +908,17 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 onClick={() => {
                   setSetsOpen(false);
                   setChatOpen(false);
+                  setAppModelsOpen(true);
+                }}
+              >
+                {t("settings.appModels")}
+                <span>›</span>
+              </button>
+              <button
+                className="setrow setlink"
+                onClick={() => {
+                  setSetsOpen(false);
+                  setChatOpen(false);
                   setEventsOpen(true);
                 }}
               >
@@ -1007,6 +1020,10 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         }} />
       <Usage open={usageOpen} onClose={() => setUsageOpen(false)} onBack={() => {
           setUsageOpen(false);
+          openSettings();
+        }} />
+      <AppModels open={appModelsOpen} onClose={() => setAppModelsOpen(false)} onBack={() => {
+          setAppModelsOpen(false);
           openSettings();
         }} />
       <Events open={eventsOpen} onClose={() => setEventsOpen(false)} onBack={() => {
