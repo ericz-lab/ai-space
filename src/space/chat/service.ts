@@ -1,7 +1,8 @@
 import { mkdir, rm, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { ModelService } from "../model/service.ts";
-import { DEFAULT_SYSTEM, type ModelCall } from "../model/types.ts";
+import { DEFAULT_SYSTEM, MODEL_PATTERN, type ModelCall } from "../model/types.ts";
+import type { ModelTier } from "../runtimes/types.ts";
 import type { CompleteFile, OnDelta } from "../runtimes/types.ts";
 import { buildPrompt } from "./prompt.ts";
 import type { ChatStore } from "./store.ts";
@@ -30,6 +31,17 @@ export type ChatServiceOptions = {
   log?: (message: string) => void;
   now?: () => number;
 };
+
+/** One entry of the widget's model picker: a runtime's capability tier and the concrete model it maps to. */
+export type ModelOption = { value: string; runtime: string; tier: ModelTier; model: string };
+
+/**
+ * The model a turn runs on and why: the person's pick in the widget, the
+ * model the app asked for (`context().model` or the mount option), or the
+ * space's app default. `runtime`/`model` are the resolved names, absent when
+ * the value does not resolve (the turn then fails with the reason).
+ */
+export type EffectiveModel = { value: string; source: "choice" | "app" | "default"; runtime?: string; model?: string };
 
 export type TurnResult = { ok: boolean; error?: string; user: Message; assistant: Message; thread: Thread; call?: ModelCall };
 
@@ -85,6 +97,62 @@ export class ChatService {
   /** The ledger row behind an answer, for the backend and cost a message shows. */
   callOf(id: number): ModelCall | undefined {
     return this.model.store.get(id);
+  }
+
+  // ---------------------------------------------------------------- model choice
+
+  /** What the picker offers: every runtime/tier pair of a runtime that answers requests. */
+  modelOptions(): ModelOption[] {
+    return this.model.runtimes.tierOptions().filter((o) => o.capabilities.complete).map(({ value, runtime, tier, model }) => ({ value, runtime, tier, model }));
+  }
+
+  /** The space's model for an app that names none (Settings → default model, else SPACE_MODEL_DEFAULT). */
+  spaceDefaultModel(): string {
+    return typeof this.defaultModel === "function" ? this.defaultModel() : this.defaultModel;
+  }
+
+  /** A model string's shape only (the app's own model may name a runtime this space lacks; the turn reports that). */
+  checkModelShape(raw: unknown): string {
+    if (typeof raw !== "string" || !MODEL_PATTERN.test(raw)) throw new Error("model must be a model alias, id or runtime/tier (letters, digits, . _ : -)");
+    return raw;
+  }
+
+  /** Check a model string the way a turn would resolve it; the error names the reason (unknown runtime, tier without a model). */
+  checkModel(raw: unknown): string {
+    const model = this.checkModelShape(raw);
+    this.model.resolve(model);
+    return model;
+  }
+
+  /** Store (or with null clear) the person's model for an app's chat. */
+  setModelChoice(app: string, raw: unknown): void {
+    this.store.setModelChoice(app, raw === null ? null : this.checkModel(raw), this.now());
+  }
+
+  /**
+   * Which model a turn of this app runs on: the person's pick > the app's
+   * `model` > the space default. A stored pick that no longer resolves (its
+   * runtime was removed from `runtimes.yaml`) is skipped rather than failing
+   * every turn; the picker shows it as unavailable.
+   */
+  effectiveModel(app: string, requested?: string, opts: { ignoreChoice?: boolean } = {}): EffectiveModel {
+    const choice = opts.ignoreChoice ? undefined : this.store.getModelChoice(app);
+    const pick = choice !== undefined && this.resolves(choice) ? { value: choice, source: "choice" as const } : requested ? { value: requested, source: "app" as const } : { value: this.spaceDefaultModel(), source: "default" as const };
+    try {
+      const r = this.model.resolve(pick.value);
+      return { ...pick, runtime: r.runtime.name, model: r.model };
+    } catch {
+      return pick;
+    }
+  }
+
+  private resolves(model: string): boolean {
+    try {
+      this.model.resolve(model);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // ---------------------------------------------------------------- attachments
@@ -180,7 +248,7 @@ export class ChatService {
       const { outcome, call } = await this.model.run(
         app,
         {
-          prompt, system: input.context?.system ?? DEFAULT_SYSTEM, model: input.model ?? (typeof this.defaultModel === "function" ? this.defaultModel() : this.defaultModel), tag: "chat", tools: input.tools,
+          prompt, system: input.context?.system ?? DEFAULT_SYSTEM, model: this.effectiveModel(app, input.model).value, tag: "chat", tools: input.tools,
           timeoutMs: input.timeoutMs, maxTokens: MAX_OUTPUT_TOKENS, ...(input.thinking !== undefined ? { thinking: input.thinking } : {}), ...(files.length ? { files } : {}),
         },
         signal,
