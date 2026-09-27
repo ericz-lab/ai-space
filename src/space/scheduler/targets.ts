@@ -150,7 +150,10 @@ async function runAgent(target: Extract<Target, { kind: "agent" }>, ctx: RunCont
   if (!(await promptFile.exists())) return { status: "error", error: `prompt file not found: ${promptPath}` };
   const prompt = (await promptFile.text()) + (ctx.events?.length ? eventPromptSection(ctx.events) : "");
   const env = { ...process.env, ...(await loadAppEnv(cwd)), ...(ctx.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []) };
-  const r = await runtime.runAgent({ prompt, cwd, env, model: selected?.model ?? target.model, signal: ctx.signal });
+  const r = await runtime.runAgent({
+    prompt, cwd, env, model: selected?.model ?? target.model, signal: ctx.signal,
+    ...(target.permissionMode ? { permissionMode: target.permissionMode } : {}), ...(target.tools?.length ? { allowedTools: target.tools } : {}),
+  });
   const base = { runtime: runtime.name, model: selected?.model ?? target.model, promptChars: prompt.length, backend: r.backend, ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
   if (!r.ok) return { status: "error", error: r.error ?? "failed", output: truncate(r.output), ...base };
   return { status: "ok", output: truncate(r.text ?? r.output), ...base };

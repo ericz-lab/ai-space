@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
-import { assertCompletionMode, FILE_NAME_PATTERN, type AgentOutcome, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, FILE_NAME_PATTERN, PERMISSION_MODES, type AgentOutcome, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /**
  * Claude Code as a runtime. Three operations, one CLI:
@@ -40,7 +40,7 @@ import { assertCompletionMode, FILE_NAME_PATTERN, type AgentOutcome, type AgentR
  * (nothing is estimated).
  */
 
-export const PERMISSION_MODES = ["acceptEdits", "bypassPermissions", "plan"] as const;
+export { PERMISSION_MODES };
 
 export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
   const sshHost = spec.sshHost?.trim() ?? "";
@@ -75,7 +75,7 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
     },
 
     async runAgent(run) {
-      const cmd = [...bin, "-p", "--output-format", "json", ...(run.model ? ["--model", run.model] : [])];
+      const cmd = [...bin, ...agentArgs(run)];
       const r = await spawnCollect(cmd, { cwd: run.cwd, env: run.env, stdin: run.prompt, signal: run.signal });
       const output = joinOutput(r.stdout, r.stderr);
       if (r.timedOut || r.aborted) return { ok: false, error: "timed out", output, timedOut: true, backend: "local" };
@@ -246,6 +246,17 @@ async function runCompletion(cmd: string[], input: CompleteInput, stdin: string 
 
 function joinOutput(stdout: string, stderr: string): string {
   return [stdout, stderr].filter(Boolean).join("\n--- stderr ---\n");
+}
+
+// ---------------------------------------------------------------- agent
+
+/** Arguments for an agent task; exported for tests. The prompt travels on stdin. */
+export function agentArgs(run: Pick<AgentRun, "model" | "permissionMode" | "allowedTools">): string[] {
+  const args = ["-p", "--output-format", "json"];
+  if (run.model) args.push("--model", run.model);
+  if (run.permissionMode) args.push("--permission-mode", run.permissionMode);
+  if (run.allowedTools?.length) args.push("--allowedTools", run.allowedTools.join(","));
+  return args;
 }
 
 // ---------------------------------------------------------------- chat

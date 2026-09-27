@@ -1,7 +1,7 @@
 import { basename, join } from "node:path";
 import { parseEventsSpec, parseProvidesSpec, triggersFromConsumes } from "../bus/spec.ts";
 import type { Capability, EventsSpec } from "../bus/types.ts";
-import { RUNTIME_NAME_PATTERN } from "../runtimes/types.ts";
+import { PERMISSION_MODES, type PermissionMode, RUNTIME_NAME_PATTERN } from "../runtimes/types.ts";
 import { parseTriggers } from "./events.ts";
 import { assertSchedule, parseDuration } from "./schedule.ts";
 
@@ -440,7 +440,16 @@ function parseTarget(run: unknown, ctx: string): Target {
   if (!isRecord(a) || typeof a.prompt !== "string") throw new Error(`${ctx}: run.agent needs a prompt path`);
   const runtime = parseRuntimeName(a.runtime, `${ctx}: run.agent.runtime`);
   if (a.model !== undefined && typeof a.model !== "string") throw new Error(`${ctx}: run.agent.model must be a string`);
-  return { kind: "agent", runtime, prompt: a.prompt, ...(a.model ? { model: a.model } : {}) };
+  const permissionMode = parsePermissionMode(a.permissionMode, `${ctx}: run.agent.permissionMode`);
+  const tools = stringList(a.tools, `${ctx}: run.agent.tools`);
+  return { kind: "agent", runtime, prompt: a.prompt, ...(a.model ? { model: a.model } : {}), ...(permissionMode ? { permissionMode } : {}), ...(tools.length ? { tools } : {}) };
+}
+
+/** An agent target's write tier: one of the runtimes' permission modes, or absent (read-only). */
+export function parsePermissionMode(v: unknown, what: string): PermissionMode | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "string" || !(PERMISSION_MODES as readonly string[]).includes(v)) throw new Error(`${what} must be one of ${PERMISSION_MODES.join(", ")}`);
+  return v as PermissionMode;
 }
 
 // ---------------------------------------------------------------- helpers

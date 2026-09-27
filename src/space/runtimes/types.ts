@@ -77,12 +77,20 @@ export type CompleteOutcome =
   | { ok: true; text: string; usage?: Usage; costUsd?: number; backend: Backend }
   | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend };
 
+/** Write authorisation tiers a chat turn or an agent task may ask for; absent means read-only (the headless default). */
+export const PERMISSION_MODES = ["acceptEdits", "bypassPermissions", "plan"] as const;
+export type PermissionMode = (typeof PERMISSION_MODES)[number];
+
 /** An agent task: the prompt on stdin, the runtime's own tools, inside the app directory. */
 export type AgentRun = {
   prompt: string;
   cwd: string;
   env: Record<string, string | undefined>;
   model?: string;
+  /** Write tier from the task's manifest; a runtime that cannot honour it refuses the run. */
+  permissionMode?: PermissionMode;
+  /** Tools the run may use without asking, from the task's manifest. */
+  allowedTools?: string[];
   signal: AbortSignal;
 };
 

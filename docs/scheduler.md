@@ -70,7 +70,7 @@ Concurrency is a single limit for the whole scheduler (`SPACE_MAX_CONCURRENCY`).
 | --- | --- | --- |
 | `http` | Sends the request with interpolated url, headers and body. Any 2xx is `ok`. A 2xx JSON body of `{ "status": "ok" \| "error" \| "skipped", "error"?: string }` overrides that verdict. | An endpoint on `127.0.0.1` that does one round of work and reports honestly. |
 | `command` | Runs `sh -c <command>` with the app directory as cwd and the app's `.env` merged into the environment. Non-zero exit is an error. | A command that does one round of work and exits. |
-| `agent` | Runs the named runtime ([runtimes.md](runtimes.md); `claude` by default) in the app directory and feeds the prompt file on stdin. | A prompt file, and that runtime configured on the space. |
+| `agent` | Runs the named runtime ([runtimes.md](runtimes.md); `claude` by default) in the app directory and feeds the prompt file on stdin. Read-only by default (the headless CLI refuses tools that write); `permissionMode` (`acceptEdits`, `bypassPermissions`, `plan`) and `tools` (auto-approved, as `--allowedTools` takes them) come from the manifest. A runtime that takes its tools from its own profile (dsh) refuses a task that sets either. | A prompt file, and that runtime configured on the space. |
 
 `${VAR}` and `${VAR:-default}` placeholders in http urls, headers, string bodies and command strings resolve from the scheduler's own environment (`<workspace>/.env`). This keeps secrets and machine-specific paths out of manifests. Inside a command, shell variables are written as `$VAR` so the shell, not the scheduler, expands them.
 

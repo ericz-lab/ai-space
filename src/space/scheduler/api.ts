@@ -1,6 +1,6 @@
 import { basename, join } from "node:path";
 import { eventPayload, parseEventInput } from "./events.ts";
-import { type Manifest, type ManifestTask, loadManifest, parseTriggers } from "./manifest.ts";
+import { type Manifest, type ManifestTask, loadManifest, parsePermissionMode, parseTriggers } from "./manifest.ts";
 import { Scheduler, type SyncSummary } from "./scheduler.ts";
 import type { Store } from "./store.ts";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
@@ -332,6 +332,10 @@ function parseCreate(body: Partial<TaskCreate>): TaskCreate {
   if (typeof body.target !== "object" || body.target === null || !("kind" in body.target)) throw new Error("target is required");
   const target = body.target;
   if (target.kind !== "http" && target.kind !== "command" && target.kind !== "agent") throw new Error("target.kind must be http, command or agent");
+  if (target.kind === "agent") {
+    parsePermissionMode(target.permissionMode, "target.permissionMode");
+    if (target.tools !== undefined && (!Array.isArray(target.tools) || !target.tools.every((t) => typeof t === "string" && t.trim()))) throw new Error("target.tools must be a list of strings");
+  }
   // Triggers use the manifest shape ({ event, filter, debounce }); a task with triggers may omit the schedule.
   const triggers = body.triggers === undefined ? undefined : parseTriggers(body.triggers, `task ${body.name}`);
   return {
