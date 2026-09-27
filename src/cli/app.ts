@@ -92,8 +92,11 @@ const sync = async (ctx: Ctx, argv: string[]) => {
   if (name) {
     const res = await c.post<{ sync: { app: string; created: string[]; updated: string[]; orphaned: string[] } }>(`/api/apps/${name}/sync`);
     if (ctx.flags.json) return ctx.print.data(res), 0;
-    ctx.print.line(summary(res.sync));
-    return 0;
+    // The sync also reconciled the app's unit; say what it did when the space supervises it.
+    const svc = await c.get<{ service: ServiceStatus }>(`/api/apps/${name}/service`).catch(() => undefined);
+    const last = svc?.service.supervisor === "space" ? svc.service.last : undefined;
+    ctx.print.line(summary(res.sync) + (last && last.action !== "absent" ? ` · service ${last.action}${last.error ? `: ${last.error}` : ""}` : ""));
+    return last?.action === "conflict" || last?.action === "failed" ? 1 : 0;
   }
   const res = await c.post<{ synced: { app: string; created: string[]; updated: string[]; orphaned: string[] }[]; skipped: { dir: string; error: string }[]; gone: { app: string }[] }>("/api/apps/sync");
   if (ctx.flags.json) return ctx.print.data(res), 0;

@@ -211,6 +211,22 @@ describe("other nouns", () => {
     expect(done.out[0]).toBe("a: service ok; directory moved to /trash/a; data kept at /d/a");
   });
 
+  test("app sync reports what the supervisor did with the unit", async () => {
+    const synced = { status: 200, body: { ok: true, sync: { app: "a", created: [], updated: [], orphaned: [] } } };
+    const svc = (last: object, supervisor = "space") => ({ status: 200, body: { ok: true, service: { app: "a", supervisor, unit: "space-a.service", scope: "user", managed: true, last } } });
+    const restarted = await runCli(["app", "sync", "a"], (t) => t.scripted.reply(synced, svc({ action: "restarted", at: 0 })));
+    expect(restarted.calls[1]!.url).toBe("http://127.0.0.1:8700/api/apps/a/service");
+    expect(restarted.out[0]).toBe("a: unchanged · service restarted");
+    const conflict = await runCli(["app", "sync", "a"], (t) => t.scripted.reply(synced, svc({ action: "conflict", at: 0, error: "the operator's unit runs it" })));
+    expect(conflict.code).toBe(EXIT.failed);
+    expect(conflict.out[0]).toBe("a: unchanged · service conflict: the operator's unit runs it");
+    const operator = await runCli(["app", "sync", "a"], (t) => t.scripted.reply(synced, svc({ action: "operator", at: 0 }, "operator")));
+    expect(operator.out[0]).toBe("a: unchanged");
+    const noService = await runCli(["app", "sync", "a"], (t) => t.scripted.reply(synced, { status: 404, body: { ok: false, error: '"a" declares no service' } }));
+    expect(noService.code).toBe(0);
+    expect(noService.out[0]).toBe("a: unchanged");
+  });
+
   test("model usage prints the totals line and the by-app table", async () => {
     const totals = { calls: 3, errors: 1, inputTokens: 1000, cacheWriteTokens: 0, cacheReadTokens: 500, outputTokens: 200, tokens: 1700, costUsd: 0.05, durationMs: 3000 };
     const r = await runCli(["model", "usage", "--window", "7d"], (t) => t.scripted.reply({ status: 200, body: { ok: true, window: "7d", since: "x", backend: "b", totals, byApp: [{ app: "demo", ...totals }], byTag: [], byModel: [], byRuntime: [], history: { totals } } }));
