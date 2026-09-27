@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS chat_attachments (
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS chat_attachments_thread ON chat_attachments(thread_id, message_id);
+CREATE TABLE IF NOT EXISTS chat_model_choices (
+  app         TEXT PRIMARY KEY,
+  model       TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
 `;
 
 const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [];
@@ -74,6 +79,18 @@ export class ChatStore {
 
   close(): void {
     this.db.close();
+  }
+
+  // ---------------------------------------------------------------- model choice
+
+  /** The model the person picked in an app's chat widget; absent = follow the app and the space. */
+  getModelChoice(app: string): string | undefined {
+    return this.db.query<{ model: string }, [string]>("SELECT model FROM chat_model_choices WHERE app = ?").get(app)?.model;
+  }
+
+  setModelChoice(app: string, model: string | null, at = Date.now()): void {
+    if (model === null) this.db.query("DELETE FROM chat_model_choices WHERE app = ?").run(app);
+    else this.db.query("INSERT INTO chat_model_choices (app, model, updated_at) VALUES (?, ?, ?) ON CONFLICT(app) DO UPDATE SET model = excluded.model, updated_at = excluded.updated_at").run(app, model, at);
   }
 
   // ---------------------------------------------------------------- threads

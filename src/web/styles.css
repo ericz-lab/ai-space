@@ -670,3 +670,6 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
 .task-model-controls button { padding: 7px 12px; border-radius: 6px; border: 1px solid var(--hairline); cursor: pointer; color: inherit; background: var(--bg); }
 .task-model-controls :disabled { opacity: .5; cursor: default; }
 .task-model .task-note { padding: 6px 0 0; }
+.app-model { margin: 8px 12px; }
+.app-model label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.app-model .task-name { color: var(--text, inherit); font-size: 13px; }

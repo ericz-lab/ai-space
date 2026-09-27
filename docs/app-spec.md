@@ -88,7 +88,7 @@ i18n:                              # translations of the display text, by langua
 | `repo` | string | The origin URL. |
 | `i18n` | mapping | Translations of `title` and `description`, and by name of the agents' and widgets' text, keyed by language tag (`zh`, `zh-Hant`, `pt-BR`). The panel shows the reader's language when the manifest has it and the plain field otherwise; names are never translated. Only declared agent and widget names may appear. See [i18n](i18n.md). |
 
-Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `storage`, `notify`. Each is optional.
+Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `storage`, `notify`, `model`. Each is optional.
 
 ```yaml
 i18n:
@@ -282,6 +282,20 @@ backup:
 
 The task it registers is named `backup`; an app may not declare a task with that name unless it sets `backup: false`.
 
+### `model`
+
+The model tier the app's calls run on when a request to `/api/model/run` names no `model`, as a whole and per `tag`. Name tiers (`basic`, `junior`, `intermediate`, `advanced`) so the manifest fits any machine; they run on the runtime of the space's default. `runtime/tier` pins a runtime.
+
+```yaml
+model:
+  default: junior                  # default: the space's default model
+  tags:                            # keyed by the tag the app sends
+    translate: basic
+    curate: intermediate
+```
+
+`model: basic` is short for `model: { default: basic }`. The operator can override any of it per app and tag in Settings → App models; a model the request itself names is above both, so leave `model` out of requests and declare it here. The resolution order and the ledger's `modelSource` are in [model.md](model.md#app-models).
+
 ### `notify`
 
 Outbound notifications to chat apps (Telegram, Discord, Slack, Feishu, DingTalk, WeCom, Bark, ntfy, a generic webhook). The full reference is in [notify.md](notify.md). Channels and their credentials are configured once by the operator in `<workspace>/.env`; the app only says which of them it may use:
@@ -395,7 +409,7 @@ Mutating routes require the bearer token from `SPACE_API_TOKEN`, or the app's ow
 
 ### Chat
 
-An app that wants an AI conversation on its page does not build one: it proxies `/space/chat/*` on its own origin to `${SPACE_API_URL}/api/chat/*` with its `SPACE_APP_TOKEN` (the page never holds the token and cannot reach ai-space itself), loads `/space/chat/widget.js` (a script element created at runtime: a bundler that builds the page, like Bun's HTML import, would otherwise try to resolve it at build time) and mounts `SpaceChat.mount(el, { scope, context })`. The space keeps the threads, messages and images per app under the app's own `scope` (`note:12`, `calendar`); the app hands over, on every turn, what the model should read first (`context()`), its presets and the actions it wants under an answer, and styles the widget with `--sc-*` tokens. The rest, the model, streaming, images the model can see, the ledger, is the space's. See [chat.md](chat.md).
+An app that wants an AI conversation on its page does not build one: it proxies `/space/chat/*` on its own origin to `${SPACE_API_URL}/api/chat/*` with its `SPACE_APP_TOKEN` (the page never holds the token and cannot reach ai-space itself), loads `/space/chat/widget.js` (a script element created at runtime: a bundler that builds the page, like Bun's HTML import, would otherwise try to resolve it at build time) and mounts `SpaceChat.mount(el, { scope, context })`. The space keeps the threads, messages and images per app under the app's own `scope` (`note:12`, `calendar`); the app hands over, on every turn, what the model should read first (`context()`), its presets and the actions it wants under an answer, and styles the widget with `--sc-*` tokens. The rest, the model, streaming, images the model can see, the ledger, is the space's; the person can pick the chat's model in the widget, stored per app, over the app's `model`. The proxy forwards every method (the model pick is a `PUT`). See [chat.md](chat.md).
 
 ## Full example
 

@@ -73,7 +73,7 @@ What an app sends to `POST /api/model/run`:
 | `prompt` | string | The whole prompt. Required; at most 2 MB. |
 | `mode` | `"slim"` or `"full"`? | Text-only calls default to slim. Full retains the native CLI context and tools; supported by Claude Code and Codex CLI. See [completion modes](runtimes.md#completion-modes). |
 | `system` | string? | The system prompt. Replaces the CLI's native base instructions in either mode. Full without `system` retains native instructions; slim default: "You answer one request from an application. Reply with exactly what it asks for and nothing else." At most 200K characters: an app may put a slowly changing reference list (the catalogue a classification maps onto) here, where the CLI caches it across calls, and keep only the varying material in `prompt`. |
-| `model` | string? | A model alias or id as `claude --model` accepts it. Default `SPACE_MODEL_DEFAULT`. |
+| `model` | string? | A model alias or id as `claude --model` accepts it, a tier (`basic`), or `runtime/tier` (`codex/intermediate`). Omit it to let the space choose by app and tag ([App models](#app-models)); an app names one only when the call cannot work on another. |
 | `tag` | string? | The purpose of the call inside the app: `translate`, `story`, `digest`. Default `other`. This is the grain the panel groups by. |
 | `tools` | string[]? | Tools the CLI may use, as `--allowedTools` takes them (`WebSearch`, `Bash(git:*)`). None in slim (nonempty lists are rejected); native tools in full when omitted. Explicit lists are supported by Claude Code, refused by Codex and the API backend. Omitting mode retains the legacy selective-tool behavior. |
 | `timeoutMs` | number? | Default 120 s, at most 30 min. |
@@ -101,6 +101,7 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 | field | meaning |
 | --- | --- |
 | `app`, `tag`, `model` | Who, why, what was asked for. |
+| `modelSource` | Which layer chose the model: `choice` (the chat widget's picker), `request`, `override-tag`, `override-app`, `manifest-tag`, `manifest-default` or `default` ([App models](#app-models)). Absent on older rows, imports and agent tasks. |
 | `backend` | `local`, `ssh:<host>`, `api`, or `agent:<runtime>` for scheduler tasks. |
 | `origin` | `run` (an app's request) or `task` (an agent task the scheduler ran). |
 | `status`, `error` | `ok` or `error` with the reason. |
@@ -108,6 +109,34 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 | `promptChars`, `outputChars` | Sizes only; prompts and answers are not stored. |
 | `usage` | `inputTokens`, `cacheWriteTokens`, `cacheReadTokens`, `outputTokens`, as reported; absent when the runtime reported none. |
 | `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend. GPT-6 Astra/Sol/Luna and GPT-5.6 Sol/Terra/Luna calls without a reported cost use standard API list prices (verified 2026-09-23); absent for unknown models or incomplete usage. |
+
+### App models
+
+A call that names no `model` runs on the first of these layers that this space can run:
+
+| layer | set by |
+| --- | --- |
+| `override-tag` | Settings → App models, for this app and tag |
+| `override-app` | Settings → App models, for the app as a whole |
+| `manifest-tag` | `model.tags.<tag>` in the app's `space.yaml` |
+| `manifest-default` | `model.default` in the app's `space.yaml` |
+| `default` | Settings → Default model, else `SPACE_MODEL_DEFAULT` |
+
+A model named in the request (`request`) is above all of them: the panel does not overrule an app that asked for a specific model, so an app should name one only when the call cannot work on another. A task's model choice reaches the app as `x-space-model` / `SPACE_TASK_MODEL` and the app sends it as `model`, so it counts as the request's.
+
+The manifest declares tiers, not machines:
+
+```yaml
+model:
+  default: junior
+  tags:
+    translate: basic
+    curate: intermediate
+```
+
+A bare tier runs on the runtime of the space's default (`codex/basic` makes `intermediate` mean `codex/intermediate`); `runtime/tier` pins the runtime. A layer naming a runtime or tier this space lacks is skipped, so a manifest written for another machine falls through instead of failing the call. Overrides are kept in `space.db` (`model_overrides`) and may only name a configured Claude Code or Codex tier, like the default. Chat turns from the widget resolve the same way under the tag `chat`.
+
+`GET /api/model/apps` lists every app with one row for the app and one per tag (declared, overridden, or seen in the ledger over the last 30 days): the declared value, the override, the model it runs on now and the layer that chose it. `GET /api/apps/:app/model` is one app. `PATCH /api/panel/apps/:app/model` with `{tag?, model}` sets an override and `{tag?, model: null}` clears it; like the task model route it takes only same-origin browser requests.
 
 ### Restarts
 
@@ -133,11 +162,16 @@ POST /api/model/run                       run one call (app token, or operator t
 GET  /api/model/status                    backend, concurrency cap, calls running and waiting
 GET  /api/model/usage?window=24h&app=x    totals and sums by app, by app/tag/model, by model, by backend/origin over 5h | 24h | 7d | 30d, plus `history`: lifetime totals and per-day sums since the first row
 GET  /api/model/calls?app&tag&limit       recent calls, newest first
+GET  /api/model/apps                      every app's model per tag and the layer that chose it
+GET  /api/apps/:app/model                 the same for one app
+PATCH /api/panel/apps/:app/model          set or clear a panel override (same-origin browser only)
 ```
 
 The read routes carry no token, like the scheduler's: the panel runs in a browser that never holds the operator token (`docs/panel.md`).
 
 ## Panel
+
+Settings → App models lists every app with a row for the app and one per tag: the model it runs on now, the layer that chose it and the `space.yaml` value, with a select that sets or clears the override (saved at once, used by the next call).
 
 Settings → Scheduler → Model usage opens a floating window: the window selector (5 h matches a subscription's rolling quota), four cards (calls, tokens, cost, model time), a table by app, purpose and model with the four token kinds side by side, a table by model and backend, and the last thirty calls with their outcome. Below the window comes the history: days recorded, lifetime calls, tokens and cost with the daily average, a day grid over the last year (one square per day, shade by that day's tokens, cost or calls) and weekly bars. The panel refreshes every 30 s while open.
 

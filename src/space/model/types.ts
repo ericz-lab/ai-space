@@ -50,6 +50,8 @@ export type ModelCall = {
   runtime?: string;
   /** Absent for legacy, imported, or agent/chat records. */
   mode?: CompletionMode;
+  /** Which layer chose the model (app-models.ts `ModelSource`); absent on rows before layers were recorded, imports and agent tasks. */
+  modelSource?: string;
   backend: string;
   origin: Origin;
   status: CallStatus;
