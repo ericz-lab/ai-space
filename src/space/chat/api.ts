@@ -17,6 +17,8 @@ import { MAX_ATTACHMENT_BYTES, type Attachment, type Message, type Thread } from
  *   POST   /api/chat/threads/:id/attachments    multipart field `file`, one image → 201 attachment
  *   GET    /api/chat/attachments/:id            the image bytes
  *   POST   /api/chat/threads/:id/turn           one turn; server-sent events by default (`delta`, then `done` or `error`), `?stream=0` for one JSON answer
+ *   GET    /api/chat/models?model=              the picker: options, the person's choice, the effective model (`model` = what the app asks for)
+ *   PUT    /api/chat/model                      { model: "runtime/tier" | null } the person's choice for this app's chat → the same view
  *   GET    /api/chat/widget.js | widget.css     the embeddable widget (no token)
  *
  * The caller is identified like the model service's: an app's own token maps
@@ -34,7 +36,7 @@ export type ChatApiOptions = {
 
 type Req = Request & { params: Record<string, string> };
 type Handler = (req: Req) => Response | Promise<Response>;
-type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "PATCH" | "DELETE", Handler>>>;
+type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "DELETE", Handler>>>;
 
 class Unauthorized extends Error {}
 class NotFound extends Error {}
@@ -94,7 +96,44 @@ export function createChatRoutes(opts: ChatApiOptions): Routes {
     return { thread: view(t), messages, running: service.isRunning(t.id) };
   };
 
+  /** The picker's view for an app; `requested` is the model the app itself asks for, when the widget knows it. */
+  const modelsView = (app: string, requested?: string) => {
+    const choice = service.store.getModelChoice(app);
+    const effective = service.effectiveModel(app, requested);
+    return {
+      ok: true,
+      options: service.modelOptions(),
+      choice: choice ?? null,
+      ...(choice !== undefined && effective.source !== "choice" ? { choiceUnavailable: true } : {}),
+      appModel: requested ?? null,
+      defaultModel: service.spaceDefaultModel(),
+      effective,
+      /** What "default" in the picker means right now: the app's model, else the space's. */
+      fallback: service.effectiveModel(app, requested, { ignoreChoice: true }),
+    };
+  };
+
   return {
+    "/api/chat/models": {
+      GET: (req) =>
+        guard(async () => {
+          const app = await resolveApp(req);
+          const raw = new URL(req.url).searchParams.get("model");
+          return json(modelsView(app, raw ? service.checkModelShape(raw) : undefined));
+        }),
+    },
+
+    "/api/chat/model": {
+      PUT: (req) =>
+        guard(async () => {
+          const b = await body(req);
+          const app = await resolveApp(req, b.app);
+          if (!("model" in b)) throw new Error("model is required (a model, runtime/tier, or null for the default)");
+          service.setModelChoice(app, b.model);
+          return json(modelsView(app, typeof b.appModel === "string" && b.appModel ? service.checkModelShape(b.appModel) : undefined));
+        }),
+    },
+
     "/api/chat/threads": {
       GET: (req) =>
         guard(async () => {

@@ -198,3 +198,56 @@ test("chat inherits a changed workspace default and preserves explicit request m
     expect(done?.data.assistant.model).toBe(expected);
   }
 });
+
+describe("model choice", () => {
+  test("the picker lists runtime/tier options with concrete models; the choice is stored per app and validated", async () => {
+    const view = (await (await call("GET", "/api/chat/models")).json()) as any;
+    expect(view.options).toContainEqual({ value: "claude/basic", runtime: "claude", tier: "basic", model: "haiku" });
+    expect(view.options).toContainEqual({ value: "claude/advanced", runtime: "claude", tier: "advanced", model: "fable" });
+    expect(view).toMatchObject({ choice: null, appModel: null, defaultModel: "haiku", effective: { value: "haiku", source: "default", runtime: "claude", model: "haiku" } });
+    expect(view.fallback).toEqual(view.effective);
+
+    const saved = (await (await call("PUT", "/api/chat/model", { model: "claude/intermediate" })).json()) as any;
+    expect(saved).toMatchObject({ choice: "claude/intermediate", effective: { value: "claude/intermediate", source: "choice", model: "opus" } });
+    // Per app: another app's token does not see it.
+    expect(((await (await call("GET", "/api/chat/models", undefined, "sat_cal")).json()) as any).choice).toBeNull();
+    expect((await (await call("GET", "/api/chat/models?model=sonnet")).json()) as any).toMatchObject({ appModel: "sonnet", effective: { source: "choice", model: "opus" }, fallback: { source: "app", model: "sonnet" } });
+
+    expect((await call("PUT", "/api/chat/model", { model: "missing/basic" })).status).toBe(400);
+    expect((await call("PUT", "/api/chat/model", { model: "bad model" })).status).toBe(400);
+    expect((await call("PUT", "/api/chat/model", {})).status).toBe(400);
+    expect((await call("PUT", "/api/chat/model", { model: "claude/basic" }, "nope")).status).toBe(401);
+    expect((await call("GET", "/api/chat/models?model=bad%20model")).status).toBe(400);
+    expect(store.getModelChoice("notes")).toBe("claude/intermediate");
+
+    const cleared = (await (await call("PUT", "/api/chat/model", { model: null })).json()) as any;
+    expect(cleared).toMatchObject({ choice: null, effective: { source: "default", model: "haiku" } });
+    // The operator names the app.
+    expect((await call("PUT", "/api/chat/model", { app: "cal", model: "claude/junior" }, "op-token")).status).toBe(200);
+    expect(store.getModelChoice("cal")).toBe("claude/junior");
+  });
+
+  test("a turn runs on the person's choice > the app's model > the space default", async () => {
+    const { thread } = (await (await call("POST", "/api/chat/threads", { scope: "note:1" })).json()) as any;
+    const turn = async (model?: string) => {
+      const r = (await (await call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, { message: "hi", ...(model ? { model } : {}) })).json()) as any;
+      expect(modelStore.get(r.call.id)?.model).toBe(r.assistant.model);
+      return r.assistant.model;
+    };
+    defaultModel = "sonnet";
+    expect(await turn()).toBe("sonnet");
+    expect(await turn("opus")).toBe("opus");
+    await call("PUT", "/api/chat/model", { model: "claude/basic" });
+    expect(await turn()).toBe("haiku");
+    expect(await turn("opus")).toBe("haiku");
+    await call("PUT", "/api/chat/model", { model: null });
+    expect(await turn("opus")).toBe("opus");
+  });
+
+  test("a stored choice that no longer resolves is skipped and reported", async () => {
+    store.setModelChoice("notes", "gone/basic");
+    const view = (await (await call("GET", "/api/chat/models?model=opus")).json()) as any;
+    expect(view).toMatchObject({ choice: "gone/basic", choiceUnavailable: true, effective: { value: "opus", source: "app" } });
+    expect(service.effectiveModel("notes").source).toBe("default");
+  });
+});

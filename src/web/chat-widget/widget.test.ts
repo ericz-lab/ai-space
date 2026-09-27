@@ -13,6 +13,15 @@ describe("chat widget", () => {
     expect(w.etag).toMatch(/^"[0-9a-f]+"$/);
   });
 
+  test("carries the model picker: its routes through the app's proxy and both languages' labels", async () => {
+    const w = await buildWidget()();
+    expect(w.js).toContain("/models");
+    expect(w.js).toContain('"/model"');
+    expect(w.js).toContain("默认（跟随 app / 空间默认）");
+    expect(w.js).toContain("Default (follow the app / space)");
+    expect(w.css).toContain(".sc-model-menu");
+  });
+
   test("markdown escapes first and renders the usual blocks", () => {
     expect(renderMd("# T\n\n- a <b>\n\n`x`")).toBe("<h2>T</h2><ul><li>a &lt;b&gt;</li></ul><p><code>x</code></p>");
     expect(renderMd("![p](/x/1.png)")).toContain('<img src="/x/1.png"');

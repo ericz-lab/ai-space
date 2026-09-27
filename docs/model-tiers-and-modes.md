@@ -441,7 +441,9 @@ Settings → Default model selects a configured Claude Code or Codex CLI runtime
 one of its four tiers. The preference is persisted in `space.db` and applies immediately
 to model-service requests and app chat turns that omit `model`, plus new Base chats.
 This includes ai-todo, ai-calendar and ai-notes, which omit app-level model defaults.
-Explicit request models take precedence. Base resumes keep their recorded runtime
+Explicit request models take precedence. In an app's chat widget, the person's
+model pick (stored per app, `PUT /api/chat/model`) takes precedence over both; see
+[chat.md](chat.md#model-choice). Base resumes keep their recorded runtime
 and model; choose a new conversation to use a changed workspace default.
 
 `GET /api/model/preferences` returns `defaultModel`, `appDefault`, `baseDefault` and
