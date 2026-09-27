@@ -88,7 +88,7 @@ i18n:                              # translations of the display text, by langua
 | `repo` | string | The origin URL. |
 | `i18n` | mapping | Translations of `title` and `description`, and by name of the agents' and widgets' text, keyed by language tag (`zh`, `zh-Hant`, `pt-BR`). The panel shows the reader's language when the manifest has it and the plain field otherwise; names are never translated. Only declared agent and widget names may appear. See [i18n](i18n.md). |
 
-Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `storage`, `notify`. Each is optional.
+Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `storage`, `notify`, `model`. Each is optional.
 
 ```yaml
 i18n:
@@ -230,7 +230,7 @@ tasks:
       http: { method: POST, url: "http://127.0.0.1:${PORT}/jobs/index" }
 ```
 
-At most one of `at` / `every` / `schedule`, and/or `triggers` (events other apps publish with `POST /api/events`; a task with only triggers has no clock), and exactly one of `run.http` / `run.command` / `run.agent` per task. Commands and agent runs execute in the app directory with the app's environment (`.env` and `space.env` merged). Real cron expressions live only here, never in a machine's crontab.
+At most one of `at` / `every` / `schedule`, and/or `triggers` (events other apps publish with `POST /api/events`; a task with only triggers has no clock), and exactly one of `run.http` / `run.command` / `run.agent` per task. `run.agent` takes `runtime`, `prompt`, `model`, and optionally `permissionMode` (`acceptEdits`, `bypassPermissions`, `plan`) and `tools` (auto-approved tools); without them the run is read-only. `bypassPermissions` lets the agent run any command as the space's user, so it belongs only on a task whose prompt the app controls. Commands and agent runs execute in the app directory with the app's environment (`.env` and `space.env` merged). Real cron expressions live only here, never in a machine's crontab.
 
 ### `events` and `provides`
 
@@ -281,6 +281,20 @@ backup:
 ```
 
 The task it registers is named `backup`; an app may not declare a task with that name unless it sets `backup: false`.
+
+### `model`
+
+The model tier the app's calls run on when a request to `/api/model/run` names no `model`, as a whole and per `tag`. Name tiers (`basic`, `junior`, `intermediate`, `advanced`) so the manifest fits any machine; they run on the runtime of the space's default. `runtime/tier` pins a runtime.
+
+```yaml
+model:
+  default: junior                  # default: the space's default model
+  tags:                            # keyed by the tag the app sends
+    translate: basic
+    curate: intermediate
+```
+
+`model: basic` is short for `model: { default: basic }`. The operator can override any of it per app and tag in Settings → App models; a model the request itself names is above both, so leave `model` out of requests and declare it here. The resolution order and the ledger's `modelSource` are in [model.md](model.md#app-models).
 
 ### `notify`
 
@@ -395,7 +409,7 @@ Mutating routes require the bearer token from `SPACE_API_TOKEN`, or the app's ow
 
 ### Chat
 
-An app that wants an AI conversation on its page does not build one: it proxies `/space/chat/*` on its own origin to `${SPACE_API_URL}/api/chat/*` with its `SPACE_APP_TOKEN` (the page never holds the token and cannot reach ai-space itself), loads `/space/chat/widget.js` (a script element created at runtime: a bundler that builds the page, like Bun's HTML import, would otherwise try to resolve it at build time) and mounts `SpaceChat.mount(el, { scope, context })`. The space keeps the threads, messages and images per app under the app's own `scope` (`note:12`, `calendar`); the app hands over, on every turn, what the model should read first (`context()`), its presets and the actions it wants under an answer, and styles the widget with `--sc-*` tokens. The rest, the model, streaming, images the model can see, the ledger, is the space's. See [chat.md](chat.md).
+An app that wants an AI conversation on its page does not build one: it proxies `/space/chat/*` on its own origin to `${SPACE_API_URL}/api/chat/*` with its `SPACE_APP_TOKEN` (the page never holds the token and cannot reach ai-space itself), loads `/space/chat/widget.js` (a script element created at runtime: a bundler that builds the page, like Bun's HTML import, would otherwise try to resolve it at build time) and mounts `SpaceChat.mount(el, { scope, context })`. The space keeps the threads, messages and images per app under the app's own `scope` (`note:12`, `calendar`); the app hands over, on every turn, what the model should read first (`context()`), its presets and the actions it wants under an answer, and styles the widget with `--sc-*` tokens. The rest, the model, streaming, images the model can see, the ledger, is the space's; the person can pick the chat's model in the widget, stored per app, over the app's `model`. The proxy forwards every method (the model pick is a `PUT`). See [chat.md](chat.md).
 
 ## Full example
 
@@ -466,3 +480,7 @@ notify:
 | `skills`, shared skills under `skills/` | Linked into `<workspace>/.claude/skills/` for sessions started by hand (`src/space/skills.ts`); per-agent mounting planned |
 | JSON Schema (`schema/space.schema.json`), `validate`, `/api/spec` | Planned |
 | `templates/app/`, `new-app`, GitHub repository creation | Planned; the shared skill `skills/space-app/` and its templates cover creation, adoption and edits by hand today |
+
+### Per-task model choice
+
+An HTTP or command task that uses Space model calls may declare `model: codex/junior` next to `name` and `every`. This opts the task into operator model selection in the task panel. Honor the `x-space-model` request header (HTTP) or `SPACE_TASK_MODEL` environment variable (command) ahead of the app's default when calling `/api/model/run`. Use request-local state for concurrent HTTP tasks. Without this integration, omit `model`; the panel then makes no claim that it can change the task's model. See [scheduler.md](scheduler.md#model-selection-in-the-task-panel) for the contract and [runtimes.md](runtimes.md#capability-tiers) for the four tiers.

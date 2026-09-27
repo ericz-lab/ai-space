@@ -31,3 +31,6 @@ data/
 
 # Claude Code worktrees
 .claude/worktrees/
+
+# Independent app source checkouts
+.ai-space/app-src/

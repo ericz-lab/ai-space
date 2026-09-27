@@ -1,12 +1,13 @@
 import { basename, join } from "node:path";
 import { parseEventsSpec, parseProvidesSpec, triggersFromConsumes } from "../bus/spec.ts";
 import type { Capability, EventsSpec } from "../bus/types.ts";
-import { RUNTIME_NAME_PATTERN } from "../runtimes/types.ts";
+import { type AppModelSpec, parseAppModelSpec } from "../model/app-models.ts";
+import { PERMISSION_MODES, type PermissionMode, RUNTIME_NAME_PATTERN } from "../runtimes/types.ts";
 import { parseTriggers } from "./events.ts";
 import { assertSchedule, parseDuration } from "./schedule.ts";
 
 export { parseTriggers };
-import { DEFAULT_TIMEOUT_MS, type EventTrigger, TASK_NOTIFY_EVENTS, type Schedule, type Target, type TaskNotify, type TaskNotifyEvent } from "./types.ts";
+import { assertTaskModel, DEFAULT_TIMEOUT_MS, type EventTrigger, TASK_NOTIFY_EVENTS, type Schedule, type Target, type TaskNotify, type TaskNotifyEvent } from "./types.ts";
 
 /**
  * App manifest (`space.yaml`) parsing.
@@ -26,7 +27,7 @@ export const MANIFEST_FILE = "space.yaml";
 export const SPEC_VERSION = 1;
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]*$/i;
-const TOP_LEVEL_KEYS = ["spec", "name", "title", "description", "icon", "url", "status", "repo", "i18n", "service", "agents", "widgets", "skills", "tasks", "storage", "notify", "backup", "events", "provides"];
+const TOP_LEVEL_KEYS = ["spec", "name", "title", "description", "icon", "url", "status", "repo", "i18n", "service", "agents", "widgets", "skills", "tasks", "storage", "notify", "backup", "events", "provides", "model"];
 /** A language tag as `i18n:` keys use it: a primary tag and optional subtags (`zh`, `zh-Hant`, `pt-BR`). */
 const LANG_TAG_RE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
@@ -130,6 +131,8 @@ export type Manifest = {
   events?: EventsSpec;
   /** The `provides:` section: capabilities other apps call through the bus. */
   provides?: Capability[];
+  /** The `model:` section: the model this app's calls run on when they name none, per tag (docs/model.md#app-models). */
+  model?: AppModelSpec;
 };
 
 export async function loadManifest(dir: string): Promise<Manifest> {
@@ -185,6 +188,7 @@ export function parseManifest(yaml: string, dir: string): Manifest {
 
   const events = doc.events === undefined ? undefined : parseEventsSpec(doc.events);
   const provides = doc.provides === undefined ? undefined : parseProvidesSpec(doc.provides);
+  const model = doc.model === undefined ? undefined : parseAppModelSpec(doc.model);
   if (events) {
     for (const [name, triggers] of triggersFromConsumes(events, tasks.map((t) => t.name))) {
       const task = tasks.find((t) => t.name === name)!;
@@ -212,6 +216,7 @@ export function parseManifest(yaml: string, dir: string): Manifest {
     ...(doc.backup !== undefined ? { backup: doc.backup } : {}),
     ...(events ? { events } : {}),
     ...(provides?.length ? { provides } : {}),
+    ...(model ? { model } : {}),
   };
 }
 
@@ -361,6 +366,10 @@ function parseTask(raw: unknown, index: number): ManifestTask {
   const schedule = parseSchedule(raw, ctx, triggers !== undefined);
   assertSchedule(schedule);
   const target = parseTarget(raw.run, ctx);
+  if (raw.model !== undefined) {
+    assertTaskModel(raw.model);
+    target.model = raw.model;
+  }
   const timeoutMs = raw.timeout === undefined ? DEFAULT_TIMEOUT_MS : parseDuration(raw.timeout as string | number);
   const enabled = raw.enabled === undefined ? true : raw.enabled === true;
   const description = typeof raw.description === "string" ? raw.description : undefined;
@@ -436,7 +445,16 @@ function parseTarget(run: unknown, ctx: string): Target {
   if (!isRecord(a) || typeof a.prompt !== "string") throw new Error(`${ctx}: run.agent needs a prompt path`);
   const runtime = parseRuntimeName(a.runtime, `${ctx}: run.agent.runtime`);
   if (a.model !== undefined && typeof a.model !== "string") throw new Error(`${ctx}: run.agent.model must be a string`);
-  return { kind: "agent", runtime, prompt: a.prompt, ...(a.model ? { model: a.model } : {}) };
+  const permissionMode = parsePermissionMode(a.permissionMode, `${ctx}: run.agent.permissionMode`);
+  const tools = stringList(a.tools, `${ctx}: run.agent.tools`);
+  return { kind: "agent", runtime, prompt: a.prompt, ...(a.model ? { model: a.model } : {}), ...(permissionMode ? { permissionMode } : {}), ...(tools.length ? { tools } : {}) };
+}
+
+/** An agent target's write tier: one of the runtimes' permission modes, or absent (read-only). */
+export function parsePermissionMode(v: unknown, what: string): PermissionMode | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "string" || !(PERMISSION_MODES as readonly string[]).includes(v)) throw new Error(`${what} must be one of ${PERMISSION_MODES.join(", ")}`);
+  return v as PermissionMode;
 }
 
 // ---------------------------------------------------------------- helpers

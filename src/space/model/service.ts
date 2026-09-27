@@ -1,6 +1,7 @@
-import type { OnDelta, RuntimeAdapter } from "../runtimes/types.ts";
+import { assertCompletionMode, type OnDelta, type RuntimeAdapter } from "../runtimes/types.ts";
 import { RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
 import type { ModelStore } from "./store.ts";
+import type { ModelSource } from "./app-models.ts";
 import { type ModelCall, type RunInput, type RunOutcome, type Usage } from "./types.ts";
 
 /**
@@ -30,7 +31,7 @@ export type RunResult = { outcome: RunOutcome; call: ModelCall };
 /** Recorded for a call the process could not finish: a restart, or a drain that ran out of grace. */
 export const INTERRUPTED = "interrupted: ai-space stopped while the call was running";
 
-type Inflight = { app: string; tag: string; model: string; promptChars: number; startedAt: number };
+type Inflight = { mode?: RunInput["mode"]; app: string; tag: string; model: string; promptChars: number; startedAt: number };
 
 export class ModelService {
   readonly store: ModelStore;
@@ -70,11 +71,11 @@ export class ModelService {
   /**
    * Run one call for an app and record it. Never throws for a failed call: the outcome says so.
    * With `onDelta`, the runtime hands the text over as it is produced when it can; the outcome
-   * still carries the whole answer.
+   * still carries the whole answer. `source` is recorded with the call: which layer chose the model.
    */
-  async run(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta): Promise<RunResult> {
-    const p = this.execute(app, input, signal, onDelta);
-    this.inflight.set(p, { app, tag: input.tag, model: input.model, promptChars: input.prompt.length, startedAt: this.now() });
+  async run(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, source?: ModelSource): Promise<RunResult> {
+    const p = this.execute(app, input, signal, onDelta, source);
+    this.inflight.set(p, { mode: input.mode ?? (input.tools.length || input.files?.length ? undefined : "slim"), app, tag: input.tag, model: input.model, promptChars: input.prompt.length, startedAt: this.now() });
     try {
       return await p;
     } finally {
@@ -98,20 +99,24 @@ export class ModelService {
     const left = [...this.inflight.values()];
     const at = this.now();
     for (const e of left) {
-      this.store.add({ app: e.app, tag: e.tag, model: e.model, backend: this.backend as ModelCall["backend"], origin: "run", status: "error", error: INTERRUPTED, startedAt: e.startedAt, durationMs: Math.max(0, at - e.startedAt), promptChars: e.promptChars });
+      this.store.add({ mode: e.mode, app: e.app, tag: e.tag, model: e.model, backend: this.backend as ModelCall["backend"], origin: "run", status: "error", error: INTERRUPTED, startedAt: e.startedAt, durationMs: Math.max(0, at - e.startedAt), promptChars: e.promptChars });
       this.log(`${e.app}/${e.tag} (${e.model}): ${INTERRUPTED}`);
     }
     return { finished: started - left.length, interrupted: left.length };
   }
 
-  private async execute(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta): Promise<RunResult> {
+  private async execute(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, source?: ModelSource): Promise<RunResult> {
     let target: { runtime: RuntimeAdapter; model: string };
     try {
       target = this.resolve(input.model);
+      assertCompletionMode(input);
+      if (input.mode === "full" && target.runtime.kind !== "codex-cli" && target.runtime.kind !== "claude-code") {
+        throw new Error(`runtime ${target.runtime.name} does not support full completion mode`);
+      }
     } catch (e) {
       // Recorded too: an app asking for a runtime this space lacks shows up in the ledger as its own error.
       const outcome: RunOutcome = { ok: false, error: (e as Error).message, backend: this.backend as RunOutcome["backend"] };
-      return { outcome, call: this.record(app, input, undefined, outcome, this.now(), 0) };
+      return { outcome, call: this.record(app, input, undefined, outcome, this.now(), 0, source) };
     }
     await this.acquire();
     const startedAt = this.now();
@@ -123,17 +128,19 @@ export class ModelService {
     } finally {
       this.release();
     }
-    const call = this.record(app, { ...input, model: target.model }, target.runtime.name, outcome, startedAt, Math.max(0, this.now() - startedAt));
+    const call = this.record(app, { ...input, model: target.model }, target.runtime.name, outcome, startedAt, Math.max(0, this.now() - startedAt), source);
     if (!outcome.ok) this.log(`${app}/${input.tag} (${target.runtime.name}/${target.model}, ${outcome.backend}): ${outcome.error}`);
     return { outcome, call };
   }
 
-  private record(app: string, input: RunInput, runtime: string | undefined, outcome: RunOutcome, startedAt: number, durationMs: number): ModelCall {
+  private record(app: string, input: RunInput, runtime: string | undefined, outcome: RunOutcome, startedAt: number, durationMs: number, source?: ModelSource): ModelCall {
     return this.store.add({
       app,
       tag: input.tag,
       model: input.model,
       runtime,
+      ...(source ? { modelSource: source } : {}),
+      mode: input.mode ?? (input.tools.length || input.files?.length ? undefined : "slim"),
       backend: outcome.backend,
       origin: "run",
       status: outcome.ok ? "ok" : "error",

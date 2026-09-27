@@ -1,9 +1,11 @@
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import ModelPreference from "./ModelPreference.tsx";
 import Chat from "./Chat.tsx";
 import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
 import Usage from "./Usage.tsx";
+import AppModels from "./AppModels.tsx";
 import Events from "./Events.tsx";
 import { getJson, isImgIcon, relTime, repoUrl, sendJson, untilTime, type AgentInfo, type AppInfo, type BackupInfo, type PeerInfo, type ServiceInfo, type WidgetInfo } from "./api.ts";
 import { type Key, LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
@@ -407,6 +409,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // One floating panel at a time: opening the settings, the chat or the tasks closes the others.
   const [tasksOpen, setTasksOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [appModelsOpen, setAppModelsOpen] = useState(false);
   const [eventsOpen, setEventsOpen] = useState(false);
   const [termOpen, setTermOpen] = useState(false);
   // The chat opens on the space agent by default; an agent tile switches to that agent.
@@ -453,6 +456,24 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       .then((d) => setBackups(d.backups || []))
       .catch(() => setBackups([]));
   }, [setsOpen]);
+  // Peers, services and backups fold into one summary line; the rows show when it is expanded.
+  // A problem is a service or peer that is down, or a backup that went stale.
+  const [statusOpen, setStatusOpen] = useState(false);
+  const statusLoaded = services !== null && backups !== null;
+  const problems = statusLoaded
+    ? services.services.filter((s) => s.status === "active" && s.health === "down").length +
+      services.peers.filter((p) => p.health !== "ok").length +
+      backups.filter((b) => b.stale && !b.retired).length
+    : 0;
+  const statusSummary = statusLoaded
+    ? [
+        t("settings.countServices", { n: services.services.length }),
+        t("settings.countBackups", { n: backups.length }),
+        services.peers.length ? t("settings.countPeers", { n: services.peers.length }) : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : t("common.loading");
   const savePrefs = (n: Prefs) => {
     localStorage.setItem("panel-prefs", JSON.stringify(n));
     return n;
@@ -507,6 +528,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       .then(([p, a]) => {
         setApps(p.apps);
         setAgents(a.agents);
+        setChatAgent((current) => a.agents.find((agent) => agent.id === current.id) ?? current);
         setLoaded(true);
         if (p.apps.some((x) => x.service?.health === "unknown"))
           setTimeout(() => getJson<{ apps: AppInfo[] }>("/api/apps").then((d) => setApps(d.apps)).catch(() => {}), PROBE_MS);
@@ -767,9 +789,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
             </div>
           )}
         </section>
+        {agents.length > 0 && (
         <section>
           <h2>{t("agents.heading")}</h2>
-          {agents.length ? (
             <div className={`launcher ${editing ? "editing" : ""}`}>
               {agents.map((a, i) => {
                 const shown = localized(lang, a);
@@ -799,10 +821,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 );
               })}
             </div>
-          ) : (
-            empty(t("agents.empty"))
-          )}
         </section>
+        )}
         {widgets.length > 0 && !prefs.noWidget && (
           <section>
             <h2>{t("widgets.heading")}</h2>
@@ -871,6 +891,12 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                   ))}
                 </select>
               </label>
+              <ModelPreference onSaved={() => {
+                void getJson<{ agents: AgentInfo[] }>("/api/agents").then((d) => {
+                  setAgents(d.agents);
+                  setChatAgent((current) => d.agents.find((a) => a.id === current.id) ?? current);
+                }).catch(() => {});
+              }} />
               <p className="sethead">{t("settings.scheduler")}</p>
               <button
                 className="setrow setlink"
@@ -899,15 +925,39 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 onClick={() => {
                   setSetsOpen(false);
                   setChatOpen(false);
+                  setAppModelsOpen(true);
+                }}
+              >
+                {t("settings.appModels")}
+                <span>›</span>
+              </button>
+              <button
+                className="setrow setlink"
+                onClick={() => {
+                  setSetsOpen(false);
+                  setChatOpen(false);
                   setEventsOpen(true);
                 }}
               >
                 {t("settings.events")}
                 <span>›</span>
               </button>
+              <p className="sethead">{t("settings.status")}</p>
+              <button className="setrow setlink" aria-expanded={statusOpen} onClick={() => setStatusOpen((o) => !o)}>
+                <span className="svc-name">{statusSummary}</span>
+                {statusLoaded && (
+                  <span className={`status ${problems ? "down" : "ok"}`}>
+                    <i />
+                    {problems ? t("status.issues", { n: problems }) : t("status.allOk")}
+                  </span>
+                )}
+                <span className={`setchev${statusOpen ? " open" : ""}`}>›</span>
+              </button>
+              {statusOpen && (
+              <>
               {services && services.peers.length > 0 && (
                 <>
-                  <p className="sethead">{t("settings.peers")}</p>
+                  <p className="sethead sub">{t("settings.peers")}</p>
                   {services.peers.map((p) => (
                     <div key={p.name} className="svcrow" title={`${p.url}\n${t("settings.peerCounts", { apps: p.apps, agents: p.agents, widgets: p.widgets, services: p.services })}${p.asOf ? `\n${t("settings.snapshot", { time: relTime(p.asOf, lang) })}` : ""}${p.error ? `\n${p.error}` : ""}`}>
                       <span className="svc-ico">🛰</span>
@@ -921,7 +971,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                   ))}
                 </>
               )}
-              <p className="sethead">{t("settings.services")}</p>
+              <p className="sethead sub">{t("settings.services")}</p>
               {services === null ? (
                 <p className="setnote">{t("common.loading")}</p>
               ) : services.services.length ? (
@@ -957,7 +1007,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 <p className="setnote">{t("settings.noServices")}</p>
               )}
               {svcError && <p className="setnote">{svcError}</p>}
-              <p className="sethead">{t("settings.backups")}</p>
+              <p className="sethead sub">{t("settings.backups")}</p>
               {backups === null ? (
                 <p className="setnote">{t("common.loading")}</p>
               ) : backups.length ? (
@@ -987,6 +1037,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               ) : (
                 <p className="setnote">{t("settings.noBackups")}</p>
               )}
+              </>
+              )}
             </div>
           </div>
         </div>
@@ -997,6 +1049,10 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         }} />
       <Usage open={usageOpen} onClose={() => setUsageOpen(false)} onBack={() => {
           setUsageOpen(false);
+          openSettings();
+        }} />
+      <AppModels open={appModelsOpen} onClose={() => setAppModelsOpen(false)} onBack={() => {
+          setAppModelsOpen(false);
           openSettings();
         }} />
       <Events open={eventsOpen} onClose={() => setEventsOpen(false)} onBack={() => {

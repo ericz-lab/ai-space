@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeOnly } from "../runtimes/registry.ts";
+import { claudeOnly, RuntimeRegistry } from "../runtimes/registry.ts";
+import { fakeModelBin } from "../runtimes/testing.ts";
 import { interpolate, loadAppEnv, runTarget } from "./targets.ts";
 
 let server: ReturnType<typeof Bun.serve>;
@@ -115,6 +116,16 @@ describe("agent target", () => {
     expect(await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, { appDir, signal: AbortSignal.timeout(1000) })).toMatchObject({ status: "error", error: expect.stringMatching(/not configured/) });
   });
 
+  test("the task's permission mode and tools reach the CLI; a runtime that cannot honour them refuses", async () => {
+    const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", permissionMode: "bypassPermissions", tools: ["Bash(sqlite3 *)", "Read"] }, ctx(5000, fakeModelBin()));
+    expect(r.status).toBe("ok");
+    expect(r.output).toContain("[args: -p --output-format json --permission-mode bypassPermissions --allowedTools Bash(sqlite3 *),Read]");
+    const plain = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx(5000, fakeModelBin()));
+    expect(plain.output).toContain("[args: -p --output-format json]");
+    const dsh = new RuntimeRegistry({ default: "dsh", runtimes: [{ name: "dsh", kind: "deepseek-harness", bin: ["sh", "-c", "cat"], profile: "headless" }] });
+    expect(await runTarget({ kind: "agent", runtime: "dsh", prompt: "prompt.md", permissionMode: "acceptEdits" }, { appDir, signal: AbortSignal.timeout(1000), runtimes: dsh })).toMatchObject({ status: "error", error: expect.stringMatching(/from its profile/) });
+  });
+
   test("missing prompt file is an error", async () => {
     const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "nope.md" }, ctx());
     expect(r.status).toBe("error");
@@ -134,7 +145,7 @@ printf '{"type":"result","result":"done: %s","total_cost_usd":0.25,"usage":{"inp
     );
     try {
       const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "haiku" }, ctx(1000, [fake]));
-      expect(r).toEqual({ status: "ok", output: "done: hello agent", usage: { inputTokens: 1, cacheWriteTokens: 3, cacheReadTokens: 4, outputTokens: 2 }, costUsd: 0.25, promptChars: 11, backend: "local" });
+      expect(r).toEqual({ status: "ok", output: "done: hello agent", usage: { inputTokens: 1, cacheWriteTokens: 3, cacheReadTokens: 4, outputTokens: 2 }, costUsd: 0.25, promptChars: 11, backend: "local", runtime: "claude", model: "haiku" });
       process.env.FAKE_AGENT_MODE = "error";
       const bad = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx(1000, [fake]));
       expect(bad).toMatchObject({ status: "error", error: "boom" });
@@ -206,4 +217,24 @@ describe("extra env from the scheduler", () => {
     expect(r.status).toBe("ok");
     expect(r.output).toBe("from space/sqlite:///x.db");
   });
+});
+
+test("model selection reaches HTTP and command tasks without leaking between runs", async () => {
+  const receiver = Bun.serve({ port: 0, fetch: (req) => Response.json({ model: req.headers.get("x-space-model") }) });
+  try {
+    const request = { kind: "http" as const, method: "POST" as const, url: `http://localhost:${receiver.port}`, model: "codex/junior", headers: { "X-Space-Model": "claude/basic" } };
+    const result = await runTarget(request, ctx());
+    expect(JSON.parse(result.output!).model).toBe("codex/junior");
+    const plain = await runTarget({ ...request, model: undefined, headers: {} }, ctx());
+    expect(JSON.parse(plain.output!).model).toBeNull();
+    const command = await runTarget({ kind: "command", command: 'printf %s "$SPACE_TASK_MODEL"', model: "codex/intermediate", env: { SPACE_TASK_MODEL: "old" } }, ctx());
+    expect(command.output).toBe("codex/intermediate");
+  } finally { receiver.stop(true); }
+});
+
+test("agent tier resolves before execution and reports the actual model", async () => {
+  const { fakeModelBin } = await import("../runtimes/testing.ts");
+  const result = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "intermediate" }, ctx(2000, fakeModelBin()));
+  expect(result).toMatchObject({ status: "ok", runtime: "claude", model: "opus" });
+  expect(result.output).toContain("--model opus");
 });

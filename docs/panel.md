@@ -19,9 +19,9 @@ So the panel is a set of routes in ai-space's `Bun.serve`, a React page bundled 
 | Section | Source | Notes |
 | --- | --- | --- |
 | Apps | every registered manifest that has a `url`, with `status` other than `archived`, minus the hidden set; peer apps follow, minus those whose `url` is already listed ([peers.md](peers.md)) | Tile: `icon` and `title`, nothing else on the icon. Click opens `url`. Hover shows the description, the status (health when the app declares `service.health`) and the repository. |
-| Agents | `agents:` of every visible app, plus the space agent | Tile shows the avatar and title, with the owning app's icon in the corner when it differs from the avatar; click opens the chat in a floating panel over the page, on that agent. |
+| Agents | `agents:` of every visible app, plus the space agent | The section is left out when the list is empty (the agents could not be loaded). Tile shows the avatar and title, with the owning app's icon in the corner when it differs from the avatar; click opens the chat in a floating panel over the page, on that agent. |
 | Widgets | `widgets:` of every visible app | `items` cards render the list in the house style; `embed` cards load the app's page in a sandboxed iframe through ai-space. |
-| Settings | built in | The last tile of the Apps grid (the Terminal tile sits just before it), not hidden, reordered or uninstalled. It opens a floating panel near the top of the page with the browser preferences (hover details, desk pet, widgets, dark mode, language), the scheduled tasks, the peers and the services. |
+| Settings | built in | The last tile of the Apps grid (the Terminal tile sits just before it), not hidden, reordered or uninstalled. It opens a floating panel near the top of the page with the browser preferences (hover details, desk pet, widgets, dark mode, language), the scheduled tasks, and a status line that folds the peers, services and backups into counts and a problem tally (a service or peer down, a stale backup); a click expands it to their rows. |
 
 | Services (in Settings) | every registered manifest with a `service` | One row per service: icon, title, loopback port, health. |
 | Language (in Settings) | the browser's preferences | English or Chinese for everything the panel owns; the browser's language is the default. Apps' titles and descriptions follow when their manifest has an `i18n:` section. Design in [i18n.md](i18n.md). |
@@ -31,7 +31,7 @@ So the panel is a set of routes in ai-space's `Bun.serve`, a React page bundled 
 
 Two independent axes decide where an app appears. A `url` means a person can open it: that is a tile. A `service` means a process runs: that is a row under Services. An app with both (a web app) has both; a data or background service with no page has a row and no tile, and stays registered, scheduled and probed, its agents and widgets (if any) in their own sections; a link app has a tile and no row; an app with neither (a repository that only runs tasks) appears in neither, and is still listed by `GET /api/apps?all=1`.
 
-The **space agent** (`space/assistant`, shown as "Base") is the default chat identity: a claude session in the workspace root with a short built-in prompt. It is the one exception to "nothing exists outside an app", on the same footing as the Space services themselves.
+The **space agent** (`space/assistant`, shown as "Base") is the default chat identity: a session in the workspace root with a short built-in prompt. Its model menu groups the configured chat runtimes (including Claude Code and Codex) into basic, junior, intermediate and advanced tiers, using the mappings in `runtimes.yaml`. The selection is remembered in the browser and captured for each message when it is queued, so later control changes cannot reroute an already queued turn. Switching runtimes starts a new conversation; history restores the original runtime and model. Base uses full native context, tools and skills; the permission menu independently controls execution access. It is the one exception to "nothing exists outside an app", on the same footing as the Space services themselves.
 
 ## Manifest-only apps
 
@@ -69,7 +69,7 @@ Everything the operator does to the launcher happens in **edit mode**: long-pres
 Two tables in `space.db`, both panel-owned:
 
 - `panel_kv` holds the layout: `{ order: { apps, agents, widgets }, hidden, sizes }`. Order lists are ids: app names, `app/name` for agents and widgets, and `<peer>/…` for entries from a peer machine; ids missing from a list follow it, local before peer, alphabetically. `hidden` is the set of apps the panel does not show; they stay registered and scheduled. `sizes` maps widget ids to the size the operator chose on the panel, applied over the manifest's `size` when widgets are listed.
-- `chat_sessions` keeps the last ten sessions per agent (`agent`, `sid`, `title`, `ts`). A resumed session gets a new id from the runtime; the previous row is replaced so a conversation stays one entry.
+- `chat_sessions` keeps the last ten sessions per agent (`agent`, `sid`, `title`, `ts`, `runtime`, `model`). A resumed session gets a new id from the runtime; the previous row is replaced so a conversation stays one entry.
 
 Nothing panel-related is written into an app directory or into the workspace as loose files.
 
@@ -77,7 +77,7 @@ Nothing panel-related is written into an app directory or into the workspace as 
 
 `POST /api/agents/:app/:agent/chat` runs one turn: ai-space spawns `claude -p <message> --output-format stream-json` in the agent's working directory with the identity from the manifest (`--append-system-prompt` from the prompt file plus the app title, description and `AGENTS.md`; `--allowedTools` from `tools`; `--model` from the request, the manifest, then `SPACE_CHAT_MODEL`) and streams the events back as server-sent events. Multi-turn continuity is `--resume <sid>`. The browser can pick a write tier (`acceptEdits`, `bypassPermissions`, `plan`); the default is the headless read-only behaviour. `SPACE_CHAT_ARGS` appends operator-chosen arguments to every run.
 
-Transcripts are read back from the runtime's own store (Claude Code: `~/.claude/projects/<cwd>/<sid>.jsonl`; DeepSeek Harness: its session log), so restoring a past session costs no extra storage. The turn runs on the runtime the agent's manifest names ([runtimes.md](runtimes.md)); an agent naming a runtime the space lacks, or one without chat, answers 501. The browser reads Claude Code's `stream-json` events; another runtime's adapter translates its own events into that shape.
+Transcripts are read back from the runtime's own store (Claude Code: `~/.claude/projects/<cwd>/<sid>.jsonl`; Codex: `$CODEX_HOME/sessions/**/rollout-*-<sid>.jsonl`; DeepSeek Harness: its session log), so restoring a past session costs no extra storage. Base accepts a `runtime/tier` or `runtime/model` in the request's `model` field. A resumed session stays on its recorded runtime; changing runtimes requires a new conversation. Other agents run on the runtime their manifest names ([runtimes.md](runtimes.md)); an agent naming a runtime the space lacks, or one without chat, answers 501. The browser reads Claude Code's `stream-json` events; another runtime's adapter translates its own events into that shape.
 
 ## Widgets
 

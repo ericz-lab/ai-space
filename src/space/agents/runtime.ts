@@ -12,7 +12,7 @@ export { PERMISSION_MODES } from "../runtimes/claude-code.ts";
 export type { ChatCallbacks, ChatTurn } from "../runtimes/types.ts";
 
 export { SESSION_ID_RE } from "../runtimes/transcripts.ts";
-export const MODEL_RE = /^[a-z0-9._-]{1,64}$/i;
+export const MODEL_RE = /^(?:[a-z0-9][a-z0-9._-]*\/)?[a-z0-9._-]{1,64}$/i;
 
 /**
  * A long tool call emits nothing. Proxies in between (a tunnel's edge) drop a

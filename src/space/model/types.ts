@@ -1,4 +1,4 @@
-import type { Backend, CompleteInput, CompleteOutcome, Usage } from "../runtimes/types.ts";
+import type { Backend, CompleteInput, CompleteOutcome, CompletionMode, Usage } from "../runtimes/types.ts";
 
 /**
  * Data model of the model service: what an app asks for, what one call
@@ -48,6 +48,10 @@ export type ModelCall = {
   model: string;
   /** Which configured runtime ran it; absent on rows written before runtimes were named and on imported rows. */
   runtime?: string;
+  /** Absent for legacy, imported, or agent/chat records. */
+  mode?: CompletionMode;
+  /** Which layer chose the model (app-models.ts `ModelSource`); absent on rows before layers were recorded, imports and agent tasks. */
+  modelSource?: string;
   backend: string;
   origin: Origin;
   status: CallStatus;

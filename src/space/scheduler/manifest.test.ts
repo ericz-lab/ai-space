@@ -64,6 +64,9 @@ describe("parseManifest", () => {
     expect(() => parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, runtime: 'Bad Name' } }", "/d")).toThrow(/runtime/);
     // Any well-formed name is accepted here; whether the space has that runtime is checked when the task runs.
     expect(parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, runtime: dsh } }", "/d").tasks[0]?.target).toMatchObject({ kind: "agent", runtime: "dsh" });
+    expect(parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, permissionMode: bypassPermissions, tools: [Read, 'Bash(sqlite3 *)'] } }", "/d").tasks[0]?.target).toEqual({ kind: "agent", runtime: "claude", prompt: "p", permissionMode: "bypassPermissions", tools: ["Read", "Bash(sqlite3 *)"] });
+    expect(() => parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, permissionMode: yolo } }", "/d")).toThrow(/permissionMode must be one of/);
+    expect(() => parseManifest("tasks:\n  - name: a\n    every: 1m\n    run: { agent: { prompt: p, tools: Read } }", "/d")).toThrow(/tools must be a list/);
     expect(() => parseManifest("tasks: {}", "/d")).toThrow(/tasks must be a list/);
     expect(() => parseManifest("- not a mapping", "/d")).toThrow(/mapping/);
   });
@@ -211,4 +214,20 @@ provides:
     expect(() => parseManifest("name: a\ntasks:\n  - { name: t, run: { command: x } }\nevents:\n  consumes: [{ event: b/c, task: t }]\n", "/apps/a")).toThrow(/declare exactly one of/);
     expect(() => parseManifest("name: a\nprovides: [1]\n", "/apps/a")).toThrow(/must map capability names/);
   });
+});
+
+test("task-level model opts HTTP and command tasks into model selection", () => {
+  const manifest = parseManifest(`name: demo
+tasks:
+  - name: news
+    every: 5m
+    model: codex/junior
+    run: { http: { url: "http://localhost:8000/run" } }
+  - name: command
+    every: 1h
+    model: claude/intermediate
+    run: { command: "true" }
+`, "/demo");
+  expect(manifest.tasks.map((t) => t.target.model)).toEqual(["codex/junior", "claude/intermediate"]);
+  expect(() => parseManifest("name: demo\ntasks:\n  - name: test\n    every: 5m\n    model: bad\n    run: { command: 'true' }", "/demo")).toThrow(/runtime\/model/);
 });

@@ -26,6 +26,7 @@ export type AgentView = {
   /** The owning app's icon, for the corner of the agent's tile. */
   appIcon: string;
   runtime: ManifestAgent["runtime"];
+  modelOptions?: { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string }[];
 };
 
 export type AppView = {

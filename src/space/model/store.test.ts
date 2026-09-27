@@ -83,3 +83,73 @@ describe("ModelStore", () => {
     expect(store.list({ since: 0 }).map((c) => c.startedAt)).toEqual([T0, T0 - 9 * DAY]);
   });
 });
+
+
+test("the mode migration preserves older rows and survives reopening", () => {
+  const old = store.add(call());
+  store.db.exec("ALTER TABLE model_calls DROP COLUMN mode");
+  store.close();
+  store = new ModelStore(join(dir, "space.db"));
+  expect(store.get(old.id)?.mode).toBeUndefined();
+  const fresh = store.add(call({ mode: "full" }));
+  store.close();
+  store = new ModelStore(join(dir, "space.db"));
+  expect(store.get(fresh.id)?.mode).toBe("full");
+  expect(store.get(old.id)?.app).toBe("news");
+});
+
+describe("GPT API-equivalent costs", () => {
+  test("historical NULL costs are estimated consistently without changing stored values", () => {
+    const usage = { inputTokens: 1620, cacheWriteTokens: 0, cacheReadTokens: 1326, outputTokens: 78 };
+    const c = store.add(call({ model: "gpt-6-luna", costUsd: undefined, usage }));
+    const expected = (1620 * 0.1 + 1326 * 0.01 + 78 * 0.5) / 1e6;
+    expect(c.costUsd).toBeCloseTo(expected, 10);
+    expect(store.db.query("SELECT cost_usd FROM model_calls WHERE id = ?").get(c.id)).toEqual({ cost_usd: null });
+    store.close();
+    store = new ModelStore(join(dir, "space.db"));
+    expect(store.get(c.id)?.costUsd).toBeCloseTo(expected, 10);
+    expect(store.list()[0]?.costUsd).toBeCloseTo(expected, 10);
+    expect(store.totals(T0).costUsd).toBeCloseTo(expected, 10);
+    expect(store.groupBy(["app", "tag", "model"], T0)[0]?.costUsd).toBeCloseTo(expected, 10);
+    expect(store.days(T0)[0]?.costUsd).toBeCloseTo(expected, 10);
+    expect(store.totals(T0 + 1).costUsd).toBe(0);
+  });
+
+  test("long context is priced per call, not from the grouped token sum", () => {
+    const usage = { inputTokens: 270000, cacheWriteTokens: 1000, cacheReadTokens: 1000, outputTokens: 1000 };
+    const a = store.add(call({ model: "gpt-6-sol", costUsd: undefined, usage }));
+    const b = store.add(call({ model: "gpt-6-sol", costUsd: undefined, usage }));
+    expect(a.costUsd).toBeCloseTo(0.5527, 10);
+    expect(b.costUsd).toBeCloseTo(0.5527, 10);
+    expect(store.totals(T0).costUsd).toBeCloseTo(1.1054, 10);
+    const long = store.add(call({ model: "gpt-6-sol", costUsd: undefined, usage: { ...usage, inputTokens: 270001 } }));
+    expect(long.costUsd).toBeCloseTo(1.100404, 10);
+  });
+
+  test("reported costs win; unknown models and incomplete usage remain unpriced", () => {
+    for (const costUsd of [0, 1.23]) {
+      expect(store.add(call({ model: "gpt-6-luna", costUsd })).costUsd).toBe(costUsd);
+    }
+    for (const model of ["haiku", "gpt-unknown", "gpt-6-luna-custom"]) {
+      expect(store.add(call({ model, costUsd: undefined })).costUsd).toBeUndefined();
+    }
+    expect(store.add(call({ model: "gpt-6-luna", costUsd: undefined, usage: undefined })).costUsd).toBeUndefined();
+    expect(store.totals(T0).costUsd).toBe(1.23);
+  });
+
+  test.each([
+    ["gpt-6-astra", 0.086], ["gpt-6-sol", 0.0172], ["gpt-6-luna", 0.00086],
+    ["gpt-5.6-sol", 0.0344], ["gpt-5.6-terra", 0.0192], ["gpt-5.6-luna", 0.00192],
+  ])("uses the rate for %s", (model, expected) => {
+    const c = store.add(call({ model, costUsd: undefined, usage: { inputTokens: 1000, cacheWriteTokens: 2000, cacheReadTokens: 1000, outputTokens: 1000 } }));
+    expect(c.costUsd).toBeCloseTo(expected, 10);
+  });
+});
+
+test("shared catalogue covers older GPT models and snapshot ids without guessing cache writes", () => {
+  const usage = { inputTokens: 1000, cacheWriteTokens: 0, cacheReadTokens: 2000, outputTokens: 1000 };
+  expect(store.add(call({ model: "gpt-5.3-codex", usage, costUsd: undefined })).costUsd).toBeCloseTo(0.0161, 10);
+  expect(store.add(call({ model: "gpt-5.4", usage, costUsd: undefined })).costUsd).toBeCloseTo(0.018, 10);
+  expect(store.add(call({ model: "gpt-6-luna-2026-09-22", usage, costUsd: undefined })).costUsd).toBeCloseTo(0.00062, 10);
+  expect(store.add(call({ model: "gpt-5.4", usage: { ...usage, cacheWriteTokens: 1 }, costUsd: undefined })).costUsd).toBeUndefined();
+});

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { type AppInfo, type RunInfo, type TaskInfo, dateTime, fmtDuration, getJson, isImgIcon, relTime, scheduleText, untilTime } from "./api.ts";
+import { type AppInfo, type RunInfo, type TaskInfo, dateTime, fmtDuration, getJson, isImgIcon, relTime, scheduleText, sendJson, untilTime } from "./api.ts";
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
 
-// Tasks window (a floating panel): a read-only view of the scheduler, grouped by app.
+// Tasks window: scheduler state and per-task model selection, grouped by app.
 // - Reads `GET /api/tasks` when opened and every 30 s while open; the list is small (tens of tasks).
 // - A row shows the effective schedule and event triggers, the next run, the last outcome; clicking it loads run history.
 // - App titles and icons come from `GET /api/apps?all=1` so headless and hidden apps still get a name.
-// Nothing here mutates: the mutating task routes need the operator token, which the browser never holds.
+// Model changes use a narrow same-origin panel route; the browser never holds the operator token.
 
 type AppLabel = { title: string; i18n?: AppInfo["i18n"]; icon: string };
 
@@ -72,12 +72,58 @@ function Runs({ taskId }: { taskId: string }) {
   );
 }
 
-function TaskRow({ t, open, onToggle }: { t: TaskInfo; open: boolean; onToggle: () => void }) {
+type ModelOption = { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string; capabilities: { agent: boolean; complete: boolean } };
+
+function ModelPicker({ task, onSaved }: { task: TaskInfo; onSaved: (task: TaskInfo) => void }) {
+  const { t } = useLang();
+  const [options, setOptions] = useState<ModelOption[]>([]);
+  const [value, setValue] = useState(task.overrides.model ?? "");
+  const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { setValue(task.overrides.model ?? ""); }, [task.id, task.overrides.model]);
+  useEffect(() => {
+    let live = true;
+    getJson<{ models: ModelOption[] }>("/api/tasks/models")
+      .then((data) => { if (live) { setOptions(data.models); setLoaded(true); } })
+      .catch((e) => { if (live) setError((e as Error).message); });
+    return () => { live = false; };
+  }, []);
+  const eligible = options.filter((o) => task.target.kind === "agent" ? o.capabilities.agent : o.capabilities.complete);
+  const save = async () => {
+    setBusy(true); setError(""); setSaved(false);
+    try {
+      const result = await sendJson<{ task: TaskInfo }>("PATCH", `/api/panel/tasks/${encodeURIComponent(task.id)}/model`, { model: value || null });
+      onSaved(result.task); setSaved(true);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  if (!task.modelSelectable) return <p className="task-note">{t("tasks.modelUnsupported")}</p>;
+  return <div className="task-model">
+    <label htmlFor={`task-model-${task.id}`}>{t("tasks.model")}</label>
+    <div className="task-model-controls">
+      <select id={`task-model-${task.id}`} value={value} disabled={busy || !loaded || task.orphaned} onChange={(e) => { setValue(e.target.value); setSaved(false); }}>
+        <option value="">{t("tasks.modelDefault", { model: task.base?.model ?? t("chat.modelDefault") })}</option>
+        {value && !eligible.some((o) => o.value === value) && <option value={value}>{value}</option>}
+        {[...new Set(eligible.map((o) => o.runtime))].map((runtime) => <optgroup key={runtime} label={runtime}>
+          {eligible.filter((o) => o.runtime === runtime).map((o) => <option key={o.value} value={o.value}>{t(`modelTier.${o.tier}`)} · {o.model}</option>)}
+        </optgroup>)}
+      </select>
+      <button type="button" disabled={busy || !loaded || task.orphaned || value === (task.overrides.model ?? "")} onClick={() => void save()}>{busy ? t("common.loading") : t("common.save")}</button>
+    </div>
+    <p className="task-note">{t("tasks.modelNextRun")}</p>
+    {saved && <p role="status" className="task-note">{t("tasks.modelSaved")}</p>}
+    {error && <p role="alert" className="run-err">{error}</p>}
+  </div>;
+}
+
+function TaskRow({ t, open, onToggle, onSaved }: { t: TaskInfo; open: boolean; onToggle: () => void; onSaved: (task: TaskInfo) => void }) {
   const { lang, t: tr } = useLang();
   const st = rowStatus(t);
   const next = t.enabled && !t.orphaned && t.state.nextRunAt ? untilTime(t.state.nextRunAt, lang) : "";
   const last = t.state.lastRunAt ? relTime(t.state.lastRunAt, lang) : "";
-  const badges = [t.source === "api" ? "api" : "", t.overrides.enabled !== undefined || t.overrides.schedule ? "override" : ""].filter(Boolean);
+  const badges = [t.source === "api" ? "api" : "", t.overrides.enabled !== undefined || t.overrides.schedule || t.overrides.model ? "override" : ""].filter(Boolean);
   return (
     <div className={`taskrow ${st.cls} ${open ? "open" : ""}`}>
       <button className="task-main" onClick={onToggle} title={t.description || `${t.app}/${t.name}`}>
@@ -108,12 +154,14 @@ function TaskRow({ t, open, onToggle }: { t: TaskInfo; open: boolean; onToggle: 
             {next && <span title={t.state.nextRunAt && dateTime(t.state.nextRunAt, lang)}>{tr("tasks.next", { time: next })}</span>}
             {t.state.pending && <span title={t.state.pending.dueAt && dateTime(t.state.pending.dueAt, lang)}>{tr("tasks.pending", { n: t.state.pending.events })}</span>}
             <span className="task-kind">{t.target.kind}</span>
+            {t.model && <span className="task-kind">{t.model}</span>}
           </span>
         </span>
       </button>
       {open && (
         <div className="task-detail">
           {t.description && <p className="task-desc">{t.description}</p>}
+          <ModelPicker task={t} onSaved={onSaved} />
           <Runs taskId={t.id} />
         </div>
       )}
@@ -199,7 +247,7 @@ export default function Tasks({ open, onClose, onBack }: { open: boolean; onClos
               <span className="svc-port">{g.list.length}</span>
             </div>
             {g.list.map((t) => (
-              <TaskRow key={t.id} t={t} open={openId === t.id} onToggle={() => setOpenId(openId === t.id ? null : t.id)} />
+              <TaskRow key={t.id} t={t} open={openId === t.id} onToggle={() => setOpenId(openId === t.id ? null : t.id)} onSaved={(task) => setTasks((current) => current?.map((row) => row.id === task.id ? task : row) ?? null)} />
             ))}
           </section>
         ))}

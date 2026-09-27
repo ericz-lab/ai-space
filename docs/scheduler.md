@@ -70,7 +70,7 @@ Concurrency is a single limit for the whole scheduler (`SPACE_MAX_CONCURRENCY`).
 | --- | --- | --- |
 | `http` | Sends the request with interpolated url, headers and body. Any 2xx is `ok`. A 2xx JSON body of `{ "status": "ok" \| "error" \| "skipped", "error"?: string }` overrides that verdict. | An endpoint on `127.0.0.1` that does one round of work and reports honestly. |
 | `command` | Runs `sh -c <command>` with the app directory as cwd and the app's `.env` merged into the environment. Non-zero exit is an error. | A command that does one round of work and exits. |
-| `agent` | Runs the named runtime ([runtimes.md](runtimes.md); `claude` by default) in the app directory and feeds the prompt file on stdin. | A prompt file, and that runtime configured on the space. |
+| `agent` | Runs the named runtime ([runtimes.md](runtimes.md); `claude` by default) in the app directory and feeds the prompt file on stdin. Read-only by default (the headless CLI refuses tools that write); `permissionMode` (`acceptEdits`, `bypassPermissions`, `plan`) and `tools` (auto-approved, as `--allowedTools` takes them) come from the manifest. A runtime that takes its tools from its own profile (dsh) refuses a task that sets either. | A prompt file, and that runtime configured on the space. |
 
 `${VAR}` and `${VAR:-default}` placeholders in http urls, headers, string bodies and command strings resolve from the scheduler's own environment (`<workspace>/.env`). This keeps secrets and machine-specific paths out of manifests. Inside a command, shell variables are written as `$VAR` so the shell, not the scheduler, expands them.
 
@@ -271,3 +271,33 @@ What stays in the app: polling loops faster than a few minutes, loops that depen
 | Event for a task that is disabled | Not queued; `matched` is empty. The event is still in `GET /api/events`. |
 | Publisher calls while ai-space is restarting | Connection refused; nothing stored. The publisher retries or the task's clock catches up. |
 | Task fails with events aboard | The events are queued again, due after the backoff; five failed runs and they are dropped (logged). |
+
+## Model selection in the task panel
+
+Motivation: an operator should be able to preserve a task's capability tier and change its provider without editing app code. The task detail panel now offers configured runtime/tier choices and a reset to the declared default. Changes affect the next scheduled, manual or event-triggered run; an in-flight run retains its choice. Overrides live in `tasks.overrides.model` and survive manifest sync and restart.
+
+Use the four tiers from [runtimes.md](runtimes.md#capability-tiers): `basic` (Haiku/Luna), `junior` (Sonnet/Terra), `intermediate` (Opus/Sol), and `advanced` (Fable/Astra). Migrate a previous Sonnet task to junior and an Opus task to intermediate, not to basic.
+
+Agent tasks support model selection directly. Only runtimes with the `agent` capability are offered for them; the Codex completion-only adapter is not an agent runtime. Agent tier aliases are resolved before starting the CLI, and the model ledger records the actual runtime and concrete model.
+
+HTTP and command tasks explicitly opt in by declaring a task-level `model` in `space.yaml`. This is a contract: the app must consume the selected model, not merely declare the field. The parser stores the default in `target.model` (API-created tasks set that field directly):
+
+```yaml
+tasks:
+  - name: summarize
+    every: 1h
+    model: codex/junior
+    run:
+      http:
+        url: http://127.0.0.1:8799/space/run
+        body: { task: summarize }
+```
+
+HTTP runs carry `x-space-model: codex/junior`; command runs receive `SPACE_TASK_MODEL=codex/junior`. The app forwards this choice as `model` to `POST /api/model/run`. For a shared HTTP server, keep the value in a request-local context (for example, AsyncLocalStorage), never in `process.env` or a global variable: two tasks of one app may run simultaneously with different models. Apply it only after the app's normal authentication check. Calls outside a scheduler run retain their app defaults. A task without this contract shows as unsupported in the panel instead of accepting a setting that would be ignored.
+
+API:
+
+- `GET /api/tasks/models` lists runtime/tier options and their concrete model IDs and capabilities.
+- `PATCH /api/tasks/:id` accepts `{ "model": "codex/intermediate" }` or `{ "model": null }` alongside existing fields, with the operator bearer token.
+- `PATCH /api/panel/tasks/:id/model` accepts only that model field, requires a matching Origin and JSON content type, and uses the panel's access perimeter like terminal/chat. It cannot edit schedules, commands or enabled state and never exposes the operator token to the browser.
+- Task views include the effective `model`, `modelSelectable`, and `base.model`. Unknown runtimes and incompatible capabilities are rejected on save. A concrete model may still be unavailable to an account; execution then fails explicitly, without a fallback to another tier.

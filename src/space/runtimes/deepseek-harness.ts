@@ -202,6 +202,8 @@ export function createDeepseekHarness(spec: DeepseekHarnessSpec): RuntimeAdapter
     },
 
     async runAgent(run) {
+      // The profile decides the harness's tools and approvals; a task asking for its own cannot be honoured.
+      if (run.permissionMode || run.allowedTools?.length) return { ok: false, error: `runtime ${spec.name} takes tools and permissions from its profile, not from the task`, output: "", timedOut: false, backend: "local" };
       const patch = run.model ? buildPatch({ model: run.model }) : undefined;
       const go = async (file?: string): Promise<AgentOutcome> => {
         const cmd = [...bin, "--profile", profile, ...(file ? ["--patch", file] : []), "--json", "-"];

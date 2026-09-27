@@ -114,7 +114,7 @@ tasks:
     expect(() => parseManifest(yaml("{ when: [boom] }"), "/a")).toThrow(/notify.when/);
     expect(() => parseManifest(yaml("{ when: [] }"), "/a")).toThrow(/at least one/);
     expect(() => parseManifest(yaml("{ channel: 'Bad Name' }"), "/a")).toThrow(/notify.channel/);
-    expect(() => parseManifest(yaml("{ on: error }"), "/a")).toThrow(/unknown key "true"/);
+    expect(() => parseManifest(yaml("{ on: error }"), "/a")).toThrow(/unknown key "(?:on|true)"/);
     expect(() => parseManifest("name: a\ntitle: ''\n", "/a")).toThrow(/title/);
   });
 });

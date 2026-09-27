@@ -51,10 +51,24 @@ A **thread** belongs to an app and a `scope` (`^[a-z0-9][a-z0-9:._/-]{0,127}$`, 
 | `message` | string | The person's text. Required. |
 | `context` | object? | `system` (replaces the runtime's system prompt), `text` (what the model reads before the conversation: the note, the calendar) and `ack` (the assistant's acknowledgement that follows it). Rebuilt by the app on every turn, so the model never argues from a stale copy. |
 | `attachments` | number[]? | Ids of uploads to this thread not yet sent. |
-| `model`, `thinking`, `timeoutMs` | as `/api/model/run` | Default model is the space's; timeout defaults to 5 minutes. |
+| `model`, `thinking`, `timeoutMs` | as `/api/model/run` | The app's model; the person's pick in the widget overrides it and the space's default fills in when both are absent ([Model choice](#model-choice)). Timeout defaults to 5 minutes. |
 | `tools` | string[]? | From `Read`, `WebSearch`, `WebFetch`; `Read` is added by the runtime when files travel. |
 
 One turn at a time per thread (`409` otherwise). The person's message is stored before the model runs and the attachments are bound to it; the thread's title is set from it when empty. The prompt is then built and run through `ModelService.run` with tag `chat`, so the ledger, the concurrency cap and the runtime choice are the model service's. The answer is stored on success; on failure the assistant message holds whatever text streamed and the error, and later turns leave that pair out of the replay. The response is `text/event-stream`: `delta {text}` as the text is produced, then `done {ok: true, user, assistant, thread, call}` or `error {ok: false, error, user, assistant, thread, call?}`, with a `: keepalive` comment every 15 s; `?stream=0` gives the same as one JSON answer (`502` on a model failure).
+
+### Model choice
+
+The widget has a model chip under the box (`⚙ claude/opus`, the model in use). It opens a picker: "Default (follow the app / space)" and every runtime/tier pair of a runtime that answers requests (`claude/basic` … `codex/advanced`, the list `GET /api/tasks/models` shows), each with the concrete model it maps to. The pick is stored in ai-space per app (`chat_model_choices` in `space.db`, keyed by the app the token maps to), so it holds across reloads and devices, and every scope and thread of that app uses it.
+
+A turn runs on the first of:
+
+1. the person's pick for the app, when it still resolves (a pick whose runtime was removed from `runtimes.yaml` is skipped, and the picker says so, rather than failing every turn);
+2. the `model` of the turn, which is `context().model` or the mount option `model`;
+3. the space's app default: Settings → Default model, else `SPACE_MODEL_DEFAULT`.
+
+The server applies the order, so a page with an older cached widget gets the pick too. The ledger row, and the `model`/`backend` a message shows, are the model the turn really ran on.
+
+Per app, not per scope or thread: scopes are the app's own keys and often short-lived (`note:12`), so a pick per scope would reset on every new note and a pick per thread on every new conversation; what the person means by the choice is "the model this app's chat uses". An app that wants a different model for one kind of page still sets `model`, which applies whenever the person has left the pick on default.
 
 ### The prompt
 
@@ -98,6 +112,8 @@ DELETE /api/chat/threads/:id                rows and files
 POST   /api/chat/threads/:id/attachments    multipart field `file` → 201 attachment (413 too large, 415 not an image)
 GET    /api/chat/attachments/:id            the image bytes
 POST   /api/chat/threads/:id/turn           one turn, streamed (above)
+GET    /api/chat/models?model=              the picker: options, choice, appModel, defaultModel, effective and fallback (what "default" means now); `model` = what the app asks for
+PUT    /api/chat/model                      { model: "runtime/tier" | model | null } the person's pick for the app's chat (null = default) → the same view; 400 when the model does not resolve (unknown runtime, tier without a model)
 GET    /api/chat/widget.js | widget.css     the widget, no token
 ```
 
@@ -117,14 +133,14 @@ const chat = SpaceChat.mount(el, {
   actions: [{ label: "追加到笔记", run: (message, thread) => … }],   // under every answer; copy is built in
   renderAssistant: (message) => html | node | undefined,   // undefined = the default Markdown
   onReply: (message, thread) => …, onError: (error, message) => …,
-  threads: true, attachments: true, theme: "auto", lang: "zh", placeholder, emptyText,
+  threads: true, attachments: true, modelPicker: true, theme: "auto", lang: "zh", placeholder, emptyText,
 });
 chat.send(text, files?) · chat.fill(text) · chat.newThread() · chat.openThread(id) · chat.setScope(scope) · chat.setTheme(t) · chat.stop() · chat.destroy() · chat.thread · chat.messages
 ```
 
-Behaviour: on mount the threads of the scope are listed and the newest opened; the first message creates a thread when there is none. A send shows the message at once, the answer as it streams (Markdown re-rendered per animation frame), then swaps both for the stored rows; a failure keeps the partial text with the reason. Images: paste, drop on the box, or the `＋` button; each is uploaded at once and previewed, and its id travels with the message. `Enter` sends, `Shift+Enter` breaks a line, `Esc` stops. Theme `auto` follows the page's `data-theme` when set (both apps set it), else the system.
+Behaviour: `modelPicker: false` hides the model chip (the person's stored pick still applies). On mount the threads of the scope are listed and the newest opened; the first message creates a thread when there is none. A send shows the message at once, the answer as it streams (Markdown re-rendered per animation frame), then swaps both for the stored rows; a failure keeps the partial text with the reason. Images: paste, drop on the box, or the `＋` button; each is uploaded at once and previewed, and its id travels with the message. `Enter` sends, `Shift+Enter` breaks a line, `Esc` stops. Theme `auto` follows the page's `data-theme` when set (both apps set it), else the system.
 
-Tokens, all with defaults in `widget.css` and dark values under `:host([data-theme="dark"])`: `--sc-font`, `--sc-font-size`, `--sc-radius`, `--sc-bg`, `--sc-fg`, `--sc-muted`, `--sc-surface`, `--sc-surface-strong`, `--sc-border`, `--sc-accent`, `--sc-on-accent`, `--sc-user-bg`, `--sc-user-fg`, `--sc-assistant-bg`, `--sc-code-bg`, `--sc-danger`, `--sc-chip-bg`, `--sc-shadow`, `--sc-focus`. An app sets them on the mount element, mapping its own palette (`--sc-accent: var(--ink)`).
+Tokens, all with defaults in `widget.css` and dark values under `:host([data-theme="dark"])`: `--sc-font`, `--sc-font-size`, `--sc-radius`, `--sc-bg`, `--sc-fg`, `--sc-muted`, `--sc-surface`, `--sc-surface-strong`, `--sc-border`, `--sc-accent`, `--sc-on-accent`, `--sc-user-bg`, `--sc-user-fg`, `--sc-assistant-bg`, `--sc-code-bg`, `--sc-danger`, `--sc-chip-bg`, `--sc-shadow`, `--sc-focus`, `--sc-menu-bg` (the model picker's background, opaque). An app sets them on the mount element, mapping its own palette (`--sc-accent: var(--ink)`).
 
 ## Adopting it in an app
 
@@ -134,7 +150,7 @@ A page cannot call ai-space: the API is loopback and the app token is the server
 /space/chat/*  →  ${SPACE_API_URL}/api/chat/*   with  authorization: Bearer ${SPACE_APP_TOKEN}
 ```
 
-forwarding only `content-type`, `accept`, `content-length` and `if-none-match` (never cookies), returning only `content-type`, `cache-control`, `etag` and `content-length`, streaming both ways (the turn is an event stream, an upload is multipart). A Bun proxy passes `timeout: false` to `fetch`, since Bun drops a connection idle for five minutes and the model may think longer; a Node proxy uses `http.request` with `setTimeout(0)` and pipes. The page loads `/space/chat/widget.js` with a script element created at runtime (`document.createElement("script")`, `onload` → mount): a static `<script src>` would be resolved at build time by a bundler that builds the page, such as Bun's HTML import, and fail. Then it mounts the widget with its scope and `context()`.
+forwarding every method (the widget uses GET, POST, PUT and DELETE; PATCH renames a thread) and only `content-type`, `accept`, `content-length` and `if-none-match` (never cookies), returning only `content-type`, `cache-control`, `etag` and `content-length`, streaming both ways (the turn is an event stream, an upload is multipart). A Bun proxy passes `timeout: false` to `fetch`, since Bun drops a connection idle for five minutes and the model may think longer; a Node proxy uses `http.request` with `setTimeout(0)` and pipes. The page loads `/space/chat/widget.js` with a script element created at runtime (`document.createElement("script")`, `onload` → mount): a static `<script src>` would be resolved at build time by a bundler that builds the page, such as Bun's HTML import, and fail. Then it mounts the widget with its scope and `context()`.
 
 An app that kept its own chat table brings it along once: `bun src/index.ts chat-import <app> <file.jsonl>`, one thread per line (`{ scope, title, createdAt, updatedAt, messages: [{ role, content, error?, createdAt }] }`); a thread already present (same app, scope, creation time) is skipped, so the command can be run again.
 

@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
-import { FILE_NAME_PATTERN, type AgentOutcome, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, FILE_NAME_PATTERN, PERMISSION_MODES, type AgentOutcome, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /**
  * Claude Code as a runtime. Three operations, one CLI:
@@ -40,7 +40,7 @@ import { FILE_NAME_PATTERN, type AgentOutcome, type AgentRun, type Backend, type
  * (nothing is estimated).
  */
 
-export const PERMISSION_MODES = ["acceptEdits", "bypassPermissions", "plan"] as const;
+export { PERMISSION_MODES };
 
 export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
   const sshHost = spec.sshHost?.trim() ?? "";
@@ -55,6 +55,7 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
     capabilities: { complete: true, agent: true, chat: true },
 
     async complete(input, signal, onDelta) {
+      assertCompletionMode(input);
       const stream = onDelta !== undefined;
       const badName = input.files?.find((f) => !FILE_NAME_PATTERN.test(f.name));
       if (badName) return { ok: false, error: `file name not allowed: ${badName.name}`, backend };
@@ -74,7 +75,7 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
     },
 
     async runAgent(run) {
-      const cmd = [...bin, "-p", "--output-format", "json", ...(run.model ? ["--model", run.model] : [])];
+      const cmd = [...bin, ...agentArgs(run)];
       const r = await spawnCollect(cmd, { cwd: run.cwd, env: run.env, stdin: run.prompt, signal: run.signal });
       const output = joinOutput(r.stdout, r.stderr);
       if (r.timedOut || r.aborted) return { ok: false, error: "timed out", output, timedOut: true, backend: "local" };
@@ -114,8 +115,12 @@ export function filesNote(files: CompleteFile[], pathOf: (f: CompleteFile) => st
 
 /** Command line for the CLI on this machine; exported for tests. */
 export function cliArgs(bin: string[], input: CompleteInput, stream = false): string[] {
+  assertCompletionMode(input);
   const tools = toolList(input);
-  return [...bin, "-p", ...formatArgs(stream), "--model", input.model, "--strict-mcp-config", "--tools", tools, ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", input.system];
+  const context = input.mode === "full" ? [] : ["--safe-mode", "--strict-mcp-config"];
+  const toolArgs = input.mode === "full" && !tools ? [] : ["--tools", tools, ...(tools ? ["--allowedTools", tools] : [])];
+  return [...bin, "-p", ...formatArgs(stream), "--model", input.model, ...context, ...toolArgs,
+    ...(input.system ? ["--system-prompt", input.system] : [])];
 }
 
 export type FileBlob = { name: string; bytes: Uint8Array };
@@ -135,12 +140,13 @@ const SAFE_ARG = /^[A-Za-z0-9._:/@,()*-]+$/;
  */
 export function remoteCommand(bin: string[], input: CompleteInput, stream = false, blobs: FileBlob[] = []): { command: string; spool?: { dir: string; archive: Uint8Array } } | { bad: string } {
   const tools = toolList(input);
-  const words = [...bin, "-p", ...formatArgs(stream), "--model", input.model, "--strict-mcp-config"];
+  assertCompletionMode(input);
+  const words = [...bin, "-p", ...formatArgs(stream), "--model", input.model, ...(input.mode === "full" ? [] : ["--safe-mode", "--strict-mcp-config"])];
   const bad = [...words, ...(tools ? [tools] : []), ...blobs.map((b) => b.name)].find((w) => !SAFE_ARG.test(w) || (blobs.some((b) => b.name === w) && !FILE_NAME_PATTERN.test(w)));
   if (bad) return { bad };
   const system = Buffer.from(input.system, "utf8").toString("base64");
   const env = input.thinking === undefined ? [] : [`MAX_THINKING_TOKENS=${Math.trunc(input.thinking)}`];
-  const parts = [...env, ...words, "--tools", tools ? tools : '""', ...(tools ? ["--allowedTools", tools] : []), "--system-prompt", `"$(printf %s ${system} | base64 -d)"`];
+  const parts = [...env, ...words, ...(input.mode === "full" && !tools ? [] : ["--tools", tools ? tools : '""', ...(tools ? ["--allowedTools", tools] : [])]), ...(input.system ? ["--system-prompt", `"$(printf %s ${system} | base64 -d)"`] : [])];
   // The prompt is spooled to a file before the CLI starts: the CLI gives up on stdin after 3 s,
   // and a prompt of a few hundred KB can take longer than that to cross a slow ssh link.
   if (!blobs.length) return { command: `f=$(mktemp) && cat > "$f" && ${parts.join(" ")} < "$f"; rc=$?; rm -f "$f"; exit $rc` };
@@ -240,6 +246,17 @@ async function runCompletion(cmd: string[], input: CompleteInput, stdin: string 
 
 function joinOutput(stdout: string, stderr: string): string {
   return [stdout, stderr].filter(Boolean).join("\n--- stderr ---\n");
+}
+
+// ---------------------------------------------------------------- agent
+
+/** Arguments for an agent task; exported for tests. The prompt travels on stdin. */
+export function agentArgs(run: Pick<AgentRun, "model" | "permissionMode" | "allowedTools">): string[] {
+  const args = ["-p", "--output-format", "json"];
+  if (run.model) args.push("--model", run.model);
+  if (run.permissionMode) args.push("--permission-mode", run.permissionMode);
+  if (run.allowedTools?.length) args.push("--allowedTools", run.allowedTools.join(","));
+  return args;
 }
 
 // ---------------------------------------------------------------- chat

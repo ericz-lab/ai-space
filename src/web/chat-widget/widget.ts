@@ -29,6 +29,20 @@ export type Message = {
 };
 export type Thread = { id: number; scope: string; title: string; createdAt: string; updatedAt: string };
 
+export type ModelOption = { value: string; runtime: string; tier: string; model: string };
+export type ModelsView = {
+  options: ModelOption[];
+  /** The person's pick for this app's chat, stored in ai-space; null = follow the app and the space. */
+  choice: string | null;
+  choiceUnavailable?: boolean;
+  appModel: string | null;
+  defaultModel: string;
+  effective: Effective;
+  /** What "default" resolves to: the app's model, else the space's. */
+  fallback: Effective;
+};
+type Effective = { value: string; source: "choice" | "app" | "default"; runtime?: string; model?: string };
+
 export type Context = { system?: string; text?: string; ack?: string; tools?: string[]; model?: string; thinking?: number };
 
 export type Options = {
@@ -53,6 +67,8 @@ export type Options = {
   onError?: (error: string, m?: Message) => void;
   /** Thread list and new/delete buttons; default on. */
   threads?: boolean;
+  /** The model chip under the box, where the person picks the model for this app's chat; default on. */
+  modelPicker?: boolean;
   /** Paste, drop and attach images; default on. */
   attachments?: boolean;
   theme?: "light" | "dark" | "auto";
@@ -92,6 +108,9 @@ function mount(host: HTMLElement, opts: Options): Widget {
   let aborter: AbortController | null = null;
   let stick = true;
   let destroyed = false;
+  let models: ModelsView | null = null;
+  /** The model the app asks for: the mount option, then whatever the last `context()` said. */
+  let appModel: string | undefined = opts.model;
 
   // ---------------------------------------------------------------- DOM
   const root = host.attachShadow({ mode: "open" });
@@ -116,6 +135,10 @@ function mount(host: HTMLElement, opts: Options): Widget {
         <button class="sc-btn sc-primary sc-send" type="submit">${esc(t.send)}</button>
       </div>
       <input class="sc-file sc-hidden" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple>
+      <div class="sc-meta ${opts.modelPicker === false ? "sc-hidden" : ""}">
+        <button class="sc-model-btn" type="button" aria-haspopup="listbox" aria-expanded="false" title="${esc(t.modelSettings)}"><span aria-hidden="true">⚙</span> <span class="sc-model-name">${esc(t.model)}</span></button>
+        <div class="sc-model-menu sc-hidden" role="listbox" aria-label="${esc(t.modelSettings)}"></div>
+      </div>
     </form>`;
   root.appendChild(ui);
   const $ = <T extends HTMLElement>(sel: string): T => ui.querySelector(sel) as T;
@@ -124,6 +147,7 @@ function mount(host: HTMLElement, opts: Options): Widget {
     presets: $<HTMLDivElement>(".sc-presets"), log: $<HTMLDivElement>(".sc-log"), form: $<HTMLFormElement>(".sc-composer"),
     previews: $<HTMLDivElement>(".sc-previews"), attach: $<HTMLButtonElement>(".sc-attach"), input: $<HTMLTextAreaElement>(".sc-input"),
     send: $<HTMLButtonElement>(".sc-send"), file: $<HTMLInputElement>(".sc-file"),
+    modelBtn: $<HTMLButtonElement>(".sc-model-btn"), modelName: $<HTMLSpanElement>(".sc-model-name"), modelMenu: $<HTMLDivElement>(".sc-model-menu"),
   };
 
   // ---------------------------------------------------------------- theme
@@ -291,6 +315,75 @@ function mount(host: HTMLElement, opts: Options): Widget {
     }
   };
 
+  // ---------------------------------------------------------------- model picker
+  const concrete = (e: ModelsView["effective"]) => (e.runtime && e.model ? `${e.runtime}/${e.model}` : e.value);
+  const renderModels = () => {
+    if (!models) return;
+    const e = models.effective;
+    els.modelName.textContent = concrete(e);
+    els.modelBtn.title = `${t.modelSettings} · ${t.modelInUse}: ${concrete(e)} (${t.modelFrom[e.source]})`;
+    const menu = els.modelMenu;
+    menu.replaceChildren();
+    const head = document.createElement("div");
+    head.className = "sc-model-head";
+    head.textContent = `${t.modelInUse}: ${concrete(e)} · ${t.modelFrom[e.source]}`;
+    menu.appendChild(head);
+    if (models.choiceUnavailable && models.choice) {
+      const warn = document.createElement("div");
+      warn.className = "sc-model-warn";
+      warn.textContent = t.modelUnavailable(models.choice);
+      menu.appendChild(warn);
+    }
+    const item = (value: string | null, label: string, sub: string) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "sc-model-item";
+      b.setAttribute("role", "option");
+      const selected = (models!.choice ?? null) === value;
+      b.setAttribute("aria-selected", String(selected));
+      b.innerHTML = `<span class="sc-model-check">${selected ? "✓" : ""}</span><span class="sc-model-label">${esc(label)}</span><span class="sc-model-sub">${esc(sub)}</span>`;
+      b.onclick = () => void chooseModel(value);
+      menu.appendChild(b);
+    };
+    item(null, t.modelDefault, concrete(models.fallback));
+    for (const o of models.options) item(o.value, `${o.runtime} · ${t.tiers[o.tier] ?? o.tier}`, o.model);
+  };
+  const modelQuery = () => (appModel ? `?model=${encodeURIComponent(appModel)}` : "");
+  const loadModels = async () => {
+    if (opts.modelPicker === false) return;
+    models = await api<ModelsView>(`/models${modelQuery()}`);
+    renderModels();
+  };
+  const chooseModel = async (value: string | null) => {
+    try {
+      models = await api<ModelsView>("/model", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: value, ...(appModel ? { appModel } : {}) }) });
+      renderModels();
+      toggleModels(false);
+      toast(`${t.modelSaved}: ${concrete(models.effective)}`);
+    } catch (e) {
+      toast((e as Error).message);
+    }
+  };
+  const toggleModels = (open = els.modelMenu.classList.contains("sc-hidden")) => {
+    els.modelMenu.classList.toggle("sc-hidden", !open);
+    els.modelBtn.setAttribute("aria-expanded", String(open));
+    if (open) void loadModels().catch((e) => toast((e as Error).message));
+  };
+  els.modelBtn.addEventListener("click", () => toggleModels());
+  // A click anywhere outside the chip and its menu closes it; the shadow root retargets page clicks to the host.
+  const closeOutside = (e: Event) => {
+    if (els.modelMenu.classList.contains("sc-hidden")) return;
+    const path = e.composedPath();
+    if (!path.includes(els.modelMenu) && !path.includes(els.modelBtn)) toggleModels(false);
+  };
+  document.addEventListener("click", closeOutside, true);
+  els.modelMenu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      toggleModels(false);
+      els.modelBtn.focus();
+    }
+  });
+
   // ---------------------------------------------------------------- attachments
   const clearPending = () => {
     for (const p of pending) URL.revokeObjectURL(p.url);
@@ -401,6 +494,11 @@ function mount(host: HTMLElement, opts: Options): Widget {
     let final: { ok: boolean; error?: string; user?: Message; assistant?: Message; thread?: Thread } | null = null;
     try {
       const ctx = opts.context ? await opts.context() : {};
+      const asked = ctx.model ?? opts.model;
+      if (asked !== appModel) {
+        appModel = asked;
+        void loadModels().catch(() => {});
+      }
       const body = {
         message, attachments,
         context: { ...(ctx.system ? { system: ctx.system } : {}), ...(ctx.text !== undefined ? { text: ctx.text } : {}), ...(ctx.ack ? { ack: ctx.ack } : {}) },
@@ -484,6 +582,7 @@ function mount(host: HTMLElement, opts: Options): Widget {
   renderThreads();
   renderLog();
   void load().catch((e) => toast((e as Error).message));
+  void loadModels().catch(() => els.modelName.textContent = t.model);
 
   return {
     send,
@@ -509,6 +608,7 @@ function mount(host: HTMLElement, opts: Options): Widget {
       destroyed = true;
       stop();
       observer.disconnect();
+      document.removeEventListener("click", closeOutside, true);
       media.removeEventListener("change", applyTheme);
       clearPending();
       root.replaceChildren();

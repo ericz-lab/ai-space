@@ -1,3 +1,6 @@
+import type { ResolvedModel } from "./app-models.ts";
+import { parseImages, type RunImage, spoolImages } from "./images.ts";
+import { GPT_PRICING } from "./pricing.ts";
 import type { ModelService } from "./service.ts";
 import { parseRunInput, parseWindow } from "./spec.ts";
 import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts";
@@ -10,7 +13,8 @@ import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts"
  *                                             With `stream: true` in the body the answer comes as server-sent
  *                                             events instead: `delta` {text} as the text is produced, then one
  *                                             `done` {ok, text, call} or `error` {ok, error, call}; a comment
- *                                             line every 15 s keeps the connection alive while the model thinks
+ *                                             line every 15 s keeps the connection alive while the model thinks.
+ *                                             `images: [{ data: base64 }]` (up to 8) travel as files named img1…
  *   GET  /api/model/status                    the configured runtimes, concurrency, calls in flight
  *   GET  /api/model/usage?window=24h&app      sums by app, tag, model, runtime and backend over a window, plus the whole history by day
  *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored)
@@ -28,7 +32,9 @@ export type ModelApiOptions = {
   /** Resolve an app's own token to its name. */
   appForToken?: (token: string) => Promise<string | undefined>;
   /** Model when the request names none (SPACE_MODEL_DEFAULT). */
-  defaultModel?: string;
+  defaultModel?: string | (() => string);
+  /** The app's layers when the request names no model (app-models.ts); takes the place of `defaultModel`. */
+  resolveModel?: (app: string, tag: string) => ResolvedModel;
 };
 
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
@@ -57,28 +63,45 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
   };
 
   return {
+    "/api/model/pricing": { GET: () => json({ ok: true, ...GPT_PRICING }) },
     "/api/model/run": {
       POST: async (req) => {
         let app: string;
         let input: ReturnType<typeof parseRunInput>;
         let body: Record<string, unknown>;
+        let images: RunImage[];
+        let fallback: string | undefined;
+        let source: ResolvedModel["source"] | undefined;
         try {
           const parsed = (await req.json().catch(() => null)) as Record<string, unknown> | null;
           if (!parsed || typeof parsed !== "object") return error(400, "body must be a JSON object");
           body = parsed;
           if (body.stream !== undefined && typeof body.stream !== "boolean") return error(400, "stream must be a boolean");
           app = await resolveApp(req, body);
-          input = parseRunInput(body, { model: opts.defaultModel });
+          if (body.model !== undefined) source = "request";
+          else if (opts.resolveModel) {
+            const chosen = opts.resolveModel(app, typeof body.tag === "string" && TAG_PATTERN.test(body.tag) ? body.tag : "other");
+            fallback = chosen.model;
+            source = chosen.source;
+          } else fallback = typeof opts.defaultModel === "function" ? opts.defaultModel() : opts.defaultModel;
+          input = parseRunInput(body, { model: fallback });
+          images = parseImages(body.images);
           // An unknown `runtime/` prefix is the request's mistake, not a model failure.
           service.resolve(input.model);
         } catch (e) {
           if (e instanceof Unauthorized) return error(401, "unauthorized");
           return error(400, (e as Error).message ?? String(e));
         }
-        if (body.stream === true) return streamRun(service, app, input, req.signal);
-        const { outcome, call } = await service.run(app, input, req.signal);
-        if (!outcome.ok) return json({ ok: false, error: outcome.error, call: view(call) }, 502);
-        return json({ ok: true, text: outcome.text, call: view(call) });
+        const { files, cleanup } = await spoolImages(images);
+        if (files.length) input = { ...input, files };
+        if (body.stream === true) return streamRun(service, app, input, req.signal, source, cleanup);
+        try {
+          const { outcome, call } = await service.run(app, input, req.signal, undefined, source);
+          if (!outcome.ok) return json({ ok: false, error: outcome.error, call: view(call) }, 502);
+          return json({ ok: true, text: outcome.text, call: view(call) });
+        } finally {
+          await cleanup();
+        }
       },
     },
 
@@ -141,7 +164,7 @@ export const STREAM_KEEPALIVE_MS = 15_000;
  * the request was already validated); a model failure is the `error` event,
  * with its ledger row, not a status code.
  */
-function streamRun(service: ModelService, app: string, input: ReturnType<typeof parseRunInput>, signal: AbortSignal): Response {
+function streamRun(service: ModelService, app: string, input: ReturnType<typeof parseRunInput>, signal: AbortSignal, source?: ResolvedModel["source"], cleanup: () => Promise<void> = async () => {}): Response {
   const enc = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -157,12 +180,13 @@ function streamRun(service: ModelService, app: string, input: ReturnType<typeof 
       const event = (name: string, data: unknown) => send(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
       const keepalive = setInterval(() => send(": keepalive\n\n"), STREAM_KEEPALIVE_MS);
       void service
-        .run(app, input, signal, (text) => event("delta", { text }))
+        .run(app, input, signal, (text) => event("delta", { text }), source)
         .then(({ outcome, call }) => {
           if (outcome.ok) event("done", { ok: true, text: outcome.text, call: view(call) });
           else event("error", { ok: false, error: outcome.error, call: view(call) });
         })
         .finally(() => {
+          void cleanup();
           clearInterval(keepalive);
           open = false;
           try {
@@ -183,6 +207,8 @@ export function view(c: ModelCall) {
     tag: c.tag,
     model: c.model,
     runtime: c.runtime,
+    mode: c.mode,
+    modelSource: c.modelSource,
     backend: c.backend,
     origin: c.origin,
     status: c.status,

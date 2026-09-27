@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TranscriptMessage } from "./types.ts";
@@ -154,4 +155,34 @@ export function toolHint(input: unknown): string {
   const i = input as Record<string, unknown>;
   const v = i.command ?? i.file_path ?? i.pattern ?? i.url ?? i.path ?? i.query ?? i.queries ?? "";
   return (Array.isArray(v) ? v.join(" ") : String(v)).replace(/\s+/g, " ").slice(0, 42);
+}
+
+/** Codex persists rollouts by date; verify the session metadata and cwd before returning one. */
+export async function readCodexTranscript(cwd: string, sid: string, home = process.env.CODEX_HOME || join(homedir(), ".codex")): Promise<TranscriptMessage[] | null> {
+  if (!SESSION_ID_RE.test(sid)) throw new Error("invalid session id");
+  if (!existsSync(join(home, "sessions"))) return null;
+  for await (const path of new Bun.Glob(`sessions/**/rollout-*-${sid}.jsonl`).scan({ cwd: home, absolute: true, onlyFiles: true })) {
+    const lines = (await Bun.file(path).text()).split("\n");
+    const messages: TranscriptMessage[] = [];
+    let matches = false;
+    for (const line of lines) {
+      let event;
+      try { event = JSON.parse(line); } catch { continue; }
+      const data = event?.payload;
+      if (event?.type === "session_meta") matches = data?.id === sid && data?.cwd === cwd;
+      // event_msg contains the actual user input, without injected environment instructions.
+      if (event?.type === "event_msg" && data?.type === "user_message" && typeof data.message === "string") messages.push({ role: "user", text: data.message });
+      if (event?.type === "response_item" && data?.type === "message" && data.role === "assistant") {
+        const text = (data.content ?? []).filter((b: { type: string }) => b.type === "output_text").map((b: { text: string }) => b.text).join("");
+        if (text) { const last = lastAi(messages); last.text += (last.text ? "\n\n" : "") + text; }
+      }
+      if (event?.type === "response_item" && data?.type === "function_call") {
+        let input = data.arguments;
+        try { input = JSON.parse(input); } catch { /* Keep text arguments. */ }
+        lastAi(messages).tools.push({ name: data.name ?? "tool", hint: toolHint(input) });
+      }
+    }
+    if (matches) return messages;
+  }
+  return null;
 }

@@ -250,3 +250,16 @@ describe("other nouns", () => {
     expect(r.out.at(-1)).toMatch(/^demo\/fail .*exit code 1$/);
   });
 });
+
+
+test("model run forwards completion modes and system instructions", async () => {
+  for (const mode of ["slim", "full"]) {
+    const r = await runCli(["model", "run", "--app", "demo", "--json", "--mode", mode, "--system", "Custom role", "hello"],
+      (t) => t.scripted.reply({ status: 200, body: { ok: true, text: "hi" } }));
+    expect(r.code).toBe(0);
+    expect(r.calls[0]!.body).toMatchObject({ prompt: "hello", mode, system: "Custom role" });
+  }
+  const bad = await runCli(["model", "run", "--app", "demo", "--mode", "wrong", "hello"]);
+  expect(bad.code).toBe(EXIT.usage);
+  expect(bad.calls).toHaveLength(0);
+});
