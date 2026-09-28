@@ -130,6 +130,8 @@ cd ~/.ai-space/core && bash deploy/install.sh
 
 `deploy/install.sh` runs `bun install --frozen-lockfile`, creates the workspace (`bun run init`: `apps/`, `data/`, `logs/`, a starter `.env`), links the `space` command into `~/.local/bin` ([cli.md](cli.md): `space status`, `space app ls`, `space task run …`, `space logs …`; `space help` lists the rest), installs `deploy/ai-space.service` into `~/.config/systemd/user/`, enables linger so the unit survives logout, starts it and curls `/healthz`.
 
+The workspace is `~/.ai-space` unless `SPACE_HOME` is set for the install: `SPACE_HOME=/srv/space bash deploy/install.sh` creates the workspace there (apps then live in `/srv/space/apps/<name>`) and writes the path, made absolute, into the unit. A later run without `SPACE_HOME`, such as a git-push deploy, keeps the path the installed unit already has, so set it again only to move the workspace. The checkout may sit anywhere; the unit runs it from wherever `install.sh` was run.
+
 `init` also clones the default apps (`src/space/defaults.ts`) into `apps/<name>` when that directory is absent, and once ai-space answers, `install.sh` runs `bun src/index.ts install-defaults`, which runs each default app's own `deploy/install.sh` (a user unit, started) now that the app's `space.env` exists. Today the list is `ai-usage`, the usage dashboard; `SPACE_DEFAULT_APPS=none` in `.env` (or the environment of the `init` run) skips it, a comma-separated list of clone URLs replaces it. The default app binds loopback and its manifest names `http://127.0.0.1:<port>`; on a server with a hostname, set `SPACE_APP_URL_AI_USAGE=https://usage.<domain>/?lang={lang}` in `.env` and add the hostname to the tunnel (step 5) like any other app. Its dashboard merges the peers of step 9 that run it too.
 
 **Git-push deploys, from the laptop**
@@ -138,7 +140,7 @@ cd ~/.ai-space/core && bash deploy/install.sh
 ssh <host> "git init --bare ~/ai-space.git"
 scp deploy/post-receive <host>:~/ai-space.git/hooks/post-receive && ssh <host> chmod +x ~/ai-space.git/hooks/post-receive
 git remote add <host> <host>:~/ai-space.git
-git push <host> main      # checks out into ~/.ai-space/core, runs deploy/install.sh, restarts the unit
+git push <host> main      # checks out into the unit's checkout (~/.ai-space/core by default), runs deploy/install.sh, restarts the unit
 ```
 
 **Workspace `.env`**

@@ -1,6 +1,8 @@
 # User-level systemd unit for ai-space. Installed by deploy/install.sh into
 # ~/.config/systemd/user/ai-space.service; %h is the home directory.
-# The workspace (~/.ai-space) holds .env, data/ and apps/; the code lives in core/.
+# The workspace (SPACE_HOME, ~/.ai-space by default) holds .env, data/ and apps/;
+# the code lives in core/. install.sh writes the checkout, the workspace and bun's
+# path of this machine over the defaults below.
 [Unit]
 Description=ai-space (Space API + scheduler)
 After=network-online.target
