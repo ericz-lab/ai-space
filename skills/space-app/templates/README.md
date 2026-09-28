@@ -20,6 +20,6 @@ Inside an ai-space workspace the provisioned variables (`DATABASE_URL`, `BLOB_UR
 
 ## Deploy
 
-`DEPLOY_HOST=<ssh host> ./deploy.sh` syncs the checkout into `~/.ai-space/apps/my-app`, installs the user-level systemd unit and checks `/healthz`. See [AGENTS.md](AGENTS.md) for the host details once it is live.
+`DEPLOY_HOST=<ssh host> ./deploy.sh` syncs the checkout into `<workspace>/apps/my-app`, installs the user-level systemd unit and checks `/healthz`. The workspace is `SPACE_HOME` when explicitly set, otherwise the target machine's installed ai-space unit's `SPACE_HOME`, otherwise `~/.ai-space` on that machine. `SPACE_HOME=/srv/space` selects a custom workspace; `DEPLOY_PATH` can independently override the app checkout. Relative paths and `~/` resolve under the remote user's home. The app unit reads provisioned variables from the selected workspace's `data/my-app/space.env`. See [AGENTS.md](AGENTS.md) for the host details once it is live.
 
 This is an [ai-space](https://github.com/Zhang-Shubo/ai-space) app; the contract is its `docs/app-spec.md`.

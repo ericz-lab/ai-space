@@ -14,7 +14,7 @@ Read this before touching code. Users read [README.md](README.md). This reposito
 ## Stack and runtime model
 
 - Bun + TypeScript, `src/index.ts` is the whole service (`Bun.serve`, `bun:sqlite`).
-- Runs as the user-level systemd unit `my-app` from `~/.ai-space/apps/my-app`, port 8710, health `GET /healthz`.
+- Runs as the user-level systemd unit `my-app` from `<workspace>/apps/my-app`, port 8710, health `GET /healthz`. Deployment resolves the workspace from explicit `SPACE_HOME`, then the target ai-space unit, then the remote `~/.ai-space` default.
 - Storage and notifications are declared in `space.yaml` and reach the process as environment variables.
 
 ## Directory map
@@ -24,7 +24,7 @@ space.yaml           * the manifest: identity, service, agents, widgets, tasks, 
 src/index.ts         * the service: /healthz, /api/widget, /jobs/refresh, SIGTERM handling
 agents/assistant.md    system prompt of the `assistant` agent
 prompts/               prompt files for scheduled agent tasks
-deploy/app.service     user-level systemd unit template (@DIR@ substituted by deploy.sh)
+deploy/app.service     user-level systemd unit template (@DIR@ and @SPACE_HOME@ substituted by deploy.sh)
 deploy.sh              rsync, install the unit, restart, health check (no sudo)
 icon.svg               panel icon, 64x64 viewBox
 .env.example           every variable the service reads
