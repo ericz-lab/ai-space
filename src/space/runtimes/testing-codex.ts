@@ -12,6 +12,17 @@ if (import.meta.main) {
     console.log(JSON.stringify({ type: "turn.failed", error: { message: "OAuth session expired" } }));
     process.exit(0);
   }
+  if (mode === "image" || mode === "noimage") {
+    // What Codex's image tool does: save under $CODEX_HOME/generated_images/<thread>/, say nothing in the stream.
+    const thread = "c0de0002-0000-4000-8000-000000000000";
+    console.log(JSON.stringify({ type: "thread.started", thread_id: thread }));
+    const home = process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`;
+    const inputs = args.flatMap((a, i) => (a === "--image" ? [args[i + 1]!] : []));
+    if (mode === "image") await Bun.write(`${home}/generated_images/${thread}/exec-1.png`, inputs.length ? Bun.file(inputs[0]!) : new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]));
+    console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ prompt, cwd: process.cwd(), args, inputs }) } }));
+    console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 7000, cached_input_tokens: 2000, output_tokens: 150 } }));
+    process.exit(0);
+  }
   if (!args.includes("--ephemeral")) console.log(JSON.stringify({ type: "thread.started", thread_id: "c0de0001-0000-4000-8000-000000000000" }));
   const systemArg = args.find((s) => s.startsWith("model_instructions_file="));
   const systemFile = systemArg ? JSON.parse(systemArg.slice(systemArg.indexOf("=") + 1)) : undefined;

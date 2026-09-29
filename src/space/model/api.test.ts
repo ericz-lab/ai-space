@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeOnly } from "../runtimes/registry.ts";
+import { claudeOnly, RuntimeRegistry } from "../runtimes/registry.ts";
+import { fakeCodexBin } from "../runtimes/testing-codex.ts";
 import { fakeModelBin } from "../runtimes/testing.ts";
 import { createModelRoutes } from "./api.ts";
 import { ModelService } from "./service.ts";
@@ -99,6 +100,31 @@ describe("POST /api/model/run", () => {
       expect((await post("/api/model/run", { prompt: "look", ...bad }, "sat_my-app")).status).toBe(400);
     }
     expect(store.totals(0).calls).toBe(count);
+  });
+
+  test("images: a runtime that makes them returns the bytes and a ledger row; one that cannot is 400", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 5, 6, 7, 8]);
+    expect(await (await post("/api/model/image", { prompt: "a postcard" }, "sat_my-app")).json()).toMatchObject({ ok: false, error: expect.stringContaining("does not make images") });
+
+    const home = await mkdtemp(join(tmpdir(), "codex-home-"));
+    const saved = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = home;
+    const codex = new ModelService({ store, runtimes: new RuntimeRegistry({ default: "codex", runtimes: [{ name: "codex", kind: "codex-cli", bin: fakeCodexBin("image"), models: { intermediate: "gpt-6-sol" } }] }), log: () => {} });
+    const codexServer = Bun.serve({ port: 0, routes: createModelRoutes({ service: codex, token: "op-token", appForToken: async (t) => TOKENS[t] }), fetch: () => new Response("nf", { status: 404 }) });
+    try {
+      const res = await fetch(`http://127.0.0.1:${codexServer.port}/api/model/image`, { method: "POST", headers: { authorization: "Bearer sat_my-app" }, body: JSON.stringify({ prompt: "edit img1", model: "codex/intermediate", images: [{ data: Buffer.from(png).toString("base64") }] }) });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { images: { type: string; data: string }[]; call: RunBody["call"] };
+      expect(body.images).toEqual([{ type: "image/png", data: Buffer.from(png).toString("base64") }]);
+      expect(body.call).toMatchObject({ app: "my-app", tag: "image", model: "gpt-6-sol", runtime: "codex", status: "ok", usage: { inputTokens: 5000 } });
+      const bad = await fetch(`http://127.0.0.1:${codexServer.port}/api/model/image`, { method: "POST", headers: { authorization: "Bearer sat_my-app" }, body: JSON.stringify({ prompt: "" }) });
+      expect(bad.status).toBe(400);
+    } finally {
+      codexServer.stop(true);
+      if (saved === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = saved;
+      await rm(home, { recursive: true, force: true });
+    }
   });
 
   test("an app token identifies the app; the answer and the ledger row come back", async () => {

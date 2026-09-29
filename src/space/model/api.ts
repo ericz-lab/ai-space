@@ -2,7 +2,7 @@ import type { ResolvedModel } from "./app-models.ts";
 import { parseImages, type RunImage, spoolImages } from "./images.ts";
 import { GPT_PRICING } from "./pricing.ts";
 import type { ModelService } from "./service.ts";
-import { parseRunInput, parseWindow } from "./spec.ts";
+import { parseImageInput, parseRunInput, parseWindow } from "./spec.ts";
 import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts";
 
 /**
@@ -15,6 +15,9 @@ import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts"
  *                                             `done` {ok, text, call} or `error` {ok, error, call}; a comment
  *                                             line every 15 s keeps the connection alive while the model thinks.
  *                                             `images: [{ data: base64 }]` (up to 8) travel as files named img1…
+ *   POST /api/model/image                     pictures: { prompt, images?, model?, tag?, system?, timeoutMs? }; 200
+ *                                             { ok, text, images: [{ type, data: base64 }], call }, 502 when the model failed.
+ *                                             Only a runtime that makes images (codex-cli); the input images as for `run`.
  *   GET  /api/model/status                    the configured runtimes, concurrency, calls in flight
  *   GET  /api/model/usage?window=24h&app      sums by app, tag, model, runtime and backend over a window, plus the whole history by day
  *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored)
@@ -99,6 +102,42 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
           const { outcome, call } = await service.run(app, input, req.signal, undefined, source);
           if (!outcome.ok) return json({ ok: false, error: outcome.error, call: view(call) }, 502);
           return json({ ok: true, text: outcome.text, call: view(call) });
+        } finally {
+          await cleanup();
+        }
+      },
+    },
+
+    "/api/model/image": {
+      POST: async (req) => {
+        let app: string;
+        let input: ReturnType<typeof parseImageInput>;
+        let images: RunImage[];
+        let source: ResolvedModel["source"] | undefined;
+        try {
+          const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+          if (!body || typeof body !== "object") return error(400, "body must be a JSON object");
+          app = await resolveApp(req, body);
+          let fallback: string | undefined;
+          const tag = typeof body.tag === "string" && TAG_PATTERN.test(body.tag) ? body.tag : "image";
+          if (body.model !== undefined) source = "request";
+          else if (opts.resolveModel) {
+            const chosen = opts.resolveModel(app, tag);
+            fallback = chosen.model;
+            source = chosen.source;
+          } else fallback = typeof opts.defaultModel === "function" ? opts.defaultModel() : opts.defaultModel;
+          input = parseImageInput(body, { model: fallback });
+          images = parseImages(body.images);
+          service.resolveImage(input.model);
+        } catch (e) {
+          if (e instanceof Unauthorized) return error(401, "unauthorized");
+          return error(400, (e as Error).message ?? String(e));
+        }
+        const { files, cleanup } = await spoolImages(images);
+        try {
+          const { outcome, call } = await service.image(app, { ...input, files }, req.signal, source);
+          if (!outcome.ok) return json({ ok: false, error: outcome.error, call: view(call) }, 502);
+          return json({ ok: true, text: outcome.text, images: outcome.images.map((i) => ({ type: i.type, data: Buffer.from(i.bytes).toString("base64") })), call: view(call) });
         } finally {
           await cleanup();
         }

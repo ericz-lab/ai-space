@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawnCollect } from "./process.ts";
 import { readCodexTranscript, SESSION_ID_RE } from "./transcripts.ts";
 import { ustar } from "./tar.ts";
-import { assertCompletionMode, type AgentRun, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, type AgentRun, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type GeneratedImage, type ImageInput, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /** Codex completions, agent runs and persistent local chat. Authentication stays in the CLI home. */
 export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
@@ -15,7 +15,7 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
   const backend: Backend = host ? `ssh:${host}` : "local";
   return {
     name: spec.name, kind: "codex-cli", backend,
-    capabilities: { complete: true, agent: true, chat: true },
+    capabilities: { complete: true, agent: true, chat: true, image: true },
     async complete(input, signal, onDelta) {
       assertCompletionMode(input);
       if (input.files?.length) return { ok: false, error: "codex-cli completions do not support file attachments", backend };
@@ -66,6 +66,24 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
       if (parsed.error) return { ok: false, error: parsed.error, ...base };
       return { ok: true, text: parsed.text, ...base };
     },
+    // Same script locally and over ssh: the prompt and the images arrive as one archive on stdin.
+    async image(input, signal) {
+      if (signal?.aborted) return { ok: false, error: "aborted", backend };
+      try {
+        const job = await codexImageCommand(bin, input, !!host);
+        const cmd = host ? ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, `bash -lc ${quote(job.command)}`] : ["bash", "-c", job.command];
+        const r = await spawnCollect(cmd, { stdin: job.archive, signal, timeoutMs: input.timeoutMs + 30_000 });
+        if (r.aborted) return { ok: false, error: "aborted", backend };
+        if (r.timedOut || r.code === 124) return { ok: false, error: `timed out after ${Math.round(input.timeoutMs / 1000)}s`, backend };
+        const { events, images } = splitImageOutput(r.stdout);
+        const parsed = parseCodexOutput(events);
+        if (r.code !== 0 || parsed.error) return { ok: false, error: ((r.code !== 0 && r.stderr.trim()) || parsed.error || `exited with ${r.code}`).slice(-800), usage: parsed.usage, backend };
+        if (!images.length) return { ok: false, error: `no image produced: ${parsed.text!.slice(0, 300)}`, usage: parsed.usage, backend };
+        return { ok: true, text: parsed.text!, images, usage: parsed.usage, backend };
+      } catch (e) {
+        return { ok: false, error: `could not run Codex: ${(e as Error).message}`, backend };
+      }
+    },
     chat(turn, cb) { return codexChat(bin, turn, cb); },
     transcript: (cwd, sid) => readCodexTranscript(cwd, sid),
   };
@@ -104,6 +122,82 @@ export function codexArgs(bin: string[], input: CompleteInput, dir: string, full
     ...Object.entries(config).flatMap(([key, value]) => ["-c", `${key}=${JSON.stringify(value)}`]),
     ...disabled.flatMap((key) => ["--disable", key]),
     ...(input.tools.length ? ["--enable", "code_mode", "--enable", "code_mode_host"] : []), "--enable", "skip_host_skill_discovery", "-"];
+}
+
+/**
+ * An image call: the slim isolation of `codexArgs`, with the image tool as the only tool. Current
+ * Codex runs that tool through Code Mode, so its host stays on; the input images are attached with
+ * `--image`, one flag each, because the flag takes several values and would swallow the `-`.
+ */
+export function codexImageArgs(bin: string[], input: Pick<ImageInput, "model" | "files">, dir: string): string[] {
+  const config: Record<string, string | number | boolean> = {
+    model_instructions_file: join(dir, "system.txt"),
+    developer_instructions: "",
+    "agents.enabled": false,
+    include_apps_instructions: false,
+    include_collaboration_mode_instructions: false,
+    include_environment_context: false,
+    include_permissions_instructions: false,
+    project_doc_max_bytes: 0,
+    model_reasoning_effort: "low",
+    web_search: "disabled",
+    approval_policy: "never",
+    "skills.include_instructions": false,
+    "skills.bundled.enabled": false,
+    "tools.update_plan.enabled": false,
+    "tools.experimental_request_user_input.enabled": false,
+    suppress_unstable_features_warning: true,
+  };
+  const disabled = ["multi_agent_v2", "hooks", "tool_suggest", "default_mode_request_user_input", "send_message_to_user_async", "shell_tool", "unified_exec", "plugins", "apps", "multi_agent", "memories", "shell_snapshot", "view_image", "browser_use", "computer_use", "goals", "sleep_tool", "skill_search", "skill_mcp_dependency_install"];
+  return [...bin, "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", "read-only", "--cd", dir, "--model", input.model,
+    ...Object.entries(config).flatMap(([key, value]) => ["-c", `${key}=${JSON.stringify(value)}`]),
+    ...disabled.flatMap((key) => ["--disable", key]),
+    "--enable", "image_generation", "--enable", "code_mode", "--enable", "code_mode_host", "--enable", "skip_host_skill_discovery",
+    ...input.files.flatMap((f) => ["--image", join(dir, f.name)]), "-"];
+}
+
+/** Marks each generated file after the event stream: `<marker> <name>`, then its base64 on one line. */
+export const IMAGE_MARKER = "@@space-image@@";
+
+/**
+ * The shell script of one image call. Codex saves what its image tool makes under
+ * `$CODEX_HOME/generated_images/<thread id>/` (also with `--ephemeral`) and says nothing of it in
+ * the event stream, so the script prints the stream, then every file of that thread's directory
+ * as base64, and removes the directory. The request directory goes away on exit either way.
+ */
+export async function codexImageCommand(bin: string[], input: ImageInput, remote: boolean): Promise<{ command: string; archive: Uint8Array; dir: string }> {
+  const dir = join(remote ? "/tmp" : tmpdir(), `space-codex-img-${randomUUID()}`);
+  const encode = (s: string) => new TextEncoder().encode(s);
+  const entries = [{ name: "prompt.txt", bytes: encode(input.prompt) }, { name: "system.txt", bytes: encode(input.system) }];
+  for (const f of input.files) entries.push({ name: f.name, bytes: new Uint8Array(await Bun.file(f.path).arrayBuffer()) });
+  const limit = remote ? `timeout --signal=TERM --kill-after=5s ${Math.ceil(input.timeoutMs / 1000)}s ` : "";
+  const command = [
+    `umask 077; dir=${quote(dir)}; mkdir "$dir" || exit 1; trap 'rm -rf -- "$dir"' EXIT; tar -xf - -C "$dir" || exit 1; builtin cd "$dir" || exit 1`,
+    `${limit}${codexImageArgs(bin, input, dir).map(quote).join(" ")} < "$dir/prompt.txt" > "$dir/out.jsonl" 2> "$dir/err.txt"; rc=$?`,
+    `cat "$dir/out.jsonl"; cat "$dir/err.txt" >&2`,
+    `tid=$(sed -nE 's/.*"thread_id": ?"([0-9A-Za-z-]+)".*/\\1/p' "$dir/out.jsonl" | head -n 1)`,
+    `if [ -n "$tid" ]; then g="\${CODEX_HOME:-$HOME/.codex}/generated_images/$tid"; if [ -d "$g" ]; then for f in "$g"/*; do [ -f "$f" ] || continue; printf '\\n%s %s\\n' ${quote(IMAGE_MARKER)} "\${f##*/}"; base64 < "$f" | tr -d '\\n'; printf '\\n'; done; rm -rf -- "$g"; fi; fi`,
+    `exit $rc`,
+  ].join("\n");
+  return { command, dir, archive: ustar(entries) };
+}
+
+const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif" };
+
+/** The event stream, and the images the script appended after it, in the order Codex saved them. */
+export function splitImageOutput(stdout: string): { events: string; images: GeneratedImage[] } {
+  const at = stdout.indexOf(`\n${IMAGE_MARKER} `);
+  if (at < 0) return { events: stdout, images: [] };
+  const images: GeneratedImage[] = [];
+  const lines = stdout.slice(at + 1).split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i]!.startsWith(`${IMAGE_MARKER} `)) continue;
+    const name = lines[i]!.slice(IMAGE_MARKER.length + 1);
+    const data = lines[i + 1] ?? "";
+    const type = IMAGE_TYPES[name.split(".").pop()!.toLowerCase()];
+    if (type && data) images.push({ type, bytes: new Uint8Array(Buffer.from(data, "base64")) });
+  }
+  return { events: stdout.slice(0, at), images };
 }
 
 /** Quote an entire shell argument, including embedded quotes, dollars and newlines. */

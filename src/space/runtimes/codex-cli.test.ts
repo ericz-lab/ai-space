@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { codexAgentArgs, codexArgs, codexChatArgs, codexRemoteCommand, createCodexCli, parseCodexOutput } from "./codex-cli.ts";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { codexAgentArgs, codexArgs, codexChatArgs, codexImageArgs, codexRemoteCommand, createCodexCli, parseCodexOutput, splitImageOutput } from "./codex-cli.ts";
 import { spawnCollect } from "./process.ts";
 import { fakeCodexBin } from "./testing-codex.ts";
-import type { ChatTurn, CompleteInput } from "./types.ts";
+import type { ChatTurn, CompleteInput, ImageInput } from "./types.ts";
 
 const input = (over: Partial<CompleteInput> = {}): CompleteInput => ({ model: "gpt-6-luna", system: "Translate into Chinese. Only JSON.", prompt: "hello", tools: [], tag: "test", maxTokens: 100, timeoutMs: 3000, ...over });
 const adapter = (mode = "ok") => createCodexCli({ name: "codex", kind: "codex-cli", bin: fakeCodexBin(mode) });
@@ -68,7 +70,7 @@ describe("Codex completions", () => {
     expect(await adapter().complete(input({ files: [{ name: "a.png", path: "/missing" }] }))).toMatchObject({ ok: false });
     expect(await adapter().complete(input({ thinking: 2048 }))).toMatchObject({ ok: true });
     expect(await createCodexCli({ name: "x", kind: "codex-cli", bin: ["/no-codex-here"] }).complete(input())).toMatchObject({ ok: false });
-    expect(adapter().capabilities).toEqual({ complete: true, agent: true, chat: true });
+    expect(adapter().capabilities).toEqual({ complete: true, agent: true, chat: true, image: true });
     expect(() => createCodexCli({ name: "x", kind: "codex-cli", bin: [], sshHost: "-oProxyCommand=bad" })).toThrow(/host/);
   });
   test("remote wrapper transfers hostile text exactly and cleans the request directory", async () => {
@@ -94,6 +96,53 @@ describe("Codex completions", () => {
   });
 });
 
+describe("Codex images", () => {
+  const imageInput = (over: Partial<ImageInput> = {}): ImageInput => ({ model: "gpt-6-sol", system: "Make pictures.", prompt: "a postcard ' $(id)", tag: "image", files: [], timeoutMs: 5000, ...over });
+
+  test("only the image tool, and one --image flag per input", () => {
+    const args = codexImageArgs(["codex"], { model: "gpt-6-sol", files: [{ name: "img1.png", path: "/x" }, { name: "img2.jpg", path: "/y" }] }, "/tmp/d");
+    for (const word of ["--ignore-user-config", "--ephemeral", "read-only", "image_generation", "code_mode_host", 'web_search="disabled"']) expect(args).toContain(word);
+    expect(args.slice(args.indexOf("--enable"))).not.toContain("shell_tool");
+    expect(args.filter((a) => a === "--image")).toHaveLength(2);
+    expect(args.slice(-5)).toEqual(["--image", "/tmp/d/img1.png", "--image", "/tmp/d/img2.jpg", "-"]);
+  });
+
+  test("returns what Codex saved under the thread, removes it, and cleans the request directory", async () => {
+    const home = await mkdtemp(join(tmpdir(), "codex-home-"));
+    const src = await mkdtemp(join(tmpdir(), "codex-src-"));
+    const saved = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = home;
+    try {
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 8, 7]);
+      await Bun.write(join(src, "photo.png"), png);
+      const r = await adapter("image").image!(imageInput({ files: [{ name: "img1.png", path: join(src, "photo.png") }] }));
+      if (!r.ok) throw new Error(r.error);
+      expect(r.images).toHaveLength(1);
+      expect(r.images[0]!.type).toBe("image/png");
+      expect([...r.images[0]!.bytes]).toEqual([...png]);
+      expect(r.usage).toEqual({ inputTokens: 5000, cacheReadTokens: 2000, cacheWriteTokens: 0, outputTokens: 150 });
+      const answer = JSON.parse(r.text);
+      expect(answer.prompt).toBe("a postcard ' $(id)");
+      expect(await Bun.file(`${answer.cwd}/prompt.txt`).exists()).toBe(false);
+      expect(await readdir(join(home, "generated_images"))).toEqual([]);
+      expect(await adapter("noimage").image!(imageInput())).toMatchObject({ ok: false, error: expect.stringContaining("no image produced") });
+      expect(await adapter("error").image!(imageInput())).toMatchObject({ ok: false, error: expect.stringContaining("OAuth") });
+      expect(await adapter("hang").image!(imageInput(), AbortSignal.timeout(80))).toMatchObject({ ok: false, error: "aborted" });
+    } finally {
+      if (saved === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = saved;
+      await rm(home, { recursive: true, force: true });
+      await rm(src, { recursive: true, force: true });
+    }
+  });
+
+  test("splits the stream from the appended files", () => {
+    const out = splitImageOutput('{"type":"turn.completed"}\n@@space-image@@ a.webp\nAQID\n@@space-image@@ b.txt\nAQID\n');
+    expect(out.events).toBe('{"type":"turn.completed"}');
+    expect(out.images).toEqual([{ type: "image/webp", bytes: new Uint8Array([1, 2, 3]) }]);
+    expect(splitImageOutput("plain").images).toEqual([]);
+  });
+});
 
 describe("Codex chat", () => {
   const turn = (over: Partial<ChatTurn> = {}): ChatTurn => ({ message: "hello", cwd: process.cwd(), model: "gpt-6-luna", systemPrompt: "Workspace identity", ...over });

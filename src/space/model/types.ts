@@ -1,4 +1,4 @@
-import type { Backend, CompleteInput, CompleteOutcome, CompletionMode, Usage } from "../runtimes/types.ts";
+import type { Backend, CompleteInput, CompleteOutcome, CompletionMode, ImageInput, ImageOutcome, Usage } from "../runtimes/types.ts";
 
 /**
  * Data model of the model service: what an app asks for, what one call
@@ -11,6 +11,9 @@ export type { Backend, Usage };
 /** What a call asks for, after validation; `model` may carry a `runtime/` prefix until the service resolves it. */
 export type RunInput = CompleteInput;
 export type RunOutcome = CompleteOutcome;
+/** A request for pictures, after validation; `model` as for a run. */
+export type ImageRunInput = ImageInput;
+export type ImageRunOutcome = ImageOutcome;
 
 export const APP_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
 /** A model alias or id as a runtime names it, optionally prefixed `runtime/`; also safe inside a shell command. */
@@ -34,6 +37,10 @@ export const MAX_TIMEOUT_MS = 30 * 60_000;
 export const DEFAULT_MAX_TOKENS = 4096;
 export const MAX_THINKING_TOKENS = 128_000;
 export const MAX_PROMPT_CHARS = 2_000_000;
+/** An image call: the runtime's image tool takes minutes, not seconds. */
+export const DEFAULT_IMAGE_TIMEOUT_MS = 10 * 60_000;
+export const MAX_IMAGE_PROMPT_CHARS = 32_000;
+export const DEFAULT_IMAGE_SYSTEM = "You create or edit images for an application with the image generation tool. Produce exactly the images the request asks for, using the attached images as the request says, then reply with one short line describing what you made.";
 
 /** Why a row exists: an app's request, the scheduler running an agent task, or an import of an app's own history. */
 export type Origin = "run" | "task" | "import";

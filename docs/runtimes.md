@@ -2,7 +2,7 @@
 
 For detailed model selection and request examples, see [Model Tiers and Request Modes](model-tiers-and-modes.md).
 
-Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`), the Anthropic Messages API (`anthropic-api`), and Codex CLI (`codex-cli`: completions, agent runs and local chat). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
+Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`), the Anthropic Messages API (`anthropic-api`), and Codex CLI (`codex-cli`: completions, agent runs, local chat and images). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
 
 ## Why one layer
 
@@ -15,6 +15,8 @@ ai-space starts an AI runtime in three places: the model service answers an app'
 | `complete` | model service | One answer to one prompt with the request's own system prompt, model, tools and thinking cap. Uses slim mode by default; full mode retains native CLI context and tools (see [completion modes](#completion-modes)). May run on another machine over ssh, borrowing its login. |
 | `agent` | scheduler | A coding agent at work: the runtime's own system prompt and tools, the prompt file on stdin, inside the app directory. Always local: it needs the directory. |
 | `chat` | panel | One turn of a conversation, streamed as the runtime's own events; a session id gives continuity. Always local, for the same reason. |
+
+A fourth, optional operation, `image`, makes pictures for the model service's `POST /api/model/image` ([model.md](model.md#images)); only `codex-cli` has it.
 
 An adapter declares which of the three it supports (`capabilities`). A caller asking for one it lacks gets a clear error (a 400 from the model API, a 501 from chat, a failed run from the scheduler), never a silent fallback to another runtime.
 
@@ -208,6 +210,12 @@ panel chat keep their existing contracts.
 Motivation: an app's scheduled agent task (`run: agent:`) must be able to run on a Codex login when the machine's Claude login is unusable, so the app does not spawn a CLI of its own and bypass the ledger and the panel's model choice.
 
 `runAgent` starts `codex exec --json` locally in the app directory, the prompt file on stdin, with the CLI's own instructions, skills and tools, like a Claude Code agent run. `ssh` on the runtime applies only to completions. The task's `permissionMode` maps to a sandbox as for chat: none and `plan` to `read-only`, `acceptEdits` to `workspace-write`, `bypassPermissions` to `danger-full-access`; `approval_policy="never"` keeps the run headless. A task `tools:` list is refused, because Codex cannot enforce Claude tool names. Codex normally removes variables whose names contain KEY, SECRET or TOKEN from the commands it runs; an agent run keeps them (`shell_environment_policy.ignore_default_excludes=true`), since the environment is what ai-space handed the app, `SPACE_APP_TOKEN` included, as a Claude Code agent run receives it. The run succeeds only on a complete event stream with a final message; that message is the run's output, and the token counters go to the ledger without a dollar cost.
+
+## Images
+
+`codex-cli` makes pictures with Codex's own image tool, under the CLI's saved login. `codexImageArgs` starts `codex exec` with the slim isolation of a completion, but with `image_generation` as the only tool; this Codex routes that tool through Code Mode, so `code_mode` and `code_mode_host` stay on (with the host off the model reports the tool as unavailable). Each input image is attached with its own `--image` flag, because the flag takes several values and would otherwise swallow the `-` that reads the prompt from stdin.
+
+Codex saves what the tool makes under `$CODEX_HOME/generated_images/<thread id>/`, even with `--ephemeral`, and the event stream does not name the file. So an image call is one shell script, the same locally (`bash -c`) and over ssh (`bash -lc`). The prompt, the system text and the input images arrive as one tar archive on stdin and are unpacked into `/tmp/space-codex-img-<uuid>`. The script runs the CLI there and prints its event stream. Then, for each file in that thread's directory, it prints a `@@space-image@@ <name>` line followed by the file as one base64 line, and removes the directory. The request directory is removed on exit. The adapter parses the stream as a completion's, so a turn failure is still a failure, and a turn that ends without a file is `no image produced`. Measured 2026-09-29 on `gpt-6-sol`: one 1254×1254 PNG edit in 73 s, about 7.5K input tokens.
 
 ## Base agent runtime and model selection
 

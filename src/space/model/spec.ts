@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_SYSTEM, DEFAULT_TIMEOUT_MS, MAX_PROMPT_CHARS, MAX_SYSTEM_CHARS, MAX_THINKING_TOKENS, MAX_TIMEOUT_MS, MODEL_PATTERN, type RunInput, TAG_PATTERN, TOOL_PATTERN, WINDOWS, type Window } from "./types.ts";
+import { DEFAULT_IMAGE_SYSTEM, DEFAULT_IMAGE_TIMEOUT_MS, type ImageRunInput, MAX_IMAGE_PROMPT_CHARS, DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_SYSTEM, DEFAULT_TIMEOUT_MS, MAX_PROMPT_CHARS, MAX_SYSTEM_CHARS, MAX_THINKING_TOKENS, MAX_TIMEOUT_MS, MODEL_PATTERN, type RunInput, TAG_PATTERN, TOOL_PATTERN, WINDOWS, type Window } from "./types.ts";
 
 /**
  * Validation of what comes over the API. Strict like manifests: an unknown
@@ -53,6 +53,28 @@ export function parseRunInput(body: Record<string, unknown>, defaults: { model?:
   }
 
   return { prompt: body.prompt, system, model, tag, tools, timeoutMs, maxTokens, ...(mode !== undefined ? { mode } : {}), ...(thinking !== undefined ? { thinking } : {}) };
+}
+
+/** `POST /api/model/image`: a prompt, optional system, model, tag and timeout; the images are parsed apart. */
+export function parseImageInput(body: Record<string, unknown>, defaults: { model?: string } = {}): Omit<ImageRunInput, "files"> {
+  if (typeof body.prompt !== "string" || !body.prompt.trim()) throw new Error("prompt is required");
+  if (body.prompt.length > MAX_IMAGE_PROMPT_CHARS) throw new Error(`prompt is longer than ${MAX_IMAGE_PROMPT_CHARS} characters`);
+  let system = DEFAULT_IMAGE_SYSTEM;
+  if (body.system !== undefined) {
+    if (typeof body.system !== "string" || !body.system.trim()) throw new Error("system must be a non-empty string");
+    if (body.system.length > MAX_SYSTEM_CHARS) throw new Error(`system is longer than ${MAX_SYSTEM_CHARS} characters`);
+    system = body.system;
+  }
+  const model = body.model === undefined ? (defaults.model ?? DEFAULT_MODEL) : body.model;
+  if (typeof model !== "string" || !MODEL_PATTERN.test(model)) throw new Error("model must be a model alias or id (letters, digits, . _ : -)");
+  const tag = body.tag === undefined ? "image" : body.tag;
+  if (typeof tag !== "string" || !TAG_PATTERN.test(tag)) throw new Error("tag must match [a-z0-9][a-z0-9._-]{0,63}");
+  let timeoutMs = DEFAULT_IMAGE_TIMEOUT_MS;
+  if (body.timeoutMs !== undefined) {
+    if (typeof body.timeoutMs !== "number" || !Number.isFinite(body.timeoutMs) || body.timeoutMs <= 0) throw new Error("timeoutMs must be a positive number");
+    timeoutMs = Math.min(Math.round(body.timeoutMs), MAX_TIMEOUT_MS);
+  }
+  return { prompt: body.prompt, system, model, tag, timeoutMs };
 }
 
 export function parseWindow(raw: string | null | undefined): Window {

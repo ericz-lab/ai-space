@@ -147,6 +147,12 @@ row with `interrupted: …` for whatever is still running, so a cut call is visi
 that cost money. `deploy/ai-space.service` uses `KillMode=mixed` for the same reason — with the
 systemd default the `ssh` children die the moment the restart begins. See `docs/scheduler.md`.
 
+### Images
+
+`POST /api/model/image` asks for pictures instead of text: create from the prompt, or edit the images the request carries. It takes `prompt` (at most 32K characters), `images` (as for `run`: base64, up to 8, named `img1.png`… in order), and optional `model`, `tag` (default `image`), `system` and `timeoutMs` (default 10 min, at most 30). The model resolves through the same layers as a run, under the tag, so a manifest's `model.tags.image: codex/intermediate` pins it. Only a runtime whose capabilities say `image` can serve it; today that is `codex-cli` ([runtimes.md](runtimes.md#images)). Any other runtime is a `400`.
+
+The answer is `200 { ok: true, text, images: [{ type, data }], call }`: `data` is base64, `text` the runtime's one-line account, `call` the ledger row. A failed call, including one where the model answered without making a picture, is `502 { ok: false, error, call }`. The call shares the concurrency cap with runs, and its ledger row carries the tokens the runtime reported for driving its image tool. What the image tool itself costs is not reported, so the row's cost figure covers the text tokens only.
+
 ### Imported history
 
 An app that kept its own call table before the service existed can bring it along: `bun src/index.ts model-import <app> <file.jsonl>` reads one JSON object per line (`ts`, `tag`, `model`, `backend`, `ok`, `durationMs`, `promptChars`, `outputChars`, `inputTokens`, `outputTokens`, `cacheReadTokens` / `cacheWriteTokens` or one combined `cacheTokens`, `costUsd`) and writes the rows with `origin: import`. A row already present (same app, start time, tag and duration) is skipped, so the command can be run again after an app exported more. The export itself is the app's business: one query over its table, one line per row.
@@ -159,6 +165,7 @@ A task with an `agent` target (`docs/scheduler.md`) runs on the runtime the targ
 
 ```
 POST /api/model/run                       run one call (app token, or operator token + app)
+POST /api/model/image                     pictures from a prompt and optional input images (same tokens)
 GET  /api/model/status                    backend, concurrency cap, calls running and waiting
 GET  /api/model/usage?window=24h&app=x    totals and sums by app, by app/tag/model, by model, by backend/origin over 5h | 24h | 7d | 30d, plus `history`: lifetime totals and per-day sums since the first row
 GET  /api/model/calls?app&tag&limit       recent calls, newest first

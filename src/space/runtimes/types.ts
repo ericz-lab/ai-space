@@ -136,7 +136,30 @@ export type Capabilities = {
   complete: boolean;
   agent: boolean;
   chat: boolean;
+  /** Makes pictures: `image` below. Absent means no. */
+  image?: boolean;
 };
+
+/**
+ * One request for pictures: create from the prompt, or edit the `files` it
+ * names (`img1.png`, …, as for an answer). The runtime returns the image
+ * bytes it produced; the text is its one-line account of them.
+ */
+export type ImageInput = {
+  prompt: string;
+  system: string;
+  /** Model as the runtime names it; it drives the runtime's own image tool. */
+  model: string;
+  tag: string;
+  files: CompleteFile[];
+  timeoutMs: number;
+};
+
+export type GeneratedImage = { type: string; bytes: Uint8Array };
+
+export type ImageOutcome =
+  | { ok: true; text: string; images: GeneratedImage[]; usage?: Usage; costUsd?: number; backend: Backend }
+  | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend };
 
 /** A past conversation as the chat panel shows it: the user's texts and the assistant's, with the tools it called. */
 export type TranscriptMessage = { role: "user"; text: string } | { role: "ai"; text: string; tools: { name: string; hint: string }[] };
@@ -155,6 +178,8 @@ export type RuntimeAdapter = {
    * adapter translates its own events into them. Returns a handle to kill it.
    */
   chat(turn: ChatTurn, cb: ChatCallbacks): { kill: () => void };
+  /** Pictures from a prompt and optional input images; only a runtime whose capabilities say `image`. */
+  image?(input: ImageInput, signal?: AbortSignal): Promise<ImageOutcome>;
   /** A past chat session from the runtime's own records; null when it has none. */
   transcript?(cwd: string, sessionId: string): Promise<TranscriptMessage[] | null>;
 };

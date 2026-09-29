@@ -2,7 +2,7 @@ import { assertCompletionMode, type OnDelta, type RuntimeAdapter } from "../runt
 import { RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
 import type { ModelStore } from "./store.ts";
 import type { ModelSource } from "./app-models.ts";
-import { type ModelCall, type RunInput, type RunOutcome, type Usage } from "./types.ts";
+import { type ImageRunInput, type ImageRunOutcome, type ModelCall, type RunInput, type RunOutcome, type Usage } from "./types.ts";
 
 /**
  * The service: resolves a request's model to one of the configured runtimes
@@ -27,6 +27,7 @@ export type ModelServiceOptions = {
 };
 
 export type RunResult = { outcome: RunOutcome; call: ModelCall };
+export type ImageResult = { outcome: ImageRunOutcome; call: ModelCall };
 
 /** Recorded for a call the process could not finish: a restart, or a drain that ran out of grace. */
 export const INTERRUPTED = "interrupted: ai-space stopped while the call was running";
@@ -41,7 +42,7 @@ export class ModelService {
   private readonly now: () => number;
   private running = 0;
   private readonly queue: (() => void)[] = [];
-  private readonly inflight = new Map<Promise<RunResult>, Inflight>();
+  private readonly inflight = new Map<Promise<RunResult | ImageResult>, Inflight>();
 
   constructor(opts: ModelServiceOptions) {
     this.store = opts.store;
@@ -81,6 +82,56 @@ export class ModelService {
     } finally {
       this.inflight.delete(p);
     }
+  }
+
+  /** The runtime a request for pictures names; throws when it cannot make them. */
+  resolveImage(model: string): { runtime: RuntimeAdapter; model: string } {
+    const r = this.runtimes.resolve(model);
+    if (!r.runtime.capabilities.image || !r.runtime.image) throw new Error(`runtime ${r.runtime.name} does not make images`);
+    return r;
+  }
+
+  /**
+   * Pictures for an app: the same cap, in-flight tracking and ledger as `run`. The row carries the
+   * tokens the runtime reported for driving its image tool; what the tool itself cost is not reported.
+   */
+  async image(app: string, input: ImageRunInput, signal?: AbortSignal, source?: ModelSource): Promise<ImageResult> {
+    const p = this.executeImage(app, input, signal, source);
+    this.inflight.set(p, { app, tag: input.tag, model: input.model, promptChars: input.prompt.length, startedAt: this.now() });
+    try {
+      return await p;
+    } finally {
+      this.inflight.delete(p);
+    }
+  }
+
+  private async executeImage(app: string, input: ImageRunInput, signal?: AbortSignal, source?: ModelSource): Promise<ImageResult> {
+    const row = (runtime: string | undefined, model: string, outcome: ImageRunOutcome, startedAt: number, durationMs: number) =>
+      this.store.add({
+        app, tag: input.tag, model, runtime, ...(source ? { modelSource: source } : {}),
+        backend: outcome.backend, origin: "run", status: outcome.ok ? "ok" : "error", error: outcome.ok ? undefined : outcome.error,
+        startedAt, durationMs, promptChars: input.prompt.length, outputChars: outcome.ok ? outcome.text.length : undefined, usage: outcome.usage, costUsd: outcome.costUsd,
+      });
+    let target: { runtime: RuntimeAdapter; model: string };
+    try {
+      target = this.resolveImage(input.model);
+    } catch (e) {
+      const outcome: ImageRunOutcome = { ok: false, error: (e as Error).message, backend: this.backend as ImageRunOutcome["backend"] };
+      return { outcome, call: row(undefined, input.model, outcome, this.now(), 0) };
+    }
+    await this.acquire();
+    const startedAt = this.now();
+    let outcome: ImageRunOutcome;
+    try {
+      outcome = await target.runtime.image!({ ...input, model: target.model }, signal);
+    } catch (e) {
+      outcome = { ok: false, error: (e as Error).message ?? String(e), backend: target.runtime.backend };
+    } finally {
+      this.release();
+    }
+    const call = row(target.runtime.name, target.model, outcome, startedAt, Math.max(0, this.now() - startedAt));
+    if (!outcome.ok) this.log(`${app}/${input.tag} image (${target.runtime.name}/${target.model}, ${outcome.backend}): ${outcome.error}`);
+    return { outcome, call };
   }
 
   /** Resolves once no call is in flight. */
