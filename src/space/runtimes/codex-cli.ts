@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { spawnCollect } from "./process.ts";
 import { readCodexTranscript, SESSION_ID_RE } from "./transcripts.ts";
 import { ustar } from "./tar.ts";
-import { assertCompletionMode, Unsupported, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, type AgentRun, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type RuntimeAdapter, type Usage } from "./types.ts";
 
-/** Codex completions and persistent local chat. Authentication stays in the CLI home. */
+/** Codex completions, agent runs and persistent local chat. Authentication stays in the CLI home. */
 export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
   const host = spec.sshHost?.trim();
   if (host && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(host)) throw new Error(`runtime ${spec.name}: ssh is not a host name`);
@@ -15,7 +15,7 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
   const backend: Backend = host ? `ssh:${host}` : "local";
   return {
     name: spec.name, kind: "codex-cli", backend,
-    capabilities: { complete: true, agent: false, chat: true },
+    capabilities: { complete: true, agent: true, chat: true },
     async complete(input, signal, onDelta) {
       assertCompletionMode(input);
       if (input.files?.length) return { ok: false, error: "codex-cli completions do not support file attachments", backend };
@@ -49,7 +49,23 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
         if (dir) await rm(dir, { recursive: true, force: true });
       }
     },
-    async runAgent() { throw new Unsupported(spec.name, "agent"); },
+    // Always local, like every runtime's agent run: it works in the app directory. `ssh` is for answers only.
+    async runAgent(run) {
+      if (run.allowedTools?.length) return { ok: false, error: `runtime ${spec.name} cannot limit an agent run to a tool list; use permissionMode`, output: "", timedOut: false, backend: "local" };
+      let r: Awaited<ReturnType<typeof spawnCollect>>;
+      try {
+        r = await spawnCollect([...bin, ...codexAgentArgs(run)], { cwd: run.cwd, env: run.env, stdin: run.prompt, signal: run.signal });
+      } catch (e) {
+        return { ok: false, error: `could not run Codex: ${(e as Error).message}`, output: "", timedOut: false, backend: "local" };
+      }
+      const output = [r.stdout, r.stderr].filter(Boolean).join("\n--- stderr ---\n");
+      if (r.timedOut || r.aborted) return { ok: false, error: "timed out", output, timedOut: true, backend: "local" };
+      const parsed = parseCodexOutput(r.stdout);
+      const base = { output, usage: parsed.usage, timedOut: false, backend: "local" as Backend };
+      if (r.code !== 0) return { ok: false, error: (r.stderr.trim() || parsed.error || `exit code ${r.code}`).slice(-800), ...base };
+      if (parsed.error) return { ok: false, error: parsed.error, ...base };
+      return { ok: true, text: parsed.text, ...base };
+    },
     chat(turn, cb) { return codexChat(bin, turn, cb); },
     transcript: (cwd, sid) => readCodexTranscript(cwd, sid),
   };
@@ -136,6 +152,18 @@ export function codexChatArgs(turn: ChatTurn): string[] {
     ...(turn.model ? ["--model", turn.model] : []),
     ...(turn.systemPrompt ? ["-c", `developer_instructions=${JSON.stringify(turn.systemPrompt)}`] : []),
     ...(turn.sessionId ? ["resume", turn.sessionId] : []), "-"];
+}
+
+/**
+ * An agent task: the prompt on stdin, the CLI's own instructions, skills and tools, in the app
+ * directory. The permission mode maps to a sandbox as for chat. Codex drops variables whose names
+ * contain KEY, SECRET or TOKEN from the commands it runs; the task's environment is what ai-space
+ * handed this app (its SPACE_APP_TOKEN among it), so it reaches the commands whole, as with Claude Code.
+ */
+export function codexAgentArgs(run: Pick<AgentRun, "model" | "permissionMode">): string[] {
+  const sandbox = run.permissionMode === "bypassPermissions" ? "danger-full-access" : run.permissionMode === "acceptEdits" ? "workspace-write" : "read-only";
+  return ["exec", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", sandbox, "-c", 'approval_policy="never"',
+    "-c", "shell_environment_policy.ignore_default_excludes=true", ...(run.model ? ["--model", run.model] : []), "-"];
 }
 
 function codexChat(bin: string[], turn: ChatTurn, cb: ChatCallbacks): { kill: () => void } {

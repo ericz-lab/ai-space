@@ -278,7 +278,7 @@ Motivation: an operator should be able to preserve a task's capability tier and 
 
 Use the four tiers from [runtimes.md](runtimes.md#capability-tiers): `basic` (Haiku/Luna), `junior` (Sonnet/Terra), `intermediate` (Opus/Sol), and `advanced` (Fable/Astra). Migrate a previous Sonnet task to junior and an Opus task to intermediate, not to basic.
 
-Agent tasks support model selection directly. Only runtimes with the `agent` capability are offered for them; the Codex completion-only adapter is not an agent runtime. Agent tier aliases are resolved before starting the CLI, and the model ledger records the actual runtime and concrete model.
+Agent tasks support model selection directly. Only runtimes with the `agent` capability are offered for them (Claude Code, DeepSeek Harness and Codex CLI; see runtimes.md). Agent tier aliases are resolved before starting the CLI, and the model ledger records the actual runtime and concrete model.
 
 HTTP and command tasks explicitly opt in by declaring a task-level `model` in `space.yaml`. This is a contract: the app must consume the selected model, not merely declare the field. The parser stores the default in `target.model` (API-created tasks set that field directly):
 

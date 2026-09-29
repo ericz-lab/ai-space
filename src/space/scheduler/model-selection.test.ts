@@ -25,7 +25,8 @@ test("panel saves only models, validates capabilities and rejects cross-origin c
     expect((await patch({ model: "codex/advanced" }, null)).status).toBe(403);
     expect((await patch({ model: "codex/basic", enabled: false })).status).toBe(400);
     expect((await patch({ model: "missing/basic" })).status).toBe(400);
-    expect((await patch({ model: "codex/basic" }, base, agent.id)).status).toBe(400);
+    // Codex runs agent tasks too: an agent task may move to it.
+    expect((await (await patch({ model: "codex/basic" }, base, agent.id)).json()).task.model).toBe("codex/basic");
     const saved = await (await patch({ model: "codex/intermediate" })).json();
     expect(saved.task).toMatchObject({ model: "codex/intermediate", overrides: { model: "codex/intermediate" }, base: { model: "codex/junior" } });
     expect((await (await patch({ model: null })).json()).task.model).toBe("codex/junior");

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { codexArgs, codexChatArgs, codexRemoteCommand, createCodexCli, parseCodexOutput } from "./codex-cli.ts";
+import { codexAgentArgs, codexArgs, codexChatArgs, codexRemoteCommand, createCodexCli, parseCodexOutput } from "./codex-cli.ts";
 import { spawnCollect } from "./process.ts";
 import { fakeCodexBin } from "./testing-codex.ts";
 import type { ChatTurn, CompleteInput } from "./types.ts";
@@ -68,7 +68,7 @@ describe("Codex completions", () => {
     expect(await adapter().complete(input({ files: [{ name: "a.png", path: "/missing" }] }))).toMatchObject({ ok: false });
     expect(await adapter().complete(input({ thinking: 2048 }))).toMatchObject({ ok: true });
     expect(await createCodexCli({ name: "x", kind: "codex-cli", bin: ["/no-codex-here"] }).complete(input())).toMatchObject({ ok: false });
-    expect(adapter().capabilities).toEqual({ complete: true, agent: false, chat: true });
+    expect(adapter().capabilities).toEqual({ complete: true, agent: true, chat: true });
     expect(() => createCodexCli({ name: "x", kind: "codex-cli", bin: [], sshHost: "-oProxyCommand=bad" })).toThrow(/host/);
   });
   test("remote wrapper transfers hostile text exactly and cleans the request directory", async () => {
@@ -182,4 +182,35 @@ test("web tool lists enable native web access locally and over SSH without enabl
   expect(full).toContain('web_search="live"');
   expect(await adapter().complete(input({ tools: ["WebSearch", "Bash"] }))).toMatchObject({ ok: false, error: expect.stringContaining("Bash") });
   await expect(adapter().complete(input({ mode: "slim", tools: ["WebSearch"] }))).rejects.toThrow(/slim/);
+});
+
+describe("Codex agent runs", () => {
+  const run = (over: Partial<Parameters<ReturnType<typeof adapter>["runAgent"]>[0]> = {}) =>
+    ({ prompt: "curate\n' $HOME `id`", cwd: realpathSync(dirname(import.meta.path)), env: { ...process.env, SPACE_APP_TOKEN: "t" }, signal: AbortSignal.timeout(5000), ...over });
+
+  test("runs in the app directory with the prompt on stdin and reports the final answer and usage", async () => {
+    const r = await adapter().runAgent(run({ model: "gpt-6-sol", permissionMode: "bypassPermissions" }));
+    expect(r).toMatchObject({ ok: true, backend: "local", timedOut: false, usage: { inputTokens: 20, cacheReadTokens: 100, outputTokens: 12 } });
+    const answer = JSON.parse(r.text!);
+    expect(answer.prompt).toBe("curate\n' $HOME `id`");
+    expect(answer.cwd).toBe(realpathSync(dirname(import.meta.path)));
+    expect(answer.args).toEqual(codexAgentArgs({ model: "gpt-6-sol", permissionMode: "bypassPermissions" }));
+    expect(r.output).toContain("turn.completed");
+  });
+
+  test("maps the permission mode to a sandbox and keeps the task's token variables for commands", () => {
+    const sandbox = (mode?: "acceptEdits" | "bypassPermissions" | "plan") => { const a = codexAgentArgs({ permissionMode: mode }); return a[a.indexOf("--sandbox") + 1]; };
+    expect([sandbox(), sandbox("plan"), sandbox("acceptEdits"), sandbox("bypassPermissions")]).toEqual(["read-only", "read-only", "workspace-write", "danger-full-access"]);
+    expect(codexAgentArgs({})).toContain("shell_environment_policy.ignore_default_excludes=true");
+    expect(codexAgentArgs({})).not.toContain("--model");
+  });
+
+  test("failures, timeouts, tool lists and a missing binary are explicit", async () => {
+    expect(await adapter("error").runAgent(run())).toMatchObject({ ok: false, error: "OAuth session expired" });
+    expect(await adapter("exit").runAgent(run())).toMatchObject({ ok: false, error: "CLI crash" });
+    expect(await adapter("partial").runAgent(run())).toMatchObject({ ok: false, error: expect.stringContaining("turn.completed") });
+    expect(await adapter("hang").runAgent(run({ signal: AbortSignal.timeout(80) }))).toMatchObject({ ok: false, timedOut: true });
+    expect(await adapter().runAgent(run({ allowedTools: ["Bash"] }))).toMatchObject({ ok: false, error: expect.stringContaining("tool list") });
+    expect(await createCodexCli({ name: "x", kind: "codex-cli", bin: ["/no-codex-here"] }).runAgent(run())).toMatchObject({ ok: false, error: expect.stringContaining("could not run Codex") });
+  });
 });

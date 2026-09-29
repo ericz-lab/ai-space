@@ -2,7 +2,7 @@
 
 For detailed model selection and request examples, see [Model Tiers and Request Modes](model-tiers-and-modes.md).
 
-Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`), the Anthropic Messages API (`anthropic-api`), and Codex CLI text completions and local chat (`codex-cli`). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
+Status: implemented for Claude Code (`claude-code`), DeepSeek Harness (`deepseek-harness`), the Anthropic Messages API (`anthropic-api`), and Codex CLI (`codex-cli`: completions, agent runs and local chat). Other coding agents and model APIs are added as further kinds; the interface below is what they implement.
 
 ## Why one layer
 
@@ -26,7 +26,7 @@ Every operation reports what the runtime said about the model call, token counts
 | --- | --- | --- | --- | --- | --- |
 | `claude-code` | yes, local or ssh | yes | yes | the CLI's own (`claude login`) | `claude -p --output-format json` for answers and agent runs, `stream-json` for chat, `--resume` for continuity. Answers over ssh: every argument validated, the system prompt base64-encoded. Files (chat attachments) are opened with `Read`; over ssh they travel with the prompt as one tar archive unpacked into a temporary directory. |
 | `deepseek-harness` | yes, local or ssh | yes | yes | a DeepSeek API key in the harness home | `dsh --profile headless --json` for everything, the task on stdin; `--session-id` for continuity. A `--patch` overlay per run sets the system prompt, model, thinking (`reasoningEffort`) and tool rows: an answer runs with the harness identity, runtime context and every tool off (6,872 input tokens as shipped → 32), a chat keeps them and adds the agent's prompt as persona. Usage from the `step_end` events, cost from DeepSeek's list prices at peak (off-peak is half). Chat events are translated into Claude Code's `stream-json`; transcripts read from the harness's session log. Files refused. |
-| `codex-cli` | yes, local or ssh | no | yes, local | the CLI’s own Codex login | Slim or full completions with per-request instructions; persistent full-context chat with `exec resume`; see below. |
+| `codex-cli` | yes, local or ssh | yes | yes, local | the CLI’s own Codex login | Slim or full completions with per-request instructions; `codex exec` agent runs in the app directory; persistent full-context chat with `exec resume`; see below. |
 | `anthropic-api` | yes | no | no | an API key | `POST /v1/messages`. Tools and files refused. Cost from list prices for known models. |
 
 ## Configuration
@@ -132,7 +132,7 @@ To default only application model calls to Codex, set `SPACE_MODEL_DEFAULT=codex
 
 ## Codex CLI completions
 
-Motivation: applications must be able to use a Codex login independently of a failed Claude login, with inexpensive models and their own instructions. `codex-cli` implements `complete` locally or through SSH, and `chat` locally; scheduled agent tasks remain unsupported. Requires a Codex CLI with `--ignore-user-config`, `--ignore-rules` and `--ephemeral` (validated with 0.156.1); the SSH host needs Bash, tar and GNU timeout. Authenticate on the machine that actually runs Codex, using `codex login`. Credentials remain in that machine's Codex home.
+Motivation: applications must be able to use a Codex login independently of a failed Claude login, with inexpensive models and their own instructions. `codex-cli` implements `complete` locally or through SSH, and `agent` and `chat` locally (see [Codex agent runs](#codex-agent-runs)). Requires a Codex CLI with `--ignore-user-config`, `--ignore-rules` and `--ephemeral` (validated with 0.156.1); the SSH host needs Bash, tar and GNU timeout. Authenticate on the machine that actually runs Codex, using `codex login`. Credentials remain in that machine's Codex home.
 
 In the default slim mode, the adapter runs `codex exec --json` in a fresh temporary directory. The request's `system` becomes `model_instructions_file`, replacing Codex's built-in model instructions; `prompt` arrives on stdin separately. Quotes, Unicode, newlines and large instructions travel as file bytes, never interpolated shell code. Over SSH both files arrive in one tar stream before the CLI starts. Request files are removed afterwards. A remote timeout bounds execution if the SSH connection drops; cancellation kills the local process group immediately, while a disconnected remote call can remain until its timeout.
 
@@ -202,6 +202,12 @@ disabled; these are example measurements, not a fixed budget.
 These modes apply to model completions. Scheduler agent execution and persistent
 panel chat keep their existing contracts.
 
+
+## Codex agent runs
+
+Motivation: an app's scheduled agent task (`run: agent:`) must be able to run on a Codex login when the machine's Claude login is unusable, so the app does not spawn a CLI of its own and bypass the ledger and the panel's model choice.
+
+`runAgent` starts `codex exec --json` locally in the app directory, the prompt file on stdin, with the CLI's own instructions, skills and tools, like a Claude Code agent run. `ssh` on the runtime applies only to completions. The task's `permissionMode` maps to a sandbox as for chat: none and `plan` to `read-only`, `acceptEdits` to `workspace-write`, `bypassPermissions` to `danger-full-access`; `approval_policy="never"` keeps the run headless. A task `tools:` list is refused, because Codex cannot enforce Claude tool names. Codex normally removes variables whose names contain KEY, SECRET or TOKEN from the commands it runs; an agent run keeps them (`shell_environment_policy.ignore_default_excludes=true`), since the environment is what ai-space handed the app, `SPACE_APP_TOKEN` included, as a Claude Code agent run receives it. The run succeeds only on a complete event stream with a final message; that message is the run's output, and the token counters go to the ledger without a dollar cost.
 
 ## Base agent runtime and model selection
 
