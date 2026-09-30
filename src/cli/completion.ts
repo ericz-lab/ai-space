@@ -11,7 +11,7 @@ import { type Ctx, type Noun, UsageError } from "./types.ts";
  */
 
 export function renderCompletion(shell: string, nouns: Noun[]): string {
-  const table = nouns.map((n) => ({ name: n.name, verbs: Object.keys(n.verbs).filter((v) => !(n.defaultVerb && Object.keys(n.verbs).length === 1)) }));
+  const table = nouns.map((n) => ({ name: n.name, verbs: Object.keys(n.verbs).filter(() => !(n.defaultVerb && Object.keys(n.verbs).length === 1)) }));
   const nounWords = [...table.map((n) => n.name), "help"].join(" ");
   if (shell === "zsh") {
     const cases = table

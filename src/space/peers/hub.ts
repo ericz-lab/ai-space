@@ -4,7 +4,6 @@ import type { AppCapabilities } from "../bus/bus.ts";
 import { PeerClient, type PeerClientOptions, type PeerStatus } from "./client.ts";
 import type { PeerConfig } from "./config.ts";
 import { mergeAgents, mergeApps, mergeServices, mergeWidgets } from "./merge.ts";
-import type { PeerStore } from "./store.ts";
 
 /**
  * Every configured peer, in name order, and the merged views the panel lists

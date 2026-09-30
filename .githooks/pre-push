@@ -1,0 +1,8 @@
+#!/bin/sh
+# Runs `bun run check` before a push, since a push to main is a deploy
+# (deploy/post-receive): nothing else checks the code between here and the server.
+# Enable once per clone with `bun run hooks`; skip one push with `git push --no-verify`.
+set -e
+cd "$(git rev-parse --show-toplevel)"
+bun install --frozen-lockfile >/dev/null
+bun run check

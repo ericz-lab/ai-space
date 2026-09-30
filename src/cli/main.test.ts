@@ -79,7 +79,7 @@ describe("help and dispatch", () => {
     expect(expandAlias(["chat-import", "a", "f"])).toEqual(["chat", "import", "a", "f"]);
     expect(expandAlias(["env", "a"])).toEqual(["app", "env", "a"]);
     expect(expandAlias(["task", "ls"])).toEqual(["task", "ls"]);
-    for (const [word, [noun, verb]] of Object.entries(ALIASES)) expect(NOUNS.find((n) => n.name === noun)?.verbs[verb!]).toBeDefined();
+    for (const [noun, verb] of Object.values(ALIASES)) expect(NOUNS.find((n) => n.name === noun)?.verbs[verb!]).toBeDefined();
   });
 
   test("help lists every noun and a noun's verbs", () => {

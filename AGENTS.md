@@ -74,6 +74,7 @@ When the user starts development from the ai-space source checkout and asks to w
 - `tsconfig.json` - TypeScript configuration (strict, bundler mode, noEmit).
 - `AGENTS.md` - this file, the agent working guide.
 - `CLAUDE.md` - Bun usage conventions.
+- `.githooks/` - `pre-push` runs `bun run check`; enable it once per clone with `bun run hooks`.
 - `deploy/` - `ai-space.service` (user-level systemd unit), `install.sh` (installs the unit on a machine), `post-receive` (bare-repo hook for git-push deploys).
 - `.env.example` - configuration template for `~/.ai-space/.env`.
 - `.gitignore` - global ignore rules.
@@ -150,7 +151,7 @@ bun run typecheck
 bun test
 ```
 
-Or run all of it with `bun run check`. While iterating, narrow the scope with `bun test ./src/path/to/file.test.ts`, but run the full check before pushing. Do not bypass failing checks. If a failure is pre-existing, verify it against the current base and document the evidence in the PR.
+Or run all of it with `bun run check`. A push to `main` is a deploy (`deploy/post-receive`) and nothing else runs the checks, so enable the pre-push hook once per clone with `bun run hooks`. While iterating, narrow the scope with `bun test ./src/path/to/file.test.ts`, but run the full check before pushing. Do not bypass failing checks. If a failure is pre-existing, verify it against the current base and document the evidence in the PR.
 
 ## Things To Avoid
 

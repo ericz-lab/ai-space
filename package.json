@@ -16,15 +16,14 @@
     "codex-upgrade": "bun src/index.ts codex-upgrade run",
     "space": "bun src/index.ts",
     "typecheck": "tsc --noEmit",
-    "check": "bun run typecheck && bun test"
+    "check": "bun run typecheck && bun test",
+    "hooks": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "1.4.0",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.7"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "@types/react-dom": "^19.2.7",
+    "typescript": "5.9.3"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.10.0",

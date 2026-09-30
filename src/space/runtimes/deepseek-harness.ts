@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { readDshTranscript } from "./transcripts.ts";
-import type { AgentOutcome, AgentRun, Backend, ChatCallbacks, ChatTurn, CompleteInput, CompleteOutcome, DeepseekHarnessSpec, RuntimeAdapter, Usage } from "./types.ts";
+import type { AgentOutcome, Backend, ChatCallbacks, ChatTurn, CompleteInput, CompleteOutcome, DeepseekHarnessSpec, RuntimeAdapter, Usage } from "./types.ts";
 
 /**
  * DeepSeek Harness (`dsh`) as a runtime. One command for all three operations,

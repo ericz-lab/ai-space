@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
-import { assertCompletionMode, FILE_NAME_PATTERN, PERMISSION_MODES, type AgentOutcome, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, FILE_NAME_PATTERN, PERMISSION_MODES, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /**
  * Claude Code as a runtime. Three operations, one CLI:

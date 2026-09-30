@@ -83,7 +83,7 @@ export function createChatRoutes(opts: ChatApiOptions): Routes {
     return b;
   };
 
-  const threadView = (app: string, t: Thread) => {
+  const threadView = (t: Thread) => {
     const attachments = new Map<number, Attachment[]>();
     for (const a of service.store.listAttachments(t.id)) if (a.messageId !== undefined) attachments.set(a.messageId, [...(attachments.get(a.messageId) ?? []), a]);
     const messages = service.store.listMessages(t.id).map((m) => messageView(m, attachments.get(m.id) ?? [], service));
@@ -157,7 +157,7 @@ export function createChatRoutes(opts: ChatApiOptions): Routes {
       GET: (req) =>
         guard(async () => {
           const app = await resolveApp(req);
-          return json({ ok: true, ...threadView(app, threadOf(app, req)) });
+          return json({ ok: true, ...threadView(threadOf(app, req)) });
         }),
       PATCH: (req) =>
         guard(async () => {
