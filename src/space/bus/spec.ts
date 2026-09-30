@@ -15,7 +15,7 @@ import { type Capability, DEFAULT_CALL_TIMEOUT_MS, type EventConsumption, type E
  *   consumes:
  *     - event: video-digest/digest.added         # one of task / http / neither (stream)
  *       filter: { channel: Weekly }
- *       task: import-weekly                      # → a trigger on that task (debounce allowed)
+ *       task: import-weekly                      # → a trigger on that task (debounce and maxWait allowed)
  *     - { event: feed/item.added, http: { method: POST, path: /api/ingest } }
  *     - { event: feed/* }                        # read from GET /api/events/stream
  * provides:
@@ -31,7 +31,7 @@ import { type Capability, DEFAULT_CALL_TIMEOUT_MS, type EventConsumption, type E
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 const APP_RE = /^[a-z0-9][a-z0-9._-]*$/i;
-const CONSUME_KEYS = ["event", "filter", "debounce", "task", "http"];
+const CONSUME_KEYS = ["event", "filter", "debounce", "maxWait", "task", "http"];
 
 export const EMPTY_EVENTS_SPEC: EventsSpec = { publishes: [], consumes: [] };
 
@@ -72,17 +72,20 @@ function parseConsumes(raw: unknown, ctx: string): EventConsumption[] {
     const c = typeof item === "string" ? { event: item } : item;
     if (!isRecord(c)) throw new Error(`${where} must be an event name or a mapping with event / filter / task / http`);
     for (const key of Object.keys(c)) if (!CONSUME_KEYS.includes(key)) throw new Error(`${where} has unknown key "${key}"`);
-    // The event / filter / debounce part is exactly a trigger.
-    const [trigger] = parseTriggers({ event: c.event, ...(c.filter !== undefined ? { filter: c.filter } : {}), ...(c.debounce !== undefined ? { debounce: c.debounce } : {}) }, where);
+    // The event / filter / debounce / maxWait part is exactly a trigger.
+    const [trigger] = parseTriggers(
+      { event: c.event, ...(c.filter !== undefined ? { filter: c.filter } : {}), ...(c.debounce !== undefined ? { debounce: c.debounce } : {}), ...(c.maxWait !== undefined ? { maxWait: c.maxWait } : {}) },
+      where,
+    );
     if (!trigger) throw new Error(`${where}: event is required`);
     const base = { event: trigger.event, ...(trigger.filter ? { filter: trigger.filter } : {}) };
     const forms = ["task", "http"].filter((k) => c[k] !== undefined);
     if (forms.length > 1) throw new Error(`${where}: declare task or http, not both`);
     if (c.task !== undefined) {
       if (typeof c.task !== "string" || !NAME_RE.test(c.task.trim())) throw new Error(`${where}: task must be the name of one of the app's tasks`);
-      return { ...base, kind: "task", task: c.task.trim(), ...(trigger.debounceMs !== undefined ? { debounceMs: trigger.debounceMs } : {}) };
+      return { ...base, kind: "task", task: c.task.trim(), ...(trigger.debounceMs !== undefined ? { debounceMs: trigger.debounceMs } : {}), ...(trigger.maxWaitMs !== undefined ? { maxWaitMs: trigger.maxWaitMs } : {}) };
     }
-    if (trigger.debounceMs !== undefined) throw new Error(`${where}: debounce applies to task subscriptions only; http and stream deliver every event`);
+    if (trigger.debounceMs !== undefined || trigger.maxWaitMs !== undefined) throw new Error(`${where}: debounce and maxWait apply to task subscriptions only; http and stream deliver every event`);
     if (c.http !== undefined) {
       const { method, path } = parseHttp(c.http, `${where}.http`);
       return { ...base, kind: "http", method, path };
@@ -98,7 +101,7 @@ export function triggersFromConsumes(spec: EventsSpec, taskNames: string[], ctx 
     if (c.kind !== "task") continue;
     if (!taskNames.includes(c.task)) throw new Error(`${ctx}: task "${c.task}" is not declared under tasks`);
     const list = out.get(c.task) ?? [];
-    list.push({ event: c.event, ...(c.filter ? { filter: c.filter } : {}), ...(c.debounceMs !== undefined ? { debounceMs: c.debounceMs } : {}) });
+    list.push({ event: c.event, ...(c.filter ? { filter: c.filter } : {}), ...(c.debounceMs !== undefined ? { debounceMs: c.debounceMs } : {}), ...(c.maxWaitMs !== undefined ? { maxWaitMs: c.maxWaitMs } : {}) });
     out.set(c.task, list);
   }
   return out;

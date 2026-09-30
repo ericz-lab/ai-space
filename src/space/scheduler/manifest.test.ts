@@ -139,14 +139,14 @@ widgets:
 
   test("parses event triggers; a task may have triggers, a schedule, or both", () => {
     const m = parseManifest(
-      "name: demo\ntasks:\n  - name: a\n    triggers: feed/item.added\n    run: { command: x }\n  - name: b\n    every: 1h\n    triggers:\n      - feed/*\n      - { event: other/done, filter: { channel: [x, y], n: 3 }, debounce: 5m }\n    run: { command: x }\n",
+      "name: demo\ntasks:\n  - name: a\n    triggers: feed/item.added\n    run: { command: x }\n  - name: b\n    every: 1h\n    triggers:\n      - feed/*\n      - { event: other/done, filter: { channel: [x, y], n: 3 }, debounce: 5m, maxWait: 1h }\n    run: { command: x }\n",
       "/apps/demo",
     );
     expect(m.tasks[0]).toMatchObject({ name: "a", schedule: { kind: "manual" }, triggers: [{ event: "feed/item.added" }] });
     expect(m.tasks[1]).toMatchObject({
       name: "b",
       schedule: { kind: "every", everyMs: 3_600_000 },
-      triggers: [{ event: "feed/*" }, { event: "other/done", filter: { channel: ["x", "y"], n: "3" }, debounceMs: 300_000 }],
+      triggers: [{ event: "feed/*" }, { event: "other/done", filter: { channel: ["x", "y"], n: "3" }, debounceMs: 300_000, maxWaitMs: 3_600_000 }],
     });
     expect("triggers" in parseManifest("name: demo\ntasks:\n  - name: a\n    every: 1h\n    run: { command: x }\n", "/d").tasks[0]!).toBe(false);
     const bad = (tasks: string) => () => parseManifest(`name: demo\ntasks:\n  - name: a\n${tasks}    run: { command: x }\n`, "/d");
@@ -156,6 +156,8 @@ widgets:
     expect(bad("    triggers: [{ event: feed/a, on: x }]\n")).toThrow(/unknown key/);
     expect(bad("    triggers: [{ event: feed/a, filter: { k: {} } }]\n")).toThrow(/filter.k must be/);
     expect(bad("    triggers: [{ event: feed/a, debounce: soon }]\n")).toThrow(/invalid duration/);
+    expect(bad("    triggers: [{ event: feed/a, maxWait: 1h }]\n")).toThrow(/declare debounce too/);
+    expect(bad("    triggers: [{ event: feed/a, debounce: 2h, maxWait: 1h }]\n")).toThrow(/at least the debounce/);
     expect(bad("    at: 2030-01-01T00:00:00Z\n    every: 1h\n    triggers: feed/a\n")).toThrow(/or none, with triggers/);
   });
 

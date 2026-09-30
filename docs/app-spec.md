@@ -225,12 +225,12 @@ tasks:
     run:
       command: "bun scripts/export.ts"
   - name: index
-    triggers: [{ event: feed/item.added, filter: { kind: video }, debounce: 5m }]
+    triggers: [{ event: feed/item.added, filter: { kind: video }, debounce: 5m, maxWait: 30m }]
     run:
       http: { method: POST, url: "http://127.0.0.1:${PORT}/jobs/index" }
 ```
 
-At most one of `at` / `every` / `schedule`, and/or `triggers` (events other apps publish with `POST /api/events`; a task with only triggers has no clock), and exactly one of `run.http` / `run.command` / `run.agent` per task. `run.agent` takes `runtime`, `prompt`, `model`, and optionally `permissionMode` (`acceptEdits`, `bypassPermissions`, `plan`) and `tools` (auto-approved tools; a Codex runtime refuses a tool list and takes only `permissionMode`); without them the run is read-only. `bypassPermissions` lets the agent run any command as the space's user, so it belongs only on a task whose prompt the app controls. Commands and agent runs execute in the app directory with the app's environment (`.env` and `space.env` merged). Real cron expressions live only here, never in a machine's crontab.
+At most one of `at` / `every` / `schedule`, and/or `triggers` (events other apps publish with `POST /api/events`; a task with only triggers has no clock; `debounce` waits for a quiet period after the last matching event, `maxWait`, default twice the `debounce`, caps the wait from the first one), and exactly one of `run.http` / `run.command` / `run.agent` per task. `run.agent` takes `runtime`, `prompt`, `model`, and optionally `permissionMode` (`acceptEdits`, `bypassPermissions`, `plan`) and `tools` (auto-approved tools; a Codex runtime refuses a tool list and takes only `permissionMode`); without them the run is read-only. `bypassPermissions` lets the agent run any command as the space's user, so it belongs only on a task whose prompt the app controls. Commands and agent runs execute in the app directory with the app's environment (`.env` and `space.env` merged). Real cron expressions live only here, never in a machine's crontab.
 
 ### `events` and `provides`
 

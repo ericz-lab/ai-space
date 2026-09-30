@@ -247,7 +247,7 @@ describe("tick and run", () => {
 
 describe("events", () => {
   const manual = { kind: "manual" } as const;
-  const trig = (event: string, over: Partial<{ debounceMs: number; filter: Record<string, string | string[]> }> = {}) => ({ event, ...over });
+  const trig = (event: string, over: Partial<{ debounceMs: number; maxWaitMs: number; filter: Record<string, string | string[]> }> = {}) => ({ event, ...over });
 
   test("a trigger-only task has no clock and runs when a matching event is published", async () => {
     const seen: { name: string; trigger?: string; events?: string[] }[] = [];
@@ -292,6 +292,47 @@ describe("events", () => {
     await h.s.idle();
     expect(h.calls).toEqual(["t"]);
     expect(h.store.listRuns(h.store.findTask("demo", "t")!.id)[0]!.eventIds).toHaveLength(2);
+  });
+
+  test("a steady stream cannot postpone the run past the max wait (default: twice the debounce)", async () => {
+    const h = harness();
+    h.s.syncManifest(h.manifest([mt("t", { schedule: manual, triggers: [trig("feed/*", { debounceMs: 5000 })] })]));
+    const first = h.at();
+    // An event every 2 s keeps the 5 s quiet period from ever passing.
+    for (let i = 0; i < 4; i++) {
+      h.s.publish({ app: "feed", name: `e${i}` });
+      h.advance(2000);
+      await h.s.tick();
+      await h.s.idle();
+    }
+    expect(h.calls).toEqual([]);
+    expect(h.store.findTask("demo", "t")!.state.pending).toMatchObject({ dueAt: first + 10_000, deadlineAt: first + 10_000 });
+    h.advance(1000); // 9 s after the first event: not yet
+    await h.s.tick();
+    await h.s.idle();
+    expect(h.calls).toEqual([]);
+    h.advance(1000); // 10 s after the first event; the last event's quiet period alone would say 11 s
+    await h.s.tick();
+    await h.s.idle();
+    expect(h.calls).toEqual(["t"]);
+    expect(h.store.listRuns(h.store.findTask("demo", "t")!.id)[0]!.eventIds).toHaveLength(4);
+    // The next burst starts a new deadline.
+    h.s.publish({ app: "feed", name: "later" });
+    expect(h.store.findTask("demo", "t")!.state.pending).toMatchObject({ dueAt: h.at() + 5000, deadlineAt: h.at() + 10_000 });
+  });
+
+  test("an explicit max wait replaces the default", async () => {
+    const h = harness();
+    h.s.syncManifest(h.manifest([mt("t", { schedule: manual, triggers: [trig("feed/*", { debounceMs: 5000, maxWaitMs: 7000 })] })]));
+    const first = h.at();
+    h.s.publish({ app: "feed", name: "a" });
+    h.advance(4000);
+    h.s.publish({ app: "feed", name: "b" });
+    expect(h.store.findTask("demo", "t")!.state.pending).toMatchObject({ dueAt: first + 7000, deadlineAt: first + 7000 });
+    h.advance(3000);
+    await h.s.tick();
+    await h.s.idle();
+    expect(h.calls).toEqual(["t"]);
   });
 
   test("events during a run queue one more run, and a clock run takes pending events along", async () => {
@@ -411,7 +452,7 @@ describe("event redelivery", () => {
     await h.s.idle();
     expect(seen).toEqual([[a.id]]);
     let task = h.store.findTask("demo", "consume")!;
-    expect(task.state.pending).toEqual({ eventIds: [a.id], dueAt: h.at() + 30_000, attempt: 1 });
+    expect(task.state.pending).toEqual({ eventIds: [a.id], dueAt: h.at() + 30_000, deadlineAt: h.at() + 30_000, attempt: 1 });
 
     // A newer event joins behind the redelivered one; nothing runs before the backoff has passed.
     const b = h.s.publish({ app: "feed", name: "x" }).event;

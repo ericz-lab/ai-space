@@ -13,13 +13,13 @@ describe("events spec", () => {
   test("consumes: task, http and stream forms", () => {
     const spec = parseEventsSpec({
       consumes: [
-        { event: "video-digest/digest.added", filter: { channel: ["A", "B"] }, task: "curate", debounce: "2h" },
+        { event: "video-digest/digest.added", filter: { channel: ["A", "B"] }, task: "curate", debounce: "2h", maxWait: "3h" },
         { event: "feed/item.added", http: { path: "/api/ingest" } },
         "portfolio/*",
       ],
     });
     expect(spec.consumes).toEqual([
-      { event: "video-digest/digest.added", filter: { channel: ["A", "B"] }, kind: "task", task: "curate", debounceMs: 2 * 3_600_000 },
+      { event: "video-digest/digest.added", filter: { channel: ["A", "B"] }, kind: "task", task: "curate", debounceMs: 2 * 3_600_000, maxWaitMs: 3 * 3_600_000 },
       { event: "feed/item.added", kind: "http", method: "POST", path: "/api/ingest" },
       { event: "portfolio/*", kind: "stream" },
     ]);
@@ -28,7 +28,8 @@ describe("events spec", () => {
   test("consumes rejects bad forms", () => {
     expect(() => parseEventsSpec({ consumes: [{ event: "x" }] })).toThrow(/expected <app>\/<event>/);
     expect(() => parseEventsSpec({ consumes: [{ event: "a/b", task: "t", http: { path: "/x" } }] })).toThrow(/task or http, not both/);
-    expect(() => parseEventsSpec({ consumes: [{ event: "a/b", http: { path: "/x" }, debounce: "1m" }] })).toThrow(/debounce applies to task/);
+    expect(() => parseEventsSpec({ consumes: [{ event: "a/b", http: { path: "/x" }, debounce: "1m" }] })).toThrow(/debounce and maxWait apply to task/);
+    expect(() => parseEventsSpec({ consumes: [{ event: "a/b", http: { path: "/x" }, debounce: "1m", maxWait: "2m" }] })).toThrow(/debounce and maxWait apply to task/);
     expect(() => parseEventsSpec({ consumes: [{ event: "a/b", http: { path: "x" } }] })).toThrow(/path must start with/);
     expect(() => parseEventsSpec({ consumes: [{ event: "a/b", http: { path: "/x", method: "HEAD" } }] })).toThrow(/unsupported method/);
     expect(() => parseEventsSpec({ consumes: [{ event: "a/b", when: 1 }] })).toThrow(/unknown key "when"/);

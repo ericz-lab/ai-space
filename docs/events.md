@@ -39,6 +39,7 @@ events:
       filter: { channel: Weekly Review }
       task: import-weekly
       debounce: 5m
+      maxWait: 30m                              # default 2 x debounce
     - event: feed/item.added                    # http: one POST per event to the app's own service
       http: { method: POST, path: /api/ingest }
     - event: portfolio/*                        # stream: the app reads GET /api/events/stream
@@ -51,7 +52,7 @@ provides:
     callers: [portfolio, thesis]                # default: every app on this space
 ```
 
-`consumes[].task` is the same thing as `tasks[].triggers`, written next to the other subscriptions; ai-space merges it into that task's triggers. `debounce` is only for tasks: http and stream deliver every event. Event names and filters follow the scheduler's rules (exact name or `<app>/*`, string equality on top-level `data` fields, no expressions).
+`consumes[].task` is the same thing as `tasks[].triggers`, written next to the other subscriptions; ai-space merges it into that task's triggers. `debounce` and `maxWait` are only for tasks: http and stream deliver every event. Event names and filters follow the scheduler's rules (exact name or `<app>/*`, string equality on top-level `data` fields, no expressions).
 
 ## Delivery
 

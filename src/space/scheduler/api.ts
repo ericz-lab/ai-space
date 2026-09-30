@@ -336,7 +336,7 @@ function parseCreate(body: Partial<TaskCreate>): TaskCreate {
     parsePermissionMode(target.permissionMode, "target.permissionMode");
     if (target.tools !== undefined && (!Array.isArray(target.tools) || !target.tools.every((t) => typeof t === "string" && t.trim()))) throw new Error("target.tools must be a list of strings");
   }
-  // Triggers use the manifest shape ({ event, filter, debounce }); a task with triggers may omit the schedule.
+  // Triggers use the manifest shape ({ event, filter, debounce, maxWait }); a task with triggers may omit the schedule.
   const triggers = body.triggers === undefined ? undefined : parseTriggers(body.triggers, `task ${body.name}`);
   return {
     app: body.app,

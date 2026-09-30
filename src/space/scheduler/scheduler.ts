@@ -1,4 +1,4 @@
-import { assertTriggerEvent, matchingTriggers } from "./events.ts";
+import { assertMaxWait, assertTriggerEvent, matchingTriggers, triggerMaxWait } from "./events.ts";
 import type { Manifest, ManifestTask } from "./manifest.ts";
 import { assertSchedule, nextRunAt } from "./schedule.ts";
 import type { Store } from "./store.ts";
@@ -45,7 +45,7 @@ import {
  * failures rather than disappearing with the process.
  *
  * Events: `publish` stores the event and queues it on every enabled task whose
- * triggers match (`state.pending`, due after the trigger's debounce). A task is
+ * triggers match (`state.pending`, due after the trigger's debounce, capped by its max wait). A task is
  * due when its clock or its pending events say so; whichever launch comes first
  * takes the pending events along, so a burst of events, or events arriving
  * while the task runs, produce one more run, never one per event. A run that
@@ -375,7 +375,9 @@ export class Scheduler {
       const ids = events.map((e) => e.id);
       if (attempt + 1 < MAX_EVENT_REDELIVERIES) {
         const later = s.pending?.eventIds.filter((id) => !ids.includes(id)) ?? [];
-        s.pending = { eventIds: [...ids, ...later], dueAt: Math.max(s.pending?.dueAt ?? 0, endedAt + backoff), attempt: attempt + 1 };
+        const dueAt = Math.max(s.pending?.dueAt ?? 0, endedAt + backoff);
+        // Events arriving before the retry may not push it later than it already is.
+        s.pending = { eventIds: [...ids, ...later], dueAt, deadlineAt: Math.max(s.pending?.deadlineAt ?? dueAt, dueAt), attempt: attempt + 1 };
       } else {
         this.log(`task ${task.app}/${task.name}: dropping ${ids.length} event(s) after ${attempt + 1} failed deliveries`);
       }
@@ -428,10 +430,13 @@ export class Scheduler {
       const hits = matchingTriggers(task.triggers, event);
       if (!hits.length) continue;
       const debounce = Math.max(...hits.map((t) => t.debounceMs ?? 0));
+      const maxWait = Math.max(...hits.map(triggerMaxWait));
       const pending = task.state.pending ?? { eventIds: [], dueAt: now };
       pending.eventIds.push(event.id);
-      // The quiet period restarts with every event; an earlier, shorter due time never moves later than that.
-      pending.dueAt = Math.max(pending.dueAt, now + debounce);
+      // The quiet period restarts with every event (a due time never moves earlier), but never past
+      // the deadline the first pending event set: a steady stream still gets its run.
+      pending.deadlineAt = Math.min(pending.deadlineAt ?? Number.POSITIVE_INFINITY, now + maxWait);
+      pending.dueAt = Math.min(Math.max(pending.dueAt, now + debounce), Math.max(pending.deadlineAt, pending.dueAt));
       task.state.pending = pending;
       this.store.saveState(task.id, task.state, now);
       matched.push(task);
@@ -619,6 +624,7 @@ function assertTriggers(triggers: EventTrigger[] | undefined): void {
   for (const t of triggers ?? []) {
     assertTriggerEvent(t.event);
     if (t.debounceMs !== undefined && (!Number.isFinite(t.debounceMs) || t.debounceMs < 0)) throw new Error(`invalid debounce: ${t.debounceMs}`);
+    assertMaxWait(t);
   }
 }
 

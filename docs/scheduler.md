@@ -27,7 +27,7 @@ A task is a schedule and/or event triggers, a target, and bookkeeping state.
 | --- | --- |
 | `app`, `name` | Identity. Manifest tasks are keyed by the pair, so re-syncing is an upsert. |
 | `schedule` | `at` (one ISO timestamp), `every` (fixed interval anchored to creation time), `cron` (5- or 6-field expression with optional IANA `tz`), or `manual` (no clock; only for a task with `triggers`). |
-| `triggers` | Event triggers, see [Event triggers](#event-triggers): `event` (`<app>/<event>` or `<app>/*`), optional `filter` on the event's data, optional `debounce`. |
+| `triggers` | Event triggers, see [Event triggers](#event-triggers): `event` (`<app>/<event>` or `<app>/*`), optional `filter` on the event's data, optional `debounce` and `maxWait`. |
 | `target` | `http` (request to an app endpoint), `command` (shell in the app directory), or `agent` (one of the space's runtimes fed a prompt file). |
 | `timeoutMs` | Hard limit per run. Past it the request is aborted or the process tree is killed. Default 10 minutes. |
 | `enabled`, `overrides` | The manifest value and the operator's overrides (`enabled`, `schedule`). Overrides survive re-sync. |
@@ -91,6 +91,7 @@ tasks:
       - event: feed/item.added               # <app>/<event>; <app>/* matches every event of that app
         filter: { channel: [news, markets] } # top-level data fields, string equality; a list means any of
         debounce: 15m                        # quiet period after the last matching event; default 0
+        maxWait: 1h                          # run at the latest this long after the first queued event; default 2 x debounce
     run:
       agent: { runtime: claude, prompt: prompts/curate.md }
 ```
@@ -112,7 +113,7 @@ Events are per machine, like tasks: a task subscribes to the apps on its own ai-
 ### Delivery
 
 - **Match.** Name first (exact, or `<app>/*`), then every `filter` field against the event's top-level `data` by string equality. No expressions; an app that needs more publishes a more specific event.
-- **Queue, do not run.** A match adds the event to the task's `state.pending` and sets its due time to now plus the trigger's `debounce` (the longest one, when several triggers match). Another matching event before that restarts the quiet period.
+- **Queue, do not run.** A match adds the event to the task's `state.pending` and sets its due time to now plus the trigger's `debounce` (the longest one, when several triggers match). Another matching event before that restarts the quiet period, but never past the first queued event plus the trigger's `maxWait` (default twice the `debounce`; with several triggers, the longest). So the run starts at the earlier of *last event + debounce* and *first queued event + maxWait*, and a steady stream of events, each inside the quiet period of the one before, still gets its run. `maxWait` needs a `debounce` and cannot be shorter than it; the deadline is kept in `state.pending.deadlineAt`.
 - **One run for a burst.** When the task is due and free, one run starts with every pending event, oldest first. Events that arrive while the task is running queue for exactly one more run, however many they are. This is what makes "a video was ingested" safe to publish per video.
 - **Clock and events share the task.** A run started by the schedule or by hand while events are pending takes them along; they are delivered once, never twice. `runs[].trigger` says what started the run and `runs[].eventIds` which events it carried.
 - **Disabled means dropped.** A disabled, paused or orphaned task is not queued, and disabling a task drops what it had pending. The event itself stays in the history.
@@ -268,6 +269,7 @@ What stays in the app: polling loops faster than a few minutes, loops that depen
 | Manifest edited with a typo | Whole app rejected with a message; existing tasks untouched. |
 | App down | `http` targets fail fast with a connection error and back off. |
 | Fifty events in a minute for one task | One run (after the debounce) with all fifty; anything published during it makes one more run. |
+| An event every ten minutes for a task with `debounce: 2h` | The quiet period never passes; the run starts `maxWait` (default 4h) after the first queued event and carries all of them. |
 | Event for a task that is disabled | Not queued; `matched` is empty. The event is still in `GET /api/events`. |
 | Publisher calls while ai-space is restarting | Connection refused; nothing stored. The publisher retries or the task's clock catches up. |
 | Task fails with events aboard | The events are queued again, due after the backoff; five failed runs and they are dropped (logged). |

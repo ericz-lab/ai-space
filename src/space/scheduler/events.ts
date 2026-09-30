@@ -89,7 +89,7 @@ export function eventPromptSection(events: SpaceEvent[]): string {
 }
 
 /**
- * `triggers: [{ event: other-app/thing.happened, filter: { kind: [a, b] }, debounce: 5m }]`;
+ * `triggers: [{ event: other-app/thing.happened, filter: { kind: [a, b] }, debounce: 5m, maxWait: 30m }]`;
  * a bare string is `{ event }`. The key is `triggers` rather than `on` for the
  * same reason notify uses `when`: YAML 1.1 reads a bare `on` as true.
  */
@@ -99,8 +99,8 @@ export function parseTriggers(raw: unknown, ctx: string): EventTrigger[] {
   return list.map((item, i) => {
     const where = `${ctx}: triggers[${i}]`;
     const t = (typeof item === "string" ? { event: item } : item) as Record<string, unknown>;
-    if (typeof t !== "object" || t === null || Array.isArray(t)) throw new Error(`${where} must be an event name or a mapping with event / filter / debounce`);
-    for (const key of Object.keys(t)) if (!["event", "filter", "debounce"].includes(key)) throw new Error(`${where} has unknown key "${key}"`);
+    if (typeof t !== "object" || t === null || Array.isArray(t)) throw new Error(`${where} must be an event name or a mapping with event / filter / debounce / maxWait`);
+    for (const key of Object.keys(t)) if (!["event", "filter", "debounce", "maxWait"].includes(key)) throw new Error(`${where} has unknown key "${key}"`);
     if (typeof t.event !== "string" || !t.event.trim()) throw new Error(`${where}: event is required`);
     const event = t.event.trim();
     assertTriggerEvent(event);
@@ -118,8 +118,23 @@ export function parseTriggers(raw: unknown, ctx: string): EventTrigger[] {
       out.filter = filter;
     }
     if (t.debounce !== undefined) out.debounceMs = parseDuration(t.debounce as string | number);
+    if (t.maxWait !== undefined) out.maxWaitMs = parseDuration(t.maxWait as string | number);
+    assertMaxWait(out, where);
     return out;
   });
+}
+
+/** The effective max wait of a trigger: `maxWaitMs`, else twice the debounce. */
+export function triggerMaxWait(t: EventTrigger): number {
+  return t.maxWaitMs ?? 2 * (t.debounceMs ?? 0);
+}
+
+/** `maxWait` bounds a debounce, so it needs one and cannot be shorter than it. */
+export function assertMaxWait(t: EventTrigger, where = `trigger ${t.event}`): void {
+  if (t.maxWaitMs === undefined) return;
+  if (!Number.isFinite(t.maxWaitMs) || t.maxWaitMs <= 0) throw new Error(`${where}: invalid maxWait: ${t.maxWaitMs}`);
+  if (!t.debounceMs) throw new Error(`${where}: maxWait bounds a debounce; declare debounce too`);
+  if (t.maxWaitMs < t.debounceMs) throw new Error(`${where}: maxWait must be at least the debounce`);
 }
 
 function isScalar(v: unknown): v is string | number | boolean {

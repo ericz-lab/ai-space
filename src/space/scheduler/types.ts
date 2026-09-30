@@ -56,13 +56,17 @@ export type RunTrigger = "schedule" | "manual" | "event";
  * `event` is the qualified name `<app>/<event>`; `<app>/*` matches every event of
  * that app. `filter` compares top-level `data` fields by string equality (a list
  * means any of). `debounceMs` is the quiet period after the last matching event
- * before the task runs; events arriving meanwhile join the same run.
+ * before the task runs; events arriving meanwhile join the same run. `maxWaitMs`
+ * bounds that: the run starts no later than this long after the first pending
+ * event, however steadily events keep coming. Default: twice `debounceMs`.
  */
 export type EventTrigger = {
   event: string;
   filter?: Record<string, string | string[]>;
   debounceMs?: number;
+  maxWaitMs?: number;
 };
+
 
 /** An event as apps publish it (`POST /api/events`), stored for delivery and history. */
 export type SpaceEvent = {
@@ -100,8 +104,10 @@ export type TaskState = {
   /**
    * Events waiting for a run: delivered together once `dueAt` has passed and the task is free.
    * `attempt` counts the failed runs these events already went through (redelivery); absent = first delivery.
+   * `deadlineAt` is the latest `dueAt` may move to (first pending event + the trigger's max wait), so a
+   * steady stream of events cannot postpone the run forever; absent on state written before it existed.
    */
-  pending?: { eventIds: number[]; dueAt: number; attempt?: number };
+  pending?: { eventIds: number[]; dueAt: number; deadlineAt?: number; attempt?: number };
 };
 
 export type TaskSource = "manifest" | "api";

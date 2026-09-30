@@ -27,7 +27,7 @@ export type EventFilter = Record<string, string | string[]>;
 
 /** `events.consumes[]`: one subscription. `task` becomes a trigger on the named task; the other two are the bus's. */
 export type EventConsumption = { event: string; filter?: EventFilter } & (
-  | { kind: "task"; task: string; debounceMs?: number }
+  | { kind: "task"; task: string; debounceMs?: number; maxWaitMs?: number }
   | { kind: "http"; method: HttpMethod; path: string }
   | { kind: "stream" }
 );
