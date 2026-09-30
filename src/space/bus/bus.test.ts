@@ -134,6 +134,27 @@ describe("bus deliveries", () => {
     const calBodies = h.calls.filter((c) => c.url.endsWith("/cal")).map((c) => c.body?.event.name);
     expect(calBodies).toEqual(["a/one", "a/two"]);
   });
+
+  test("a delivery waiting for its retry holds back the app's later ones, not other apps'", async () => {
+    // cal: first fails, then everything succeeds; whymove never fails.
+    const h = harness([503]);
+    h.bus.syncApp("cal", { events: { publishes: [], consumes: [{ event: "a/*", kind: "http", method: "POST", path: "/cal" }] } });
+    h.publish("a", "first");
+    h.publish("a", "second");
+    await h.bus.tick();
+    expect(h.calls.map((c) => c.body?.event.name)).toEqual(["a/first"]);
+    // The timer waits for the retry, not for the held-back delivery that is already due.
+    expect(h.store.nextDueAt()).toBe(Date.parse("2026-09-22T00:00:00Z") + RETRY_DELAYS_MS[0]!);
+    // An event arriving during the backoff waits too; another app is not held.
+    h.bus.syncApp("whymove", { events: { publishes: [], consumes: [{ event: "a/*", kind: "http", method: "POST", path: "/wm" }] } });
+    h.publish("a", "third");
+    await h.bus.tick();
+    expect(h.calls.map((c) => `${c.url.endsWith("/cal") ? "cal" : "wm"}:${c.body?.event.name}`)).toEqual(["cal:a/first", "wm:a/third"]);
+    h.advance(RETRY_DELAYS_MS[0]!);
+    await h.bus.tick();
+    expect(h.calls.filter((c) => c.url.endsWith("/cal")).map((c) => c.body?.event.name)).toEqual(["a/first", "a/first", "a/second", "a/third"]);
+    expect(h.store.nextDueAt()).toBeUndefined();
+  });
 });
 
 describe("bus streams", () => {
@@ -221,6 +242,21 @@ describe("bus calls", () => {
       [500, false],
       [0, false],
     ]);
+  });
+
+  test("a body that breaks off after the headers is a failed call, still recorded", async () => {
+    const broken = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode("{\"partial"));
+        c.error(new Error("socket closed"));
+      },
+    });
+    const h = harness([() => new Response(broken, { status: 200 })]);
+    h.bus.syncApp("insight", { provides: [{ name: "research", method: "POST", path: "/api/research", timeoutMs: 5000 }] });
+    const err = await h.bus.call("portfolio", "insight", "research").catch((e) => e as CallError);
+    expect(err).toBeInstanceOf(CallError);
+    expect(err).toMatchObject({ status: 502, message: "answer cut off: socket closed" });
+    expect(h.store.listCalls()).toEqual([expect.objectContaining({ capability: "research", status: 200, ok: false, error: "answer cut off: socket closed" })]);
   });
 
   test("the catalogue lists what every app provides, publishes and consumes", () => {

@@ -267,7 +267,8 @@ export class Bus {
     for (const d of due) byApp.set(d.app, [...(byApp.get(d.app) ?? []), d]);
     await Promise.all(
       [...byApp.values()].map(async (list) => {
-        for (const d of list) await this.deliver(d);
+        // A delivery waiting for its retry holds back the app's later ones: order per app is guaranteed.
+        for (const d of list) if (!(await this.deliver(d))) break;
       }),
     );
   }
@@ -283,7 +284,8 @@ export class Bus {
     if (typeof this.timer === "object" && "unref" in this.timer) this.timer.unref();
   }
 
-  private async deliver(d: Delivery): Promise<void> {
+  /** One attempt; false when the delivery is still pending (a retry is scheduled). */
+  private async deliver(d: Delivery): Promise<boolean> {
     const now = this.now();
     const e = this.events.getEvent(d.eventId);
     if (!e) return this.skip(d, "event pruned before delivery", now);
@@ -308,29 +310,30 @@ export class Bus {
       const ended = this.now();
       if (res.ok) {
         this.store.patchDelivery(d.id, { status: "ok", attempts, lastStatus: res.status, lastError: undefined, endedAt: ended, nextAt: undefined });
-        return;
+        return true;
       }
       const text = (await res.text().catch(() => "")).slice(0, 300);
       const error = `${res.status}${text ? ` ${text}` : ""}`;
-      if (retryable(res.status)) this.fail(d, attempts, error, res.status, ended);
-      else {
-        this.store.patchDelivery(d.id, { status: "dead", attempts, lastStatus: res.status, lastError: error, endedAt: ended, nextAt: undefined });
-        this.dead(d, attempts, error, e);
-      }
+      if (retryable(res.status)) return this.fail(d, attempts, error, res.status, ended);
+      this.store.patchDelivery(d.id, { status: "dead", attempts, lastStatus: res.status, lastError: error, endedAt: ended, nextAt: undefined });
+      this.dead(d, attempts, error, e);
+      return true;
     } catch (err) {
-      this.fail(d, attempts, (err as Error).message ?? String(err), undefined, this.now());
+      return this.fail(d, attempts, (err as Error).message ?? String(err), undefined, this.now());
     }
   }
 
-  private fail(d: Delivery, attempts: number, error: string, status: number | undefined, now: number): void {
+  /** Schedule the retry, or end the delivery as dead; false while it is still pending. */
+  private fail(d: Delivery, attempts: number, error: string, status: number | undefined, now: number): boolean {
     if (attempts >= MAX_ATTEMPTS) {
       this.store.patchDelivery(d.id, { status: "dead", attempts, lastStatus: status, lastError: error, endedAt: now, nextAt: undefined });
       this.dead(d, attempts, error, this.events.getEvent(d.eventId));
-      return;
+      return true;
     }
     const delay = RETRY_DELAYS_MS[attempts - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1] ?? 0;
     this.store.patchDelivery(d.id, { status: "pending", attempts, lastStatus: status, lastError: error, nextAt: now + delay });
     this.log(`delivery #${d.id} ${d.event} → ${d.app}: attempt ${attempts} failed (${error}); next in ${Math.round(delay / 1000)}s`);
+    return false;
   }
 
   private giveUp(d: Delivery, error: string, now: number): void {
@@ -349,9 +352,10 @@ export class Bus {
     }
   }
 
-  private skip(d: Delivery, reason: string, now: number): void {
+  private skip(d: Delivery, reason: string, now: number): true {
     this.store.patchDelivery(d.id, { status: "skipped", lastError: reason, endedAt: now, nextAt: undefined });
     this.log(`delivery #${d.id} ${d.event} → ${d.app}: skipped (${reason})`);
+    return true;
   }
 
   /** Operator: queue a dead or skipped delivery again, from attempt zero. Any other status is returned unchanged. */
@@ -385,7 +389,8 @@ export class Bus {
       this.store.addCall({ caller, app, capability: name, status, ok, durationMs: Math.max(0, this.now() - startedAt), ...(error ? { error } : {}), at: startedAt });
     const signals = [AbortSignal.timeout(cap.timeoutMs), ...(req.signal ? [req.signal] : [])];
     const signal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
-    let res: Response;
+    let res: Response | undefined;
+    let body: ArrayBuffer;
     try {
       res = await this.fetch(`http://127.0.0.1:${port}${cap.path}`, {
         method: cap.method,
@@ -398,14 +403,16 @@ export class Bus {
         ...(req.body !== undefined && req.body !== null && cap.method !== "GET" ? { body: req.body } : {}),
         signal,
       });
+      // Inside the try: the timeout covers the body too, and a body cut short is a failed call.
+      body = await res.arrayBuffer();
     } catch (err) {
       const timedOut = (err as Error).name === "TimeoutError" || signal?.aborted;
-      const error = timedOut ? `no answer within ${Math.round(cap.timeoutMs / 1000)}s` : `unreachable: ${(err as Error).message ?? String(err)}`;
-      const rec = record(0, false, error);
+      const reason = (err as Error).message ?? String(err);
+      const error = timedOut ? `no answer within ${Math.round(cap.timeoutMs / 1000)}s` : res ? `answer cut off: ${reason}` : `unreachable: ${reason}`;
+      const rec = record(res?.status ?? 0, false, error);
       this.log(`call ${caller} → ${app}/${name}: ${error}`);
       throw Object.assign(new CallError(timedOut ? 504 : 502, error), { record: rec });
     }
-    const body = await res.arrayBuffer();
     const rec = record(res.status, res.ok, res.ok ? undefined : `${res.status}`);
     this.log(`call ${caller} → ${app}/${name}: ${res.status} in ${rec.durationMs}ms`);
     const contentType = res.headers.get("content-type") ?? undefined;

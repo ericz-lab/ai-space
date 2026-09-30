@@ -66,7 +66,7 @@ Every stored event passes through the bus once. For each app whose `consumes` ma
   "events": [ { "…the same event…" } ] }
 ```
 
-A 2xx ends the delivery (`ok`). A 5xx, 408, 425, 429 or a connection error retries after 3 s, 10 s, 30 s, 1 min, 5 min, 10 min, 10 min; the eighth failure makes it `dead`. Any other 4xx is final at once: a 400 will not fix itself by retrying. One attempt times out after 30 s. Deliveries to one app go in order, one at a time; different apps in parallel.
+A 2xx ends the delivery (`ok`). A 5xx, 408, 425, 429 or a connection error retries after 3 s, 10 s, 30 s, 1 min, 5 min, 10 min, 10 min; the eighth failure makes it `dead`. Any other 4xx is final at once: a 400 will not fix itself by retrying. One attempt times out after 30 s. Deliveries to one app go in order, one at a time: one waiting for its retry holds back the app's later ones, so a delivery that keeps failing holds the app's queue for about 27 minutes before it goes `dead`. Different apps go in parallel.
 
 **stream.** The app holds `GET /api/events/stream` open with its `SPACE_APP_TOKEN`. Each delivery arrives as one server-sent event (`event: delivery`, `id: <delivery id>`, `data: <the body above>`); the app answers `POST /api/events/ack { "delivery": 12 }`. Deliveries for an app that is not connected wait as `pending` and are pushed when it connects, oldest first. A pushed delivery not acked within 5 minutes goes back to `pending` and is pushed again on the next connection; after eight such rounds it is `dead`. Keepalive comments go out every 20 s.
 
@@ -90,7 +90,7 @@ Content-Type: application/json
 
 ai-space identifies the caller from the token, checks that `insight` provides `research` and that the caller is allowed, forwards the request to `http://127.0.0.1:<insight's port>/api/research` with the method the capability declared, the caller's `content-type` and `accept`, and two headers the provider trusts: `x-space-caller: portfolio` and `x-space-capability: research`. Whatever the provider answers, status, content type and body, comes back unchanged, with `x-space-call-id` and `x-space-call-ms` added. Every call lands in the `bus_calls` table (caller, app, capability, status, duration, error) and in `GET /api/calls`.
 
-Errors the bus itself answers: 401 no valid token, 404 unknown app or capability, 403 the caller is not in `callers`, 503 the provider has no service port, 504 no answer within the capability's timeout, 502 unreachable, 413 a body over 4 MB.
+Errors the bus itself answers: 401 no valid token, 404 unknown app or capability, 403 the caller is not in `callers`, 503 the provider has no service port, 504 no answer within the capability's timeout, 502 unreachable or an answer cut off mid-body (recorded as a failed call either way), 413 a body over 4 MB.
 
 A provider only has to trust requests that come from loopback and carry `x-space-caller`; it no longer hands out push tokens. The operator token calls as `space`.
 

@@ -132,6 +132,20 @@ describe("turns", () => {
     expect((await first).status).toBe(502);
   });
 
+  test("a thread cannot be deleted while it answers, alone or with its scope", async () => {
+    const { thread } = (await (await call("POST", "/api/chat/threads", { scope: "s" })).json()) as any;
+    process.env.FAKE_MODEL_MODE = "hang";
+    const first = call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, { message: "slow", timeoutMs: 400 });
+    await Bun.sleep(80);
+    expect((await call("DELETE", `/api/chat/threads/${thread.id}`)).status).toBe(409);
+    expect((await call("DELETE", "/api/chat/threads?scope=s")).status).toBe(409);
+    const done = (await (await first).json()) as any;
+    expect(done.thread.id).toBe(thread.id);
+    expect(store.listMessages(thread.id).length).toBe(2);
+    expect((await call("DELETE", `/api/chat/threads/${thread.id}`)).status).toBe(200);
+    expect(store.listMessages(thread.id)).toEqual([]);
+  });
+
   test("validation: message, tools outside the chat set, too many attachments", async () => {
     const { thread } = (await (await call("POST", "/api/chat/threads", { scope: "s" })).json()) as any;
     expect((await call("POST", `/api/chat/threads/${thread.id}/turn`, { message: "  " })).status).toBe(400);

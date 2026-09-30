@@ -119,7 +119,10 @@ export class ModelService {
       const outcome: ImageRunOutcome = { ok: false, error: (e as Error).message, backend: this.backend as ImageRunOutcome["backend"] };
       return { outcome, call: row(undefined, input.model, outcome, this.now(), 0) };
     }
-    await this.acquire();
+    if (!(await this.acquire(signal))) {
+      const outcome: ImageRunOutcome = { ok: false, error: "aborted", backend: target.runtime.backend };
+      return { outcome, call: row(target.runtime.name, target.model, outcome, this.now(), 0) };
+    }
     const startedAt = this.now();
     let outcome: ImageRunOutcome;
     try {
@@ -169,7 +172,11 @@ export class ModelService {
       const outcome: RunOutcome = { ok: false, error: (e as Error).message, backend: this.backend as RunOutcome["backend"] };
       return { outcome, call: this.record(app, input, undefined, outcome, this.now(), 0, source) };
     }
-    await this.acquire();
+    if (!(await this.acquire(signal))) {
+      // Cancelled while queued: it never ran, but the ledger still shows the request.
+      const outcome: RunOutcome = { ok: false, error: "aborted", backend: target.runtime.backend };
+      return { outcome, call: this.record(app, { ...input, model: target.model }, target.runtime.name, outcome, this.now(), 0, source) };
+    }
     const startedAt = this.now();
     let outcome: RunOutcome;
     try {
@@ -239,16 +246,26 @@ export class ModelService {
     });
   }
 
-  private acquire(): Promise<void> {
+  /** A slot under the cap; false, holding none, when `signal` aborts first (the waiter leaves the queue at once). */
+  private acquire(signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(false);
     if (this.running < this.maxConcurrency) {
       this.running++;
-      return Promise.resolve();
+      return Promise.resolve(true);
     }
     return new Promise((resolve) => {
-      this.queue.push(() => {
+      const onAbort = () => {
+        const i = this.queue.indexOf(grant);
+        if (i >= 0) this.queue.splice(i, 1);
+        resolve(false);
+      };
+      const grant = () => {
+        signal?.removeEventListener("abort", onAbort);
         this.running++;
-        resolve();
-      });
+        resolve(true);
+      };
+      this.queue.push(grant);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 

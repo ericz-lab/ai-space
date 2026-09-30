@@ -187,7 +187,9 @@ export class ChatService {
     }
   }
 
+  /** Throws `Locked` while the thread is answering: the turn would write its reply into a deleted thread. */
   async deleteThread(app: string, id: number): Promise<boolean> {
+    if (this.running.has(id)) throw new Locked();
     const paths = this.store.deleteThread(app, id);
     if (!paths) return false;
     await this.unlinkAll(paths);
@@ -195,13 +197,17 @@ export class ChatService {
     return true;
   }
 
+  /** Throws `Locked`, deleting nothing, while any thread of the scope is answering. */
   async deleteScope(app: string, scope: string): Promise<number> {
+    const threads = this.store.listThreads(app, scope, 100_000);
+    if (threads.some((t) => this.running.has(t.id))) throw new Locked();
+    // Every row goes before the first await, so no turn can start on a thread about to be deleted.
+    const removed = threads.map((t) => ({ id: t.id, paths: this.store.deleteThread(app, t.id) ?? [] }));
     let n = 0;
-    for (const t of this.store.listThreads(app, scope, 100_000)) {
-      const paths = this.store.deleteThread(app, t.id) ?? [];
+    for (const { id, paths } of removed) {
       n += paths.length;
       await this.unlinkAll(paths);
-      await rm(join(this.fileDir(app), String(t.id)), { recursive: true, force: true });
+      await rm(join(this.fileDir(app), String(id)), { recursive: true, force: true });
     }
     return n;
   }

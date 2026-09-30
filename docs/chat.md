@@ -105,10 +105,10 @@ Every image shipped is read again by the runtime on every turn (a `Read` call pl
 ```
 GET    /api/chat/threads?scope=&limit=      threads of the app in a scope, newest first
 POST   /api/chat/threads                    { scope, title? } → 201 thread
-DELETE /api/chat/threads?scope=             every thread of a scope (an app deleting a note)
+DELETE /api/chat/threads?scope=             every thread of a scope (an app deleting a note); 409, nothing deleted, while one answers
 GET    /api/chat/threads/:id                thread, messages with attachments and (from the ledger) backend, model, cost; `running`
 PATCH  /api/chat/threads/:id                { title }
-DELETE /api/chat/threads/:id                rows and files
+DELETE /api/chat/threads/:id                rows and files; 409 while it answers
 POST   /api/chat/threads/:id/attachments    multipart field `file` → 201 attachment (413 too large, 415 not an image)
 GET    /api/chat/attachments/:id            the image bytes
 POST   /api/chat/threads/:id/turn           one turn, streamed (above)

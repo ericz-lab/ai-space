@@ -252,6 +252,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     runningTasks: (app) => scheduler.runningTasks(app),
     onRemove: async (app) => {
       scheduler.forget(app);
+      bus.forget(app);
       void router.sync();
     },
     supervision: { mode: supervisor.mode, lastOf: (app) => (supervisor.mode === "space" ? supervisor.lastOf(app) : undefined) },

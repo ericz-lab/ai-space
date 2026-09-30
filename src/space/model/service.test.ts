@@ -57,6 +57,27 @@ describe("drain", () => {
   });
 });
 
+test("a call cancelled while queued leaves the queue at once and is recorded as aborted", async () => {
+  service = new ModelService({ store, runtimes: claudeOnly(fakeModelBin()), maxConcurrency: 1, log: () => {} });
+  process.env.FAKE_MODEL_MODE = "hang";
+  const holder = new AbortController();
+  const first = service.run("my-app", input(), holder.signal);
+  const waiter = new AbortController();
+  const second = service.run("my-app", { ...input(), tag: "queued" }, waiter.signal);
+  await Bun.sleep(30);
+  expect(service.load).toEqual({ running: 1, waiting: 1 });
+
+  waiter.abort();
+  const r = await second;
+  expect(r.outcome).toMatchObject({ ok: false, error: "aborted" });
+  expect(r.call).toMatchObject({ tag: "queued", status: "error", error: "aborted", durationMs: 0 });
+  expect(service.load).toEqual({ running: 1, waiting: 0 });
+
+  holder.abort();
+  await first;
+  expect(service.load).toEqual({ running: 0, waiting: 0 });
+});
+
 test("Codex tier calls estimate the concrete model cost only when usage is available", async () => {
   const { RuntimeRegistry } = await import("../runtimes/registry.ts");
   const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");

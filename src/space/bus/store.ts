@@ -142,11 +142,15 @@ export class BusStore {
     this.db.query(`UPDATE bus_deliveries SET ${sets.join(", ")} WHERE id = ?`).run(...args, id);
   }
 
-  /** http deliveries whose next attempt is due, oldest first. */
+  /** http deliveries whose next attempt is due and that wait behind no retry to the same app, oldest first. */
   dueHttp(now: number, limit = 100): Delivery[] {
     return this.db
-      .query<DeliveryRow, [number, number]>("SELECT * FROM bus_deliveries WHERE status = 'pending' AND kind = 'http' AND next_at <= ? ORDER BY id LIMIT ?")
-      .all(now, limit)
+      .query<DeliveryRow, [number, number, number]>(
+        `SELECT * FROM bus_deliveries d WHERE status = 'pending' AND kind = 'http' AND next_at <= ?
+           AND NOT EXISTS (SELECT 1 FROM bus_deliveries p WHERE p.app = d.app AND p.kind = 'http' AND p.status = 'pending' AND p.id < d.id AND p.next_at > ?)
+         ORDER BY id LIMIT ?`,
+      )
+      .all(now, now, limit)
       .map(rowToDelivery);
   }
 
@@ -166,10 +170,13 @@ export class BusStore {
       .map(rowToDelivery);
   }
 
-  /** The earliest moment any pending http or sent stream delivery needs attention. */
+  /** The earliest moment an app's oldest pending http delivery, or any sent stream delivery, needs attention. */
   nextDueAt(): number | undefined {
     const row = this.db
-      .query<{ next: number | null }, []>("SELECT MIN(next_at) AS next FROM bus_deliveries WHERE (status = 'pending' AND kind = 'http') OR status = 'sent'")
+      .query<{ next: number | null }, []>(
+        `SELECT MIN(next_at) AS next FROM bus_deliveries d WHERE status = 'sent'
+           OR (status = 'pending' AND kind = 'http' AND NOT EXISTS (SELECT 1 FROM bus_deliveries p WHERE p.app = d.app AND p.kind = 'http' AND p.status = 'pending' AND p.id < d.id))`,
+      )
       .get();
     return row?.next ?? undefined;
   }
