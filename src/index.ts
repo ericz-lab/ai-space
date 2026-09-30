@@ -64,6 +64,18 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const runtimes = new RuntimeRegistry(loaded.config);
   // Codex tiers from the installed CLI's catalogue, in the background: the built-in names serve until it answers.
   void refreshCodexTiers(runtimes, loaded.config.runtimes, (l) => console.log(`[runtimes] ${l}`));
+  const registry = new AppRegistry();
+  // The bus (docs/events.md): http and stream deliveries of every stored event, and calls between apps.
+  const busStore = new BusStore(config.dbPath);
+  const bus = new Bus({
+    store: busStore,
+    events: store,
+    servicePort: (app) => registry.get(app)?.manifest.service?.port,
+    onDead: (d, event) =>
+      void notify
+        .send(d.app, { level: "alert", title: `event ${d.event} not delivered`, text: `Delivery #${d.id} (${d.kind}) gave up after ${d.attempts} attempt(s): ${d.lastError ?? "no error text"}${event ? `\nEvent #${event.id} from ${event.app} at ${new Date(event.at).toISOString()}` : ""}`, key: `bus:${d.app}:${d.event}`, windowMs: 3_600_000 })
+        .catch((e) => console.error(`[bus] ${d.app}: dead-delivery notification rejected: ${(e as Error).message}`)),
+  });
   const modelPreferences = new ModelPreferences(store.db, runtimes);
   const appDefaultModel = () => modelPreferences.read() ?? config.model.defaultModel;
   const baseDefaultModel = () => modelPreferences.read() ?? config.chatModel;
@@ -101,18 +113,6 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
     onFinish: createTaskNotifier({ notify, tasksChannel: config.notifyTasks }),
     onPublish: (event) => bus.onEvent(event),
-  });
-  const registry = new AppRegistry();
-  // The bus (docs/events.md): http and stream deliveries of every stored event, and calls between apps.
-  const busStore = new BusStore(config.dbPath);
-  const bus = new Bus({
-    store: busStore,
-    events: store,
-    servicePort: (app) => registry.get(app)?.manifest.service?.port,
-    onDead: (d, event) =>
-      void notify
-        .send(d.app, { level: "alert", title: `event ${d.event} not delivered`, text: `Delivery #${d.id} (${d.kind}) gave up after ${d.attempts} attempt(s): ${d.lastError ?? "no error text"}${event ? `\nEvent #${event.id} from ${event.app} at ${new Date(event.at).toISOString()}` : ""}`, key: `bus:${d.app}:${d.event}`, windowMs: 3_600_000 })
-        .catch((e) => console.error(`[bus] ${d.app}: dead-delivery notification rejected: ${(e as Error).message}`)),
   });
   const layout = new LayoutStore(store.db);
   const sessions = new SessionStore(store.db);
