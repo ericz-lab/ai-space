@@ -214,6 +214,41 @@ describe("runSetup", () => {
     });
   });
 
+  describe("Cloudflare", () => {
+    const quiet: [string, string | boolean][] = [["Configure a notification channel now?", false], ["Configure one now?", false], ["Will a hub", false], ["Add a peer", false], ["Write them?", false]];
+
+    test("no tunnel yet and a known domain: the cf commands are printed; a missing cf is not counted", async () => {
+      const io = scripted([...quiet]);
+      const d = await deps(io, { SPACE_API_TOKEN: "t", SPACE_NAME: "box", SPACE_ROUTER: "caddy", SPACE_DOMAIN: "example.com" });
+      const out = await runSetup(d);
+      expect(out.missing).toEqual(["gh", "cloudflared", "caddy"]);
+      const log = io.log.join("\n");
+      expect(log).toContain("bun add -g cf");
+      expect(log).toContain("cf tunnels create --name box --config-src cloudflare");
+      expect(log).toContain('"hostname":"*.example.com","service":"http://127.0.0.1:8080"');
+      expect(log).toContain("Access allows me@example.com");
+    });
+
+    test("a cloudflared system unit counts as the tunnel; cf's login is checked", async () => {
+      const io = scripted([...quiet]);
+      const d = await deps(io, { SPACE_API_TOKEN: "t" });
+      const base = d.run;
+      d.which = async (cmd) => (["claude", "gh", "tar", "zstd", "cloudflared", "cf"].includes(cmd) ? `/usr/bin/${cmd}` : undefined);
+      d.run = async (cmd, opts) => {
+        if (cmd.join(" ") === "systemctl is-active cloudflared") return { code: 0, stdout: "active\n", stderr: "" };
+        if (cmd[0] === "cf") return { code: 0, stdout: '{"authenticated":false,"error":"Not logged in"}', stderr: "" };
+        return base(cmd, opts);
+      };
+      const out = await runSetup(d);
+      expect(out.missing).toEqual(["gh"]);
+      const log = io.log.join("\n");
+      expect(log).toContain("tunnel system unit active");
+      expect(log).toContain("Not logged in");
+      expect(log).toContain("The tunnel is up.");
+      expect(log).not.toContain("cf tunnels create");
+    });
+  });
+
   test("a failed S3 probe is dropped unless kept; a rejected peer token is reported", async () => {
     const io = scripted([
       ["Configure a notification channel now?", false],

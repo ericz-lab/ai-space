@@ -1,6 +1,7 @@
 import { chmod } from "node:fs/promises";
 import { hostname } from "node:os";
 import { createInterface } from "node:readline";
+import { cfCommands, parseWhoami, renderCfScript } from "./cloudflare.ts";
 import { TRANSPORTS, parseChannelUrl } from "./notify/index.ts";
 import type { Channel, ChannelKind } from "./notify/types.ts";
 import { PEER_NAME_RE } from "./peers/config.ts";
@@ -9,12 +10,14 @@ import type { Workspace } from "./workspace.ts";
 /**
  * `bun src/index.ts setup`: the interactive first-install walk-through.
  *
- * Checks the tools ai-space spawns (bun, git, tar, zstd, claude, gh, cloudflared), then
+ * Checks the tools ai-space spawns (bun, git, tar, zstd, claude, gh, cloudflared, and the
+ * optional `cf` for Cloudflare changes), then
  * asks for every workspace `.env` value section by section (core, who runs
  * the services, notification channel, S3 blob store, peers), verifies what can be verified from the
  * machine (a test message, one S3 list call), writes `<workspace>/.env`
  * keeping every line it does not touch, and prints what remains to be done
- * elsewhere (tunnel hostnames, the access layer). Re-runnable: existing
+ * elsewhere (tunnel hostnames, the access layer, as the `cf` commands of
+ * cloudflare.ts). Re-runnable: existing
  * values are the defaults. The full procedure is in docs/install.md.
  *
  * Every side effect goes through `SetupDeps`, so the flow runs unchanged
@@ -201,7 +204,8 @@ export const CHANNEL_FORMS: Record<ChannelKind, { fields: Field[]; build: (a: Re
 /* Tool checks                                                              */
 /* ------------------------------------------------------------------------ */
 
-type Check = { name: string; ok: boolean; detail: string; hint?: string };
+/** `optional`: a failure is shown with its hint but not counted as missing. */
+type Check = { name: string; ok: boolean; detail: string; hint?: string; optional?: boolean };
 
 export async function checkTools(d: SetupDeps): Promise<Check[]> {
   const checks: Check[] = [];
@@ -243,12 +247,22 @@ export async function checkTools(d: SetupDeps): Promise<Check[]> {
     checks.push({ name: "gh", ok: false, detail: "not on PATH", hint: "see docs/install.md step 3 (optional: only for cloning private apps)" });
   }
 
+  // The tunnel's connector: the user unit of install.md, or a system unit from `cloudflared service install`.
   if (await d.which("cloudflared")) {
-    const unit = await d.run(["systemctl", "--user", "is-active", "cloudflared"]);
-    const active = unit.stdout.trim() === "active";
-    checks.push({ name: "cloudflared", ok: active, detail: active ? "tunnel unit active" : "installed, user unit not active", hint: "see docs/install.md step 5" });
+    const user = (await d.run(["systemctl", "--user", "is-active", "cloudflared"])).stdout.trim() === "active";
+    const system = !user && (await d.run(["systemctl", "is-active", "cloudflared"])).stdout.trim() === "active";
+    const detail = user ? "tunnel user unit active" : system ? "tunnel system unit active" : "installed, no active cloudflared unit";
+    checks.push({ name: "cloudflared", ok: user || system, detail, hint: "see docs/install.md step 5" });
   } else {
     checks.push({ name: "cloudflared", ok: false, detail: "not on PATH", hint: "see docs/install.md step 5 (the panel stays loopback-only until then)" });
+  }
+
+  // cf makes the Cloudflare changes (docs/cloudflare.md); optional, since any machine with the login can run them.
+  if (await d.which("cf")) {
+    const who = parseWhoami((await d.run(["cf", "auth", "whoami"], { timeoutMs: 30_000 })).stdout);
+    checks.push({ name: "cf", ok: who.ok, detail: who.detail, hint: "cf auth login (or CLOUDFLARE_API_TOKEN); optional", optional: true });
+  } else {
+    checks.push({ name: "cf", ok: false, detail: "not on PATH", hint: "bun add -g cf (Node 22+; optional: Cloudflare changes, docs/cloudflare.md)", optional: true });
   }
 
   // Service supervision (docs/supervision.md) needs a user manager that outlives the login session.
@@ -307,7 +321,7 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
   const missing: string[] = [];
   for (const c of checks) {
     io.say(`  ${c.ok ? "ok  " : "--  "} ${c.name.padEnd(13)} ${c.detail}${c.ok || !c.hint ? "" : `  →  ${c.hint}`}`);
-    if (!c.ok) missing.push(c.name);
+    if (!c.ok && !c.optional) missing.push(c.name);
   }
   io.say();
 
@@ -438,12 +452,47 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
 
   /* what remains */
   io.say();
-  io.say("Next, from the Cloudflare dashboard (docs/install.md steps 5 and 6):");
-  io.say(`  - a tunnel public hostname  space.<your-domain>  →  http://127.0.0.1:${updates.SPACE_PORT ?? current("SPACE_PORT") ?? "8700"}`);
-  io.say("  - an Access application on that hostname allowing only you, before it goes live");
-  io.say("  - one hostname per app page, then that hostname as `url` in the app's space.yaml");
+  if (checks.find((c) => c.name === "cloudflared")?.ok) {
+    io.say("The tunnel is up. Later Cloudflare changes (a hostname, Access, a bucket) go through cf: docs/cloudflare.md");
+  } else {
+    await sayEdgePlan(d, { ...d.env, ...updates });
+  }
   if (missing.length) io.say(`Tools still missing: ${missing.join(", ")} (hints above).`);
   return { written: keys, missing, restarted };
+}
+
+/**
+ * What is left on Cloudflare: the `cf` commands of cloudflare.ts when the
+ * hostnames are known (the router's domain or SPACE_PANEL_HOST), else in words.
+ */
+async function sayEdgePlan(d: SetupDeps, env: Record<string, string | undefined>): Promise<void> {
+  const { io } = d;
+  const v = (k: string) => env[k]?.trim() ?? "";
+  const port = Number(v("SPACE_PORT") || 8700);
+  const domain = v("SPACE_DOMAIN").replace(/\.$/, "");
+  const panelHost = v("SPACE_PANEL_HOST") || (domain ? `space.${domain}` : "");
+  const zone = domain || panelHost.split(".").slice(1).join(".");
+  if (!panelHost || !zone.includes(".")) {
+    io.say("Next, on Cloudflare (docs/install.md steps 5 and 6; the cf commands are in docs/cloudflare.md):");
+    io.say(`  - a tunnel with the hostname  space.<your-domain>  →  http://127.0.0.1:${port}`);
+    io.say("  - an Access application on that hostname allowing only you, before it goes live");
+    io.say("  - one hostname per app page (or SPACE_ROUTER=caddy and one wildcard), then that hostname as `url` in the app's space.yaml");
+    return;
+  }
+  const git = await d.run(["git", "config", "--global", "user.email"]);
+  const email = git.code === 0 && git.stdout.trim() ? git.stdout.trim() : "you@example.com";
+  const machine = v("SPACE_NAME") || d.hostname();
+  const cmds = cfCommands({
+    machine,
+    zone,
+    panelHost,
+    panelPort: port,
+    ...(v("SPACE_ROUTER") === "caddy" ? { routerPort: Number(v("SPACE_ROUTER_PORT") || 8080) } : {}),
+    email,
+  });
+  io.say(`Next, on Cloudflare, from any machine with cf (docs/cloudflare.md). Access allows ${email}; change the body if that is wrong.`);
+  for (const line of renderCfScript(cmds)) io.say(`  ${line}`);
+  io.say("Then the cloudflared unit of docs/install.md step 5 with that token.");
 }
 
 /* ------------------------------------------------------------------------ */

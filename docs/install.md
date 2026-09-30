@@ -184,7 +184,7 @@ If `systemctl --user` says the bus is not available, log out and back in once af
 
 ai-space binds loopback on purpose. The tunnel publishes chosen ports on hostnames of your domain, TLS included, with nothing listening on the public IP.
 
-Prerequisites: the domain is on Cloudflare (nameservers switched, zone active) and you have a Zero Trust account (free tier is enough).
+Prerequisites: the domain is on Cloudflare (nameservers switched, zone active) and you have a Zero Trust account (free tier is enough). Which Cloudflare objects a space uses and which tool manages each is in [cloudflare.md](cloudflare.md).
 
 **Create the tunnel (dashboard-managed, recommended)**
 
@@ -211,7 +211,7 @@ EOF
 systemctl --user daemon-reload && systemctl --user enable --now cloudflared
 ```
 
-(`cloudflared service install <token>` does the same as a system service and needs sudo.)
+(`cloudflared service install <token>` does the same as a system service and needs sudo; `setup` accepts either unit. It writes the token into the unit file, which is world-readable, so prefer the user unit.)
 
 **Wildcard and router (recommended)**
 
@@ -253,13 +253,13 @@ Then in DNS (the zone's DNS page, not Zero Trust): a proxied CNAME `*` to `<tunn
 
 Each rule creates the proxied CNAME in DNS. Nothing else in DNS is needed. Keep the zone's SSL mode at Full (strict); the tunnel terminates TLS at Cloudflare and speaks plain HTTP to loopback.
 
-The CLI route is equivalent when you prefer files over the dashboard: `cloudflared tunnel login`, `cloudflared tunnel create <name>`, an `ingress:` list in `~/.cloudflared/config.yml`, `cloudflared tunnel route dns <name> <hostname>` per hostname, and `cloudflared tunnel run <name>` in the unit instead of the token.
+**The CLI route (recommended for scripts and agents).** Every dashboard step above and in steps 6 and 7 has a `cf` command, Cloudflare's unified CLI (`bun add -g cf`, Node 22+): the tunnel, its token, the ingress, the DNS records including the wildcard, the Access applications and the bucket. The commands, in the order that keeps Access ahead of the hostnames, are in [cloudflare.md](cloudflare.md); `setup` prints them with this machine's values. Run them from any machine logged in with `cf auth login`; the server only needs the token. The connector stays the `cloudflared` unit above.
 
 ## 6. Cloudflare Access
 
 The panel routes carry no token (see [panel.md](panel.md)): whoever reaches the panel can open a chat with write permissions, which is a shell as this user. The access layer in front of the tunnel is the authentication. Create it before the panel hostname goes live.
 
-Zero Trust → Access → Applications → Add → Self-hosted:
+Zero Trust → Access → Applications → Add → Self-hosted (or `cf zero-trust access applications create`, [cloudflare.md](cloudflare.md)):
 
 - Application domain: `space.example.com`. Session duration: as you like (24 h is common).
 - Identity: at minimum the One-time PIN login method; add an IdP (Google, GitHub) if you want one click instead of an emailed code.
@@ -277,8 +277,8 @@ Check from the laptop: the panel hostname shows the Cloudflare login page, then 
 
 Only needed when an app declares `storage.blobs: s3`; an app with `storage.blobs: file` uses `<workspace>/data/<app>/blobs/` and needs nothing here. R2 is recommended once files are large (video) or must survive the machine.
 
-1. R2 → Create bucket. One bucket for the space is enough: each app gets its own prefix (`<app>/`) unless its manifest says otherwise.
-2. R2 → Manage R2 API Tokens → Create API token: permission Object Read & Write, scoped to that bucket, no TTL. Note the Access Key ID, Secret Access Key and the S3 endpoint `https://<account-id>.r2.cloudflarestorage.com`.
+1. R2 → Create bucket (or `cf r2 buckets create --name <bucket>`). One bucket for the space is enough: each app gets its own prefix (`<app>/`) unless its manifest says otherwise.
+2. R2 → Manage R2 API Tokens → Create API token: permission Object Read & Write, scoped to that bucket, no TTL. This one stays on the dashboard: `cf` offers only short-lived R2 credentials. Note the Access Key ID, Secret Access Key and the S3 endpoint `https://<account-id>.r2.cloudflarestorage.com`.
 3. In `~/.ai-space/.env`:
 
 ```bash

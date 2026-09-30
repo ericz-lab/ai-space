@@ -79,7 +79,7 @@ git push <host> main      # 检出到 ~/.ai-space/core，运行 deploy/install.s
 
 `deploy/install.sh` 把 `deploy/ai-space.service` 装进 `~/.config/systemd/user/`，开启 linger，重启服务。日志：`journalctl --user -u ai-space -f`。
 
-新机器上，在 `~/.ai-space/core` 里运行 `bun run setup` 交互式地完成其余部分：检查 ai-space 会调用的工具（claude、gh、cloudflared），逐节询问工作区 `.env` 的每个值，发一条测试通知，探测存储桶，并打印 Cloudflare 上还需要做的事。从一个空用户到域名和访问层之后的面板，完整流程见 [docs/install.md](docs/install.md)。
+新机器上，在 `~/.ai-space/core` 里运行 `bun run setup` 交互式地完成其余部分：检查 ai-space 会调用的工具（claude、gh、cloudflared，以及可选的 `cf` CLI），逐节询问工作区 `.env` 的每个值，发一条测试通知，探测存储桶，并以 `cf` 命令的形式打印 Cloudflare 上还需要做的事（[docs/cloudflare.md](docs/cloudflare.md)）。从一个空用户到域名和访问层之后的面板，完整流程见 [docs/install.md](docs/install.md)。
 
 App 规范（什么是 app、目录布局、`space.yaml` 契约）见 [docs/app-spec.md](docs/app-spec.md)；引导 agent 按该规范创建、收编或修改 app 的共享 skill 见 [skills/space-app](skills/space-app/SKILL.md)（app 模板在 `skills/space-app/templates/`）；agent 和贡献者指南（含提交格式）见 [AGENTS.md](AGENTS.md)；Bun 约定见 [CLAUDE.md](CLAUDE.md)。
 

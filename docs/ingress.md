@@ -1,6 +1,6 @@
 # Ingress: how the outside reaches a space
 
-Status: decided and in use. Every machine publishes its panel and its apps through a Cloudflare Tunnel (option A below); nothing listens on a public port. This document records the alternatives that were weighed and why they lost, so the choice is not reopened by accident. The install steps are in [install.md](install.md) (steps 5 and 6).
+Status: decided and in use. Every machine publishes its panel and its apps through a Cloudflare Tunnel (option A below); nothing listens on a public port. This document records the alternatives that were weighed and why they lost, so the choice is not reopened by accident. The install steps are in [install.md](install.md) (steps 5 and 6); every Cloudflare object a space uses, and the `cf` commands that manage them, are in [cloudflare.md](cloudflare.md).
 
 ## Problem
 

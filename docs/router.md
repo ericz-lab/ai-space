@@ -137,7 +137,7 @@ Once per machine, next to the tunnel ([install.md](install.md) step 5):
 
 1. Caddy's static binary into `~/.local/bin`, like `cloudflared`.
 2. A user unit (`caddy.service` on Linux; a LaunchAgent on macOS) running `caddy run --config ~/.ai-space/run/Caddyfile --adapter caddyfile`. ai-space writes an empty but valid Caddyfile at `init` so the unit starts before any app exists.
-3. On the tunnel: one public hostname `*.example.com` to `http://127.0.0.1:8080`, plus the wildcard CNAME the dashboard does not create by itself. One Access application on `*.example.com`. The panel keeps its own rule and Access application, or sets `SPACE_PANEL_HOST` and joins the wildcard.
+3. On the tunnel: one public hostname `*.example.com` to `http://127.0.0.1:8080`, plus the wildcard CNAME the dashboard does not create by itself. One Access application on `*.example.com`. All three are `cf` commands in [cloudflare.md](cloudflare.md). The panel keeps its own rule and Access application, or sets `SPACE_PANEL_HOST` and joins the wildcard.
 4. `.env`: `SPACE_ROUTER=caddy`, `SPACE_DOMAIN=example.com`. `setup` asks for both and checks that `caddy` is on `PATH` and its unit is active.
 
 Installing an app afterwards is: clone, sync. Step 10's "add the hostname on the dashboard" goes away for apps under the wildcard.

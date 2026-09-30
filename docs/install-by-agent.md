@@ -6,7 +6,7 @@ This is the procedure for a coding agent (Claude Code, Codex, or any tool with a
 
 - **Two shapes.** Either you run on the person's machine and reach the server over `ssh <host>`, or you run on the server itself inside the checkout at `~/.ai-space/core`. Say which shape you are in at the start; every command below is meant for the server.
 - **Root only for step 1.** Create the user, packages, time zone, swap and firewall with `sudo`, then do everything else as the user that owns ai-space. Never run the service, Bun, Claude Code or `gh` as root.
-- **Stop at the browser.** The Claude login, `gh auth login`, the Cloudflare tunnel and the Access application need a browser. Print the URL or code, tell the person exactly what to do, wait.
+- **Stop at the browser.** The Claude login, `gh auth login` and `cf auth login` (or, on the dashboard route, the Cloudflare tunnel and the Access application) need a browser. Print the URL or code, tell the person exactly what to do, wait.
 - **Show before you write.** Print the `.env` values you intend to write, with secrets masked, and get a yes. Secrets go into `~/.ai-space/.env` or the tools' own stores and nowhere else; never into a commit, a log line or the chat transcript when it can be avoided.
 - **No new ports.** ai-space, every app and the peer routes bind loopback; only SSH is open. Do not change that to "make it reachable".
 - **Prove, do not assume.** Every phase ends with a command whose output you paste. The checklist at the end is the definition of done.
@@ -101,15 +101,17 @@ Proof: `curl -s 127.0.0.1:8700/healthz` is `{"ok":true}`; `curl -s 127.0.0.1:870
 
 Order matters: the Access application first, the public hostname second, so the panel is never reachable without login.
 
-1. Stop: the person creates the tunnel in the Zero Trust dashboard and gives you the token, and creates the Access application for `space.<domain>` with an allow policy on their email.
-2. Install `cloudflared` under `~/.local/bin` and the user unit from install.md with the token in `~/.cloudflared/env` (mode 600).
-3. Stop: the person adds the public hostname `space.<domain>` to `http://127.0.0.1:8700`.
+Cloudflare changes go through the `cf` CLI ([cloudflare.md](cloudflare.md)); do not use `wrangler` or hand-written API calls.
+
+1. Install `cf` where the person can log in (`bun add -g cf`, needs Node 22+; on the server or on their laptop). Stop: `cf auth login` opens a browser (device flow); relay the URL and code, wait, then `cf auth whoami` shows `"authenticated": true`. If the person would rather click, the dashboard route of install.md steps 5 and 6 still works: they create the tunnel and the Access application and give you the token.
+2. Run the commands `setup` printed (or the list in cloudflare.md) in order: tunnel, Access applications for `space.<domain>` (and `*.<domain>` with the router) with an allow policy on their email, then the ingress, then the DNS records, then `cf tunnels token get`. Show each `--body` before running it.
+3. Install `cloudflared` under `~/.local/bin` and the user unit from install.md with the token in `~/.cloudflared/env` (mode 600).
 
 Proof: `systemctl --user is-active cloudflared`; from outside, `curl -sI https://space.<domain>/api/apps` is a 302 to the Cloudflare login; the person opens the panel in a browser and sees it after login.
 
 ### Phase 7: bucket, notifications, peers (steps 7 to 9, each optional)
 
-- **Bucket:** `SPACE_S3_*` in `.env`, restart, then `bun src/index.ts backup space` from the checkout. Proof: the object appears in the bucket; `bun src/index.ts backups` lists it.
+- **Bucket:** `cf r2 buckets create --name <bucket>` (or the dashboard); stop: the person creates the bucket-scoped R2 API token on the dashboard and gives you the two keys. `SPACE_S3_*` in `.env`, restart, then `bun src/index.ts backup space` from the checkout. Proof: the object appears in the bucket; `bun src/index.ts backups` lists it.
 - **Notifications:** `SPACE_NOTIFY_DEFAULT` and `SPACE_NOTIFY_TASKS=default`, restart. Proof: `POST /api/notify/channels/default/test` with the API token and the person confirms the message arrived.
 - **Peer:** follow install.md step 9 for the role the person chose. Proof: `GET /api/peers` on the hub shows this machine `ok`.
 
@@ -142,7 +144,7 @@ Base, required on every install:
 Reachability, when a domain was requested:
 
 - [ ] `cloudflared` user unit active; token file mode 600
-- [ ] Access application exists for the panel hostname before the hostname does
+- [ ] Access application exists for the panel hostname before the hostname does (`cf zero-trust access applications list`)
 - [ ] `curl -sI https://space.<domain>/api/apps` from outside is 302; an incognito browser is blocked; the person can log in and see the panel
 
 Services, when requested:
