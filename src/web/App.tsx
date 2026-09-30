@@ -1,4 +1,5 @@
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { AddForm, UninstallForm } from "./AppForms.tsx";
 import ModelPreference from "./ModelPreference.tsx";
 import Chat from "./Chat.tsx";
 import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
@@ -7,9 +8,12 @@ import Terminal from "./Terminal.tsx";
 import Usage from "./Usage.tsx";
 import AppModels from "./AppModels.tsx";
 import Events from "./Events.tsx";
-import { getJson, isImgIcon, relTime, repoUrl, sendJson, untilTime, type AgentInfo, type AppInfo, type BackupInfo, type PeerInfo, type ServiceInfo, type WidgetInfo } from "./api.ts";
-import { type Key, LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
-import { type PetChoice, type PetdexPet, loadPetdex, resolvePet, suggestPets } from "./petdex.ts";
+import { getJson, repoUrl, sendJson, type AgentInfo, type AppInfo, type WidgetInfo } from "./api.ts";
+import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
+import PetField from "./PetField.tsx";
+import { type PetChoice, resolvePet } from "./petdex.ts";
+import SettingsStatus from "./SettingsStatus.tsx";
+import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 
 // Launcher-style panel: App and Agent tiles with hover details, widget cards, a chat window.
 // Settings is a built-in tile at the end of the Apps grid; it, the chat and the tasks list open as
@@ -19,379 +23,10 @@ import { type PetChoice, type PetdexPet, loadPetdex, resolvePet, suggestPets } f
 // Entries from peer machines say where they run in their hover details and are muted while that peer is down.
 // Every string the panel owns goes through `t` (i18n.ts); manifest text is picked with `localized`.
 
-const STATUS: Record<string, Key> = { active: "status.active", paused: "status.paused", archived: "status.archived" };
-const HEALTH: Record<string, Key | undefined> = { ok: "status.up", down: "status.down", unknown: undefined };
-
-type DragProps = Partial<Record<"draggable" | "onDragStart" | "onDragOver" | "onDragEnd" | "data-drop", unknown>> | undefined;
-
-function Icon({ icon, fallback }: { icon: string; fallback: string }) {
-  const [broken, setBroken] = useState(false);
-  if (isImgIcon(icon) && !broken) return <img src={icon} alt="" loading="lazy" onError={() => setBroken(true)} />;
-  return <>{isImgIcon(icon) ? fallback : icon || fallback}</>;
-}
-
-function Tile({
-  icon,
-  fallback,
-  name,
-  href,
-  editing,
-  onRemove,
-  removeTitle,
-  onOpen,
-  showPop = true,
-  dragProps,
-  stale,
-  corner,
-  className,
-  children,
-}: {
-  icon: string;
-  fallback: string;
-  name: string;
-  href?: string;
-  editing: boolean;
-  onRemove?: () => void;
-  removeTitle?: string;
-  onOpen?: () => void;
-  showPop?: boolean;
-  dragProps?: DragProps;
-  /** The peer is not answering: the entry is its last known state. */
-  stale?: boolean;
-  /** A small icon over the icon's bottom-right corner: the app an agent belongs to. */
-  corner?: string;
-  className?: string;
-  children?: ReactNode;
-}) {
-  // onOpen wins over href: agent tiles open the chat window; links move into the pop-over.
-  const asLink = !!href && !editing && !onOpen;
-  // Hide the pop-over once the tile is clicked (a pure :hover would keep it while the pointer rests there).
-  const [popHidden, setPopHidden] = useState(false);
-  const inner = (
-    <>
-      {editing && onRemove && (
-        <button
-          className="tile-del"
-          title={removeTitle}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onRemove();
-          }}
-        >
-          ✕
-        </button>
-      )}
-      <span className={`tile-icon ${isImgIcon(icon) ? "" : "solid"}`}>
-        <Icon icon={icon} fallback={fallback} />
-        {corner && (
-          <span className={`tile-corner ${isImgIcon(corner) ? "" : "solid"}`}>
-            <Icon icon={corner} fallback="📦" />
-          </span>
-        )}
-      </span>
-      <span className="tile-name">{name}</span>
-      {!editing && !popHidden && showPop && <div className="pop">{children}</div>}
-    </>
-  );
-  const common = {
-    className: `tile${stale ? " stale" : ""}${className ? ` ${className}` : ""}`,
-    ...(dragProps as object),
-    onMouseLeave: () => setPopHidden(false),
-    onClick: () => {
-      setPopHidden(true);
-      if (!editing && onOpen) onOpen();
-    },
-  };
-  return asLink ? (
-    <a {...common} href={href} target="_blank" rel="noopener noreferrer">
-      {inner}
-    </a>
-  ) : (
-    <div {...common}>{inner}</div>
-  );
-}
-
-/** Grid gap of `.widgets`, for turning a drag distance into columns and rows. */
-const WIDGET_GAP = 20;
-const MAX_COLS = 2;
-const MAX_ROWS = 2;
-
-function Widget({ w, dragProps, theme, onResize }: { w: WidgetInfo; dragProps?: DragProps; theme: string; onResize?: (size: string, commit: boolean) => void }) {
-  const { lang, t } = useLang();
-  const title = localized(lang, w).title;
-  const embed = `${w.peer ? `/api/peers/${encodeURIComponent(w.peer)}` : "/api"}/widgets/${encodeURIComponent(w.app)}/${encodeURIComponent(w.name)}/embed?theme=${theme}&lang=${lang}`;
-  const link = w.link ? withLang(w.link, lang) : "";
-  const tall = w.size.endsWith("x2");
-  const card = useRef<HTMLDivElement>(null);
-  const [resizing, setResizing] = useState<string | null>(null);
-  // A size change (a drag snapping to the next cell, or a layout loaded later) is animated from the
-  // card's previous box to its new one: grid spans cannot transition, so the box is measured before
-  // and after the render and tweened with the Web Animations API.
-  const lastBox = useRef<{ w: number; h: number } | null>(null);
-  useLayoutEffect(() => {
-    const el = card.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const prev = lastBox.current;
-    lastBox.current = { w: r.width, h: r.height };
-    if (!prev || (prev.w === r.width && prev.h === r.height) || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    el.style.overflow = "hidden";
-    const anim = el.animate([{ width: `${prev.w}px`, height: `${prev.h}px` }, { width: `${r.width}px`, height: `${r.height}px` }], { duration: 240, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
-    anim.onfinish = () => {
-      el.style.overflow = "";
-    };
-  }, [w.size]);
-  // Edit mode: the handle in the bottom-right corner resizes by dragging (pointer events, so the
-  // HTML5 drag that reorders cards does not start). One cell is the card's current width divided by
-  // its columns; crossing half a cell snaps to the next size, and the size is saved on release.
-  const startResize = (e: React.PointerEvent) => {
-    if (!onResize || !card.current) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const [cols0, rows0] = w.size.split("x").map(Number) as [number, number];
-    const rect = card.current.getBoundingClientRect();
-    const cellW = (rect.width - WIDGET_GAP * (cols0 - 1)) / cols0;
-    const cellH = (rect.height - WIDGET_GAP * (rows0 - 1)) / rows0;
-    const x0 = e.clientX;
-    const y0 = e.clientY;
-    let last = w.size;
-    const sizeAt = (ev: PointerEvent) => {
-      const cols = Math.min(MAX_COLS, Math.max(1, cols0 + Math.round((ev.clientX - x0) / (cellW + WIDGET_GAP))));
-      const rows = Math.min(MAX_ROWS, Math.max(1, rows0 + Math.round((ev.clientY - y0) / (cellH + WIDGET_GAP))));
-      return `${cols}x${rows}`;
-    };
-    const move = (ev: PointerEvent) => {
-      const next = sizeAt(ev);
-      setResizing(next);
-      if (next !== last) {
-        last = next;
-        onResize(next, false);
-      }
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
-      setResizing(null);
-      onResize(sizeAt(ev), true);
-      // The release also produces a click, wherever the pointer ended up; a click on the
-      // background would leave edit mode, so the one that follows this drag is swallowed.
-      const swallow = (c: MouseEvent) => {
-        c.stopPropagation();
-        c.preventDefault();
-      };
-      window.addEventListener("click", swallow, { capture: true, once: true });
-      setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 400);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-  };
-  return (
-    <div ref={card} className={`widget s${w.size}${w.stale ? " stale" : ""}${resizing ? " resizing" : ""}`} {...(dragProps as object)} title={w.stale ? t("widget.stale", { peer: w.peer ?? "" }) : undefined}>
-      <div className="widget-head">
-        <span className="widget-ico">
-          <Icon icon={w.icon} fallback="📦" />
-        </span>
-        <b>{title}</b>
-        {w.peer && <span className="widget-peer">{w.peer}</span>}
-        {onResize && <span className="widget-size">{(resizing ?? w.size).replace("x", "×")}</span>}
-      </div>
-      {onResize && <span className="widget-grip" title={t("widget.resizeHint")} draggable={false} onPointerDown={startResize} onDragStart={(e) => e.preventDefault()} />}
-      {w.kind === "embed" ? (
-        <iframe title={title} src={embed} sandbox="allow-scripts" loading="lazy" />
-      ) : w.ok ? (
-        <div className="widget-list">
-          {w.items.slice(0, tall ? 14 : 6).map((it, i) => (
-            <a key={i} href={it.url || link} target="_blank" rel="noopener noreferrer">
-              <span className="wi-text">{it.text}</span>
-              {it.time && <span className="wi-time">{relTime(it.time, lang)}</span>}
-            </a>
-          ))}
-          {!w.items.length && <p className="widget-err">{t("widget.empty")}</p>}
-        </div>
-      ) : (
-        <p className="widget-err">{t("common.unavailable", { error: w.error })}</p>
-      )}
-      {link && (
-        <a className="widget-more" href={link} target="_blank" rel="noopener noreferrer">
-          {t("widget.viewAll")}
-        </a>
-      )}
-    </div>
-  );
-}
-
-function AddForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const { t } = useLang();
-  const [link, setLink] = useState("");
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const save = async () => {
-    if (!/^https?:\/\//.test(link.trim())) return setErr(t("add.needLink"));
-    setErr("");
-    setBusy(true);
-    try {
-      await sendJson("POST", "/api/apps", { link: link.trim() });
-      onSaved();
-    } catch (e) {
-      setErr(String((e as Error).message || e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="overlay" onClick={busy ? undefined : onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          {t("add.title")}<span className="modal-sub">{t("add.sub")}</span>
-        </h3>
-        <div className="field">
-          <label>{t("add.link")}</label>
-          <input value={link} onChange={(e) => setLink(e.target.value)} disabled={busy} placeholder={t("add.placeholder")} onKeyDown={(e) => e.key === "Enter" && !busy && save()} />
-        </div>
-        <div className="form-hint">{t("add.hint")}</div>
-        {err && <div className="form-err">{err}</div>}
-        <div className="actions">
-          <button className="btn2" onClick={onClose} disabled={busy}>
-            {t("common.cancel")}
-          </button>
-          <button className="btn2 primary" onClick={save} disabled={busy}>
-            {busy ? t("add.resolving") : t("common.save")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The confirmation behind the uninstall zone: says what will happen to this app (service, directory,
- * data) and sends the DELETE, to the hub route for a peer's app.
- */
-function UninstallForm({ app, onClose, onDone }: { app: AppInfo; onClose: () => void; onDone: () => void }) {
-  const { lang, t } = useLang();
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const path = app.peer ? `/api/peers/${encodeURIComponent(app.peer)}/apps/${encodeURIComponent(app.name)}` : `/api/apps/${encodeURIComponent(app.name)}`;
-  const run = async () => {
-    setErr("");
-    setBusy(true);
-    try {
-      await sendJson("DELETE", path);
-      onDone();
-    } catch (e) {
-      setErr(String((e as Error).message || e));
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="overlay" onClick={busy ? undefined : onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>
-          {t("uninstall.title", { title: localized(lang, app).title })}
-          {app.peer && <span className="modal-sub">{t("common.onPeer", { peer: app.peer })}</span>}
-        </h3>
-        <ul className="modal-list">
-          {app.service ? <li>{t("uninstall.stopService", { port: app.service.port })}</li> : <li>{t("uninstall.noService")}</li>}
-          {app.manifestOnly ? <li>{t("uninstall.deleteLink")}</li> : <li>{t("uninstall.moveDir")}</li>}
-          <li>{t("uninstall.forget")}</li>
-        </ul>
-        {err && <div className="form-err">{err}</div>}
-        <div className="actions">
-          <button className="btn2" onClick={onClose} disabled={busy}>
-            {t("common.cancel")}
-          </button>
-          <button className="btn2 danger" onClick={run} disabled={busy}>
-            {busy ? t("uninstall.busy") : t("uninstall.action")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetChoice };
 
-/**
- * The pet picker in the settings pop-over: type a name from petdex.dev, the sheet URL is looked up in
- * the public manifest and kept in the preferences. Empty means the bundled default.
- */
-function PetField({ pet, onChange }: { pet: PetChoice | undefined; onChange: (p: PetChoice | undefined) => void }) {
-  const { t } = useLang();
-  const [query, setQuery] = useState(pet?.slug || "");
-  const [pets, setPets] = useState<PetdexPet[] | null>(null);
-  const [state, setState] = useState<{ kind: "idle" } | { kind: "busy" } | { kind: "error"; text: string }>({ kind: "idle" });
-  useEffect(() => setQuery(pet?.slug || ""), [pet?.slug]);
-  const warm = () => {
-    if (pets) return;
-    loadPetdex()
-      .then(setPets)
-      .catch(() => {});
-  };
-  const apply = () => {
-    const q = query.trim();
-    if (q === (pet?.slug || "")) return;
-    if (!q) {
-      setState({ kind: "idle" });
-      return onChange(undefined);
-    }
-    setState({ kind: "busy" });
-    resolvePet(q)
-      .then((p) => {
-        if (!p) return setState({ kind: "error", text: t("pet.notFound", { name: q }) });
-        setState({ kind: "idle" });
-        onChange(p);
-      })
-      .catch(() => setState({ kind: "error", text: t("pet.unreachable") }));
-  };
-  const note = state.kind === "busy" ? t("pet.lookingUp") : state.kind === "error" ? state.text : pet ? (pet.by ? t("pet.by", { name: pet.name, by: pet.by }) : pet.name) : t("pet.default");
-  return (
-    <div className="setfield">
-      <div className="setinput">
-        <input
-          list="petdex-pets"
-          placeholder={t("pet.placeholder")}
-          value={query}
-          spellCheck={false}
-          autoComplete="off"
-          onFocus={warm}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            warm();
-          }}
-          onBlur={apply}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          }}
-        />
-        {/* Always in the DOM so the row keeps its width; hidden until there is something to clear. */}
-        <button
-          type="button"
-          title={t("pet.reset")}
-          style={{ visibility: pet || query ? "visible" : "hidden" }}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => {
-            setQuery("");
-            setState({ kind: "idle" });
-            onChange(undefined);
-          }}
-        >
-          ×
-        </button>
-        <datalist id="petdex-pets">
-          {suggestPets(pets || [], query).map((p) => (
-            <option key={p.slug} value={p.slug}>
-              {p.name}
-            </option>
-          ))}
-        </datalist>
-      </div>
-      <p className={`setnote${state.kind === "error" ? " err" : ""}`}>{note}</p>
-    </div>
-  );
-}
+/** Floating panels over the page; one at a time. */
+type Panel = "settings" | "chat" | "tasks" | "usage" | "appModels" | "events" | "terminal";
 
 /** `onLang` changes the language of the whole page; the root (main.tsx) owns the value and provides it. */
 export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
@@ -405,13 +40,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // The app dropped on the uninstall zone, awaiting confirmation; `zoneHot` while a tile hovers the zone.
   const [uninstalling, setUninstalling] = useState<AppInfo | null>(null);
   const [zoneHot, setZoneHot] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
-  // One floating panel at a time: opening the settings, the chat or the tasks closes the others.
-  const [tasksOpen, setTasksOpen] = useState(false);
-  const [usageOpen, setUsageOpen] = useState(false);
-  const [appModelsOpen, setAppModelsOpen] = useState(false);
-  const [eventsOpen, setEventsOpen] = useState(false);
-  const [termOpen, setTermOpen] = useState(false);
+  // One floating panel at a time: opening one closes the others.
+  const [panel, setPanel] = useState<Panel | null>(null);
+  const close = () => setPanel(null);
   // The chat opens on the space agent by default; an agent tile switches to that agent.
   const [chatAgent, setChatAgent] = useState<AgentInfo>({ id: "space/assistant", app: "space", name: "assistant", title: "Base", i18n: { zh: { title: "基础" } }, avatar: "✨", appIcon: "✨", runtime: "claude" });
   const [prefs, setPrefs] = useState<Prefs>(() => {
@@ -421,59 +52,6 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       return {};
     }
   });
-  const [setsOpen, setSetsOpen] = useState(false);
-  // Services: every app that runs a process, with or without a page, plus the peer machines whose
-  // panels this one merges. Loaded each time the settings open so the health dots are fresh (the
-  // server caches probes for 15 s and peer snapshots for their refresh period).
-  const [services, setServices] = useState<{ services: ServiceInfo[]; peers: PeerInfo[] } | null>(null);
-  const loadServices = useCallback(() => {
-    getJson<{ services: ServiceInfo[]; peers: PeerInfo[] }>("/api/services")
-      .then((d) => setServices({ services: d.services || [], peers: d.peers || [] }))
-      .catch(() => setServices({ services: [], peers: [] }));
-  }, []);
-  useEffect(() => {
-    if (setsOpen) loadServices();
-  }, [setsOpen, loadServices]);
-  // Start / stop / restart of a unit the space supervises (docs/supervision.md); one at a time per row.
-  const [svcBusy, setSvcBusy] = useState<string | null>(null);
-  const [svcError, setSvcError] = useState<string | null>(null);
-  const controlService = async (app: string, action: "start" | "stop" | "restart") => {
-    setSvcBusy(app);
-    setSvcError(null);
-    try {
-      await sendJson("POST", `/api/apps/${encodeURIComponent(app)}/service`, { action });
-    } catch (e) {
-      setSvcError(`${app}: ${(e as Error).message}`);
-    } finally {
-      setSvcBusy(null);
-      loadServices();
-    }
-  };
-  const [backups, setBackups] = useState<BackupInfo[] | null>(null);
-  useEffect(() => {
-    if (!setsOpen) return;
-    getJson<{ backups: BackupInfo[] }>("/api/backups")
-      .then((d) => setBackups(d.backups || []))
-      .catch(() => setBackups([]));
-  }, [setsOpen]);
-  // Peers, services and backups fold into one summary line; the rows show when it is expanded.
-  // A problem is a service or peer that is down, or a backup that went stale.
-  const [statusOpen, setStatusOpen] = useState(false);
-  const statusLoaded = services !== null && backups !== null;
-  const problems = statusLoaded
-    ? services.services.filter((s) => s.status === "active" && s.health === "down").length +
-      services.peers.filter((p) => p.health !== "ok").length +
-      backups.filter((b) => b.stale && !b.retired).length
-    : 0;
-  const statusSummary = statusLoaded
-    ? [
-        t("settings.countServices", { n: services.services.length }),
-        t("settings.countBackups", { n: backups.length }),
-        services.peers.length ? t("settings.countPeers", { n: services.peers.length }) : "",
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : t("common.loading");
   const savePrefs = (n: Prefs) => {
     localStorage.setItem("panel-prefs", JSON.stringify(n));
     return n;
@@ -494,29 +72,18 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       })
       .catch(() => {});
   };
+  const setsOpen = panel === "settings";
   useEffect(() => {
     if (!setsOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSetsOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPanel(null);
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [setsOpen]);
-  const openSettings = () => {
-    setChatOpen(false);
-    setTasksOpen(false);
-    setTermOpen(false);
-    setSetsOpen(true);
-  };
-  const openTerminal = () => {
-    setChatOpen(false);
-    setTasksOpen(false);
-    setSetsOpen(false);
-    setTermOpen(true);
-  };
+  const openSettings = () => setPanel("settings");
+  const openTerminal = () => setPanel("terminal");
   const openChat = (a: AgentInfo) => {
     setChatAgent(a);
-    setSetsOpen(false);
-    setTasksOpen(false);
-    setChatOpen(true);
+    setPanel("chat");
   };
 
   // The app list answers at once with the health the server has cached; a service it has not
@@ -635,12 +202,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     a.splice(to, 0, x as T);
     return a;
   };
-  const saveOrder = (kind: string, ids: string[]) => sendJson("PUT", "/api/panel/layout", { order: { [kind]: ids } }).catch(() => {});
+  // The new order or size stays on screen either way; a failed save only shows after a reload, so say it in the console.
+  const layoutNotSaved = (e: unknown) => console.warn("panel layout not saved:", e);
+  const saveOrder = (kind: string, ids: string[]) => sendJson("PUT", "/api/panel/layout", { order: { [kind]: ids } }).catch(layoutNotSaved);
   // A widget size dragged in edit mode: shown while the drag goes on, stored in the layout (as an
   // override of the manifest's) when the handle is released.
   const resizeWidget = (w: WidgetInfo, size: string, commit: boolean) => {
     setWidgets((cur) => cur.map((x) => (x.id === w.id ? { ...x, size } : x)));
-    if (commit) sendJson("PUT", "/api/panel/layout", { sizes: { [w.id]: size } }).catch(() => {});
+    if (commit) sendJson("PUT", "/api/panel/layout", { sizes: { [w.id]: size } }).catch(layoutNotSaved);
   };
   const dragProps = <T extends { name?: string; id?: string }>(kind: string, setItems: (fn: (cur: T[]) => T[]) => void, i: number): DragProps =>
     editing
@@ -855,11 +424,11 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         />
       )}
       {setsOpen && (
-        <div className="overlay top" onClick={() => setSetsOpen(false)}>
+        <div className="overlay top" onClick={close}>
           <div className="panel settings" role="dialog" aria-label={t("settings.title")} onClick={(e) => e.stopPropagation()}>
             <div className="panel-head">
               <b>{t("settings.title")}</b>
-              <button className="chat-hbtn" title={t("common.close")} onClick={() => setSetsOpen(false)}>
+              <button className="chat-hbtn" title={t("common.close")} onClick={close}>
                 ✕
               </button>
             </div>
@@ -898,174 +467,33 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 }).catch(() => {});
               }} />
               <p className="sethead">{t("settings.scheduler")}</p>
-              <button
-                className="setrow setlink"
-                onClick={() => {
-                  setSetsOpen(false);
-                  setChatOpen(false);
-                  setTasksOpen(true);
-                }}
-              >
+              <button className="setrow setlink" onClick={() => setPanel("tasks")}>
                 {t("settings.tasks")}
                 <span>›</span>
               </button>
-              <button
-                className="setrow setlink"
-                onClick={() => {
-                  setSetsOpen(false);
-                  setChatOpen(false);
-                  setUsageOpen(true);
-                }}
-              >
+              <button className="setrow setlink" onClick={() => setPanel("usage")}>
                 {t("settings.usage")}
                 <span>›</span>
               </button>
-              <button
-                className="setrow setlink"
-                onClick={() => {
-                  setSetsOpen(false);
-                  setChatOpen(false);
-                  setAppModelsOpen(true);
-                }}
-              >
+              <button className="setrow setlink" onClick={() => setPanel("appModels")}>
                 {t("settings.appModels")}
                 <span>›</span>
               </button>
-              <button
-                className="setrow setlink"
-                onClick={() => {
-                  setSetsOpen(false);
-                  setChatOpen(false);
-                  setEventsOpen(true);
-                }}
-              >
+              <button className="setrow setlink" onClick={() => setPanel("events")}>
                 {t("settings.events")}
                 <span>›</span>
               </button>
-              <p className="sethead">{t("settings.status")}</p>
-              <button className="setrow setlink" aria-expanded={statusOpen} onClick={() => setStatusOpen((o) => !o)}>
-                <span className="svc-name">{statusSummary}</span>
-                {statusLoaded && (
-                  <span className={`status ${problems ? "down" : "ok"}`}>
-                    <i />
-                    {problems ? t("status.issues", { n: problems }) : t("status.allOk")}
-                  </span>
-                )}
-                <span className={`setchev${statusOpen ? " open" : ""}`}>›</span>
-              </button>
-              {statusOpen && (
-              <>
-              {services && services.peers.length > 0 && (
-                <>
-                  <p className="sethead sub">{t("settings.peers")}</p>
-                  {services.peers.map((p) => (
-                    <div key={p.name} className="svcrow" title={`${p.url}\n${t("settings.peerCounts", { apps: p.apps, agents: p.agents, widgets: p.widgets, services: p.services })}${p.asOf ? `\n${t("settings.snapshot", { time: relTime(p.asOf, lang) })}` : ""}${p.error ? `\n${p.error}` : ""}`}>
-                      <span className="svc-ico">🛰</span>
-                      <span className="svc-name">{p.name}</span>
-                      {p.health !== "ok" && p.asOf && <span className="svc-port">{relTime(p.asOf, lang)}</span>}
-                      <span className={`status ${p.health}`}>
-                        <i />
-                        {t(p.health === "ok" ? "status.up" : "status.down")}
-                      </span>
-                    </div>
-                  ))}
-                </>
-              )}
-              <p className="sethead sub">{t("settings.services")}</p>
-              {services === null ? (
-                <p className="setnote">{t("common.loading")}</p>
-              ) : services.services.length ? (
-                services.services.map((s) => {
-                  const unitProblem = s.supervision?.action === "conflict" || s.supervision?.action === "failed";
-                  const statusKey = unitProblem ? "services.unitProblem" : s.status === "active" ? HEALTH[s.health] : STATUS[s.status];
-                  const supervised = !s.peer && s.supervisor === "space" && s.status === "active";
-                  return (
-                  <div key={`${s.peer ?? ""}/${s.app}`} className="svcrow" title={`${s.peer ? `${s.peer}/` : ""}${s.app} · 127.0.0.1:${s.port}${s.supervisor ? ` · ${t(s.supervisor === "space" ? "services.bySpace" : "services.byOperator")}` : ""}${s.supervision ? ` · ${s.supervision.action}` : ""}${s.supervision?.error ? `\n${s.supervision.error}` : ""}${s.hidden ? ` · ${t("status.hidden")}` : ""}`}>
-                    <span className="svc-ico">
-                      <Icon icon={s.icon} fallback="📦" />
-                    </span>
-                    <span className="svc-name">{localized(lang, s).title}</span>
-                    {s.peer && <span className="svc-peer">{s.peer}</span>}
-                    <span className="svc-port">:{s.port}</span>
-                    {supervised && (
-                      <span className="svc-ctl">
-                        {(["start", "stop", "restart"] as const).map((a) => (
-                          <button key={a} type="button" disabled={svcBusy === s.app} title={t(`services.${a}`)} aria-label={t(`services.${a}`)} onClick={() => void controlService(s.app, a)}>
-                            {a === "start" ? "▶" : a === "stop" ? "■" : "↻"}
-                          </button>
-                        ))}
-                      </span>
-                    )}
-                    <span className={`status ${unitProblem ? "down" : s.status === "active" ? s.health : s.status}`}>
-                      <i />
-                      {statusKey ? t(statusKey) : "?"}
-                    </span>
-                  </div>
-                  );
-                })
-              ) : (
-                <p className="setnote">{t("settings.noServices")}</p>
-              )}
-              {svcError && <p className="setnote">{svcError}</p>}
-              <p className="sethead sub">{t("settings.backups")}</p>
-              {backups === null ? (
-                <p className="setnote">{t("common.loading")}</p>
-              ) : backups.length ? (
-                backups.map((b) => (
-                  <div
-                    key={b.app}
-                    className="svcrow"
-                    title={[
-                      b.lastOkKey ?? "",
-                      b.lastStatus === "error" && b.lastError ? t("backup.lastError", { error: b.lastError }) : "",
-                      b.lastVerifiedAt !== undefined ? (b.lastVerifyOk ? t("backup.verified", { time: relTime(b.lastVerifiedAt, lang) }) : t("backup.verifyFailed", { error: b.lastVerifyError ?? "" })) : "",
-                      b.nextRunAt && !b.retired ? t("backup.nextRun", { time: untilTime(new Date(b.nextRunAt).toISOString(), lang) }) : "",
-                      b.retired ? t("backup.retiredHint") : "",
-                    ]
-                      .filter(Boolean)
-                      .join("\n")}
-                  >
-                    <span className="svc-ico">🗄</span>
-                    <span className="svc-name">{b.app}</span>
-                    <span className="svc-port">{b.lastOkAt ? relTime(b.lastOkAt, lang) : t("backup.never")}</span>
-                    <span className={`status ${b.retired ? "archived" : b.stale ? "down" : "ok"}`}>
-                      <i />
-                      {t(b.retired ? "backup.retired" : b.stale ? "backup.stale" : "backup.fresh")}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p className="setnote">{t("settings.noBackups")}</p>
-              )}
-              </>
-              )}
+              <SettingsStatus />
             </div>
           </div>
         </div>
       )}
-      <Tasks open={tasksOpen} onClose={() => setTasksOpen(false)} onBack={() => {
-          setTasksOpen(false);
-          openSettings();
-        }} />
-      <Usage open={usageOpen} onClose={() => setUsageOpen(false)} onBack={() => {
-          setUsageOpen(false);
-          openSettings();
-        }} />
-      <AppModels open={appModelsOpen} onClose={() => setAppModelsOpen(false)} onBack={() => {
-          setAppModelsOpen(false);
-          openSettings();
-        }} />
-      <Events open={eventsOpen} onClose={() => setEventsOpen(false)} onBack={() => {
-          setEventsOpen(false);
-          openSettings();
-        }} />
-      <Terminal open={termOpen} onClose={() => setTermOpen(false)} />
-      <Chat
-        open={chatOpen}
-        agent={chatAgent}
-        onClose={() => setChatOpen(false)}
-        onSwitch={openChat}
-      />
+      <Tasks open={panel === "tasks"} onClose={close} onBack={openSettings} />
+      <Usage open={panel === "usage"} onClose={close} onBack={openSettings} />
+      <AppModels open={panel === "appModels"} onClose={close} onBack={openSettings} />
+      <Events open={panel === "events"} onClose={close} onBack={openSettings} />
+      <Terminal open={panel === "terminal"} onClose={close} />
+      <Chat open={panel === "chat"} agent={chatAgent} onClose={close} onSwitch={openChat} />
     </>
   );
 }
