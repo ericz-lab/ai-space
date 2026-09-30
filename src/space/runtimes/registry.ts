@@ -16,9 +16,9 @@ export type RegistryDeps = { fetch?: typeof fetch };
 export type RuntimeView = { name: string; kind: string; backend: string; capabilities: RuntimeAdapter["capabilities"]; default: boolean };
 
 /** Operator vocabulary: basic/基础, junior/初级, intermediate/中级, advanced/高级. */
-const TIER_DEFAULTS: Partial<Record<RuntimeSpec["kind"], TierModels>> = {
+export const TIER_DEFAULTS: Partial<Record<RuntimeSpec["kind"], TierModels>> = {
   "claude-code": { basic: "haiku", junior: "sonnet", intermediate: "opus", advanced: "fable" },
-  "codex-cli": { basic: "gpt-6-luna", junior: "gpt-5.6-terra", intermediate: "gpt-6-sol", advanced: "gpt-6-astra" },
+  "codex-cli": { basic: "gpt-6-luna", junior: "gpt-5.6-terra", intermediate: "gpt-6.1-sol", advanced: "gpt-6-astra" },
 };
 
 export class RuntimeRegistry {

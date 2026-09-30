@@ -13,6 +13,7 @@
     "init": "bun src/index.ts init",
     "setup": "bun src/index.ts setup",
     "new-app": "bun src/index.ts app new",
+    "codex-upgrade": "bun src/index.ts codex-upgrade",
     "space": "bun src/index.ts",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test"

@@ -129,7 +129,7 @@ runtimes:
     expect(config.runtimes[1]).toMatchObject({ kind: "codex-cli", sshHost: "box", bin: ["/opt/codex"] });
     for (const [tier, claude, codex] of [
       ["basic", "haiku", "gpt-6-luna"], ["junior", "sonnet", "gpt-5.6-terra"],
-      ["intermediate", "opus", "gpt-6-sol"], ["advanced", "fable", "gpt-6-astra"],
+      ["intermediate", "opus", "gpt-6.1-sol"], ["advanced", "fable", "gpt-6-astra"],
     ]) {
       expect(registry.resolve(tier!).model).toBe(claude!);
       expect(registry.resolve(`codex/${tier}`)).toMatchObject({ model: codex, runtime: { name: "codex", capabilities: { complete: true, agent: true, chat: true } } });

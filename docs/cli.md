@@ -42,7 +42,7 @@ space task run x ──── HTTP + token ────▶ 127.0.0.1:8700 /api/t
 
 Rules:
 
-- **One implementation per operation, in the service.** A verb that has a route calls the route; a verb that has none gets the route first, then the verb. The CLI never opens `space.db` for something the API can answer. The exceptions are the commands that must work with ai-space down or before it exists: `init`, `setup`, `start`, `install-defaults`, `app env` (reads the storage inventory), `app new`, `backup run`, `backup verify`, `backup restore`, `model import`, `chat import`. They stay disk-bound, as they were. `backup run` is disk-bound on purpose: it is the command the daily task spawns, and an operator typing it wants the synchronous result, not a 202.
+- **One implementation per operation, in the service.** A verb that has a route calls the route; a verb that has none gets the route first, then the verb. The CLI never opens `space.db` for something the API can answer. The exceptions are the commands that must work with ai-space down or before it exists: `init`, `setup`, `start`, `install-defaults`, `codex-upgrade`, `app env` (reads the storage inventory), `app new`, `backup run`, `backup verify`, `backup restore`, `model import`, `chat import`. They stay disk-bound, as they were. `backup run` is disk-bound on purpose: it is the command the daily task spawns, and an operator typing it wants the synchronous result, not a 202.
 - **Same command anywhere.** On the machine it talks to loopback. From a task's `command:` it inherits `SPACE_API_URL` and `SPACE_APP_TOKEN` from `space.env`, so `space notify send` and `space event emit` need no `--app`. From the laptop it reaches a machine through a forwarded port (`SPACE_API_URL=http://127.0.0.1:8701`) or, simpler, `ssh <host> space ...`, since the binary is there. Peers are not addressed through the hub: a peer exposes `/api/peer/*` only, and its tasks, logs and backups stay on that machine ([peers.md](peers.md)).
 - **Readable by default, parseable on request.** Human output is a table with fixed columns, relative times and no color. `--json` prints exactly what the route returned, so an agent or a script gets the API's own shape and nothing invented by the CLI. Errors go to stderr as `space: <what>`; stdout carries only the result, so `eval "$(space app env x)"` and `space task ls --json | jq` stay clean.
 - **stdin only when asked.** A body or a prompt comes from the argument, from `--json-file`, or from stdin when the argument is `-`. The CLI never reads stdin on its own: inside a task or a hook, stdin may be a pipe nobody closes, and a command that waits on it hangs the run.
@@ -92,6 +92,7 @@ Rules:
 | `space router show` / `sync` | routes with status; write and reload | `GET /api/router`, `POST /api/router/sync` |
 | `space api METHOD PATH [BODY\|-] [--app]` | one call with the operator token (`--app`: the app's own); JSON pretty-printed, SSE one line per event | any |
 | `space init` / `setup` / `start` / `install-defaults` | the lifecycle commands, unchanged | disk |
+| `space codex-upgrade [--dry-run] [--no-update] [--no-restart]` | update the Codex CLI and move each codex tier to the newest model ([runtimes.md](runtimes.md#keeping-codex-tiers-current)) | disk, ssh |
 | `space completion zsh\|bash` | a completion script from the same command table the help prints | |
 
 Global flags, before or after the noun: `--json`, `--url <api url>`, `--token <token>`, `-q` (no table header), `--help` at every level. `space` alone and `space <noun>` alone print the help of that level; a noun whose only verb takes no argument (`status`, `init`, `setup`, `start`) runs it.
@@ -126,7 +127,7 @@ src/cli/client.ts         url + token resolution (flags, then env, then <workspa
 src/cli/output.ts         tables (widths from the rows, right-aligned numbers), relative times, sizes, tokens, money
 src/cli/common.ts         task lookup (<app>/<name>, bare name, id), schedule text, JSON bodies, confirmations
 src/cli/status.ts, app.ts (+ newapp.ts), task.ts, logs.ts, model.ts, notify.ts, backup.ts, chat.ts, event.ts,
-        peer.ts, router.ts, api.ts, lifecycle.ts (init, setup, start, install-defaults), completion.ts
+        peer.ts, router.ts, api.ts, lifecycle.ts (init, setup, start, install-defaults, codex-upgrade), completion.ts
 src/cli/testing.ts        runCli(): the CLI against a scripted fetch, stdout and stderr collected
 src/cli/*.test.ts         every verb: the call it makes, the table it prints, the code it exits with
 ```

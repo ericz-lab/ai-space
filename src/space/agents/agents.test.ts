@@ -229,7 +229,7 @@ test("Codex-only Base ignores legacy Claude defaults and honors qualified defaul
     try {
       const result = await events(await fetch(`http://127.0.0.1:${local.port}/api/agents/space/assistant/chat`, { method: "POST", body: JSON.stringify({ message: "hello" }) }));
       expect(result.some((e) => e.type === "error")).toBe(false);
-      expect(store.list("space/assistant")[0]).toMatchObject({ runtime: "codex", model: defaultModel === "sonnet" ? "gpt-6-sol" : "gpt-6-luna" });
+      expect(store.list("space/assistant")[0]).toMatchObject({ runtime: "codex", model: defaultModel === "sonnet" ? "gpt-6.1-sol" : "gpt-6-luna" });
     } finally { local.stop(true); }
   }
 });
@@ -299,7 +299,7 @@ test("app agents pick a chat runtime through the app's model layers and the spac
     expect((await chat("harness")).session).toMatchObject({ runtime: "codex", model: "gpt-6-luna" });
     // The app's model.default tier runs on the default's runtime.
     layers.manifest = "intermediate";
-    expect((await chat("planner")).session).toMatchObject({ runtime: "codex", model: "gpt-6-sol" });
+    expect((await chat("planner")).session).toMatchObject({ runtime: "codex", model: "gpt-6.1-sol" });
     // A declared runtime the space has wins over the app's default.
     expect((await chat("pinned")).session).toMatchObject({ runtime: "claude", model: "opus" });
     // The panel's override for the app wins over the manifest; Claude gets the tool list.

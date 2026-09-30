@@ -51,9 +51,9 @@ test("all three apps inherit changes immediately and explicit model choices win"
       prefs.update("claude/basic");
       expect((await run(app)).call).toMatchObject({ runtime: "claude", model: "haiku" });
       prefs.update("codex/intermediate");
-      expect((await run(app)).call).toMatchObject({ runtime: "codex", model: "gpt-6-sol" });
+      expect((await run(app)).call).toMatchObject({ runtime: "codex", model: "gpt-6.1-sol" });
       const web = await run(app, undefined, ["WebSearch", "WebFetch"]);
-      expect(web.call).toMatchObject({ runtime: "codex", model: "gpt-6-sol" });
+      expect(web.call).toMatchObject({ runtime: "codex", model: "gpt-6.1-sol" });
       expect(JSON.parse(web.text).args).toContain('web_search="live"');
       expect((await run(app, "claude/junior")).call).toMatchObject({ runtime: "claude", model: "sonnet" });
     }

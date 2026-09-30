@@ -108,7 +108,7 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 | `startedAt`, `durationMs` | Wall clock of the whole call including any wait for a slot. |
 | `promptChars`, `outputChars` | Sizes only; prompts and answers are not stored. |
 | `usage` | `inputTokens`, `cacheWriteTokens`, `cacheReadTokens`, `outputTokens`, as reported; absent when the runtime reported none. |
-| `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend. GPT-6 Astra/Sol/Luna and GPT-5.6 Sol/Terra/Luna calls without a reported cost use standard API list prices (verified 2026-09-23); absent for unknown models or incomplete usage. |
+| `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend. GPT-6 Astra/Sol/Luna, GPT-6.1 Sol and GPT-5.6 Sol/Terra/Luna calls without a reported cost use standard API list prices (verified 2026-09-23; GPT-6.1 Sol 2026-09-30); absent for unknown models or incomplete usage. |
 
 ### App models
 

@@ -56,6 +56,6 @@ test("a scheduled HTTP run uses the saved model all the way through a completion
     expect(seen).toEqual(["codex/gpt-5.6-terra"]);
     scheduler.patchTask(task.id, { model: "codex/intermediate" });
     scheduler.runNow(task.id); await scheduler.idle();
-    expect(seen).toEqual(["codex/gpt-5.6-terra", "codex/gpt-6-sol"]);
+    expect(seen).toEqual(["codex/gpt-5.6-terra", "codex/gpt-6.1-sol"]);
   } finally { app.stop(true); scheduler.stop(); store.close(); }
 });
