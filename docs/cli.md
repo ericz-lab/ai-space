@@ -92,7 +92,7 @@ Rules:
 | `space router show` / `sync` | routes with status; write and reload | `GET /api/router`, `POST /api/router/sync` |
 | `space api METHOD PATH [BODY\|-] [--app]` | one call with the operator token (`--app`: the app's own); JSON pretty-printed, SSE one line per event | any |
 | `space init` / `setup` / `start` / `install-defaults` | the lifecycle commands, unchanged | disk |
-| `space codex-upgrade [--dry-run] [--no-update] [--no-restart]` | update the Codex CLI and move each codex tier to the newest model ([runtimes.md](runtimes.md#keeping-codex-tiers-current)) | disk, ssh |
+| `space codex-upgrade [--dry-run] [--no-update] [--no-restart]` | update the Codex CLI, check each codex tier's model, restart so the catalogue gives the tiers ([runtimes.md](runtimes.md#keeping-codex-tiers-current)) | disk, ssh |
 | `space completion zsh\|bash` | a completion script from the same command table the help prints | |
 
 Global flags, before or after the noun: `--json`, `--url <api url>`, `--token <token>`, `-q` (no table header), `--help` at every level. `space` alone and `space <noun>` alone print the help of that level; a noun whose only verb takes no argument (`status`, `init`, `setup`, `start`) runs it.

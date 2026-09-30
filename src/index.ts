@@ -10,6 +10,7 @@ import { AppModels, createAppModelRoutes } from "./space/model/app-models.ts";
 import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts";
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
+import { refreshCodexTiers } from "./space/runtimes/codex-upgrade.ts";
 import { Bus, BusStore, createBusRoutes } from "./space/bus/index.ts";
 import { type Manifest, Scheduler, Store, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts";
@@ -60,6 +61,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const loaded = await loadRuntimes(ws.home, env);
   for (const w of loaded.warnings) console.warn(`[runtimes] ${w}`);
   const runtimes = new RuntimeRegistry(loaded.config);
+  // Codex tiers from the installed CLI's catalogue, in the background: the built-in names serve until it answers.
+  void refreshCodexTiers(runtimes, loaded.config.runtimes, (l) => console.log(`[runtimes] ${l}`));
   const modelPreferences = new ModelPreferences(store.db, runtimes);
   const appDefaultModel = () => modelPreferences.read() ?? config.model.defaultModel;
   const baseDefaultModel = () => modelPreferences.read() ?? config.chatModel;

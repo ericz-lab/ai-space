@@ -103,7 +103,7 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 
 Use these four names consistently when discussing models or selecting them in requests:
 
-| Tier | Request alias | Claude Code | Codex CLI default |
+| Tier | Request alias | Claude Code | Codex CLI (fallback; the catalogue decides) |
 | --- | --- | --- | --- |
 | Basic | `basic` | Haiku (`haiku`) | Luna (`gpt-6-luna`) |
 | Junior | `junior` | Sonnet (`sonnet`) | Terra (`gpt-5.6-terra`) |
@@ -123,18 +123,15 @@ runtimes:
     kind: codex-cli
     ssh: box                         # omit for local execution
     bin: /home/operator/.local/bin/codex
-    models:
-      basic: gpt-6-luna
-      junior: gpt-5.6-terra
-      intermediate: gpt-6.1-sol
-      advanced: gpt-6-astra
+    models:                          # optional pins; omit to follow the CLI's catalogue
+      intermediate: gpt-6-sol
 ```
 
 ### Keeping Codex tiers current
 
-`space codex-upgrade` (also `bun run codex-upgrade`) runs `codex update` on every machine a codex runtime uses: this one, where agent runs and chat happen, and the runtime's `ssh` host, where completions go. It then reads the catalogue the new CLI ships with (`codex debug models`) and gives each tier the newest listed model of its family: basic Luna, junior Terra, intermediate Sol, advanced Astra, preferring models the catalogue does not mark for upgrade. A model counts only when every machine lists it and answers a one-line prompt on it there, because the account can refuse a model the catalogue shows (`gpt-6.1-sol` under codex 0.156 was refused with "not supported when using Codex with a ChatGPT account"). A tier set to a model outside the `gpt-<version>-<family>` form is left alone, and no tier moves to an older version.
+Codex tiers are not written down. At boot each codex runtime reads the installed CLI's catalogue (`codex debug models`) on every machine it uses (this one, where agent runs and chat happen, and its `ssh` host, where completions go) and gives each tier the newest listed model of its family: basic Luna, junior Terra, intermediate Sol, advanced Astra, preferring models the catalogue does not mark for upgrade. A model counts only when every machine lists it. Until the catalogue answers, or when it cannot, the built-in names in the table above serve. A `models` pin in `runtimes.yaml` wins over the catalogue; the boot log names a pin that keeps an older model than the catalogue has.
 
-The command rewrites only the tier lines of `runtimes.yaml`, keeps the previous file as `runtimes.yaml.bak`, and restarts the `ai-space` user unit, since the file is read at boot. `--dry-run` reports the proposed tiers without updating, probing or writing; `--no-update` keeps the installed CLI; `--no-restart` leaves the restart to the operator. A new model without a price in `src/space/model/gpt-prices.json` is named in the output: its ledger rows show no cost until the price is added there.
+So a new model arrives with a new CLI, which is also what makes the account accept it (`gpt-6.1-sol` under codex 0.156 was refused with "not supported when using Codex with a ChatGPT account"). `space codex-upgrade` (also `bun run codex-upgrade`) runs `codex update` on every such machine, sends each tier's model a one-line prompt there, and restarts the `ai-space` user unit so the next boot reads the new catalogue. It never edits `runtimes.yaml`. `--dry-run` only reports the tiers the installed CLI gives; `--no-update` keeps the installed CLI; `--no-restart` leaves the restart to the operator. A tier model without a price in `src/space/model/gpt-prices.json` is named in the output: its ledger rows show no cost until the price is added there.
 
 To default only application model calls to Codex, set `SPACE_MODEL_DEFAULT=codex/basic`. Base can select either configured CLI runtime independently of the model service default. Explicit application model settings take precedence; change those individually.
 

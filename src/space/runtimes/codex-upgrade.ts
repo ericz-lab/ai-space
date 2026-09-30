@@ -2,24 +2,22 @@ import { join } from "node:path";
 import { GPT_PRICING } from "../model/pricing.ts";
 import { RUNTIMES_FILE, parseRuntimesYaml } from "./config.ts";
 import { spawnCollect } from "./process.ts";
-import { TIER_DEFAULTS } from "./registry.ts";
-import { MODEL_TIERS, type CodexCliSpec, type ModelTier, type TierModels } from "./types.ts";
+import type { RuntimeRegistry } from "./registry.ts";
+import { MODEL_TIERS, type CodexCliSpec, type ModelTier, type RuntimeSpec, type TierModels } from "./types.ts";
 
 /**
- * `space codex-upgrade`: update the Codex CLI on every machine a codex
- * runtime uses, read the model catalogue the new CLI ships with, and point
- * each tier of `runtimes.yaml` at the newest model of its family
- * (basic = Luna, junior = Terra, intermediate = Sol, advanced = Astra).
- * A new model is written only when every machine lists it and answers a
- * one-line prompt on it; the account may refuse a model the catalogue shows.
+ * Codex tiers follow the installed CLI: at boot each codex runtime reads
+ * `codex debug models` on every machine it uses and gives each tier the newest
+ * listed model of its family (basic = Luna, junior = Terra, intermediate = Sol,
+ * advanced = Astra). No model name is written down: a new one arrives with
+ * `codex update`. `space codex-upgrade` runs that update, checks each new tier
+ * model answers, and restarts ai-space so the next boot reads the catalogue.
  */
 
 export const TIER_FAMILY: Record<ModelTier, string> = { basic: "luna", junior: "terra", intermediate: "sol", advanced: "astra" };
 
 /** One entry of `codex debug models`. */
 export type CatalogModel = { slug: string; visibility?: string; upgrade?: { model: string } | null };
-
-export type Change = { runtime: string; tier: ModelTier; from: string; to: string };
 
 /** `gpt-6.1-sol` → [6, 1] for family `sol`; undefined when the slug is not of that family. */
 export function familyVersion(slug: string, family: string): number[] | undefined {
@@ -43,16 +41,12 @@ export function latestOfFamily(catalog: CatalogModel[], family: string): string 
   return pool.sort((a, b) => compare(familyVersion(b.slug, family)!, familyVersion(a.slug, family)!))[0]?.slug;
 }
 
-/** Tiers whose model has a newer one in the catalogue. A model outside the gpt-<version>-<family> form is the operator's choice and stays. */
-export function proposeTiers(catalog: CatalogModel[], current: TierModels): Partial<Record<ModelTier, string>> {
-  const out: Partial<Record<ModelTier, string>> = {};
+/** Each tier's newest model; a family the catalogue lacks leaves its tier to the fallback. */
+export function catalogTiers(catalog: CatalogModel[]): TierModels {
+  const out: TierModels = {};
   for (const tier of MODEL_TIERS) {
-    const family = TIER_FAMILY[tier];
-    const now = current[tier];
-    const nowVersion = now ? familyVersion(now, family) : undefined;
-    if (now && !nowVersion) continue;
-    const latest = latestOfFamily(catalog, family);
-    if (latest && latest !== now && (!nowVersion || compare(familyVersion(latest, family)!, nowVersion) > 0)) out[tier] = latest;
+    const latest = latestOfFamily(catalog, TIER_FAMILY[tier]);
+    if (latest) out[tier] = latest;
   }
   return out;
 }
@@ -64,63 +58,18 @@ export function intersectCatalogs(catalogs: CatalogModel[][]): CatalogModel[] {
   return first.filter((m) => rest.every((c) => c.some((o) => o.slug === m.slug)));
 }
 
-/**
- * Set tier models of one runtime in the text of `runtimes.yaml`, keeping its
- * comments and layout: replaces a tier's line, adds missing tiers under
- * `models:`, or adds the `models:` block at the end of the runtime.
- */
-export function setTierModels(text: string, runtime: string, models: Partial<Record<ModelTier, string>>): string {
-  const lines = text.split("\n");
-  const indent = (l: string) => l.length - l.trimStart().length;
-  const blank = (l: string) => !l.trim() || l.trimStart().startsWith("#");
-  const top = lines.findIndex((l) => /^runtimes:\s*(#.*)?$/.test(l));
-  const start = lines.findIndex((l, i) => i > top && new RegExp(`^\\s+${runtime}:\\s*(#.*)?$`).test(l));
-  if (top < 0 || start < 0) throw new Error(`${RUNTIMES_FILE}: runtime ${runtime} not found`);
-  const own = indent(lines[start]!);
-  let end = start + 1;
-  while (end < lines.length && (blank(lines[end]!) || indent(lines[end]!) > own)) end++;
-  while (end > start + 1 && !lines[end - 1]!.trim()) end--;
-
-  const at = lines.findIndex((l, i) => i > start && i < end && /^\s+models:\s*(#.*)?$/.test(l));
-  const pending = { ...models };
-  if (at < 0) {
-    const pad = " ".repeat(own + 2);
-    const block = [`${pad}models:`, ...MODEL_TIERS.filter((t) => pending[t]).map((t) => `${pad}  ${t}: ${pending[t]}`)];
-    lines.splice(end, 0, ...block);
-    return lines.join("\n");
-  }
-  const modelsIndent = indent(lines[at]!);
-  let last = at;
-  for (let i = at + 1; i < end && (blank(lines[i]!) || indent(lines[i]!) > modelsIndent); i++) {
-    if (blank(lines[i]!)) continue;
-    last = i;
-    const m = /^(\s+)([a-z]+):(\s*)([^\s#]+)(.*)$/.exec(lines[i]!);
-    const tier = m?.[2] as ModelTier | undefined;
-    if (m && tier && pending[tier]) {
-      lines[i] = `${m[1]}${tier}:${m[3] || " "}${pending[tier]}${m[5]}`;
-      delete pending[tier];
-    }
-  }
-  const pad = " ".repeat(modelsIndent + 2);
-  lines.splice(last + 1, 0, ...MODEL_TIERS.filter((t) => pending[t]).map((t) => `${pad}${t}: ${pending[t]}`));
-  return lines.join("\n");
+/** A runtime's pin that the catalogue has a newer model for: the pin keeps the older one. */
+export function stalePins(pinned: TierModels | undefined, tiers: TierModels): { tier: ModelTier; pinned: string; latest: string }[] {
+  return MODEL_TIERS.flatMap((tier) => {
+    const pin = pinned?.[tier];
+    const latest = tiers[tier];
+    const a = pin && familyVersion(pin, TIER_FAMILY[tier]);
+    const b = latest && familyVersion(latest, TIER_FAMILY[tier]);
+    return a && b && compare(b, a) > 0 ? [{ tier, pinned: pin!, latest: latest! }] : [];
+  });
 }
 
 export type Run = (cmd: string[], opts?: { timeoutMs?: number }) => Promise<{ code: number | null; stdout: string; stderr: string }>;
-
-export type UpgradeOptions = {
-  home: string;
-  /** Report what would change; write nothing, upgrade nothing, restart nothing. */
-  dryRun?: boolean;
-  /** Keep the installed CLI; only read the catalogue and update the tiers. */
-  skipUpgrade?: boolean;
-  /** Restart ai-space after writing, so it reads the new tiers (the file is read at boot). */
-  restart?: boolean;
-  log: (line: string) => void;
-  run?: Run;
-};
-
-export type UpgradeResult = { changes: Change[]; unpriced: string[]; written: boolean; restarted: boolean; failures: string[] };
 
 const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 
@@ -134,102 +83,122 @@ const defaultRun: Run = async (cmd, opts) => {
   return { code: r.timedOut ? 124 : r.code, stdout: r.stdout, stderr: r.stderr };
 };
 
+type Machine = { host?: string; bin: string };
+
+/** Agent runs and chat are always local; completions go to the runtime's ssh host. */
+function machinesOf(spec: CodexCliSpec): Machine[] {
+  const bin = (spec.bin.length ? spec.bin : ["codex"]).map(quote).join(" ");
+  return [{ bin }, ...(spec.sshHost ? [{ host: spec.sshHost, bin }] : [])];
+}
+
+async function readCatalog(run: Run, m: Machine): Promise<CatalogModel[]> {
+  const r = await run(onHost(m.host, `${m.bin} debug models < /dev/null`), { timeoutMs: 120_000 });
+  const models = (JSON.parse(r.stdout) as { models?: CatalogModel[] }).models;
+  if (!Array.isArray(models)) throw new Error("no models in `codex debug models`");
+  return models;
+}
+
+async function tiersFor(run: Run, spec: CodexCliSpec): Promise<TierModels> {
+  return catalogTiers(intersectCatalogs(await Promise.all(machinesOf(spec).map((m) => readCatalog(run, m)))));
+}
+
+/** Boot: every codex runtime's tiers from its catalogue. A machine that cannot answer leaves the fallback names. */
+export async function refreshCodexTiers(registry: RuntimeRegistry, specs: RuntimeSpec[], log: (line: string) => void, run: Run = defaultRun): Promise<void> {
+  await Promise.all(specs.filter((s): s is CodexCliSpec & { models?: TierModels } => s.kind === "codex-cli").map(async (spec) => {
+    try {
+      const tiers = await tiersFor(run, spec);
+      registry.applyCatalogTiers(spec.name, tiers);
+      log(`${spec.name} tiers from the codex catalogue: ${MODEL_TIERS.map((t) => `${t}=${tiers[t] ?? "fallback"}`).join(" ")}`);
+      for (const p of stalePins(spec.models, tiers)) log(`${spec.name}/${p.tier} is pinned to ${p.pinned} in ${RUNTIMES_FILE}; the catalogue has ${p.latest}`);
+    } catch (e) {
+      log(`${spec.name}: could not read the codex catalogue (${(e as Error).message.slice(0, 200)}); tiers keep the built-in names`);
+    }
+  }));
+}
+
+export type UpgradeOptions = {
+  home: string;
+  /** Report the tiers the installed CLI gives; update, probe and restart nothing. */
+  dryRun?: boolean;
+  /** Keep the installed CLI; only check the tiers and restart. */
+  skipUpdate?: boolean;
+  /** Restart ai-space so it reads the new catalogue (it does at boot). */
+  restart?: boolean;
+  log: (line: string) => void;
+  run?: Run;
+};
+
+export type UpgradeResult = { tiers: Record<string, TierModels>; unpriced: string[]; restarted: boolean; failures: string[] };
+
+/** `space codex-upgrade`: `codex update` on every machine, a one-line probe of each tier's model, then a restart. */
 export async function codexUpgrade(opts: UpgradeOptions): Promise<UpgradeResult> {
   const run = opts.run ?? defaultRun;
   const log = opts.log;
-  const path = join(opts.home, RUNTIMES_FILE);
-  const file = Bun.file(path);
-  const result: UpgradeResult = { changes: [], unpriced: [], written: false, restarted: false, failures: [] };
-  if (!(await file.exists())) {
-    log(`no ${path}: this space has no codex runtime to update`);
-    return result;
-  }
-  let text = await file.text();
-  const codex = parseRuntimesYaml(text).config.runtimes.filter((r): r is CodexCliSpec & { models?: TierModels } => r.kind === "codex-cli");
+  const result: UpgradeResult = { tiers: {}, unpriced: [], restarted: false, failures: [] };
+  const file = Bun.file(join(opts.home, RUNTIMES_FILE));
+  const codex = (await file.exists()) ? parseRuntimesYaml(await file.text()).config.runtimes.filter((r): r is CodexCliSpec & { models?: TierModels } => r.kind === "codex-cli") : [];
   if (!codex.length) {
-    log(`${RUNTIMES_FILE} has no codex-cli runtime`);
+    log(`no codex-cli runtime in ${join(opts.home, RUNTIMES_FILE)}; nothing to update`);
     return result;
   }
 
-  // Agent runs and chat are always local; completions go to the runtime's ssh host.
-  const machines = new Map<string, { host?: string; bin: string }>();
-  for (const r of codex) {
-    const bin = (r.bin.length ? r.bin : ["codex"]).map(quote).join(" ");
-    machines.set(`local ${bin}`, { bin });
-    if (r.sshHost) machines.set(`${r.sshHost} ${bin}`, { host: r.sshHost, bin });
-  }
-
-  const catalogs: CatalogModel[][] = [];
+  const machines = new Map<string, Machine>();
+  for (const spec of codex) for (const m of machinesOf(spec)) machines.set(`${m.host ?? ""} ${m.bin}`, m);
   for (const m of machines.values()) {
     const where = m.host ?? "local";
     const version = async () => (await run(onHost(m.host, `${m.bin} --version`), { timeoutMs: 60_000 })).stdout.trim() || "unknown";
     const before = await version();
-    if (!opts.skipUpgrade && !opts.dryRun) {
-      const u = await run(onHost(m.host, `${m.bin} update < /dev/null`));
-      if (u.code !== 0) {
-        result.failures.push(`${where}: codex update failed: ${(u.stderr || u.stdout).trim().slice(-300)}`);
-        log(`${where}: codex update failed (exit ${u.code}); reading the installed catalogue`);
-      }
-      const after = await version();
-      log(`${where}: ${before === after ? `${after} (already current)` : `${before} → ${after}`}`);
-    } else log(`${where}: ${before}`);
-    const c = await run(onHost(m.host, `${m.bin} debug models < /dev/null`), { timeoutMs: 120_000 });
-    try {
-      catalogs.push((JSON.parse(c.stdout) as { models: CatalogModel[] }).models);
-    } catch {
-      result.failures.push(`${where}: could not read \`codex debug models\``);
-      log(`${where}: could not read the model catalogue; nothing changes`);
-      return result;
+    if (opts.dryRun || opts.skipUpdate) {
+      log(`${where}: ${before}`);
+      continue;
     }
+    const u = await run(onHost(m.host, `${m.bin} update < /dev/null`));
+    if (u.code !== 0) result.failures.push(`${where}: codex update failed: ${(u.stderr || u.stdout).trim().slice(-300)}`);
+    const after = await version();
+    log(`${where}: ${before === after ? `${after} (no newer version)` : `${before} → ${after}`}`);
   }
-  const catalog = intersectCatalogs(catalogs);
 
-  for (const r of codex) {
-    const current: TierModels = { ...TIER_DEFAULTS["codex-cli"], ...r.models };
-    const proposed = proposeTiers(catalog, current);
-    const accepted: Partial<Record<ModelTier, string>> = {};
+  for (const spec of codex) {
+    let tiers: TierModels;
+    try {
+      tiers = await tiersFor(run, spec);
+    } catch (e) {
+      result.failures.push(`${spec.name}: could not read the codex catalogue: ${(e as Error).message.slice(0, 200)}`);
+      continue;
+    }
+    const effective = { ...tiers, ...spec.models };
+    result.tiers[spec.name] = effective;
     for (const tier of MODEL_TIERS) {
-      const to = proposed[tier];
-      if (!to) {
-        log(`${r.name}/${tier}: ${current[tier]} (latest)`);
+      const model = effective[tier];
+      if (!model) continue;
+      const pinned = spec.models?.[tier] ? ` (pinned in ${RUNTIMES_FILE})` : "";
+      if (opts.dryRun) {
+        log(`${spec.name}/${tier}: ${model}${pinned}`);
         continue;
       }
-      const hosts = [...new Set([undefined, r.sshHost])];
-      let ok = true;
-      if (!opts.dryRun) {
-        for (const host of hosts) {
-          const bin = (r.bin.length ? r.bin : ["codex"]).map(quote).join(" ");
-          const probe = await run(onHost(host, `${bin} exec --ignore-user-config --ephemeral --skip-git-repo-check --sandbox read-only --model ${quote(to)} ${quote("Reply with just: ok")} < /dev/null`), { timeoutMs: 180_000 });
-          if (probe.code !== 0) {
-            ok = false;
-            const why = (probe.stderr || probe.stdout).trim().split("\n").filter((l) => /error/i.test(l)).at(-1) ?? `exit ${probe.code}`;
-            result.failures.push(`${r.name}/${tier}: ${to} did not answer on ${host ?? "local"}: ${why.slice(0, 300)}`);
-          }
+      const refused: string[] = [];
+      for (const m of machinesOf(spec)) {
+        const probe = await run(onHost(m.host, `${m.bin} exec --ignore-user-config --ephemeral --skip-git-repo-check --sandbox read-only --model ${quote(model)} ${quote("Reply with just: ok")} < /dev/null`), { timeoutMs: 180_000 });
+        if (probe.code !== 0) {
+          const why = (probe.stderr || probe.stdout).trim().split("\n").filter((l) => /error/i.test(l)).at(-1) ?? `exit ${probe.code}`;
+          refused.push(m.host ?? "local");
+          result.failures.push(`${spec.name}/${tier}: ${model} did not answer on ${m.host ?? "local"}: ${why.slice(0, 300)}`);
         }
       }
-      log(`${r.name}/${tier}: ${current[tier]} → ${to}${opts.dryRun ? " (not probed)" : ok ? "" : " — refused, kept"}`);
-      if (ok) {
-        accepted[tier] = to;
-        result.changes.push({ runtime: r.name, tier, from: current[tier]!, to });
-      }
+      log(`${spec.name}/${tier}: ${model}${pinned}${refused.length ? ` — did not answer on ${refused.join(", ")}; pin a working model in ${RUNTIMES_FILE}` : " ok"}`);
     }
-    if (Object.keys(accepted).length) text = setTierModels(text, r.name, accepted);
+    for (const p of stalePins(spec.models, tiers)) log(`${spec.name}/${p.tier}: the pin ${p.pinned} keeps an older model than ${p.latest}; remove the line in ${RUNTIMES_FILE} to follow the catalogue`);
   }
 
   const prices = GPT_PRICING.models as Record<string, unknown>;
-  result.unpriced = [...new Set(result.changes.map((c) => c.to))].filter((m) => !prices[m]);
+  result.unpriced = [...new Set(Object.values(result.tiers).flatMap((t) => Object.values(t)))].filter((m) => !prices[m!]) as string[];
   for (const m of result.unpriced) log(`${m} has no price in src/space/model/gpt-prices.json; its ledger rows show no cost until it is added`);
 
-  if (!result.changes.length || opts.dryRun) return result;
-  parseRuntimesYaml(text); // never write a file the next boot cannot read
-  await Bun.write(`${path}.bak`, await file.text());
-  await Bun.write(path, text);
-  result.written = true;
-  log(`wrote ${path} (previous version in ${RUNTIMES_FILE}.bak)`);
+  if (opts.dryRun) return result;
   if (opts.restart) {
     const r = await run(["systemctl", "--user", "restart", "ai-space"], { timeoutMs: 60_000 });
     result.restarted = r.code === 0;
-    log(result.restarted ? "restarted ai-space" : `could not restart ai-space (${r.stderr.trim() || `exit ${r.code}`}); restart it to use the new tiers`);
+    log(result.restarted ? "restarted ai-space; it reads the catalogue at boot" : `could not restart ai-space (${r.stderr.trim() || `exit ${r.code}`}); restart it to use the new tiers`);
   } else log("restart ai-space to use the new tiers");
   return result;
 }

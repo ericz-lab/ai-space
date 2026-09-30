@@ -15,7 +15,11 @@ export type RegistryDeps = { fetch?: typeof fetch };
 
 export type RuntimeView = { name: string; kind: string; backend: string; capabilities: RuntimeAdapter["capabilities"]; default: boolean };
 
-/** Operator vocabulary: basic/基础, junior/初级, intermediate/中级, advanced/高级. */
+/**
+ * Operator vocabulary: basic/基础, junior/初级, intermediate/中级, advanced/高级.
+ * Codex's names are only the fallback: at boot its tiers come from the installed
+ * CLI's catalogue (codex-upgrade.ts, `applyCatalogTiers`), and runtimes.yaml pins win over both.
+ */
 export const TIER_DEFAULTS: Partial<Record<RuntimeSpec["kind"], TierModels>> = {
   "claude-code": { basic: "haiku", junior: "sonnet", intermediate: "opus", advanced: "fable" },
   "codex-cli": { basic: "gpt-6-luna", junior: "gpt-5.6-terra", intermediate: "gpt-6.1-sol", advanced: "gpt-6-astra" },
@@ -24,17 +28,25 @@ export const TIER_DEFAULTS: Partial<Record<RuntimeSpec["kind"], TierModels>> = {
 export class RuntimeRegistry {
   private readonly byName = new Map<string, RuntimeAdapter>();
   private readonly models = new Map<string, TierModels>();
+  private readonly specs = new Map<string, RuntimeSpec>();
   readonly default: RuntimeAdapter;
 
   constructor(config: RuntimesConfig, deps: RegistryDeps = {}) {
     for (const spec of config.runtimes) {
       if (this.byName.has(spec.name)) throw new Error(`duplicate runtime name: ${spec.name}`);
       this.byName.set(spec.name, createAdapter(spec, deps));
+      this.specs.set(spec.name, spec);
       this.models.set(spec.name, { ...TIER_DEFAULTS[spec.kind], ...spec.models });
     }
     const def = this.byName.get(config.default);
     if (!def) throw new Error(`default runtime is not configured: ${config.default}`);
     this.default = def;
+  }
+
+  /** Tier models read from a runtime's own catalogue; the runtimes.yaml `models` pins still win. */
+  applyCatalogTiers(name: string, tiers: TierModels): void {
+    const spec = this.specs.get(name);
+    if (spec) this.models.set(name, { ...TIER_DEFAULTS[spec.kind], ...tiers, ...spec.models });
   }
 
   get(name: string): RuntimeAdapter | undefined {
