@@ -17,3 +17,10 @@ test("queued turns keep their selections when another conversation's controls ch
   expect(queue.map((turn) => turn.permissionMode)).toEqual([undefined, "acceptEdits"]);
   expect(appTurn.model).toBe("haiku");
 });
+
+test("an app agent with runtime/tier options sends its own pick; one of an older peer sends the Claude model", () => {
+  const options = [{ value: "codex/intermediate", runtime: "codex", tier: "intermediate" as const, model: "gpt-6-sol" }];
+  expect(queuedChatTurn({ app: "todo", name: "planner", modelOptions: options }, "hi", "haiku", "codex/intermediate", "").model).toBe("codex/intermediate");
+  expect(queuedChatTurn({ app: "todo", name: "planner", modelOptions: options }, "hi", "haiku", "", "").model).toBeUndefined();
+  expect(queuedChatTurn({ app: "todo", name: "planner" }, "hi", "haiku", "codex/intermediate", "").model).toBe("haiku");
+});

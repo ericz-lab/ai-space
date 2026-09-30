@@ -65,7 +65,8 @@ export type ManifestAgent = {
   description?: string;
   /** Avatar path relative to the app directory, or an emoji; undefined = the app icon. */
   avatar?: string;
-  runtime: AgentRuntime;
+  /** Declared runtime; undefined = whatever the space picks for its agents (docs/panel.md#agent-models). */
+  runtime?: AgentRuntime;
   model?: string;
   /** System prompt file, relative to the app directory. */
   prompt?: string;
@@ -304,7 +305,7 @@ function parseAgent(raw: unknown, where: string): ManifestAgent {
   const name = typeof raw.name === "string" ? raw.name.trim() : "";
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`${where}: invalid or missing name`);
   const ctx = `agent "${name}"`;
-  const runtime = parseRuntimeName(raw.runtime, `${ctx}: runtime`);
+  const runtime = raw.runtime === undefined ? undefined : parseRuntimeName(raw.runtime, `${ctx}: runtime`);
   const memory = raw.memory ?? "shared";
   if (memory !== "shared" && memory !== "app" && memory !== "none") throw new Error(`${ctx}: memory must be shared, app or none`);
   const tools = stringList(raw.tools, `${ctx}: tools`);
@@ -320,7 +321,7 @@ function parseAgent(raw: unknown, where: string): ManifestAgent {
     title,
     ...(description !== undefined ? { description } : {}),
     ...(avatar !== undefined ? { avatar } : {}),
-    runtime,
+    ...(runtime !== undefined ? { runtime } : {}),
     ...(model !== undefined ? { model } : {}),
     ...(prompt !== undefined ? { prompt } : {}),
     cwd,

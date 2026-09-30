@@ -123,7 +123,9 @@ describe("agents api", () => {
   test("validates input and refuses runtimes the space lacks", async () => {
     expect((await post("/api/agents/notes/librarian/chat", { message: " " })).status).toBe(400);
     expect((await post("/api/agents/notes/nobody/chat", { message: "x" })).status).toBe(404);
-    expect((await post("/api/agents/notes/coder/chat", { message: "x" })).status).toBe(501);
+    expect((await post("/api/agents/notes/librarian/chat", { message: "x", model: "missing/basic" })).status).toBe(501);
+    // A manifest runtime this space lacks falls through to the space's default instead of failing.
+    expect((await post("/api/agents/notes/coder/chat", { message: "x" })).status).toBe(200);
   });
 
   test("session list and transcript routes", async () => {
@@ -193,7 +195,12 @@ describe("Base runtime selection", () => {
       expect((await chat({ message: "x", sessionId: session.sid, model: "claude/basic" })).status).toBe(400);
       expect((await chat({ message: "x", model: "missing/basic" })).status).toBe(501);
       expect((await chat({ message: "x", model: "codex/invalid/model" })).status).toBe(400);
-      expect((await chat({ message: "x", model: "codex/basic" }, "notes/librarian")).status).toBe(400);
+      // An app agent may chat on any runtime; its Claude tool list does not go to Codex.
+      const appTurn = await events(await chat({ message: "x", model: "codex/basic" }, "notes/librarian"));
+      expect(appTurn.some((e) => e.type === "error")).toBe(false);
+      const appSession = store.list("notes/librarian")[0]!;
+      expect(appSession).toMatchObject({ runtime: "codex", model: "gpt-6-luna" });
+      expect((await chat({ message: "x", sessionId: appSession.sid, model: "claude/basic" }, "notes/librarian")).status).toBe(400);
       configured.get("codex")!.transcript = async () => [{ role: "user", text: "Codex transcript" }];
       const transcript = await (await fetch(`${url}/api/agents/space/assistant/sessions/${session.sid}`)).json();
       expect(transcript).toMatchObject({ messages: [{ text: "Codex transcript" }] });
@@ -256,4 +263,54 @@ test("Base reads the live default for new chats but retains a resumed session's 
     await chat({ message: "new" });
     expect(store.list("space/assistant")[0]).toMatchObject({ runtime: "codex", model: "gpt-6-astra" });
   } finally { local.stop(true); db.close(); }
+});
+
+test("app agents pick a chat runtime through the app's model layers and the space's default", async () => {
+  const { RuntimeRegistry } = await import("../runtimes/registry.ts");
+  const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
+  // As on a machine whose Claude is configured but whose chats should run on Codex.
+  const configured = new RuntimeRegistry({ default: "claude", runtimes: [
+    { name: "claude", kind: "claude-code", bin: ["bun", join(home, "fake-claude.js")], chatArgs: [] },
+    { name: "codex", kind: "codex-cli", bin: fakeCodexBin() },
+  ] });
+  const dir = join(home, "apps", "todo");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "space.yaml"), "name: todo\nagents:\n  - { name: planner, tools: [Read, 'Bash(bun *)'] }\n  - { name: harness, runtime: dsh }\n  - { name: pinned, runtime: claude }\n");
+  const registry = new AppRegistry();
+  await registry.set(await loadManifest(dir));
+  const layers: { override?: string; manifest?: string } = {};
+  const store = new SessionStore(new Database(":memory:"));
+  const local = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createAgentRoutes({ ws: workspacePaths(home), registry, layout: new LayoutStore(new Database(":memory:")), sessions: store, runtimes: configured, defaultModel: "sonnet", baseDefaultModel: () => "codex/basic", appModel: () => layers }) });
+  const url = `http://127.0.0.1:${local.port}`;
+  const planner = async () => ((await (await fetch(`${url}/api/agents`)).json()) as { agents: { id: string; runtime: string; modelOptions?: unknown[] }[] }).agents.find((a) => a.id === "todo/planner")!;
+  const chat = async (agent: string, body: Record<string, unknown> = {}) => {
+    const r = await fetch(`${url}/api/agents/todo/${agent}/chat`, { method: "POST", body: JSON.stringify({ message: "hello", ...body }) });
+    expect(r.status).toBe(200);
+    const ev = await events(r);
+    expect(ev.some((e) => e.type === "error")).toBe(false);
+    return { session: store.list(`todo/${agent}`)[0]!, ev };
+  };
+  try {
+    // Nothing declared: the space's default, like Base, with every chat runtime/tier to pick from.
+    expect(await planner()).toMatchObject({ runtime: "codex" });
+    expect((await planner()).modelOptions).toHaveLength(8);
+    expect((await chat("planner")).session).toMatchObject({ runtime: "codex", model: "gpt-6-luna" });
+    // A declared runtime this space lacks falls through too.
+    expect((await chat("harness")).session).toMatchObject({ runtime: "codex", model: "gpt-6-luna" });
+    // The app's model.default tier runs on the default's runtime.
+    layers.manifest = "intermediate";
+    expect((await chat("planner")).session).toMatchObject({ runtime: "codex", model: "gpt-6-sol" });
+    // A declared runtime the space has wins over the app's default.
+    expect((await chat("pinned")).session).toMatchObject({ runtime: "claude", model: "opus" });
+    // The panel's override for the app wins over the manifest; Claude gets the tool list.
+    layers.override = "claude/junior";
+    expect((await planner()).runtime).toBe("claude");
+    const overridden = await chat("planner");
+    expect(overridden.session).toMatchObject({ runtime: "claude", model: "sonnet" });
+    expect(JSON.stringify(overridden.ev)).toContain("--allowedTools");
+    // The chat's own pick wins over every layer; a resumed session keeps its runtime.
+    const picked = await chat("planner", { model: "codex/advanced" });
+    expect(picked.session).toMatchObject({ runtime: "codex", model: "gpt-6-astra" });
+    expect((await chat("planner", { sessionId: picked.session.sid })).session).toMatchObject({ runtime: "codex", model: "gpt-6-astra" });
+  } finally { local.stop(true); }
 });

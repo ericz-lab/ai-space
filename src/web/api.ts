@@ -15,7 +15,9 @@ export type AgentInfo = {
   avatar: string;
   /** The owning app's icon, shown in the corner of the tile. */
   appIcon: string;
+  /** The runtime a new chat starts on. */
   runtime: string;
+  /** Runtime/tier values the chat may pick; absent on an older peer's app agents. */
   modelOptions?: { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string }[];
 };
 

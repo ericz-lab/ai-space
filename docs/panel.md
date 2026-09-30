@@ -31,7 +31,7 @@ So the panel is a set of routes in ai-space's `Bun.serve`, a React page bundled 
 
 Two independent axes decide where an app appears. A `url` means a person can open it: that is a tile. A `service` means a process runs: that is a row under Services. An app with both (a web app) has both; a data or background service with no page has a row and no tile, and stays registered, scheduled and probed, its agents and widgets (if any) in their own sections; a link app has a tile and no row; an app with neither (a repository that only runs tasks) appears in neither, and is still listed by `GET /api/apps?all=1`.
 
-The **space agent** (`space/assistant`, shown as "Base") is the default chat identity: a session in the workspace root with a short built-in prompt. Its model menu groups the configured chat runtimes (including Claude Code and Codex) into basic, junior, intermediate and advanced tiers, using the mappings in `runtimes.yaml`. The selection is remembered in the browser and captured for each message when it is queued, so later control changes cannot reroute an already queued turn. Switching runtimes starts a new conversation; history restores the original runtime and model. Base uses full native context, tools and skills; the permission menu independently controls execution access. It is the one exception to "nothing exists outside an app", on the same footing as the Space services themselves.
+The **space agent** (`space/assistant`, shown as "Base") is the default chat identity: a session in the workspace root with a short built-in prompt. Its model menu groups the configured chat runtimes (including Claude Code and Codex) into basic, junior, intermediate and advanced tiers, using the mappings in `runtimes.yaml`. The selection is remembered in the browser and captured for each message when it is queued, so later control changes cannot reroute an already queued turn. Switching runtimes starts a new conversation; history restores the original runtime and model. App agents have the same menu ([Agent models](#agent-models)). Base uses full native context, tools and skills; the permission menu independently controls execution access. It is the one exception to "nothing exists outside an app", on the same footing as the Space services themselves.
 
 ## Manifest-only apps
 
@@ -75,9 +75,26 @@ Nothing panel-related is written into an app directory or into the workspace as 
 
 ## Chat
 
-`POST /api/agents/:app/:agent/chat` runs one turn: ai-space spawns `claude -p <message> --output-format stream-json` in the agent's working directory with the identity from the manifest (`--append-system-prompt` from the prompt file plus the app title, description and `AGENTS.md`; `--allowedTools` from `tools`; `--model` from the request, the manifest, then `SPACE_CHAT_MODEL`) and streams the events back as server-sent events. Multi-turn continuity is `--resume <sid>`. The browser can pick a write tier (`acceptEdits`, `bypassPermissions`, `plan`); the default is the headless read-only behaviour. `SPACE_CHAT_ARGS` appends operator-chosen arguments to every run.
+`POST /api/agents/:app/:agent/chat` runs one turn: ai-space spawns `claude -p <message> --output-format stream-json` in the agent's working directory with the identity from the manifest (`--append-system-prompt` from the prompt file plus the app title, description and `AGENTS.md`; `--allowedTools` from `tools`; `--model` from the request, else as [Agent models](#agent-models) resolves it) and streams the events back as server-sent events. Multi-turn continuity is `--resume <sid>`. The browser can pick a write tier (`acceptEdits`, `bypassPermissions`, `plan`); the default is the headless read-only behaviour. `SPACE_CHAT_ARGS` appends operator-chosen arguments to every run.
 
-Transcripts are read back from the runtime's own store (Claude Code: `~/.claude/projects/<cwd>/<sid>.jsonl`; Codex: `$CODEX_HOME/sessions/**/rollout-*-<sid>.jsonl`; DeepSeek Harness: its session log), so restoring a past session costs no extra storage. Base accepts a `runtime/tier` or `runtime/model` in the request's `model` field. A resumed session stays on its recorded runtime; changing runtimes requires a new conversation. Other agents run on the runtime their manifest names ([runtimes.md](runtimes.md)); an agent naming a runtime the space lacks, or one without chat, answers 501. The browser reads Claude Code's `stream-json` events; another runtime's adapter translates its own events into that shape.
+Transcripts are read back from the runtime's own store (Claude Code: `~/.claude/projects/<cwd>/<sid>.jsonl`; Codex: `$CODEX_HOME/sessions/**/rollout-*-<sid>.jsonl`; DeepSeek Harness: its session log), so restoring a past session costs no extra storage. Every agent accepts a `runtime/tier` or `runtime/model` in the request's `model` field ([Agent models](#agent-models)). A resumed session stays on its recorded runtime; changing runtimes requires a new conversation. A requested runtime the space lacks, or one without chat, answers 501. The browser reads Claude Code's `stream-json` events; another runtime's adapter translates its own events into that shape.
+
+### Agent models
+
+The model is the space's choice, not the app's, so every agent's chat menu offers the same configured chat runtimes and tiers as Base (`modelOptions` in `GET /api/agents`), and the menu's "default model" names the runtime a new chat starts on (`runtime`). The pick is remembered per agent in the browser; switching runtimes starts a new conversation, as for Base.
+
+A new chat whose request names no model runs on the first of these that this space can chat on:
+
+| layer | set by |
+| --- | --- |
+| override | Settings → App models, the app-wide row (the same `override-app` that model calls use, [model.md](model.md#app-models)) |
+| agent | the agent's own `runtime` / `model` in `space.yaml` |
+| manifest | the app's `model.default` in `space.yaml` |
+| default | Base's default: Settings → Default model, else `SPACE_CHAT_MODEL`, at the intermediate tier of its runtime when that names only a runtime |
+
+A bare tier runs on the runtime of the default (`codex/basic` makes `intermediate` mean `codex/intermediate`). A layer naming a runtime this space lacks or that cannot chat is skipped, so a manifest written for a Claude machine (or one that omits `runtime`, which used to mean Claude) runs on the space's own default instead of failing. So on a Codex-only machine an operator does nothing for an app's agents to use Codex; setting the app's override moves its agents and its model calls together.
+
+The manifest's `tools` list is Claude Code's syntax and is passed only to Claude Code. On Codex the permission menu's sandbox bounds the agent instead: read-only by default, with neither writes nor network, so an agent whose commands write data or call a local HTTP service needs the "all permissions" tier there.
 
 ## Widgets
 

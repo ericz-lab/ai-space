@@ -115,7 +115,7 @@ widgets:
     const m = parseManifest(FULL, "/apps/notes");
     expect(m).toMatchObject({ app: "notes", spec: 1, title: "Notes", url: "https://notes.example.com", status: "paused", repo: "https://github.com/example/notes.git" });
     expect(m.service).toEqual({ command: "bun src/index.ts", port: 8710, health: "/healthz", env: { LOG_LEVEL: "info" } });
-    expect(m.agents[0]).toEqual({ name: "librarian", title: "librarian", description: "Files notes.", runtime: "claude", prompt: "agents/librarian.md", cwd: ".", tools: ["Read", "Bash(bun *)"], skills: ["./skills", "space:keep"], memory: "shared" });
+    expect(m.agents[0]).toEqual({ name: "librarian", title: "librarian", description: "Files notes.", prompt: "agents/librarian.md", cwd: ".", tools: ["Read", "Bash(bun *)"], skills: ["./skills", "space:keep"], memory: "shared" });
     expect(m.widgets[0]).toEqual({ name: "recent", title: "Notes · Recent", kind: "items", source: "/api/widget/recent", link: "/#recent", size: "2x1", refreshMs: 120_000 });
     expect(m.widgets[1]).toMatchObject({ kind: "embed", size: "1x1", refreshMs: 60_000 });
   });

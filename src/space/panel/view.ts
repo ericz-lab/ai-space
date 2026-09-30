@@ -25,7 +25,9 @@ export type AgentView = {
   avatar: string;
   /** The owning app's icon, for the corner of the agent's tile. */
   appIcon: string;
-  runtime: ManifestAgent["runtime"];
+  /** The runtime a new chat starts on; in an app's own view, only the manifest's declaration. */
+  runtime?: string;
+  /** Runtime/tier values the chat may pick (docs/panel.md#agent-models). */
   modelOptions?: { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string }[];
 };
 
@@ -116,7 +118,7 @@ export function resolveLink(m: Manifest, link: string | undefined): string {
   }
 }
 
-export function agentView(m: Manifest, a: ManifestAgent): AgentView {
+export function agentView(m: Manifest, a: ManifestAgent, chat?: Pick<AgentView, "runtime" | "modelOptions">): AgentView {
   return {
     id: `${m.app}/${a.name}`,
     app: m.app,
@@ -126,7 +128,8 @@ export function agentView(m: Manifest, a: ManifestAgent): AgentView {
     ...agentI18n(m, a),
     avatar: avatarUrl(m, a),
     appIcon: iconUrl(m),
-    runtime: a.runtime,
+    ...(a.runtime !== undefined ? { runtime: a.runtime } : {}),
+    ...chat,
   };
 }
 

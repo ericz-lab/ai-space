@@ -134,7 +134,7 @@ model:
     curate: intermediate
 ```
 
-A bare tier runs on the runtime of the space's default (`codex/basic` makes `intermediate` mean `codex/intermediate`); `runtime/tier` pins the runtime. A layer naming a runtime or tier this space lacks is skipped, so a manifest written for another machine falls through instead of failing the call. Overrides are kept in `space.db` (`model_overrides`) and may only name a configured Claude Code or Codex tier, like the default. Chat turns from the widget resolve the same way under the tag `chat`.
+A bare tier runs on the runtime of the space's default (`codex/basic` makes `intermediate` mean `codex/intermediate`); `runtime/tier` pins the runtime. A layer naming a runtime or tier this space lacks is skipped, so a manifest written for another machine falls through instead of failing the call. Overrides are kept in `space.db` (`model_overrides`) and may only name a configured Claude Code or Codex tier, like the default. Chat turns from the widget resolve the same way under the tag `chat`. The app's agents in the panel's chat start on the app-wide override too, then their own declaration, then `model.default` ([panel.md](panel.md#agent-models)).
 
 `GET /api/model/apps` lists every app with one row for the app and one per tag (declared, overridden, or seen in the ledger over the last 30 days): the declared value, the override, the model it runs on now and the layer that chose it. `GET /api/apps/:app/model` is one app. `PATCH /api/panel/apps/:app/model` with `{tag?, model}` sets an override and `{tag?, model: null}` clears it; like the task model route it takes only same-origin browser requests.
 
