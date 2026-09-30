@@ -80,7 +80,8 @@ export async function runBackup(deps: BackupDeps, job: BackupJob): Promise<Backu
     return { key, at: manifest.at, bytes: archive.bytes, sha256: archive.sha256, entries: manifest.entries.length, durationMs, skipped: manifest.skipped, pruned };
   } catch (e) {
     const error = (e as Error).message ?? String(e);
-    await deps.store.record({ app: job.app, key, at: now.getTime(), bytes: 0, sha256: "", status: "error", error, durationMs: Date.now() - started, entries: 0 }).catch(() => {});
+    await deps.store.record({ app: job.app, key, at: now.getTime(), bytes: 0, sha256: "", status: "error", error, durationMs: Date.now() - started, entries: 0 })
+      .catch((r) => log(`${job.app}: the failed run could not be recorded: ${(r as Error).message}`));
     throw e;
   } finally {
     await rm(appRoot, { recursive: true, force: true });

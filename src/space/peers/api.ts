@@ -102,7 +102,8 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
         } catch (e) {
           return error(502, `peer ${client.name} unreachable: ${String((e as Error).message ?? e).slice(0, 200)}`);
         }
-        if (res.ok) await client.refresh().catch(() => {});
+        // The next scheduled refresh catches up if this one fails.
+        if (res.ok) await client.refresh().catch((e) => console.error(`[peers] ${client.name}: refresh after uninstall failed: ${(e as Error).message}`));
         return res;
       },
     },

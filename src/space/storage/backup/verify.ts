@@ -90,7 +90,9 @@ export async function verifyApp(deps: BackupDeps, app: string, opts: VerifyOptio
   if (sidecar) {
     if (!(await deps.store.get(newest.key))) await deps.store.index({ ...sidecar, key: newest.key });
     await deps.store.setVerify(newest.key, { at: now.getTime(), ok: verify.ok, error: verify.error });
-    await deps.target.putText(sidecarKey(newest.key), JSON.stringify({ ...sidecar, key: newest.key, verify }, null, 2)).catch(() => {});
+    await deps.target.putText(sidecarKey(newest.key), JSON.stringify({ ...sidecar, key: newest.key, verify }, null, 2))
+      // The index above has the result; only another machine reading the target misses it.
+      .catch((e) => console.error(`[backup] ${newest.key}: verification not written to the target: ${(e as Error).message}`));
   }
   return result;
 }
