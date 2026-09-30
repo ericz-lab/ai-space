@@ -26,6 +26,7 @@ import { Supervisor, Systemctl, createServiceRoutes, unitName } from "./space/se
 import { createWebRoutes } from "./web/routes.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
+import { guardBrowserWrites } from "./space/auth.ts";
 
 /**
  * ai-space entry point.
@@ -283,7 +284,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     idleTimeout: 255,
     // The web UI is bundled once at boot; SPACE_DEV=1 turns on Bun's dev server (hot reload) instead.
     development: process.env.SPACE_DEV === "1",
-    routes: {
+    // Panel routes carry no token: a write from another site's page is refused (src/space/auth.ts).
+    routes: guardBrowserWrites({
       ...createRoutes({
         scheduler,
         store,
@@ -329,7 +331,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...terminalRoutes,
       ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, servicePort: (app) => registry.get(app)?.manifest.service?.port, bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
       ...createWebRoutes(),
-    },
+    }),
     websocket: terminalWebSocket,
     fetch: () => new Response(JSON.stringify({ ok: false, error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }),
   });

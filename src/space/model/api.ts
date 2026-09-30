@@ -4,6 +4,7 @@ import { GPT_PRICING } from "./pricing.ts";
 import type { ModelService } from "./service.ts";
 import { parseImageInput, parseRunInput, parseWindow } from "./spec.ts";
 import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts";
+import { OPERATOR, Unauthorized, identify } from "../auth.ts";
 
 /**
  * HTTP surface for the model service, shaped as a Bun.serve `routes` table
@@ -47,22 +48,16 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
   const { service } = opts;
   const token = opts.token?.trim() ?? "";
 
-  const bearer = (req: Request): string => req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ?? "";
 
   /** Who is calling: the app behind an app token, or the operator (then `app` comes from the body). */
   const resolveApp = async (req: Request, body: Record<string, unknown>): Promise<string> => {
-    const presented = bearer(req);
     const fromBody = (): string => {
       if (typeof body.app !== "string" || !APP_PATTERN.test(body.app)) throw new Error("app is required when calling with the operator token");
       return body.app;
     };
-    if (token && presented === token) return fromBody();
-    if (presented && opts.appForToken) {
-      const app = await opts.appForToken(presented);
-      if (app) return app;
-    }
-    if (!token && !presented) return fromBody();
-    throw new Unauthorized();
+    const caller = await identify(req, { token, appForToken: opts.appForToken });
+    if (!caller) throw new Unauthorized();
+    return caller === OPERATOR ? fromBody() : caller.app;
   };
 
   return {
@@ -193,7 +188,6 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
   };
 }
 
-class Unauthorized extends Error {}
 
 /** How often a comment line goes out on an idle event stream, so no proxy or server closes it while the model thinks. */
 export const STREAM_KEEPALIVE_MS = 15_000;

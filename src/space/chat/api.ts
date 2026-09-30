@@ -3,6 +3,7 @@ import { APP_PATTERN } from "../model/types.ts";
 import { type ChatService, Locked, Refused, type TurnResult } from "./service.ts";
 import { parseScope, parseTitle, parseTurnInput } from "./spec.ts";
 import { MAX_ATTACHMENT_BYTES, type Attachment, type Message, type Thread } from "./types.ts";
+import { OPERATOR, Unauthorized, identify } from "../auth.ts";
 
 /**
  * HTTP surface of the chat service, a Bun.serve `routes` table merged with the
@@ -38,29 +39,22 @@ type Req = Request & { params: Record<string, string> };
 type Handler = (req: Req) => Response | Promise<Response>;
 type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "PUT" | "PATCH" | "DELETE", Handler>>>;
 
-class Unauthorized extends Error {}
 class NotFound extends Error {}
 
 export function createChatRoutes(opts: ChatApiOptions): Routes {
   const { service } = opts;
   const token = opts.token?.trim() ?? "";
-  const bearer = (req: Request): string => req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ?? "";
 
   /** Who is calling: the app behind an app token, or the operator naming the app. */
   const resolveApp = async (req: Request, named?: unknown): Promise<string> => {
-    const presented = bearer(req);
     const fromCaller = (): string => {
       const app = named ?? new URL(req.url).searchParams.get("app");
       if (typeof app !== "string" || !APP_PATTERN.test(app)) throw new Error("app is required when calling with the operator token");
       return app;
     };
-    if (token && presented === token) return fromCaller();
-    if (presented && opts.appForToken) {
-      const app = await opts.appForToken(presented);
-      if (app) return app;
-    }
-    if (!token && !presented) return fromCaller();
-    throw new Unauthorized();
+    const caller = await identify(req, { token, appForToken: opts.appForToken });
+    if (!caller) throw new Unauthorized();
+    return caller === OPERATOR ? fromCaller() : caller.app;
   };
 
   const threadOf = (app: string, req: Req): Thread => {

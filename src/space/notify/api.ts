@@ -2,6 +2,7 @@ import type { NotifyService } from "./engine.ts";
 import { parseChannelName, parseNotificationInput } from "./spec.ts";
 import type { NotifyStore } from "./store.ts";
 import { APP_PATTERN, type Delivery, type Notification } from "./types.ts";
+import { OPERATOR, Unauthorized, identify, isOperator } from "../auth.ts";
 
 /**
  * HTTP surface for notify, shaped as a Bun.serve `routes` table and merged
@@ -34,12 +35,11 @@ export function createNotifyRoutes(opts: NotifyApiOptions): Routes {
   const { notify, store } = opts;
   const token = opts.token?.trim() ?? "";
 
-  const bearer = (req: Request): string => req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ?? "";
 
   const operator =
     (h: Handler): Handler =>
     async (req) => {
-      if (token && bearer(req) !== token) return error(401, "unauthorized");
+      if (!isOperator(req, token)) return error(401, "unauthorized");
       try {
         return await h(req);
       } catch (e) {
@@ -49,18 +49,13 @@ export function createNotifyRoutes(opts: NotifyApiOptions): Routes {
 
   /** Who is calling: the app behind an app token, or the operator (then `app` comes from the body). */
   const resolveApp = async (req: Request, body: Record<string, unknown>): Promise<string> => {
-    const presented = bearer(req);
     const fromBody = (): string => {
       if (typeof body.app !== "string" || !APP_PATTERN.test(body.app)) throw new Error("app is required when calling with the operator token");
       return body.app;
     };
-    if (token && presented === token) return fromBody();
-    if (presented && opts.appForToken) {
-      const app = await opts.appForToken(presented);
-      if (app) return app;
-    }
-    if (!token && !presented) return fromBody();
-    throw new Unauthorized();
+    const caller = await identify(req, { token, appForToken: opts.appForToken });
+    if (!caller) throw new Unauthorized();
+    return caller === OPERATOR ? fromBody() : caller.app;
   };
 
   return {
@@ -114,7 +109,6 @@ export function createNotifyRoutes(opts: NotifyApiOptions): Routes {
   };
 }
 
-class Unauthorized extends Error {}
 
 export function view(n: Notification, deliveries: Delivery[]) {
   return {

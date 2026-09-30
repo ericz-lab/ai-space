@@ -1,5 +1,6 @@
 import type { BackupStore, BackupSummary } from "./store.ts";
 import type { BackupTarget } from "./target.ts";
+import { isOperator } from "../../auth.ts";
 
 /**
  * HTTP surface for backups, merged into the Space API routes.
@@ -45,7 +46,7 @@ export function createBackupRoutes(opts: BackupApiOptions): Routes {
   const guard =
     (h: Handler): Handler =>
     async (req) => {
-      if (token && req.headers.get("authorization") !== `Bearer ${token}`) return error(401, "unauthorized");
+      if (!isOperator(req, token)) return error(401, "unauthorized");
       try {
         return await h(req);
       } catch (e) {

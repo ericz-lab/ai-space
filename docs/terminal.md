@@ -120,7 +120,7 @@ What the terminal does not do: it does not run as another user, does not confine
 ```
 src/space/terminal/   config.ts (SPACE_TERMINAL_*, the environment strip), pty.ts (Bun.Terminal and python backends),
                       pty_helper.py, service.ts (tickets, sessions, cap, idle sweep, passphrase lockout), store.ts (audit rows),
-                      api.ts (routes, same-origin check, the websocket handler, the hub bridge), terminal.test.ts
+                      api.ts (routes, the websocket handler, the hub bridge; the same-origin check is in src/space/auth.ts), terminal.test.ts
 src/web/Terminal.tsx  the panel (xterm.js, tabs, machine picker, passphrase, history)
 ```
 

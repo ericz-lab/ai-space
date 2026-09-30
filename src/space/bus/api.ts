@@ -4,6 +4,7 @@ import type { SpaceEvent } from "../scheduler/types.ts";
 import { type AppCapabilities, type Bus, CallError } from "./bus.ts";
 import type { BusStore } from "./store.ts";
 import { type CallRecord, type Delivery, type DeliveryStatus, MAX_CALL_BODY_BYTES, MAX_CALL_TIMEOUT_MS } from "./types.ts";
+import { OPERATOR as SPACE_OPERATOR, identify as identifyCaller, isOperator } from "../auth.ts";
 
 /**
  * HTTP surface of the bus, next to the scheduler's `/api/events`.
@@ -62,24 +63,16 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
   const token = opts.token?.trim() ?? "";
   const keepaliveMs = opts.keepaliveMs ?? KEEPALIVE_MS;
 
-  const bearer = (req: Request): string => req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ?? "";
-
   /** The app behind the token, or OPERATOR for the operator token; undefined = not authorized. */
   const identify = async (req: Request): Promise<string | undefined> => {
-    const presented = bearer(req);
-    if (token && presented === token) return OPERATOR;
-    if (presented && opts.appForToken) {
-      const app = await opts.appForToken(presented);
-      if (app) return app;
-    }
-    if (!token && !presented) return OPERATOR;
-    return undefined;
+    const caller = await identifyCaller(req, { token, appForToken: opts.appForToken });
+    return caller === undefined ? undefined : caller === SPACE_OPERATOR ? OPERATOR : caller.app;
   };
 
   const guard =
     (h: Handler): Handler =>
     async (req) => {
-      if (token && req.headers.get("authorization") !== `Bearer ${token}`) return error(401, "unauthorized");
+      if (!isOperator(req, token)) return error(401, "unauthorized");
       try {
         return await h(req);
       } catch (e) {

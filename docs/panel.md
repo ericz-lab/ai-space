@@ -137,6 +137,7 @@ These routes carry no bearer token. The browser cannot hold `SPACE_API_TOKEN`, a
 
 - Anyone who passes the access layer can open a chat with `bypassPermissions`, which is a shell on the machine with the operator's runtime login. This is the same exposure as before, now written down.
 - Anything on the machine that can reach loopback can add an app from a link, uninstall an app (which runs the stop command) and change the layout. Command tasks run as the same user anyway.
+- A page on another site cannot do the same through the operator's browser. Every write (`POST`, `PUT`, `PATCH`, `DELETE`) that comes without an `Authorization` header must pass the same-origin check the terminal uses, or it is a 403 before any handler runs (`guardBrowserWrites` in `src/space/auth.ts`, applied to the whole route table). Without it, a simple cross-site `POST` to loopback could start a chat turn, add an app or stop a service. A request with a bearer token is not checked: a browser cannot send one cross-site without a preflight, which the space never answers. A script on the machine sends neither `Origin` nor `Sec-Fetch-Site` and passes.
 
 - The terminal, when a machine enables it, is the same shell without the agent in between. It adds what the other routes lack because a cross-site page could otherwise open it through the operator's browser: a same-origin check on every request that opens or ends a session, a one-time ticket on the socket, an optional passphrase, an idle limit and a cap. [terminal.md](terminal.md#trust-boundary) states the whole boundary.
 

@@ -4,7 +4,7 @@ import { type Manifest, type ManifestTask, loadManifest, parsePermissionMode, pa
 import { Scheduler, type SyncSummary } from "./scheduler.ts";
 import type { Store } from "./store.ts";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
-import { sameOrigin } from "../terminal/api.ts";
+import { OPERATOR, Unauthorized, identify, isOperator, sameOrigin } from "../auth.ts";
 import { type Schedule, type SpaceEvent, type Task, type TaskCreate, type TaskPatch, assertTaskModel, baseTaskModel, effectiveTaskModel, taskSupportsModel, effectiveEnabled, effectiveSchedule } from "./types.ts";
 
 /**
@@ -55,7 +55,7 @@ export function createRoutes(opts: ApiOptions): Routes {
   const guard =
     (h: Handler): Handler =>
     async (req) => {
-      if (token && req.headers.get("authorization") !== `Bearer ${token}`) return error(401, "unauthorized");
+      if (!isOperator(req, token)) return error(401, "unauthorized");
       try {
         return await h(req);
       } catch (e) {
@@ -63,22 +63,16 @@ export function createRoutes(opts: ApiOptions): Routes {
       }
     };
 
-  const bearer = (req: Request): string => req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ?? "";
 
   /** Who publishes: the app behind an app token, or the operator (then `app` comes from the body). */
   const publisher = async (req: Request, body: Record<string, unknown>): Promise<string> => {
-    const presented = bearer(req);
     const fromBody = (): string => {
       if (typeof body.app !== "string" || !APP_RE.test(body.app)) throw new Error("app is required when publishing with the operator token");
       return body.app;
     };
-    if (token && presented === token) return fromBody();
-    if (presented && opts.appForToken) {
-      const app = await opts.appForToken(presented);
-      if (app) return app;
-    }
-    if (!token && !presented) return fromBody();
-    throw new Unauthorized();
+    const caller = await identify(req, { token, appForToken: opts.appForToken });
+    if (!caller) throw new Unauthorized();
+    return caller === OPERATOR ? fromBody() : caller.app;
   };
 
   const withTask = (req: { params: Record<string, string> }): Task => {
@@ -243,7 +237,6 @@ export function createRoutes(opts: ApiOptions): Routes {
 // ---------------------------------------------------------------- helpers
 
 class NotFound extends Error {}
-class Unauthorized extends Error {}
 
 const APP_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 

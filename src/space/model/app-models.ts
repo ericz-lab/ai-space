@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { MODEL_TIERS } from "../runtimes/types.ts";
-import { sameOrigin } from "../terminal/api.ts";
+import { sameOrigin } from "../auth.ts";
 import { APP_PATTERN, MODEL_PATTERN, TAG_PATTERN } from "./types.ts";
 
 /**

@@ -1,4 +1,5 @@
 import { APP_RE, type LogsProcess, type LogsRequest, spawnLogs } from "./logs.ts";
+import { isOperator } from "../auth.ts";
 
 /**
  * HTTP surface of the logs, shaped as a Bun.serve `routes` table.
@@ -36,7 +37,7 @@ export function createLogsRoutes(opts: LogsApiOptions): Record<string, { GET: Ha
   return {
     "/api/apps/:app/logs": {
       GET: async (req) => {
-        if (token && req.headers.get("authorization") !== `Bearer ${token}`) return error(401, "unauthorized");
+        if (!isOperator(req, token)) return error(401, "unauthorized");
         const app = req.params.app ?? "";
         if (!APP_RE.test(app)) return error(400, "invalid app name");
         if (app !== "space" && !opts.knownApp(app)) return error(404, `unknown app: ${app}`);

@@ -3,6 +3,7 @@ import { type Bus, CallError } from "../bus/bus.ts";
 import { MAX_CALL_BODY_BYTES } from "../bus/types.ts";
 import { eventPayload } from "../scheduler/events.ts";
 import type { Store } from "../scheduler/store.ts";
+import { bearer, tokenEquals } from "../auth.ts";
 
 /**
  * The peer side: `/api/peer/*`, present only when `SPACE_HUB_TOKEN` is set.
@@ -59,12 +60,11 @@ const PROXY_TIMEOUT_MS = 60_000;
 
 export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
   if (!opts.token) return {};
-  const expected = `Bearer ${opts.token}`;
 
   const guard =
     (h: Handler): Handler =>
     async (req, server) => {
-      if (req.headers.get("authorization") !== expected) return json({ ok: false, error: "unauthorized" }, 401);
+      if (!tokenEquals(bearer(req), opts.token)) return json({ ok: false, error: "unauthorized" }, 401);
       try {
         return await h(req, server);
       } catch (e) {

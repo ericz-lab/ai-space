@@ -1,5 +1,6 @@
 import { parseBackend, parseName } from "./spec.ts";
 import type { StorageService } from "./storage.ts";
+import { isOperator } from "../auth.ts";
 
 /**
  * HTTP surface for storage, shaped as a Bun.serve `routes` table and merged
@@ -26,7 +27,7 @@ export function createStorageRoutes(opts: StorageApiOptions): Routes {
   const guard =
     (h: Handler): Handler =>
     async (req) => {
-      if (token && req.headers.get("authorization") !== `Bearer ${token}`) return error(401, "unauthorized");
+      if (!isOperator(req, token)) return error(401, "unauthorized");
       try {
         return await h(req);
       } catch (e) {

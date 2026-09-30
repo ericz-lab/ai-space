@@ -1,6 +1,9 @@
 import type { Server, WebSocketHandler } from "bun";
 import type { PeerHub } from "../peers/hub.ts";
 import { type TerminalService, TooManySessions, type WsAttachment, type WsData } from "./service.ts";
+import { sameOrigin } from "../auth.ts";
+
+export { sameOrigin };
 
 /**
  * HTTP surface of the terminal, shaped as a Bun.serve `routes` table, plus
@@ -224,28 +227,6 @@ function bridge(url: string, headers: Record<string, string>, peer: string): WsA
       }
     },
   };
-}
-
-/**
- * True when the request comes from the panel's own origin: `Origin` (sent on
- * every POST and socket upgrade) or, failing that, `Sec-Fetch-Site` matches
- * the host the request arrived at. A request with neither header (a script
- * on the machine, the hub's forward) passes: those are not browsers.
- */
-export function sameOrigin(req: Request): boolean {
-  const origin = req.headers.get("origin");
-  if (origin === null) {
-    const site = req.headers.get("sec-fetch-site");
-    return site === null || site === "same-origin" || site === "none";
-  }
-  let host: string;
-  try {
-    host = new URL(origin).host;
-  } catch {
-    return false;
-  }
-  const forwarded = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
-  return host === req.headers.get("host") || (!!forwarded && host === forwarded);
 }
 
 function json(body: unknown, status = 200): Response {
