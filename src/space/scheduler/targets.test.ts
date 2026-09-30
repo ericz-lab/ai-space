@@ -143,11 +143,12 @@ printf '{"type":"result","result":"done: %s","total_cost_usd":0.25,"usage":{"inp
 `,
       { mode: 0o755 },
     );
+    // A generous abort: the first run of a newly written script can take a second on macOS.
     try {
-      const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "haiku" }, ctx(1000, [fake]));
+      const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "haiku" }, ctx(4000, [fake]));
       expect(r).toEqual({ status: "ok", output: "done: hello agent", usage: { inputTokens: 1, cacheWriteTokens: 3, cacheReadTokens: 4, outputTokens: 2 }, costUsd: 0.25, promptChars: 11, backend: "local", runtime: "claude", model: "haiku" });
       process.env.FAKE_AGENT_MODE = "error";
-      const bad = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx(1000, [fake]));
+      const bad = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx(4000, [fake]));
       expect(bad).toMatchObject({ status: "error", error: "boom" });
     } finally {
       delete process.env.FAKE_AGENT_MODE;
