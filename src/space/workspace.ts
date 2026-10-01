@@ -12,6 +12,7 @@ import { MANIFEST_FILE } from "./scheduler/manifest.ts";
  *   ~/.ai-space/
  *   ├── core/    ai-space itself (this repository), when deployed here
  *   ├── apps/    one directory per app; an app with a space.yaml is picked up automatically
+ *   ├── app-src/ app source checkouts for development, one per app; ai-space does not scan it (AGENTS.md, App Development Mode)
  *   ├── data/    runtime state: space.db, then one directory per app (its databases, blobs/ and space.env)
  *   ├── logs/
  *   ├── run/     files ai-space writes for other programs: the router's Caddyfile and admin socket (src/space/router/)

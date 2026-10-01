@@ -216,7 +216,7 @@ POST   /api/apps/:app/sync        re-read the app's space.yaml
 
 ## Workspace and deployment
 
-Everything lives under the workspace (`~/.ai-space` by default, `SPACE_HOME` to override): `core/` for this code, `apps/` for app checkouts, `data/` for SQLite and per-app data, `logs/`, and `.env`. The workspace is created on first boot or by `bun run init`.
+Everything lives under the workspace (`~/.ai-space` by default, `SPACE_HOME` to override): `core/` for this code, `apps/` for app checkouts, `app-src/` for app source checkouts during development, `data/` for SQLite and per-app data, `logs/`, and `.env`. The workspace is created on first boot or by `bun run init`.
 
 ai-space runs as a user-level systemd unit (`deploy/ai-space.service`, installed by `deploy/install.sh`). Apps that need a long-running process run under their own unit, and the scheduler reaches them over `127.0.0.1`. A bare-repo `post-receive` hook (`deploy/post-receive`) turns `git push <host> main` into checkout, install and restart.
 

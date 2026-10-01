@@ -25,10 +25,12 @@ English is the default language of this repository. Write code identifiers, comm
 
 ## App Development Mode
 
-When the user starts development from the ai-space source checkout and asks to work on an app, establish the app's source directory before editing:
+An app is read and changed in its source checkout, never in a deployed copy. This holds for investigating an app as much as for developing it. Establish the app's source directory first:
 
 - Use the app source directory specified by the user when one is provided.
-- Otherwise, default to `.ai-space/app-src/<app-name>/` relative to the ai-space repository root. State the resolved path and proceed with this default without requiring confirmation.
+- Otherwise, default to `<workspace>/app-src/<app-name>/`, where the workspace is `$SPACE_HOME` or `~/.ai-space`. State the resolved path and proceed with this default without requiring confirmation.
+- When the app is not there yet, clone its repository (the manifest's `repo:`) into that directory. Other checkouts of the app elsewhere on the machine are not the source of truth and may lag behind; use one only when the user points to it.
+- `<workspace>/apps/<app>/` on a server is what runs there, put in place by the app's deployment channel (a bare repository with a hook, `deploy.sh`, or an exported tree without `.git`). Read it to diagnose, change the source checkout, and deploy through the channel the app's `AGENTS.md` names; an edit in the deployed copy is lost on the next deploy.
 - Keep app source changes in that directory and follow its own `AGENTS.md` instructions. Run the app's commands and Git operations from its source directory; keep ai-space platform changes in the ai-space checkout.
 
 ## Stack And Conventions
@@ -43,7 +45,7 @@ When the user starts development from the ai-space source checkout and asks to w
 ## Repository Map
 
 - `.claude/` - shared development launch configuration; local worktrees remain ignored.
-- `.ai-space/app-src/` - ignored, independent app source checkouts used during app development.
+- `.ai-space/app-src/` - ignored; the former location of app source checkouts, now `<workspace>/app-src/` (see App Development Mode). A link here may point there.
 
 - `src/` - source code. Entry point is `src/index.ts` (boots Space services and serves the Space API). Tests sit next to the code they test and are named `*.test.ts`.
 - `src/space/` - Space layer services shared by every app. One directory per service. `workspace.ts` defines the `~/.ai-space` layout, creates it, discovers apps and loads the workspace `.env`. `skills.ts` links the shared skills and every app's skills into `<workspace>/.claude/skills/` on boot, `init` and each workspace sync. `guide.ts` generates the workspace `AGENTS.md` (template with a "This machine" section from `SPACE_NAME`, hostname, user and workspace path, plus the operator's `AGENTS.local.md`, written once) and links `CLAUDE.md` to it, on boot, `init` and each workspace sync, for sessions of any agent tool started by hand there.
