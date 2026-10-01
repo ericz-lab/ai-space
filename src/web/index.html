@@ -14,6 +14,29 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="space">
 <link rel="stylesheet" href="./styles.css">
+<!-- Paint the saved appearance before the bundle runs (no flash): theme.ts stores the resolved
+     variables of both schemes under panel-appearance-boot; before that exists, the legacy
+     light/dark switch or the system decides data-theme and styles.css supplies the colors. -->
+<script>
+(function () {
+  try {
+    var root = document.documentElement, dark = matchMedia("(prefers-color-scheme: dark)").matches, scheme;
+    var boot = JSON.parse(localStorage.getItem("panel-appearance-boot") || "null");
+    if (boot && typeof boot === "object") {
+      scheme = boot.mode === "light" || boot.mode === "dark" ? boot.mode : dark ? "dark" : "light";
+      var vars = boot[scheme] || {};
+      for (var k in vars) if (/^--[a-z0-9-]+$/.test(k) && typeof vars[k] === "string") root.style.setProperty(k, vars[k]);
+    } else {
+      var legacy = localStorage.getItem("panel-theme");
+      scheme = legacy === "light" || legacy === "dark" ? legacy : dark ? "dark" : "light";
+    }
+    root.dataset.theme = scheme;
+    root.style.colorScheme = scheme;
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", (boot && boot.themeColor && boot.themeColor[scheme]) || (scheme === "dark" ? "#1c2030" : "#f6f7fb"));
+  } catch (e) {}
+})();
+</script>
 </head>
 <body>
 <div id="root"></div>

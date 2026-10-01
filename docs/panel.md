@@ -21,7 +21,7 @@ So the panel is a set of routes in ai-space's `Bun.serve`, a React page bundled 
 | Apps | every registered manifest that has a `url`, with `status` other than `archived`, minus the hidden set; peer apps follow, minus those whose `url` is already listed ([peers.md](peers.md)) | Tile: `icon` and `title`, nothing else on the icon. Click opens `url`. Hover shows the description, the status (health when the app declares `service.health`) and the repository. |
 | Agents | `agents:` of every visible app, plus the space agent | The section is left out when the list is empty (the agents could not be loaded). Tile shows the avatar and title, with the owning app's icon in the corner when it differs from the avatar; click opens the chat in a floating panel over the page, on that agent. |
 | Widgets | `widgets:` of every visible app | `items` cards render the list in the house style; `embed` cards load the app's page in a sandboxed iframe through ai-space. |
-| Settings | built in | The last tile of the Apps grid (the Terminal tile sits just before it), not hidden, reordered or uninstalled. It opens a floating panel near the top of the page with the browser preferences (hover details, desk pet, widgets, dark mode, language), the scheduled tasks, and a status line that folds the peers, services and backups into counts and a problem tally (a service or peer down, a stale backup); a click expands it to their rows. |
+| Settings | built in | The last tile of the Apps grid (the Terminal tile sits just before it), not hidden, reordered or uninstalled. It opens a floating panel near the top of the page with the browser preferences (hover details, desk pet, widgets, appearance ([Appearance](#appearance)), language), the scheduled tasks, and a status line that folds the peers, services and backups into counts and a problem tally (a service or peer down, a stale backup); a click expands it to their rows. |
 
 | Services (in Settings) | every registered manifest with a `service` | One row per service: icon, title, loopback port, health. |
 | Language (in Settings) | the browser's preferences | English or Chinese for everything the panel owns; the browser's language is the default. Apps' titles and descriptions follow when their manifest has an `i18n:` section. Design in [i18n.md](i18n.md). |
@@ -100,6 +100,24 @@ The manifest's `tools` list is Claude Code's syntax and is passed only to Claude
 
 `GET /api/widgets` fetches every `kind: items` source through ai-space, caches each payload for the widget's `refresh`, and returns at most twenty items with only the contract fields (`text`, `url`, `time`). A failing source yields `{ ok: false, error }` and the card shows the error as is. Sources are resolved server-side: a path is joined to `http://127.0.0.1:<service.port>`, a full URL is used unchanged; neither reaches the browser. `kind: embed` widgets are proxied at `GET /api/widgets/:app/:name/embed?theme=&lang=` because the browser cannot reach loopback (both parameters are forwarded to the page, `lang` only when it is a language tag); the page must be self-contained (inline assets or absolute public URLs).
 
+## Appearance
+
+The panel's look is a browser preference, edited in Settings without code changes (`src/web/theme.ts`, `src/web/ThemeSettings.tsx`). It has three parts:
+
+- **Mode**: follow the system, light or dark. Only "follow the system" listens to `prefers-color-scheme`; a fixed mode ignores the OS. `data-theme` on `<html>` is always the resolved `light` or `dark`, and `color-scheme` and `<meta name="theme-color">` follow it.
+- **Theme** (a preset): Aurora (the default, the look the panel always had), Simple (opaque surfaces, no glow, small radii) and Warm. A preset is a `ThemeDefinition` (`version`, `id`, `name`, `light` and `dark` tokens) and is independent of the mode: each preset has both schemes.
+- **Adjustments**, per mode: accent color, background color, corner radius, glass blur, surface opacity and the background glow. Light and dark keep their own, and the settings edit the one on screen.
+
+Resolution for the scheme in effect is the default tokens, then the preset's, then the adjustments; a token missing at one layer falls back to the layer below. Tokens are semantic: background, text and secondary text, surfaces (glass, strong glass, panel, solid), borders and hairlines, shadow, accent, link and focus with the color on the accent, success, warning and danger, code and terminal grounds, selection, scrim, radius, blur and the three glow colors. `styles.css` declares the default values (a test keeps them equal to `DEFAULT_THEME`) and derives the rest (shadow, smaller radii, the glass filter) from them; the theme engine sets the resolved values inline on `<html>`. The panel's accent never reaches apps: embedded widgets still receive only `theme=light|dark`, and the chat widget keeps its own `--sc-*` tokens that each app maps to its brand.
+
+The mode is saved at once. The theme and the adjustments are a draft the page previews live; Save stores it, Cancel (or closing the settings) drops it, and "Reset to default" returns the draft to Aurora without adjustments. Switching the theme while adjustments exist asks whether to keep or clear them.
+
+Storage is `localStorage`: `panel-appearance` holds `{ version: 1, mode, presetId, overrides: { light, dark } }`. The light/dark switch of earlier versions (`panel-theme`) becomes a fixed mode on first load and is removed. Data that cannot be read (not JSON, another version, an unknown preset, an invalid color, a number out of range) falls back to the default, part by part, and the settings say so with a one-click reset. Unavailable storage (private mode, blocked site data) keeps the look for the page and says it was not saved. Another tab's save applies here through the `storage` event. To avoid a flash, the engine also writes `panel-appearance-boot` (the resolved variables of both schemes), and a small inline script in `index.html` paints them before the bundle loads.
+
+The terminal takes its ground, text, cursor and selection from the resolved theme and keeps fixed ANSI colors, picked by the ground's brightness so program output stays readable; a theme change recolors open terminals without touching their sessions.
+
+**Import and export.** Export downloads the saved preferences as JSON (`{ format: "ai-space-panel-theme", version: 1, mode, presetId, overrides }`). Import is strict: at most 16 KB, the format tag and version must match, and any unknown field, a color other than hex or `rgb()`/`rgba()`, or a number out of range refuses the whole file and leaves the current look alone. An accepted file is previewed as a draft and applies only when saved. No CSS, scripts or images are accepted.
+
 ## Events
 
 The settings open an Events window next to Tasks and Model usage: the bus's catalogue (what every app, local or on a peer, provides, publishes and consumes, with call counts) and the last hundred events, each opening to its http and stream deliveries with status, attempts and last error ([events.md](events.md)). Read-only, like Tasks.
@@ -154,6 +172,7 @@ src/space/terminal/ the web terminal: PTY backends, tickets and sessions, audit 
 src/space/agents/   runtime.ts (claude process + SSE), sessions.ts (chat_sessions),
                     transcript.ts, api.ts (routes, space agent)
 src/web/            index.html, main.tsx (language root), App.tsx, Chat.tsx, Tasks.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
+                    theme.ts (appearance: presets, resolution, storage), ThemeSettings.tsx (its settings rows),
                     i18n.ts (dictionaries, language choice), styles.css, api.ts, routes.ts (HTML import + public files),
                     public/ (PWA shell, pet sprite)
 ```
