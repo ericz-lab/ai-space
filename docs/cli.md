@@ -26,6 +26,7 @@ space notify  send | ls | channels | test
 space backup  run | ls | verify | restore
 space chat    ls | import
 space event   ls | emit
+space consumer ls | show | add | rotate | rm
 space peer    ls
 space router  show | sync
 space api     <METHOD> <path> [body]  the escape hatch: one raw call with the token added
@@ -88,6 +89,9 @@ Rules:
 | `space backup verify` / `restore APP ...` | today's `backup-verify` and `restore`, unchanged | disk |
 | `space chat ls --app APP --scope S` / `import` | threads of one scope; the older `chat-import` | `GET /api/chat/threads`, disk |
 | `space event ls [--name] [--app]` / `emit NAME [--data JSON]` | recent events; publish one | `GET`, `POST /api/events` |
+| `space consumer ls` / `show NAME` | external consumers of the bus: events, calls, token hint, last contact; one with its delivery counts ([events.md](events.md#external-consumers)) | `GET /api/consumers`, `GET /api/consumers/:name` |
+| `space consumer add NAME --event E [--filter k=v1,v2] [--call APP/CAP] [--description D]` | create one; `--filter` applies to every event and call; or a JSON body, `-`, `--json-file`; prints the token once | `POST /api/consumers` |
+| `space consumer rotate NAME [--yes]` / `rm NAME [--yes]` | a new token, or revoke; both end the old token and its open streams at once | `POST /api/consumers/:name/rotate`, `DELETE /api/consumers/:name` |
 | `space peer ls` | health, snapshot age, app counts | `GET /api/peers` |
 | `space router show` / `sync` | routes with status; write and reload | `GET /api/router`, `POST /api/router/sync` |
 | `space api METHOD PATH [BODY\|-] [--app]` | one call with the operator token (`--app`: the app's own); JSON pretty-printed, SSE one line per event | any |
@@ -126,7 +130,7 @@ src/cli/client.ts         url + token resolution (flags, then env, then <workspa
                           JSON and SSE readers, `ApiError` for exit 1 and `Unreachable` for exit 3
 src/cli/output.ts         tables (widths from the rows, right-aligned numbers), relative times, sizes, tokens, money
 src/cli/common.ts         task lookup (<app>/<name>, bare name, id), schedule text, JSON bodies, confirmations
-src/cli/status.ts, app.ts (+ newapp.ts), task.ts, logs.ts, model.ts, notify.ts, backup.ts, chat.ts, event.ts,
+src/cli/status.ts, app.ts (+ newapp.ts), task.ts, logs.ts, model.ts, notify.ts, backup.ts, chat.ts, event.ts, consumer.ts,
         peer.ts, router.ts, api.ts, lifecycle.ts (init, setup, start, install-defaults, codex-upgrade), completion.ts
 src/cli/testing.ts        runCli(): the CLI against a scripted fetch, stdout and stderr collected
 src/cli/*.test.ts         every verb: the call it makes, the table it prints, the code it exits with

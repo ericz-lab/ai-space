@@ -413,7 +413,7 @@ API, for apps and their agents:
 | `POST /api/apps`, `PATCH`/`DELETE /api/apps/:app` | Create a manifest-only app, hide an app, delete a manifest-only app. |
 | `GET /api/tasks`, `POST /api/tasks/:id/run` | Inspect and trigger the app's own tasks. |
 | `POST /api/events`, `GET /api/events` | Publish an event for other apps (`{ name, data }`, stored as `<app>/<name>`); read recent events. |
-| `GET /api/events/stream`, `POST /api/events/ack`, `GET /api/events/:id`, `GET /api/deliveries` | Stream deliveries to the app, ack them, read an event with its deliveries ([events.md](events.md)). |
+| `GET /api/events/stream`, `POST /api/events/ack`, `GET /api/events/:id`, `GET /api/deliveries` | Stream deliveries to the app, ack them, read an event with its deliveries ([events.md](events.md)). The stream and ack also serve external consumers, programs outside the space with their own operator-made credential ([events.md](events.md#external-consumers)). |
 | `POST /api/call/:app/:capability`, `GET /api/capabilities`, `GET /api/calls` | Call another app's capability as this app; the catalogue; call history. |
 | `GET /api/widgets` | Every widget's latest payload (used by the panel). |
 | `POST /api/agents/:app/:agent/chat` | One chat turn, streamed as server-sent events; `sessionId` continues a session. |
