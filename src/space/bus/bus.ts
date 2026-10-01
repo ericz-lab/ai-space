@@ -5,6 +5,7 @@ import {
   ACK_TIMEOUT_MS,
   type CallRecord,
   type Capability,
+  type ConsumerSubscription,
   DELIVERY_TIMEOUT_MS,
   type Delivery,
   type DeliveryPayload,
@@ -12,8 +13,11 @@ import {
   type EventPublication,
   type EventsSpec,
   MAX_ATTEMPTS,
+  MAX_CONSUMER_BACKLOG,
   RETRY_DELAYS_MS,
+  consumerKey,
   deliveryPayload,
+  isConsumerKey,
 } from "./types.ts";
 
 /**
@@ -31,6 +35,10 @@ import {
  *   open; it is pushed as `sent`, and the app acks it. Not acked within
  *   ACK_TIMEOUT_MS, it goes back to pending and is pushed again on the next
  *   connection, MAX_ATTEMPTS times.
+ *
+ * External consumers (`setConsumer`, docs/events.md#external-consumers) get
+ * stream deliveries under the key `consumer:<name>`, the same rows, push, ack
+ * and redelivery as an app's stream; their backlog is capped.
  *
  * At-least-once, in order per app and kind; consumers dedupe on the event id.
  * A call (`call`) is synchronous: forwarded to the capability's path on the
@@ -94,6 +102,10 @@ export class Bus {
   private readonly onDead?: BusOptions["onDead"];
   private readonly specs = new Map<string, { events: EventsSpec; provides: Capability[] }>();
   private readonly listeners = new Map<string, Set<StreamListener>>();
+  /** Per app or consumer key: how to end each open stream (revoke, rotate). */
+  private readonly closers = new Map<string, Set<() => void>>();
+  /** External consumers' subscriptions, by key (`consumer:<name>`). */
+  private readonly consumers = new Map<string, ConsumerSubscription[]>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private ticking: Promise<void> | null = null;
@@ -160,6 +172,23 @@ export class Bus {
     return this.specs.get(app)?.provides.find((c) => c.name === name);
   }
 
+  // ---------------------------------------------------------------- external consumers
+
+  /** Register (or replace) an external consumer's subscriptions. */
+  setConsumer(name: string, subscriptions: ConsumerSubscription[]): void {
+    this.consumers.set(consumerKey(name), subscriptions);
+  }
+
+  /** Forget a consumer: its open streams close and what still waits for it is skipped. */
+  removeConsumer(name: string): void {
+    const key = consumerKey(name);
+    this.consumers.delete(key);
+    this.disconnect(key);
+    const n = this.store.skipOpen(key, "consumer removed", this.now());
+    if (n) this.log(`${key}: ${n} open deliveries skipped`);
+    this.armTimer();
+  }
+
   // ---------------------------------------------------------------- events in
 
   /** One delivery per matching http / stream subscription of every app; pushes stream ones right away. */
@@ -182,6 +211,14 @@ export class Bus {
         else kick = true;
       }
     }
+    for (const [key, subs] of this.consumers) {
+      if (!subs.some((c) => matches({ event: c.event, ...(c.filter ? { filter: c.filter } : {}) }, event))) continue;
+      const d = this.store.addDelivery({ eventId: event.id, event: event.name, app: key, kind: "stream", createdAt: now });
+      created.push(d);
+      this.push(d, event);
+      const dropped = this.store.trimBacklog(key, MAX_CONSUMER_BACKLOG, now);
+      if (dropped) this.log(`${key}: backlog over ${MAX_CONSUMER_BACKLOG}, ${dropped} oldest skipped`);
+    }
     if (created.length) this.log(`event ${event.name} #${event.id}: ${created.map((d) => `${d.app} (${d.kind})`).join(", ")}`);
     if (kick && this.started) void this.tick();
     return created;
@@ -189,20 +226,53 @@ export class Bus {
 
   // ---------------------------------------------------------------- streams
 
-  /** Attach a consumer for the app; what is pending for it is pushed at once. Returns the detach function. */
-  subscribe(app: string, listener: StreamListener): () => void {
+  /**
+   * Attach a consumer for the app (or `consumer:<name>`); what is pending for it is pushed at once.
+   * `close` is how `disconnect` ends this stream. Returns the detach function.
+   */
+  subscribe(app: string, listener: StreamListener, close?: () => void): () => void {
     let set = this.listeners.get(app);
     if (!set) {
       set = new Set();
       this.listeners.set(app, set);
     }
     set.add(listener);
+    if (close) {
+      let c = this.closers.get(app);
+      if (!c) {
+        c = new Set();
+        this.closers.set(app, c);
+      }
+      c.add(close);
+    }
     for (const d of this.store.pendingStream(app)) this.push(d);
     return () => {
       const s = this.listeners.get(app);
       s?.delete(listener);
       if (s && !s.size) this.listeners.delete(app);
+      const c = this.closers.get(app);
+      if (close) c?.delete(close);
+      if (c && !c.size) this.closers.delete(app);
     };
+  }
+
+  /** How many streams are open for the app or consumer key. */
+  streams(app: string): number {
+    return this.listeners.get(app)?.size ?? 0;
+  }
+
+  /** End every open stream of the app or consumer key at once (a revoked or rotated credential). */
+  disconnect(app: string): void {
+    const closers = [...(this.closers.get(app) ?? [])];
+    this.closers.delete(app);
+    this.listeners.delete(app);
+    for (const close of closers) {
+      try {
+        close();
+      } catch {
+        // already closed
+      }
+    }
   }
 
   /** The app confirms a pushed delivery. Returns the delivery, or undefined when it is not the app's, not sent, or unknown. */
@@ -363,6 +433,8 @@ export class Bus {
     const d = this.store.getDelivery(id);
     if (!d) return undefined;
     if (d.status !== "dead" && d.status !== "skipped") return d;
+    // A removed consumer has nobody to deliver to.
+    if (isConsumerKey(d.app) && !this.consumers.has(d.app)) return d;
     const now = this.now();
     this.store.patchDelivery(id, { status: "pending", attempts: 0, nextAt: now, lastError: undefined, lastStatus: undefined, sentAt: undefined, endedAt: undefined });
     const fresh = this.store.getDelivery(id);

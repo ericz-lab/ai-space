@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
-import { type CallRecord, type Delivery, type DeliveryKind, type DeliveryStatus, type HttpMethod, MAX_CALLS, MAX_DELIVERIES } from "./types.ts";
+import { type CallRecord, type Consumer, type ConsumerCall, type ConsumerSubscription, type Delivery, type DeliveryKind, type DeliveryStatus, type HttpMethod, MAX_CALLS, MAX_DELIVERIES } from "./types.ts";
 
 /**
- * SQLite persistence for deliveries and calls, in ai-space's own database next
+ * SQLite persistence for deliveries, calls and external consumers, in ai-space's own database next
  * to the scheduler's `events` table. A delivery row carries its target (kind,
  * method, path), so it can still be attempted after a restart or after the app
  * changed its manifest. Same migration rule as the other stores: add nullable
@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS bus_calls (
   at           INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS bus_calls_app_at ON bus_calls(app, at DESC);
+CREATE TABLE IF NOT EXISTS bus_consumers (
+  name          TEXT PRIMARY KEY,
+  description   TEXT,
+  subscriptions TEXT NOT NULL,
+  calls         TEXT NOT NULL,
+  token_hash    TEXT NOT NULL UNIQUE,
+  token_hint    TEXT NOT NULL,
+  created_at    INTEGER NOT NULL,
+  rotated_at    INTEGER,
+  last_seen_at  INTEGER
+);
 `;
 
 const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [];
@@ -75,6 +86,20 @@ type CallRow = {
   error: string | null;
   at: number;
 };
+
+type ConsumerRow = {
+  name: string;
+  description: string | null;
+  subscriptions: string;
+  calls: string;
+  token_hash: string;
+  token_hint: string;
+  created_at: number;
+  rotated_at: number | null;
+  last_seen_at: number | null;
+};
+
+export type ConsumerCreate = Omit<Consumer, "lastSeenAt" | "rotatedAt"> & { tokenHash: string };
 
 export type DeliveryCreate = {
   eventId: number;
@@ -207,6 +232,63 @@ export class BusStore {
     return out;
   }
 
+  /** Open deliveries (pending or sent) of one app or consumer end as skipped with the reason; returns how many. */
+  skipOpen(app: string, reason: string, now: number): number {
+    const r = this.db
+      .query("UPDATE bus_deliveries SET status = 'skipped', last_error = ?, ended_at = ?, next_at = NULL WHERE app = ? AND status IN ('pending', 'sent')")
+      .run(reason, now, app);
+    return r.changes;
+  }
+
+  /** Keep at most `max` pending deliveries for the app: the oldest beyond that are skipped. Returns how many. */
+  trimBacklog(app: string, max: number, now: number): number {
+    const r = this.db
+      .query(
+        `UPDATE bus_deliveries SET status = 'skipped', last_error = 'backlog over ${Math.floor(max)} deliveries', ended_at = ?, next_at = NULL
+           WHERE app = ? AND status = 'pending' AND id NOT IN (SELECT id FROM bus_deliveries WHERE app = ? AND status = 'pending' ORDER BY id DESC LIMIT ?)`,
+      )
+      .run(now, app, app, max);
+    return r.changes;
+  }
+
+  // ---------------------------------------------------------------- external consumers
+
+  addConsumer(c: ConsumerCreate): void {
+    this.db
+      .query("INSERT INTO bus_consumers (name, description, subscriptions, calls, token_hash, token_hint, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(c.name, c.description ?? null, JSON.stringify(c.subscriptions), JSON.stringify(c.calls), c.tokenHash, c.tokenHint, c.createdAt);
+  }
+
+  getConsumer(name: string): Consumer | undefined {
+    const row = this.db.query<ConsumerRow, [string]>("SELECT * FROM bus_consumers WHERE name = ?").get(name);
+    return row ? rowToConsumer(row) : undefined;
+  }
+
+  consumerByTokenHash(hash: string): Consumer | undefined {
+    const row = this.db.query<ConsumerRow, [string]>("SELECT * FROM bus_consumers WHERE token_hash = ?").get(hash);
+    return row ? rowToConsumer(row) : undefined;
+  }
+
+  listConsumers(): Consumer[] {
+    return this.db.query<ConsumerRow, []>("SELECT * FROM bus_consumers ORDER BY name").all().map(rowToConsumer);
+  }
+
+  countConsumers(): number {
+    return this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM bus_consumers").get()?.n ?? 0;
+  }
+
+  setConsumerToken(name: string, tokenHash: string, tokenHint: string, now: number): boolean {
+    return this.db.query("UPDATE bus_consumers SET token_hash = ?, token_hint = ?, rotated_at = ? WHERE name = ?").run(tokenHash, tokenHint, now, name).changes > 0;
+  }
+
+  touchConsumer(name: string, now: number): void {
+    this.db.query("UPDATE bus_consumers SET last_seen_at = ? WHERE name = ?").run(now, name);
+  }
+
+  removeConsumer(name: string): boolean {
+    return this.db.query("DELETE FROM bus_consumers WHERE name = ?").run(name).changes > 0;
+  }
+
   // ---------------------------------------------------------------- calls
 
   addCall(input: Omit<CallRecord, "id">): CallRecord {
@@ -261,6 +343,19 @@ function rowToDelivery(r: DeliveryRow): Delivery {
     ...(r.sent_at !== null ? { sentAt: r.sent_at } : {}),
     ...(r.ended_at !== null ? { endedAt: r.ended_at } : {}),
     createdAt: r.created_at,
+  };
+}
+
+function rowToConsumer(r: ConsumerRow): Consumer {
+  return {
+    name: r.name,
+    ...(r.description ? { description: r.description } : {}),
+    subscriptions: JSON.parse(r.subscriptions) as ConsumerSubscription[],
+    calls: JSON.parse(r.calls) as ConsumerCall[],
+    tokenHint: r.token_hint,
+    createdAt: r.created_at,
+    ...(r.rotated_at !== null ? { rotatedAt: r.rotated_at } : {}),
+    ...(r.last_seen_at !== null ? { lastSeenAt: r.last_seen_at } : {}),
   };
 }
 

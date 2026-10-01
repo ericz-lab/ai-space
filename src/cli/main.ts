@@ -9,6 +9,7 @@ import { appNoun } from "./app.ts";
 import { backupNoun } from "./backup.ts";
 import { chatNoun } from "./chat.ts";
 import { completionNoun } from "./completion.ts";
+import { consumerNoun } from "./consumer.ts";
 import { eventNoun } from "./event.ts";
 import { lifecycleNouns } from "./lifecycle.ts";
 import { logsNoun } from "./logs.ts";
@@ -29,7 +30,7 @@ import { taskNoun } from "./task.ts";
  * the docs and the scheduler's tasks spell keeps working.
  */
 
-export const NOUNS: Noun[] = [statusNoun, appNoun, taskNoun, logsNoun, modelNoun, notifyNoun, backupNoun, chatNoun, eventNoun, peerNoun, routerNoun, apiNoun, ...lifecycleNouns, completionNoun];
+export const NOUNS: Noun[] = [statusNoun, appNoun, taskNoun, logsNoun, modelNoun, notifyNoun, backupNoun, chatNoun, eventNoun, consumerNoun, peerNoun, routerNoun, apiNoun, ...lifecycleNouns, completionNoun];
 
 /** Older spellings of `src/index.ts`: word → noun and verb. */
 export const ALIASES: Record<string, string[]> = {

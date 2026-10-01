@@ -116,3 +116,55 @@ export const MAX_CALL_TIMEOUT_MS = 15 * 60_000;
 export const MAX_CALL_BODY_BYTES = 4 * 1024 * 1024;
 export const MAX_DELIVERIES = 20_000;
 export const MAX_CALLS = 5_000;
+
+// ---------------------------------------------------------------- external consumers
+
+/**
+ * An external consumer: a program on another device (not a Space app) that
+ * reads bus events over the stream and acks them, with its own credential.
+ * The operator creates it (`space consumer add`); it is independent of any
+ * app's installation. Its deliveries are ordinary stream deliveries whose
+ * `app` is `consumer:<name>`, a form no app name can take.
+ */
+export const CONSUMER_PREFIX = "consumer:";
+
+export function consumerKey(name: string): string {
+  return `${CONSUMER_PREFIX}${name}`;
+}
+
+export function isConsumerKey(app: string): boolean {
+  return app.startsWith(CONSUMER_PREFIX);
+}
+
+/** One event subscription: the same `event` and `filter` rules as `events.consumes`. */
+export type ConsumerSubscription = { event: string; filter?: EventFilter };
+
+/**
+ * One call the consumer may make through `POST /api/call/<app>/<capability>`.
+ * `filter` is checked against the top-level fields of the JSON request body,
+ * the way an event filter is checked against `data`: `{ groupId: [g1, g2] }`
+ * lets the consumer read those groups and no other.
+ */
+export type ConsumerCall = { app: string; capability: string; filter?: EventFilter };
+
+export type Consumer = {
+  name: string;
+  description?: string;
+  subscriptions: ConsumerSubscription[];
+  calls: ConsumerCall[];
+  /** The first characters of the credential, to tell two apart; the credential itself is not stored. */
+  tokenHint: string;
+  createdAt: number;
+  rotatedAt?: number;
+  lastSeenAt?: number;
+};
+
+/** Credentials start with this, so a log line or a leaked string is recognisable. */
+export const CONSUMER_TOKEN_PREFIX = "sec_";
+export const MAX_CONSUMERS = 100;
+export const MAX_CONSUMER_SUBSCRIPTIONS = 50;
+export const MAX_CONSUMER_CALLS = 20;
+/** Open streams per consumer at once; one more is a 429. */
+export const MAX_CONSUMER_STREAMS = 4;
+/** Deliveries waiting for a consumer; older ones beyond this are skipped so an abandoned consumer cannot grow the table. */
+export const MAX_CONSUMER_BACKLOG = 5_000;

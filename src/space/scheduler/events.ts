@@ -46,8 +46,13 @@ export function matches(trigger: EventTrigger, event: SpaceEvent): boolean {
   const name = trigger.event.slice(slash + 1);
   if (app !== event.app) return false;
   if (name !== "*" && `${event.app}/${name}` !== event.name) return false;
-  for (const [key, accepted] of Object.entries(trigger.filter ?? {})) {
-    const v = event.data[key];
+  return filterMatches(trigger.filter, event.data);
+}
+
+/** String equality on top-level fields: every key of the filter must be a scalar in `data` equal to (one of) its value(s). */
+export function filterMatches(filter: Record<string, string | string[]> | undefined, data: Record<string, unknown>): boolean {
+  for (const [key, accepted] of Object.entries(filter ?? {})) {
+    const v = data[key];
     if (v === undefined || v === null || typeof v === "object") return false;
     const text = String(v);
     if (Array.isArray(accepted) ? !accepted.includes(text) : accepted !== text) return false;

@@ -11,7 +11,7 @@ import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts"
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
 import { refreshCodexTiers } from "./space/runtimes/codex-upgrade.ts";
-import { Bus, BusStore, createBusRoutes } from "./space/bus/index.ts";
+import { Bus, BusStore, Consumers, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
 import { type Manifest, Scheduler, Store, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts";
 import { BACKUP_TASK, SPACE_APP, backupTask, createBackupRoutes, parseBackupSpec, spaceManifest } from "./space/storage/backup/index.ts";
@@ -73,9 +73,11 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     servicePort: (app) => registry.get(app)?.manifest.service?.port,
     onDead: (d, event) =>
       void notify
-        .send(d.app, { level: "alert", title: `event ${d.event} not delivered`, text: `Delivery #${d.id} (${d.kind}) gave up after ${d.attempts} attempt(s): ${d.lastError ?? "no error text"}${event ? `\nEvent #${event.id} from ${event.app} at ${new Date(event.at).toISOString()}` : ""}`, key: `bus:${d.app}:${d.event}`, windowMs: 3_600_000 })
+        .send(isConsumerKey(d.app) ? "space" : d.app, { level: "alert", title: `event ${d.event} not delivered${isConsumerKey(d.app) ? ` to ${d.app}` : ""}`, text: `Delivery #${d.id} (${d.kind}) gave up after ${d.attempts} attempt(s): ${d.lastError ?? "no error text"}${event ? `\nEvent #${event.id} from ${event.app} at ${new Date(event.at).toISOString()}` : ""}`, key: `bus:${d.app}:${d.event}`, windowMs: 3_600_000 })
         .catch((e) => console.error(`[bus] ${d.app}: dead-delivery notification rejected: ${(e as Error).message}`)),
   });
+  // External consumers (docs/events.md#external-consumers): loaded into the bus now, so their deliveries resume.
+  const consumers = new Consumers({ store: busStore, bus });
   const modelPreferences = new ModelPreferences(store.db, runtimes);
   const appDefaultModel = () => modelPreferences.read() ?? config.model.defaultModel;
   const baseDefaultModel = () => modelPreferences.read() ?? config.chatModel;
@@ -304,7 +306,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         },
         appForToken: (t) => storage.appForToken(t),
       }),
-      ...createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t), remote }),
+      ...createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t), remote, consumers }),
       ...createStorageRoutes({ storage, token: config.apiToken }),
       ...createBackupRoutes({
         store: backups.store,
