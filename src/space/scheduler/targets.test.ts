@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,6 +67,23 @@ describe("http target", () => {
     const r = await runTarget({ kind: "http", method: "GET", url: `${base}/slow` }, ctx(200));
     expect(r.status).toBe("error");
     expect(r.error).toBe("timed out");
+  });
+
+  test("only the task deadline limits a quiet HTTP job", async () => {
+    const nativeFetch = globalThis.fetch;
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (url, options) => {
+      // Model a runtime idle timeout without making the suite wait five minutes.
+      if (!options || !("timeout" in options) || options.timeout !== false) throw new DOMException("idle timeout", "TimeoutError");
+      return nativeFetch(url, options);
+    }) as typeof fetch);
+    try {
+      const r = await runTarget({ kind: "http", method: "GET", url: `${base}/slow` }, ctx(4000));
+      expect(r).toEqual({ status: "ok", output: "late" });
+      const expired = await runTarget({ kind: "http", method: "GET", url: `${base}/slow` }, ctx(50));
+      expect(expired).toEqual({ status: "error", error: "timed out" });
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   test("missing env var in url fails cleanly", async () => {
