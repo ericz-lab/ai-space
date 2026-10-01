@@ -44,6 +44,8 @@ export type Target =
       permissionMode?: PermissionMode;
       /** Tools the run may use without asking (`--allowedTools`). */
       tools?: string[];
+      /** App command that verifies business completion; receives the final answer on stdin. */
+      verify?: string;
     };
 
 export type RunStatus = "ok" | "error" | "skipped";

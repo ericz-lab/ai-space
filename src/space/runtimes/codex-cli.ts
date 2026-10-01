@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,7 +9,14 @@ import { ustar } from "./tar.ts";
 import { assertCompletionMode, type AgentRun, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type GeneratedImage, type ImageInput, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /** Codex completions, agent runs and persistent local chat. Authentication stays in the CLI home. */
-export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
+export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
+  spawn: typeof spawnCollect;
+  now: () => number;
+  sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
+}> = {}): RuntimeAdapter {
+  const spawn = deps.spawn ?? spawnCollect;
+  const now = deps.now ?? (() => performance.now());
+  const sleep = deps.sleep ?? ((ms, signal) => delay(ms, undefined, { signal }));
   const host = spec.sshHost?.trim();
   if (host && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(host)) throw new Error(`runtime ${spec.name}: ssh is not a host name`);
   const bin = spec.bin.length ? spec.bin : ["codex"];
@@ -23,27 +31,45 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
       if (unsupported.length) return { ok: false, error: `codex-cli completions support only WebSearch and WebFetch tool lists; unsupported: ${unsupported.join(", ")}`, backend };
       if (signal?.aborted) return { ok: false, error: "aborted", backend };
       let dir: string | undefined;
+      const deadline = now() + input.timeoutMs;
       try {
-        let cmd: string[];
-        let stdin: string | Uint8Array = input.prompt;
-        if (host) {
-          const remote = codexRemoteCommand(bin, input);
-          cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, `bash -lc ${quote(remote.command)}`];
-          stdin = remote.archive;
-        } else {
-          dir = await mkdtemp(join(tmpdir(), "space-codex-"));
-          await Bun.write(join(dir, "system.txt"), input.system);
-          cmd = codexArgs(bin, input, dir);
+        for (let attempt = 0; ; attempt++) {
+          if (signal?.aborted) return { ok: false, error: "aborted", backend };
+          const remainingMs = Math.ceil(deadline - now());
+          if (remainingMs <= 0) return { ok: false, error: "timed out before retry", backend };
+          let cmd: string[];
+          let stdin: string | Uint8Array = input.prompt;
+          if (host) {
+            const remote = codexRemoteCommand(bin, { ...input, timeoutMs: remainingMs });
+            cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, `bash -lc ${quote(remote.command)}`];
+            stdin = remote.archive;
+          } else {
+            if (!dir) {
+              dir = await mkdtemp(join(tmpdir(), "space-codex-"));
+              await Bun.write(join(dir, "system.txt"), input.system);
+            }
+            cmd = codexArgs(bin, input, dir);
+          }
+          const r = await spawn(cmd, { cwd: input.mode === "full" ? undefined : dir, stdin, signal, timeoutMs: Math.max(1, Math.ceil(deadline - now())) });
+          if (r.aborted) return { ok: false, error: "aborted", backend };
+          if (r.timedOut || r.code === 124) return { ok: false, error: `timed out after ${Math.round(input.timeoutMs / 1000)}s`, backend };
+          const parsed = parseCodexOutput(r.stdout);
+          if (r.code !== 0 || parsed.error) {
+            const error = ((r.code !== 0 && r.stderr.trim()) || parsed.error || `exited with ${r.code}`).slice(-800);
+            // Only isolated text generation is safe to replay. Never replay a completed answer.
+            const retryable = input.mode !== "full" && !input.tools.length && !parsed.text && !parsed.usage
+              && transientCompletionError(`${r.stderr}\n${parsed.error ?? ""}`);
+            const waitMs = 1000 * 2 ** attempt;
+            if (!retryable || attempt >= 3 || deadline - now() <= waitMs) return { ok: false, error, usage: parsed.usage, backend };
+            await sleep(waitMs, signal);
+            continue;
+          }
+          // exec emits complete messages, not text deltas. Deliver only the validated final answer.
+          onDelta?.(parsed.text!);
+          return { ok: true, text: parsed.text!, usage: parsed.usage, backend };
         }
-        const r = await spawnCollect(cmd, { cwd: input.mode === "full" ? undefined : dir, stdin, signal, timeoutMs: input.timeoutMs });
-        if (r.aborted) return { ok: false, error: "aborted", backend };
-        if (r.timedOut || r.code === 124) return { ok: false, error: `timed out after ${Math.round(input.timeoutMs / 1000)}s`, backend };
-        const parsed = parseCodexOutput(r.stdout);
-        if (r.code !== 0 || parsed.error) return { ok: false, error: ((r.code !== 0 && r.stderr.trim()) || parsed.error || `exited with ${r.code}`).slice(-800), usage: parsed.usage, backend };
-        // exec emits complete messages, not text deltas. Deliver only the validated final answer.
-        onDelta?.(parsed.text!);
-        return { ok: true, text: parsed.text!, usage: parsed.usage, backend };
       } catch (e) {
+        if (signal?.aborted) return { ok: false, error: "aborted", backend };
         return { ok: false, error: `could not run Codex: ${(e as Error).message}`, backend };
       } finally {
         if (dir) await rm(dir, { recursive: true, force: true });
@@ -87,6 +113,12 @@ export function createCodexCli(spec: CodexCliSpec): RuntimeAdapter {
     chat(turn, cb) { return codexChat(bin, turn, cb); },
     transcript: (cwd, sid) => readCodexTranscript(cwd, sid),
   };
+}
+
+/** Match transport failures narrowly; an unrelated model-list warning is not a retry reason. */
+function transientCompletionError(error: string): boolean {
+  if (/permission denied|authentication|unauthorized|forbidden|oauth|invalid.*(?:key|token)|model.*not supported|unknown model|host key verification/i.test(error)) return false;
+  return /broken pipe|connection (?:reset|closed|refused|timed out)|connection to .+ closed|network is unreachable|temporary failure in name resolution|ECONNRESET|ECONNREFUSED|ETIMEDOUT|stream disconnected before completion|error sending request for url/i.test(error);
 }
 
 /** Use the request as model instructions, not as a second user message. */
@@ -206,7 +238,7 @@ function quote(value: string): string { return `'${value.replaceAll("'", "'\\''"
 export function codexRemoteCommand(bin: string[], input: CompleteInput): { command: string; archive: Uint8Array; dir: string } {
   const dir = `/tmp/space-codex-${randomUUID()}`;
   const encode = (s: string) => new TextEncoder().encode(s);
-  // The remote timeout bounds orphan lifetime after SSH disconnects. No retry or model fallback.
+  // The remote timeout bounds orphan lifetime after SSH disconnects. Retries share the original deadline; there is no model fallback.
   // `builtin cd`: the login shell may load a profile that wraps `cd` in a function, and RVM's
   // wrapper runs `trap - EXIT`, which dropped the cleanup and left the request files behind.
   const command = `umask 077; mkdir ${quote(dir)} || exit 1; trap ${quote(`rm -rf -- ${quote(dir)}`)} EXIT; tar -xf - -C ${quote(dir)} || exit 1; ${input.mode === "full" ? "" : `builtin cd ${quote(dir)} || exit 1; `}timeout --signal=TERM --kill-after=5s ${Math.ceil(input.timeoutMs / 1000)}s ${codexArgs(bin, input, dir, ".").map(quote).join(" ")} < ${quote(join(dir, "prompt.txt"))}`;

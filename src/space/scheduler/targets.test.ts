@@ -239,3 +239,22 @@ test("agent tier resolves before execution and reports the actual model", async 
   expect(result).toMatchObject({ status: "ok", runtime: "claude", model: "opus" });
   expect(result.output).toContain("--model opus");
 });
+
+describe("agent business verification", () => {
+  test("successful agent exits still fail when the app verifier rejects the outcome", async () => {
+    const result = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", verify: 'cat; echo "unfinished draft" >&2; exit 1' }, ctx());
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("unfinished draft");
+    expect(result.output).toContain("hello agent");
+  });
+  test("verifier receives the answer, app environment and opt-in marker", async () => {
+    const result = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", verify: 'test "$SPACE_AGENT_VERIFICATION" = 1 && test "$GREETING" = "from dotenv" && test "$(cat)" = "hello agent"' }, ctx());
+    expect(result.status).toBe("ok");
+  });
+  test("missing verifier and verification timeout cannot report success", async () => {
+    for (const verify of ["/missing-verifier", "sleep 5"]) {
+      const result = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", verify }, ctx(300));
+      expect(result.status).toBe("error");
+    }
+  });
+});

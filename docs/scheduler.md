@@ -305,3 +305,15 @@ API:
 - `PATCH /api/tasks/:id` accepts `{ "model": "codex/intermediate" }` or `{ "model": null }` alongside existing fields, with the operator bearer token.
 - `PATCH /api/panel/tasks/:id/model` accepts only that model field, requires a matching Origin and JSON content type, and uses the panel's access perimeter like terminal/chat. It cannot edit schedules, commands or enabled state and never exposes the operator token to the browser.
 - Task views include the effective `model`, `modelSelectable`, and `base.model`. Unknown runtimes and incompatible capabilities are rejected on save. A concrete model may still be unavailable to an account; execution then fails explicitly, without a fallback to another tier.
+
+### Agent business verification
+
+An agent target may set `verify: bun run verify-task` (inside `run.agent` in a manifest).
+After the runtime succeeds, Space runs this app-owned command in the same directory and environment,
+with the untruncated final answer on stdin and the same cancellation/timeout budget.
+Nonzero exit, a missing verifier or timeout makes the task fail even if the agent exited successfully.
+The agent and verifier receive `SPACE_AGENT_VERIFICATION=1`; apps can use it to tag task-owned drafts.
+The verifier should check a structured final report and actual persisted outcomes, allowing a valid
+no-work result but rejecting unfinished work. Existing targets without `verify` are unchanged.
+Failed event-triggered runs use the existing bounded event redelivery (five total attempts with
+backoff). Apps must reuse existing work on redelivery; manual runs without events are not auto-replayed.

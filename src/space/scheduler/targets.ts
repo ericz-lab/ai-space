@@ -149,14 +149,22 @@ async function runAgent(target: Extract<Target, { kind: "agent" }>, ctx: RunCont
   const promptFile = Bun.file(promptPath);
   if (!(await promptFile.exists())) return { status: "error", error: `prompt file not found: ${promptPath}` };
   const prompt = (await promptFile.text()) + (ctx.events?.length ? eventPromptSection(ctx.events) : "");
-  const env = { ...process.env, ...(await loadAppEnv(cwd)), ...(ctx.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []) };
+  const env = { ...process.env, ...(await loadAppEnv(cwd)), ...(ctx.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []), ...(target.verify ? { SPACE_AGENT_VERIFICATION: "1" } : {}) };
   const r = await runtime.runAgent({
     prompt, cwd, env, model: selected?.model ?? target.model, signal: ctx.signal,
     ...(target.permissionMode ? { permissionMode: target.permissionMode } : {}), ...(target.tools?.length ? { allowedTools: target.tools } : {}),
   });
   const base = { runtime: runtime.name, model: selected?.model ?? target.model, promptChars: prompt.length, backend: r.backend, ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
   if (!r.ok) return { status: "error", error: r.error ?? "failed", output: truncate(r.output), ...base };
-  return { status: "ok", output: truncate(r.text ?? r.output), ...base };
+  const answer = r.text ?? r.output;
+  if (target.verify) {
+    const checked = await spawnCollect(["sh", "-c", target.verify], { cwd, env, stdin: answer, signal: ctx.signal });
+    const output = truncate(joinOutput(answer, joinOutput(checked.stdout, checked.stderr)));
+    if (checked.aborted || checked.timedOut) return { status: "error", error: "verification timed out", output, ...base };
+    if (checked.code !== 0) return { status: "error", error: `verification failed (exit ${checked.code}): ${truncate(checked.stderr || checked.stdout, 500)}`, output, ...base };
+    return { status: "ok", output, ...base };
+  }
+  return { status: "ok", output: truncate(answer), ...base };
 }
 
 function joinOutput(stdout: string, stderr: string): string {

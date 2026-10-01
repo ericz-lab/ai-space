@@ -447,8 +447,9 @@ function parseTarget(run: unknown, ctx: string): Target {
   const runtime = parseRuntimeName(a.runtime, `${ctx}: run.agent.runtime`);
   if (a.model !== undefined && typeof a.model !== "string") throw new Error(`${ctx}: run.agent.model must be a string`);
   const permissionMode = parsePermissionMode(a.permissionMode, `${ctx}: run.agent.permissionMode`);
+  if (a.verify !== undefined && (typeof a.verify !== "string" || !a.verify.trim())) throw new Error(`${ctx}: run.agent.verify must be a nonempty command`);
   const tools = stringList(a.tools, `${ctx}: run.agent.tools`);
-  return { kind: "agent", runtime, prompt: a.prompt, ...(a.model ? { model: a.model } : {}), ...(permissionMode ? { permissionMode } : {}), ...(tools.length ? { tools } : {}) };
+  return { kind: "agent", runtime, prompt: a.prompt, ...(a.verify ? { verify: a.verify } : {}), ...(a.model ? { model: a.model } : {}), ...(permissionMode ? { permissionMode } : {}), ...(tools.length ? { tools } : {}) };
 }
 
 /** An agent target's write tier: one of the runtimes' permission modes, or absent (read-only). */

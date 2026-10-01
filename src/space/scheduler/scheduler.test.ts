@@ -587,3 +587,36 @@ describe("task model overrides", () => {
     h.s.stop(); h.store.close();
   });
 });
+
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runTarget } from "./targets.ts";
+import { claudeOnly } from "../runtimes/registry.ts";
+
+test("business verification failure redelivers the event and recovery ends retries", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "space-verified-task-"));
+  const seen: number[][] = [];
+  const h = harness({ runner: (task, ctx) => {
+    seen.push((ctx.events ?? []).map((e) => e.id));
+    return runTarget(task.target, { ...ctx, appDir: dir, runtimes: claudeOnly(["sh", "-c", "cat"]) });
+  } });
+  try {
+    await Bun.write(join(dir, "prompt.md"), '{"status":"ok"}');
+    h.s.syncManifest(h.manifest([mt("curate", {
+      schedule: { kind: "manual" }, triggers: [{ event: "feed/video" }],
+      target: { kind: "agent", runtime: "claude", prompt: "prompt.md", verify: 'test -f published || { echo "draft remains" >&2; exit 1; }' },
+    })]));
+    const event = h.s.publish({ app: "feed", name: "video" }).event;
+    await h.s.tick(); await h.s.idle();
+    let task = h.store.findTask("demo", "curate")!;
+    expect(task.state.lastStatus).toBe("error");
+    expect(task.state.pending?.eventIds).toEqual([event.id]);
+    expect(h.store.listRuns(task.id)[0]?.error).toContain("draft remains");
+    await Bun.write(join(dir, "published"), "verified publication");
+    h.advance(30_000); await h.s.tick(); await h.s.idle();
+    task = h.store.getTask(task.id)!;
+    expect(task.state.lastStatus).toBe("ok"); expect(task.state.pending).toBeUndefined();
+    expect(seen).toEqual([[event.id], [event.id]]);
+  } finally { h.store.close(); await rm(dir, { recursive: true, force: true }); }
+});

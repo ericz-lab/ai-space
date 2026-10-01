@@ -501,3 +501,15 @@ notify:
 ### Per-task model choice
 
 An HTTP or command task that uses Space model calls may declare `model: codex/junior` next to `name` and `every`. This opts the task into operator model selection in the task panel. Honor the `x-space-model` request header (HTTP) or `SPACE_TASK_MODEL` environment variable (command) ahead of the app's default when calling `/api/model/run`. Use request-local state for concurrent HTTP tasks. Without this integration, omit `model`; the panel then makes no claim that it can change the task's model. See [scheduler.md](scheduler.md#model-selection-in-the-task-panel) for the contract and [runtimes.md](runtimes.md#capability-tiers) for the four tiers.
+
+### Agent business verification
+
+An agent target may set `verify: bun run verify-task` (inside `run.agent` in a manifest).
+After the runtime succeeds, Space runs this app-owned command in the same directory and environment,
+with the untruncated final answer on stdin and the same cancellation/timeout budget.
+Nonzero exit, a missing verifier or timeout makes the task fail even if the agent exited successfully.
+The agent and verifier receive `SPACE_AGENT_VERIFICATION=1`; apps can use it to tag task-owned drafts.
+The verifier should check a structured final report and actual persisted outcomes, allowing a valid
+no-work result but rejecting unfinished work. Existing targets without `verify` are unchanged.
+Failed event-triggered runs use the existing bounded event redelivery (five total attempts with
+backoff). Apps must reuse existing work on redelivery; manual runs without events are not auto-replayed.

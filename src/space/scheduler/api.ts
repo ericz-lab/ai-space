@@ -326,6 +326,7 @@ function parseCreate(body: Partial<TaskCreate>): TaskCreate {
   const target = body.target;
   if (target.kind !== "http" && target.kind !== "command" && target.kind !== "agent") throw new Error("target.kind must be http, command or agent");
   if (target.kind === "agent") {
+    if (target.verify !== undefined && (typeof target.verify !== "string" || !target.verify.trim())) throw new Error("target.verify must be a nonempty command");
     parsePermissionMode(target.permissionMode, "target.permissionMode");
     if (target.tools !== undefined && (!Array.isArray(target.tools) || !target.tools.every((t) => typeof t === "string" && t.trim()))) throw new Error("target.tools must be a list of strings");
   }

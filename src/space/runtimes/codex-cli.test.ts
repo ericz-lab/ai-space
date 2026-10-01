@@ -263,3 +263,60 @@ describe("Codex agent runs", () => {
     expect(await createCodexCli({ name: "x", kind: "codex-cli", bin: ["/no-codex-here"] }).runAgent(run())).toMatchObject({ ok: false, error: expect.stringContaining("could not run Codex") });
   });
 });
+
+import type { SpawnResult } from "./process.ts";
+
+describe("completion transport backoff", () => {
+  const broken: SpawnResult = { code: 255, stderr: "client_loop: send disconnect: Broken pipe", stdout: "", timedOut: false, aborted: false };
+  const success: SpawnResult = { ...broken, code: 0, stderr: "", stdout: '{"type":"item.completed","item":{"type":"agent_message","text":"done"}}\n{"type":"turn.completed"}' };
+  function fixture(results: SpawnResult[]) {
+    let time = 0;
+    const waits: number[] = [], budgets: number[] = [], commands: string[][] = [];
+    const runtime = createCodexCli({ name: "codex", kind: "codex-cli", bin: ["codex"], sshHost: "box" }, {
+      now: () => time,
+      sleep: async (ms) => { waits.push(ms); time += ms; },
+      spawn: async (cmd, opts) => { commands.push(cmd); budgets.push(opts!.timeoutMs!); time += 100; return results.shift() ?? broken; },
+    });
+    return { runtime, waits, budgets, commands };
+  }
+  test("recovers on a fresh SSH attempt and emits only the final answer", async () => {
+    const f = fixture([broken, broken, success]); const chunks: string[] = [];
+    expect(await f.runtime.complete(input({ timeoutMs: 10_000 }), undefined, (s) => chunks.push(s))).toMatchObject({ ok: true, text: "done" });
+    expect(f.waits).toEqual([1000, 2000]);
+    expect(f.budgets).toEqual([10000, 8900, 6800]);
+    expect(f.commands[0]!.at(-1)).not.toBe(f.commands[1]!.at(-1));
+    expect(f.commands[2]!.at(-1)).toContain("7s");
+    expect(chunks).toEqual(["done"]);
+  });
+  test("bounds attempts and shares the original deadline", async () => {
+    const f = fixture([]);
+    expect(await f.runtime.complete(input({ timeoutMs: 20_000 }))).toMatchObject({ ok: false, error: expect.stringContaining("Broken pipe") });
+    expect(f.waits).toEqual([1000, 2000, 4000]); expect(f.commands).toHaveLength(4);
+    const short = fixture([]);
+    await short.runtime.complete(input({ timeoutMs: 1000 }));
+    expect(short.waits).toEqual([]); expect(short.commands).toHaveLength(1);
+  });
+  test("never replays full or tool-using calls, permanent errors, completed output or a timeout", async () => {
+    for (const request of [input({ mode: "full" }), input({ tools: ["WebSearch"] })]) {
+      const f = fixture([]); await f.runtime.complete(request); expect(f.commands).toHaveLength(1);
+    }
+    for (const result of [
+      { ...broken, stderr: "Permission denied; connection closed" },
+      { ...broken, stderr: "failed to refresh available models: request timed out\nunknown model" },
+      { ...broken, stderr: "CLI crash" },
+      { ...broken, stdout: success.stdout },
+      { ...broken, timedOut: true },
+      { ...broken, code: 124 },
+    ]) {
+      const f = fixture([result]); await f.runtime.complete(input()); expect(f.commands).toHaveLength(1);
+    }
+  });
+  test("cancellation interrupts backoff without another launch", async () => {
+    const controller = new AbortController(); let calls = 0;
+    const runtime = createCodexCli({ name: "codex", kind: "codex-cli", bin: ["codex"], sshHost: "box" }, {
+      spawn: async () => { calls++; setTimeout(() => controller.abort(), 10); return broken; },
+    });
+    expect(await runtime.complete(input(), controller.signal)).toMatchObject({ ok: false, error: "aborted" });
+    expect(calls).toBe(1);
+  });
+});

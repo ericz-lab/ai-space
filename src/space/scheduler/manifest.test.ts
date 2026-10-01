@@ -233,3 +233,9 @@ tasks:
   expect(manifest.tasks.map((t) => t.target.model)).toEqual(["codex/junior", "claude/intermediate"]);
   expect(() => parseManifest("name: demo\ntasks:\n  - name: test\n    every: 5m\n    model: bad\n    run: { command: 'true' }", "/demo")).toThrow(/runtime\/model/);
 });
+
+test("agent verification is an opt-in nonempty command", () => {
+  const prefix = 'tasks:\n  - name: curate\n    every: 1m\n    run: { agent: { prompt: p, verify: ';
+  expect(parseManifest(prefix + '"bun run verify" } }', "/app").tasks[0]?.target).toMatchObject({ verify: "bun run verify" });
+  for (const value of ['""', '" "', '123', 'false']) expect(() => parseManifest(prefix + value + ' } }', "/app")).toThrow(/verify/);
+});
