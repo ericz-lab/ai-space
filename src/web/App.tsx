@@ -13,6 +13,8 @@ import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n
 import PetField from "./PetField.tsx";
 import { type PetChoice, resolvePet } from "./petdex.ts";
 import SettingsStatus from "./SettingsStatus.tsx";
+import { useAppearance } from "./theme.ts";
+import ThemeSettings from "./ThemeSettings.tsx";
 import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 
 // Launcher-style panel: App and Agent tiles with hover details, widget cards, a chat window.
@@ -34,7 +36,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const [apps, setApps] = useState<AppInfo[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [theme, setTheme] = useState(() => localStorage.getItem("panel-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+  // Embedded widgets get the resolved scheme only, never the panel's colors (theme.ts).
+  const { scheme } = useAppearance();
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   // The app dropped on the uninstall zone, awaiting confirmation; `zoneHot` while a tile hovers the zone.
@@ -123,11 +126,6 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       document.removeEventListener("visibilitychange", pull);
     };
   }, []);
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem("panel-theme", theme);
-  }, [theme]);
 
   // Long-press (550 ms, under 8 px of movement) on the background enters edit mode; a click on the
   // background leaves it. The listeners mount once and read `editing` through a ref: remounting on
@@ -397,7 +395,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
             <h2>{t("widgets.heading")}</h2>
             <div className={`widgets ${editing ? "editing" : ""}`}>
               {widgets.map((w, i) => (
-                <Widget key={w.id} w={w} theme={theme} dragProps={dragProps("widgets", setWidgets, i)} onResize={editing ? (size, commit) => resizeWidget(w, size, commit) : undefined} />
+                <Widget key={w.id} w={w} theme={scheme} dragProps={dragProps("widgets", setWidgets, i)} onResize={editing ? (size, commit) => resizeWidget(w, size, commit) : undefined} />
               ))}
             </div>
           </section>
@@ -446,10 +444,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 {t("settings.widgets")}
                 <input type="checkbox" role="switch" checked={!prefs.noWidget} onChange={() => togglePref("noWidget")} />
               </label>
-              <label className="setrow">
-                {t("settings.dark")}
-                <input type="checkbox" role="switch" checked={theme === "dark"} onChange={() => setTheme(theme === "dark" ? "light" : "dark")} />
-              </label>
+              <ThemeSettings />
               <label className="setrow">
                 {t("settings.language")}
                 <select className="setselect" value={lang} onChange={pickLang}>

@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
 import { dateTime, fmtDuration, getJson, relTime } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
+import { type Appearance, currentAppearance, luminance, onAppearance } from "./theme.ts";
 
 // Terminal window (a floating panel): shells on this machine and on peer machines, in xterm.js.
 // - Mounted permanently (closing only slides it away) so sessions survive closing the panel.
@@ -29,9 +30,16 @@ type Tab = {
 };
 
 const FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
-const LIGHT = { background: "#fbfbfd", foreground: "#1d1d1f", cursor: "#1d1d1f", cursorAccent: "#fbfbfd", selectionBackground: "rgba(99, 102, 241, 0.28)", black: "#1d1d1f", brightBlack: "#6e6e73", white: "#e5e5ea", brightWhite: "#ffffff", blue: "#2563eb", brightBlue: "#3b82f6", green: "#16a34a", brightGreen: "#22c55e", red: "#dc2626", brightRed: "#ef4444", yellow: "#b45309", brightYellow: "#d97706", magenta: "#9333ea", brightMagenta: "#a855f7", cyan: "#0e7490", brightCyan: "#0891b2" };
-const DARK = { background: "#0b0d12", foreground: "#e6e8ee", cursor: "#e6e8ee", cursorAccent: "#0b0d12", selectionBackground: "rgba(139, 92, 246, 0.35)", black: "#0b0d12", brightBlack: "#6b7280", white: "#d1d5db", brightWhite: "#f9fafb" };
-const themeOf = () => (document.documentElement.dataset.theme === "dark" ? DARK : LIGHT);
+// ANSI colors stay fixed per brightness so program output keeps its contrast; the ground, text,
+// cursor and selection come from the panel's appearance (theme.ts). A light ground gets the darker
+// ANSI set, a dark ground xterm's defaults.
+const LIGHT_ANSI = { black: "#1d1d1f", brightBlack: "#6e6e73", white: "#e5e5ea", brightWhite: "#ffffff", blue: "#2563eb", brightBlue: "#3b82f6", green: "#16a34a", brightGreen: "#22c55e", red: "#dc2626", brightRed: "#ef4444", yellow: "#b45309", brightYellow: "#d97706", magenta: "#9333ea", brightMagenta: "#a855f7", cyan: "#0e7490", brightCyan: "#0891b2" };
+const DARK_ANSI = { brightBlack: "#6b7280", white: "#d1d5db", brightWhite: "#f9fafb" };
+const themeOf = (a: Appearance = currentAppearance()) => {
+  const { terminal, terminalText, selection } = a.resolved;
+  const dark = luminance(terminal) < 0.3;
+  return { ...(dark ? { ...DARK_ANSI, black: terminal } : LIGHT_ANSI), background: terminal, foreground: terminalText, cursor: terminalText, cursorAccent: terminal, selectionBackground: selection };
+};
 const CLOSED_REASON: Record<string, Key> = { idle: "term.closedIdle", killed: "term.closedKilled", shutdown: "term.closedShutdown" };
 const dim = (s: string) => `\r\n\x1b[2m[${s}]\x1b[0m\r\n`;
 const red = (s: string) => `\r\n\x1b[31m${s}\x1b[0m\r\n`;
@@ -104,14 +112,16 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  useEffect(() => {
-    const mo = new MutationObserver(() => {
-      const theme = themeOf();
-      for (const tab of tabsRef.current) tab.term.options.theme = theme;
-    });
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    return () => mo.disconnect();
-  }, []);
+  // Every appearance change (mode, preset, preview) recolors the open terminals in place; the
+  // sessions and their scrollback are untouched.
+  useEffect(
+    () =>
+      onAppearance((a) => {
+        const theme = themeOf(a);
+        for (const tab of tabsRef.current) tab.term.options.theme = theme;
+      }),
+    [],
+  );
 
   const connect = async (tab: Tab) => {
     const { term } = tab;
