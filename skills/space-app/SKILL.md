@@ -10,6 +10,8 @@ user-invocable: true
 
 The contract is [docs/app-spec.md](../../docs/app-spec.md). This skill is the procedure that gets an app from an idea to a running, registered, verified entry in the workspace, and the procedure for changing one afterwards. Nothing here is machine-specific: hosts, ports, tokens and channels come from the workspace and the operator.
 
+When creating or changing timestamps, deadlines, date inputs, reports or scheduled tasks, read [Time and timezone conventions](../../docs/time.md) and apply its field semantics, timezone resolution and verification checklist. Do not assume the server's timezone is the user's timezone.
+
 Two places you may be running:
 
 - **on the space host**, in an operator session: the workspace is `${SPACE_HOME:-~/.ai-space}` and the Space API is `http://127.0.0.1:${SPACE_PORT:-8700}`;

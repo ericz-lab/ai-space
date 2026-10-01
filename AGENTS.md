@@ -19,6 +19,7 @@ English is the default language of this repository. Write code identifiers, comm
 - Avoid unrelated formatting, renames, dependency changes, or broad rewrites.
 - Add or update tests when behavior changes.
 - Update docs when setup, commands, or user-facing behavior changes.
+- Follow [docs/time.md](docs/time.md) when creating or changing time fields, date inputs, scheduling or calendar-based reports, including app-facing contracts.
 - For new features, larger refactors, new dependencies, or runtime changes, open an issue or state the motivation in the PR description before starting.
 - Run the local checks in [Validation](#validation) before every push. Do not push unverified code.
 
@@ -41,6 +42,7 @@ When the user starts development from the ai-space source checkout and asks to w
 
 ## Repository Map
 
+- `.claude/` - shared development launch configuration; local worktrees remain ignored.
 - `.ai-space/app-src/` - ignored, independent app source checkouts used during app development.
 
 - `src/` - source code. Entry point is `src/index.ts` (boots Space services and serves the Space API). Tests sit next to the code they test and are named `*.test.ts`.

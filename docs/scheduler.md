@@ -21,6 +21,8 @@ Non-goals:
 
 ## Model
 
+New task definitions follow [Time and timezone conventions](time.md#scheduling-and-calendar-arithmetic): declare an explicit cron zone and include `Z` or an offset in one-shot timestamps. The optional zone in the existing API remains a compatibility behavior, not the recommended default for new apps.
+
 A task is a schedule and/or event triggers, a target, and bookkeeping state.
 
 | Field | Meaning |

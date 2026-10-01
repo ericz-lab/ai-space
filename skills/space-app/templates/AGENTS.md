@@ -35,6 +35,7 @@ icon.svg               panel icon, 64x64 viewBox
 - Widget contract: `GET /api/widget` -> `{ ok: true, items: [{ text, url, time }] }`, at most twenty items, newest first.
 - Task endpoints (`/jobs/*`) do one round of work and answer `{ status: "ok" | "error" | "skipped", error? }`.
 - Commit messages follow Conventional Commits.
+- Time handling follows ai-space `docs/time.md`: distinguish instants, calendar dates and zoned local times; declare cron zones and share user-timezone context across web, CLI and AI. Read that document before changing time-related behavior.
 
 ## Commands
 

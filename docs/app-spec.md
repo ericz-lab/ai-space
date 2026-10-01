@@ -4,6 +4,8 @@ This document is the contract between ai-space and the apps that run inside it. 
 
 Spec version: `1`. An app states the version it targets with `spec: 1` at the top of `space.yaml`. Breaking changes bump the number; ai-space keeps accepting older versions for at least one release.
 
+Time-related fields and behavior follow [Time and timezone conventions](time.md): distinguish instants from calendar dates, declare schedule zones, and use consistent user-timezone context across web, CLI and AI inputs. The document separates requirements for new work from existing implementation gaps.
+
 Status: the `tasks`, `storage` and `notify` sections, the top-level identity fields, `agents` (chat), `widgets`, the panel, the workspace layout and the `space.env` hand-over are implemented. `skills` mounting, the JSON Schema, `validate` and `new-app` are specified here first and implemented next; the [status table](#implementation-status) at the end tracks it.
 
 ## What an app is

@@ -82,6 +82,8 @@ Bun's `SQL` class provides the tagged-template interface for both backends, so p
 
 ### Portable SQL
 
+For timestamp semantics, date-only fields, API encoding and timezone ownership, follow [Time and timezone conventions](time.md). The timestamp rule below applies to instants in new portable schemas, not pure calendar dates or a requirement to rewrite existing UTC ISO text tables.
+
 The client does not translate SQL. Instead, code that must run on both backends follows these rules; anything outside them is written twice and selected by `dialect`.
 
 | Topic | Rule |
