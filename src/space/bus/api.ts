@@ -2,9 +2,10 @@ import { eventPayload } from "../scheduler/events.ts";
 import type { Store } from "../scheduler/store.ts";
 import type { SpaceEvent } from "../scheduler/types.ts";
 import { type AppCapabilities, type Bus, CallError } from "./bus.ts";
+import { ConsumerError, type Consumers, consumerView, parseConsumerInput } from "./consumers.ts";
 import type { BusStore } from "./store.ts";
-import { type CallRecord, type Delivery, type DeliveryStatus, MAX_CALL_BODY_BYTES, MAX_CALL_TIMEOUT_MS } from "./types.ts";
-import { OPERATOR as SPACE_OPERATOR, identify as identifyCaller, isOperator } from "../auth.ts";
+import { type CallRecord, type Consumer, type Delivery, type DeliveryStatus, MAX_CALL_BODY_BYTES, MAX_CALL_TIMEOUT_MS, MAX_CONSUMER_STREAMS, consumerKey } from "./types.ts";
+import { OPERATOR as SPACE_OPERATOR, bearer, identify as identifyCaller, isOperator } from "../auth.ts";
 
 /**
  * HTTP surface of the bus, next to the scheduler's `/api/events`.
@@ -19,9 +20,16 @@ import { OPERATOR as SPACE_OPERATOR, identify as identifyCaller, isOperator } fr
  *                                           that is not here but on exactly one peer is reached through that peer
  *   POST /api/call/:peer/:app/:capability   the same, naming the peer
  *   GET  /api/calls?app&caller&limit        call history, newest first
+ *   GET  /api/consumers                     external consumers (operator token)
+ *   POST /api/consumers                     { name, subscriptions, calls } create one; the credential is in the answer, once
+ *   GET  /api/consumers/:name               one consumer (operator token)
+ *   POST /api/consumers/:name/rotate        a new credential; the old one and its streams end at once (operator token)
+ *   DELETE /api/consumers/:name             revoke: credential, streams and waiting deliveries end at once (operator token)
  *
  * `stream`, `ack` and `call` identify the app by its `SPACE_APP_TOKEN`; the operator token
- * is accepted too and then calls as `space`. Reads are open like the rest of the API.
+ * is accepted too and then calls as `space`. An external consumer's credential is accepted
+ * by `stream` and `ack` for its own deliveries and by `call` for the capabilities on its list,
+ * and by nothing else. Reads are open like the rest of the API.
  */
 
 export type BusApiOptions = {
@@ -36,6 +44,8 @@ export type BusApiOptions = {
   keepaliveMs?: number;
   /** The peers (docs/peers.md): their catalogues join `/api/capabilities`, and a call to an app they hold is forwarded. */
   remote?: RemoteBus;
+  /** External consumers (docs/events.md#external-consumers); without it their routes answer 404. */
+  consumers?: Consumers;
 };
 
 /** What the bus routes need from the peer hub; `name` is this space's own name, prefixed onto forwarded callers. */
@@ -52,7 +62,7 @@ export type RemotePeer = {
 };
 
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
-type Routes = Record<string, Handler | Partial<Record<"GET" | "POST", Handler>>>;
+type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "DELETE", Handler>>>;
 
 /** The operator, when a call comes with the operator token. */
 export const OPERATOR = "space";
@@ -67,6 +77,12 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
   const identify = async (req: Request): Promise<string | undefined> => {
     const caller = await identifyCaller(req, { token, appForToken: opts.appForToken });
     return caller === undefined ? undefined : caller === SPACE_OPERATOR ? OPERATOR : caller.app;
+  };
+
+  /** The external consumer behind the presented credential, when the token is not an app's or the operator's. */
+  const consumerOf = (req: Request): Consumer | undefined => {
+    const presented = bearer(req);
+    return presented ? opts.consumers?.authenticate(presented) : undefined;
   };
 
   const guard =
@@ -127,7 +143,13 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
     "/api/events/stream": {
       GET: async (req) => {
         const app = await identify(req);
-        if (!app) return error(401, "unauthorized");
+        if (!app) {
+          const consumer = consumerOf(req);
+          if (!consumer) return error(401, "unauthorized");
+          const key = consumerKey(consumer.name);
+          if (bus.streams(key) >= MAX_CONSUMER_STREAMS) return error(429, `consumer ${consumer.name} already holds ${MAX_CONSUMER_STREAMS} streams`);
+          return streamResponse(bus, key, keepaliveMs, req.signal);
+        }
         if (app === OPERATOR) return error(400, "the stream is per app: use the app's SPACE_APP_TOKEN");
         return streamResponse(bus, app, keepaliveMs, req.signal);
       },
@@ -135,7 +157,9 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
 
     "/api/events/ack": {
       POST: async (req) => {
-        const app = await identify(req);
+        const identified = await identify(req);
+        const consumer = identified ? undefined : consumerOf(req);
+        const app = identified ?? (consumer ? consumerKey(consumer.name) : undefined);
         if (!app) return error(401, "unauthorized");
         if (app === OPERATOR) return error(400, "acks come from the app that received the delivery");
         const body = (await req.json().catch(() => null)) as { delivery?: unknown } | null;
@@ -191,10 +215,26 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
 
     "/api/call/:app/:capability": {
       POST: async (req) => {
-        const caller = await identify(req);
-        if (!caller) return error(401, "unauthorized");
+        let caller = await identify(req);
         const app = req.params.app ?? "";
         const name = req.params.capability ?? "";
+        if (!caller) {
+          const consumer = consumerOf(req);
+          if (!consumer) return error(401, "unauthorized");
+          // Only a capability on the consumer's list, with a body its filter accepts.
+          const length = Number(req.headers.get("content-length") ?? 0);
+          if (length > MAX_CALL_BODY_BYTES) return error(413, `body is ${length} bytes; the limit is ${MAX_CALL_BODY_BYTES}`);
+          const body = await req.arrayBuffer();
+          if (body.byteLength > MAX_CALL_BODY_BYTES) return error(413, `body is ${body.byteLength} bytes; the limit is ${MAX_CALL_BODY_BYTES}`);
+          try {
+            opts.consumers!.checkCall(consumer, app, name, body);
+          } catch (e) {
+            if (e instanceof ConsumerError) return error(e.status, e.message);
+            throw e;
+          }
+          caller = consumerKey(consumer.name);
+          req = Object.assign(new Request(req.url, { method: req.method, headers: req.headers, body: body.byteLength ? body : null, signal: req.signal }), { params: req.params });
+        }
         // Not provided here but on exactly one peer: the peer answers. Anything else is the local bus's answer.
         if (opts.remote && !bus.capability(app, name)) {
           const where = opts.remote.providerOf(app, name);
@@ -208,11 +248,51 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
     "/api/call/:peer/:app/:capability": {
       POST: async (req) => {
         const caller = await identify(req);
-        if (!caller) return error(401, "unauthorized");
+        if (!caller) return consumerOf(req) ? error(403, "an external consumer calls through /api/call/<app>/<capability>") : error(401, "unauthorized");
         const peer = opts.remote?.get(req.params.peer ?? "");
         if (!peer) return error(404, `unknown peer: ${req.params.peer ?? ""}`);
         return callRemote(req, caller, peer, req.params.app ?? "", req.params.capability ?? "");
       },
+    },
+
+    "/api/consumers": {
+      GET: guard(() => (opts.consumers ? json({ ok: true, consumers: opts.consumers.list().map(consumerView) }) : error(404, "external consumers are not enabled"))),
+      POST: guard(async (req) => {
+        if (!opts.consumers) return error(404, "external consumers are not enabled");
+        try {
+          const input = parseConsumerInput(await req.json().catch(() => null));
+          const { consumer, token } = opts.consumers.create(input);
+          return json({ ok: true, consumer: consumerView(consumer), token, note: "the token is shown once; store it now" }, 201);
+        } catch (e) {
+          if (e instanceof ConsumerError) return error(e.status, e.message);
+          throw e;
+        }
+      }),
+    },
+
+    "/api/consumers/:name": {
+      GET: guard((req) => {
+        const c = opts.consumers?.get(req.params.name ?? "");
+        if (!c) return error(404, `unknown consumer: ${req.params.name ?? ""}`);
+        return json({ ok: true, consumer: consumerView(c), deliveries: store.countDeliveries(consumerKey(c.name)), streams: bus.streams(consumerKey(c.name)) });
+      }),
+      DELETE: guard((req) => {
+        if (!opts.consumers?.remove(req.params.name ?? "")) return error(404, `unknown consumer: ${req.params.name ?? ""}`);
+        return json({ ok: true, removed: req.params.name });
+      }),
+    },
+
+    "/api/consumers/:name/rotate": {
+      POST: guard((req) => {
+        if (!opts.consumers) return error(404, "external consumers are not enabled");
+        try {
+          const { consumer, token } = opts.consumers.rotate(req.params.name ?? "");
+          return json({ ok: true, consumer: consumerView(consumer), token, note: "the token is shown once; store it now" });
+        } catch (e) {
+          if (e instanceof ConsumerError) return error(e.status, e.message);
+          throw e;
+        }
+      }),
     },
 
     "/api/calls": {
@@ -241,9 +321,7 @@ function streamResponse(bus: Bus, app: string, keepaliveMs: number, abort: Abort
         }
       };
       send(`: stream for ${app}\n\n`);
-      detach = bus.subscribe(app, (payload) => send(`event: delivery\nid: ${payload.delivery.id}\ndata: ${JSON.stringify(payload)}\n\n`));
-      keepalive = setInterval(() => send(": keepalive\n\n"), keepaliveMs);
-      abort.addEventListener("abort", () => {
+      const end = () => {
         detach?.();
         if (keepalive) clearInterval(keepalive);
         try {
@@ -251,7 +329,11 @@ function streamResponse(bus: Bus, app: string, keepaliveMs: number, abort: Abort
         } catch {
           // already closed
         }
-      });
+      };
+      // `end` is also how the bus closes the stream when a consumer's credential is revoked or rotated.
+      detach = bus.subscribe(app, (payload) => send(`event: delivery\nid: ${payload.delivery.id}\ndata: ${JSON.stringify(payload)}\n\n`), end);
+      keepalive = setInterval(() => send(": keepalive\n\n"), keepaliveMs);
+      abort.addEventListener("abort", end);
     },
     cancel() {
       detach?.();

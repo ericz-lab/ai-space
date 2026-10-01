@@ -1,6 +1,6 @@
 # Events and calls between apps (the bus)
 
-Status: implemented in `src/space/bus/` (spec, store, engine, routes, the agents' prompt section) on top of the scheduler's events (`docs/scheduler.md`); peers mirror events and forward calls (`src/space/peers/`); the panel has an Events window (`src/web/Events.tsx`).
+Status: implemented in `src/space/bus/` (spec, store, engine, routes, the agents' prompt section, external consumers) on top of the scheduler's events (`docs/scheduler.md`); peers mirror events and forward calls (`src/space/peers/`); the panel has an Events window (`src/web/Events.tsx`).
 
 The bus is the Space-layer service that carries what one app has to tell another. An app publishes an event and never learns who listens; other apps declare what they consume and how they want it delivered. An app that needs an answer from another app calls a capability the other app declared, through ai-space, which forwards the request and records it. Both directions go through one process on loopback, so no app holds another app's address or token.
 
@@ -102,9 +102,9 @@ Every agent chat session gets a condensed copy as the last section of its system
 
 ## Storage
 
-Two tables in `space.db` next to the scheduler's: `bus_deliveries` (event id and name, app, kind, method and path, status, attempts, next due time, last error and status, sent and ended times) and `bus_calls`. Finished deliveries beyond 20 000 rows and calls beyond 5 000 are dropped on insert; a pending delivery is never dropped by the cap. A delivery keeps its target on the row, so it is still attempted after a restart or after the app changed its manifest; what it needs from the event it reads by id, and an event pruned by the retention makes the delivery `skipped`.
+Three tables in `space.db` next to the scheduler's: `bus_deliveries` (event id and name, app, kind, method and path, status, attempts, next due time, last error and status, sent and ended times), `bus_calls`, and `bus_consumers` (external consumers: name, subscriptions and calls as JSON, the credential's hash and hint, created, rotated and last-seen times). Finished deliveries beyond 20 000 rows and calls beyond 5 000 are dropped on insert; a pending delivery is never dropped by the cap. A delivery keeps its target on the row, so it is still attempted after a restart or after the app changed its manifest; what it needs from the event it reads by id, and an event pruned by the retention makes the delivery `skipped`.
 
-What an app publishes, consumes and provides is not stored: it comes from the manifest on every sync, like tasks.
+What an app publishes, consumes and provides is not stored: it comes from the manifest on every sync, like tasks. External consumers are stored, since no manifest declares them, and loaded into the bus on boot.
 
 ## API
 
@@ -112,13 +112,18 @@ What an app publishes, consumes and provides is not stored: it comes from the ma
 POST /api/events                          publish (scheduler; unchanged)
 GET  /api/events?limit&name&app           recent events (unchanged)
 GET  /api/events/:id                      one event with its deliveries
-GET  /api/events/stream                   the app's stream deliveries as SSE (app token)
-POST /api/events/ack                      { delivery } (app token)
+GET  /api/events/stream                   the app's stream deliveries as SSE (app token, or an external consumer's)
+POST /api/events/ack                      { delivery } (app token, or an external consumer's)
 GET  /api/deliveries?app&status&limit     deliveries, newest first
 POST /api/deliveries/:id/retry            queue a dead or skipped delivery again (operator token)
 GET  /api/capabilities                    the catalogue
 POST /api/call/:app/:capability           forward as the calling app
 GET  /api/calls?app&caller&limit          call history
+GET  /api/consumers                       external consumers (operator token; below)
+POST /api/consumers                       create one; the credential is in the answer, once
+GET  /api/consumers/:name                 one, with delivery counts
+POST /api/consumers/:name/rotate          a new credential
+DELETE /api/consumers/:name               revoke
 ```
 
 ## Migrating a point-to-point link
@@ -149,6 +154,101 @@ A call to an app the hub does not hold is forwarded to the one peer whose snapsh
 ## The panel
 
 The settings' Events window lists the catalogue (what each app, and each peer's app, provides, publishes and consumes, with call counts) and the last hundred events; a row opens to its http and stream deliveries with their status, attempts and last error. It is read-only like the Tasks window: replaying a dead delivery needs the operator token.
+
+## External consumers
+
+An external consumer is a program that is not a Space app, usually on another device, that needs to hear about some events and read a little data in answer. The first case: a machine elsewhere keeps a copy of asset groups and wants to know when one changes. asset-center publishes `asset-center/group.changed` with `{ groupId }`, coalesced over about two seconds; the event is a hint to re-read, not the change itself, and the consumer answers it by calling `asset-center/group-members` with `{ groupId, detail: true }`.
+
+Apps cannot serve this: a subscription exists only in an installed app's `space.yaml`, its identity is that app's `SPACE_APP_TOKEN`, and that token is not read-only (it publishes, calls every capability, runs models), so it must never leave the machine. An external consumer is therefore its own resource, made by the operator, independent of any app's installation.
+
+### What one is
+
+| Field | Meaning |
+| --- | --- |
+| `name` | 1-63 letters, digits, dots, dashes, underscores. Its deliveries and calls appear as `consumer:<name>`, a form no app name can take. |
+| `subscriptions` | Events it receives: `{ event, filter? }`, the same rules as `events.consumes` (exact name or `<app>/*`, string equality on top-level `data` fields). At most 50. |
+| `calls` | Capabilities it may call: `{ capability: "<app>/<capability>", filter? }`. The filter is checked against the top-level fields of the JSON request body, the way an event filter is checked against `data`: `{ groupId: [g1, g2] }` lets it read those groups and refuses any other. At most 20. |
+| credential | `sec_` + 32 random bytes, shown once when created and once on each rotation. Only its SHA-256 is stored, with the first characters as a hint (`sec_AbC12x…`). |
+
+The credential is accepted by exactly three routes, and by nothing else in the API (every other route answers 401 to it):
+
+- `GET /api/events/stream`: the consumer's own deliveries.
+- `POST /api/events/ack`: acks of its own deliveries (another consumer's or an app's delivery is a 404).
+- `POST /api/call/<app>/<capability>`: only the capabilities on its list, only with a body the entry's filter accepts; anything else is a 403 before the provider sees the request. The provider gets `x-space-caller: consumer:<name>`; a capability that restricts `callers` must list that form. A call naming a peer (`/api/call/<peer>/...`) is refused; an unprefixed call still reaches a capability that only a peer provides, as for apps.
+
+The operator decides what a consumer may call and must list only read-only capabilities: the bus cannot tell a read from a write. Subscriptions and calls are fixed at creation; to change them, remove the consumer and add it again.
+
+### Managing
+
+```
+space consumer add hub-sync --event asset-center/group.changed --filter groupId=g1,g2 \
+  --call asset-center/group-members --description "office NAS mirror"
+space consumer ls
+space consumer show hub-sync          # subscriptions, calls, delivery counts, open streams, last seen
+space consumer rotate hub-sync --yes  # new credential; the old one and its streams end at once
+space consumer rm hub-sync --yes      # revoke
+```
+
+`--filter` applies to every `--event` and every `--call` of the command, so the groups a consumer hears about are the groups it may read. Other shapes go as JSON: `space consumer add '{"name": …, "subscriptions": […], "calls": […]}'`, `-` or `--json-file`. The routes (operator token):
+
+```
+GET    /api/consumers                 list (never the credential)
+POST   /api/consumers                 { name, description?, subscriptions, calls } → 201 { consumer, token }
+GET    /api/consumers/:name           one, with delivery counts and open streams
+POST   /api/consumers/:name/rotate    → { consumer, token }
+DELETE /api/consumers/:name           revoke
+```
+
+Removing and rotating take effect at once: the bus closes the consumer's open streams, and the next request with the old credential is a 401. Removing also ends what still waited for the consumer as `skipped` ("consumer removed").
+
+### Delivery
+
+A consumer's deliveries are ordinary stream deliveries in `bus_deliveries` with `app = consumer:<name>`, so they have the same semantics as an app's stream: written when the event is stored, persistent across restarts, pushed when the consumer connects (oldest first, at most 500 per connection) and live while it is connected, back to `pending` when not acked within 5 minutes, `dead` after eight rounds, `skipped` when the event was pruned by `SPACE_EVENTS_RETENTION_DAYS` before the consumer came for it. A dead delivery raises one alert on the space's own notify channel. At most 4 streams per consumer at once (the fifth is a 429), and at most 5 000 deliveries waiting for one consumer: beyond that the oldest are skipped, so an abandoned consumer cannot grow the table.
+
+What a consumer must do itself:
+
+- **Dedupe.** Delivery is at-least-once. The same delivery comes again (same `delivery.id`, higher `delivery.attempt`) when an ack was lost or late. Key on `event.id` (one event, one delivery per consumer) or on `delivery.id`.
+- **Ack after the work.** Ack once the re-read is done; a consumer that crashes before acking gets the delivery again.
+- **Reconcile.** There is no exactly-once and no `Last-Event-ID` replay: the SSE `id:` is the delivery id, informational only, and a reconnect is served from the delivery rows, not from an offset. Events pruned before the consumer came back are gone. So the consumer re-reads everything it mirrors when it starts, after every reconnect, and periodically (an hour is plenty), and treats events as hints that make a re-read sooner. A `404` from `group-members` means the group was deleted: drop the local copy.
+
+### Reaching it from another device
+
+From outside, the API is behind the operator's tunnel and access layer ([ingress.md](ingress.md)). Give the device an Access service token (the same kind a hub uses for a peer, [cloudflare.md](cloudflare.md)) and send its headers with every request, in addition to the consumer credential. The access layer admits the device to the API host as a whole, and the read routes that carry no token (the panel's) are open to anyone past it; scope that Access application or policy as narrowly as the operator's setup allows. On a space without `SPACE_API_TOKEN` (loopback only) the operator routes need no token, so anything that can reach the API can manage consumers: set the token before exposing the API.
+
+### A minimal client
+
+```sh
+API=https://space.example.com
+AUTH=(-H "Authorization: Bearer $SEC_TOKEN" -H "CF-Access-Client-Id: $CF_ID" -H "CF-Access-Client-Secret: $CF_SECRET")
+
+# Re-read everything on start (and after each reconnect)
+for g in g1 g2; do
+  curl -s "${AUTH[@]}" -H 'content-type: application/json' \
+    -d "{\"groupId\":\"$g\",\"detail\":true}" "$API/api/call/asset-center/group-members"
+done
+
+# Then follow the stream: one `data:` line per delivery
+curl -sN "${AUTH[@]}" "$API/api/events/stream" | while IFS= read -r line; do
+  case "$line" in
+    data:*)
+      body=${line#data: }
+      group=$(jq -r '.event.data.groupId' <<<"$body")
+      delivery=$(jq -r '.delivery.id' <<<"$body")
+      curl -s "${AUTH[@]}" -H 'content-type: application/json' \
+        -d "{\"groupId\":\"$group\",\"detail\":true}" "$API/api/call/asset-center/group-members" >"group-$group.json"
+      curl -s "${AUTH[@]}" -H 'content-type: application/json' -d "{\"delivery\":$delivery}" "$API/api/events/ack" >/dev/null
+      ;;
+  esac
+done
+```
+
+A real client wraps the stream in a reconnect loop with backoff, re-reads on every reconnect, keeps the processed event ids for a while, and handles the 404 of a deleted group.
+
+### Not yet
+
+- **Webhooks.** Pushing to a URL on the consumer's side (signed, retried) would spare it a long-lived connection; it needs outbound reachability, signing and per-URL retry state, and is a follow-up.
+- **Editing in place.** Changing a consumer's subscriptions or calls means removing and adding it (a new credential).
+- **Per-consumer rate limits on calls.** Calls are recorded in `bus_calls` under `consumer:<name>` and the consumer's last contact is kept, which is the audit; there is no call quota yet.
 
 ## When not to use it
 
