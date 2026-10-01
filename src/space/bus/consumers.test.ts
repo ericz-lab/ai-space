@@ -254,6 +254,22 @@ function sse(res: Response) {
 }
 
 describe("consumer api", () => {
+  test("an allowed capability cannot silently move to a peer", async () => {
+    const created = api.consumers.create(parseConsumerInput({ name: "local-only", subscriptions: ["remote-app/changed"], calls: ["remote-app/read"] }));
+    let forwarded = false;
+    const peer = { name: "remote", forward: async () => { forwarded = true; return Response.json({ ok: true }); } };
+    const routes = createBusRoutes({ bus: api.bus, store: api.busStore, events: api.events, token: "op", consumers: api.consumers,
+      remote: { name: "local", capabilities: () => [], providerOf: () => ({ peer }), get: () => peer } });
+    const route = routes["/api/call/:app/:capability"];
+    if (typeof route === "function" || !route?.POST) throw new Error("missing call route");
+    const request = (token: string) => Object.assign(new Request("http://localhost/api/call/remote-app/read", { method: "POST", headers: as(token), body: "{}" }), { params: { app: "remote-app", capability: "read" } });
+    expect((await route.POST(request(created.token))).status).toBe(403);
+    expect(forwarded).toBe(false);
+    expect((await route.POST(request("op"))).status).toBe(200);
+    expect(forwarded).toBe(true);
+    api.consumers.remove("local-only");
+  });
+
   test("only the operator manages consumers; the token is shown once", async () => {
     expect((await call("/api/consumers")).status).toBe(401);
     expect((await call("/api/consumers", { method: "POST", headers: as("asset-token"), body: JSON.stringify(GROUP_CHANGED) })).status).toBe(401);

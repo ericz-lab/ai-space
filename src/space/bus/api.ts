@@ -232,6 +232,9 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
             if (e instanceof ConsumerError) return error(e.status, e.message);
             throw e;
           }
+          // A scoped credential belongs to this space. Do not silently change
+          // its provider to a peer if the local capability disappears.
+          if (!bus.capability(app, name)) return error(403, "external consumers may only call local capabilities");
           caller = consumerKey(consumer.name);
           req = Object.assign(new Request(req.url, { method: req.method, headers: req.headers, body: body.byteLength ? body : null, signal: req.signal }), { params: req.params });
         }

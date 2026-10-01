@@ -174,7 +174,7 @@ The credential is accepted by exactly three routes, and by nothing else in the A
 
 - `GET /api/events/stream`: the consumer's own deliveries.
 - `POST /api/events/ack`: acks of its own deliveries (another consumer's or an app's delivery is a 404).
-- `POST /api/call/<app>/<capability>`: only the capabilities on its list, only with a body the entry's filter accepts; anything else is a 403 before the provider sees the request. The provider gets `x-space-caller: consumer:<name>`; a capability that restricts `callers` must list that form. A call naming a peer (`/api/call/<peer>/...`) is refused; an unprefixed call still reaches a capability that only a peer provides, as for apps.
+- `POST /api/call/<app>/<capability>`: only local capabilities on its list, only with a body the entry's filter accepts; anything else is a 403 before the provider sees the request. The provider gets `x-space-caller: consumer:<name>`; a capability that restricts `callers` must list that form. Both explicit peer calls and automatic forwarding to a peer are refused. Register a separate consumer on the provider's space when it runs elsewhere.
 
 The operator decides what a consumer may call and must list only read-only capabilities: the bus cannot tell a read from a write. Subscriptions and calls are fixed at creation; to change them, remove the consumer and add it again.
 
