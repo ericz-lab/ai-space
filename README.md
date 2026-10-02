@@ -1,8 +1,12 @@
-<img src="docs/logo.png" alt="ai-space logo" width="180">
+<p align="center">
+  <img src="docs/logo.png" alt="ai-space logo" width="180">
+</p>
 
-# ai-space
+<h1 align="center">ai-space</h1>
 
-English | [中文](README.zh-CN.md)
+<p align="center">
+  English | <a href="README.zh-CN.md">中文</a>
+</p>
 
 A home for your AI: one place that connects and organizes several AI agents, apps and their data into a single system on a dedicated server.
 

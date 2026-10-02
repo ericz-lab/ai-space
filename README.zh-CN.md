@@ -1,8 +1,12 @@
-<img src="docs/logo.png" alt="ai-space 标志" width="180">
+<p align="center">
+  <img src="docs/logo.png" alt="ai-space 标志" width="180">
+</p>
 
-# ai-space
+<h1 align="center">ai-space</h1>
 
-[English](README.md) | 中文
+<p align="center">
+  <a href="README.md">English</a> | 中文
+</p>
 
 AI 的家：把多个 AI agent、app 和它们的数据连接、组织进同一个系统，跑在一台专用服务器上。
 
