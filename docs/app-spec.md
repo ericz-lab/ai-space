@@ -88,9 +88,9 @@ i18n:                              # translations of the display text, by langua
 | `url` | string | Public entry URL; the panel shows a tile only for apps that have one. Widget and agent links are resolved relative to it. A `{lang}` placeholder in its query (`https://my-app.example.com/?lang={lang}`) is replaced by the panel's language when the tile is opened; without one the app sees only the browser's language. See [i18n](i18n.md#apps). A **path** (`/`, `/docs?lang={lang}`) means "my page, on the hostname the space assigns": it resolves to `https://<name>.<SPACE_DOMAIN><path>` on a space with a domain and to `http://127.0.0.1:<service.port><path>` on one without, so a public app writes `url: /` and is right on every machine; it needs a `service` with a `port`. See [router](router.md). An operator overrides either form per machine with `SPACE_APP_URL_<NAME>` in the workspace `.env` (the app name uppercased, `-` and `.` as `_`). |
 | `status` | enum | `paused` keeps the app listed but stops its tasks and service; `archived` hides it and stops everything. Storage is never dropped by a status change. |
 | `repo` | string | The origin URL. |
-| `i18n` | mapping | Translations of `title` and `description`, and by name of the agents' and widgets' text, keyed by language tag (`zh`, `zh-Hant`, `pt-BR`). The panel shows the reader's language when the manifest has it and the plain field otherwise; names are never translated. Only declared agent and widget names may appear. See [i18n](i18n.md). |
+| `i18n` | mapping | Translations of `title` and `description`, and by name of the agents', widgets' and checks' text, keyed by language tag (`zh`, `zh-Hant`, `pt-BR`). The panel shows the reader's language when the manifest has it and the plain field otherwise; names are never translated. Only declared agent, widget and check names may appear. See [i18n](i18n.md). |
 
-Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `storage`, `notify`, `model`. Each is optional.
+Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `events`, `provides`, `storage`, `backup`, `model`, `checks`, `notify`. Each is optional.
 
 ```yaml
 i18n:
@@ -313,6 +313,35 @@ model:
 
 `model: basic` is short for `model: { default: basic }`. The operator can override any of it per app and tag in Settings → App models; a model the request itself names is above both, so leave `model` out of requests and declare it here. The resolution order and the ledger's `modelSource` are in [model.md](model.md#app-models).
 
+### `checks`
+
+The day's work an operator should be able to look at: whether today's import ran, whether today's digest was published. An inspection page (space-ops) reads each check on its own cadence and shows one of **done**, **pending** (not done, not due yet), **late** (not done after `due`, or not done with no `due`), **off** (nothing is due today) and **unknown** (unreachable, or a field is missing). A check is not a fault: it never opens an incident or sends a notification. Execution failures stay with the task; a check says whether the outcome is there.
+
+```yaml
+checks:
+  - name: hk-today                                 # unique in the app; the page's id is <app>/<name>
+    title: Hong Kong bars for today
+    description: Today's session is in the database.   # optional
+    http: { path: "/api/sync-status?market=hk" }   # GET on 127.0.0.1:<service.port>
+    when: [{ path: $.today.open, eq: true }]       # optional: when one fails, the check is off today
+    done:                                          # every assertion holds: done
+      - { path: $.today.done, eq: true }
+    due: "18:00"                                   # optional; before it, not done is pending
+    timezone: Asia/Hong_Kong                       # required by due and by `today` assertions
+```
+
+An assertion is a field path (`$.a.b`, `$.items[0].count`) and one operator:
+
+| Operator | Holds when |
+| --- | --- |
+| `exists: true` | the field is present and not null |
+| `eq: <string, number or boolean>` | the field equals it |
+| `lt: <n>` / `gt: <n>` | the field is a number below / above it |
+| `age: 26h` | the field is a timestamp with a zone, younger than the duration |
+| `today: true` | the field is a timestamp with a zone whose local date in `timezone` is today |
+
+Business calendars belong to the app: a market app answers `open` and `done` for the session it expects today and lets `when` turn holidays off, instead of the page guessing. A check needs a `service`. `GET /api/checks` lists the checks of every active app on this space with the URL to read and the `i18n` titles; the inspection page shows peers through their own page's snapshot.
+
 ### `notify`
 
 Outbound notifications to chat apps (Telegram, Discord, Slack, Feishu, DingTalk, WeCom, Bark, ntfy, a generic webhook). The full reference is in [notify.md](notify.md). Channels and their credentials are configured once by the operator in `<workspace>/.env`; the app only says which of them it may use:
@@ -493,6 +522,7 @@ notify:
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |
 | Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |
 | `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |
+| `checks`, `/api/checks` | Implemented (`src/space/checks/`, `src/space/panel/api.ts`); the inspection page is space-ops |
 | Panel (web UI, layout, manifest-only apps) | Implemented ([panel.md](panel.md)) |
 | `skills`, shared skills under `skills/` | Linked into `<workspace>/.claude/skills/` for sessions started by hand (`src/space/skills.ts`); per-agent mounting planned |
 | JSON Schema (`schema/space.schema.json`), `validate`, `/api/spec` | Planned |

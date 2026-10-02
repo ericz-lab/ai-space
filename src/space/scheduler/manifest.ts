@@ -1,5 +1,6 @@
 import { basename, join } from "node:path";
 import { parseEventsSpec, parseProvidesSpec, triggersFromConsumes } from "../bus/spec.ts";
+import { type ManifestCheck, parseChecksSpec } from "../checks/spec.ts";
 import type { Capability, EventsSpec } from "../bus/types.ts";
 import { type AppModelSpec, parseAppModelSpec } from "../model/app-models.ts";
 import { PERMISSION_MODES, type PermissionMode, RUNTIME_NAME_PATTERN } from "../runtimes/types.ts";
@@ -27,7 +28,7 @@ export const MANIFEST_FILE = "space.yaml";
 export const SPEC_VERSION = 1;
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]*$/i;
-const TOP_LEVEL_KEYS = ["spec", "name", "title", "description", "icon", "url", "status", "repo", "i18n", "service", "agents", "widgets", "skills", "tasks", "storage", "notify", "backup", "events", "provides", "model"];
+const TOP_LEVEL_KEYS = ["spec", "name", "title", "description", "icon", "url", "status", "repo", "i18n", "service", "agents", "widgets", "skills", "tasks", "storage", "notify", "backup", "events", "provides", "model", "checks"];
 /** A language tag as `i18n:` keys use it: a primary tag and optional subtags (`zh`, `zh-Hant`, `pt-BR`). */
 const LANG_TAG_RE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
@@ -100,6 +101,8 @@ export type ManifestI18n = Record<
     agents?: Record<string, I18nText>;
     /** By widget name; widgets have no description. */
     widgets?: Record<string, { title?: string }>;
+    /** By check name. */
+    checks?: Record<string, I18nText>;
   }
 >;
 
@@ -134,6 +137,8 @@ export type Manifest = {
   provides?: Capability[];
   /** The `model:` section: the model this app's calls run on when they name none, per tag (docs/model.md#app-models). */
   model?: AppModelSpec;
+  /** The `checks:` section: daily work an inspection page shows (docs/app-spec.md#checks). */
+  checks?: ManifestCheck[];
 };
 
 export async function loadManifest(dir: string): Promise<Manifest> {
@@ -174,7 +179,9 @@ export function parseManifest(yaml: string, dir: string): Manifest {
   const service = doc.service === undefined ? undefined : parseService(doc.service);
   const agents = parseList(doc.agents, "agents", parseAgent);
   const widgets = parseList(doc.widgets, "widgets", parseWidget);
-  const i18n = doc.i18n === undefined ? undefined : parseI18n(doc.i18n, agents, widgets);
+  const checks = parseChecksSpec(doc.checks);
+  if (checks.length && !service) throw new Error("checks need a service: each check reads a path on it");
+  const i18n = doc.i18n === undefined ? undefined : parseI18n(doc.i18n, agents, widgets, checks);
 
   const rawTasks = doc.tasks ?? [];
   if (!Array.isArray(rawTasks)) throw new Error("tasks must be a list");
@@ -218,6 +225,7 @@ export function parseManifest(yaml: string, dir: string): Manifest {
     ...(events ? { events } : {}),
     ...(provides?.length ? { provides } : {}),
     ...(model ? { model } : {}),
+    ...(checks.length ? { checks } : {}),
   };
 }
 
@@ -239,16 +247,16 @@ function parseService(raw: unknown): ManifestService {
  * `i18n:` maps language tags to translations of `title` / `description` and, by name, of the agents'
  * and widgets' text. Only declared names may be translated, so a rename cannot leave a stale entry.
  */
-function parseI18n(raw: unknown, agents: ManifestAgent[], widgets: ManifestWidget[]): ManifestI18n | undefined {
+function parseI18n(raw: unknown, agents: ManifestAgent[], widgets: ManifestWidget[], checks: ManifestCheck[]): ManifestI18n | undefined {
   if (!isRecord(raw)) throw new Error("i18n must map language tags to mappings");
   const out: ManifestI18n = {};
   for (const [lang, entry] of Object.entries(raw)) {
     if (!LANG_TAG_RE.test(lang)) throw new Error(`i18n: "${lang}" is not a language tag (like zh, zh-Hant, pt-BR)`);
     const ctx = `i18n.${lang}`;
     if (!isRecord(entry)) throw new Error(`${ctx} must be a mapping`);
-    for (const key of Object.keys(entry)) if (!["title", "description", "agents", "widgets"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
+    for (const key of Object.keys(entry)) if (!["title", "description", "agents", "widgets", "checks"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
     const text = parseI18nText(entry, ctx, true);
-    const byName = <T extends { name: string }>(section: "agents" | "widgets", items: T[], withDescription: boolean) => {
+    const byName = <T extends { name: string }>(section: "agents" | "widgets" | "checks", items: T[], withDescription: boolean) => {
       if (entry[section] === undefined) return undefined;
       const rawMap = entry[section];
       if (!isRecord(rawMap)) throw new Error(`${ctx}.${section} must map names to mappings`);
@@ -265,7 +273,8 @@ function parseI18n(raw: unknown, agents: ManifestAgent[], widgets: ManifestWidge
     };
     const agentsText = byName("agents", agents, true);
     const widgetsText = byName("widgets", widgets, false);
-    const value = { ...text, ...(agentsText ? { agents: agentsText } : {}), ...(widgetsText ? { widgets: widgetsText } : {}) };
+    const checksText = byName("checks", checks, true);
+    const value = { ...text, ...(agentsText ? { agents: agentsText } : {}), ...(widgetsText ? { widgets: widgetsText } : {}), ...(checksText ? { checks: checksText } : {}) };
     if (Object.keys(value).length) out[lang] = value;
   }
   return Object.keys(out).length ? out : undefined;

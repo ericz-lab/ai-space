@@ -7,6 +7,10 @@ import { type LayoutStore, orderBy } from "./layout.ts";
 import { createLinkApp, parseLinkApp, resolveLinkWithAgent } from "./links.ts";
 import type { AppRegistry, RegisteredApp } from "./registry.ts";
 import { type AppView, type ServiceView, appView, serviceView } from "./view.ts";
+import type { ManifestCheck } from "../checks/spec.ts";
+
+/** A check as GET /api/checks lists it; `i18n` carries the app's translated title and the check's text. */
+export type CheckView = ManifestCheck & { id: string; app: string; appTitle: string; url: string; i18n?: Record<string, { appTitle?: string; title?: string; description?: string }> };
 import { retireAppDir } from "./uninstall.ts";
 import { type WidgetFeed, sourceUrl } from "./widgets.ts";
 
@@ -21,6 +25,7 @@ import { type WidgetFeed, sourceUrl } from "./widgets.ts";
  *   GET    /api/apps/:app/icon
  *   GET    /api/agents/:app/:agent/avatar
  *   GET    /api/services                 every app that declares a service, with its health and who supervises it; peers with theirs
+ *   GET    /api/checks                   every active app's declared checks (docs/app-spec.md#checks), with the URL to read; this space only
  *   GET    /api/widgets                  every widget's latest payload
  *   GET    /api/widgets/:app/:name/embed the page of a `kind: embed` widget, proxied from its source
  *   GET    /api/panel/layout             order + hidden
@@ -62,6 +67,28 @@ type Handler = (req: Request & { params: Record<string, string> }) => Response |
 type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "PATCH" | "PUT" | "DELETE", Handler>>>;
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]*$/i;
+
+/** The declared checks of an active app with a service, each with the loopback URL it reads. */
+export function checkViews(entry: RegisteredApp): CheckView[] {
+  const m = entry.manifest;
+  if (m.status !== "active" || !m.service || !m.checks?.length) return [];
+  const i18n = (c: { name: string }) => {
+    const out: Record<string, { title?: string; description?: string }> = {};
+    for (const [lang, text] of Object.entries(m.i18n ?? {})) {
+      const t = text.checks?.[c.name];
+      if (t || text.title) out[lang] = { ...(text.title ? { appTitle: text.title } : {}), ...t };
+    }
+    return Object.keys(out).length ? { i18n: out } : {};
+  };
+  return m.checks.map((c) => ({
+    id: `${m.app}/${c.name}`,
+    app: m.app,
+    appTitle: m.title ?? m.app,
+    ...c,
+    url: `http://127.0.0.1:${m.service!.port}${c.path}`,
+    ...i18n(c),
+  }));
+}
 
 export function createPanelRoutes(opts: PanelApiOptions): Routes {
   const { registry, layout, widgets, health, peers } = opts;
@@ -223,6 +250,11 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
 
     "/api/services": {
       GET: wrap(async () => json({ ok: true, services: await listServices(), peers: peers?.status() ?? [], ...(opts.supervision ? { supervisor: opts.supervision.mode } : {}), asOf: new Date().toISOString() })),
+    },
+
+    // Local only: each space's inspection page reads its own apps and shows its peers' through their snapshots.
+    "/api/checks": {
+      GET: wrap(async () => json({ ok: true, checks: registry.list().flatMap(checkViews), asOf: new Date().toISOString() })),
     },
 
     "/api/widgets": {
