@@ -22,7 +22,7 @@ describe("Codex completions", () => {
       expect(answer.cwd).toBe(process.cwd());
       for (const flag of ["--ignore-user-config", "--ignore-rules", "--disable", "project_doc_max_bytes=0"]) expect(answer.args).not.toContain(flag);
       expect(answer.args).toContain("read-only");
-      const remote = codexRemoteCommand(fakeCodexBin(), request);
+      const remote = await codexRemoteCommand(fakeCodexBin(), request);
       const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 5000 });
       expect(result.code).toBe(0);
       expect(JSON.parse(parseCodexOutput(result.stdout).text!).system).toBe(system || null);
@@ -75,7 +75,7 @@ describe("Codex completions", () => {
   });
   test("remote wrapper transfers hostile text exactly and cleans the request directory", async () => {
     const request = input({ prompt: "中文 ' $(touch /tmp/should-not-exist) `id`\n", system: "a'\"\\\n$HOME\n" });
-    const remote = codexRemoteCommand(fakeCodexBin(), request);
+    const remote = await codexRemoteCommand(fakeCodexBin(), request);
     const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 5000 });
     expect(result.code).toBe(0);
     const output = parseCodexOutput(result.stdout);
@@ -84,7 +84,7 @@ describe("Codex completions", () => {
     expect(await Bun.file(`${remote.dir}/system.txt`).exists()).toBe(false);
   });
   test("remote timeout kills the CLI and removes request files", async () => {
-    const remote = codexRemoteCommand(fakeCodexBin("hang"), input({ timeoutMs: 50 }));
+    const remote = await codexRemoteCommand(fakeCodexBin("hang"), input({ timeoutMs: 50 }));
     const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 4000 });
     expect(result.code).toBe(124);
     expect(await Bun.file(`${remote.dir}/system.txt`).exists()).toBe(false);
@@ -221,7 +221,7 @@ test("web tool lists enable native web access locally and over SSH without enabl
     for (const feature of ["shell_tool", "unified_exec", "plugins", "apps", "view_image"]) {
       expect(args.some((value, i) => value === "--disable" && args[i + 1] === feature)).toBe(true);
     }
-    const remote = codexRemoteCommand(fakeCodexBin(), request);
+    const remote = await codexRemoteCommand(fakeCodexBin(), request);
     const output = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 5000 });
     expect(output.code).toBe(0);
     expect(JSON.parse(parseCodexOutput(output.stdout).text!).args).toContain('web_search="live"');
@@ -319,4 +319,35 @@ describe("completion transport backoff", () => {
     expect(await runtime.complete(input(), controller.signal)).toMatchObject({ ok: false, error: "aborted" });
     expect(calls).toBe(1);
   });
+});
+
+
+test("completion images arrive intact locally and over the SSH archive and are cleaned", async () => {
+  const source = await mkdtemp(join(tmpdir(), "codex-input-"));
+  const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 255]);
+  await Bun.write(join(source, "source.png"), bytes);
+  const request = input({ files: [{ name: "img1.png", path: join(source, "source.png") }] });
+  try {
+    const local = await adapter().complete(request);
+    expect(local.ok).toBe(true);
+    if (!local.ok) throw new Error(local.error);
+    const answer = JSON.parse(local.text);
+    expect(answer.images).toEqual([Array.from(bytes)]);
+    expect(await Bun.file(join(answer.cwd, "img1.png")).exists()).toBe(false);
+    const remote = await codexRemoteCommand(fakeCodexBin(), request);
+    const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 5000 });
+    expect(result.code).toBe(0);
+    expect(JSON.parse(parseCodexOutput(result.stdout).text!).images).toEqual([Array.from(bytes)]);
+    expect(await Bun.file(join(remote.dir, "img1.png")).exists()).toBe(false);
+    expect(await Bun.file(join(source, "source.png")).exists()).toBe(true);
+  } finally { await rm(source, { recursive: true, force: true }); }
+});
+
+test("completion attachments cannot escape staging or replace prompt files", async () => {
+  for (const name of ["../outside.png", "/tmp/outside.png", "prompt.txt", "image.png/../../bad"]) {
+    const request = input({ files: [{ name, path: "/missing" }] });
+    expect(await adapter().complete(request)).toMatchObject({ ok: false, error: expect.stringContaining("image name") });
+    await expect(codexRemoteCommand(fakeCodexBin(), request)).rejects.toThrow("image name");
+  }
+  expect(() => codexArgs(["codex"], input({ files: [{ name: "x.png", path: "/a" }, { name: "x.png", path: "/b" }] }), "/tmp/test")).toThrow("duplicate");
 });

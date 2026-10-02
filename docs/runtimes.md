@@ -187,8 +187,11 @@ sets `agents.enabled=false`, and disables execution, code-mode host, integration
 and discovery features. Full retains native configuration and tools. Both Codex
 modes retain the read-only sandbox and never-approve policy: full context does not
 authorize unrestricted writes. Full uses the CLI's reasoning default; slim uses
-low reasoning. Codex custom tool lists and file attachments remain unsupported;
-full exposes its native tools instead.
+low reasoning. Codex accepts WebSearch/WebFetch tool lists; full without an explicit
+list exposes native tools. Image attachments are supported with omitted or full
+mode (explicit slim rejects attachments): images are staged in the request directory
+and passed with one `--image` flag per file, locally and over SSH. Temporary copies
+are removed on completion; source files are preserved.
 
 **Codex 0.156.1 limitation:** even with tool execution disabled, this CLI still sends
 `exec`, `wait` and asynchronous-input definitions. Slim disables optional tool facilities, but cannot promise a completely empty

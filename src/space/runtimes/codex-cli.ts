@@ -26,7 +26,6 @@ export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
     capabilities: { complete: true, agent: true, chat: true, image: true },
     async complete(input, signal, onDelta) {
       assertCompletionMode(input);
-      if (input.files?.length) return { ok: false, error: "codex-cli completions do not support file attachments", backend };
       const unsupported = input.tools.filter((tool) => tool !== "WebSearch" && tool !== "WebFetch");
       if (unsupported.length) return { ok: false, error: `codex-cli completions support only WebSearch and WebFetch tool lists; unsupported: ${unsupported.join(", ")}`, backend };
       if (signal?.aborted) return { ok: false, error: "aborted", backend };
@@ -40,13 +39,14 @@ export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
           let cmd: string[];
           let stdin: string | Uint8Array = input.prompt;
           if (host) {
-            const remote = codexRemoteCommand(bin, { ...input, timeoutMs: remainingMs });
+            const remote = await codexRemoteCommand(bin, { ...input, timeoutMs: remainingMs });
             cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, `bash -lc ${quote(remote.command)}`];
             stdin = remote.archive;
           } else {
             if (!dir) {
               dir = await mkdtemp(join(tmpdir(), "space-codex-"));
               await Bun.write(join(dir, "system.txt"), input.system);
+              for (const file of completionFiles(input)) await Bun.write(join(dir, file.name), Bun.file(file.path));
             }
             cmd = codexArgs(bin, input, dir);
           }
@@ -124,11 +124,12 @@ function transientCompletionError(error: string): boolean {
 /** Use the request as model instructions, not as a second user message. */
 export function codexArgs(bin: string[], input: CompleteInput, dir: string, fullCwd = process.cwd()): string[] {
   assertCompletionMode(input);
+  const images = completionFiles(input).flatMap((file) => ["--image", join(dir, file.name)]);
   const common = ["--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", "read-only", "--model", input.model];
   // Explicit web-only lists must not inherit native shell, plugins or MCP tools.
   if (input.mode === "full" && !input.tools.length) {
     return [...bin, "exec", ...common, "--cd", fullCwd, "-c", 'approval_policy="never"',
-      ...(input.system ? ["-c", `model_instructions_file=${JSON.stringify(join(dir, "system.txt"))}`] : []), "-"];
+      ...(input.system ? ["-c", `model_instructions_file=${JSON.stringify(join(dir, "system.txt"))}`] : []), ...images, "-"];
   }
   const config: Record<string, string | number | boolean> = {
     model_instructions_file: join(dir, "system.txt"),
@@ -153,7 +154,7 @@ export function codexArgs(bin: string[], input: CompleteInput, dir: string, full
   return [...bin, "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", "read-only", "--cd", dir, "--model", input.model,
     ...Object.entries(config).flatMap(([key, value]) => ["-c", `${key}=${JSON.stringify(value)}`]),
     ...disabled.flatMap((key) => ["--disable", key]),
-    ...(input.tools.length ? ["--enable", "code_mode", "--enable", "code_mode_host"] : []), "--enable", "skip_host_skill_discovery", "-"];
+    ...(input.tools.length ? ["--enable", "code_mode", "--enable", "code_mode_host"] : []), "--enable", "skip_host_skill_discovery", ...images, "-"];
 }
 
 /**
@@ -235,14 +236,27 @@ export function splitImageOutput(stdout: string): { events: string; images: Gene
 /** Quote an entire shell argument, including embedded quotes, dollars and newlines. */
 function quote(value: string): string { return `'${value.replaceAll("'", "'\\''")}'`; }
 
-export function codexRemoteCommand(bin: string[], input: CompleteInput): { command: string; archive: Uint8Array; dir: string } {
+function completionFiles(input: CompleteInput) {
+  const files = input.files ?? [];
+  const names = new Set<string>();
+  for (const file of files) {
+    if (!/^[A-Za-z0-9_-]+\.(?:png|jpe?g|gif|webp)$/i.test(file.name) || names.has(file.name))
+      throw new Error("invalid or duplicate completion image name");
+    names.add(file.name);
+  }
+  return files;
+}
+
+export async function codexRemoteCommand(bin: string[], input: CompleteInput): Promise<{ command: string; archive: Uint8Array; dir: string }> {
   const dir = `/tmp/space-codex-${randomUUID()}`;
   const encode = (s: string) => new TextEncoder().encode(s);
   // The remote timeout bounds orphan lifetime after SSH disconnects. Retries share the original deadline; there is no model fallback.
   // `builtin cd`: the login shell may load a profile that wraps `cd` in a function, and RVM's
   // wrapper runs `trap - EXIT`, which dropped the cleanup and left the request files behind.
   const command = `umask 077; mkdir ${quote(dir)} || exit 1; trap ${quote(`rm -rf -- ${quote(dir)}`)} EXIT; tar -xf - -C ${quote(dir)} || exit 1; ${input.mode === "full" ? "" : `builtin cd ${quote(dir)} || exit 1; `}timeout --signal=TERM --kill-after=5s ${Math.ceil(input.timeoutMs / 1000)}s ${codexArgs(bin, input, dir, ".").map(quote).join(" ")} < ${quote(join(dir, "prompt.txt"))}`;
-  return { command, dir, archive: ustar([{ name: "prompt.txt", bytes: encode(input.prompt) }, { name: "system.txt", bytes: encode(input.system) }]) };
+  const entries = [{ name: "prompt.txt", bytes: encode(input.prompt) }, { name: "system.txt", bytes: encode(input.system) }];
+  for (const file of completionFiles(input)) entries.push({ name: file.name, bytes: new Uint8Array(await Bun.file(file.path).arrayBuffer()) });
+  return { command, dir, archive: ustar(entries) };
 }
 
 /** Never mistake an exit-zero error, partial stream or log line for a successful answer. */

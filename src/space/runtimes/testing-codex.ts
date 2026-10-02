@@ -26,7 +26,8 @@ if (import.meta.main) {
   if (!args.includes("--ephemeral")) console.log(JSON.stringify({ type: "thread.started", thread_id: "c0de0001-0000-4000-8000-000000000000" }));
   const systemArg = args.find((s) => s.startsWith("model_instructions_file="));
   const systemFile = systemArg ? JSON.parse(systemArg.slice(systemArg.indexOf("=") + 1)) : undefined;
-  const text = JSON.stringify({ prompt, system: systemFile ? await Bun.file(systemFile).text() : null, cwd: process.cwd(), args });
+  const images = await Promise.all(args.flatMap((a, i) => a === "--image" ? [Bun.file(args[i + 1]!).arrayBuffer().then((b) => Array.from(new Uint8Array(b)))] : []));
+  const text = JSON.stringify({ images, prompt, system: systemFile ? await Bun.file(systemFile).text() : null, cwd: process.cwd(), args });
   console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "intermediate", phase: "commentary" } }));
   console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }));
   if (mode !== "partial") console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 120, cached_input_tokens: 100, output_tokens: 12 } }));
