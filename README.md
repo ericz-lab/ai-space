@@ -1,3 +1,5 @@
+<img src="docs/logo.png" alt="ai-space logo" width="180">
+
 # ai-space
 
 English | [中文](README.zh-CN.md)
