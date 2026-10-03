@@ -97,7 +97,9 @@ async function runHttp(target: Extract<Target, { kind: "http" }>, ctx: RunContex
   }
   // Long-running jobs can be silent for minutes. The scheduler's signal owns the
   // deadline; Bun's shorter connection idle timeout must not end the wait early.
-  const res = await fetch(interpolate(target.url), { method: target.method, headers, body, signal: ctx.signal, timeout: false });
+  // Jobs are infrequent and may hit a busy application's expired idle connection.
+  // Start a fresh connection; retrying a dropped POST could execute a job twice.
+  const res = await fetch(interpolate(target.url), { method: target.method, headers, body, signal: ctx.signal, timeout: false, keepalive: false });
   const raw = await res.text();
   const text = truncate(raw);
   if (!res.ok) return { status: "error", error: `HTTP ${res.status}`, output: text };

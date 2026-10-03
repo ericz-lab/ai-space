@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { createServer, type Socket } from "node:net";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,6 +51,47 @@ describe("http target", () => {
     );
     expect(r.status).toBe("ok");
     expect(JSON.parse(r.output!)).toEqual({ got: '{"task":"x"}', auth: "Bearer secret" });
+  });
+
+  test("HTTP jobs use fresh connections and never replay a dropped POST", async () => {
+    const sockets = new Set<Socket>();
+    let connections = 0;
+    let executions = 0;
+    let drop = false;
+    const receiver = createServer(socket => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+      const connection = ++connections;
+      let buffer = "";
+      socket.on("data", chunk => {
+        buffer += chunk.toString();
+        const end = buffer.indexOf("\r\n\r\n");
+        if (end < 0) return;
+        const length = Number(/content-length: (\d+)/i.exec(buffer.slice(0, end))?.[1] ?? 0);
+        if (buffer.length < end + 4 + length) return;
+        buffer = buffer.slice(end + 4 + length);
+        executions++;
+        if (drop) { socket.destroy(); return; }
+        const body = JSON.stringify({ connection });
+        socket.write(`HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: keep-alive\r\n\r\n${body}`);
+      });
+    });
+    await new Promise<void>(resolve => receiver.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = receiver.address() as { port: number };
+      const target = { kind: "http" as const, method: "POST" as const, url: `http://127.0.0.1:${address.port}`, body: { task: "once" } };
+      const first = await runTarget(target, ctx());
+      const second = await runTarget(target, ctx());
+      expect(first.status).toBe("ok");
+      expect(second.status).toBe("ok");
+      expect(JSON.parse(first.output!).connection).not.toBe(JSON.parse(second.output!).connection);
+      drop = true;
+      expect((await runTarget(target, ctx())).status).toBe("error");
+      expect(executions).toBe(3);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>(resolve => receiver.close(() => resolve()));
+    }
   });
 
   test("a 2xx JSON body can carry its own verdict", async () => {

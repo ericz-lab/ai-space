@@ -57,6 +57,7 @@ The engine is a single timer plus an in-flight set.
 Rules the engine enforces:
 
 - **No overlap.** A task with `runningAt` set is never launched again. A manual run of a running task is refused.
+- **HTTP connections are per run.** Each HTTP job opens a fresh connection so a busy app cannot reject it on an expired pooled connection. A dropped POST is not automatically replayed: it may already have performed work.
 - **Timeouts are real.** HTTP requests wait until the task's `timeoutMs`, with Bun's connection idle timeout disabled so a quiet long-running job is not reported as failed early. Aborting the request does not terminate work inside the app: the app must enforce its own execution deadline. Commands and agents start in their own process group (where `setsid` exists) and the whole tree is killed; after that the engine stops waiting on their pipes so an orphaned grandchild cannot hold a slot.
 - **Errors back off.** Consecutive failures push the next run to at least 30 s, 1 m, 5 m, 15 m, then 60 m after the failure, never earlier than the natural next slot. Success resets the counter.
 - **Missed runs execute.** A tick that finds nothing due only fills in missing `nextRunAt` values. It never advances a past-due value, so a run that was missed while the process was down or busy executes instead of being skipped.
