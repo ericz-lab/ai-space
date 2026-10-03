@@ -8,7 +8,8 @@ import Terminal from "./Terminal.tsx";
 import Usage from "./Usage.tsx";
 import AppModels from "./AppModels.tsx";
 import Events from "./Events.tsx";
-import { getJson, repoUrl, sendJson, type AgentInfo, type AppInfo, type WidgetInfo } from "./api.ts";
+import Inbox from "./Inbox.tsx";
+import { getJson, repoUrl, sendJson, type AgentInfo, type AppInfo, type InboxSummary, type WidgetInfo } from "./api.ts";
 import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
 import PetField from "./PetField.tsx";
 import { type PetChoice, resolvePet } from "./petdex.ts";
@@ -28,7 +29,7 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetChoice };
 
 /** Floating panels over the page; one at a time. */
-type Panel = "settings" | "chat" | "tasks" | "usage" | "appModels" | "events" | "terminal";
+type Panel = "settings" | "chat" | "tasks" | "usage" | "appModels" | "events" | "terminal" | "inbox";
 
 /** `onLang` changes the language of the whole page; the root (main.tsx) owns the value and provides it. */
 export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
@@ -84,6 +85,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   }, [setsOpen]);
   const openSettings = () => setPanel("settings");
   const openTerminal = () => setPanel("terminal");
+  const openInbox = () => setPanel("inbox");
   const openChat = (a: AgentInfo) => {
     setChatAgent(a);
     setPanel("chat");
@@ -120,6 +122,25 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     };
     pull();
     const t = setInterval(pull, 300_000);
+    document.addEventListener("visibilitychange", pull);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", pull);
+    };
+  }, []);
+
+  // The inbox tile's badge: unread threads, once on load and every minute while visible; the inbox
+  // window reports every change it makes.
+  const [inbox, setInbox] = useState<InboxSummary | null>(null);
+  useEffect(() => {
+    const pull = () => {
+      if (!document.hidden)
+        getJson<{ summary: InboxSummary }>("/api/inbox?filter=unread&limit=1")
+          .then((d) => setInbox(d.summary))
+          .catch(() => {});
+    };
+    pull();
+    const t = setInterval(pull, 60_000);
     document.addEventListener("visibilitychange", pull);
     return () => {
       clearInterval(t);
@@ -298,6 +319,26 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 </Tile>
                 );
               })}
+              <Tile
+                icon="/inbox.svg"
+                fallback="📥"
+                name={t("inbox.title")}
+                editing={editing}
+                onOpen={openInbox}
+                showPop={!prefs.noPop}
+                className="builtin"
+                badge={inbox ? { n: inbox.unread, title: t("inbox.badge", { n: inbox.unread }) } : undefined}
+              >
+                <p className="pop-title">
+                  {t("inbox.title")}
+                  <span className="status">
+                    <i />
+                    {t("status.builtIn")}
+                  </span>
+                </p>
+                {inbox && <p className="pop-hint">{t("inbox.summary", { unread: inbox.unread, open: inbox.open })}</p>}
+                <p className="pop-body">{t("inbox.blurb")}</p>
+              </Tile>
               <Tile icon="/terminal.svg" fallback="⌨️" name={t("term.title")} editing={editing} onOpen={openTerminal} showPop={!prefs.noPop} className="builtin">
                 <p className="pop-title">
                   {t("term.title")}
@@ -488,6 +529,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <AppModels open={panel === "appModels"} onClose={close} onBack={openSettings} />
       <Events open={panel === "events"} onClose={close} onBack={openSettings} />
       <Terminal open={panel === "terminal"} onClose={close} />
+      <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
       <Chat open={panel === "chat"} agent={chatAgent} onClose={close} onSwitch={openChat} />
     </>
   );

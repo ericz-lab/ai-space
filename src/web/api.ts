@@ -221,6 +221,23 @@ export type DeliveryInfo = {
   lastStatus?: number;
   createdAt: string;
 };
+export type InboxItem = {
+  thread: string;
+  app: string;
+  level: "info" | "success" | "warn" | "alert" | "report";
+  title?: string;
+  text: string;
+  url?: string;
+  key?: string;
+  notificationId: string;
+  count: number;
+  firstAt: string;
+  lastAt: string;
+  action: boolean;
+  unread: boolean;
+  done: boolean;
+};
+export type InboxSummary = { unread: number; open: number };
 export type EventInfo = { id: number; name: string; app: string; at: string; data: Record<string, unknown>; peer?: string };
 export type CapabilityApp = {
   app: string;

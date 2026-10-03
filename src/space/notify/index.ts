@@ -7,3 +7,4 @@ export { NotifyStore, MAX_NOTIFICATIONS_PER_APP } from "./store.ts";
 export { NotifyService, CAP, CAP_WINDOW_MS, STALE_MS, SPACE_APP, type NotifyOptions, type SendOptions, type SendResult } from "./engine.ts";
 export { createNotifyRoutes, view as notificationView, type NotifyApiOptions } from "./api.ts";
 export { createTaskNotifier, STREAK_ALERT_AT, type TaskEvent, type TaskNotifierOptions } from "./tasks.ts";
+export { Inbox, ACTION_LEVELS, INBOX_FILTERS, type InboxFilter, type InboxItem, type InboxSummary } from "./inbox.ts";

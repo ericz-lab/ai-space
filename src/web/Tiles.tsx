@@ -28,6 +28,7 @@ export function Tile({
   dragProps,
   stale,
   corner,
+  badge,
   className,
   children,
 }: {
@@ -45,6 +46,8 @@ export function Tile({
   stale?: boolean;
   /** A small icon over the icon's bottom-right corner: the app an agent belongs to. */
   corner?: string;
+  /** A count over the icon's top-right corner (the inbox's unread threads); hidden when empty. */
+  badge?: { n: number; title: string };
   className?: string;
   children?: ReactNode;
 }) {
@@ -72,6 +75,11 @@ export function Tile({
         {corner && (
           <span className={`tile-corner ${isImgIcon(corner) ? "" : "solid"}`}>
             <Icon icon={corner} fallback="📦" />
+          </span>
+        )}
+        {badge && badge.n > 0 && (
+          <span className="tile-badge" title={badge.title}>
+            {badge.n > 99 ? "99+" : badge.n}
           </span>
         )}
       </span>

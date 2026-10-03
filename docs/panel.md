@@ -122,6 +122,10 @@ The terminal takes its ground, text, cursor and selection from the resolved them
 
 The settings open an Events window next to Tasks and Model usage: the bus's catalogue (what every app, local or on a peer, provides, publishes and consumes, with call counts) and the last hundred events, each opening to its http and stream deliveries with status, attempts and last error ([events.md](events.md)). Read-only, like Tasks.
 
+## Inbox
+
+A built-in tile next to Terminal opens the Inbox: every app's notifications as threads, newest first, with a red badge for the unread ones. Filters for all, unread, to handle (`alert` and `warn` not yet done) and done, and one app. Opening a row marks it read and shows the full text, the link the notification carried and, for a repeated thread, how many times since when; it can be marked done, reopened or marked unread. A newer notification in a thread brings it back. The data and its rules are in [notify.md](notify.md#inbox); this machine's notifications only, not a peer's.
+
 ## Health
 
 Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<port><service.health>` (two-second timeout), caches the result for fifteen seconds, and shows a green or red dot. Apps without `service.health` show no dot.
@@ -145,6 +149,7 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 | `GET /api/agents` | every agent the panel lists |
 | `POST /api/agents/:app/:agent/chat` | one chat turn, SSE |
 | `GET /api/agents/:app/:agent/sessions[/:sid]` | recent sessions, restored transcript |
+| `GET /api/inbox`, `POST /api/inbox/mark`, `POST /api/inbox/read-all` | the inbox: threads with read and done state, and changing it ([notify.md](notify.md#inbox)) |
 | `GET /api/peers`, `PATCH`/`DELETE /api/peers/:peer/apps/:app`, `/api/peers/:peer/…` | peer machines, hub-side hide, forwarded uninstall/icon/embed/chat/sessions ([peers.md](peers.md)) |
 | `GET /api/terminal`, `POST /api/terminal/sessions`, `DELETE /api/terminal/sessions/:id`, `GET /api/terminal/ws`, `/api/peers/:peer/terminal/…` | the web terminal: status and machines, open a session (one-time ticket), end one, the session socket; the same on a peer, forwarded and bridged ([terminal.md](terminal.md)) |
 | `/api/peer/…` | this space as a peer of a hub, bearer-guarded ([peers.md](peers.md)) |
@@ -171,7 +176,7 @@ src/space/peers/    other machines' panels merged into this one, and this one se
 src/space/terminal/ the web terminal: PTY backends, tickets and sessions, audit rows, routes and the socket bridge to a peer (terminal.md)
 src/space/agents/   runtime.ts (claude process + SSE), sessions.ts (chat_sessions),
                     transcript.ts, api.ts (routes, space agent)
-src/web/            index.html, main.tsx (language root), App.tsx, Chat.tsx, Tasks.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
+src/web/            index.html, main.tsx (language root), App.tsx, Chat.tsx, Tasks.tsx, Inbox.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
                     theme.ts (appearance: presets, resolution, storage), ThemeSettings.tsx (its settings rows),
                     i18n.ts (dictionaries, language choice), styles.css, api.ts, routes.ts (HTML import + public files),
                     public/ (PWA shell, pet sprite)

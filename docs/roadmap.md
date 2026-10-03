@@ -30,7 +30,7 @@ out to be an event bus.
 | **Logs, metrics, tracing** | Partial: the log routes and `space logs` wrap the operator's log command; model calls have a ledger. | Per-app request rate, error rate and latency; a trace from a click through an app, the model service and a runtime, with what it cost. Diagnosing an incident today means reading the journal and querying the database by hand. |
 | **Quotas** | The ledger records spend. | Budgets and throttling: a daily token or money cap per app, and what happens when it is reached. Nothing currently stops a failing call from being retried at full price. |
 | **Network, service discovery** | Yes: one wildcard tunnel rule and a proxy whose configuration the space writes, so a new app needs no registration ([router.md](router.md), [ingress.md](ingress.md)); peers merge machines into one panel ([peers.md](peers.md)). | An app on one machine reaching an app on another still goes through a hand-made forward. |
-| **Notification centre** | Outbound only: the notify service sends to chat channels ([notify.md](notify.md)). | An inbox in the panel — what every app produced, read and unread — and a way back, so a reply reaches an agent. |
+| **Notification centre** | The notify service sends to chat channels, and the panel's inbox keeps what every app sent, grouped by key, read and unread, open and done ([notify.md](notify.md#inbox)). | A way back, so a reply reaches an agent; actions an app declares on a notification; peers' inboxes in the hub. |
 | **Shell** | Yes: one `space` command over every operation ([cli.md](cli.md)), and a web terminal ([terminal.md](terminal.md)). | — |
 | **Locale, time** | Yes ([i18n.md](i18n.md)). | — |
 | **Backup, disaster recovery** | Yes, per app: snapshots, retention, verification, restore ([backup.md](backup.md)). | Rebuilding a whole machine from a bucket and one `.env`. The install documents are written for a person to follow; there is no single path back. |
@@ -47,8 +47,8 @@ out to be an event bus.
    what did it cost" has to be answerable from one place. The log routes are the start; per-app rates and a trace with cost are the rest.
 3. **Budgets.** The ledger without a limit only tells you afterwards what a loop cost.
 4. **Shared memory and global search.** The difference between a system and a pile of sites.
-5. **Package management and an inbox.** Versions, dependencies and rollback; and one place where
-   what the apps produced is waiting.
+5. **Package management and replies.** Versions, dependencies and rollback; and a reply from the
+   inbox that reaches the agent that sent the message.
 
 ## Not on this list
 

@@ -207,7 +207,7 @@ Rules the engine enforces:
 
 ## Storage
 
-Two tables in `<workspace>/data/space.db`, following the additive migration rule: `notifications` (id, app, level, title, text, url, key, has image, created) and `deliveries` (notification id, channel, status, attempts, last error, provider id, sent at). Images are not stored in the database; `data` payloads are written to `<workspace>/data/<app>/notify/` and deleted after delivery. The store keeps the latest 2000 notifications per app.
+Three tables in `<workspace>/data/space.db`, following the additive migration rule: `notifications` (id, app, level, title, text, url, key, has image, created) and `deliveries` (notification id, channel, status, attempts, last error, provider id, sent at), and `inbox_state` (thread, read at, done at; see [Inbox](#inbox)). Images are not stored in the database; `data` payloads are written to `<workspace>/data/<app>/notify/` and deleted after delivery. The store keeps the latest 2000 notifications per app.
 
 ## API
 
@@ -219,9 +219,22 @@ GET    /api/notify/channels              every channel: name, kind, enabled, las
 POST   /api/notify/channels/:name/test   send a test message to one channel; operator token only
 GET    /api/notifications?app&limit      history, newest first, with deliveries
 GET    /api/notifications/:id            one notification and its deliveries
+GET    /api/inbox?app&filter&action&limit  every app's notifications as threads, with read and done state (see Inbox)
+POST   /api/inbox/mark                   { threads, read?, done? }
+POST   /api/inbox/read-all               { app? }
 ```
 
-A panel widget for "last 20 notifications" falls out of the history route; it is not part of this change.
+## Inbox
+
+Channels are for being interrupted; the inbox is where everything an app sent can be found again, whether or not a channel was configured, enabled or under its cap. A notification that was skipped, deduped or capped is still recorded, and on a busy space that can be most of them: a task can fail hundreds of times without a message reaching anyone. The panel's Inbox tile shows the same notifications, read and unread.
+
+- **Threads.** Notifications with the same `app` and `key` are one thread, shown as its latest notification with a count and the time of the first (`k:<app>:<key>`); a notification without a key is a thread of its own (its id). A task's failure streak, which the scheduler already keys as `task:<id>:error`, becomes one row instead of hundreds. The `key` an app sends for dedup is the same key that groups it here, so no new field is needed.
+- **State.** One `inbox_state` row per thread in `space.db`: when it was read and when it was done. A notification newer than either time makes the thread unread and open again, so "done" means done up to then and a failure that comes back is not hidden. Done implies read. Rows whose notifications were all pruned (2000 per app) are dropped at boot.
+- **Needs action.** `alert` and `warn` are the levels that ask for something to be done; the rest are results. The "to handle" filter is `filter=open&action=1`: threads at those levels that are not done.
+- **Filters.** `filter` is `all` (default), `unread`, `open` or `done`; `app` narrows to one app; `limit` defaults to 100, at most 500. The answer always carries `summary: { unread, open }`, which the tile's badge shows.
+- **Who may write.** Like the panel's layout, the routes carry no token: the panel's page is the caller, and the same-origin guard refuses another site's writes ([panel.md](panel.md#trust-boundary)).
+
+Not in this version: replying to an agent from a thread, actions an app declares on a notification (approve, retry), events in the inbox (they are machine-to-machine signals, not messages for a person), and peers' inboxes in the hub's panel.
 
 ## Scheduler integration
 
@@ -283,6 +296,7 @@ One file per concern in `src/space/notify/`, tests next to each:
 | `engine.ts` | `NotifyService`: accept, dedup, cap, one worker per channel, retries, stale handling, image parking. |
 | `api.ts` | The routes; app identity from `SPACE_APP_TOKEN` (resolved by the storage service) or the operator token plus `app`. |
 | `tasks.ts` | The scheduler hook that turns run results into messages. |
+| `inbox.ts` | The inbox: notifications grouped into threads by `app` and `key`, read and done state (`inbox_state`), the summary. |
 
 The scheduler exposes an `onFinish` callback and stores `tasks[].notify`; the storage service issues the per-app token (`app_tokens` table) and writes it into `space.env`; the entry point wires the three together and adds the `notify` subcommand. The shared skill lives in `skills/notify/SKILL.md`.
 

@@ -317,6 +317,31 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .ev-target { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ev-path { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Inbox: every app's notifications as threads (docs/notify.md#inbox). */
+.tile-badge {
+  position: absolute; right: -6px; top: -6px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  background: var(--danger); color: #fff; border: 2px solid var(--solid); box-shadow: var(--shadow);
+  font-size: 11px; font-weight: 700; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.inbox-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--glass-border); }
+.inbox-app { margin-left: auto; max-width: 40%; }
+.inbox-pill {
+  border: 1px solid var(--glass-border); background: var(--glass); color: var(--text); text-decoration: none;
+  border-radius: 999px; font: inherit; font-size: 12px; padding: 3px 10px; cursor: pointer; white-space: nowrap;
+}
+.inbox-pill:hover { border-color: var(--muted); }
+.inbox-pill.on { background: var(--text); color: var(--inverse); border-color: transparent; }
+.inbox-pill:disabled { opacity: 0.45; cursor: default; }
+.inbox-row .task-name { font-weight: 500; }
+.inbox-row.unread .task-name { font-weight: 700; }
+.inbox-row .status { width: 8px; flex: none; }
+.inbox-text {
+  margin-bottom: 8px; padding: 6px 8px; border-radius: 8px; max-height: 240px; overflow: auto;
+  background: var(--code-bg); border: 1px solid var(--glass-border);
+  font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+}
+.inbox-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
 /* Usage: the model ledger in the same floating panel; tables scroll sideways rather than the page. */
 .tasks.usage { width: min(720px, 94vw); }
 .usage-windows { margin-left: auto; display: flex; gap: 2px; }

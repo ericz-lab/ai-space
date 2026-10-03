@@ -11,6 +11,7 @@ const PUBLIC: Record<string, string> = {
   "/favicon.svg": "favicon.svg",
   "/settings.svg": "settings.svg",
   "/terminal.svg": "terminal.svg",
+  "/inbox.svg": "inbox.svg",
   "/manifest.webmanifest": "manifest.webmanifest",
   "/apple-touch-icon.png": "apple-touch-icon.png",
   "/icon-512.png": "icon-512.png",

@@ -109,3 +109,34 @@ describe("reads and channel test", () => {
     expect((await post("/api/notify/channels/nope/test", {}, "op-token")).status).toBe(400);
   });
 });
+
+describe("inbox", () => {
+  test("lists every app's threads with a summary; mark and read-all change state", async () => {
+    await post("/api/notify", { level: "alert", title: "feed stalled", text: "x", channel: "ops", key: "stall", wait: true }, "sat_my-app");
+    await post("/api/notify", { level: "alert", title: "feed stalled", text: "y", channel: "ops", key: "stall", window: "1ms", wait: true }, "sat_my-app");
+    await post("/api/notify", { text: "done", wait: true }, "sat_other");
+    type List = { items: { thread: string; app: string; count: number; unread: boolean; done: boolean; lastAt: string }[]; summary: { unread: number; open: number } };
+    const list = (await (await fetch(`${base}/api/inbox`)).json()) as List;
+    expect(list.items.map((i) => [i.thread, i.count]).sort()).toEqual([
+      ["k:my-app:stall", 2],
+      [expect.stringMatching(/^n_/), 1],
+    ]);
+    expect(list.summary).toEqual({ unread: 2, open: 1 });
+
+    const marked = await post("/api/inbox/mark", { threads: ["k:my-app:stall"], done: true });
+    expect(await marked.json()).toMatchObject({ ok: true, changed: 1, summary: { unread: 1, open: 0 } });
+    const open = (await (await fetch(`${base}/api/inbox?filter=open&action=1`)).json()) as List;
+    expect(open.items).toEqual([]);
+
+    expect(await (await post("/api/inbox/read-all", {})).json()).toMatchObject({ changed: 1, summary: { unread: 0, open: 0 } });
+  });
+
+  test("bad input is 400", async () => {
+    expect((await fetch(`${base}/api/inbox?filter=weird`)).status).toBe(400);
+    expect((await fetch(`${base}/api/inbox?app=Bad!`)).status).toBe(400);
+    expect((await post("/api/inbox/mark", { threads: [], read: true })).status).toBe(400);
+    expect((await post("/api/inbox/mark", { threads: ["x"] })).status).toBe(400);
+    expect((await post("/api/inbox/mark", { threads: ["x"], read: "yes" })).status).toBe(400);
+    expect((await post("/api/inbox/read-all", { app: "Bad!" })).status).toBe(400);
+  });
+});
