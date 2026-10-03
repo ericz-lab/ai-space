@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Manifest } from "./manifest.ts";
-import { MAX_EVENT_REDELIVERIES, type Runner, Scheduler } from "./scheduler.ts";
+import { INTERRUPTED, MAX_EVENT_REDELIVERIES, type Runner, Scheduler } from "./scheduler.ts";
 import { Store } from "./store.ts";
 import type { Task } from "./types.ts";
 
@@ -519,7 +519,8 @@ describe("shutdown", () => {
     const h = harness({
       runner: (_task, ctx) =>
         new Promise((resolve) => {
-          ctx.signal.addEventListener("abort", () => resolve({ status: "error", error: "aborted" }));
+          // What runTarget reports for any abort.
+          ctx.signal.addEventListener("abort", () => resolve({ status: "error", error: "timed out" }));
         }),
     });
     h.s.syncManifest(h.manifest([mt("a")]));
@@ -529,7 +530,10 @@ describe("shutdown", () => {
     expect(await h.s.drain(10)).toEqual({ finished: 0, aborted: 1 });
     const run = h.store.listRuns(task.id)[0]!;
     expect(run.status).toBe("error");
-    expect(h.store.getTask(task.id)!.state.runningAt).toBeUndefined();
+    expect(run.error).toBe(INTERRUPTED);
+    const after = h.store.getTask(task.id)!;
+    expect(after.state.runningAt).toBeUndefined();
+    expect(after.state.consecutiveErrors).toBe(0);
   });
 
   test("a run the process never finished is recorded as interrupted on the next start", async () => {

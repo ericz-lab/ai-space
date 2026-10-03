@@ -62,6 +62,8 @@ const ERROR_BACKOFF_MS = [30_000, 60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
 const ABORT_GRACE_MS = 5_000;
 /** Recorded for a run the process could not finish: a restart, or a drain that ran out of grace. */
 export const INTERRUPTED = "interrupted: ai-space stopped while the task was running";
+/** The abort reason a drain gives, so a run it cuts off is not mistaken for its own timeout. */
+const SHUTDOWN = new Error("ai-space is shutting down");
 /** Failed runs an event rides through before it is dropped from the task's queue. */
 export const MAX_EVENT_REDELIVERIES = 5;
 
@@ -157,7 +159,7 @@ export class Scheduler {
     const left = [...this.inflight.values()];
     if (left.length) {
       this.log(`aborting ${left.length} run(s) still going after ${Math.round(graceMs / 1000)}s`);
-      for (const r of left) r.controller.abort(new Error("ai-space is shutting down"));
+      for (const r of left) r.controller.abort(SHUTDOWN);
       await Promise.race([this.idle(), sleep(ABORT_GRACE_MS)]);
     }
     return { finished: started - left.length, aborted: left.length };
@@ -338,6 +340,8 @@ export class Scheduler {
       .catch((e): RunResult => ({ status: "error", error: (e as Error).message ?? String(e) }))
       .then((result) => {
         clearTimeout(timeout);
+        // A run the drain cut off did not fail on its own: whatever the runner reports, record it as interrupted.
+        if (controller.signal.reason === SHUTDOWN) result = { ...result, status: "error", error: INTERRUPTED };
         this.finish(task.id, startedAt, result, trigger, events, attempt);
       })
       .finally(() => {
@@ -359,11 +363,13 @@ export class Scheduler {
     s.lastStatus = result.status;
     s.lastError = result.error;
     s.lastDurationMs = Math.max(0, endedAt - startedAt);
-    s.consecutiveErrors = result.status === "error" ? s.consecutiveErrors + 1 : 0;
+    // Like recordInterrupted: a run cut off by shutdown neither counts as a failure nor backs off.
+    const interrupted = result.error === INTERRUPTED;
+    if (!interrupted) s.consecutiveErrors = result.status === "error" ? s.consecutiveErrors + 1 : 0;
 
     const schedule = effectiveSchedule(task);
     const natural = effectiveEnabled(task) ? nextRunAt(schedule, endedAt) : undefined;
-    const backoff = ERROR_BACKOFF_MS[Math.min(s.consecutiveErrors - 1, ERROR_BACKOFF_MS.length - 1)] ?? 0;
+    const backoff = interrupted ? 0 : ERROR_BACKOFF_MS[Math.min(s.consecutiveErrors - 1, ERROR_BACKOFF_MS.length - 1)] ?? 0;
     if (result.status === "error" && natural !== undefined) {
       s.nextRunAt = Math.max(natural, endedAt + backoff);
     } else {

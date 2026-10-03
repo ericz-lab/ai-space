@@ -231,8 +231,9 @@ is therefore a drain, not a stop:
 2. The runs in flight, and the model calls apps are blocked on (`POST /api/model/run`), get
    `SPACE_DRAIN_SECONDS` (300 by default) to finish. The HTTP server keeps serving while they do,
    because a command task in flight may still be calling back into the space.
-3. Whatever is still going then is aborted: the run lands in the history as a failure and the
-   model call in the ledger as interrupted. Nothing disappears silently.
+3. Whatever is still going then is aborted: the run lands in the history as an `interrupted: …`
+   failure (not a timeout, and without counting toward the error backoff) and the model call in
+   the ledger as interrupted. Nothing disappears silently.
 
 Two unit settings have to agree with this, and `deploy/ai-space.service` sets both:
 
@@ -264,7 +265,7 @@ What stays in the app: polling loops faster than a few minutes, loops that depen
 
 | Situation | Behaviour |
 | --- | --- |
-| Process restarts mid-run | The run gets the drain's grace to finish; past it, it is aborted and recorded. A run killed outright is recorded as interrupted on the next start, and the task is due again and runs once. An app that is still busy with the previous round answers `skipped`. |
+| Process restarts mid-run | The run gets the drain's grace to finish; past it, it is aborted and recorded as interrupted. A run killed outright is recorded as interrupted on the next start, and the task is due again and runs once. An app that is still busy with the previous round answers `skipped`. |
 | Target hangs forever | Aborted or killed at `timeoutMs`; recorded as an error; backoff applies. |
 | Target fails repeatedly | Backoff grows to one hour; the task keeps its natural schedule otherwise. |
 | Clock jumps forward | Timer fires within 60 s; every past-due task runs once. |
