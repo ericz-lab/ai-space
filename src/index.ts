@@ -22,7 +22,7 @@ import { localMachine, syncGuide } from "./space/guide.ts";
 import { TerminalService, TerminalStore, createTerminalRoutes, terminalWebSocket } from "./space/terminal/index.ts";
 import { Router, createRouterRoutes } from "./space/router/index.ts";
 import { createLogsRoutes } from "./space/logs/index.ts";
-import { Supervisor, Systemctl, createServiceRoutes, unitName } from "./space/services/index.ts";
+import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/services/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
@@ -147,14 +147,14 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     log: (l) => console.error(`[router] ${l}`),
   });
 
-  // Service supervision (docs/supervision.md): under SPACE_SUPERVISOR=space one user unit per app,
-  // kept in step with its manifest on every sync; under operator, the operator's units as before.
-  const systemctl = new Systemctl();
+  // Service supervision (docs/supervision.md): under SPACE_SUPERVISOR=space one user unit per app
+  // (systemd on Linux, a LaunchAgent on macOS), kept in step with its manifest on every sync;
+  // under operator, the operator's units as before.
+  const manager = process.platform === "darwin" ? new Launchctl({ logDir: ws.logs }) : new Systemctl({ unitDir: join(env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"), "systemd", "user") });
   const supervisor = new Supervisor({
     mode: config.supervisor,
-    unitDir: join(env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"), "systemd", "user"),
     envDir: join(ws.run, "env"),
-    systemctl,
+    manager,
     envFor: (app) => storage.envFor(app),
     probe: async (port, path) => {
       try {
@@ -165,7 +165,13 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
     log: (l) => console.error(`[services] ${l}`),
   });
-  if (config.supervisor === "space" && !(await systemctl.available())) console.error("[services] SPACE_SUPERVISOR=space, but no systemd user manager answers (systemctl --user); services cannot start. Enable lingering (loginctl enable-linger) or set SPACE_SUPERVISOR=operator");
+  if (config.supervisor === "space" && !(await manager.available())) console.error(`[services] SPACE_SUPERVISOR=space, but services cannot start: ${manager.unavailable}`);
+  // launchd appends to one file per app and never rotates it: keep each under its cap, hourly.
+  if (config.supervisor === "space" && manager instanceof Launchctl) {
+    const rotate = () => void manager.rotateLogs().then((apps) => apps.forEach((a) => console.error(`[services] ${a}: log rotated`)), (e) => console.error(`[services] log rotation: ${(e as Error).message}`));
+    rotate();
+    setInterval(rotate, 3_600_000).unref();
+  }
 
   // Storage first, so a command task started right after sync already sees its DATABASE_URL.
   // Returns the tasks the services contribute for the app: its backup task, unless the manifest opts out.
@@ -327,7 +333,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
       ...createRouterRoutes({ router }),
-      ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode === "space" ? { unitOf: (app: string) => unitName(app) } : {}) }),
+      ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) }),
       ...createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest }),
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),

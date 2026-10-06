@@ -105,7 +105,7 @@ i18n:
 
 ### `service`
 
-The app's own process, if it has one. Where the machine runs `SPACE_SUPERVISOR=space`, ai-space starts it as the user unit `space-<name>.service`, restarts it on failure, stops it when the app is paused, archived or uninstalled, and reads its journal; elsewhere the operator's own unit runs it. ai-space checks its health either way. See [supervision](supervision.md).
+The app's own process, if it has one. Where the machine runs `SPACE_SUPERVISOR=space`, ai-space starts it as the user unit `space-<name>.service` (on macOS the LaunchAgent `space.<name>`), restarts it on failure, stops it when the app is paused, archived or uninstalled, and reads its log; elsewhere the operator's own unit runs it. ai-space checks its health either way. See [supervision](supervision.md).
 
 ```yaml
 service:
@@ -120,7 +120,7 @@ Contract for the process:
 
 - It reads `PORT`, binds `127.0.0.1:${PORT}` and nothing else.
 - Its environment is, in increasing precedence: the app's `.env`, `<workspace>/data/<name>/space.env`, `service.env`, then the values ai-space sets (`PORT`, `SPACE_APP`, `SPACE_APP_DIR`, `SPACE_APP_DATA_DIR`, `SPACE_API_URL`, `SPACE_NAME`).
-- It logs to stdout and stderr; under the space's supervision they go to the journal of its unit (`space logs <name>`).
+- It logs to stdout and stderr; under the space's supervision they go to the journal of its unit, on macOS to `<workspace>/logs/<name>/service.log` (`space logs <name>` either way).
 - It answers `GET <health>` with 200 when it can serve requests. The panel shows the app as down otherwise.
 - It exits on `SIGTERM` within 10 seconds.
 
@@ -516,7 +516,7 @@ notify:
 | `backup` | Implemented (`src/space/storage/backup/`): daily snapshots, retention, weekly verify, `restore` |
 | `notify`, `/api/notify`, `SPACE_APP_TOKEN` | Implemented (`src/space/notify/`, `skills/notify/`) |
 | Top-level `spec`, `title`, `description`, `icon`, `url`, `status`, `repo` | Implemented (`src/space/scheduler/manifest.ts`); `paused`/`archived` stop the app's tasks |
-| `service` | Implemented (`src/space/services/`): under `SPACE_SUPERVISOR=space` one user unit per app, reconciled on every sync, the environment file with `PORT`, logs from its journal; under `operator` the operator's units, probed, stopped through `SPACE_SERVICE_STOP`, logs through `SPACE_SERVICE_LOGS` |
+| `service` | Implemented (`src/space/services/`): under `SPACE_SUPERVISOR=space` one user unit per app (a LaunchAgent on macOS), reconciled on every sync, the environment file with `PORT`, logs from its journal (a log file on macOS); under `operator` the operator's units, probed, stopped through `SPACE_SERVICE_STOP`, logs through `SPACE_SERVICE_LOGS` |
 | Router, `/api/router` | Implemented (`src/space/router/`): with `SPACE_ROUTER=caddy` every app's hostname is routed on the machine, no per-app registration ([router.md](router.md)) |
 | `agents`, chat route | Implemented for `claude` (`src/space/agents/`); `skills` and `memory` are parsed but not mounted yet |
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |

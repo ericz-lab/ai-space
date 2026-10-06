@@ -1,7 +1,7 @@
 # Service supervision
 
-Status: implemented (`src/space/services/`), with `setup` asking the question. Handing the running
-machines over is the next step; see [Rollout](#rollout).
+Status: implemented (`src/space/services/`) for systemd and, on macOS, launchd, with `setup` asking
+the question. Handing the running machines over is the next step; see [Rollout](#rollout).
 
 An app's `service` is a long-running process. Somebody has to start it at boot, restart it when it
 crashes, stop it when the app is paused or uninstalled, and say where its log is. Until now that was
@@ -16,7 +16,7 @@ the process itself.
 | Value | Who runs the services | What the space does |
 | --- | --- | --- |
 | `operator` (default when unset) | Units the operator installed, named after the app | Probes health; stops a unit on uninstall through `SPACE_SERVICE_STOP`; reads logs through `SPACE_SERVICE_LOGS`. Exactly the behaviour before supervision. |
-| `space` | The space: one user unit per app, `space-<app>.service` | Writes, starts, restarts and removes the unit on every sync; reads its journal; stops it on uninstall. |
+| `space` | The space: one user unit per app, `space-<app>.service` (on macOS the LaunchAgent `space.<app>`, see [macOS](#macos)) | Writes, starts, restarts and removes the unit on every sync; reads its log; stops it on uninstall. |
 
 `operator` stays the default so a machine whose services are the operator's units keeps them until
 it is switched on purpose; a switch without first disabling those units would start every app twice
@@ -28,7 +28,8 @@ switching.
 
 `space` needs a systemd user manager that runs without a login session: `loginctl enable-linger
 <user>`. Without one, every sync of an app records `failed` with that reason and nothing is written.
-A machine without systemd (a laptop on macOS) stays on `operator`.
+On macOS the manager is launchd, and the user's GUI session takes the place of lingering: see
+[macOS](#macos). A machine with neither stays on `operator`.
 
 ## Who should be running
 
@@ -202,8 +203,91 @@ healthy answer.
    fresh install relies on it.
 4. Machine by machine, app by app, with `space app supervise <app>` ([hand-over](#hand-over)).
 
+## macOS
+
+On macOS (`process.platform === "darwin"`) the same supervisor drives launchd instead of systemd
+(`src/space/services/launchd.ts`, behind the `ServiceManager` interface in `manager.ts` that
+`systemd.ts` implements too). Everything above holds (the rule for who should run, the
+reconcile table, conflicts, hand-over, uninstall), with these words swapped:
+
+| systemd | launchd |
+| --- | --- |
+| `~/.config/systemd/user/space-<app>.service` | `~/Library/LaunchAgents/space.<app>.plist`, label `space.<app>`, domain `gui/<uid>` |
+| the marker on the first line | the marker comment on the second line, after the XML declaration |
+| `EnvironmentFile=` with `KEY="value"` | a shell file, `export KEY='value'`, sourced by the wrapper below |
+| `Restart=on-failure`, `RestartSec=5` | `KeepAlive` `{SuccessfulExit: false}`, `ThrottleInterval` 5 |
+| `WantedBy=default.target` + lingering | `RunAtLoad`: loaded at every login of the user |
+| `KillMode=control-group` | the wrapper passes SIGTERM to the job's process group |
+| `TimeoutStopSec=30` | `ExitTimeOut` 30 |
+| `enable --now` / `disable --now` | `launchctl enable` + `bootstrap` / `bootout` + `launchctl disable` |
+| `restart` | `bootout`, wait, `bootstrap` (launchd reads the plist only when it loads it) |
+| the journal | `<workspace>/logs/<app>/service.log` |
+| the operator's `<app>.service`, user or system | the operator's job labelled `<app>`: `~/Library/LaunchAgents/<app>.plist` or `/Library/LaunchDaemons/<app>.plist` |
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Written by ai-space. Do not edit: it is regenerated on every app sync. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>space.<app></string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>[ -r "$1" ] || exit 78; . "$1"; trap '…' TERM INT HUP; /bin/sh -c "$2" &amp; wait $!</string>
+    <string>space-<app></string>
+    <string><workspace>/run/env/<app>.env</string>
+    <string><service.command></string>
+  </array>
+  <key>WorkingDirectory</key><string><app dir></string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>ExitTimeOut</key><integer>30</integer>
+  <key>ProcessType</key><string>Standard</string>
+  <key>StandardOutPath</key><string><workspace>/logs/<app>/service.log</string>
+  <key>StandardErrorPath</key><string><workspace>/logs/<app>/service.log</string>
+</dict>
+</plist>
+```
+
+- **The wrapper.** launchd signals only the job's main process. The shell sources the environment
+  file, runs the command in the background and waits; its trap sends SIGTERM to the job's whole
+  process group (launchd makes each job a group leader), so the app gets the SIGTERM the contract
+  promises however the command starts it. The command's exit status is the job's, so a clean exit
+  stays down and a crash restarts. The credentials stay in the environment file (0600), never in
+  the plist, which other users can read. The command and the file path are arguments, so nothing in
+  them is quoted for the shell.
+- **Stopping.** `launchctl bootout` returns before the job has exited. Every stop and restart
+  therefore waits for the job's process group to empty (SIGKILL after 35 s) and for the label to
+  leave the domain before the next `bootstrap`: the new process never meets the old one on the
+  port.
+- **States.** `launchctl print` is mapped onto systemd's words: running is `active`; `spawn
+  scheduled` after a crash is `activating`/`auto-restart`; not running with a non-zero last exit is
+  `failed`. `restarts` is launchd's run count less one, and `since` comes from `ps -o lstart`.
+  A loaded job that is not running is unloaded and loaded again on `start`, so the counts start
+  over.
+- **Enabled.** A LaunchAgent whose file exists and whose label is not switched off
+  (`launchctl print-disabled`) is `enabled`: it loads at the next login. An operator's agent that is
+  enabled or running is a [conflict](#conflicts), exactly as an enabled systemd unit is; `space app
+  supervise <app>` unloads and disables it (a LaunchDaemon through `sudo -n launchctl`) and gives it
+  back the same way.
+- **The session.** LaunchAgents run in the user's GUI domain, which exists while the user is logged
+  in at the Mac (automatic login keeps it so after a reboot). Without it (`launchctl print
+  gui/<uid>` fails, e.g. only an SSH session) the supervisor answers like a systemd machine without
+  lingering: every sync records `failed`, nothing is written. `setup` checks it among the tools.
+- **Logs.** stdout and stderr are appended to `<workspace>/logs/<app>/service.log`; `space logs
+  <app>` and `GET /api/apps/:app/logs` read it with `tail`. Hourly, and at boot, a log over 10 MiB
+  is copied to `service.log.1` and truncated in place (launchd keeps it open for appending, so the
+  app goes on writing at the new end).
+- **ai-space itself** is not one of these jobs: restarting it leaves every app running, and the
+  next sync finds them `unchanged`. How ai-space itself is kept running on a Mac (a LaunchAgent of
+  the operator's, a terminal) is up to the operator; `SPACE_SERVICE_LOGS` still says where its own
+  log is for `space logs space`.
+
 ## Not in v1
 
-Resource limits (`MemoryMax=`, `CPUQuota=`), ordering between apps, cgroup metrics, machines without
-systemd, and services that need root. The unit is the obvious place for the first three when they
+Resource limits (`MemoryMax=`, `CPUQuota=`), ordering between apps, cgroup metrics, machines with
+neither systemd nor launchd, and services that need root. The unit is the obvious place for the first three when they
 come; they would be manifest fields rendered into it.

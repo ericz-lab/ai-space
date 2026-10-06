@@ -2,13 +2,14 @@ import { chmod, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Manifest } from "../scheduler/manifest.ts";
 import { interpolate as interpolateEnv, loadAppEnv } from "../scheduler/targets.ts";
-import { type Systemctl, type UnitState } from "./systemd.ts";
-import { UNIT_MARKER, renderEnvFile, renderUnitFor, serviceEnv, unitName } from "./unit.ts";
+import type { Scope, ServiceManager, UnitState } from "./manager.ts";
+import { serviceEnv } from "./unit.ts";
 
 /**
  * Service supervision (docs/supervision.md). Under `SPACE_SUPERVISOR=space`
- * the space owns one user unit per app, `space-<app>.service`, and keeps it
- * in step with the manifest on every sync:
+ * the space owns one user unit per app, `space-<app>.service` under systemd
+ * or the LaunchAgent `space.<app>` under launchd (the `ServiceManager`), and
+ * keeps it in step with the manifest on every sync:
  *
  *   should run, no unit                   write, enable --now
  *   should run, unit or env changed       rewrite, daemon-reload, restart
@@ -55,9 +56,9 @@ export type HandoverResult = {
 export type ServiceStatus = {
   app: string;
   supervisor: SupervisorMode;
-  /** The unit that runs the app: `space-<app>.service` under the space, the operator's `<app>.service` otherwise. */
+  /** The unit that runs the app: the space's (`space-<app>.service`, `space.<app>`), the operator's (`<app>.service`, `<app>`) otherwise. */
   unit: string;
-  scope: "user" | "system";
+  scope: Scope;
   /** A unit written by the space exists for the app. */
   managed: boolean;
   state?: UnitState;
@@ -66,11 +67,10 @@ export type ServiceStatus = {
 
 export type SupervisorOptions = {
   mode: SupervisorMode;
-  /** `~/.config/systemd/user`. */
-  unitDir: string;
   /** `<workspace>/run/env`: one environment file per supervised app. */
   envDir: string;
-  systemctl: Systemctl;
+  /** systemd on Linux, launchd on macOS; it knows where the units live. */
+  manager: ServiceManager;
   /** The variables storage hands the app (`space.env`). */
   envFor: (app: string) => Promise<Record<string, string>>;
   /** The app's own `.env`; default reads `<dir>/.env`. */
@@ -90,7 +90,7 @@ export class Supervisor {
   private readonly last = new Map<string, ApplyResult>();
   private readonly chains = new Map<string, Promise<unknown>>();
   private readonly log: (line: string) => void;
-  private manager?: Promise<boolean>;
+  private managerUp?: Promise<boolean>;
 
   constructor(private readonly opts: SupervisorOptions) {
     this.log = opts.log ?? (() => {});
@@ -101,7 +101,7 @@ export class Supervisor {
   }
 
   unitOf(app: string): string {
-    return this.opts.mode === "space" ? unitName(app) : `${app}.service`;
+    return this.opts.mode === "space" ? this.opts.manager.unitName(app) : this.opts.manager.operatorUnit(app);
   }
 
   /** Bring the app's unit in line with its manifest. Never throws: the outcome is recorded and returned. */
@@ -123,7 +123,7 @@ export class Supervisor {
       this.last.delete(app);
       if (this.opts.mode !== "space") return { removed: false };
       const text = await this.readUnit(app);
-      if (text === undefined || !text.startsWith(UNIT_MARKER)) return { removed: false };
+      if (!this.owned(text)) return { removed: false };
       await this.teardown(app);
       return { removed: true };
     });
@@ -138,36 +138,35 @@ export class Supervisor {
     if (this.opts.mode !== "space") return [];
     let files: string[];
     try {
-      files = await readdir(this.opts.unitDir);
+      files = await readdir(this.opts.manager.unitDir);
     } catch {
       return [];
     }
     const removed: string[] = [];
     for (const f of files) {
-      const m = /^space-(.+)\.service$/.exec(f);
-      if (!m || keep.has(m[1]!)) continue;
-      const text = await this.readUnit(m[1]!);
-      if (!text?.startsWith(UNIT_MARKER)) continue;
+      const app = this.opts.manager.appOfFile(f);
+      if (!app || keep.has(app)) continue;
+      if (!this.owned(await this.readUnit(app))) continue;
       try {
-        await this.remove(m[1]!);
-        removed.push(m[1]!);
+        await this.remove(app);
+        removed.push(app);
       } catch (e) {
-        this.log(`${m[1]}: could not remove the unit of a gone app: ${(e as Error).message}`);
+        this.log(`${app}: could not remove the unit of a gone app: ${(e as Error).message}`);
       }
     }
     return removed;
   }
 
   async status(app: string): Promise<ServiceStatus> {
-    const managed = this.opts.mode === "space" && Boolean((await this.readUnit(app))?.startsWith(UNIT_MARKER));
+    const managed = this.opts.mode === "space" && this.owned(await this.readUnit(app));
     const unit = this.unitOf(app);
-    let scope: "user" | "system" = "user";
+    let scope: Scope = "user";
     let state: UnitState | undefined;
     try {
-      state = await this.opts.systemctl.show(unit);
+      state = await this.opts.manager.show(unit);
       // An operator's unit may be a system one (installed with sudo).
       if (this.opts.mode === "operator" && state.loadState === "not-found") {
-        const sys = await this.opts.systemctl.show(unit, "system");
+        const sys = await this.opts.manager.show(unit, "system");
         if (sys.loadState && sys.loadState !== "not-found") [state, scope] = [sys, "system"];
       }
     } catch {
@@ -189,10 +188,10 @@ export class Supervisor {
   /** Start, stop or restart the space's unit of an app by hand. A stop holds until the next sync of the app. */
   control(app: string, action: "start" | "stop" | "restart"): Promise<void> {
     return this.serial(app, async () => {
-      if (this.opts.mode !== "space") throw new SupervisorError(409, `services on this machine are the operator's (SPACE_SUPERVISOR=operator): systemctl ${action} ${app}.service`);
-      if (!(await this.readUnit(app))?.startsWith(UNIT_MARKER)) throw new SupervisorError(409, `"${app}" has no unit of the space; sync it with status: active and a service`);
+      if (this.opts.mode !== "space") throw new SupervisorError(409, `services on this machine are the operator's (SPACE_SUPERVISOR=operator): ${this.opts.manager.command(action, this.opts.manager.operatorUnit(app))}`);
+      if (!this.owned(await this.readUnit(app))) throw new SupervisorError(409, `"${app}" has no unit of the space; sync it with status: active and a service`);
       await this.requireManager();
-      await this.opts.systemctl[action](unitName(app));
+      await this.opts.manager[action](this.opts.manager.unitName(app));
     });
   }
 
@@ -200,10 +199,10 @@ export class Supervisor {
    * Move an app between the operator's unit and the space's, under
    * `SPACE_SUPERVISOR=space`, and wait for its health path to answer.
    *
-   *   to space     disable --now <app>.service (user, or system with sudo -n),
-   *                reconcile (write, enable --now space-<app>.service), wait for health;
+   *   to space     disable --now the operator's unit (user, or system with sudo -n),
+   *                reconcile (write, enable --now the space's), wait for health;
    *                on failure remove the space's unit and bring the operator's back as it was
-   *   to operator  remove the space's unit, enable --now <app>.service, wait for health;
+   *   to operator  remove the space's unit, enable --now the operator's, wait for health;
    *                on failure disable it again and give the app back to the space
    *
    * The app stays down between the stop and the first healthy answer: a few seconds.
@@ -220,21 +219,23 @@ export class Supervisor {
 
   private async toSpace(m: Manifest): Promise<HandoverResult> {
     const app = m.app;
-    const sysctl = this.opts.systemctl;
+    const mgr = this.opts.manager;
+    const own = mgr.unitName(app);
+    const opUnit = mgr.operatorUnit(app);
     const steps: string[] = [];
     const op = await this.operatorUnit(app);
     const wasEnabled = op?.state.unitFileState === "enabled";
     const wasActive = op ? isRunning(op.state.activeState) : false;
-    const hadUnit = Boolean((await this.readUnit(app))?.startsWith(UNIT_MARKER));
+    const hadUnit = this.owned(await this.readUnit(app));
     const fail = async (error: string): Promise<HandoverResult> => {
       try {
-        if (!hadUnit && (await this.readUnit(app))?.startsWith(UNIT_MARKER)) {
+        if (!hadUnit && this.owned(await this.readUnit(app))) {
           await this.teardown(app);
-          steps.push(`removed ${unitName(app)}`);
+          steps.push(`removed ${own}`);
         }
-        if (op && wasEnabled) await sysctl.enableNow(`${app}.service`, op.scope);
-        else if (op && wasActive) await sysctl.start(`${app}.service`, op.scope);
-        if (op && (wasEnabled || wasActive)) steps.push(`restored the ${op.scope} unit ${app}.service`);
+        if (op && wasEnabled) await mgr.enableNow(opUnit, op.scope);
+        else if (op && wasActive) await mgr.start(opUnit, op.scope);
+        if (op && (wasEnabled || wasActive)) steps.push(`restored the ${op.scope} unit ${opUnit}`);
         this.record({ app, action: "conflict", at: Date.now(), error: `hand-over failed: ${error}` });
       } catch (e) {
         return { app, to: "space", ok: false, steps, error: `${error}; rollback failed too: ${(e as Error).message}`, rolledBack: false };
@@ -243,11 +244,11 @@ export class Supervisor {
     };
     if (op && (wasEnabled || wasActive)) {
       try {
-        await sysctl.disableNow(`${app}.service`, op.scope);
+        await mgr.disableNow(opUnit, op.scope);
       } catch (e) {
         return { app, to: "space", ok: false, steps, error: `could not stop the operator's unit: ${(e as Error).message}` };
       }
-      steps.push(`disabled the ${op.scope} unit ${app}.service`);
+      steps.push(`disabled the ${op.scope} unit ${opUnit}`);
     }
     let r: ApplyResult;
     try {
@@ -257,8 +258,8 @@ export class Supervisor {
     }
     this.record(r);
     if (r.action === "conflict" || r.action === "failed") return fail(r.error ?? r.action);
-    steps.push(`${r.action} ${unitName(app)}`);
-    const health = await this.waitHealthy(m, unitName(app), "user");
+    steps.push(`${r.action} ${own}`);
+    const health = await this.waitHealthy(m, own, "user");
     if (health !== "ok") return fail(health);
     steps.push("healthy");
     this.log(`${app}: handed over to the space`);
@@ -267,17 +268,19 @@ export class Supervisor {
 
   private async toOperator(m: Manifest): Promise<HandoverResult> {
     const app = m.app;
-    const sysctl = this.opts.systemctl;
+    const mgr = this.opts.manager;
+    const own = mgr.unitName(app);
+    const opUnit = mgr.operatorUnit(app);
     const steps: string[] = [];
     const op = await this.operatorUnit(app);
-    if (!op) throw new SupervisorError(409, `there is no operator unit ${app}.service (user or system) to hand "${app}" back to; install one first`);
-    if ((await this.readUnit(app))?.startsWith(UNIT_MARKER)) {
+    if (!op) throw new SupervisorError(409, `there is no operator unit ${opUnit} (user or system) to hand "${app}" back to; install one first`);
+    if (this.owned(await this.readUnit(app))) {
       await this.teardown(app);
-      steps.push(`removed ${unitName(app)}`);
+      steps.push(`removed ${own}`);
     }
     const giveBack = async (error: string): Promise<HandoverResult> => {
       try {
-        await sysctl.disableNow(`${app}.service`, op.scope);
+        await mgr.disableNow(opUnit, op.scope);
         const r = this.record(await this.reconcile(m));
         steps.push(`gave the app back to the space (${r.action})`);
       } catch (e) {
@@ -286,39 +289,39 @@ export class Supervisor {
       return { app, to: "operator", ok: false, steps, error, rolledBack: true };
     };
     try {
-      await sysctl.enableNow(`${app}.service`, op.scope);
+      await mgr.enableNow(opUnit, op.scope);
     } catch (e) {
       return giveBack((e as Error).message);
     }
-    steps.push(`enabled the ${op.scope} unit ${app}.service`);
-    const health = await this.waitHealthy(m, `${app}.service`, op.scope);
+    steps.push(`enabled the ${op.scope} unit ${opUnit}`);
+    const health = await this.waitHealthy(m, opUnit, op.scope);
     if (health !== "ok") return giveBack(health);
     steps.push("healthy");
     // Syncs from now on record the operator's unit as a conflict, and leave it running.
-    this.record({ app, action: "conflict", at: Date.now(), error: `handed back to the operator's ${op.scope} unit ${app}.service` });
+    this.record({ app, action: "conflict", at: Date.now(), error: `handed back to the operator's ${op.scope} unit ${opUnit}` });
     this.log(`${app}: handed back to the operator`);
     return { app, to: "operator", ok: true, steps };
   }
 
   /** The operator's unit named after the app, user first; absent when neither manager knows one. */
-  private async operatorUnit(app: string): Promise<{ scope: "user" | "system"; state: UnitState } | undefined> {
+  private async operatorUnit(app: string): Promise<{ scope: Scope; state: UnitState } | undefined> {
     for (const scope of ["user", "system"] as const) {
-      const state = await this.opts.systemctl.show(`${app}.service`, scope);
+      const state = await this.opts.manager.show(this.opts.manager.operatorUnit(app), scope);
       if (state.loadState && state.loadState !== "not-found") return { scope, state };
     }
     return undefined;
   }
 
   /** "ok", or why not: the health path never answered, or the unit is not running (no health path). */
-  private async waitHealthy(m: Manifest, unit: string, scope: "user" | "system"): Promise<string> {
+  private async waitHealthy(m: Manifest, unit: string, scope: Scope): Promise<string> {
     const wait = this.opts.healthWaitMs ?? 30_000;
     const deadline = Date.now() + wait;
     const health = m.service?.health;
     const probe = this.opts.probe;
     for (;;) {
-      const state = await this.opts.systemctl.show(unit, scope).catch(() => undefined);
+      const state = await this.opts.manager.show(unit, scope).catch(() => undefined);
       // A crashing command never reaches "failed" under Restart=on-failure: it loops through auto-restart.
-      if (state && (state.activeState === "failed" || state.subState === "auto-restart" || state.restarts > 0)) return `${unit} ${state.activeState === "failed" ? "failed to start" : "keeps exiting"}; see journalctl ${scope === "user" ? "--user " : ""}-u ${unit}`;
+      if (state && (state.activeState === "failed" || state.subState === "auto-restart" || state.restarts > 0)) return `${unit} ${state.activeState === "failed" ? "failed to start" : "keeps exiting"}; see ${this.opts.manager.logHint(unit, scope)}`;
       if (probe && health && m.service) {
         if ((await probe(m.service.port, health).catch(() => "down")) === "ok") return "ok";
       } else if (state && state.activeState === "active") return "ok";
@@ -329,24 +332,26 @@ export class Supervisor {
 
   // ------------------------------------------------------------ reconcile
 
-  /** Asked once: without a user manager nothing is written, so a machine without systemd keeps no stray unit files. */
+  /** Asked once: without a user manager nothing is written, so a machine without one keeps no stray unit files. */
   private async requireManager(): Promise<void> {
-    this.manager ??= this.opts.systemctl.available().catch(() => false);
-    if (!(await this.manager)) {
-      this.manager = undefined; // asked again next time: lingering may be enabled meanwhile
-      throw new SupervisorError(503, "no systemd user manager answers (systemctl --user); enable lingering (loginctl enable-linger) or set SPACE_SUPERVISOR=operator");
+    this.managerUp ??= this.opts.manager.available().catch(() => false);
+    if (!(await this.managerUp)) {
+      this.managerUp = undefined; // asked again next time: lingering may be enabled meanwhile
+      throw new SupervisorError(503, this.opts.manager.unavailable);
     }
   }
 
   private async reconcile(m: Manifest): Promise<ApplyResult> {
     const app = m.app;
-    const unit = unitName(app);
+    const mgr = this.opts.manager;
+    const unit = mgr.unitName(app);
+    const unitPath = join(mgr.unitDir, mgr.unitFile(app));
     const at = Date.now();
     const onDisk = await this.readUnit(app);
     if (onDisk === undefined && (!m.service || m.status !== "active")) return { app, action: "absent", at };
     await this.requireManager();
-    if (onDisk !== undefined && !onDisk.startsWith(UNIT_MARKER)) {
-      return { app, action: "conflict", at, error: `${join(this.opts.unitDir, unit)} exists and was not written by ai-space; move it away` };
+    if (onDisk !== undefined && !this.owned(onDisk)) {
+      return { app, action: "conflict", at, error: `${unitPath} exists and was not written by ai-space; move it away` };
     }
     if (!m.service || m.status !== "active") {
       if (onDisk === undefined) return { app, action: "absent", at };
@@ -368,20 +373,20 @@ export class Supervisor {
       spaceEnv: await this.opts.envFor(app),
       serviceEnv: serviceVars,
     });
-    const env = renderEnvFile(vars);
+    const env = mgr.renderEnv(vars);
     const envPath = this.envPath(app);
-    const unitText = renderUnitFor(m, interpolate(service.command), envPath);
+    const unitText = mgr.renderUnit(m, interpolate(service.command), envPath);
     const skipped = env.skipped.length ? { skippedEnv: env.skipped } : {};
     if (env.skipped.length) this.log(`${app}: left out of the environment: ${env.skipped.join(", ")}`);
 
     const envOnDisk = await readText(envPath);
-    const sysctl = this.opts.systemctl;
     if (onDisk === unitText && envOnDisk === env.text) {
-      const state = await sysctl.show(unit);
+      const state = await mgr.show(unit);
       if (["active", "activating", "reloading"].includes(state.activeState)) return { app, action: "unchanged", at, ...skipped };
       const conflict = await this.operatorConflict(app);
       if (conflict) return { app, action: "conflict", at, error: conflict };
-      await sysctl.start(unit);
+      await mgr.prepare?.(app);
+      await mgr.start(unit);
       this.log(`${app}: started ${unit}`);
       return this.afterStart(m, { app, action: "started", at, ...skipped });
     }
@@ -391,25 +396,28 @@ export class Supervisor {
     await mkdir(this.opts.envDir, { recursive: true, mode: 0o700 });
     await Bun.write(envPath, env.text);
     await chmod(envPath, 0o600); // it holds the app's credentials; Bun.write follows the umask
-    await mkdir(this.opts.unitDir, { recursive: true });
-    await Bun.write(join(this.opts.unitDir, unit), unitText);
-    await sysctl.daemonReload();
+    await mkdir(mgr.unitDir, { recursive: true });
+    await Bun.write(unitPath, unitText);
+    await mgr.prepare?.(app);
+    await mgr.daemonReload();
     if (onDisk === undefined) {
-      await sysctl.enableNow(unit);
+      await mgr.enableNow(unit);
       this.log(`${app}: installed and started ${unit}`);
       return this.afterStart(m, { app, action: "installed", at, ...skipped });
     }
-    await sysctl.restart(unit);
+    await mgr.restart(unit);
     this.log(`${app}: ${unit} changed, restarted`);
     return this.afterStart(m, { app, action: "restarted", at, ...skipped });
   }
 
   /** An enabled or running unit named after the app: the operator still runs it. */
   private async operatorConflict(app: string): Promise<string | undefined> {
+    const mgr = this.opts.manager;
+    const unit = mgr.operatorUnit(app);
     for (const scope of ["user", "system"] as const) {
-      const s = await this.opts.systemctl.show(`${app}.service`, scope);
+      const s = await mgr.show(unit, scope);
       const on = s.unitFileState === "enabled" || ["active", "activating", "reloading"].includes(s.activeState);
-      if (on) return `the operator's ${scope} unit ${app}.service is ${s.activeState === "active" ? "running" : s.unitFileState}; disable it (${scope === "system" ? "sudo systemctl" : "systemctl --user"} disable --now ${app}.service) before the space takes the app over`;
+      if (on) return `the operator's ${scope} unit ${unit} is ${s.activeState === "active" ? "running" : s.unitFileState}; disable it (${mgr.command("disable", unit, scope)}) or hand it over (space app supervise ${app}) before the space takes the app over`;
     }
     return undefined;
   }
@@ -436,13 +444,13 @@ export class Supervisor {
   }
 
   private async teardown(app: string): Promise<void> {
-    const unit = unitName(app);
-    const sysctl = this.opts.systemctl;
-    await sysctl.disableNow(unit);
-    await rm(join(this.opts.unitDir, unit), { force: true });
+    const mgr = this.opts.manager;
+    const unit = mgr.unitName(app);
+    await mgr.disableNow(unit);
+    await rm(join(mgr.unitDir, mgr.unitFile(app)), { force: true });
     await rm(this.envPath(app), { force: true });
-    await sysctl.daemonReload();
-    await sysctl.resetFailed(unit);
+    await mgr.daemonReload();
+    await mgr.resetFailed(unit);
   }
 
   // ------------------------------------------------------------ helpers
@@ -452,7 +460,12 @@ export class Supervisor {
   }
 
   private readUnit(app: string): Promise<string | undefined> {
-    return readText(join(this.opts.unitDir, unitName(app)));
+    return readText(join(this.opts.manager.unitDir, this.opts.manager.unitFile(app)));
+  }
+
+  /** A unit file the space wrote; anything else of that name is the operator's and never touched. */
+  private owned(text: string | undefined): boolean {
+    return text !== undefined && this.opts.manager.owns(text);
   }
 
   private record(r: ApplyResult): ApplyResult {

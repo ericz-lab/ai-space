@@ -123,9 +123,8 @@ async function setup(init?: Parameters<typeof fakeSystemd>[0], mode: "space" | "
   const spaceEnv: Record<string, string> = { SPACE_APP: "demo", SPACE_APP_DATA_DIR: "/ws/data/demo", SPACE_APP_TOKEN: "sat_x" };
   const sup = new Supervisor({
     mode,
-    unitDir: join(root, "units"),
     envDir: join(root, "run", "env"),
-    systemctl: new Systemctl({ run: sd.run }),
+    manager: new Systemctl({ run: sd.run, unitDir: join(root, "units") }),
     envFor: async () => ({ ...spaceEnv }),
     appEnv: async () => ({}),
     interpolate: (t) => t.replace("${SECRET}", "s3cret"),
@@ -219,7 +218,7 @@ describe("supervisor", () => {
 
   test("without a user manager nothing is written", async () => {
     const t = await setup();
-    const sup = new Supervisor({ ...{ mode: "space", unitDir: join(t.root, "units"), envDir: join(t.root, "env"), envFor: async () => ({}), appEnv: async () => ({}) }, systemctl: new Systemctl({ run: async () => ({ code: 127, stdout: "", stderr: "Executable not found" }) }) });
+    const sup = new Supervisor({ ...{ mode: "space", envDir: join(t.root, "env"), envFor: async () => ({}), appEnv: async () => ({}) }, manager: new Systemctl({ unitDir: join(t.root, "units"), run: async () => ({ code: 127, stdout: "", stderr: "Executable not found" }) }) });
     const r = await sup.apply(mf("demo"));
     expect(r.action).toBe("failed");
     expect(r.error).toMatch(/no systemd user manager/);

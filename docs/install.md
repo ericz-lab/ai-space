@@ -159,7 +159,7 @@ SPACE_SUPERVISOR=space                      # ai-space runs each app's service a
 SPACE_NAME=<short machine name>             # what this space calls itself (machines.md)
 ```
 
-`SPACE_SUPERVISOR=space` needs the lingering that `install.sh` enabled; `setup` checks it and offers only `operator` without it. With `operator` (the default when the line is absent) the apps' services are units you install yourself, and two more lines tell the space how to handle them:
+`SPACE_SUPERVISOR=space` needs the lingering that `install.sh` enabled; `setup` checks it and offers only `operator` without it. On a Mac the apps run as LaunchAgents (`~/Library/LaunchAgents/space.<app>.plist`) instead, which needs the user logged in at the Mac (automatic login after a reboot) rather than lingering; `setup` checks that instead ([supervision.md](supervision.md#macos)). An app the operator already runs from its own LaunchAgent labelled after it moves over with `space app supervise <app>`. With `operator` (the default when the line is absent) the apps' services are units you install yourself, and two more lines tell the space how to handle them:
 
 ```bash
 SPACE_SUPERVISOR=operator

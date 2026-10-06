@@ -212,6 +212,33 @@ describe("runSetup", () => {
       expect(io.log.join("\n")).toContain("Only operator here: user manager up, lingering off");
       expect(await Bun.file(d.ws.envFile).text()).toContain("SPACE_SUPERVISOR=operator");
     });
+
+    // macOS: launchd, with or without a GUI session for the user.
+    const launchd = (session: boolean): Partial<SetupDeps> => ({
+      which: async (cmd) => (["claude", "gh", "tar", "zstd", "launchctl"].includes(cmd) ? `/usr/bin/${cmd}` : undefined),
+      async run(cmd) {
+        if (cmd[0] === "launchctl" && cmd[1] === "print") return session ? { code: 0, stdout: `${cmd[2]} = {\n}\n`, stderr: "" } : { code: 125, stdout: "", stderr: "Domain does not support specified action" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    test("a Mac with a GUI session gets space by default, run by LaunchAgents", async () => {
+      const io = scripted([...quiet]);
+      const d = await deps(io, { SPACE_API_TOKEN: "t", USER: "me" }, launchd(true));
+      const out = await runSetup(d);
+      expect(out.missing).not.toContain("launchd");
+      expect(io.log.join("\n")).toContain("one LaunchAgent per app");
+      expect(await Bun.file(d.ws.envFile).text()).toContain("SPACE_SUPERVISOR=space");
+    });
+
+    test("a Mac without a GUI session stays on operator", async () => {
+      const io = scripted([...quiet]);
+      const d = await deps(io, { SPACE_API_TOKEN: "t", SPACE_SUPERVISOR: "space" }, launchd(false));
+      const out = await runSetup(d);
+      expect(out.missing).toContain("launchd");
+      expect(io.log.join("\n")).toContain("Only operator here: no GUI session");
+      expect(await Bun.file(d.ws.envFile).text()).toContain("SPACE_SUPERVISOR=operator");
+    });
   });
 
   describe("Cloudflare", () => {

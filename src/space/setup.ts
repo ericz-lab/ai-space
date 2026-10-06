@@ -265,9 +265,11 @@ export async function checkTools(d: SetupDeps): Promise<Check[]> {
     checks.push({ name: "cf", ok: false, detail: "not on PATH", hint: "bun add -g cf (Node 22+; optional: Cloudflare changes, docs/cloudflare.md)", optional: true });
   }
 
-  // Service supervision (docs/supervision.md) needs a user manager that outlives the login session.
+  // Service supervision (docs/supervision.md) needs a user manager: systemd's outliving the login session, or launchd's GUI domain.
   const sd = await userSystemd(d);
   if (sd) checks.push({ name: "systemd user", ok: sd.ok, detail: sd.detail, hint: `sudo loginctl enable-linger ${d.env.USER ?? "$USER"} (SPACE_SUPERVISOR=space needs it; docs/supervision.md)` });
+  const ld = sd ? undefined : await userLaunchd(d);
+  if (ld) checks.push({ name: "launchd", ok: ld.ok, detail: ld.detail, hint: "log in on the Mac (automatic login keeps a session after a reboot); SPACE_SUPERVISOR=space needs it (docs/supervision.md#macos)" });
 
   // The router (docs/router.md) is optional: checked when it is on, or when caddy is there anyway.
   const caddy = await d.which("caddy");
@@ -295,6 +297,17 @@ export async function userSystemd(d: SetupDeps): Promise<{ ok: boolean; detail: 
   const linger = await d.run(["loginctl", "show-user", d.env.USER ?? "", "-p", "Linger"]);
   if (linger.stdout.trim() !== "Linger=yes") return { ok: false, detail: "user manager up, lingering off: units stop at logout" };
   return { ok: true, detail: "user manager, lingering on" };
+}
+
+/**
+ * Whether this Mac can run `SPACE_SUPERVISOR=space`: a launchd GUI domain for the user, where the
+ * space's LaunchAgents load now and at every login. Undefined without launchd at all.
+ */
+export async function userLaunchd(d: SetupDeps): Promise<{ ok: boolean; detail: string } | undefined> {
+  if (!(await d.which("launchctl"))) return undefined;
+  const r = await d.run(["launchctl", "print", `gui/${process.getuid?.() ?? 0}`]);
+  if (r.code !== 0) return { ok: false, detail: "no GUI session for this user (launchctl print gui/<uid>)" };
+  return { ok: true, detail: "GUI session: LaunchAgents load now and at login" };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -350,13 +363,15 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
   io.say("[3/6] Services (docs/supervision.md)");
   const operatorTemplates = ["SPACE_SERVICE_STOP", "SPACE_SERVICE_LOGS"].filter((k) => current(k));
   const sd = await userSystemd(d);
+  const ld = sd ? undefined : await userLaunchd(d);
+  const host = sd ?? ld;
   const was = current("SPACE_SUPERVISOR") || "operator";
   let supervisor = was;
-  if (!sd?.ok) {
-    io.say(`  Only operator here: ${sd ? sd.detail : "no systemd on this machine"}. The apps' services are units you install.`);
+  if (!host?.ok) {
+    io.say(`  Only operator here: ${host ? host.detail : "neither systemd nor launchd on this machine"}. The apps' services are units you install.`);
     supervisor = "operator";
   } else {
-    io.say("  space: ai-space writes one user unit per app and starts, restarts and removes it with the manifest.");
+    io.say(`  space: ai-space writes one ${ld ? "LaunchAgent" : "user unit"} per app and starts, restarts and removes it with the manifest.`);
     io.say("  operator: units you install yourself; ai-space only probes them and stops them on uninstall.");
     // A fresh machine gets the space; one whose .env already names the operator's templates keeps them.
     const def = current("SPACE_SUPERVISOR") || (operatorTemplates.length ? "operator" : "space");
@@ -367,7 +382,8 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
     for (const k of operatorTemplates) set(k, "");
     io.say(`  ${operatorTemplates.join(" and ")} cleared: they describe the operator's units.`);
     io.say("  Apps whose own unit is still enabled keep running under it and show `conflict` until you");
-    io.say("  disable that unit (systemctl --user disable --now <app>) and run `space app sync <app>`.");
+    io.say("  hand them over (space app supervise <app>), or disable that unit");
+    io.say(`  (${ld ? "launchctl bootout gui/$(id -u)/<app> && launchctl disable gui/$(id -u)/<app>" : "systemctl --user disable --now <app>"}) and run \`space app sync <app>\`.`);
   }
   io.say();
 

@@ -87,7 +87,7 @@ SPACE_PORT=8700
 SPACE_API_TOKEN=<openssl rand -hex 32>
 SPACE_MAX_CONCURRENCY=2            # 4 on a box with 4 GB or more
 SPACE_CHAT_MODEL=sonnet
-SPACE_SUPERVISOR=space             # operator only when `loginctl show-user $USER -p Linger` is not Linger=yes
+SPACE_SUPERVISOR=space             # operator only when `loginctl show-user $USER -p Linger` is not Linger=yes (on a Mac: when `launchctl print gui/$(id -u)` fails)
 SPACE_NAME=<machine name>
 ```
 
