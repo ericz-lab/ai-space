@@ -1,80 +1,89 @@
-<p align="center">
-  <img src="docs/logo.png" alt="ai-space logo" width="180">
+<div align="center">
+
+<img src="docs/logo.png" alt="ai-space logo" width="140">
+
+<h1>ai-space<br/><sub>A self-hosted home for your AI agents, apps and their data.</sub></h1>
+
+<p>
+  <a href="#-quickstart">Quickstart</a> ·
+  <a href="#-key-features">Features</a> ·
+  <a href="#%EF%B8%8F-architecture">Architecture</a> ·
+  <a href="#-documentation">Docs</a> ·
+  <a href="docs/roadmap.md">Roadmap</a>
 </p>
 
-<h1 align="center">ai-space</h1>
-
-<p align="center">
-  English | <a href="README.zh-CN.md">中文</a>
+<p>
+  <img alt="status: early stage" src="https://img.shields.io/badge/status-early_stage-orange">
+  <img alt="runtime: Bun" src="https://img.shields.io/badge/runtime-Bun-black?logo=bun">
+  <img alt="language: TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white">
+  <img alt="self-hosted" src="https://img.shields.io/badge/self--hosted-one_server-2ea44f">
+  <img alt="agents: Claude Code and Codex" src="https://img.shields.io/badge/agents-Claude_Code_·_Codex-d97757">
 </p>
 
-A home for your AI: one place that connects and organizes several AI agents, apps and their data into a single system on a dedicated server.
+<p>English | <a href="README.zh-CN.md">中文</a></p>
 
-It is one entry for all of it. Instead of switching between AI tools, you use and manage your own AI system through one web interface made of three things:
+</div>
 
-- **Apps** hold structured information and the scenarios you work in, and give the AI lasting context.
-- **Agents** take on complex, unstructured requests and carry out the work.
-- **Widgets** keep the important state and results visible at a glance.
+---
 
-Underneath, ai-space puts apps, agents, widgets, skills and data into one system instead of a set of separate tools: they share context and data, call each other's abilities, hand over tasks and results, and keep working towards the goals you set. The core supplies what a running AI system needs: scheduled tasks that fire on a clock or on events, notifications when a task finishes or turns up something important, backups of the data and results, storage, and one panel over several machines.
+**ai-space turns one server into a long-running home for your AI.** Your agents, the apps they work in, and the data both produce live in one system behind one web panel, instead of in a dozen tools that do not know about each other.
 
-## Architecture
+You use it through three things:
 
-![ai-space architecture](docs/architecture.svg)
+- 🧩 **Apps** hold structured information and the scenarios you work in, and give the AI lasting context.
+- 🤖 **Agents** take on complex, unstructured requests and carry out the work.
+- 📊 **Widgets** keep the important state and results visible at a glance.
 
-Top to bottom:
+Underneath, the core gives every app what a running AI system needs and nobody wants to build twice: scheduled and event-driven tasks, notifications, model calls with a usage ledger, storage, daily backups, and one panel over several machines.
 
-- **Application layer.** A unified web UI is the only entry point. It lists the installed apps, lets you chat with any agent, shows app widgets on the home panel, and carries notifications and settings. Each app owns one or more agents and may contribute one or more widgets.
-- **Space layer (ai-space core).** Shared services that every app and agent can call through one Space API instead of building their own: cloud storage, scheduled tasks, notifications, data backup, config and secrets, logs and monitoring. The core also keeps the app registry, routes requests to the right agent, and handles auth.
-- **Runtime layer.** Agents run as [Claude Code](https://claude.com/claude-code) or Codex sessions. Skills, MCP tools, memory, and LLM access come from the runtime; agents reach the Space API as tools.
-- **Infrastructure layer.** Everything runs on one dedicated Linux server with Bun, SQLite and the filesystem, cron, and a public domain.
+> [!NOTE]
+> ai-space is at an early stage. The services listed below work today; the app contract and APIs may still change. See [Status](#-status).
 
-The diagram source is `docs/architecture.svg`.
+## ✨ What it looks like in practice
 
-## Workspace
+| You want… | ai-space does it with |
+| --- | --- |
+| A dashboard of what Claude Code spent on every machine | The default app [ai-usage](https://github.com/ericz-lab/ai-usage), shown as a widget on the panel |
+| An agent that runs every morning and pings you on Telegram when it finds something | A `cron` task with an `agent` target in the app's `space.yaml`, plus one `POST /api/notify` |
+| One app reacting when another one changes | The app publishes an event; the other consumes it as a task trigger or an http delivery |
+| To ask any app's agent a question from your phone | The panel's chat, behind your own domain and a Cloudflare Access login |
+| To build a new app without writing glue | Ask your coding agent; the shared [`space-app`](skills/space-app/SKILL.md) skill scaffolds it to the [app spec](docs/app-spec.md) |
 
-Everything ai-space owns on a machine lives in one directory, `~/.ai-space` by default (override with `SPACE_HOME`). It is created on first boot or by `bun run init`:
+## 🌟 Key features
 
+- 🏠 **Own everything.** One server, one directory (`~/.ai-space`), plain files and SQLite. Data leaves it only for the model runtimes, bucket and chat apps you configure.
+- 🤖 **Agents you already use.** Agents run as [Claude Code](https://claude.com/claude-code) or Codex sessions, with their skills, MCP tools and memory; the Anthropic API and DeepSeek Harness are runtimes too. → [runtimes](docs/runtimes.md)
+- 🗓️ **Scheduler.** `at` / `every` / `cron` schedules and event triggers, with `http`, `command` and `agent` targets. → [scheduler](docs/scheduler.md)
+- 🔌 **Bus.** Events and calls between apps, delivered at least once, with a catalogue and a history. → [events](docs/events.md)
+- 🔔 **Notify.** One call reaches Telegram, Discord, Slack, Feishu, DingTalk, WeCom, Bark, ntfy or a webhook; queued, rate limited, retried, and gathered in a panel inbox. → [notify](docs/notify.md)
+- 🧠 **Model calls.** One `POST /api/model/run` for every app, a concurrency cap, and a ledger of tokens by app, purpose and model. → [model](docs/model.md)
+- 💬 **Chat.** Threads with image attachments and an embeddable widget for apps' own pages. → [chat](docs/chat.md)
+- 💾 **Storage & backup.** Per-app SQLite or PostgreSQL and a blob store; daily snapshots to any S3 bucket, weekly verification, restore. → [storage](docs/storage.md) · [backup](docs/backup.md)
+- 🛠️ **Supervision.** ai-space can run each app's service as a systemd user unit (a LaunchAgent on macOS) and keep it in step with the manifest. → [supervision](docs/supervision.md)
+- 🖥️ **Panel.** App launcher, agent chat, widgets, task history, inbox, in English or Chinese. → [panel](docs/panel.md)
+- 🌐 **Peers.** One panel over several machines. → [peers](docs/peers.md)
+- ⌨️ **Web terminal** (off by default) and a **`space` CLI** for everything the API does. → [terminal](docs/terminal.md) · [cli](docs/cli.md)
+
+## 🚀 Quickstart
+
+The recommended install is to **let a coding agent do it**. It follows a written procedure, stops at the browser logins, and tells you what to click.
+
+```text
+# From a checkout on your laptop, in Claude Code or Codex:
+> Install ai-space on <host> following docs/install-by-agent.md
+
+# Or on the server itself:
+git clone <this repository> ~/.ai-space/core && cd ~/.ai-space/core
+claude   # then: "install ai-space on this machine"
 ```
-~/.ai-space/
-├── core/    ai-space itself (this repository) when deployed with deploy/
-├── apps/    one directory per app; any app with a space.yaml is scheduled automatically
-├── data/    runtime state (SQLite) and per-app data directories
-├── logs/
-└── .env     ai-space configuration plus the secrets app manifests reference via ${VAR}
-```
 
-`bun run init` also installs the default apps: the ones ai-space comes with, each a public repository cloned into `apps/` and started by its own installer. Today that is [ai-usage](https://github.com/ericz-lab/ai-usage), a dashboard of what Claude Code spent on this machine and its peers. `SPACE_DEFAULT_APPS=none` in `.env` skips them; a list of clone URLs replaces them.
+Procedure: [docs/install-by-agent.md](docs/install-by-agent.md). Reference: [docs/install.md](docs/install.md).
 
-## Development
+<details>
+<summary><b>Install by hand</b> (user-level systemd, no sudo)</summary>
+<br/>
 
-```bash
-bun install
-bun run init           # create ~/.ai-space (idempotent)
-bun run start          # boot the Space API and the panel on 127.0.0.1:8700
-bun run dev            # hot reload, including the web UI
-bun run check          # typecheck + tests
-```
-
-Local configuration goes in `~/.ai-space/.env` (see `.env.example`); process environment variables win over it.
-
-## What you need
-
-Five things, in the order you will use them. The first two are required; the rest make the result usable from anywhere and safe to keep.
-
-1. **A coding agent.** [Claude Code](https://claude.com/claude-code), Codex, or any similar tool with a shell. It installs ai-space, it is the runtime the agents behind the panel run as, and it is how you build and maintain your apps. Bring its login: a Claude subscription or an API key.
-2. **A cloud server.** One Linux box (Debian or Ubuntu, systemd, SSH with a key) that stays on. 1 vCPU and 2 GB RAM run the core with swap; 2 vCPU and 4 GB are comfortable once several apps and agent sessions run at the same time (each session costs about 150 MB).
-3. **A Cloudflare account**, free tier. Tunnel publishes the panel and apps on your domain with no open port on the server, and can carry SSH too; Access puts a login in front of them; R2 (10 GB free) holds backups and app files. Without it the panel stays on loopback, reachable through an SSH port forward, and backups need another S3 bucket.
-4. **GitHub CLI** (`gh`), logged in on the server, so the agent clones, commits and pushes app repositories for you with one login and no deploy keys.
-5. **A domain hosted on Cloudflare.** Nameservers at Cloudflare, one hostname per app (`space.example.com` for the panel). This is what 3 publishes to.
-
-The install walks through each of them in this order: [docs/install.md](docs/install.md).
-
-## Deployment
-
-Hand the procedure to a coding agent (Claude Code, Codex): from a checkout on your machine, ask it to install ai-space on `<host>` following `docs/install-by-agent.md`; or on the server, clone into `~/.ai-space/core`, start the agent inside that directory, and ask it to install ai-space on this machine. It stops at the browser logins and tells you what to do. See [docs/install-by-agent.md](docs/install-by-agent.md) and [docs/install.md](docs/install.md).
-
-By hand: user-level systemd, no sudo. On the target machine, with Bun installed under `~/.bun`:
+On the target machine, with Bun installed under `~/.bun`:
 
 ```bash
 ssh <host> "git init --bare ~/ai-space.git"
@@ -85,36 +94,127 @@ git push <host> main      # checks out into ~/.ai-space/core, runs deploy/instal
 
 `deploy/install.sh` installs `deploy/ai-space.service` into `~/.config/systemd/user/`, enables linger, and restarts the service. Logs: `journalctl --user -u ai-space -f`.
 
-On a new machine, `bun run setup` (in `~/.ai-space/core`) walks through the rest interactively: it checks the tools ai-space spawns (claude, gh, cloudflared, and the optional `cf` CLI), asks for every workspace `.env` value section by section, sends a test notification, probes the bucket, and prints what is left to do on Cloudflare as `cf` commands ([docs/cloudflare.md](docs/cloudflare.md)). The full procedure, from an empty user to a panel behind a domain and an access layer, is in [docs/install.md](docs/install.md).
+Then run `bun run setup` in `~/.ai-space/core`. It checks the tools ai-space spawns (claude, gh, cloudflared, and the optional `cf` CLI), asks for every workspace `.env` value section by section, sends a test notification, probes the bucket, and prints what is left to do on Cloudflare as `cf` commands ([docs/cloudflare.md](docs/cloudflare.md)).
 
-See [docs/app-spec.md](docs/app-spec.md) for the app specification (what an app is, its layout, and the `space.yaml` contract), [skills/space-app](skills/space-app/SKILL.md) for the shared skill that walks an agent through creating, adopting or changing an app by that specification (with the app template under `skills/space-app/templates/`), [AGENTS.md](AGENTS.md) for the agent and contributor guide, including the commit format, and [CLAUDE.md](CLAUDE.md) for Bun conventions.
+</details>
 
-## Services
+### What you need
 
-- **Scheduler** (`src/space/scheduler/`) - scheduled and event-driven tasks for apps: `at` / `every` / `cron` schedules, event `triggers` fed by `POST /api/events` (debounced, coalesced, delivered as the run's payload), `http` / `command` / `agent` targets, declared in each app's `space.yaml` and managed through `/api/tasks`. See [docs/scheduler.md](docs/scheduler.md).
-- **Bus** (`src/space/bus/`) - events and calls between apps: an app declares what it publishes, what it consumes (as a task trigger, as an http delivery to its own service retried until it answers, or as a stream it reads and acks) and what it provides; ai-space delivers every stored event with at-least-once semantics, forwards `POST /api/call/<app>/<capability>` to the provider with the caller's name, and keeps a catalogue and a history of both. See [docs/events.md](docs/events.md).
-- **Storage** (`src/space/storage/`) - per-app databases on SQLite or PostgreSQL and a per-app blob store on the filesystem or any S3-compatible bucket, declared in `space.yaml`, provisioned on sync and handed over through `<workspace>/data/<app>/space.env` (`DATABASE_URL`, `BLOB_URL`, `S3_*`). The managed blob API from the design is not implemented yet. See [docs/storage.md](docs/storage.md).
-- **Backup** (`src/space/storage/backup/`) - every app's data directory snapshotted daily to an S3 bucket (SQLite via `VACUUM INTO`, state files, one `tar.zst` per app with a sidecar manifest), counted retention, a weekly verification task that opens the newest snapshot, and `restore` into a directory or in place. See [docs/backup.md](docs/backup.md).
-- **Notify** (`src/space/notify/`) - one-way notifications to chat apps (Telegram, Discord, Slack, Feishu, DingTalk, WeCom, Bark, ntfy, generic webhook). Channels are configured once in the workspace `.env` as `SPACE_NOTIFY_<NAME>` URLs; apps declare which they may use in `space.yaml` and send one `POST /api/notify`. Deliveries are queued, rate limited, retried and recorded; the scheduler reports failing tasks through it. See [docs/notify.md](docs/notify.md).
-- **Model** (`src/space/model/`) - model calls for apps and agent tasks through one `POST /api/model/run`: a request names one of the space's runtimes (or takes the default), calls run under a concurrency cap, and every call lands in one ledger with the token counts the runtime reported, shown in the panel by app, purpose and model. See [docs/model.md](docs/model.md).
-- **Chat** (`src/space/chat/`) - conversations for apps' pages: threads with history and image attachments kept by the space per app, one streamed turn route that replays the thread and ships the images to wherever the model runs, and a widget (`/api/chat/widget.js`) an app embeds through a small proxy and styles with CSS tokens. See [docs/chat.md](docs/chat.md).
-- **Runtimes** (`src/space/runtimes/`) - the AI runtimes a space has (Claude Code locally or over ssh, the Anthropic API; more kinds to come), configured in `runtimes.yaml`, each offering answers, agent runs and chat as it can. The model service, the scheduler and the panel all start runtimes through this one layer. See [docs/runtimes.md](docs/runtimes.md).
-- **Services** (`src/space/services/`) - who runs each app's `service`, chosen per machine with `SPACE_SUPERVISOR`: under `space`, ai-space writes one user unit per app (`space-<app>.service`, or the LaunchAgent `space.<app>` on macOS; its environment in one generated file), keeps it in step with the manifest on every sync without restarting what did not change, removes it when the app is paused or uninstalled, and reads its log; under `operator`, the units you installed, probed for health. See [docs/supervision.md](docs/supervision.md).
-- **Panel** (`src/space/panel/`, `src/space/agents/`, `src/web/`) - the web entry at `/`: a launcher of every app in the workspace (icon, entry URL, health), a chat window that opens a Claude Code session as any declared agent or as the space agent, widget cards fed by the apps, a read-only view of every scheduled task with its run history, and an edit mode to add an app from a link, hide, reorder or uninstall. In English or Chinese, following the browser or a setting; apps translate their own titles in `space.yaml` ([docs/i18n.md](docs/i18n.md)). See [docs/panel.md](docs/panel.md).
-- **Terminal** (`src/space/terminal/`, `src/web/Terminal.tsx`) - a shell in the browser on this machine and on every peer that enables one: xterm.js over a WebSocket to a pseudo-terminal running the operator's shell in the workspace root. Off by default (`SPACE_TERMINAL_ENABLED=1`); same-origin checks and one-time tickets on every session, an optional passphrase, an idle limit and a session cap, credentials stripped from the shell's environment, one audit row per session and no keystroke logging. See [docs/terminal.md](docs/terminal.md).
+Five things, in the order you will use them. The first two are required; the rest make the result usable from anywhere and safe to keep.
 
-- **CLI** (`src/cli/`, `bin/space`) - one `space` command on `PATH` for everything the API does: `space status`, `space app ls`, `space task run <app>/<task> --wait`, `space logs <app> -f`, `space model usage`, `space notify send`, `space backup ls`, `space api GET /api/…`; tables by default, `--json` for scripts, the same command inside a task, on the machine or over `ssh`. See [docs/cli.md](docs/cli.md).
+| # | What | Why |
+| --- | --- | --- |
+| 1 | **A coding agent** ([Claude Code](https://claude.com/claude-code), Codex, …) with its login | It installs ai-space, the panel's agents run as it, and you build apps with it |
+| 2 | **A Linux server** (Debian/Ubuntu, systemd, SSH key) that stays on | 1 vCPU / 2 GB runs the core with swap; 2 vCPU / 4 GB is comfortable with several apps (each agent session is about 150 MB) |
+| 3 | **A Cloudflare account** (free tier) | Tunnel publishes the panel with no open port, Access puts a login in front, R2 (10 GB free) holds backups |
+| 4 | **GitHub CLI** (`gh`), logged in on the server | The agent clones, commits and pushes app repositories with one login and no deploy keys |
+| 5 | **A domain on Cloudflare** | One hostname per app, `space.example.com` for the panel |
 
-## Status
+Without 3 and 5 the panel stays on loopback, reachable through an SSH port forward, and backups need another S3 bucket.
 
-Early stage. Scheduler (schedules and event triggers), storage (databases and blob hand-over), backups, notifications, model calls with a usage ledger, chat threads with images and an embeddable widget, the panel (agent chat, widgets, add from link, uninstall), peers (one panel over several machines, [docs/peers.md](docs/peers.md)), the web terminal ([docs/terminal.md](docs/terminal.md)), the `space` CLI ([docs/cli.md](docs/cli.md)), service supervision ([docs/supervision.md](docs/supervision.md)) and the interactive `setup` are in place. Follow-up work, roughly in order:
+## 🏗️ Architecture
 
-- **Supervision hand-over** - `space app supervise <app>` to move an app from the operator's unit to the space's with a health check and a rollback; resource limits in the unit.
-- **Skills mounting** - make `skills:` and `memory:` from the manifest available to agent sessions; both are parsed today. Every shared and app skill is already linked into `<workspace>/.claude/skills/` for sessions started by hand.
-- **Managed blob API** - index table, streaming routes and presigning on top of the blob stores that are already provisioned and handed over.
-- **App tooling** - `schema/space.schema.json`, `validate` and `/api/spec`; `space app new` creates an app from the template, the shared skill `skills/space-app/` covers adopting and changing one.
+![ai-space architecture](docs/architecture.svg)
 
-The per-area table is in [docs/app-spec.md](docs/app-spec.md#implementation-status). The longer
-view - what a space still owes the apps living in it, measured against what an operating system
-gives its programs, and the order those gaps are worth closing in - is in
-[docs/roadmap.md](docs/roadmap.md).
+- **Application layer.** One web UI is the only entry: installed apps, chat with any agent, app widgets, notifications and settings. Each app owns one or more agents and may contribute widgets.
+- **Space layer (ai-space core).** Shared services every app and agent calls through one Space API instead of building their own. The core also keeps the app registry, routes requests to the right agent, and handles auth.
+- **Runtime layer.** Agents run as Claude Code or Codex sessions; skills, MCP tools, memory and LLM access come from the runtime, and agents reach the Space API as tools.
+- **Infrastructure layer.** One dedicated Linux server with Bun, SQLite and the filesystem, and a public domain.
+
+## 📁 Your data
+
+Everything ai-space owns on a machine lives in one directory, `~/.ai-space` by default (override with `SPACE_HOME`). No lock-in: it is plain files and SQLite, readable without ai-space running, and backed up daily.
+
+```
+~/.ai-space/
+├── core/    ai-space itself (this repository) when deployed with deploy/
+├── apps/    one directory per app; any app with a space.yaml is scheduled automatically
+├── data/    runtime state (SQLite) and per-app data directories
+├── logs/
+└── .env     ai-space configuration plus the secrets app manifests reference via ${VAR}
+```
+
+`bun run init` creates it and installs the default apps, each a public repository cloned into `apps/` and started by its own installer. Today that is [ai-usage](https://github.com/ericz-lab/ai-usage). `SPACE_DEFAULT_APPS=none` in `.env` skips them; a list of clone URLs replaces them.
+
+## ⌨️ Usage
+
+The panel is the everyday entry. For scripts, tasks and SSH there is one `space` command on `PATH`:
+
+```bash
+space status                          # health, services, tasks, backups, model load, peers
+space app ls                          # every app in the workspace
+space task run <app>/<task> --wait    # run a task now and wait for the result
+space logs <app> -f                   # follow an app's log
+space model usage                     # tokens by app and model
+space notify send "hello"             # test the notification channels
+space backup ls                       # snapshots of every app's data
+```
+
+Tables by default, `--json` for scripts. `space <command> help` lists the verbs; [docs/cli.md](docs/cli.md) is the design.
+
+## 🔒 Security
+
+An AI system with shell access deserves a clear boundary. In short:
+
+- **No open port.** The panel and apps are published through a Cloudflare Tunnel, never by listening on the public interface. → [ingress](docs/ingress.md)
+- **A login in front.** Cloudflare Access guards the panel and every app hostname. Without it, keep the panel on loopback.
+- **Tokens for apps.** Every app calls the Space API with its own token; tokenless writes from another site's page are refused. → [panel trust boundary](docs/panel.md#trust-boundary)
+- **The web terminal is off by default.** When enabled it uses one-time tickets, same-origin checks, an optional passphrase, idle limits, a session cap and an audit row per session. → [terminal](docs/terminal.md)
+- **Agents act with your account.** They run as your user, with your coding agent's login. Model calls run under a concurrency cap and are recorded in the ledger, so cost stays visible.
+
+## 🤔 Why ai-space
+
+A coding agent on a server can already do a lot. What it lacks is a place to keep going: something that wakes it on a schedule, remembers what it did, hands its result to another program, and tells you when it matters. ai-space is that place. It is not a workflow builder or a chat front-end. It is the shared layer between the agents you already use and the small apps you build with them.
+
+<details>
+<summary><b>Compared with other tools</b></summary>
+<br/>
+
+| | ai-space | A bare agent on a server | Workflow builders | Chat front-ends |
+| --- | --- | --- | --- | --- |
+| Agents | Claude Code / Codex sessions with their own tools | Same | Mostly model API calls inside a flow | Mostly model API calls |
+| Schedules & events | Built in, declared per app | cron by hand | Built in | Varies |
+| Apps with their own UI and data | Yes, via `space.yaml` | Ad hoc | Varies | Varies |
+| Notifications, backups, usage ledger | Shared services | By hand | Partial | Partial |
+| Where it runs | Your server, plain files | Your server | Self-hosted or cloud | Self-hosted or cloud |
+
+If you mostly want a drag-and-drop pipeline or a multi-user chat UI over model APIs, a dedicated tool will serve you better. ai-space fits when the agents do the work and you want them to keep running.
+
+</details>
+
+## 📈 Status
+
+In place: the scheduler (schedules and event triggers), the bus, storage (databases and blob hand-over), backups, notifications and the inbox, model calls with a usage ledger, chat with images and an embeddable widget, the panel, peers, the web terminal, the `space` CLI, service supervision and the interactive `setup`.
+
+Next, roughly in order:
+
+- [ ] **Supervision hand-over**: `space app supervise <app>` with a health check and a rollback; resource limits in the unit.
+- [ ] **Skills mounting**: make `skills:` and `memory:` from the manifest available to agent sessions. Shared and app skills are already linked into `<workspace>/.claude/skills/`.
+- [ ] **Managed blob API**: index table, streaming routes and presigning on top of the blob stores that are already provisioned.
+- [ ] **App tooling**: `schema/space.schema.json`, `validate` and `/api/spec`.
+
+The per-area table is in [docs/app-spec.md](docs/app-spec.md#implementation-status). The longer view, measured against what an operating system gives its programs, is in [docs/roadmap.md](docs/roadmap.md).
+
+## 📚 Documentation
+
+| Getting started | Building apps | Running a space | Internals |
+| --- | --- | --- | --- |
+| [Install by agent](docs/install-by-agent.md) | [App spec](docs/app-spec.md) | [CLI](docs/cli.md) | [Runtimes](docs/runtimes.md) |
+| [Install by hand](docs/install.md) | [`space-app` skill](skills/space-app/SKILL.md) | [Backup](docs/backup.md) | [Router](docs/router.md) |
+| [Cloudflare](docs/cloudflare.md) | [Scheduler](docs/scheduler.md) | [Supervision](docs/supervision.md) | [Ingress](docs/ingress.md) |
+| [Machines](docs/machines.md) | [Events & calls](docs/events.md) | [Peers](docs/peers.md) | [Time fields](docs/time.md) |
+| | [Storage](docs/storage.md) | [Terminal](docs/terminal.md) | [i18n](docs/i18n.md) |
+| | [Notify](docs/notify.md) · [Model](docs/model.md) · [Chat](docs/chat.md) | [Panel](docs/panel.md) | [Roadmap](docs/roadmap.md) |
+
+## 🧑‍💻 Development
+
+```bash
+bun install
+bun run init           # create ~/.ai-space (idempotent)
+bun run start          # boot the Space API and the panel on 127.0.0.1:8700
+bun run dev            # hot reload, including the web UI
+bun run check          # typecheck + tests
+bun run hooks          # once per clone: run the checks before every push
+```
+
+Local configuration goes in `~/.ai-space/.env` (see `.env.example`); process environment variables win over it. Read [AGENTS.md](AGENTS.md) before contributing (work style, repository map, commit format) and [CLAUDE.md](CLAUDE.md) for Bun conventions.

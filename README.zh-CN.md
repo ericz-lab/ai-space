@@ -1,80 +1,89 @@
-<p align="center">
-  <img src="docs/logo.png" alt="ai-space 标志" width="180">
+<div align="center">
+
+<img src="docs/logo.png" alt="ai-space 标志" width="140">
+
+<h1>ai-space<br/><sub>自托管的 AI 之家：agent、app 和它们的数据都在这里。</sub></h1>
+
+<p>
+  <a href="#-快速开始">快速开始</a> ·
+  <a href="#-核心特性">特性</a> ·
+  <a href="#%EF%B8%8F-架构">架构</a> ·
+  <a href="#-文档">文档</a> ·
+  <a href="docs/roadmap.md">路线图</a>
 </p>
 
-<h1 align="center">ai-space</h1>
-
-<p align="center">
-  <a href="README.md">English</a> | 中文
+<p>
+  <img alt="status: early stage" src="https://img.shields.io/badge/status-early_stage-orange">
+  <img alt="runtime: Bun" src="https://img.shields.io/badge/runtime-Bun-black?logo=bun">
+  <img alt="language: TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white">
+  <img alt="self-hosted" src="https://img.shields.io/badge/self--hosted-one_server-2ea44f">
+  <img alt="agents: Claude Code and Codex" src="https://img.shields.io/badge/agents-Claude_Code_·_Codex-d97757">
 </p>
 
-AI 的家：把多个 AI agent、app 和它们的数据连接、组织进同一个系统，跑在一台专用服务器上。
+<p><a href="README.md">English</a> | 中文</p>
 
-它是所有这些的统一入口。不必在不同的 AI 工具之间来回切换，你通过一个 web 界面使用和管理自己的 AI 系统。这个界面由三样东西组成：
+</div>
 
-- **Apps** 承载结构化的信息和工作场景，同时为 AI 提供持续的上下文。
-- **Agents** 负责理解和处理复杂、非结构化的需求，并执行具体任务。
-- **Widgets** 把重要的状态和结果以轻量、直观的方式呈现，随时可见。
+---
 
-在底层，ai-space 把 apps、agents、widgets、skills 和数据组织进同一个系统，而不是一堆各自为战的工具：它们共享上下文和数据，调用彼此的能力，传递任务与结果，并围绕你设定的目标持续推进。核心提供一个 AI 系统运行所需的基础能力：按时间或事件触发的定时任务，任务完成或出现重要结果时的通知，数据和产出的备份，存储，以及多台机器共用一个面板。
+**ai-space 把一台服务器变成 AI 长期运行的家。** 你的 agent、它们工作所在的 app，以及两者产生的数据，都放进同一个系统、通过同一个 web 面板使用，而不是散落在十几个互不相识的工具里。
 
-## 架构
+你通过三样东西使用它：
 
-![ai-space 架构](docs/architecture.svg)
+- 🧩 **Apps** 承载结构化的信息和工作场景，同时为 AI 提供持续的上下文。
+- 🤖 **Agents** 负责理解和处理复杂、非结构化的需求，并执行具体任务。
+- 📊 **Widgets** 把重要的状态和结果直观地呈现出来，随时可见。
 
-自上而下：
+在底层，核心为每个 app 提供一个 AI 系统运行所需、又没人想重复造的能力：定时与事件驱动任务、通知、带用量账本的模型调用、存储、每日备份，以及多台机器共用一个面板。
 
-- **应用层。** 统一的 web UI 是唯一入口。它列出已安装的 app，可以和任意 agent 对话，在首页面板上展示 app 的 widget，并承载通知和设置。每个 app 拥有一个或多个 agent，可以贡献一个或多个 widget。
-- **空间层（ai-space 核心）。** 每个 app 和 agent 都能通过同一个 Space API 调用的共享服务，不必各自造轮子：云存储、定时任务、通知、数据备份、配置与密钥、日志与监控。核心还维护 app 注册表，把请求路由到正确的 agent，并处理鉴权。
-- **运行时层。** Agent 以 [Claude Code](https://claude.com/claude-code) 或 Codex 会话的形式运行。Skills、MCP 工具、记忆和模型访问来自运行时；agent 把 Space API 当作工具来调用。
-- **基础设施层。** 一切跑在一台专用 Linux 服务器上：Bun、SQLite 和文件系统、cron、一个公开域名。
+> [!NOTE]
+> ai-space 还在早期阶段。下面列出的服务都已可用；app 契约和 API 仍可能变化。见[状态](#-状态)。
 
-架构图源文件是 `docs/architecture.svg`。
+## ✨ 实际用起来是什么样
 
-## 工作区
+| 你想要…… | ai-space 怎么做 |
+| --- | --- |
+| 一个看板，统计每台机器上 Claude Code 花了多少 | 默认应用 [ai-usage](https://github.com/ericz-lab/ai-usage)，以 widget 显示在面板上 |
+| 一个每天早上自动运行、发现情况就在 Telegram 上提醒你的 agent | 在 app 的 `space.yaml` 里声明一个 `agent` 目标的 `cron` 任务，再加一次 `POST /api/notify` |
+| 一个 app 在另一个 app 变化时做出反应 | 一个 app 发布事件，另一个把它当作任务触发器或 http 投递来消费 |
+| 在手机上向任意 app 的 agent 提问 | 面板里的聊天，放在你自己的域名和 Cloudflare Access 登录之后 |
+| 不写胶水代码就搭一个新 app | 交给你的 coding agent；共享 skill [`space-app`](skills/space-app/SKILL.md) 按 [app 规范](docs/app-spec.md) 生成骨架 |
 
-ai-space 在一台机器上拥有的一切都放在一个目录里，默认 `~/.ai-space`（用 `SPACE_HOME` 覆盖）。首次启动或 `bun run init` 时创建：
+## 🌟 核心特性
 
+- 🏠 **一切归你。** 一台服务器、一个目录（`~/.ai-space`）、普通文件和 SQLite。数据只会发往你配置的模型运行时、存储桶和聊天软件。
+- 🤖 **用你已经在用的 agent。** Agent 以 [Claude Code](https://claude.com/claude-code) 或 Codex 会话运行，带着它们的 skills、MCP 工具和记忆；Anthropic API 和 DeepSeek Harness 也可作为运行时。→ [runtimes](docs/runtimes.md)
+- 🗓️ **调度器。** `at` / `every` / `cron` 时间表和事件触发，`http`、`command`、`agent` 三种目标。→ [scheduler](docs/scheduler.md)
+- 🔌 **总线。** App 之间的事件与调用，至少一次投递，带目录和历史。→ [events](docs/events.md)
+- 🔔 **通知。** 一次调用即可发到 Telegram、Discord、Slack、飞书、钉钉、企业微信、Bark、ntfy 或 webhook；有队列、限速、重试，并汇总到面板的收件箱。→ [notify](docs/notify.md)
+- 🧠 **模型调用。** 所有 app 共用一个 `POST /api/model/run`，有并发上限，token 按 app、用途和模型记账。→ [model](docs/model.md)
+- 💬 **对话。** 带图片附件的会话线程，以及可嵌入 app 页面的聊天组件。→ [chat](docs/chat.md)
+- 💾 **存储与备份。** 每个 app 一个 SQLite 或 PostgreSQL 数据库加一个对象存储；每日快照到任意 S3 桶，每周校验，可恢复。→ [storage](docs/storage.md) · [backup](docs/backup.md)
+- 🛠️ **服务托管。** ai-space 可以把每个 app 的服务作为 systemd 用户单元（macOS 上是 LaunchAgent）运行，并与 manifest 保持一致。→ [supervision](docs/supervision.md)
+- 🖥️ **面板。** App 启动器、agent 聊天、widget、任务历史、收件箱，支持中英文。→ [panel](docs/panel.md)
+- 🌐 **Peers。** 多台机器共用一个面板。→ [peers](docs/peers.md)
+- ⌨️ **Web 终端**（默认关闭），以及覆盖全部 API 能力的 **`space` 命令行**。→ [terminal](docs/terminal.md) · [cli](docs/cli.md)
+
+## 🚀 快速开始
+
+推荐的安装方式是**让 coding agent 来装**。它按一份写好的流程执行，遇到浏览器登录会停下来，告诉你该点什么。
+
+```text
+# 在你笔记本上的 checkout 里，用 Claude Code 或 Codex：
+> 按 docs/install-by-agent.md 把 ai-space 装到 <host> 上
+
+# 或者直接在服务器上：
+git clone <本仓库> ~/.ai-space/core && cd ~/.ai-space/core
+claude   # 然后说："在这台机器上安装 ai-space"
 ```
-~/.ai-space/
-├── core/    ai-space 本身（本仓库），用 deploy/ 部署时放在这里
-├── apps/    一个 app 一个目录；任何带 space.yaml 的 app 自动进入调度
-├── data/    运行时状态（SQLite）和每个 app 的数据目录
-├── logs/
-└── .env     ai-space 配置，以及 app manifest 通过 ${VAR} 引用的密钥
-```
 
-`bun run init` 还会装上默认应用：ai-space 自带的应用，每个都是一个公开仓库，克隆到 `apps/` 后由它自己的安装脚本启动。目前是 [ai-usage](https://github.com/ericz-lab/ai-usage)，一个统计本机和 peer 机器上 Claude Code 消耗的看板。在 `.env` 里设 `SPACE_DEFAULT_APPS=none` 跳过；给一串克隆地址则替换这个列表。
+流程：[docs/install-by-agent.md](docs/install-by-agent.md)。参考：[docs/install.md](docs/install.md)。
 
-## 开发
+<details>
+<summary><b>手工安装</b>（用户级 systemd，不需要 sudo）</summary>
+<br/>
 
-```bash
-bun install
-bun run init           # 创建 ~/.ai-space（幂等）
-bun run start          # 在 127.0.0.1:8700 启动 Space API 和面板
-bun run dev            # 热重载，包括 web UI
-bun run check          # 类型检查 + 测试
-```
-
-本地配置放在 `~/.ai-space/.env`（见 `.env.example`）；进程环境变量优先于它。
-
-## 运行前提
-
-五样东西，按使用顺序排列。前两项必须有，其余的让结果随处可用、可以长期保留。
-
-1. **一个 coding agent。** [Claude Code](https://claude.com/claude-code)、Codex 或任何类似的带 shell 的工具。它负责安装 ai-space，是面板背后 agent 的运行时，也是你构建和维护 app 的方式。带上它的登录：Claude 订阅或一个 API key。
-2. **一台云主机。** 一台常开的 Linux 机器（Debian 或 Ubuntu，systemd，密钥 SSH）。1 核 2G 加 swap 能跑核心；2 核 4G 在多个 app 和 agent 会话同时运行时体验更好（每个会话约占 150 MB）。
-3. **一个 Cloudflare 账号**，免费套餐即可。Tunnel 把面板和 app 发布到你的域名上，服务器不开任何端口，还能顺带承载 SSH；Access 在它们前面加一层登录；R2（免费 10 GB）存备份和 app 文件。没有它，面板只在本机回环地址上，通过 SSH 端口转发访问，备份需要另找一个 S3 桶。
-4. **GitHub CLI**（`gh`），在服务器上登录，让 agent 替你 clone、提交和推送 app 仓库，一次登录，不用逐个仓库配 deploy key。
-5. **一个托管在 Cloudflare 的域名。** DNS 解析在 Cloudflare，每个 app 一个主机名（面板用 `space.example.com`）。第 3 项发布到的就是它。
-
-安装过程按这个顺序逐项进行：[docs/install.md](docs/install.md)。
-
-## 部署
-
-把整个流程交给一个 coding agent（Claude Code、Codex）：在你本机的 checkout 里，让它按 `docs/install-by-agent.md` 把 ai-space 装到 `<host>` 上；或者在服务器上 clone 到 `~/.ai-space/core`，在该目录里启动 agent，让它按同一份文档装这台机器。遇到需要浏览器登录的步骤它会停下来告诉你怎么做。见 [docs/install-by-agent.md](docs/install-by-agent.md) 和 [docs/install.md](docs/install.md)。
-
-手工方式：用户级 systemd，不需要 sudo。目标机器上装好 Bun（在 `~/.bun` 下）之后：
+目标机器上装好 Bun（在 `~/.bun` 下）之后：
 
 ```bash
 ssh <host> "git init --bare ~/ai-space.git"
@@ -85,33 +94,127 @@ git push <host> main      # 检出到 ~/.ai-space/core，运行 deploy/install.s
 
 `deploy/install.sh` 把 `deploy/ai-space.service` 装进 `~/.config/systemd/user/`，开启 linger，重启服务。日志：`journalctl --user -u ai-space -f`。
 
-新机器上，在 `~/.ai-space/core` 里运行 `bun run setup` 交互式地完成其余部分：检查 ai-space 会调用的工具（claude、gh、cloudflared，以及可选的 `cf` CLI），逐节询问工作区 `.env` 的每个值，发一条测试通知，探测存储桶，并以 `cf` 命令的形式打印 Cloudflare 上还需要做的事（[docs/cloudflare.md](docs/cloudflare.md)）。从一个空用户到域名和访问层之后的面板，完整流程见 [docs/install.md](docs/install.md)。
+然后在 `~/.ai-space/core` 里运行 `bun run setup`。它会检查 ai-space 要调用的工具（claude、gh、cloudflared，以及可选的 `cf` CLI），逐节询问工作区 `.env` 的每个值，发一条测试通知，探测存储桶，并以 `cf` 命令的形式打印 Cloudflare 上还需要做的事（[docs/cloudflare.md](docs/cloudflare.md)）。
 
-App 规范（什么是 app、目录布局、`space.yaml` 契约）见 [docs/app-spec.md](docs/app-spec.md)；引导 agent 按该规范创建、收编或修改 app 的共享 skill 见 [skills/space-app](skills/space-app/SKILL.md)（app 模板在 `skills/space-app/templates/`）；agent 和贡献者指南（含提交格式）见 [AGENTS.md](AGENTS.md)；Bun 约定见 [CLAUDE.md](CLAUDE.md)。
+</details>
 
-## 服务
+### 运行前提
 
-- **调度器**（`src/space/scheduler/`）：app 的定时任务和事件驱动任务。`at` / `every` / `cron` 三种时间表，由 `POST /api/events` 喂入的事件 `triggers`（去抖、合并，作为运行的 payload 传入），`http` / `command` / `agent` 三种目标，在每个 app 的 `space.yaml` 里声明，通过 `/api/tasks` 管理。见 [docs/scheduler.md](docs/scheduler.md)。
-- **总线**（`src/space/bus/`）：app 之间的事件与调用。app 声明它发布什么、消费什么（作为任务触发器；作为投递到自己服务的 http 请求，重试直到应答；或作为自己读取并确认的流）、提供什么；ai-space 以至少一次的语义投递每一条事件，把 `POST /api/call/<app>/<capability>` 带着调用方的名字转发给提供方，并保留目录和两者的历史。见 [docs/events.md](docs/events.md)。
-- **存储**（`src/space/storage/`）：每个 app 一个 SQLite 或 PostgreSQL 数据库，以及一个放在文件系统或任意 S3 兼容桶上的对象存储，在 `space.yaml` 里声明，同步时开通，通过 `<workspace>/data/<app>/space.env` 交接（`DATABASE_URL`、`BLOB_URL`、`S3_*`）。设计中的托管 blob API 尚未实现。见 [docs/storage.md](docs/storage.md)。
-- **备份**（`src/space/storage/backup/`）：每个 app 的数据目录每天快照到 S3 桶（SQLite 用 `VACUUM INTO`，状态文件，每 app 一个 `tar.zst` 加一份清单），按数量保留，每周一次打开最新快照的校验任务，以及 `restore` 到目录或原地恢复。见 [docs/backup.md](docs/backup.md)。
-- **通知**（`src/space/notify/`）：向聊天软件的单向通知（Telegram、Discord、Slack、飞书、钉钉、企业微信、Bark、ntfy、通用 webhook）。渠道在工作区 `.env` 里以 `SPACE_NOTIFY_<NAME>` URL 配置一次；app 在 `space.yaml` 里声明可用的渠道，发一个 `POST /api/notify` 即可。投递有队列、限速、重试和记录；调度器通过它上报失败的任务。见 [docs/notify.md](docs/notify.md)。
-- **对话**（`src/space/chat/`）：给 app 页面用的 AI 对话：线程、历史和图片附件由空间按 app 保存，一个流式的 turn 路由负责回放历史、把图片送到模型运行的机器上，再加一个 app 经小代理嵌入、用 CSS 变量定制样式的小组件（`/api/chat/widget.js`）。见 [docs/chat.md](docs/chat.md)。
-- **模型**（`src/space/model/`）：app 和 agent 任务的模型调用统一走一个 `POST /api/model/run`：请求指定空间里的某个运行时（或用默认的），调用受并发上限约束，每次调用连同运行时上报的 token 数进入同一本账，面板按 app、用途和模型展示。见 [docs/model.md](docs/model.md)。
-- **运行时**（`src/space/runtimes/`）：一个空间拥有的 AI 运行时（本机或经 ssh 的 Claude Code、Anthropic API，后续增加更多种类），在 `runtimes.yaml` 里配置，各自按能力提供问答、agent 运行和聊天三种操作。模型服务、调度器和面板都通过这一层启动运行时。见 [docs/runtimes.md](docs/runtimes.md)。
-- **服务托管**（`src/space/services/`）：每台机器用 `SPACE_SUPERVISOR` 选择谁来运行 app 的 `service`。`space` 模式下 ai-space 为每个 app 写一个用户级 unit（`space-<app>.service`，macOS 上是 LaunchAgent `space.<app>`；环境变量渲染到一个生成的文件里），每次同步时与 manifest 对齐、内容没变就不重启，app 暂停或卸载时移除，并读取它的日志；`operator` 模式下是你自己安装的 unit，空间只探测健康。见 [docs/supervision.md](docs/supervision.md)。
-- **面板**（`src/space/panel/`、`src/space/agents/`、`src/web/`）：`/` 上的 web 入口。工作区里每个 app 的启动器（图标、入口 URL、健康状态），以任意声明的 agent 或空间 agent 身份打开 Claude Code 会话的聊天窗口，由 app 提供数据的 widget 卡片，所有定时任务及其运行历史的只读视图，以及从链接添加 app、隐藏、排序或卸载的编辑模式。中英文跟随浏览器或设置；app 在 `space.yaml` 里翻译自己的标题（[docs/i18n.md](docs/i18n.md)）。见 [docs/panel.md](docs/panel.md)。
-- **终端**（`src/space/terminal/`、`src/web/Terminal.tsx`）：在浏览器里打开本机以及每台启用了终端的 peer 机器的 shell：xterm.js 通过 WebSocket 连到一个伪终端，里面以操作员的 shell 在工作区根目录运行。默认关闭（`SPACE_TERMINAL_ENABLED=1` 开启）；每个会话都有同源检查和一次性票据，可选口令，空闲超时和会话数上限，shell 环境里剥离凭据，每个会话一条审计记录，不记录按键。见 [docs/terminal.md](docs/terminal.md)。
+五样东西，按使用顺序排列。前两项必须有，其余的让结果随处可用、可以长期保留。
 
-- **命令行**（`src/cli/`、`bin/space`）：一个 `space` 命令覆盖 API 能做的一切：`space status`、`space app ls`、`space task run <app>/<task> --wait`、`space logs <app> -f`、`space model usage`、`space notify send`、`space backup ls`、`space api GET /api/…`；默认表格输出，`--json` 给脚本用，在任务里、在机器上、通过 `ssh` 都是同一条命令。见 [docs/cli.md](docs/cli.md)。
+| # | 是什么 | 为什么 |
+| --- | --- | --- |
+| 1 | **一个 coding agent**（[Claude Code](https://claude.com/claude-code)、Codex 等）及其登录 | 它安装 ai-space，面板里的 agent 以它运行，你也用它构建 app |
+| 2 | **一台常开的 Linux 服务器**（Debian/Ubuntu，systemd，密钥 SSH） | 1 核 2G 加 swap 能跑核心；多个 app 同时运行时 2 核 4G 更从容（每个 agent 会话约 150 MB） |
+| 3 | **一个 Cloudflare 账号**（免费套餐） | Tunnel 发布面板、不开端口，Access 在前面加登录，R2（免费 10 GB）存备份 |
+| 4 | **GitHub CLI**（`gh`），在服务器上登录 | agent 一次登录即可 clone、提交和推送 app 仓库，不用配 deploy key |
+| 5 | **一个托管在 Cloudflare 的域名** | 每个 app 一个主机名，面板用 `space.example.com` |
 
-## 状态
+没有第 3、5 项时，面板只在本机回环地址上，通过 SSH 端口转发访问，备份需要另找一个 S3 桶。
 
-早期阶段。调度器（时间表和事件触发）、存储（数据库和对象存储交接）、备份、通知、带用量账本的模型调用、面板（agent 聊天、widget、从链接添加、卸载）、peers（多台机器共用一个面板，[docs/peers.md](docs/peers.md)）、web 终端（[docs/terminal.md](docs/terminal.md)）、`space` 命令行（[docs/cli.md](docs/cli.md)）、服务托管（[docs/supervision.md](docs/supervision.md)）和交互式 `setup` 已就位。后续工作，大致按顺序：
+## 🏗️ 架构
 
-- **托管交接**：`space app supervise <app>`，把一个 app 从操作员的 unit 迁到空间的 unit，带健康检查和失败回滚；unit 里的资源上限。
-- **Skills 挂载**：把 manifest 里的 `skills:` 和 `memory:` 提供给 agent 会话；目前两者只解析不挂载。所有共享 skill 和各 app 的 skill 已经链接到 `<workspace>/.claude/skills/`，手动启动的会话都能用。
-- **托管 blob API**：在已经开通并交接的对象存储之上加索引表、流式路由和预签名。
-- **App 工具链**：`schema/space.schema.json`、`validate`、`/api/spec` 和 `bun run new-app`；目前由共享 skill `skills/space-app/` 手工完成。
+![ai-space 架构](docs/architecture.svg)
 
-分区状态表见 [docs/app-spec.md](docs/app-spec.md#implementation-status)。更长远的视角——对照操作系统给程序的东西，一个空间还欠住在里面的 app 什么，以及这些空缺值得按什么顺序补上——见 [docs/roadmap.md](docs/roadmap.md)。
+- **应用层。** 统一的 web UI 是唯一入口：已安装的 app、与任意 agent 对话、app 的 widget、通知和设置。每个 app 拥有一个或多个 agent，可以贡献 widget。
+- **空间层（ai-space 核心）。** 每个 app 和 agent 都通过同一个 Space API 调用的共享服务，不必各自造轮子。核心还维护 app 注册表，把请求路由到正确的 agent，并处理鉴权。
+- **运行时层。** Agent 以 Claude Code 或 Codex 会话运行；skills、MCP 工具、记忆和模型访问来自运行时，agent 把 Space API 当作工具调用。
+- **基础设施层。** 一台专用 Linux 服务器，上面是 Bun、SQLite 和文件系统，外加一个公开域名。
+
+## 📁 你的数据
+
+ai-space 在一台机器上拥有的一切都放在一个目录里，默认 `~/.ai-space`（用 `SPACE_HOME` 覆盖）。没有锁定：都是普通文件和 SQLite，不运行 ai-space 也能读，并且每天备份。
+
+```
+~/.ai-space/
+├── core/    ai-space 本身（本仓库），用 deploy/ 部署时放在这里
+├── apps/    一个 app 一个目录；任何带 space.yaml 的 app 自动进入调度
+├── data/    运行时状态（SQLite）和每个 app 的数据目录
+├── logs/
+└── .env     ai-space 配置，以及 app manifest 通过 ${VAR} 引用的密钥
+```
+
+`bun run init` 创建这个目录，并装上默认应用：每个都是一个公开仓库，克隆到 `apps/` 后由它自己的安装脚本启动。目前是 [ai-usage](https://github.com/ericz-lab/ai-usage)。在 `.env` 里设 `SPACE_DEFAULT_APPS=none` 跳过；给一串克隆地址则替换这个列表。
+
+## ⌨️ 使用
+
+日常入口是面板。脚本、任务和 SSH 场景下，`PATH` 上有一个 `space` 命令：
+
+```bash
+space status                          # 健康、服务、任务、备份、模型负载、peers
+space app ls                          # 工作区里的所有 app
+space task run <app>/<task> --wait    # 立即运行一个任务并等待结果
+space logs <app> -f                   # 跟踪某个 app 的日志
+space model usage                     # 按 app 和模型统计 token
+space notify send "hello"             # 测试通知渠道
+space backup ls                       # 每个 app 数据的快照
+```
+
+默认表格输出，`--json` 给脚本用。`space <command> help` 列出子命令；设计见 [docs/cli.md](docs/cli.md)。
+
+## 🔒 安全
+
+一个有 shell 权限的 AI 系统需要清晰的边界。简要来说：
+
+- **不开端口。** 面板和 app 通过 Cloudflare Tunnel 发布，从不监听公网接口。→ [ingress](docs/ingress.md)
+- **前面有登录。** Cloudflare Access 保护面板和每个 app 的主机名。没有它时，让面板只留在回环地址上。
+- **App 用令牌。** 每个 app 用自己的令牌调用 Space API；来自其他站点页面、不带令牌的写请求一律拒绝。→ [面板信任边界](docs/panel.md#trust-boundary)
+- **Web 终端默认关闭。** 开启后使用一次性票据、同源检查、可选口令、空闲超时、会话数上限，每个会话一条审计记录。→ [terminal](docs/terminal.md)
+- **Agent 以你的账号行事。** 它们以你的用户身份、用你的 coding agent 登录运行。模型调用有并发上限并记入账本，成本始终可见。
+
+## 🤔 为什么是 ai-space
+
+服务器上的 coding agent 本身已经能做很多事。它缺的是一个能持续运转的地方：按时唤醒它、记住它做过什么、把它的结果交给另一个程序、在要紧时通知你。ai-space 就是这个地方。它不是工作流编排器，也不是聊天前端，而是你已经在用的 agent 和你用它们搭出来的小 app 之间的共享层。
+
+<details>
+<summary><b>与其他工具对比</b></summary>
+<br/>
+
+| | ai-space | 服务器上直接跑 agent | 工作流编排工具 | 聊天前端 |
+| --- | --- | --- | --- | --- |
+| Agent | 带自身工具的 Claude Code / Codex 会话 | 同左 | 多为流程里的模型 API 调用 | 多为模型 API 调用 |
+| 定时与事件 | 内置，按 app 声明 | 手写 cron | 内置 | 不一定 |
+| 有自己界面和数据的 app | 有，通过 `space.yaml` | 临时拼凑 | 不一定 | 不一定 |
+| 通知、备份、用量账本 | 共享服务 | 自己动手 | 部分 | 部分 |
+| 运行在哪 | 你的服务器，普通文件 | 你的服务器 | 自托管或云端 | 自托管或云端 |
+
+如果你主要想要拖拽式流水线，或基于模型 API 的多人聊天界面，专门的工具会更合适。当干活的是 agent、而你希望它们一直运转下去时，ai-space 正合适。
+
+</details>
+
+## 📈 状态
+
+已就位：调度器（时间表和事件触发）、总线、存储（数据库和对象存储交接）、备份、通知与收件箱、带用量账本的模型调用、带图片和可嵌入组件的对话、面板、peers、web 终端、`space` 命令行、服务托管和交互式 `setup`。
+
+后续工作，大致按顺序：
+
+- [ ] **托管交接**：`space app supervise <app>`，带健康检查和失败回滚；unit 里的资源上限。
+- [ ] **Skills 挂载**：把 manifest 里的 `skills:` 和 `memory:` 提供给 agent 会话。共享 skill 和各 app 的 skill 已经链接到 `<workspace>/.claude/skills/`。
+- [ ] **托管 blob API**：在已经开通的对象存储之上加索引表、流式路由和预签名。
+- [ ] **App 工具链**：`schema/space.schema.json`、`validate` 和 `/api/spec`。
+
+分区状态表见 [docs/app-spec.md](docs/app-spec.md#implementation-status)。更长远的视角——对照操作系统给程序的东西，一个空间还欠它的 app 什么——见 [docs/roadmap.md](docs/roadmap.md)。
+
+## 📚 文档
+
+| 入门 | 构建 app | 运维一个空间 | 内部机制 |
+| --- | --- | --- | --- |
+| [让 agent 安装](docs/install-by-agent.md) | [App 规范](docs/app-spec.md) | [命令行](docs/cli.md) | [运行时](docs/runtimes.md) |
+| [手工安装](docs/install.md) | [`space-app` skill](skills/space-app/SKILL.md) | [备份](docs/backup.md) | [路由](docs/router.md) |
+| [Cloudflare](docs/cloudflare.md) | [调度器](docs/scheduler.md) | [服务托管](docs/supervision.md) | [入口](docs/ingress.md) |
+| [机器](docs/machines.md) | [事件与调用](docs/events.md) | [Peers](docs/peers.md) | [时间字段](docs/time.md) |
+| | [存储](docs/storage.md) | [终端](docs/terminal.md) | [多语言](docs/i18n.md) |
+| | [通知](docs/notify.md) · [模型](docs/model.md) · [对话](docs/chat.md) | [面板](docs/panel.md) | [路线图](docs/roadmap.md) |
+
+## 🧑‍💻 开发
+
+```bash
+bun install
+bun run init           # 创建 ~/.ai-space（幂等）
+bun run start          # 在 127.0.0.1:8700 启动 Space API 和面板
+bun run dev            # 热重载，包括 web UI
+bun run check          # 类型检查 + 测试
+bun run hooks          # 每个 clone 一次：push 前自动运行检查
+```
+
+本地配置放在 `~/.ai-space/.env`（见 `.env.example`）；进程环境变量优先于它。贡献之前先读 [AGENTS.md](AGENTS.md)（工作方式、仓库地图、提交格式），Bun 约定见 [CLAUDE.md](CLAUDE.md)。
