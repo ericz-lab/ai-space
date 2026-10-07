@@ -10,7 +10,8 @@ import { type RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
 import { loadManifest } from "../scheduler/manifest.ts";
 import { workspacePaths } from "../workspace.ts";
 import { createAgentRoutes } from "./api.ts";
-import { chatResponse } from "./runtime.ts";
+import { runResponse } from "./runtime.ts";
+import { RunRegistry } from "./runs.ts";
 import { SessionStore } from "./sessions.ts";
 import { parseTranscript, transcriptPath } from "./transcript.ts";
 
@@ -58,10 +59,12 @@ beforeAll(async () => {
 afterAll(() => server.stop(true));
 
 const post = (path: string, body: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+// Each event is an `id:` line (run events) and a `data:` line; comments are skipped.
 const events = async (r: Response) =>
   (await r.text())
     .split("\n\n")
-    .filter((l) => l.startsWith("data: "))
+    .map((chunk) => chunk.split("\n").find((l) => l.startsWith("data: ")))
+    .filter((l): l is string => !!l)
     .map((l) => JSON.parse(l.slice(6)) as Record<string, unknown>);
 
 describe("chat runtime", () => {
@@ -106,8 +109,9 @@ describe("agents api", () => {
   });
 
   test("keeps the stream alive with comment lines during a long tool call", async () => {
-    const r = chatResponse(runtimes.default, { message: "slow", cwd: home }, {}, { heartbeatMs: 40 });
-    const text = await r.text();
+    const runs = new RunRegistry(new Database(":memory:"));
+    const run = runs.start({ agent: "space/assistant", runtime: runtimes.default, turn: { message: "slow", cwd: home } });
+    const text = await runResponse(runs, run.id, 0, { heartbeatMs: 40 })!.text();
     expect(text.split(": keepalive\n\n").length).toBeGreaterThan(2);
     expect(text.trim().endsWith('data: {"type":"done"}')).toBe(true);
     // The browser's parser only reads `data:` lines; a comment never reaches it as an event.

@@ -182,7 +182,9 @@ export class PeerClient {
     const init: RequestInit = { method: req.method, headers, signal: opts.timeoutMs ? AbortSignal.any([req.signal, AbortSignal.timeout(opts.timeoutMs)]) : req.signal };
     if (req.method !== "GET" && req.method !== "HEAD") init.body = await req.text();
     const up = await this.fetch(this.config.url + path, init);
-    return new Response(up.body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store" } });
+    // A chat turn's run id rides along, so the browser can reattach to it or stop it on the peer.
+    const runId = up.headers.get("x-run-id");
+    return new Response(up.body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store", ...(runId ? { "x-run-id": runId } : {}) } });
   }
 
   /** The headers every request to the peer carries: the access layer's extras and the bearer token. */

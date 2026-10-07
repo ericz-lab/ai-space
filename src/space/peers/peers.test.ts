@@ -166,10 +166,12 @@ afterAll(() => {
 type Body = any;
 const get = (base: string, path: string, init?: RequestInit) => fetch(base + path, init).then(async (r) => ({ status: r.status, body: (await r.json()) as Body }));
 const jsonInit = (method: string, body: unknown): RequestInit => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+// Each event is an `id:` line (run events) and a `data:` line; comments are skipped.
 const events = async (r: Response) =>
   (await r.text())
     .split("\n\n")
-    .filter((l) => l.startsWith("data: "))
+    .map((chunk) => chunk.split("\n").find((l) => l.startsWith("data: ")))
+    .filter((l): l is string => !!l)
     .map((l) => JSON.parse(l.slice(6)) as Record<string, unknown>);
 
 describe("peer config", () => {
@@ -297,6 +299,13 @@ describe("hub", () => {
     expect(ev[0]).toMatchObject({ type: "system", session_id: "cafe0001-0000-4000-8000-000000000000" });
     expect(String((ev[1] as { message: { content: { text: string }[] } }).message.content[0]!.text)).toContain(`cwd=${mediaDir}`);
     expect(ev.at(-1)).toEqual({ type: "done" });
+    // The turn is a background run on the peer: listed, replayed and stopped through the hub.
+    const runId = chat.headers.get("x-run-id")!;
+    expect((await get(hub, "/api/peers/david/agents/runs")).body.runs[0]).toMatchObject({ id: runId, agent: "media/helper", status: "done" });
+    expect((await get(hub, "/api/peers/david/agents/media/helper/runs")).body.runs[0]).toMatchObject({ id: runId });
+    expect((await get(hub, `/api/peers/david/agents/media/helper/runs/${runId}`)).body.run).toMatchObject({ id: runId, status: "done" });
+    expect((await events(await fetch(`${hub}/api/peers/david/agents/media/helper/runs/${runId}/events`))).map((e) => e.type)).toEqual(ev.map((e) => e.type));
+    expect((await get(hub, `/api/peers/david/agents/media/helper/runs/${runId}/stop`, { method: "POST" })).body).toMatchObject({ ok: true, stopped: false });
     expect((await get(hub, "/api/peers/david/agents/media/helper/sessions")).body.sessions).toMatchObject([{ sid: "cafe0001-0000-4000-8000-000000000000", title: "hello" }]);
     expect((await get(hub, "/api/peers/david/agents/media/nobody/sessions")).status).toBe(404);
 

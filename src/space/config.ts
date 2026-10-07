@@ -51,6 +51,8 @@ export type Config = {
   eventRetentionMs: number;
   /** Chat model when neither the request nor the manifest names one (SPACE_CHAT_MODEL). */
   chatModel: string;
+  /** A panel chat turn still running after this long is stopped (SPACE_CHAT_TIMEOUT_MINUTES, 60; 0 = never). */
+  chatTimeoutMs: number;
   /**
    * Who runs the apps' services (SPACE_SUPERVISOR, docs/supervision.md): `space` writes and keeps a user
    * unit per app (`space-<app>.service`); `operator` (the default) leaves them to units the operator
@@ -129,6 +131,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     notifyTasks: env.SPACE_NOTIFY_TASKS?.trim() ?? "",
     eventRetentionMs: Math.max(1, Number(env.SPACE_EVENTS_RETENTION_DAYS ?? 30) || 30) * 24 * 3600_000,
     chatModel: env.SPACE_CHAT_MODEL?.trim() ?? "sonnet",
+    chatTimeoutMs: Math.max(0, Number(env.SPACE_CHAT_TIMEOUT_MINUTES ?? 60) || 0) * 60_000,
     supervisor,
     serviceStop: env.SPACE_SERVICE_STOP?.trim() ?? "",
     serviceLogs: env.SPACE_SERVICE_LOGS?.trim() || DEFAULT_SERVICE_LOGS,

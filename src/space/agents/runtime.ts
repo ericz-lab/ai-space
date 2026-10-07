@@ -1,11 +1,11 @@
-import type { ChatTurn, RuntimeAdapter } from "../runtimes/types.ts";
+import type { RunRegistry } from "./runs.ts";
 
 /**
  * Chat over HTTP: one turn of a conversation with an agent, run on the
- * agent's runtime adapter (`../runtimes`) and streamed back as server-sent
- * events. Authentication is the runtime's own login on the machine; the
- * agent identity (system prompt, tool allow-list) is decided by the caller
- * from the manifest, never by the browser.
+ * agent's runtime adapter (`../runtimes`) as a background run (`./runs.ts`)
+ * and streamed back as server-sent events. Authentication is the runtime's own
+ * login on the machine; the agent identity (system prompt, tool allow-list) is
+ * decided by the caller from the manifest, never by the browser.
  */
 
 export { PERMISSION_MODES } from "../runtimes/claude-code.ts";
@@ -23,14 +23,17 @@ export const MODEL_RE = /^(?:[a-z0-9][a-z0-9._-]*\/)?[a-z0-9._-]{1,64}$/i;
 export const HEARTBEAT_MS = 20_000;
 
 /**
- * Server-sent events adapter: the response streams every runtime event as a
- * `data:` line, then `{"type":"error"}` on failure and `{"type":"done"}`.
- * A comment line every `heartbeatMs` keeps the connection alive through a
- * long tool call. Closing the response (client gone) kills the process.
+ * Server-sent events over a background run: the response replays the run's events after
+ * `after` and follows it live, each as an `id: <seq>` and a `data:` line, then
+ * `{"type":"error","error","status"}` when the run did not end well and `{"type":"done"}`.
+ * A comment line every `heartbeatMs` keeps the connection alive through a long tool call.
+ * Closing the response (client gone) only unsubscribes: the run goes on, and `runs.stop` is
+ * what ends it. Null for an unknown run.
  */
-export function chatResponse(runtime: RuntimeAdapter, t: ChatTurn, hooks: { onSession?: (sid: string) => void } = {}, opts: { heartbeatMs?: number } = {}): Response {
+export function runResponse(runs: RunRegistry, id: string, after = 0, opts: { heartbeatMs?: number } = {}): Response | null {
+  if (!runs.get(id)) return null;
   const enc = new TextEncoder();
-  let handle: { kill: () => void } | undefined;
+  let unsubscribe: (() => void) | null = null;
   let beat: ReturnType<typeof setInterval> | undefined;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -44,27 +47,25 @@ export function chatResponse(runtime: RuntimeAdapter, t: ChatTurn, hooks: { onSe
         }
       };
       const send = (line: string) => write(`data: ${line}\n\n`);
-      const finish = (error: string | null) => {
-        clearInterval(beat);
-        if (error) send(JSON.stringify({ type: "error", error }));
-        send('{"type":"done"}');
-        closed = true;
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
-      };
       beat = setInterval(() => write(": keepalive\n\n"), opts.heartbeatMs ?? HEARTBEAT_MS);
-      try {
-        handle = runtime.chat(t, { onEvent: send, onSession: hooks.onSession, onFinish: finish });
-      } catch (e) {
-        finish((e as Error).message);
-      }
+      unsubscribe = runs.subscribe(id, after, {
+        onEvent: (ev) => write(`id: ${ev.seq}\ndata: ${ev.line}\n\n`),
+        onEnd: (run) => {
+          clearInterval(beat);
+          if (run.status !== "done") send(JSON.stringify({ type: "error", error: run.error ?? run.status, status: run.status }));
+          send('{"type":"done"}');
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
+        },
+      });
     },
     cancel() {
       clearInterval(beat);
-      handle?.kill();
+      unsubscribe?.();
     },
   });
   return new Response(stream, {
@@ -73,6 +74,7 @@ export function chatResponse(runtime: RuntimeAdapter, t: ChatTurn, hooks: { onSe
       "cache-control": "no-cache",
       connection: "keep-alive",
       "x-accel-buffering": "no",
+      "x-run-id": id,
     },
   });
 }

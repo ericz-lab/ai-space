@@ -295,6 +295,11 @@ describe("through a hub", () => {
     "/api/agents/:app/:agent/chat": { POST: gone },
     "/api/agents/:app/:agent/sessions": { GET: gone },
     "/api/agents/:app/:agent/sessions/:sid": { GET: gone },
+    "/api/agents/runs": { GET: gone },
+    "/api/agents/:app/:agent/runs": { GET: gone },
+    "/api/agents/:app/:agent/runs/:id": { GET: gone },
+    "/api/agents/:app/:agent/runs/:id/events": { GET: gone },
+    "/api/agents/:app/:agent/runs/:id/stop": { POST: gone },
   };
 
   beforeAll(async () => {

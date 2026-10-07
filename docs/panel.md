@@ -70,6 +70,7 @@ Two tables in `space.db`, both panel-owned:
 
 - `panel_kv` holds the layout: `{ order: { apps, agents, widgets }, hidden, sizes }`. Order lists are ids: app names, `app/name` for agents and widgets, and `<peer>/…` for entries from a peer machine; ids missing from a list follow it, local before peer, alphabetically. `hidden` is the set of apps the panel does not show; they stay registered and scheduled. `sizes` maps widget ids to the size the operator chose on the panel, applied over the manifest's `size` when widgets are listed.
 - `chat_sessions` keeps the last ten sessions per agent (`agent`, `sid`, `title`, `ts`, `runtime`, `model`). A resumed session gets a new id from the runtime; the previous row is replaced so a conversation stays one entry.
+- `agent_runs` keeps the last 200 chat turns (`id`, `agent`, `session_id`, `sid`, `message`, `runtime`, `model`, `status`, `error`, `started_at`, `finished_at`, `last_seq`, and `events` once the turn ends), so a page loaded later can show and follow them ([Background runs](#background-runs)).
 
 Nothing panel-related is written into an app directory. The one panel state kept as files in the workspace is the icon packs (below), because they are images.
 
@@ -88,6 +89,22 @@ Making a pack is the `space:app-icons` skill's job: the operator describes a sty
 ## Chat
 
 `POST /api/agents/:app/:agent/chat` runs one turn: ai-space spawns `claude -p <message> --output-format stream-json` in the agent's working directory with the identity from the manifest (`--append-system-prompt` from the prompt file plus the app title, description and `AGENTS.md`; `--allowedTools` from `tools`; `--model` from the request, else as [Agent models](#agent-models) resolves it) and streams the events back as server-sent events. Multi-turn continuity is `--resume <sid>`. The browser can pick a write tier (`acceptEdits`, `bypassPermissions`, `plan`); the default is the headless read-only behaviour. `SPACE_CHAT_ARGS` appends operator-chosen arguments to every run.
+
+### Background runs
+
+A turn is a run owned by the server, not by the request that started it (`src/space/agents/runs.ts`). The chat route creates the run, answers with its id in `x-run-id` and streams it; the browser closing, refreshing or losing its connection only detaches that stream. Three things end a run: the operator's stop (⏹ in the chat, `POST …/runs/:id/stop`), the timeout (`SPACE_CHAT_TIMEOUT_MINUTES`, 60 by default, 0 for none), and the service shutting down, which gives running turns `SPACE_DRAIN_SECONDS` to finish, as it does task runs, and then stops the rest as `interrupted`. A stopped runtime that has not exited 5 s after the kill is closed anyway.
+
+Each event of a run gets a sequence number, sent as the SSE `id:`. The events are kept in memory while the run goes and for ten minutes after it ends (at most 20 finished runs), and written into the run's `agent_runs` row when it ends, so a later replay reads them from there; a row still `running` at boot belongs to a process that died and is marked `interrupted`. The buffer is bounded at 4 MB per run: text deltas that a following assistant message repeats are dropped first (they are dropped from the stored copy in any case), then the oldest events.
+
+| Route | |
+| --- | --- |
+| `GET /api/agents/runs?recent=<s>&agent=<app/name>&limit=` | runs newest first: every running one and those that ended in the last `recent` seconds (all when absent) |
+| `GET /api/agents/:app/:agent/runs` | the same for one agent |
+| `GET /api/agents/:app/:agent/runs/:id` | one run |
+| `GET /api/agents/:app/:agent/runs/:id/events?after=<seq>` | SSE: the events after `seq` (or `Last-Event-ID`), then live; the stream ends with `{"type":"error","error","status"}` when the run did not end `done`, then `{"type":"done"}` |
+| `POST /api/agents/:app/:agent/runs/:id/stop` | stop a running turn: `{ ok, stopped, run }` |
+
+A conversation runs one turn at a time: a chat request that resumes a session with a turn still running is a 409. On load the panel asks for the runs of the last half hour (and each peer's), takes the newest per agent, and restores it as that agent's conversation: the session's earlier turns from its transcript, the run's message, then the run's events from the start, following it live while it goes. A stream that drops mid-turn reattaches after the last `id:` seen, five times at most. Leaving a conversation in the panel (new conversation, a past session) stops its running turn, as the panel did before; messages queued behind a running turn are kept in the page only.
 
 Transcripts are read back from the runtime's own store (Claude Code: `~/.claude/projects/<cwd>/<sid>.jsonl`; Codex: `$CODEX_HOME/sessions/**/rollout-*-<sid>.jsonl`; DeepSeek Harness: its session log), so restoring a past session costs no extra storage. Every agent accepts a `runtime/tier` or `runtime/model` in the request's `model` field ([Agent models](#agent-models)). A resumed session stays on its recorded runtime; changing runtimes requires a new conversation. A requested runtime the space lacks, or one without chat, answers 501. The browser reads Claude Code's `stream-json` events; another runtime's adapter translates its own events into that shape.
 
@@ -162,7 +179,8 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 | `GET`/`PUT`/`DELETE /api/panel/icons/:pack/:kind?id=` | one icon of a pack (`kind`: `app` or `agent`): read, upload as the request body (`content-type` `image/svg+xml`, `image/png` or `image/webp`; creates the pack), remove |
 | `DELETE /api/panel/icons/:pack` | a whole pack; an active one turns packs off |
 | `GET /api/agents` | every agent the panel lists |
-| `POST /api/agents/:app/:agent/chat` | one chat turn, SSE |
+| `POST /api/agents/:app/:agent/chat` | one chat turn as a background run, SSE |
+| `GET /api/agents/runs`, `GET /api/agents/:app/:agent/runs[/:id[/events]]`, `POST /api/agents/:app/:agent/runs/:id/stop` | chat runs: list, one, replay and follow, stop ([Background runs](#background-runs)) |
 | `GET /api/agents/:app/:agent/sessions[/:sid]` | recent sessions, restored transcript |
 | `GET /api/inbox`, `POST /api/inbox/mark`, `POST /api/inbox/read-all` | the inbox: threads with read and done state, and changing it ([notify.md](notify.md#inbox)) |
 | `GET /api/peers`, `PATCH`/`DELETE /api/peers/:peer/apps/:app`, `/api/peers/:peer/…` | peer machines, hub-side hide, forwarded uninstall/icon/embed/chat/sessions ([peers.md](peers.md)) |
@@ -189,7 +207,7 @@ src/space/panel/    registry.ts (registered manifests), layout.ts (panel_kv), ic
                     api.ts (routes)
 src/space/peers/    other machines' panels merged into this one, and this one served to a hub (peers.md)
 src/space/terminal/ the web terminal: PTY backends, tickets and sessions, audit rows, routes and the socket bridge to a peer (terminal.md)
-src/space/agents/   runtime.ts (claude process + SSE), sessions.ts (chat_sessions),
+src/space/agents/   runtime.ts (a run as SSE), runs.ts (background runs, agent_runs), sessions.ts (chat_sessions),
                     transcript.ts, api.ts (routes, space agent)
 src/web/            index.html, main.tsx (language root), App.tsx, Chat.tsx, Tasks.tsx, Inbox.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
                     theme.ts (appearance: presets, resolution, storage), ThemeSettings.tsx (its settings rows),
@@ -212,6 +230,7 @@ src/web/            index.html, main.tsx (language root), App.tsx, Chat.tsx, Tas
 - A manifest fails validation: the app is skipped with a log line and the panel does not list it, same as the scheduler. Nothing partial.
 - A widget source is slow or down: eight-second timeout, error shown on the card, next attempt after `refresh`.
 - The runtime is missing or exits non-zero: the SSE stream ends with an `error` event carrying the last lines of stderr, then `done`.
-- The browser disconnects mid-turn: the response stream is cancelled and the runtime process is killed.
+- The browser disconnects mid-turn: the response stream is cancelled and the run goes on; the page reattaches on reload (Background runs).
+- A turn never ends: the run timeout stops it. ai-space restarts mid-turn: the turn gets the drain time, then is stopped and recorded as interrupted.
 - Two people reorder at once: last write wins; the layout is small enough that this is acceptable.
 - An icon path points outside the app directory: 404.

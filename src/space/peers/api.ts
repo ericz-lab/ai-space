@@ -15,6 +15,9 @@ import { peerId } from "./merge.ts";
  *   GET   /api/peers/:peer/widgets/:app/:name/embed     │ the token and extra headers added, the
  *   POST  /api/peers/:peer/agents/:app/:agent/chat      │ answer streamed back as is
  *   GET   /api/peers/:peer/agents/:app/:agent/sessions[/:sid] │
+ *   GET   /api/peers/:peer/agents/runs                  │
+ *   GET   /api/peers/:peer/agents/:app/:agent/runs[/:id[/events]] │
+ *   POST  /api/peers/:peer/agents/:app/:agent/runs/:id/stop │
  *   GET   /api/peers/:peer/apps/:app/proxy/api/*        ┘ (the peer app's own API; docs/peers.md)
  *
  * Only these paths are forwarded; anything else under /api/peers/ is 404 on
@@ -112,8 +115,14 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
     "/api/peers/:peer/apps/:app/appcolor": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/avatar": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/widgets/:app/:name/embed": { GET: proxy(FORWARD_TIMEOUT_MS) },
-    // A chat stream stays open as long as the peer's does; the browser leaving aborts it.
+    // A chat stream stays open as long as the peer's does; the browser leaving only detaches it,
+    // the turn goes on on the peer as a background run (docs/panel.md#chat).
     "/api/peers/:peer/agents/:app/:agent/chat": { POST: proxy() },
+    "/api/peers/:peer/agents/runs": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/runs": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/runs/:id": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/runs/:id/events": { GET: proxy() },
+    "/api/peers/:peer/agents/:app/:agent/runs/:id/stop": { POST: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/sessions": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/sessions/:sid": { GET: proxy(FORWARD_TIMEOUT_MS) },
     // An app on this hub reading a peer app's API; the peer bounds the call with its own timeout.

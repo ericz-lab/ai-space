@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
-import { SessionStore, createAgentRoutes } from "./space/agents/index.ts";
+import { RunRegistry, SessionStore, createAgentRoutes } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, IconPacks, LayoutStore, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
 import { ModelService, ModelStore, createModelRoutes, recordAgentRun } from "./space/model/index.ts";
@@ -119,6 +119,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const layout = new LayoutStore(store.db);
   const icons = new IconPacks(ws.home, store.db);
   const sessions = new SessionStore(store.db);
+  // Panel chat turns run in the background: a page closing does not stop them (docs/panel.md#chat).
+  const agentRuns = new RunRegistry(store.db, { timeoutMs: config.chatTimeoutMs });
   const health = new HealthProbe();
   const widgets = new WidgetFeed(registry);
   const { peers: peerConfigs, errors: peerErrors } = loadPeers(env);
@@ -281,7 +283,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) }
         : {}),
   });
-  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: (app) => storage.envFor(app), peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
+  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: (app) => storage.envFor(app), peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");
@@ -363,8 +365,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     terminal.stop();
     router.stop();
     const at = Date.now();
-    const [runs, calls] = await Promise.all([scheduler.drain(config.drainMs), model.drain(config.drainMs)]);
-    console.log(`[space] drained in ${Date.now() - at}ms: ${runs.finished} run(s) finished, ${runs.aborted} aborted; ${calls.finished} model call(s) finished, ${calls.interrupted} interrupted`);
+    const [runs, calls, chats] = await Promise.all([scheduler.drain(config.drainMs), model.drain(config.drainMs), agentRuns.shutdown(config.drainMs)]);
+    console.log(`[space] drained in ${Date.now() - at}ms: ${runs.finished} run(s) finished, ${runs.aborted} aborted; ${calls.finished} model call(s) finished, ${calls.interrupted} interrupted; ${chats.finished} chat turn(s) finished, ${chats.interrupted} interrupted`);
     server.stop();
     await bus.idle();
     await notify.idle();
@@ -379,7 +381,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
 
-  return { supervisor, store, storage, scheduler, bus, busStore, notify, notifyStore, model, modelStore, chat, chatStore, registry, peers, server, backups };
+  return { supervisor, store, storage, scheduler, bus, busStore, notify, notifyStore, model, modelStore, chat, chatStore, registry, peers, server, backups, agentRuns };
 }
 if (import.meta.main) {
   // The unit runs `bun src/index.ts` with no word: that is `start`. `bin/space` with no word is `help`.

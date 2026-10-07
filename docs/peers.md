@@ -74,7 +74,8 @@ Present only when `SPACE_HUB_TOKEN` is set; every route requires `Authorization:
 | `GET /api/peer/apps/:app/appcolor` | `/api/panel/appcolor?app=` | |
 | `GET /api/peer/agents/:app/:agent/avatar` | `/api/agents/:app/:agent/avatar` | |
 | `GET /api/peer/widgets/:app/:name/embed` | `/api/widgets/:app/:name/embed` | The proxied embed page, `?theme=` passed through. |
-| `POST /api/peer/agents/:app/:agent/chat` | `/api/agents/:app/:agent/chat` | The same body, the same SSE stream. Sessions are recorded on the peer. |
+| `POST /api/peer/agents/:app/:agent/chat` | `/api/agents/:app/:agent/chat` | The same body, the same SSE stream, the run id in `x-run-id`. Sessions and runs are recorded on the peer. |
+| `GET /api/peer/agents/runs`, `GET /api/peer/agents/:app/:agent/runs[/:id[/events]]`, `POST /api/peer/agents/:app/:agent/runs/:id/stop` | the same under `/api/agents/` | The peer's background chat runs: list, replay and follow, stop ([panel.md](panel.md#background-runs)). |
 | `GET /api/peer/agents/:app/:agent/sessions[/:sid]` | `/api/agents/:app/:agent/sessions[/:sid]` | |
 | `GET /api/peer/apps/:app/proxy/api/*` | `http://127.0.0.1:<service.port>/api/*` | The peer app's own API, for an app on the hub that reads its counterpart on the peer (the usage app pulls each machine's rows this way). GET only, only paths under the app's `/api/`, only apps with a service; the query string is passed through, the answer streamed back as is, 60 s limit. |
 | `GET /api/peer/terminal`, `POST /api/peer/terminal/sessions`, `DELETE /api/peer/terminal/sessions/:id`, `GET /api/peer/terminal/ws` | `/api/terminal…` | Present only while the terminal is enabled on the peer (`SPACE_TERMINAL_ENABLED`); the snapshot then carries `terminal: true`. A session on the peer, opened and bridged by the hub ([terminal.md](terminal.md#peers)). |
@@ -90,7 +91,7 @@ Module `src/space/peers/`:
 | File | Holds |
 | --- | --- |
 | `config.ts` | `SPACE_PEER_*` parsing: name, URL, token, extra headers, refresh. |
-| `client.ts` | One client per peer: `refresh()` on its own timer with the last good snapshot kept, `health()`, `forward(req, path)` for the proxied routes. Timeouts: 8 s for a snapshot, none for a chat stream (it stays open as long as the peer's does; the browser leaving aborts it), 8 s for the other forwards. |
+| `client.ts` | One client per peer: `refresh()` on its own timer with the last good snapshot kept, `health()`, `forward(req, path)` for the proxied routes. Timeouts: 8 s for a snapshot, none for a chat stream (it stays open as long as the peer's does; the browser leaving detaches it, the turn goes on on the peer), 8 s for the other forwards. |
 | `store.ts` | The last good snapshot per peer in `space.db` (`peer_snapshots`), so a hub restart while a peer is down still lists its apps, muted. A peer dropped from `.env` loses its row at boot. |
 | `merge.ts` | Turns a snapshot into hub views: prefixes ids, sets `peer`, rewrites icon, avatar and embed routes to the hub's proxy, applies the hub's hidden set, marks stale entries. |
 | `hub.ts` | Every configured peer and the merged lists the panel appends. |

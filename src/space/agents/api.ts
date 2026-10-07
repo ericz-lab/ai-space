@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { AppCapabilities } from "../bus/bus.ts";
@@ -12,7 +13,8 @@ import { MODEL_TIERS } from "../runtimes/types.ts";
 import type { Manifest, ManifestAgent } from "../scheduler/manifest.ts";
 import { loadAppEnv } from "../scheduler/targets.ts";
 import type { Workspace } from "../workspace.ts";
-import { MODEL_RE, SESSION_ID_RE, chatResponse } from "./runtime.ts";
+import { MODEL_RE, SESSION_ID_RE, runResponse } from "./runtime.ts";
+import { RunBusyError, RunClosedError, RunRegistry } from "./runs.ts";
 import type { SessionStore } from "./sessions.ts";
 import { readTranscript } from "./transcript.ts";
 
@@ -20,7 +22,12 @@ import { readTranscript } from "./transcript.ts";
  * HTTP surface for agents, shaped as a Bun.serve `routes` table.
  *
  *   GET  /api/agents                              every agent of every visible app, plus the space agent, then the peers' agents
- *   POST /api/agents/:app/:agent/chat             { message, sessionId?, model?, permissionMode? } → SSE
+ *   POST /api/agents/:app/:agent/chat             { message, sessionId?, model?, permissionMode? } → SSE of a new background run (x-run-id)
+ *   GET  /api/agents/runs?recent=<s>&agent=        runs newest first: running ones and those that ended in the last `recent` seconds
+ *   GET  /api/agents/:app/:agent/runs              the agent's runs (same query)
+ *   GET  /api/agents/:app/:agent/runs/:id          one run
+ *   GET  /api/agents/:app/:agent/runs/:id/events?after=<seq>   SSE: replay after `seq`, then live
+ *   POST /api/agents/:app/:agent/runs/:id/stop     stop a running turn
  *   GET  /api/agents/:app/:agent/sessions         recent sessions
  *   GET  /api/agents/:app/:agent/sessions/:sid    restored transcript
  *
@@ -53,6 +60,10 @@ export type AgentsApiOptions = {
   icons?: IconPacks;
   /** The bus catalogue (local apps and peers'), appended to every agent's system prompt (docs/events.md). */
   capabilities?: () => (AppCapabilities & { peer?: string })[];
+  /** Chat turns as background runs; default: a registry over an in-memory database. */
+  runs?: RunRegistry;
+  /** SSE keepalive interval (tests). */
+  heartbeatMs?: number;
 };
 
 /** The space's own agent: the default chat identity, working in the workspace root. */
@@ -111,6 +122,20 @@ const MAX_CONTEXT = 24_000;
 
 export function createAgentRoutes(opts: AgentsApiOptions): Routes {
   const { registry, layout, sessions } = opts;
+  const runs = opts.runs ?? new RunRegistry(new Database(":memory:"));
+  /** The `recent` and `limit` query of a run listing. */
+  const listQuery = (req: Request) => {
+    const q = new URL(req.url).searchParams;
+    const recent = Number(q.get("recent"));
+    const limit = Number(q.get("limit"));
+    return { ...(q.get("recent") !== null && Number.isFinite(recent) && recent >= 0 ? { recentMs: recent * 1000 } : {}), ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}) };
+  };
+  /** The run `:id` of the agent `:app/:agent`, or a 404. */
+  const runOf = (req: Request & { params: Record<string, string> }) => {
+    const run = runs.get(req.params.id ?? "");
+    if (!run || run.agent !== `${req.params.app}/${req.params.agent}`) throw new NotFound(`unknown run: ${req.params.id}`);
+    return run;
+  };
   const baseDefault = () => opts.baseDefaultModel?.() ?? opts.defaultModel;
 
   /** `runtime/model` for a value: a bare tier on `tierRuntime`, another bare model on `runtime` (else the space's default runtime). */
@@ -235,12 +260,54 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const model = tier && !opts.runtimes.tierOptions().some((o) => o.value === selected) ? undefined : opts.runtimes.resolve(selected).model;
         const permissionMode = typeof body.permissionMode === "string" ? body.permissionMode : undefined;
         const env: Record<string, string | undefined> = { ...process.env, ...(await loadAppEnv(agent.cwd)), ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}) };
-        return chatResponse(
-          runtime,
-          // The manifest's tool list is Claude Code's syntax; other runtimes bound the agent by the permission mode's sandbox.
-          { message, sessionId, model, permissionMode, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
-          { onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model) },
-        );
+        let run;
+        try {
+          run = runs.start({
+            agent: agent.id,
+            runtime,
+            model,
+            // The manifest's tool list is Claude Code's syntax; other runtimes bound the agent by the permission mode's sandbox.
+            turn: { message, sessionId, model, permissionMode, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
+            onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model),
+          });
+        } catch (e) {
+          if (e instanceof RunBusyError) return error(409, e.message);
+          if (e instanceof RunClosedError) return error(503, e.message);
+          throw e;
+        }
+        return runResponse(runs, run.id, 0, { heartbeatMs: opts.heartbeatMs })!;
+      }),
+    },
+
+    "/api/agents/runs": {
+      GET: wrap((req) => {
+        const agent = new URL(req.url).searchParams.get("agent");
+        return json({ ok: true, runs: runs.list({ ...listQuery(req), ...(agent ? { agent } : {}) }) });
+      }),
+    },
+
+    "/api/agents/:app/:agent/runs": {
+      GET: wrap((req) => json({ ok: true, runs: runs.list({ ...listQuery(req), agent: `${req.params.app}/${req.params.agent}` }) })),
+    },
+
+    "/api/agents/:app/:agent/runs/:id": {
+      GET: wrap((req) => json({ ok: true, run: runOf(req) })),
+    },
+
+    "/api/agents/:app/:agent/runs/:id/events": {
+      GET: wrap((req) => {
+        const run = runOf(req);
+        // `after` from the query, else the browser's own reconnect header.
+        const after = Number(new URL(req.url).searchParams.get("after") ?? req.headers.get("last-event-id") ?? 0);
+        return runResponse(runs, run.id, Number.isFinite(after) && after > 0 ? after : 0, { heartbeatMs: opts.heartbeatMs }) ?? error(404, "unknown run");
+      }),
+    },
+
+    "/api/agents/:app/:agent/runs/:id/stop": {
+      POST: wrap((req) => {
+        const run = runOf(req);
+        const stopped = runs.stop(run.id);
+        return json({ ok: true, stopped, run: runs.get(run.id) });
       }),
     },
 

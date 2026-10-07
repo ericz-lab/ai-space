@@ -22,6 +22,9 @@ import { bearer, tokenEquals } from "../auth.ts";
  *                                                  /api/, is 404; only GET, so nothing is changed from afar)
  *   POST /api/peer/agents/:app/:agent/chat         = /api/agents/:app/:agent/chat
  *   GET  /api/peer/agents/:app/:agent/sessions[/:sid]
+ *   GET  /api/peer/agents/runs                     = /api/agents/runs
+ *   GET  /api/peer/agents/:app/:agent/runs[/:id[/events]]  = /api/agents/:app/:agent/runs…
+ *   POST /api/peer/agents/:app/:agent/runs/:id/stop = /api/agents/:app/:agent/runs/:id/stop
  *   GET  /api/peer/terminal                        = /api/terminal            ┐ only when the terminal is
  *   POST /api/peer/terminal/sessions               = /api/terminal/sessions   │ enabled here; the snapshot
  *   DELETE /api/peer/terminal/sessions/:id         = /api/terminal/sessions/:id │ says so with `terminal: true`
@@ -180,6 +183,11 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     "/api/peer/agents/:app/:agent/chat": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/chat", "POST")) },
     "/api/peer/agents/:app/:agent/sessions": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions", "GET")) },
     "/api/peer/agents/:app/:agent/sessions/:sid": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions/:sid", "GET")) },
+    "/api/peer/agents/runs": { GET: guard(mirror(opts.agents, "/api/agents/runs", "GET")) },
+    "/api/peer/agents/:app/:agent/runs": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs", "GET")) },
+    "/api/peer/agents/:app/:agent/runs/:id": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id", "GET")) },
+    "/api/peer/agents/:app/:agent/runs/:id/events": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id/events", "GET")) },
+    "/api/peer/agents/:app/:agent/runs/:id/stop": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id/stop", "POST")) },
     ...(opts.terminal
       ? {
           "/api/peer/terminal": { GET: guard(mirror(opts.terminal, "/api/terminal", "GET")) },
