@@ -210,6 +210,12 @@ disabled; these are example measurements, not a fixed budget.
 These modes apply to model completions. Scheduler agent execution and persistent
 panel chat keep their existing contracts.
 
+Codex full completions, all panel agents (Base and app agents, including resumed
+sessions), and scheduled agent runs explicitly set `web_search="live"`. Live web
+search is available by default on every execution host, independently of its
+Codex user configuration or the selected sandbox. Slim text-only completions and
+image-only calls retain their tool restrictions.
+
 
 ## Codex agent runs
 

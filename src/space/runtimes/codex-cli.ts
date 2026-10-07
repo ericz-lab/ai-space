@@ -128,7 +128,7 @@ export function codexArgs(bin: string[], input: CompleteInput, dir: string, full
   const common = ["--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", "read-only", "--model", input.model];
   // Explicit web-only lists must not inherit native shell, plugins or MCP tools.
   if (input.mode === "full" && !input.tools.length) {
-    return [...bin, "exec", ...common, "--cd", fullCwd, "-c", 'approval_policy="never"',
+    return [...bin, "exec", ...common, "--cd", fullCwd, "-c", 'approval_policy="never"', "-c", 'web_search="live"',
       ...(input.system ? ["-c", `model_instructions_file=${JSON.stringify(join(dir, "system.txt"))}`] : []), ...images, "-"];
   }
   const config: Record<string, string | number | boolean> = {
@@ -288,7 +288,7 @@ export function parseCodexOutput(raw: string): { text?: string; error?: string; 
 /** Persistent local chat with native context, skills and tools; permissions remain explicit. */
 export function codexChatArgs(turn: ChatTurn): string[] {
   const sandbox = turn.permissionMode === "bypassPermissions" ? "danger-full-access" : turn.permissionMode === "acceptEdits" ? "workspace-write" : "read-only";
-  return ["exec", "--skip-git-repo-check", "--json", "--sandbox", sandbox, "-c", 'approval_policy="never"',
+  return ["exec", "--skip-git-repo-check", "--json", "--sandbox", sandbox, "-c", 'approval_policy="never"', "-c", 'web_search="live"',
     ...(turn.model ? ["--model", turn.model] : []),
     ...(turn.systemPrompt ? ["-c", `developer_instructions=${JSON.stringify(turn.systemPrompt)}`] : []),
     ...(turn.sessionId ? ["resume", turn.sessionId] : []), "-"];
@@ -302,7 +302,7 @@ export function codexChatArgs(turn: ChatTurn): string[] {
  */
 export function codexAgentArgs(run: Pick<AgentRun, "model" | "permissionMode">): string[] {
   const sandbox = run.permissionMode === "bypassPermissions" ? "danger-full-access" : run.permissionMode === "acceptEdits" ? "workspace-write" : "read-only";
-  return ["exec", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", sandbox, "-c", 'approval_policy="never"',
+  return ["exec", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", sandbox, "-c", 'approval_policy="never"', "-c", 'web_search="live"',
     "-c", "shell_environment_policy.ignore_default_excludes=true", ...(run.model ? ["--model", run.model] : []), "-"];
 }
 

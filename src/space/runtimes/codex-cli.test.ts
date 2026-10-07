@@ -22,9 +22,11 @@ describe("Codex completions", () => {
       expect(answer.cwd).toBe(process.cwd());
       for (const flag of ["--ignore-user-config", "--ignore-rules", "--disable", "project_doc_max_bytes=0"]) expect(answer.args).not.toContain(flag);
       expect(answer.args).toContain("read-only");
+      expect(answer.args).toContain('web_search="live"');
       const remote = await codexRemoteCommand(fakeCodexBin(), request);
       const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 5000 });
       expect(result.code).toBe(0);
+      expect(JSON.parse(parseCodexOutput(result.stdout).text!).args).toContain('web_search="live"');
       expect(JSON.parse(parseCodexOutput(result.stdout).text!).system).toBe(system || null);
       expect(await Bun.file(`${remote.dir}/system.txt`).exists()).toBe(false);
     }
@@ -172,6 +174,7 @@ describe("Codex chat", () => {
         const args = codexChatArgs(turn({ sessionId, permissionMode }));
         expect(args[args.indexOf("--sandbox") + 1]).toBe(sandbox!);
         expect(args).toContain('approval_policy="never"');
+        expect(args).toContain('web_search="live"');
         if (sessionId) expect(args.slice(-3)).toEqual(["resume", sessionId, "-"]);
       }
     }
@@ -248,7 +251,11 @@ describe("Codex agent runs", () => {
   });
 
   test("maps the permission mode to a sandbox and keeps the task's token variables for commands", () => {
-    const sandbox = (mode?: "acceptEdits" | "bypassPermissions" | "plan") => { const a = codexAgentArgs({ permissionMode: mode }); return a[a.indexOf("--sandbox") + 1]; };
+    const sandbox = (mode?: "acceptEdits" | "bypassPermissions" | "plan") => {
+      const a = codexAgentArgs({ permissionMode: mode });
+      expect(a).toContain('web_search="live"');
+      return a[a.indexOf("--sandbox") + 1];
+    };
     expect([sandbox(), sandbox("plan"), sandbox("acceptEdits"), sandbox("bypassPermissions")]).toEqual(["read-only", "read-only", "workspace-write", "danger-full-access"]);
     expect(codexAgentArgs({})).toContain("shell_environment_policy.ignore_default_excludes=true");
     expect(codexAgentArgs({})).not.toContain("--model");
