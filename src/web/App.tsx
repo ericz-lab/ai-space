@@ -533,7 +533,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Events open={panel === "events"} onClose={close} onBack={openSettings} />
       <Terminal open={panel === "terminal"} onClose={close} />
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
-      <Chat open={panel === "chat"} agent={chatAgent} onClose={close} onSwitch={openChat} />
+      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} />
     </>
   );
 }

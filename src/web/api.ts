@@ -94,6 +94,21 @@ export type PeerInfo = {
 export type Layout = { order: { apps: string[]; agents: string[]; widgets: string[] }; hidden: string[]; sizes: Record<string, string> };
 
 export type ChatSession = { sid: string; title: string; ts: number; runtime?: string | null; model?: string | null };
+/** A chat turn running, or run, in the background on the server (src/space/agents/runs.ts). */
+export type ChatRun = {
+  id: string;
+  agent: string;
+  sessionId: string | null;
+  sid: string | null;
+  message: string;
+  runtime: string;
+  model: string | null;
+  status: "running" | "done" | "error" | "stopped" | "timeout" | "interrupted";
+  error: string | null;
+  startedAt: number;
+  finishedAt: number | null;
+  lastSeq: number;
+};
 
 export async function getJson<T>(path: string): Promise<T> {
   const r = await fetch(path);

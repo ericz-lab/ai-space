@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime } from "./api.ts";
+import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun } from "./api.ts";
 import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
 import { localized, useLang } from "./i18n.ts";
 
 // Chat window (a floating panel). The server streams the runtime's stream-json events over SSE.
+// - Every turn is a background run on the server (docs/panel.md#chat): closing or refreshing the page
+//   does not stop it. On load, each agent's running or recently ended run is restored and followed.
 // - Mounted permanently (closing only slides it away) so conversations and session ids survive.
 // - Conversations are keyed by agent id and run in parallel: each has its own queue and in-flight turn;
 //   the bookmark bar on the left switches between them, a busy one shows a pulsing dot.
 // - Typewriter smoothing: a burst of text is released at a steady rate per frame.
-// - Messages sent while a turn runs are queued and sent in order; ⏹ interrupts the current turn.
+// - Messages sent while a turn runs are queued in the page and sent in order; ⏹ stops the current run.
 // - Model and write-permission tier are picked in the header and remembered in localStorage.
 
 // Minimal markdown → html (escape first, then mark up): headings, lists, tables, quotes, rules,
@@ -150,9 +152,24 @@ const Ava = ({ icon, fallback = "✨" }: { icon?: string; fallback?: string }) =
 type Msg = { role: "user"; text: string } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; status?: string | null; live?: boolean };
 type Conv = { agent: AgentInfo | null; msgs: Msg[]; sid: string | null; busy: boolean; queued: number };
 const EMPTY_CONV: Conv = { agent: null, msgs: [], sid: null, busy: false, queued: 0 };
-type Runner = { queue: QueuedChatTurn[]; running: boolean; active: { ctrl: AbortController; typer: { target: string } } | null };
+/** The turn a conversation is following: its run (once the server named it) and the stream's abort. */
+type Active = { ctrl: AbortController; typer: { target: string }; base: string; runId: string | null; stopRequested: boolean };
+type Runner = { queue: QueuedChatTurn[]; running: boolean; active: Active | null };
+type TurnSource = { kind: "new"; turn: QueuedChatTurn } | { kind: "attach"; runId: string };
+const RECONNECT_TRIES = 5;
+/** Runs that ended this long ago (seconds) still come back after a page load. */
+const RESTORE_RECENT_S = 1800;
 
-export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean; agent: AgentInfo; onClose: () => void; onSwitch?: (a: AgentInfo) => void }) {
+/** Stop a run on the server; before the server has named it, the stop is sent as soon as it does. */
+async function stopRun(a: Active): Promise<void> {
+  if (!a.runId) {
+    a.stopRequested = true;
+    return;
+  }
+  await fetch(`${a.base}/runs/${encodeURIComponent(a.runId)}/stop`, { method: "POST" }).catch(() => {});
+}
+
+export default function Chat({ open, agent, agents = [], onClose, onSwitch }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void }) {
   const { lang, t } = useLang();
   // Status lines are written into the message state while a turn streams, so they read `t` through a
   // ref: a language change mid-turn applies from the next status on.
@@ -240,12 +257,14 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
     localStorage.setItem("chat-perm", e.target.value);
   };
 
-  // One turn: append an AI bubble to the agent's conversation and fill it from the SSE stream.
-  const runTurn = async (turnKey: string, chatBase: string, turn: QueuedChatTurn) => {
+  // One turn: append an AI bubble to the agent's conversation and fill it from the run's SSE stream.
+  // The turn is a background run on the server: a new one is started by POST /chat, a restored one
+  // is attached by id. A dropped stream reattaches after the last event seen; only ⏹ stops the run.
+  const runTurn = async (turnKey: string, chatBase: string, source: TurnSource) => {
     let aiIdx = -1;
     patch(turnKey, (v) => {
       aiIdx = v.msgs.length;
-      return { ...v, msgs: [...v.msgs, { role: "ai", text: "", tools: [], denied: [], status: tRef.current("chat.starting"), live: true }] };
+      return { ...v, msgs: [...v.msgs, { role: "ai", text: "", tools: [], denied: [], status: tRef.current(source.kind === "new" ? "chat.starting" : "chat.reconnecting"), live: true }] };
     });
     const upd = (fn: (m: Extract<Msg, { role: "ai" }>) => Msg) =>
       patch(turnKey, (v) => {
@@ -278,89 +297,130 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
       pump();
     };
     const ctrl = new AbortController();
-    runner(turnKey).active = { ctrl, typer };
+    const active: Active = { ctrl, typer, base: chatBase, runId: source.kind === "attach" ? source.runId : null, stopRequested: false };
+    runner(turnKey).active = active;
     const setSid = (sid: string) => patch(turnKey, (v) => ({ ...v, sid }));
     let acc = ""; // finished text of this turn (tool calls split it into several assistant messages)
     let streamed = ""; // delta of the current message
+    let lastSeq = 0; // the run's last event seen, to reattach after it
+    let finished = false; // the stream said "done"
     const seenTools = new Set<string>();
     const toolNames = new Map<string, string>();
-    try {
-      const r = await fetch(`${chatBase}/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          ...turn,
-          sessionId: convsRef.current[turnKey]?.sid || undefined,
-        }),
-        signal: ctrl.signal,
-      });
-      if (!r.ok || !r.body) {
-        const j = (await r.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error || `HTTP ${r.status}`);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handle = (ev: any) => {
+      if (ev.type === "system" && ev.subtype === "init") {
+        setSid(ev.session_id);
+        upd((x) => ({ ...x, status: tRef.current("chat.thinkingModel", { model: ev.model || "claude" }) }));
+      } else if (ev.type === "stream_event" && ev.event?.delta?.type === "text_delta") {
+        streamed += ev.event.delta.text;
+        setTarget(acc + streamed);
+      } else if (ev.type === "assistant") {
+        const blocks: { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }[] = ev.message?.content || [];
+        const txt = blocks
+          .filter((b) => b.type === "text")
+          .map((b) => b.text)
+          .join("");
+        if (txt) {
+          acc += (acc ? "\n\n" : "") + txt;
+          streamed = "";
+          setTarget(acc);
+        }
+        for (const b of blocks)
+          if (b.type === "tool_use" && b.id && !seenTools.has(b.id)) {
+            seenTools.add(b.id);
+            toolNames.set(b.id, b.name || "tool");
+            upd((x) => ({ ...x, status: tRef.current("chat.running", { name: b.name || "tool" }), tools: [...x.tools, { name: b.name || "tool", hint: toolHint(b.input) }] }));
+          }
+      } else if (ev.type === "user") {
+        // Tool results: a call the headless run was not allowed to make comes back as an error; show it.
+        // The CLI words it as "requires approval" for commands and "permission … denied" for edits.
+        for (const b of ev.message?.content || []) {
+          if (b.type !== "tool_result" || !b.is_error) continue;
+          const rtxt = typeof b.content === "string" ? b.content : Array.isArray(b.content) ? b.content.map((c: { text?: string }) => c.text || "").join(" ") : "";
+          if (/requires approval|permission|granted|denied/i.test(rtxt)) {
+            const name = toolNames.get(b.tool_use_id) || "tool";
+            upd((x) => (x.denied.includes(name) ? x : { ...x, denied: [...x.denied, name] }));
+          }
+        }
+      } else if (ev.type === "result") {
+        if (ev.session_id) setSid(ev.session_id);
+        if (ev.is_error && !acc) setTarget(String(ev.result || ev.subtype || tRef.current("chat.wentWrong")));
+      } else if (ev.type === "error") {
+        const note = ev.status === "stopped" ? tRef.current("chat.interrupted") : `⚠️ ${ev.error}`;
+        setTarget((typer.target ? typer.target + "\n\n" : "") + note);
+      } else if (ev.type === "done") finished = true;
+    };
+    const open = async (): Promise<Response> => {
+      if (!active.runId && source.kind === "new") {
+        return fetch(`${chatBase}/chat`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...source.turn, sessionId: convsRef.current[turnKey]?.sid || undefined }),
+          signal: ctrl.signal,
+        });
       }
-      const reader = r.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() ?? "";
-        for (const raw of lines) {
-          if (!raw.startsWith("data: ")) continue;
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          let ev: any;
-          try {
-            ev = JSON.parse(raw.slice(6));
-          } catch {
-            continue;
-          }
-          if (ev.type === "system" && ev.subtype === "init") {
-            setSid(ev.session_id);
-            upd((x) => ({ ...x, status: tRef.current("chat.thinkingModel", { model: ev.model || "claude" }) }));
-          } else if (ev.type === "stream_event" && ev.event?.delta?.type === "text_delta") {
-            streamed += ev.event.delta.text;
-            setTarget(acc + streamed);
-          } else if (ev.type === "assistant") {
-            const blocks: { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }[] = ev.message?.content || [];
-            const txt = blocks
-              .filter((b) => b.type === "text")
-              .map((b) => b.text)
-              .join("");
-            if (txt) {
-              acc += (acc ? "\n\n" : "") + txt;
-              streamed = "";
-              setTarget(acc);
-            }
-            for (const b of blocks)
-              if (b.type === "tool_use" && b.id && !seenTools.has(b.id)) {
-                seenTools.add(b.id);
-                toolNames.set(b.id, b.name || "tool");
-                upd((x) => ({ ...x, status: tRef.current("chat.running", { name: b.name || "tool" }), tools: [...x.tools, { name: b.name || "tool", hint: toolHint(b.input) }] }));
+      return fetch(`${chatBase}/runs/${encodeURIComponent(active.runId!)}/events?after=${lastSeq}`, { signal: ctrl.signal });
+    };
+    let retries = 0;
+    try {
+      while (!finished) {
+        let r: Response;
+        try {
+          r = await open();
+        } catch (e) {
+          // The network blinked before the stream opened: reattach to a run we know of, a few times.
+          if ((e as Error).name === "AbortError" || !active.runId || retries >= RECONNECT_TRIES) throw e;
+          retries++;
+          upd((x) => ({ ...x, status: tRef.current("chat.reconnecting") }));
+          await new Promise((res) => setTimeout(res, 1000 * retries));
+          continue;
+        }
+        if (!r.ok || !r.body) {
+          const j = (await r.json().catch(() => ({}))) as { error?: string };
+          throw new Error(j.error || `HTTP ${r.status}`);
+        }
+        active.runId ||= r.headers.get("x-run-id");
+        if (active.stopRequested) void stopRun(active);
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        let seq: number | null = null;
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            retries = 0;
+            buf += dec.decode(value, { stream: true });
+            const lines = buf.split("\n");
+            buf = lines.pop() ?? "";
+            for (const raw of lines) {
+              if (raw.startsWith("id: ")) seq = Number(raw.slice(4));
+              if (!raw.startsWith("data: ")) continue;
+              let ev: unknown;
+              try {
+                ev = JSON.parse(raw.slice(6));
+              } catch {
+                continue;
               }
-          } else if (ev.type === "user") {
-            // Tool results: a call the headless run was not allowed to make comes back as an error; show it.
-            // The CLI words it as "requires approval" for commands and "permission … denied" for edits.
-            for (const b of ev.message?.content || []) {
-              if (b.type !== "tool_result" || !b.is_error) continue;
-              const rtxt = typeof b.content === "string" ? b.content : Array.isArray(b.content) ? b.content.map((c: { text?: string }) => c.text || "").join(" ") : "";
-              if (/requires approval|permission|granted|denied/i.test(rtxt)) {
-                const name = toolNames.get(b.tool_use_id) || "tool";
-                upd((x) => (x.denied.includes(name) ? x : { ...x, denied: [...x.denied, name] }));
-              }
+              if (seq !== null && Number.isFinite(seq)) lastSeq = seq;
+              seq = null;
+              handle(ev);
             }
-          } else if (ev.type === "result") {
-            if (ev.session_id) setSid(ev.session_id);
-            if (ev.is_error && !acc) setTarget(String(ev.result || ev.subtype || tRef.current("chat.wentWrong")));
-          } else if (ev.type === "error") {
-            setTarget((typer.target ? typer.target + "\n\n" : "") + `⚠️ ${ev.error}`);
           }
+        } catch (e) {
+          if ((e as Error).name === "AbortError" || !active.runId || retries >= RECONNECT_TRIES) throw e;
+        }
+        // Ended without "done": the connection dropped, the run goes on; reattach after the last event.
+        if (!finished) {
+          if (!active.runId || retries >= RECONNECT_TRIES) throw new Error(tRef.current("chat.streamLost"));
+          retries++;
+          upd((x) => ({ ...x, status: tRef.current("chat.reconnecting") }));
+          await new Promise((res) => setTimeout(res, 500 * retries));
         }
       }
     } catch (e) {
       const err = e as Error;
-      if (err.name === "AbortError") setTarget((typer.target ? typer.target + "\n\n" : "") + tRef.current("chat.interrupted"));
+      if (err.name === "AbortError") setTarget((typer.target ? typer.target + "\n\n" : "") + tRef.current("chat.detached"));
       else setTarget((typer.target ? typer.target + "\n\n" : "") + `⚠️ ${err.message || err}`);
     }
     if (!typer.target) typer.target = tRef.current("chat.noOutput");
@@ -370,23 +430,70 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
       typer.timer = null;
     }
     upd((x) => ({ ...x, text: typer.target, status: null, live: false }));
-    runner(turnKey).active = null;
+    if (runner(turnKey).active === active) runner(turnKey).active = null;
   };
 
-  const drain = async (k: string, chatBase: string) => {
+  const drain = async (k: string, chatBase: string, first?: TurnSource) => {
     const r = runner(k);
     if (r.running) return;
     r.running = true;
     patch(k, (v) => ({ ...v, busy: true }));
+    if (first) await runTurn(k, chatBase, first);
     while (r.queue.length) {
       const turn = r.queue.shift()!;
       const queued = r.queue.length; // read before the lazy state update runs
       patch(k, (v) => ({ ...v, queued }));
-      await runTurn(k, chatBase, turn);
+      await runTurn(k, chatBase, { kind: "new", turn });
     }
     r.running = false;
     patch(k, (v) => ({ ...v, busy: false, queued: 0 }));
   };
+
+  // After a page load: the latest run of each agent that is still going, or ended in the last half
+  // hour, comes back as that agent's conversation: the session's earlier turns from its transcript,
+  // the run's message, then its events replayed and followed live.
+  const restoreRuns = async (list: AgentInfo[]) => {
+    const peers = [...new Set(list.map((a) => a.peer).filter((p): p is string => !!p))];
+    const sources = [undefined, ...peers];
+    const found = await Promise.all(
+      sources.map((peer) =>
+        getJson<{ runs: ChatRun[] }>(`${peer ? `/api/peers/${encodeURIComponent(peer)}` : "/api"}/agents/runs?recent=${RESTORE_RECENT_S}`)
+          .then((j) => j.runs.map((run) => ({ peer, run })))
+          .catch(() => []),
+      ),
+    );
+    const latest = new Map<string, { agent: AgentInfo; run: ChatRun }>();
+    for (const { peer, run } of found.flat()) {
+      const a = list.find((x) => (x.peer ?? undefined) === peer && `${x.app}/${x.name}` === run.agent);
+      if (a && !latest.has(a.id)) latest.set(a.id, { agent: a, run }); // newest first
+    }
+    for (const { agent: a, run } of latest.values()) {
+      const k = a.id;
+      if (runner(k).running || convsRef.current[k]?.msgs.length) continue;
+      const b = agentBase(a);
+      let history: Msg[] = [];
+      if (run.sessionId) {
+        try {
+          const j = await getJson<{ messages: ({ role: "user"; text: string } | { role: "ai"; text: string; tools: Tool[] })[] }>(`${b}/sessions/${encodeURIComponent(run.sessionId)}`);
+          history = j.messages.map((m) => (m.role === "ai" ? { denied: [], ...m } : m));
+          // The transcript may already hold this turn: cut it at the run's own message.
+          const last = history.findLastIndex((m) => m.role === "user");
+          if (last >= 0 && history[last]!.text.trim() === run.message.trim()) history = history.slice(0, last);
+        } catch {
+          /* no transcript: the run alone */
+        }
+      }
+      if (runner(k).running || convsRef.current[k]?.msgs.length) continue;
+      patch(k, (v) => ({ ...v, agent: v.agent || a, msgs: [...history, { role: "user", text: run.message }], sid: run.sid ?? run.sessionId }));
+      void drain(k, b, { kind: "attach", runId: run.id });
+    }
+  };
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || !agents.length) return;
+    restoredRef.current = true;
+    void restoreRuns(agents);
+  }, [agents]);
 
   const send = (text: string) => {
     patch(key, (v) => ({ ...v, agent: agent || v.agent, msgs: [...v.msgs, { role: "user", text }] }));
@@ -401,12 +508,23 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
     send(text);
   };
 
-  const stop = () => runner(key).active?.ctrl.abort();
+  // ⏹ stops the run on the server; its stream then ends with the "stopped" error and "done".
+  const stop = () => {
+    const a = runner(key).active;
+    if (a) void stopRun(a);
+  };
+  // Leaving a conversation (new one, a past session) stops its running turn and detaches.
+  const leave = (k: string) => {
+    const r = runner(k);
+    r.queue = [];
+    if (r.active) {
+      void stopRun(r.active);
+      r.active.ctrl.abort();
+    }
+  };
 
   const reset = () => {
-    const r = runner(key);
-    r.queue = [];
-    r.active?.ctrl.abort();
+    leave(key);
     patch(key, (v) => ({ ...v, msgs: [], sid: null }));
     setHist(null);
     inputRef.current?.focus();
@@ -439,9 +557,7 @@ export default function Chat({ open, agent, onClose, onSwitch }: { open: boolean
       const option = agent.modelOptions.find((o) => o.runtime === runtime && o.model === s.model);
       saveBaseChoice(key, option?.value ?? (s.model ? `${runtime}/${s.model}` : ""));
     }
-    const r = runner(key);
-    r.queue = [];
-    r.active?.ctrl.abort();
+    leave(key);
     let msgs: Msg[];
     try {
       const j = await getJson<{ messages: ({ role: "user"; text: string } | { role: "ai"; text: string; tools: Tool[] })[] }>(`${base}/sessions/${encodeURIComponent(s.sid)}`);
