@@ -4,5 +4,7 @@
 # Enable once per clone with `bun run hooks`; skip one push with `git push --no-verify`.
 set -e
 cd "$(git rev-parse --show-toplevel)"
+# Tests create temporary repositories; do not let them inherit this checkout.
+unset $(git rev-parse --local-env-vars)
 bun install --frozen-lockfile >/dev/null
 bun run check
