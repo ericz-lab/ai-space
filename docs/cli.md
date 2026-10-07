@@ -18,7 +18,7 @@ One executable, `space`, on `PATH` on every machine that runs ai-space, and on t
 
 ```
 space status                          the machine at a glance
-space app     ls | show | sync | service | start | stop | restart | hide | unhide | uninstall | env | new
+space app     ls | show | sync | deploy | service | start | stop | restart | hide | unhide | uninstall | env | new
 space task    ls | show | run | runs | enable | disable | create | rm
 space logs    <app> [-n 100] [-f]     an app's log, or `space logs space` for ai-space itself
 space model   usage | calls | status | run | import
@@ -62,6 +62,7 @@ Rules:
 | `space app ls [--panel]` | every app: title, status, service health, url, hidden (`--panel`: only what the panel shows) | `GET /api/apps?all=1` |
 | `space app show APP` | the manifest as synced, storage, tasks, agents, widgets, last backup | `GET /api/apps/:app`, `.../storage`, `.../backups` |
 | `space app sync [APP]` | re-read one `space.yaml` or every app directory | `POST /api/apps/sync`, `POST /api/apps/:app/sync` |
+| `space app deploy APP [--rev REV] [--git-dir DIR] [--no-restart]` | on the host: check out `REV`, run the manifest's `deploy` install, check and build commands, then sync and restart; a failure restores the previous tree and leaves the service running, exit 1 ([app-spec.md](app-spec.md#deploy)) | disk (`src/space/deploy/`), then `POST /api/apps/:app/sync`, `GET`/`POST /api/apps/:app/service` |
 | `space app service APP` | who runs the service (`SPACE_SUPERVISOR`), the unit, its state, restarts, since when, the last sync's outcome ([supervision.md](supervision.md)) | `GET /api/apps/:app/service` |
 | `space app start` / `stop` / `restart APP` | the space's unit of the app, by hand; under `operator` the answer names the `systemctl` command instead | `POST /api/apps/:app/service` |
 | `space app supervise APP [space\|operator]` | hand the app from the operator's unit to the space's (or back), waiting for health and rolling back on failure; exit 1 when rolled back ([supervision.md](supervision.md#hand-over)) | `POST /api/apps/:app/service` `{ action: "supervise" }` |

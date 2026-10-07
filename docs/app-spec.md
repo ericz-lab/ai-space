@@ -90,7 +90,7 @@ i18n:                              # translations of the display text, by langua
 | `repo` | string | The origin URL. |
 | `i18n` | mapping | Translations of `title` and `description`, and by name of the agents', widgets' and checks' text, keyed by language tag (`zh`, `zh-Hant`, `pt-BR`). The panel shows the reader's language when the manifest has it and the plain field otherwise; names are never translated. Only declared agent, widget and check names may appear. See [i18n](i18n.md). |
 
-Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `events`, `provides`, `storage`, `backup`, `model`, `checks`, `notify`. Each is optional.
+Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `events`, `provides`, `storage`, `backup`, `model`, `checks`, `notify`, `deploy`. Each is optional.
 
 ```yaml
 i18n:
@@ -342,6 +342,26 @@ An assertion is a field path (`$.a.b`, `$.items[0].count`) and one operator:
 
 Business calendars belong to the app: a market app answers `open` and `done` for the session it expects today and lets `when` turn holidays off, instead of the page guessing. A check needs a `service`. `GET /api/checks` lists the checks of every active app on this space with the URL to read and the `i18n` titles; the inspection page shows peers through their own page's snapshot.
 
+### `deploy`
+
+What `space app deploy` runs in the app directory after it checks out a new revision and before the service restarts. Nothing here runs at boot or on a sync: a deploy is the only time an app is built.
+
+```yaml
+deploy:
+  install: bun install --frozen-lockfile   # default when the checkout has bun.lock; [] for none
+  check: [bun run typecheck, bun test]      # must pass before anything is built
+  build: bun run build                      # the artifacts the service runs from
+```
+
+Each key takes one command or a list (at most 10), run in order by `/bin/sh -c` in the app directory with the deploying shell's environment (the hook's repository variables removed, the Bun running the deploy first on `PATH`), not the service's: a test never sees the production `DATABASE_URL`. The first command that exits non-zero stops the deploy. `space app deploy APP --rev REV`, run on the host (normally as the whole body of the app's post-receive hook, template `skills/space-app/templates/deploy/post-receive`):
+
+1. puts `REV` into `<workspace>/apps/<app>/`: with `--git-dir` the directory is that bare repository's work tree (`git read-tree -u --reset`, which leaves the bare repository's `HEAD` on its branch); without it the directory is a clone and is `reset --hard`; without `--rev` the commands run on what is already there (an rsync deploy);
+2. parses `space.yaml` as a sync would, so a manifest the space would reject fails here;
+3. runs `install`, `check`, `build`;
+4. syncs the app, restarts its unit unless the sync already did (under `SPACE_SUPERVISOR=space`; otherwise it says the operator's unit needs a restart), and waits up to 30 seconds for `service.health`.
+
+A failure in steps 2 and 3 puts the previous tree back and runs its install again, so the files match the process that keeps running, and exits 1 without touching the service. The build runs in the live directory while the old process keeps serving, so the host needs memory for both; a Bun app that runs TypeScript directly has no `build` and only `check`s.
+
 ### `notify`
 
 Outbound notifications to chat apps (Telegram, Discord, Slack, Feishu, DingTalk, WeCom, Bark, ntfy, a generic webhook). The full reference is in [notify.md](notify.md). Channels and their credentials are configured once by the operator in `<workspace>/.env`; the app only says which of them it may use:
@@ -409,6 +429,7 @@ Commit messages follow Conventional Commits, as in ai-space itself.
 | --- | --- | --- |
 | Create | `space app new <name> [--dir D] [--title T] [--port N] [--no-github]` (also `bun run new-app`) | Copies the `space-app` skill's `templates/`, fills in the name, title and port, `git init` and first commit, private GitHub repository under `SPACE_GITHUB_OWNER` when configured, registers nothing else: the directory under `apps/` is the registration. The shared skill [`space-app`](../skills/space-app/SKILL.md) covers adopting an existing project and every later change. |
 | Validate | `bun run validate [<dir>]` | Parses `space.yaml` against the schema and the semantic rules (unique ports, referenced files exist, placeholders resolvable). Exit code 1 with one line per problem. |
+| Deploy | `space app deploy <name> --git-dir ~/<name>.git --rev main` on the host, the body of the post-receive hook | Checks out the revision, runs the manifest's [`deploy`](#deploy) commands (install, type check, tests, build), and only when all pass syncs and restarts the service; a failure restores the previous tree and leaves the service running. |
 | Sync | automatic on boot and on `POST /api/apps/sync` | Discovers every `apps/*/space.yaml`, provisions storage, registers tasks, starts services, publishes agents and widgets. Idempotent. |
 | Pause / archive | edit `status:` and sync | Tasks and service stop; storage stays. |
 | Remove | drop the app on the panel's uninstall zone, or `DELETE /api/apps/<name>`, or delete the directory and sync | The service is stopped (the space's unit is removed under `SPACE_SUPERVISOR=space`, even when removing by hand and syncing; otherwise through the operator's `SPACE_SERVICE_STOP` command, not when removing by hand), the directory leaves `apps/` (a checkout goes to `<workspace>/trash/`, a symlink is unlinked), tasks are marked orphaned, agents and widgets disappear. `<workspace>/data/<name>/` is kept until removed by hand, and so are the repository, an operator's unit file and the hostname: retiring an app for good means also `systemctl disable` of such a unit, dropping its tunnel ingress and archiving its repository. See [panel.md](panel.md#arranging-hiding-and-uninstalling-apps). |

@@ -51,6 +51,10 @@ tasks:
       http: { method: POST, url: "http://127.0.0.1:${PORT}/jobs/refresh" }
     notify: { when: [error] }
 
+# What `space app deploy` runs before a restart; a failure keeps the running service (docs/app-spec.md#deploy).
+# deploy:
+#   check: bun run typecheck         # install defaults to `bun install --frozen-lockfile` with a bun.lock
+
 # Databases and blob stores ai-space provisions; the URLs arrive through space.env.
 storage:
   database: sqlite                 # sqlite | postgres, or databases: [name, ...]

@@ -2,6 +2,7 @@ import { basename, join } from "node:path";
 import { parseEventsSpec, parseProvidesSpec, triggersFromConsumes } from "../bus/spec.ts";
 import { type ManifestCheck, parseChecksSpec } from "../checks/spec.ts";
 import type { Capability, EventsSpec } from "../bus/types.ts";
+import { type DeploySpec, parseDeploySpec } from "../deploy/spec.ts";
 import { type AppModelSpec, parseAppModelSpec } from "../model/app-models.ts";
 import { PERMISSION_MODES, type PermissionMode, RUNTIME_NAME_PATTERN } from "../runtimes/types.ts";
 import { parseTriggers } from "./events.ts";
@@ -28,7 +29,7 @@ export const MANIFEST_FILE = "space.yaml";
 export const SPEC_VERSION = 1;
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]*$/i;
-const TOP_LEVEL_KEYS = ["spec", "name", "title", "description", "icon", "url", "status", "repo", "i18n", "service", "agents", "widgets", "skills", "tasks", "storage", "notify", "backup", "events", "provides", "model", "checks"];
+const TOP_LEVEL_KEYS = ["spec", "name", "title", "description", "icon", "url", "status", "repo", "i18n", "service", "agents", "widgets", "skills", "tasks", "storage", "notify", "backup", "events", "provides", "model", "checks", "deploy"];
 /** A language tag as `i18n:` keys use it: a primary tag and optional subtags (`zh`, `zh-Hant`, `pt-BR`). */
 const LANG_TAG_RE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
@@ -139,6 +140,8 @@ export type Manifest = {
   model?: AppModelSpec;
   /** The `checks:` section: daily work an inspection page shows (docs/app-spec.md#checks). */
   checks?: ManifestCheck[];
+  /** The `deploy:` section: install, check and build commands `space app deploy` runs before a restart. */
+  deploy?: DeploySpec;
 };
 
 export async function loadManifest(dir: string): Promise<Manifest> {
@@ -197,6 +200,7 @@ export function parseManifest(yaml: string, dir: string): Manifest {
   const events = doc.events === undefined ? undefined : parseEventsSpec(doc.events);
   const provides = doc.provides === undefined ? undefined : parseProvidesSpec(doc.provides);
   const model = doc.model === undefined ? undefined : parseAppModelSpec(doc.model);
+  const deploy = parseDeploySpec(doc.deploy);
   if (events) {
     for (const [name, triggers] of triggersFromConsumes(events, tasks.map((t) => t.name))) {
       const task = tasks.find((t) => t.name === name)!;
@@ -226,6 +230,7 @@ export function parseManifest(yaml: string, dir: string): Manifest {
     ...(provides?.length ? { provides } : {}),
     ...(model ? { model } : {}),
     ...(checks.length ? { checks } : {}),
+    ...(deploy ? { deploy } : {}),
   };
 }
 

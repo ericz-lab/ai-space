@@ -1,0 +1,11 @@
+#!/bin/bash
+# Bare-repository hook on the host: install as ~/my-app.git/hooks/post-receive (chmod +x).
+# `space app deploy` checks main out into the app directory, runs space.yaml's deploy commands
+# (install, type check, tests, build) and restarts the service only when all of them pass; on a
+# failure the previous tree goes back and the running service is left alone.
+# Contract: ai-space docs/app-spec.md#deploy. Set SPACE_HOME here when the workspace is not ~/.ai-space.
+set -e; unset GIT_DIR
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+APP=my-app
+mkdir -p "${SPACE_HOME:-$HOME/.ai-space}/apps/$APP"
+exec "$HOME/.local/bin/space" app deploy "$APP" --git-dir "$HOME/$APP.git" --rev main

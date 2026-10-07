@@ -1,11 +1,12 @@
 import { openStorage } from "../space/config.ts";
 import { parseArgs, need, noMore } from "./args.ts";
 import { type TaskView, confirm, listTasks, scheduleText, taskRef } from "./common.ts";
+import { deployVerb } from "./deploy.ts";
 import { newApp } from "./newapp.ts";
 import { ago, bytes, until } from "./output.ts";
 import { ApiError, type Ctx, type Noun, UsageError } from "./types.ts";
 
-/** `space app`: the apps of the workspace, as the panel sees them, plus the disk-bound `env` and `new`. */
+/** `space app`: the apps of the workspace, as the panel sees them, plus the disk-bound `env`, `new` and `deploy`. */
 
 export type AppView = {
   id: string;
@@ -232,11 +233,12 @@ export function shellQuote(v: string): string {
 
 export const appNoun: Noun = {
   name: "app",
-  summary: "the apps of the workspace: list, show, sync, service, start/stop/restart, supervise, hide, uninstall, env, new",
+  summary: "the apps of the workspace: list, show, sync, deploy, service, start/stop/restart, supervise, hide, uninstall, env, new",
   verbs: {
     ls: { usage: "[--panel]", summary: "every app (--panel: only what the panel shows)", run: ls },
     show: { usage: "APP", summary: "manifest, storage, backups and tasks of one app", run: show },
     sync: { usage: "[APP]", summary: "re-read one space.yaml, or every app directory", run: sync },
+    deploy: { usage: "APP [--rev REV] [--git-dir DIR] [--no-restart]", summary: "on the host: check out, install, check and build, then sync and restart; a failure restores the previous tree", run: deployVerb() },
     service: { usage: "APP", summary: "who runs the app's service, its unit, state, restarts, the last sync's outcome", run: service },
     start: { usage: "APP", summary: "start the app's unit (SPACE_SUPERVISOR=space)", run: control("start") },
     stop: { usage: "APP", summary: "stop the app's unit until its next sync (set status: paused to keep it stopped)", run: control("stop") },
