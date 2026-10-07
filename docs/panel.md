@@ -71,7 +71,19 @@ Two tables in `space.db`, both panel-owned:
 - `panel_kv` holds the layout: `{ order: { apps, agents, widgets }, hidden, sizes }`. Order lists are ids: app names, `app/name` for agents and widgets, and `<peer>/…` for entries from a peer machine; ids missing from a list follow it, local before peer, alphabetically. `hidden` is the set of apps the panel does not show; they stay registered and scheduled. `sizes` maps widget ids to the size the operator chose on the panel, applied over the manifest's `size` when widgets are listed.
 - `chat_sessions` keeps the last ten sessions per agent (`agent`, `sid`, `title`, `ts`, `runtime`, `model`). A resumed session gets a new id from the runtime; the previous row is replaced so a conversation stays one entry.
 
-Nothing panel-related is written into an app directory or into the workspace as loose files.
+Nothing panel-related is written into an app directory. The one panel state kept as files in the workspace is the icon packs (below), because they are images.
+
+## Icon packs
+
+The icons a tile shows come from the app's manifest (`icon`, an agent's `avatar`), so changing them used to mean a commit and a deploy in every app repository, and a link app has no repository at all. An icon pack is the panel's own set of icons over those, chosen per panel and never written into an app.
+
+- **Where.** `<workspace>/icons/<pack>/app/<id>.<ext>` for app tiles and `<workspace>/icons/<pack>/agent/<id>.<ext>` for agents, SVG, PNG or WebP, at most 512 KB each. The id is the tile's layout id with `/` written as `~`: `notes`, `david~media` (an app on peer `david`), `notes~librarian`, `david~media~helper`, `space~assistant` for the space agent, `space` for its corner, and `space~inbox`, `space~terminal`, `space~settings` for the panel's built-in tiles (`/api/apps` returns their icons as `builtins`). A pack holds any subset of the tiles; a tile without a file in it keeps the manifest's icon.
+- **Which.** At most one pack is active, recorded in `panel_kv` under `icons.active`. None active is the default: every tile shows its manifest icon.
+- **How it applies.** `/api/apps`, `/api/agents`, `/api/services` and `/api/widgets` replace `icon`, `avatar` and `appIcon` (the agent tile's corner) with the active pack's file route, versioned by the file's modification time so a replaced icon is fetched anew. `?icons=manifest` on any of them returns the manifests' own; the [`space:app-icons`](../skills/app-icons/SKILL.md) skill reads them that way.
+- **Peers.** A pack belongs to the machine whose panel shows it, and it covers that panel's peer tiles too (by their `<peer>/…` ids). The snapshot a space gives a hub reads the lists with `?icons=manifest`: a peer's pack never reaches a hub, which shows its own.
+- **Serving.** Pack files are served with `content-security-policy: default-src 'none'` and `nosniff`, so an SVG opened on its own cannot run script on the panel's origin.
+
+Making a pack is the `space:app-icons` skill's job: the operator describes a style, an agent draws every tile in it, previews the set and uploads it. Writes are panel routes like the layout's: no token, behind the same-origin check (Trust boundary).
 
 ## Chat
 
@@ -146,6 +158,9 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 | `GET /api/widgets`, `GET /api/widgets/:app/:name/embed` | widget payloads and embed pages |
 | `GET`/`PUT /api/panel/layout` | order and hidden set |
 | `GET /api/panel/appcolor?app=` | the app page's `theme-color`, for the phone shell |
+| `GET`/`PUT /api/panel/icons` | the icon packs with their files, and `{ active: <pack> \| null }` (Icon packs) |
+| `GET`/`PUT`/`DELETE /api/panel/icons/:pack/:kind?id=` | one icon of a pack (`kind`: `app` or `agent`): read, upload as the request body (`content-type` `image/svg+xml`, `image/png` or `image/webp`; creates the pack), remove |
+| `DELETE /api/panel/icons/:pack` | a whole pack; an active one turns packs off |
 | `GET /api/agents` | every agent the panel lists |
 | `POST /api/agents/:app/:agent/chat` | one chat turn, SSE |
 | `GET /api/agents/:app/:agent/sessions[/:sid]` | recent sessions, restored transcript |
@@ -169,7 +184,7 @@ An operator who wants a second factor puts it in front of the tunnel, not in ai-
 ## Module layout
 
 ```
-src/space/panel/    registry.ts (registered manifests), layout.ts (panel_kv), health.ts,
+src/space/panel/    registry.ts (registered manifests), layout.ts (panel_kv), icons.ts (icon packs), health.ts,
                     widgets.ts (feed + cache), view.ts (API shapes), links.ts (manifest-only apps), uninstall.ts (stop + directory),
                     api.ts (routes)
 src/space/peers/    other machines' panels merged into this one, and this one served to a hub (peers.md)

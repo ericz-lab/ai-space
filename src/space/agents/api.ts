@@ -2,6 +2,7 @@ import { realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { AppCapabilities } from "../bus/bus.ts";
 import { capabilitiesPrompt } from "../bus/prompt.ts";
+import { type IconPacks, applyToAgent } from "../panel/icons.ts";
 import { type LayoutStore, orderBy } from "../panel/layout.ts";
 import type { AppRegistry } from "../panel/registry.ts";
 import { type AgentView, agentView } from "../panel/view.ts";
@@ -48,6 +49,8 @@ export type AgentsApiOptions = {
   home?: string;
   /** Other machines whose agents this panel lists; chat with them is forwarded by the peer routes. */
   peers?: PeerHub;
+  /** The panel's icon packs: the active one's icons replace avatars and corner icons in the list. */
+  icons?: IconPacks;
   /** The bus catalogue (local apps and peers'), appended to every agent's system prompt (docs/events.md). */
   capabilities?: () => (AppCapabilities & { peer?: string })[];
 };
@@ -180,7 +183,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
 
   return {
     "/api/agents": {
-      GET: () => {
+      GET: async (req) => {
         const lay = layout.read();
         const hidden = new Set(lay.hidden);
         const agents: AgentView[] = [spaceAgentView(opts.runtimes, baseDefault())];
@@ -192,7 +195,9 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
           }
         }
         agents.push(...(opts.peers?.agents(hidden) ?? []));
-        return json({ ok: true, agents: orderBy(agents, lay.order.agents, (a) => a.id, (a) => (a.peer ? 1 : 0)) });
+        const icons = opts.icons && new URL(req.url).searchParams.get("icons") !== "manifest" ? await opts.icons.overrides() : undefined;
+        const listed = orderBy(agents, lay.order.agents, (a) => a.id, (a) => (a.peer ? 1 : 0));
+        return json({ ok: true, agents: icons ? listed.map((a) => applyToAgent(icons, a)) : listed });
       },
     },
 

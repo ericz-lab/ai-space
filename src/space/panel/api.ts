@@ -3,6 +3,7 @@ import type { PeerHub } from "../peers/hub.ts";
 import { dropSameLink, dropSameUrl } from "../peers/merge.ts";
 import type { Workspace } from "../workspace.ts";
 import type { HealthProbe } from "./health.ts";
+import { ICON_HEADERS, type IconPacks, MAX_ICON_BYTES, type Overrides, NotFound as IconNotFound, applyToApp, applyToService, applyToWidget, builtinIcons, isIconKind } from "./icons.ts";
 import { type LayoutStore, orderBy } from "./layout.ts";
 import { createLinkApp, parseLinkApp, resolveLinkWithAgent } from "./links.ts";
 import type { AppRegistry, RegisteredApp } from "./registry.ts";
@@ -17,7 +18,7 @@ import { type WidgetFeed, sourceUrl } from "./widgets.ts";
 /**
  * HTTP surface for the panel, shaped as a Bun.serve `routes` table.
  *
- *   GET    /api/apps                     apps with a url, with agents and widgets (?all=1: every app)
+ *   GET    /api/apps                     apps with a url, with agents and widgets (?all=1: every app), and the built-in tiles' icons
  *   POST   /api/apps                     { link } or identity fields: create a manifest-only app
  *   GET    /api/apps/:app
  *   PATCH  /api/apps/:app                { hidden }
@@ -31,6 +32,15 @@ import { type WidgetFeed, sourceUrl } from "./widgets.ts";
  *   GET    /api/panel/layout             order + hidden
  *   PUT    /api/panel/layout             { order?: { apps?, agents?, widgets? }, hidden?, sizes? }
  *   GET    /api/panel/appcolor?app=      <meta name="theme-color"> of the app's entry page
+ *   GET    /api/panel/icons              { active, packs: [{ name, icons }] } (docs/panel.md#icon-packs)
+ *   PUT    /api/panel/icons              { active: "<pack>" | null }
+ *   GET    /api/panel/icons/:pack/:kind?id=   one icon file (kind: app | agent)
+ *   PUT    /api/panel/icons/:pack/:kind?id=   the image as the body (SVG, PNG or WebP); creates the pack
+ *   DELETE /api/panel/icons/:pack/:kind?id=   one icon
+ *   DELETE /api/panel/icons/:pack             the whole pack
+ *
+ * The lists (apps, services, widgets) show the active icon pack's icons over
+ * the manifests'; `?icons=manifest` returns the manifests' own.
  *
  * These routes are what the browser calls. They carry no bearer token: the
  * panel is reached through the operator's tunnel and access layer, and on the
@@ -61,6 +71,8 @@ export type PanelApiOptions = {
   fetch?: typeof fetch;
   /** Other machines whose panels this one merges. */
   peers?: PeerHub;
+  /** The panel's icon packs; absent = the manifests' icons only. */
+  icons?: IconPacks;
 };
 
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
@@ -91,7 +103,9 @@ export function checkViews(entry: RegisteredApp): CheckView[] {
 }
 
 export function createPanelRoutes(opts: PanelApiOptions): Routes {
-  const { registry, layout, widgets, health, peers } = opts;
+  const { registry, layout, widgets, health, peers, icons } = opts;
+  const NONE: Overrides = { app: new Map(), agent: new Map() };
+  const overridesFor = async (req: Request): Promise<Overrides> => (icons && new URL(req.url).searchParams.get("icons") !== "manifest" ? icons.overrides() : NONE);
   const tier = (v: { peer?: string }) => (v.peer ? 1 : 0);
   const resolveLink = opts.resolveLink ?? ((link: string) => resolveLinkWithAgent(link));
   const colorCache = new Map<string, { at: number; color: string }>();
@@ -102,7 +116,7 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
       try {
         return await h(req);
       } catch (e) {
-        return e instanceof NotFound ? error(404, e.message) : error(400, (e as Error).message ?? String(e));
+        return e instanceof NotFound || e instanceof IconNotFound ? error(404, e.message) : error(400, (e as Error).message ?? String(e));
       }
     };
 
@@ -171,7 +185,8 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     "/api/apps": {
       GET: wrap(async (req) => {
         const all = new URL(req.url).searchParams.get("all") === "1";
-        return json({ ok: true, apps: await listApps(all), asOf: new Date().toISOString() });
+        const o = await overridesFor(req);
+        return json({ ok: true, apps: (await listApps(all)).map((v) => applyToApp(o, v)), builtins: builtinIcons(o), asOf: new Date().toISOString() });
       }),
       POST: wrap(async (req) => {
         let body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -249,7 +264,10 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     },
 
     "/api/services": {
-      GET: wrap(async () => json({ ok: true, services: await listServices(), peers: peers?.status() ?? [], ...(opts.supervision ? { supervisor: opts.supervision.mode } : {}), asOf: new Date().toISOString() })),
+      GET: wrap(async (req) => {
+        const o = await overridesFor(req);
+        return json({ ok: true, services: (await listServices()).map((v) => applyToService(o, v)), peers: peers?.status() ?? [], ...(opts.supervision ? { supervisor: opts.supervision.mode } : {}), asOf: new Date().toISOString() });
+      }),
     },
 
     // Local only: each space's inspection page reads its own apps and shows its peers' through their snapshots.
@@ -258,12 +276,13 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     },
 
     "/api/widgets": {
-      GET: wrap(async () => {
+      GET: wrap(async (req) => {
+        const o = await overridesFor(req);
         const lay = layout.read();
         const hidden = new Set(lay.hidden);
         const local = (await widgets.all()).filter((w) => !hidden.has(w.app));
         const all = [...local, ...dropSameLink(local, peers?.widgets(hidden) ?? [])].map((w) => (lay.sizes[w.id] ? { ...w, size: lay.sizes[w.id] } : w));
-        return json({ ok: true, widgets: orderBy(all, lay.order.widgets, (w) => w.id, tier), asOf: new Date().toISOString() });
+        return json({ ok: true, widgets: orderBy(all, lay.order.widgets, (w) => w.id, tier).map((w) => applyToWidget(o, w)), asOf: new Date().toISOString() });
       }),
     },
 
@@ -301,6 +320,8 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
       }),
     },
 
+    ...(icons ? iconRoutes(icons, wrap) : {}),
+
     "/api/panel/appcolor": {
       GET: wrap(async (req) => {
         const n = name(new URL(req.url).searchParams.get("app") ?? "");
@@ -321,6 +342,54 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
         }
         colorCache.set(n, { at: Date.now(), color });
         return json({ ok: true, color });
+      }),
+    },
+  };
+}
+
+// ---------------------------------------------------------------- icon packs
+
+function iconRoutes(icons: IconPacks, wrap: (h: Handler) => Handler): Routes {
+  const target = (req: Request & { params: Record<string, string> }) => {
+    const kind = req.params.kind ?? "";
+    if (!isIconKind(kind)) throw new NotFound(`unknown icon kind: ${kind} (app or agent)`);
+    return { pack: req.params.pack ?? "", kind, id: new URL(req.url).searchParams.get("id") ?? "" };
+  };
+  return {
+    "/api/panel/icons": {
+      GET: wrap(async () => json({ ok: true, active: icons.active(), packs: await icons.packs() })),
+      PUT: wrap(async (req) => {
+        const body = (await req.json().catch(() => null)) as { active?: unknown } | null;
+        if (!body || (body.active !== null && typeof body.active !== "string")) return error(400, "body must be { active: <pack> | null }");
+        await icons.setActive(body.active || null);
+        return json({ ok: true, active: icons.active() });
+      }),
+    },
+    "/api/panel/icons/:pack": {
+      DELETE: wrap(async (req) => {
+        if (!(await icons.removePack(req.params.pack ?? ""))) throw new NotFound(`unknown icon pack: ${req.params.pack}`);
+        return json({ ok: true, active: icons.active() });
+      }),
+    },
+    "/api/panel/icons/:pack/:kind": {
+      GET: wrap(async (req) => {
+        const t = target(req);
+        const f = await icons.file(t.pack, t.kind, t.id);
+        if (!f) throw new NotFound("icon not found");
+        return new Response(Bun.file(f.path), { headers: { "content-type": f.type, ...ICON_HEADERS } });
+      }),
+      PUT: wrap(async (req) => {
+        const t = target(req);
+        const len = Number(req.headers.get("content-length") ?? 0);
+        if (len > MAX_ICON_BYTES) return error(413, `the icon is larger than ${MAX_ICON_BYTES / 1024} KB`);
+        const bytes = new Uint8Array(await req.arrayBuffer());
+        const icon = await icons.write(t.pack, t.kind, t.id, req.headers.get("content-type") ?? "", bytes);
+        return json({ ok: true, icon });
+      }),
+      DELETE: wrap(async (req) => {
+        const t = target(req);
+        if (!(await icons.remove(t.pack, t.kind, t.id))) throw new NotFound("icon not found");
+        return json({ ok: true });
       }),
     },
   };

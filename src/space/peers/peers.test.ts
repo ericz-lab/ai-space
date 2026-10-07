@@ -11,6 +11,7 @@ import { BusStore } from "../bus/store.ts";
 import { Store } from "../scheduler/store.ts";
 import { createPanelRoutes } from "../panel/api.ts";
 import { HealthProbe } from "../panel/health.ts";
+import { IconPacks } from "../panel/icons.ts";
 import { LayoutStore } from "../panel/layout.ts";
 import { AppRegistry } from "../panel/registry.ts";
 import { WidgetFeed } from "../panel/widgets.ts";
@@ -59,6 +60,7 @@ const hubRegistry = new AppRegistry();
 let peers: PeerHub;
 // The bus on both sides: the peer's media app provides `clip` and publishes `clip.added`; the hub mirrors and forwards.
 let peerEvents: Store;
+let hubIcons: IconPacks;
 let hubEvents: Store;
 const mirrored: { peer: string; app: string; name: string }[] = [];
 
@@ -102,8 +104,13 @@ widgets:
   const peerDb = new Database(":memory:");
   const peerLayout = new LayoutStore(peerDb);
   peerLayout.hide("secret", true); // hidden on the peer: never reaches the hub
-  const peerPanel = createPanelRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, widgets: new WidgetFeed(peerRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback });
-  const peerAgents = createAgentRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, sessions: new SessionStore(peerDb), runtimes, defaultModel: "sonnet", home: peerHome });
+  // The peer's own panel has an icon pack; its snapshot must still carry the manifest icons.
+  const peerIcons = new IconPacks(peerHome, peerDb);
+  await peerIcons.write("mine", "app", "media", "image/svg+xml", new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>"));
+  await peerIcons.write("mine", "agent", "media/helper", "image/svg+xml", new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>"));
+  await peerIcons.setActive("mine");
+  const peerPanel = createPanelRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, widgets: new WidgetFeed(peerRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback, icons: peerIcons });
+  const peerAgents = createAgentRoutes({ ws: pws, registry: peerRegistry, layout: peerLayout, sessions: new SessionStore(peerDb), runtimes, defaultModel: "sonnet", home: peerHome, icons: peerIcons });
   peerEvents = new Store(":memory:");
   // The port is fixed here: an earlier test uninstalls media from the peer's registry, the bus keeps its manifest until re-sync.
   const peerBus = new Bus({
@@ -141,8 +148,9 @@ widgets:
   });
   const hubBus = new Bus({ store: new BusStore(":memory:"), events: hubEvents, servicePort: () => undefined, log: () => {} });
   const hubBusRoutes = createBusRoutes({ bus: hubBus, store: new BusStore(":memory:"), events: hubEvents, remote: { name: "hub-box", capabilities: () => peers.capabilities(), providerOf: (a, c) => peers.providerOf(a, c), get: (n) => peers.get(n) } });
-  const hubPanel = createPanelRoutes({ ws: hws, registry: hubRegistry, layout, widgets: new WidgetFeed(hubRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback, peers });
-  const hubAgents = createAgentRoutes({ ws: hws, registry: hubRegistry, layout, sessions: new SessionStore(hubDb), runtimes, defaultModel: "sonnet", home: hubHome, peers });
+  hubIcons = new IconPacks(hubHome, hubDb);
+  const hubPanel = createPanelRoutes({ ws: hws, registry: hubRegistry, layout, widgets: new WidgetFeed(hubRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback, peers, icons: hubIcons });
+  const hubAgents = createAgentRoutes({ ws: hws, registry: hubRegistry, layout, sessions: new SessionStore(hubDb), runtimes, defaultModel: "sonnet", home: hubHome, peers, icons: hubIcons });
   // The hub also serves as a peer (a hub of hubs), to check its snapshot carries only its own entries.
   hubServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...hubPanel, ...hubAgents, ...hubBusRoutes, ...createPeerRoutes({ hub: peers, layout, registry: hubRegistry }), ...createPeerServeRoutes({ token: "hubtok", name: "hub-box", panel: hubPanel, agents: hubAgents, events: hubEvents }) }, websocket: { message() {} } });
   hub = `http://127.0.0.1:${hubServer.port}`;
@@ -251,6 +259,28 @@ describe("hub", () => {
     expect(own.body.agents.map((a: Body) => a.id)).toEqual(["notes/librarian"]);
     expect(own.body.widgets).toEqual([]);
     expect(own.body.services).toEqual([]);
+  });
+
+  test("a peer's icon pack stays on the peer; the hub's own pack covers the peer's tiles", async () => {
+    const auth = { headers: { authorization: "Bearer s3cret" } };
+    const snap = (await get(peerBase, "/api/peer/snapshot", auth)).body;
+    expect(snap.apps[0].icon).toBe("/api/apps/media/icon");
+    expect(snap.agents[0]).toMatchObject({ avatar: "/api/apps/media/icon", appIcon: "/api/apps/media/icon" });
+    expect(snap.services[0].icon).toBe("/api/apps/media/icon");
+    // The peer's own panel does show its pack.
+    expect((await get(peerBase, "/api/apps")).body.apps[0].icon).toStartWith("/api/panel/icons/mine/app?id=media&v=");
+
+    const svg = new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>");
+    const app = await hubIcons.write("hub", "app", "david/media", "image/svg+xml", svg);
+    const agent = await hubIcons.write("hub", "agent", "david/media/helper", "image/svg+xml", svg);
+    expect((await get(hub, "/api/agents")).body.agents.find((a: Body) => a.id === "david/media/helper")).toMatchObject({ avatar: "/api/peers/david/apps/media/icon" });
+    await hubIcons.setActive("hub");
+    expect(app.url).toStartWith("/api/panel/icons/hub/app?id=david%2Fmedia&v=");
+    expect((await get(hub, "/api/agents")).body.agents.find((a: Body) => a.id === "david/media/helper")).toMatchObject({ avatar: agent.url, appIcon: app.url });
+    expect((await get(hub, "/api/services")).body.services[0].icon).toBe(app.url);
+    expect((await get(hub, "/api/services?icons=manifest")).body.services[0].icon).toBe("/api/peers/david/apps/media/icon");
+    expect((await fetch(`${hub}${app.url}`)).headers.get("content-type")).toBe("image/svg+xml");
+    await hubIcons.setActive(null);
   });
 
   test("forwards icons, embed pages, chat and sessions to the peer; nothing else", async () => {

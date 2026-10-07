@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
 import { SessionStore, createAgentRoutes } from "./space/agents/index.ts";
-import { AppRegistry, HealthProbe, LayoutStore, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
+import { AppRegistry, HealthProbe, IconPacks, LayoutStore, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
 import { ModelService, ModelStore, createModelRoutes, recordAgentRun } from "./space/model/index.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
@@ -117,6 +117,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     onPublish: (event) => bus.onEvent(event),
   });
   const layout = new LayoutStore(store.db);
+  const icons = new IconPacks(ws.home, store.db);
   const sessions = new SessionStore(store.db);
   const health = new HealthProbe();
   const widgets = new WidgetFeed(registry);
@@ -256,6 +257,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     widgets,
     health,
     peers,
+    icons,
     onCreate: syncDir,
     runningTasks: (app) => scheduler.runningTasks(app),
     onRemove: async (app) => {
@@ -279,7 +281,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) }
         : {}),
   });
-  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: (app) => storage.envFor(app), peers, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
+  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: (app) => storage.envFor(app), peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");

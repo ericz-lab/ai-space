@@ -21,6 +21,10 @@ export type AgentInfo = {
   modelOptions?: { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string }[];
 };
 
+/** Icons of the panel's own tiles; `/api/apps` returns the active icon pack's over these. */
+export const BUILTIN_ICONS = { inbox: "/inbox.svg", terminal: "/terminal.svg", settings: "/settings.svg" };
+export type BuiltinIcons = typeof BUILTIN_ICONS;
+
 export type AppInfo = {
   /** The layout key: the name, or `<peer>/<name>` for an app on a peer. */
   id: string;

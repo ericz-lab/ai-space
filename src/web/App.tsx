@@ -9,7 +9,7 @@ import Usage from "./Usage.tsx";
 import AppModels from "./AppModels.tsx";
 import Events from "./Events.tsx";
 import Inbox from "./Inbox.tsx";
-import { getJson, repoUrl, sendJson, type AgentInfo, type AppInfo, type InboxSummary, type WidgetInfo } from "./api.ts";
+import { BUILTIN_ICONS, getJson, repoUrl, sendJson, type AgentInfo, type AppInfo, type BuiltinIcons, type InboxSummary, type WidgetInfo } from "./api.ts";
 import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
 import PetField from "./PetField.tsx";
 import { type PetChoice, resolvePet } from "./petdex.ts";
@@ -35,6 +35,8 @@ type Panel = "settings" | "chat" | "tasks" | "usage" | "appModels" | "events" | 
 export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const { lang, t } = useLang();
   const [apps, setApps] = useState<AppInfo[]>([]);
+  // The built-in tiles' icons: the active icon pack's when it has them (docs/panel.md#icon-packs).
+  const [builtins, setBuiltins] = useState<BuiltinIcons>(BUILTIN_ICONS);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loaded, setLoaded] = useState(false);
   // Embedded widgets get the resolved scheme only, never the panel's colors (theme.ts).
@@ -96,9 +98,10 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // timeout to turn those dots green or red.
   const PROBE_MS = 2_500;
   const reload = () =>
-    Promise.all([getJson<{ apps: AppInfo[] }>("/api/apps"), getJson<{ agents: AgentInfo[] }>("/api/agents")])
+    Promise.all([getJson<{ apps: AppInfo[]; builtins?: BuiltinIcons }>("/api/apps"), getJson<{ agents: AgentInfo[] }>("/api/agents")])
       .then(([p, a]) => {
         setApps(p.apps);
+        if (p.builtins) setBuiltins(p.builtins);
         setAgents(a.agents);
         setChatAgent((current) => a.agents.find((agent) => agent.id === current.id) ?? current);
         setLoaded(true);
@@ -320,7 +323,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 );
               })}
               <Tile
-                icon="/inbox.svg"
+                icon={builtins.inbox}
                 fallback="📥"
                 name={t("inbox.title")}
                 editing={editing}
@@ -339,7 +342,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 {inbox && <p className="pop-hint">{t("inbox.summary", { unread: inbox.unread, open: inbox.open })}</p>}
                 <p className="pop-body">{t("inbox.blurb")}</p>
               </Tile>
-              <Tile icon="/terminal.svg" fallback="⌨️" name={t("term.title")} editing={editing} onOpen={openTerminal} showPop={!prefs.noPop} className="builtin">
+              <Tile icon={builtins.terminal} fallback="⌨️" name={t("term.title")} editing={editing} onOpen={openTerminal} showPop={!prefs.noPop} className="builtin">
                 <p className="pop-title">
                   {t("term.title")}
                   <span className="status">
@@ -349,7 +352,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 </p>
                 <p className="pop-body">{t("term.blurb")}</p>
               </Tile>
-              <Tile icon="/settings.svg" fallback="⚙️" name={t("settings.title")} editing={editing} onOpen={openSettings} showPop={!prefs.noPop} className="builtin">
+              <Tile icon={builtins.settings} fallback="⚙️" name={t("settings.title")} editing={editing} onOpen={openSettings} showPop={!prefs.noPop} className="builtin">
                 <p className="pop-title">
                   {t("settings.title")}
                   <span className="status">

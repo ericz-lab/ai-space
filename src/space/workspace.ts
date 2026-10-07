@@ -15,6 +15,7 @@ import { MANIFEST_FILE } from "./scheduler/manifest.ts";
  *   ├── app-src/ app source checkouts for development, one per app; ai-space does not scan it (AGENTS.md, App Development Mode)
  *   ├── data/    runtime state: space.db, then one directory per app (its databases, blobs/ and space.env)
  *   ├── logs/
+ *   ├── icons/   the panel's icon packs, one directory per pack, made on the first upload (src/space/panel/icons.ts)
  *   ├── run/     files ai-space writes for other programs: the router's Caddyfile and admin socket (src/space/router/)
  *   ├── .claude/skills/  links to every shared and app skill, for sessions started by hand (src/space/skills.ts)
  *   ├── AGENTS.md        the workspace guide for such sessions, generated from a template plus

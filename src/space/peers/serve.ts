@@ -77,9 +77,14 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     return (req, server) => h(req, server);
   };
 
-  /** Call a local GET route in-process and return its JSON body. */
+  /**
+   * Call a local GET route in-process and return its JSON body. The lists are read with the
+   * manifests' icons: this machine's icon pack is its own panel's, a hub shows its own.
+   */
   const local = async <T>(routes: Routes, path: string, base: string): Promise<T> => {
-    const req = Object.assign(new Request(new URL(path, base)), { params: {} as Record<string, string> });
+    const url = new URL(path, base);
+    url.searchParams.set("icons", "manifest");
+    const req = Object.assign(new Request(url), { params: {} as Record<string, string> });
     const r = await handlerOf(routes, path, "GET")(req, undefined as unknown as Bun.Server<unknown>);
     return (await r!.json()) as T;
   };

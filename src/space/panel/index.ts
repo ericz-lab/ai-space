@@ -1,5 +1,6 @@
 export { createPanelRoutes, type PanelApiOptions } from "./api.ts";
 export { HealthProbe, type Health } from "./health.ts";
+export { IconPacks, type IconEntry, type IconKind, type IconPack } from "./icons.ts";
 export { LayoutStore, orderBy, type Layout, type LayoutPatch } from "./layout.ts";
 export { createLinkApp, linkManifest, parseLinkApp, removeLinkApp, resolveLinkWithAgent, type LinkApp } from "./links.ts";
 export { AppRegistry, type RegisteredApp } from "./registry.ts";
