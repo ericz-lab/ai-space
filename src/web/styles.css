@@ -726,8 +726,10 @@ a.widget-title:hover { color: var(--text); }
 .wb-label { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; display: flex; align-items: center; gap: 6px; }
 .wb-hero-value { font-size: 40px; line-height: 1.05; font-weight: 650; letter-spacing: -0.02em; overflow-wrap: anywhere; }
 .wb-hero-value.missing, .wb-row-value.missing { color: var(--muted); font-size: 15px; font-weight: 500; letter-spacing: 0; }
-.wb-hero.wb-progress .wb-hero-value, .wb-hero.wb-status .wb-hero-value { font-size: 32px; }
-.wb-status-value { display: flex; align-items: center; gap: 10px; }
+.wb-hero.wb-progress .wb-hero-value { font-size: 32px; }
+.wb-status-value { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.wb-hero.wb-status .wb-hero-value { font-size: 22px; line-height: 1.25; font-weight: 600; letter-spacing: 0; }
+.wb-status-value .wb-v { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .wb-caption { font-size: 12px; color: var(--muted); }
 .wb-delta { font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .wb-delta-label { font-weight: 400; }
@@ -748,7 +750,11 @@ a.widget-title:hover { color: var(--text); }
 .wb-row { display: flex; flex-direction: column; gap: 2px; padding: 5px 6px; min-width: 0; }
 .wb-row-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .wb-row-head .wb-label { flex: 1; font-size: 13px; color: var(--text); }
-.wb-row-value { flex: none; display: flex; align-items: baseline; gap: 6px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wb-row-value { flex: 0 1 auto; max-width: 62%; min-width: 0; display: flex; align-items: baseline; gap: 6px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wb-row-value .wb-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-row-value > :not(.wb-v) { flex: none; }
+.wb-row-head .wb-label { min-width: 3em; }
+.wb-lt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-row .wb-spark { height: 22px; }
 /* Wide cards: the hero on the left, rows beside it; a large card puts the rows in two columns. */
 .wb-s2x1, .wb-s2x2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 18px; }

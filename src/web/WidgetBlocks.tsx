@@ -188,11 +188,13 @@ function Hero({ b, lang }: { b: WidgetBlock; lang: Lang }) {
     <Box url={b.url} className={`wb-hero wb-${b.type}`}>
       <span className="wb-label">{txt(b.label, lang)}</span>
       {b.type === "status" ? (
-        <span className="wb-hero-value wb-status-value">
-          <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />
-          {value}
+        <>
+          <span className="wb-hero-value wb-status-value">
+            <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />
+            <span className="wb-v">{value}</span>
+          </span>
           {b.time && <span className="wb-time">{relTime(b.time, lang)}</span>}
-        </span>
+        </>
       ) : (
         <span className={`wb-hero-value${value === undefined ? " missing" : ""}`} style={{ color: b.type === "gauge" && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}>
           {value ?? t("widget.noData")}
@@ -215,12 +217,14 @@ function Row({ b, lang }: { b: WidgetBlock; lang: Lang }) {
   return (
     <Box url={b.url} className={`wb-row wb-${b.type}`}>
       <span className="wb-row-head">
-        <span className="wb-label" title={caption || undefined}>
+        <span className="wb-label" title={[txt(b.label, lang), caption].filter(Boolean).join(" · ")}>
           {b.type === "status" && <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />}
-          {txt(b.label, lang)}
+          <span className="wb-lt">{txt(b.label, lang)}</span>
         </span>
         <span className={`wb-row-value${value === undefined ? " missing" : ""}`} style={{ color: (b.type === "gauge" || b.type === "metric") && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}>
-          {value ?? t("widget.noData")}
+          <span className="wb-v" title={value}>
+            {value ?? t("widget.noData")}
+          </span>
           {b.type === "metric" && b.delta && <Delta d={{ ...b.delta, label: undefined }} lang={lang} />}
           {b.type === "status" && b.time && <span className="wb-time">{relTime(b.time, lang)}</span>}
         </span>
