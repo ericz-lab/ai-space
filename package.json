@@ -17,7 +17,10 @@
     "space": "bun src/index.ts",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test",
-    "hooks": "git config core.hooksPath .githooks"
+    "hooks": "git config core.hooksPath .githooks",
+    "desktop:build": "desktop/macos/scripts/build.sh",
+    "desktop:test": "desktop/macos/scripts/test.sh",
+    "desktop:xcode": "xcodegen generate --spec desktop/macos/project.yml"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",
