@@ -51,6 +51,9 @@ const en = {
 
   "widgets.heading": "Widgets",
   "widget.empty": "Nothing yet",
+  "widget.noData": "No data",
+  "widget.noHistory": "No history yet",
+  "widget.outdated": "Out of date · {time}",
   "widget.viewAll": "View all →",
   "widget.resizeHint": "Drag to resize (columns × rows)",
   "widget.stale": "{peer} is not answering; last known state",
@@ -397,6 +400,9 @@ const zh: Record<Key, string> = {
 
   "widgets.heading": "小组件",
   "widget.empty": "暂无内容",
+  "widget.noData": "暂无数据",
+  "widget.noHistory": "暂无历史数据",
+  "widget.outdated": "数据已过期 · {time}",
   "widget.viewAll": "查看全部 →",
   "widget.resizeHint": "拖动调整大小（列 × 行）",
   "widget.stale": "{peer} 无响应；显示最后已知状态",

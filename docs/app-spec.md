@@ -184,6 +184,43 @@ Contract for `kind: items`. `GET <source>` returns:
 
 `text` is required; `url` and `time` (ISO 8601) are optional and the panel renders relative time. On failure the app returns `{ "ok": false, "error": "…" }` and the panel shows the error as is. The panel fetches through ai-space (`/api/widgets`), caches for `refresh`, and only ever calls URLs that a manifest declares, so `source` may be a loopback address and is never sent to the browser. A path `source` needs a `service` to attach to; an app without one gives a full URL.
 
+#### Blocks: a state card instead of a list
+
+A list puts every app's card in the same shape, and a card about one thing (today's spend, the market's mood) reads better as a number, a scale or a chart. The same `items` response may carry `blocks`: structured values the panel draws in the house style. `items` stays required and stays meaningful, because a panel or a peer running an older ai-space ignores `blocks` and shows the list.
+
+```json
+{
+  "ok": true,
+  "items": [ { "text": "Today · $11.02 · 14.6M tokens" } ],
+  "asOf": "2026-10-08T01:20:32Z",
+  "staleAfter": 1800,
+  "blocks": [
+    { "type": "metric", "label": { "en": "Today", "zh": "今日费用" }, "value": 11.02, "format": "currency", "currency": "USD",
+      "delta": { "value": -12.5, "format": "percent", "label": { "en": "vs 7-day avg", "zh": "较 7 日均值" } }, "url": "/?range=today" },
+    { "type": "trend", "label": { "en": "Last 7 days", "zh": "近 7 天" }, "style": "bar", "format": "currency",
+      "points": [ { "t": "2026-10-02", "v": 92.1 }, { "t": "2026-10-03", "v": null } ] },
+    { "type": "progress", "label": { "en": "Codex week", "zh": "Codex 周额度" }, "value": 27, "max": 100, "format": "percent",
+      "caption": { "en": "27% used · resets Mon", "zh": "已用 27% · 周一重置" }, "tone": "neutral" }
+  ]
+}
+```
+
+Blocks are ordered by importance. The first is the card's hero, drawn large; the rest are drawn as compact rows, as many as the card's size holds (about 2 on a 1x1, 4 beside the hero on a 2x1, 6 on a 1x2, 10 on a 2x2). A larger card therefore shows more, laid out differently, not the same rows stretched. At most 12 blocks are kept.
+
+Fields every block may carry: `label` (required), `caption` (a short line under the value: what it counts, over which range), `url` (opens on a click, relative to the app's public URL like `link`), `tone` (`positive`, `negative`, `warning`, `neutral`; the panel maps it to its own success, danger and warning colors and never uses a gradient). Text fields take a string or a map by language tag (`{ "en": "…", "zh": "…" }`); the panel picks the reader's language, then `en`, then any.
+
+| `type` | Fields | Drawn as |
+| --- | --- | --- |
+| `metric` | `value` (number or `null`), `format`, `currency`, `decimals`, `unit`, `display`, `delta: { value, format, unit, label, tone }` | A number with its unit and an optional change. |
+| `trend` | `points: [{ t, v }]` (ISO date or time, number or `null`; at most 90, oldest first), `style` (`line` or `bar`), `format`, `currency`, `unit`, `signed` | A sparkline or bars; `signed: true` colors bars by sign around a zero line. The latest non-null point is the value shown. |
+| `progress` | `value` (number or `null`), `max`, `format`, `currency`, `unit`, `display` | A bar from 0 to `max`. Say in `label` or `caption` whether it counts used or remaining. |
+| `gauge` | `value` (number or `null`), `min`, `max`, `zones: [{ to, tone, label }]`, `display` | A scale with a marker, zones colored by tone (fear and greed, a temperature). |
+| `status` | `value` (text), `time` (ISO 8601) | A dot in the block's tone, a word and when it happened. |
+
+`format` is `number` (default), `compact` (14.6M), `currency` (`currency` is an ISO code, USD by default) or `percent` (the value is already in percent: `27` is 27%). `decimals` fixes the fraction digits. `display` replaces the formatted value with the app's own text when a number alone would mislead. The panel formats numbers in the reader's language.
+
+Honesty applies to every block. A value the app could not obtain is `null` and the panel shows it as missing; a series has the points the app recorded and no others, a missing day is `null` and never interpolated. `asOf` (ISO 8601) says when the data was produced; with `staleAfter` (seconds) the panel marks the card as out of date once `asOf` is older than that. The panel never parses numbers out of `text`.
+
 Contract for `kind: embed`. `source` is a page the app serves; the panel loads it in a sandboxed iframe of the declared size, in the viewer's theme and language (the page receives `?theme=light|dark&lang=<tag>`, `lang` being the panel's language such as `en` or `zh`; a page may ignore it). ai-space proxies the page (`/api/widgets/:app/:name/embed`), so it must be self-contained: inline styles and scripts, or absolute public URLs. It must work without cookies and without a public origin.
 
 ### `skills`

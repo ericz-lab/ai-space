@@ -62,6 +62,8 @@ export type ServiceInfo = {
   supervision?: { action: string; error?: string; health?: string };
 };
 
+export type { WidgetBlock } from "../space/panel/blocks.ts";
+import type { WidgetBlock } from "../space/panel/blocks.ts";
 export type WidgetItem = { text: string; url: string; time: string };
 export type WidgetInfo = {
   id: string;
@@ -75,7 +77,7 @@ export type WidgetInfo = {
   link: string;
   kind: "items" | "embed";
   size: string;
-} & ({ ok: true; items: WidgetItem[] } | { ok: false; error: string });
+} & ({ ok: true; items: WidgetItem[]; blocks?: WidgetBlock[]; asOf?: string; staleAfterMs?: number } | { ok: false; error: string });
 
 /** One peer machine as `GET /api/services` and `GET /api/peers` report it. */
 export type PeerInfo = {

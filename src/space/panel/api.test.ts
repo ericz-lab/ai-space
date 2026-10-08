@@ -24,7 +24,18 @@ const running: Record<string, string[]> = {};
 const fakeFetch = (async (input: string | URL | Request) => {
   const url = String(input instanceof Request ? input.url : input);
   if (url.endsWith("/healthz")) return new Response("ok");
-  if (url.endsWith("/api/widget")) return Response.json({ ok: true, items: [{ text: "First", url: "https://notes.example.com/1", time: "2026-09-04T09:00:00Z", extra: 1 }] });
+  if (url.endsWith("/api/widget"))
+    return Response.json({
+      ok: true,
+      items: [{ text: "First", url: "https://notes.example.com/1", time: "2026-09-04T09:00:00Z", extra: 1 }],
+      asOf: "2026-09-04T09:00:00Z",
+      staleAfter: 600,
+      blocks: [
+        { type: "metric", label: "Notes", value: 12, url: "/?filter=today" },
+        { type: "metric", label: "Bad link", value: 1, url: "javascript:alert(1)" },
+        { type: "nope", label: "x" },
+      ],
+    });
   if (url.endsWith("/api/broken")) return Response.json({ ok: false, error: "db locked" });
   if (url.endsWith("/board?theme=dark")) return new Response("<html>board dark</html>", { headers: { "content-type": "text/html" } });
   if (url.endsWith("/board?theme=light&lang=zh")) return new Response("<html>board zh</html>", { headers: { "content-type": "text/html" } });
@@ -166,6 +177,16 @@ describe("panel api", () => {
     const byId = Object.fromEntries(r.body.widgets.map((w: Body) => [w.id, w]));
     expect(byId["notes/recent"]).toMatchObject({ ok: true, items: [{ text: "First", url: "https://notes.example.com/1", time: "2026-09-04T09:00:00Z" }], link: "https://notes.example.com/#recent" });
     expect(byId["notes/recent"].items[0]).not.toHaveProperty("extra");
+    // Blocks pass validated, their links resolved against the app's URL and limited to http(s).
+    expect(byId["notes/recent"]).toMatchObject({
+      asOf: "2026-09-04T09:00:00Z",
+      staleAfterMs: 600_000,
+      blocks: [
+        { type: "metric", label: "Notes", value: 12, url: "https://notes.example.com/?filter=today" },
+        { type: "metric", label: "Bad link", value: 1 },
+      ],
+    });
+    expect(byId["notes/recent"].blocks[1]).not.toHaveProperty("url");
     expect(byId["notes/broken"]).toMatchObject({ ok: false, error: "db locked" });
     expect(byId["docs/w"]).toMatchObject({ ok: false, error: expect.stringContaining("no service") });
     expect(byId["notes/board"]).toMatchObject({ kind: "embed", ok: true });

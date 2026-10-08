@@ -1,6 +1,7 @@
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { isImgIcon, relTime, type WidgetInfo } from "./api.ts";
 import { type Key, localized, useLang, withLang } from "./i18n.ts";
+import { Blocks, isOutdated } from "./WidgetBlocks.tsx";
 
 // The panel's building blocks: app and agent tiles with their hover pop-over, and widget cards.
 
@@ -116,6 +117,9 @@ export function Widget({ w, dragProps, theme, onResize }: { w: WidgetInfo; dragP
   const embed = `${w.peer ? `/api/peers/${encodeURIComponent(w.peer)}` : "/api"}/widgets/${encodeURIComponent(w.app)}/${encodeURIComponent(w.name)}/embed?theme=${theme}&lang=${lang}`;
   const link = w.link ? withLang(w.link, lang) : "";
   const tall = w.size.endsWith("x2");
+  const hasBlocks = w.ok && !!w.blocks?.length;
+  const asOf = w.ok ? w.asOf : undefined;
+  const outdated = w.ok && isOutdated(w.asOf, w.staleAfterMs);
   const card = useRef<HTMLDivElement>(null);
   const [resizing, setResizing] = useState<string | null>(null);
   // A size change (a drag snapping to the next cell, or a layout loaded later) is animated from the
@@ -182,18 +186,32 @@ export function Widget({ w, dragProps, theme, onResize }: { w: WidgetInfo; dragP
     window.addEventListener("pointercancel", up);
   };
   return (
-    <div ref={card} className={`widget s${w.size}${w.stale ? " stale" : ""}${resizing ? " resizing" : ""}`} {...(dragProps as object)} title={w.stale ? t("widget.stale", { peer: w.peer ?? "" }) : undefined}>
+    <div ref={card} className={`widget s${w.size}${w.stale ? " stale" : ""}${hasBlocks ? " has-blocks" : ""}${resizing ? " resizing" : ""}`} {...(dragProps as object)} title={w.stale ? t("widget.stale", { peer: w.peer ?? "" }) : undefined}>
+      {/* The title stays quiet and leads to the app; the content is what the card is about. */}
       <div className="widget-head">
         <span className="widget-ico">
           <Icon icon={w.icon} fallback="📦" />
         </span>
-        <b>{title}</b>
+        {link ? (
+          <a className="widget-title" href={link} target="_blank" rel="noopener noreferrer">
+            {title}
+          </a>
+        ) : (
+          <span className="widget-title">{title}</span>
+        )}
         {w.peer && <span className="widget-peer">{w.peer}</span>}
+        {asOf && (
+          <span className={`widget-asof${outdated ? " outdated" : ""}`} title={new Date(asOf).toLocaleString()}>
+            {outdated ? t("widget.outdated", { time: relTime(asOf, lang) }) : relTime(asOf, lang)}
+          </span>
+        )}
         {onResize && <span className="widget-size">{(resizing ?? w.size).replace("x", "×")}</span>}
       </div>
       {onResize && <span className="widget-grip" title={t("widget.resizeHint")} draggable={false} onPointerDown={startResize} onDragStart={(e) => e.preventDefault()} />}
       {w.kind === "embed" ? (
         <iframe title={title} src={embed} sandbox="allow-scripts" loading="lazy" />
+      ) : w.ok && w.blocks?.length ? (
+        <Blocks blocks={w.blocks} size={w.size} />
       ) : w.ok ? (
         <div className="widget-list">
           {w.items.slice(0, tall ? 14 : 6).map((it, i) => (
@@ -207,7 +225,7 @@ export function Widget({ w, dragProps, theme, onResize }: { w: WidgetInfo; dragP
       ) : (
         <p className="widget-err">{t("common.unavailable", { error: w.error })}</p>
       )}
-      {link && (
+      {link && !hasBlocks && (
         <a className="widget-more" href={link} target="_blank" rel="noopener noreferrer">
           {t("widget.viewAll")}
         </a>

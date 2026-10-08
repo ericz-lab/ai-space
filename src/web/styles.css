@@ -699,7 +699,12 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
   border: 1px solid var(--glass-border); border-radius: var(--radius); box-shadow: var(--shadow);
   padding: 14px 16px; display: flex; flex-direction: column;
 }
-.widget-head { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 8px; }
+.widget-head { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 8px; min-width: 0; }
+.widget-title { color: var(--muted); font-weight: 600; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+a.widget-title:hover { color: var(--text); }
+.widget-asof { margin-left: auto; flex: none; font-size: 11px; color: var(--muted); }
+.widget-asof.outdated { color: var(--warning); font-weight: 600; }
+.widget-asof + .widget-size { margin-left: 8px; }
 .widget-ico { width: 22px; height: 22px; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 16px; flex: none; }
 .widget-ico img { width: 100%; height: 100%; object-fit: cover; }
 .widget-list { display: flex; flex-direction: column; }
@@ -710,6 +715,53 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
 .widget-err { font-size: 12px; color: var(--muted); padding: 6px 4px; }
 .widget-more { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--hairline); font-size: 12px; color: var(--muted); text-decoration: none; }
 .widget-more:hover { color: var(--text); }
+
+/* Blocks: a state card. The first block is the hero; the rest are compact rows, as many as the size
+   holds, laid out per size (side by side on a wide card, stacked on a tall one). Color is only data:
+   tones for state and sign, the accent for a plain series, no gradients. */
+.wb { flex: 1; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.wb a, .wb > div { color: var(--text); text-decoration: none; border-radius: 10px; }
+.wb a:hover { background: var(--glass-strong); }
+.wb-hero { display: flex; flex-direction: column; gap: 4px; padding: 4px 6px; min-width: 0; }
+.wb-label { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.wb-hero-value { font-size: 40px; line-height: 1.05; font-weight: 650; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.wb-hero-value.missing, .wb-row-value.missing { color: var(--muted); font-size: 15px; font-weight: 500; letter-spacing: 0; }
+.wb-hero.wb-progress .wb-hero-value, .wb-hero.wb-status .wb-hero-value { font-size: 32px; }
+.wb-status-value { display: flex; align-items: center; gap: 10px; }
+.wb-caption { font-size: 12px; color: var(--muted); }
+.wb-delta { font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.wb-delta-label { font-weight: 400; }
+.wb-time { font-size: 11px; font-weight: 400; color: var(--muted); }
+.wb-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+.wb-missing { font-size: 12px; color: var(--muted); }
+.wb-spark { display: block; width: 100%; height: 28px; overflow: visible; }
+.wb-spark.big { height: 56px; margin-top: 4px; }
+.wb-zero { stroke: var(--hairline); stroke-width: 1; }
+.wb-bar { position: relative; display: block; height: 6px; border-radius: 3px; background: var(--hairline); overflow: hidden; margin-top: 4px; }
+.wb-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: 3px; }
+.wb-scale { position: relative; display: block; height: 6px; margin: 8px 0 4px; }
+.wb-zone { position: absolute; top: 0; bottom: 0; opacity: 0.45; }
+.wb-zone:first-child { border-radius: 3px 0 0 3px; }
+.wb-zone:last-of-type { border-radius: 0 3px 3px 0; }
+.wb-marker { position: absolute; top: -4px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 2px var(--solid); }
+.wb-rows { display: grid; gap: 2px; align-content: start; min-width: 0; }
+.wb-row { display: flex; flex-direction: column; gap: 2px; padding: 5px 6px; min-width: 0; }
+.wb-row-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.wb-row-head .wb-label { flex: 1; font-size: 13px; color: var(--text); }
+.wb-row-value { flex: none; display: flex; align-items: baseline; gap: 6px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wb-row .wb-spark { height: 22px; }
+/* Wide cards: the hero on the left, rows beside it; a large card puts the rows in two columns. */
+.wb-s2x1, .wb-s2x2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 18px; }
+.wb-s2x2 { grid-template-rows: auto 1fr; }
+.wb-s2x2 .wb-hero { grid-column: 1 / -1; }
+.wb-s2x2 .wb-hero .wb-spark.big { height: 120px; }
+.wb-s2x2 .wb-rows { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 18px; }
+.wb-s1x2 .wb-hero .wb-spark.big { height: 80px; }
+@media (max-width: 700px) {
+  .wb-s2x1, .wb-s2x2 { display: flex; flex-direction: column; }
+  .wb-s2x2 .wb-rows { grid-template-columns: minmax(0, 1fr); }
+  .wb-hero-value { font-size: 34px; }
+}
 
 .widgets.editing .widget { cursor: grab; outline: 2px dashed var(--hairline); outline-offset: 4px; }
 .widgets.editing .widget a { pointer-events: none; }
