@@ -228,7 +228,7 @@ src/web/            index.html, main.tsx (language root), App.tsx, Chat.tsx, Tas
 ## Failure modes considered
 
 - A manifest fails validation: the app is skipped with a log line and the panel does not list it, same as the scheduler. Nothing partial.
-- A widget source is slow or down: eight-second timeout, error shown on the card, next attempt after `refresh`.
+- A widget source is slow or down: eight-second timeout, error shown on the card, next attempt after 30 seconds (or `refresh`, when shorter), so a source restarting for a deploy does not hold the error for a whole `refresh`.
 - The runtime is missing or exits non-zero: the SSE stream ends with an `error` event carrying the last lines of stderr, then `done`.
 - The browser disconnects mid-turn: the response stream is cancelled and the run goes on; the page reattaches on reload (Background runs).
 - A turn never ends: the run timeout stops it. ai-space restarts mid-turn: the turn gets the drain time, then is stopped and recorded as interrupted.

@@ -34,6 +34,7 @@ export type WidgetView = {
 } & WidgetResult;
 
 const MAX_ITEMS = 20;
+const ERROR_RETRY_MS = 30_000;
 
 export class WidgetFeed {
   private readonly cache = new Map<string, { at: number; data: WidgetResult }>();
@@ -69,7 +70,10 @@ export class WidgetFeed {
     };
     if (w.kind === "embed") return { ...base, ok: true, items: [] };
     const hit = this.cache.get(id);
-    if (hit && Date.now() - hit.at < w.refreshMs) return { ...base, ...hit.data };
+    // A failure is retried sooner than a payload is refreshed: a source restarting for a deploy
+    // should not leave the card on its error for a whole `refresh`.
+    const ttl = hit?.data.ok === false ? Math.min(w.refreshMs, ERROR_RETRY_MS) : w.refreshMs;
+    if (hit && Date.now() - hit.at < ttl) return { ...base, ...hit.data };
     const data = await this.fetchItems(m, w);
     this.cache.set(id, { at: Date.now(), data });
     return { ...base, ...data };
