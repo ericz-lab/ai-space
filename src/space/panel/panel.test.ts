@@ -13,13 +13,17 @@ describe("layout", () => {
 
   test("store round-trips, validates and dedupes", () => {
     const store = new LayoutStore(new Database(":memory:"));
-    expect(store.read()).toEqual({ order: { apps: [], agents: [], widgets: [] }, hidden: [], sizes: {} });
+    expect(store.read()).toEqual({ order: { apps: [], agents: [], widgets: [] }, hidden: [], sizes: {}, hiddenWidgets: [] });
     store.update({ order: { apps: ["b", "a", "b", 3 as unknown as string] } });
     store.update({ hidden: ["x"] });
-    expect(store.read()).toEqual({ order: { apps: ["b", "a"], agents: [], widgets: [] }, hidden: ["x"], sizes: {} });
+    expect(store.read()).toEqual({ order: { apps: ["b", "a"], agents: [], widgets: [] }, hidden: ["x"], sizes: {}, hiddenWidgets: [] });
     expect(store.hide("y", true).hidden).toEqual(["x", "y"]);
     expect(store.hide("x", false).hidden).toEqual(["y"]);
     expect(() => store.update({ hidden: "x" as unknown as string[] })).toThrow(/hidden must be/);
+    expect(store.update({ hiddenWidgets: { "a/w": true, "b/w": true } }).hiddenWidgets).toEqual(["a/w", "b/w"]);
+    expect(store.update({ hiddenWidgets: { "a/w": false } }).hiddenWidgets).toEqual(["b/w"]);
+    expect(() => store.update({ hiddenWidgets: ["a/w"] as unknown as Record<string, boolean> })).toThrow(/hiddenWidgets must be/);
+    expect(() => store.update({ hiddenWidgets: { "a/w": "yes" as unknown as boolean } })).toThrow(/true or false/);
   });
 });
 

@@ -55,6 +55,7 @@ Everything the operator does to the launcher happens in **edit mode**: long-pres
 - **Move.** Drag a tile to a new place in its group; the order is saved when the tile is dropped (`PUT /api/panel/layout`). Apps, agents and widgets are ordered separately. A peer's entries are ordered on the hub by their prefixed id (`<peer>/<app>`), so moving them never touches the peer.
 - **Hide.** The ✕ on a tile hides the app on this panel (`PATCH /api/apps/:app { hidden: true }`): its tile, agents and widgets disappear, the app itself keeps running and stays in the workspace. `?all=1` on `GET /api/apps` lists hidden apps, and the same route with `hidden: false` brings one back. For a peer's app the ✕ hides it on the hub only (`PATCH /api/peers/:peer/apps/:app`).
 - **Resize a widget.** In edit mode every widget card has a grip in its bottom-right corner; dragging it snaps the card to 1 or 2 columns and 1 or 2 rows (the head shows the size while dragging). The size is stored on release in the layout (`PUT /api/panel/layout { sizes: { "<app>/<widget>": "1x2" } }`) and overrides the manifest's `size` on this panel; `null` returns the widget to the manifest's size. The app's repository is not touched.
+- **Remove a widget.** In edit mode every widget card has a ✕ in its top-right corner; it takes the card off the panel at once and stores its id in the layout (`PUT /api/panel/layout { hiddenWidgets: { "<app>/<widget>": true } }`), so it stays off after a reload. Only the card goes: the app, its service and its other widgets stay. `/api/widgets` returns the removed ids as `hidden`, and the settings offer to show them again (`false` per id).
 - **Add.** The "Add" tile takes a link; see the previous section.
 - **Uninstall.** Below the app grid, edit mode shows an uninstall zone. Dropping a tile there opens a confirmation that says what will happen, then sends `DELETE /api/apps/:app` (for a peer's app `DELETE /api/peers/:peer/apps/:app`, which the hub forwards to the peer and then refreshes its snapshot). In order:
   1. A task of the app with a run in flight refuses the uninstall with 409 and names the tasks: stopping the service and moving the directory would pull the ground from under that run. `DELETE /api/apps/:app?force=1` (`space app uninstall APP --force`) goes ahead anyway.
@@ -68,7 +69,7 @@ Everything the operator does to the launcher happens in **edit mode**: long-pres
 
 Two tables in `space.db`, both panel-owned:
 
-- `panel_kv` holds the layout: `{ order: { apps, agents, widgets }, hidden, sizes }`. Order lists are ids: app names, `app/name` for agents and widgets, and `<peer>/…` for entries from a peer machine; ids missing from a list follow it, local before peer, alphabetically. `hidden` is the set of apps the panel does not show; they stay registered and scheduled. `sizes` maps widget ids to the size the operator chose on the panel, applied over the manifest's `size` when widgets are listed.
+- `panel_kv` holds the layout: `{ order: { apps, agents, widgets }, hidden, sizes, hiddenWidgets }`. Order lists are ids: app names, `app/name` for agents and widgets, and `<peer>/…` for entries from a peer machine; ids missing from a list follow it, local before peer, alphabetically. `hidden` is the set of apps the panel does not show; they stay registered and scheduled. `sizes` maps widget ids to the size the operator chose on the panel, applied over the manifest's `size` when widgets are listed. `hiddenWidgets` is the set of widget ids removed from the panel; `/api/widgets` leaves them out.
 - `chat_sessions` keeps the last ten sessions per agent (`agent`, `sid`, `title`, `ts`, `runtime`, `model`). A resumed session gets a new id from the runtime; the previous row is replaced so a conversation stays one entry.
 - `agent_runs` keeps the last 200 chat turns (`id`, `agent`, `session_id`, `sid`, `message`, `runtime`, `model`, `status`, `error`, `started_at`, `finished_at`, `last_seq`, and `events` once the turn ends), so a page loaded later can show and follow them ([Background runs](#background-runs)).
 
@@ -173,7 +174,7 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 | `DELETE /api/apps/:app[?force=1]` | uninstall: stop the service, take the directory out of the workspace, forget the app (see above); 409 while a task of the app is running, unless forced |
 | `GET /api/apps/:app/icon`, `GET /api/agents/:app/:agent/avatar` | icon files from the app directory; paths cannot escape it |
 | `GET /api/widgets`, `GET /api/widgets/:app/:name/embed` | widget payloads and embed pages |
-| `GET`/`PUT /api/panel/layout` | order and hidden set |
+| `GET`/`PUT /api/panel/layout` | order, hidden apps, widget sizes and removed widgets |
 | `GET /api/panel/appcolor?app=` | the app page's `theme-color`, for the phone shell |
 | `GET`/`PUT /api/panel/icons` | the icon packs with their files, and `{ active: <pack> \| null }` (Icon packs) |
 | `GET`/`PUT`/`DELETE /api/panel/icons/:pack/:kind?id=` | one icon of a pack (`kind`: `app` or `agent`): read, upload as the request body (`content-type` `image/svg+xml`, `image/png` or `image/webp`; creates the pack), remove |

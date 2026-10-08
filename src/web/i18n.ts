@@ -56,6 +56,7 @@ const en = {
   "widget.outdated": "Out of date · {time}",
   "widget.viewAll": "View all →",
   "widget.resizeHint": "Drag to resize (columns × rows)",
+  "widget.remove": "Remove from the panel (the app stays)",
   "widget.stale": "{peer} is not answering; last known state",
 
   "add.title": "Add app",
@@ -81,6 +82,8 @@ const en = {
   "settings.hover": "Hover details",
   "settings.pet": "Desk pet",
   "settings.widgets": "Widgets",
+  "settings.hiddenWidgets": "Removed widgets: {n}",
+  "settings.showAgain": "Show again",
   "settings.language": "Language",
   "appearance.mode": "Appearance",
   "appearance.system": "Follow system",
@@ -405,6 +408,7 @@ const zh: Record<Key, string> = {
   "widget.outdated": "数据已过期 · {time}",
   "widget.viewAll": "查看全部 →",
   "widget.resizeHint": "拖动调整大小（列 × 行）",
+  "widget.remove": "从面板移除（应用保留）",
   "widget.stale": "{peer} 无响应；显示最后已知状态",
 
   "add.title": "添加应用",
@@ -430,6 +434,8 @@ const zh: Record<Key, string> = {
   "settings.hover": "悬停详情",
   "settings.pet": "桌面宠物",
   "settings.widgets": "小组件",
+  "settings.hiddenWidgets": "已移除的小组件：{n}",
+  "settings.showAgain": "恢复显示",
   "settings.language": "语言",
   "appearance.mode": "外观",
   "appearance.system": "跟随系统",

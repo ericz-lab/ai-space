@@ -151,7 +151,7 @@ describe("panel api", () => {
 
   test("layout: order and hidden set are stored and applied", async () => {
     const put = await call("/api/panel/layout", jsonInit("PUT", { order: { apps: ["notes", "docs"] }, hidden: ["docs"] }));
-    expect(put.body.layout).toEqual({ order: { apps: ["notes", "docs"], agents: [], widgets: [] }, hidden: ["docs"], sizes: {} });
+    expect(put.body.layout).toEqual({ order: { apps: ["notes", "docs"], agents: [], widgets: [] }, hidden: ["docs"], sizes: {}, hiddenWidgets: [] });
     expect((await call("/api/apps")).body.apps.map((a: Body) => a.name)).toEqual(["notes"]);
     expect((await call("/api/apps?all=1")).body.apps.map((a: Body) => a.name)).toEqual(["notes", "docs", "feed", "old"]);
     const unhide = await call("/api/apps/docs", jsonInit("PATCH", { hidden: false }));
@@ -169,6 +169,19 @@ describe("panel api", () => {
     const cleared = await call("/api/panel/layout", jsonInit("PUT", { sizes: { "notes/recent": null } }));
     expect(cleared.body.layout.sizes).toEqual({});
     expect((await call("/api/widgets")).body.widgets.find((w: Body) => w.id === "notes/recent").size).toBe("2x1");
+  });
+
+  test("layout: a widget removed on the panel stays removed until shown again, and its app stays", async () => {
+    const removed = await call("/api/panel/layout", jsonInit("PUT", { hiddenWidgets: { "notes/recent": true } }));
+    expect(removed.body.layout.hiddenWidgets).toEqual(["notes/recent"]);
+    const after = (await call("/api/widgets")).body;
+    expect(after.widgets.some((w: Body) => w.id === "notes/recent")).toBe(false);
+    expect(after.hidden).toEqual(["notes/recent"]);
+    expect((await call("/api/apps")).body.apps.map((a: Body) => a.name)).toContain("notes");
+    expect((await call("/api/panel/layout", jsonInit("PUT", { hiddenWidgets: { "notes/recent": 1 } }))).status).toBe(400);
+    const shown = await call("/api/panel/layout", jsonInit("PUT", { hiddenWidgets: { "notes/recent": false } }));
+    expect(shown.body.layout.hiddenWidgets).toEqual([]);
+    expect((await call("/api/widgets")).body.widgets.some((w: Body) => w.id === "notes/recent")).toBe(true);
   });
 
   test("widgets: cached payloads, honest errors, embed proxied with the theme", async () => {

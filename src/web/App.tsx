@@ -116,12 +116,18 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
 
   // Widgets: once on load, then every 5 minutes while visible; the server caches per widget refresh.
   const [widgets, setWidgets] = useState<WidgetInfo[]>([]);
+  // Ids of the widgets removed from the panel; the settings can show them again.
+  const [hiddenWidgets, setHiddenWidgets] = useState<string[]>([]);
+  const pullWidgets = () =>
+    getJson<{ widgets: WidgetInfo[]; hidden?: string[] }>("/api/widgets")
+      .then((d) => {
+        setWidgets(d.widgets || []);
+        setHiddenWidgets(d.hidden || []);
+      })
+      .catch(() => {});
   useEffect(() => {
     const pull = () => {
-      if (!document.hidden)
-        getJson<{ widgets: WidgetInfo[] }>("/api/widgets")
-          .then((d) => setWidgets(d.widgets || []))
-          .catch(() => {});
+      if (!document.hidden) void pullWidgets();
     };
     pull();
     const t = setInterval(pull, 300_000);
@@ -232,6 +238,20 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const resizeWidget = (w: WidgetInfo, size: string, commit: boolean) => {
     setWidgets((cur) => cur.map((x) => (x.id === w.id ? { ...x, size } : x)));
     if (commit) sendJson("PUT", "/api/panel/layout", { sizes: { [w.id]: size } }).catch(layoutNotSaved);
+  };
+  // A widget removed in edit mode leaves the panel at once; the removal is kept in the layout, and
+  // only the card goes: the app, its service and its other widgets stay.
+  const removeWidget = (w: WidgetInfo) => {
+    setWidgets((cur) => cur.filter((x) => x.id !== w.id));
+    setHiddenWidgets((cur) => (cur.includes(w.id) ? cur : [...cur, w.id]));
+    sendJson("PUT", "/api/panel/layout", { hiddenWidgets: { [w.id]: true } }).catch(layoutNotSaved);
+  };
+  const showHiddenWidgets = () => {
+    const ids = hiddenWidgets;
+    setHiddenWidgets([]);
+    sendJson("PUT", "/api/panel/layout", { hiddenWidgets: Object.fromEntries(ids.map((id) => [id, false])) })
+      .catch(layoutNotSaved)
+      .then(() => pullWidgets());
   };
   const dragProps = <T extends { name?: string; id?: string }>(kind: string, setItems: (fn: (cur: T[]) => T[]) => void, i: number): DragProps =>
     editing
@@ -439,7 +459,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
             <h2>{t("widgets.heading")}</h2>
             <div className={`widgets ${editing ? "editing" : ""}`}>
               {widgets.map((w, i) => (
-                <Widget key={w.id} w={w} theme={scheme} dragProps={dragProps("widgets", setWidgets, i)} onResize={editing ? (size, commit) => resizeWidget(w, size, commit) : undefined} />
+                <Widget
+                  key={w.id}
+                  w={w}
+                  theme={scheme}
+                  dragProps={dragProps("widgets", setWidgets, i)}
+                  onResize={editing ? (size, commit) => resizeWidget(w, size, commit) : undefined}
+                  onRemove={editing ? () => removeWidget(w) : undefined}
+                />
               ))}
             </div>
           </section>
@@ -488,6 +515,12 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 {t("settings.widgets")}
                 <input type="checkbox" role="switch" checked={!prefs.noWidget} onChange={() => togglePref("noWidget")} />
               </label>
+              {hiddenWidgets.length > 0 && (
+                <button className="setrow setlink" onClick={showHiddenWidgets}>
+                  {t("settings.hiddenWidgets", { n: hiddenWidgets.length })}
+                  <span>{t("settings.showAgain")}</span>
+                </button>
+              )}
               <ThemeSettings />
               <label className="setrow">
                 {t("settings.language")}

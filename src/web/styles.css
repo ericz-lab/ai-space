@@ -689,6 +689,7 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
   opacity: 0.8;
 }
 .widget-grip:hover, .widget.resizing .widget-grip { opacity: 1; }
+.widget > .tile-del { top: -9px; right: -9px; }
 .widget.resizing { outline: 2px solid var(--accent); outline-offset: 4px; }
 .widget iframe { width: 100%; border: 0; border-radius: 10px; min-height: 160px; flex: 1; background: transparent; }
 .widget.s2x2 iframe { min-height: 340px; }
@@ -769,7 +770,7 @@ a.widget-title:hover { color: var(--text); }
   .wb-hero-value { font-size: 34px; }
 }
 
-.widgets.editing .widget { cursor: grab; outline: 2px dashed var(--hairline); outline-offset: 4px; }
+.widgets.editing .widget { position: relative; cursor: grab; outline: 2px dashed var(--hairline); outline-offset: 4px; }
 .widgets.editing .widget a { pointer-events: none; }
 .launcher.editing .tile { cursor: grab; }
 /* The drop target while a tile is dragged: a bar on the side the dragged tile will land. */

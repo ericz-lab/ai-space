@@ -13,12 +13,17 @@ export type Layout = {
   hidden: string[];
   /** Widget sizes the operator chose on the panel, by widget id; they override the manifest's `size`. */
   sizes: Record<string, WidgetSize>;
+  /** Widget ids removed from the panel; the app and its other widgets stay. */
+  hiddenWidgets: string[];
 };
 
-/** `sizes` merges: a size sets the widget, `null` returns it to the manifest's. */
-export type LayoutPatch = Partial<{ order: Partial<Layout["order"]>; hidden: string[]; sizes: Record<string, string | null> }>;
+/**
+ * `sizes` merges: a size sets the widget, `null` returns it to the manifest's.
+ * `hiddenWidgets` merges too: `true` removes the widget from the panel, `false` shows it again.
+ */
+export type LayoutPatch = Partial<{ order: Partial<Layout["order"]>; hidden: string[]; sizes: Record<string, string | null>; hiddenWidgets: Record<string, boolean> }>;
 
-const EMPTY: Layout = { order: { apps: [], agents: [], widgets: [] }, hidden: [], sizes: {} };
+const EMPTY: Layout = { order: { apps: [], agents: [], widgets: [] }, hidden: [], sizes: {}, hiddenWidgets: [] };
 const KEY = "layout";
 const MAX_NAMES = 500;
 
@@ -47,6 +52,7 @@ export class LayoutStore {
         },
         hidden: names(parsed.hidden),
         sizes: sizes(parsed.sizes),
+        hiddenWidgets: names(parsed.hiddenWidgets),
       };
     } catch {
       return structuredClone(EMPTY);
@@ -77,6 +83,18 @@ export class LayoutStore {
         else throw new Error(`sizes.${id}: size must be one of ${WIDGET_SIZES.join(", ")} or null`);
       }
       if (Object.keys(cur.sizes).length > MAX_NAMES) throw new Error("too many sizes");
+    }
+    if (patch.hiddenWidgets !== undefined) {
+      const hw = patch.hiddenWidgets;
+      if (typeof hw !== "object" || hw === null || Array.isArray(hw)) throw new Error("hiddenWidgets must be an object of widget id to true or false");
+      const set = new Set(cur.hiddenWidgets);
+      for (const [id, hide] of Object.entries(hw)) {
+        if (typeof hide !== "boolean") throw new Error(`hiddenWidgets.${id}: must be true or false`);
+        if (hide) set.add(id);
+        else set.delete(id);
+      }
+      if (set.size > MAX_NAMES) throw new Error("too many hidden widgets");
+      cur.hiddenWidgets = names([...set]);
     }
     this.db.query("INSERT INTO panel_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(KEY, JSON.stringify(cur));
     return cur;

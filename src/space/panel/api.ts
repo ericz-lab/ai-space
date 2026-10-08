@@ -30,7 +30,7 @@ import { type WidgetFeed, sourceUrl } from "./widgets.ts";
  *   GET    /api/widgets                  every widget's latest payload
  *   GET    /api/widgets/:app/:name/embed the page of a `kind: embed` widget, proxied from its source
  *   GET    /api/panel/layout             order + hidden
- *   PUT    /api/panel/layout             { order?: { apps?, agents?, widgets? }, hidden?, sizes? }
+ *   PUT    /api/panel/layout             { order?: { apps?, agents?, widgets? }, hidden?, sizes?, hiddenWidgets? }
  *   GET    /api/panel/appcolor?app=      <meta name="theme-color"> of the app's entry page
  *   GET    /api/panel/icons              { active, packs: [{ name, icons }] } (docs/panel.md#icon-packs)
  *   PUT    /api/panel/icons              { active: "<pack>" | null }
@@ -281,8 +281,12 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
         const lay = layout.read();
         const hidden = new Set(lay.hidden);
         const local = (await widgets.all()).filter((w) => !hidden.has(w.app));
-        const all = [...local, ...dropSameLink(local, peers?.widgets(hidden) ?? [])].map((w) => (lay.sizes[w.id] ? { ...w, size: lay.sizes[w.id] } : w));
-        return json({ ok: true, widgets: orderBy(all, lay.order.widgets, (w) => w.id, tier).map((w) => applyToWidget(o, w)), asOf: new Date().toISOString() });
+        const removed = new Set(lay.hiddenWidgets);
+        const all = [...local, ...dropSameLink(local, peers?.widgets(hidden) ?? [])]
+          .filter((w) => !removed.has(w.id))
+          .map((w) => (lay.sizes[w.id] ? { ...w, size: lay.sizes[w.id] } : w));
+        // `hidden` lists the widgets removed from the panel, so the settings can show them again.
+        return json({ ok: true, widgets: orderBy(all, lay.order.widgets, (w) => w.id, tier).map((w) => applyToWidget(o, w)), hidden: lay.hiddenWidgets, asOf: new Date().toISOString() });
       }),
     },
 

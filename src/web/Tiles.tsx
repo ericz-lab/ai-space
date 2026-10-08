@@ -111,7 +111,20 @@ const WIDGET_GAP = 20;
 const MAX_COLS = 2;
 const MAX_ROWS = 2;
 
-export function Widget({ w, dragProps, theme, onResize }: { w: WidgetInfo; dragProps?: DragProps; theme: string; onResize?: (size: string, commit: boolean) => void }) {
+export function Widget({
+  w,
+  dragProps,
+  theme,
+  onResize,
+  onRemove,
+}: {
+  w: WidgetInfo;
+  dragProps?: DragProps;
+  theme: string;
+  onResize?: (size: string, commit: boolean) => void;
+  /** Edit mode: removes the card from the panel (the app stays). */
+  onRemove?: () => void;
+}) {
   const { lang, t } = useLang();
   const title = localized(lang, w).title;
   const embed = `${w.peer ? `/api/peers/${encodeURIComponent(w.peer)}` : "/api"}/widgets/${encodeURIComponent(w.app)}/${encodeURIComponent(w.name)}/embed?theme=${theme}&lang=${lang}`;
@@ -187,6 +200,21 @@ export function Widget({ w, dragProps, theme, onResize }: { w: WidgetInfo; dragP
   };
   return (
     <div ref={card} className={`widget s${w.size}${w.stale ? " stale" : ""}${hasBlocks ? " has-blocks" : ""}${resizing ? " resizing" : ""}`} {...(dragProps as object)} title={w.stale ? t("widget.stale", { peer: w.peer ?? "" }) : undefined}>
+      {onRemove && (
+        <button
+          className="tile-del"
+          title={t("widget.remove")}
+          aria-label={t("widget.remove")}
+          draggable={false}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          ✕
+        </button>
+      )}
       {/* The title stays quiet and leads to the app; the content is what the card is about. */}
       <div className="widget-head">
         <span className="widget-ico">
