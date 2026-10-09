@@ -9,7 +9,7 @@ This document sets the visual and interaction rules for the panel (`src/web/`). 
 - **Implemented**: the panel does this today. The source is named, and [Panel design](panel.md#appearance) describes the mechanism.
 - **Proposed**: an accepted direction that has not been built yet. A proposed rule becomes implemented only in the change that builds it, and that change updates this document.
 
-Nothing in this document starts a redesign on its own. The desktop restructuring (home screen, library, multiple screens; tracked separately as todo #101) is a separate change; section 11 lists what it must follow.
+Nothing in this document starts a redesign on its own. The screens layout (home screen, library, more screens; [Panel design](panel.md#screens)) is implemented; section 11 records how it meets these rules and what is still open.
 
 ## 1. Principles
 
@@ -266,20 +266,26 @@ Implemented unless marked *(proposed)*.
 | Switch thumb | 220 ms `cubic-bezier(0.34, 1.3, 0.64, 1)` |
 | Panel open (`rise`) | 200 ms ease, from 10 px lower at 98.5% scale |
 | Glow on/off | 300 ms ease |
-| Screen change (#101, proposed) | 280 ms `cubic-bezier(0.2, 0.8, 0.2, 1)`, horizontal translate only; instant under reduced motion |
+| Screen change | 280 ms `cubic-bezier(0.2, 0.8, 0.2, 1)`, 48 px horizontal slide with fade; none under reduced motion |
 
 Motion explains where something came from or that something changed. Nothing loops except an indicator of active work, and that stops under reduced motion and when the page is hidden.
 
-## 11. Desktop restructuring (#101)
+## 11. Screens, library, and dock
 
-The home screen, library, and multiple screens of #101 follow this document. In particular:
+The screens layout ([Panel design](panel.md#screens)) is implemented. How it meets this document:
 
-- **The background is fixed to the viewport, not to a screen.** Screens slide over one static arc; the field is not repainted during a swipe.
-- **Edge affordances are visible without hover:** a faint handle (`hairline` fill, 4 × 48 px) at each edge that has a destination, becoming an arrow or plus button (40 px, glass, focusable) on hover or focus. Touch uses swipes and a tappable page indicator.
-- **The page indicator** sits bottom center: a library icon, a home icon, then dots, 8 px apart, with the current one in `text` and the others in `muted`. Each is a button with a label for screen readers.
-- **"Added" state** in the library is a check plus the word "Added" in `muted`, with no extra color; the add button becomes a disabled state, not hidden.
-- **Search** (⌘K / Ctrl+K) opens a reading-surface panel near the top, like Settings, with type filters as pill toggles.
-- **The library is a reading surface,** not glass: it lists many items, and a grid of glass over glass would break 5.3.
+- **Edges are discoverable without hover** (implemented): a faint 4 × 44 px handle in `muted` at 0.22 opacity at each edge with a destination, which becomes a 40 px strong-glass button with a label on hover or keyboard focus (3 px focus ring). Touch screens hide the edges and use the dock and swipes.
+- **The dock** (implemented) sits bottom center on strong glass: library, home, one dot per screen, and search. The current dot is full opacity; the others are at 0.45.
+- **Screen changes** slide 48 px with a fade in 280 ms and do not animate under reduced motion (implemented, section 10.3).
+- **"Added" state** (implemented): the Add button turns into "✓ Added" for an entry already on the target screen, and a notice links to that screen. The check and the word carry the state, not color alone.
+- **Search** (implemented): ⌘K / Ctrl+K opens the library with the search focused.
+
+Still open (proposed):
+
+- **The background stays fixed to the viewport, not to a screen.** The `.aurora` layer is `position: fixed` today, so this holds. The Space arc must keep it that way and must not be repainted during a slide.
+- **Library cards are glass** (`.lib-card` has its own backdrop filter), so a library with every app means dozens of blurred layers. Draw library cards with the flat `surfaceStrong` fill and no backdrop filter (5.3, section 8's performance note). The library is a list to scan, not a place for depth.
+- **The dock's inactive dots** (`currentColor` at 0.45) must reach 3:1 against the dock in every preset (9.1). Check this in the contrast test.
+- **The edge handle** at 0.22 opacity is decorative; the button on hover or focus is the control. Keep it that way: the handle must not become the only cue on any input type.
 
 ## 12. Review checklist
 
@@ -294,7 +300,7 @@ A change to the panel's look is ready when every box can be checked. Screens to 
 - [ ] The background has one recognizable shape and a quiet content area.
 - [ ] No glass inside glass; reading surfaces at 0.94 alpha or more.
 - [ ] Cards are distinct from the field without heavy shadows or a cloudy look.
-- [ ] Light and dark look equally finished, with screenshots of both in the PR.
+- [ ] Light and dark look equally finished, with screenshots of both in the PR (home, library, and one open panel).
 
 **Interaction**
 - [ ] Every control has visible hover, focus, pressed, and disabled states.
