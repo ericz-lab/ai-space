@@ -673,6 +673,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               addMode={libAdd}
               onAddMode={setLibAdd}
               onPin={pinEntry}
+              onUnpin={(key, screenId) => updateScreens((cur) => unpin(cur, screenId, key))}
               onOpen={openEntry}
               usage={usage}
               onGoTo={goToScreen}

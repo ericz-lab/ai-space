@@ -931,6 +931,10 @@ a.widget-title:hover { color: var(--text); }
 .lib-act { flex: none; display: flex; gap: 6px; align-items: center; }
 .lib-act .btn2 { padding: 5px 14px; font-size: 13px; }
 :is(.lib-act, .widget-extra) .btn2.done { background: transparent; color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); opacity: 1; }
+/* "Added" turns into "Remove" under the pointer; a click takes the entry off the target screen. */
+.btn2.done .undo, .btn2.done:hover .on, .btn2.done:focus-visible .on { display: none; }
+.btn2.done:hover .undo, .btn2.done:focus-visible .undo { display: inline; }
+:is(.lib-act, .widget-extra) .btn2.done:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .lib-size { padding: 4px 6px; font-size: 12px; }
 .lib-toast {
   position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 27;

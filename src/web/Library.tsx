@@ -38,6 +38,7 @@ export default function Library({
   addMode,
   onAddMode,
   onPin,
+  onUnpin,
   onOpen,
   usage,
   onGoTo,
@@ -58,6 +59,8 @@ export default function Library({
   addMode: boolean;
   onAddMode: (on: boolean) => void;
   onPin: (key: string, screenId: string, size?: string) => void;
+  /** Takes an entry added by mistake off `target` again. */
+  onUnpin: (key: string, screenId: string) => void;
   /** Agents and the panel's own tiles open in the page; apps and widgets are links. */
   onOpen: (key: string) => void;
   /** The last 30 days of use by entry key, for the "Most used" order. */
@@ -147,6 +150,21 @@ export default function Library({
     onPin(e.key, targetScreen.id, size !== e.size ? size : undefined);
     setToast((cur) => ({ name: e.title, screen: targetScreen.id, n: (cur?.n ?? 0) + 1 }));
   };
+  const remove = (e: Entry) => {
+    if (targetScreen) onUnpin(e.key, targetScreen.id);
+  };
+  /** Add, or once added a button that takes the entry off the target screen again. */
+  const addButton = (e: Entry, pinnedHere: boolean) =>
+    pinnedHere ? (
+      <button className="btn2 done" title={t("library.removeTitle")} onClick={() => remove(e)}>
+        <span className="on">✓ {t("library.added")}</span>
+        <span className="undo">{t("library.remove")}</span>
+      </button>
+    ) : (
+      <button className="btn2 primary" onClick={() => add(e)}>
+        {t("library.add")}
+      </button>
+    );
   /** An app or built-in opened from here counts as a library open; an agent counts its chat turns instead. */
   const use = (e: Entry) => {
     if (e.kind === "app" || e.kind === "builtin") recordOpen(e.kind, parseKey(e.key)!.id, "library");
@@ -262,9 +280,7 @@ export default function Library({
             <div key={e.key} className={`lib-card ${e.kind}${pinnedHere ? " pinned" : ""}`}>
               {body}
               <div className="lib-act">
-                <button className={`btn2${pinnedHere ? " done" : " primary"}`} disabled={pinnedHere} onClick={() => add(e)}>
-                  {pinnedHere ? `✓ ${t("library.added")}` : t("library.add")}
-                </button>
+                {addButton(e, pinnedHere)}
               </div>
             </div>
           );
@@ -296,9 +312,7 @@ export default function Library({
                             ))}
                           </select>
                         )}
-                        <button className={`btn2${pinnedHere ? " done" : " primary"}`} disabled={pinnedHere} onClick={() => add(e)}>
-                          {pinnedHere ? `✓ ${t("library.added")}` : t("library.add")}
-                        </button>
+                        {addButton(e, pinnedHere)}
                       </>
                     ) : on.length > 0 ? (
                       <span className="lib-on">{t("library.onScreens", { screens: on.join(lang === "zh" ? "、" : ", ") })}</span>
