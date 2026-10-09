@@ -79,7 +79,7 @@ describe("routeTable", () => {
 });
 
 describe("renderCaddyfile", () => {
-  const opts = { port: 8080, socket: "/ws/run/caddy.sock", logDir: "/ws/logs/router" };
+  const opts = { port: 8080, socket: "/ws/run/caddy.sock", logDir: "/ws/logs/router", spacePort: 8700 };
 
   test("global options, one site per route sorted by host, conflicts skipped, a 404 catch-all", () => {
     const routes: Route[] = [
@@ -98,8 +98,15 @@ describe("renderCaddyfile", () => {
         "",
         "# a",
         "http://a.example.com:8080 {",
-        "\treverse_proxy 127.0.0.1:8710 {",
-        "\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}",
+        "\thandle /_space/* {",
+        "\t\treverse_proxy 127.0.0.1:8700 {",
+        "\t\t\theader_up X-Space-App a",
+        "\t\t}",
+        "\t}",
+        "\thandle {",
+        "\t\treverse_proxy 127.0.0.1:8710 {",
+        "\t\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}",
+        "\t\t}",
         "\t}",
         "\tlog {",
         "\t\toutput file /ws/logs/router/a.log {",
@@ -111,8 +118,15 @@ describe("renderCaddyfile", () => {
         "",
         "# b",
         "http://b.example.com:8080 {",
-        "\treverse_proxy 127.0.0.1:8720 {",
-        "\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}",
+        "\thandle /_space/* {",
+        "\t\treverse_proxy 127.0.0.1:8700 {",
+        "\t\t\theader_up X-Space-App b",
+        "\t\t}",
+        "\t}",
+        "\thandle {",
+        "\t\treverse_proxy 127.0.0.1:8720 {",
+        "\t\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}",
+        "\t\t}",
         "\t}",
         "\tlog {",
         "\t\toutput file /ws/logs/router/b.log {",
@@ -128,6 +142,12 @@ describe("renderCaddyfile", () => {
         "",
       ].join("\n"),
     );
+  });
+
+  test("the panel's site goes straight to ai-space and drops a client's X-Space-App", () => {
+    const text = renderCaddyfile([{ app: "space", host: "space.example.com", target: "127.0.0.1:8700", status: "wildcard" }], opts);
+    expect(text).toContain("http://space.example.com:8080 {\n\treverse_proxy 127.0.0.1:8700 {\n\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}\n\t\theader_up -X-Space-App\n\t}\n");
+    expect(text).not.toContain("handle /_space/*");
   });
 
   test("no routes is still a valid file", () => {

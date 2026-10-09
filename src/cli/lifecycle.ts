@@ -38,7 +38,7 @@ const init = (installDefaults: boolean) => async (ctx: Ctx, argv: string[]) => {
   const router = loadRouterConfig(env).config;
   const caddyfile = join(ws.run, "Caddyfile");
   if (router.backend === "caddy" && !(await Bun.file(caddyfile).exists())) {
-    await Bun.write(caddyfile, renderCaddyfile([], { port: router.port, socket: join(ws.run, "caddy.sock"), logDir: join(ws.logs, "router") }));
+    await Bun.write(caddyfile, renderCaddyfile([], { port: router.port, socket: join(ws.run, "caddy.sock"), logDir: join(ws.logs, "router"), spacePort: Number(env.SPACE_PORT ?? 8700) }));
     err(`[space] router: wrote ${caddyfile} with no routes yet; the caddy unit can start`);
   }
   err(`[space] workspace ready at ${ws.home}`);

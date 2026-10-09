@@ -20,7 +20,7 @@ export type RouterOptions = {
   config: RouterConfig;
   /** The registry's manifests, read at each sync. */
   apps: () => Manifest[];
-  /** The panel's port, for `SPACE_PANEL_HOST`. */
+  /** The panel's port, for `SPACE_PANEL_HOST` and every app's `/_space/*`. */
   panelPort: number;
   /** `<workspace>/run/Caddyfile`. */
   file: string;
@@ -101,7 +101,7 @@ export class Router {
       const routes = this.table();
       for (const r of routes) if (r.status === "conflict") this.log(`${r.app}: ${r.host} is already routed to another app; not rendered`);
       await mkdir(this.opts.logDir, { recursive: true });
-      const changed = await this.backend.write(renderCaddyfile(routes, { port: this.opts.config.port, socket: this.opts.socket, logDir: this.opts.logDir }));
+      const changed = await this.backend.write(renderCaddyfile(routes, { port: this.opts.config.port, socket: this.opts.socket, logDir: this.opts.logDir, spacePort: this.opts.panelPort }));
       // Reload on a change, and again after a failure even when nothing changed (Caddy may be up now).
       if (changed || !this.lastSync?.ok) {
         await this.backend.reload();

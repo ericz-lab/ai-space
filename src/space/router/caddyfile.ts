@@ -1,3 +1,4 @@
+import { PANEL_ROUTE } from "./table.ts";
 import type { Route } from "./types.ts";
 
 /**
@@ -11,6 +12,11 @@ import type { Route } from "./types.ts";
  * login the access layer verified; an app should trust it only behind the
  * edge. The hostless site answers whatever arrives through the wildcard
  * and belongs to no app.
+ *
+ * On every app's hostname, `/_space/*` goes to ai-space itself (the usage
+ * heartbeat, docs/usage.md) with `X-Space-App` set to the app: the page
+ * calls its own origin, and the app name is the router's word, not the
+ * page's. The panel's own site drops any `X-Space-App` a client sends.
  */
 
 export type CaddyfileOptions = {
@@ -20,6 +26,8 @@ export type CaddyfileOptions = {
   socket: string;
   /** Directory of the per-app access logs. */
   logDir: string;
+  /** ai-space's own port, the target of every app's `/_space/*`. */
+  spacePort: number;
 };
 
 export const CADDYFILE_HEADER = "# Written by ai-space from its registry; edits are overwritten. See docs/router.md.";
@@ -36,12 +44,25 @@ export function renderCaddyfile(routes: Route[], opts: CaddyfileOptions): string
   ];
   const active = routes.filter((r) => r.status !== "conflict").sort((a, b) => a.host.localeCompare(b.host));
   for (const r of active) {
+    const site =
+      r.app === PANEL_ROUTE
+        ? [`\treverse_proxy ${r.target} {`, "\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}", "\t\theader_up -X-Space-App", "\t}"]
+        : [
+            "\thandle /_space/* {",
+            `\t\treverse_proxy 127.0.0.1:${opts.spacePort} {`,
+            `\t\t\theader_up X-Space-App ${r.app}`,
+            "\t\t}",
+            "\t}",
+            "\thandle {",
+            `\t\treverse_proxy ${r.target} {`,
+            "\t\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}",
+            "\t\t}",
+            "\t}",
+          ];
     lines.push(
       `# ${r.app}`,
       `http://${r.host}:${opts.port} {`,
-      `\treverse_proxy ${r.target} {`,
-      "\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}",
-      "\t}",
+      ...site,
       "\tlog {",
       `\t\toutput file ${opts.logDir}/${r.app}.log {`,
       "\t\t\troll_size 10MiB",
