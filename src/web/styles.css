@@ -857,11 +857,8 @@ a.widget-title:hover { color: var(--text); }
 .dock.shown, .dock:focus-within { transform: translateX(-50%); opacity: 1; }
 @media (hover: none) { .dock { transform: translateX(-50%); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .dock { transition: none; } }
-/* Dark: the dock and the edge buttons are pure black. */
-:root[data-theme="dark"] :is(.dock, .edge-btn) {
-  background: #000; border-color: rgba(255, 255, 255, 0.1);
-  -webkit-backdrop-filter: none; backdrop-filter: none;
-}
+/* Dark: the dock and the edge buttons are near black, a step darker than the panel's glass. */
+:root[data-theme="dark"] :is(.dock, .edge-btn) { background: rgba(18, 20, 27, 0.9); border-color: rgba(255, 255, 255, 0.1); }
 :root[data-theme="dark"] :is(.dock-btn.on, .dock-btn:hover) { background: rgba(255, 255, 255, 0.12); }
 .dock-sep { width: 1px; height: 24px; margin: 0 4px; background: var(--hairline); }
 .dock-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
