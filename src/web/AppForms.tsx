@@ -4,7 +4,7 @@ import { localized, useLang } from "./i18n.ts";
 
 // The panel's two dialogs in edit mode: add an app from a link, and confirm an uninstall.
 
-export function AddForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+export function AddForm({ onClose, onSaved }: { onClose: () => void; onSaved: (app?: AppInfo) => void }) {
   const { t } = useLang();
   const [link, setLink] = useState("");
   const [err, setErr] = useState("");
@@ -14,8 +14,8 @@ export function AddForm({ onClose, onSaved }: { onClose: () => void; onSaved: ()
     setErr("");
     setBusy(true);
     try {
-      await sendJson("POST", "/api/apps", { link: link.trim() });
-      onSaved();
+      const r = await sendJson<{ app?: AppInfo }>("POST", "/api/apps", { link: link.trim() });
+      onSaved(r.app);
     } catch (e) {
       setErr(String((e as Error).message || e));
     } finally {

@@ -2,6 +2,13 @@ import type { Database } from "bun:sqlite";
 import { WIDGET_SIZES, type WidgetSize } from "../scheduler/manifest.ts";
 
 /**
+ * A screen of the panel: a named page of entries pinned to it, in order. Entries are keys of the
+ * form `app:<id>`, `agent:<id>`, `widget:<id>` or `builtin:<name>`; the library shows everything
+ * else. The first screen is the home screen, the one the panel opens on.
+ */
+export type Screen = { id: string; name: string; items: string[] };
+
+/**
  * Panel layout: the order of tiles and cards and the set of hidden apps.
  * Panel-owned state, kept in ai-space's own database so it follows the
  * workspace and never touches an app's repository.
@@ -15,17 +22,21 @@ export type Layout = {
   sizes: Record<string, WidgetSize>;
   /** Widget ids removed from the panel; the app and its other widgets stay. */
   hiddenWidgets: string[];
+  /** The screens, home first; `null` until the panel stores its first set (it seeds the home screen then). */
+  screens: Screen[] | null;
 };
 
 /**
  * `sizes` merges: a size sets the widget, `null` returns it to the manifest's.
  * `hiddenWidgets` merges too: `true` removes the widget from the panel, `false` shows it again.
  */
-export type LayoutPatch = Partial<{ order: Partial<Layout["order"]>; hidden: string[]; sizes: Record<string, string | null>; hiddenWidgets: Record<string, boolean> }>;
+export type LayoutPatch = Partial<{ order: Partial<Layout["order"]>; hidden: string[]; sizes: Record<string, string | null>; hiddenWidgets: Record<string, boolean>; screens: Screen[] }>;
 
-const EMPTY: Layout = { order: { apps: [], agents: [], widgets: [] }, hidden: [], sizes: {}, hiddenWidgets: [] };
+const EMPTY: Layout = { order: { apps: [], agents: [], widgets: [] }, hidden: [], sizes: {}, hiddenWidgets: [], screens: null };
 const KEY = "layout";
 const MAX_NAMES = 500;
+const MAX_SCREENS = 20;
+export const HOME_SCREEN = "home";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS panel_kv (
@@ -53,6 +64,7 @@ export class LayoutStore {
         hidden: names(parsed.hidden),
         sizes: sizes(parsed.sizes),
         hiddenWidgets: names(parsed.hiddenWidgets),
+        screens: Array.isArray(parsed.screens) ? screens(parsed.screens) : null,
       };
     } catch {
       return structuredClone(EMPTY);
@@ -96,6 +108,7 @@ export class LayoutStore {
       if (set.size > MAX_NAMES) throw new Error("too many hidden widgets");
       cur.hiddenWidgets = names([...set]);
     }
+    if (patch.screens !== undefined) cur.screens = screens(patch.screens, true);
     this.db.query("INSERT INTO panel_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(KEY, JSON.stringify(cur));
     return cur;
   }
@@ -125,6 +138,42 @@ export function orderBy<T>(items: T[], order: string[], nameOf: (item: T) => str
 function names(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return [...new Set(v.filter((x): x is string => typeof x === "string" && x.length > 0 && x.length <= 200))].slice(0, MAX_NAMES);
+}
+
+/**
+ * Screens as stored: the home screen first (added when missing), ids and names unique and short,
+ * items de-duplicated per screen. `strict` (a patch) throws on a malformed list instead of dropping.
+ */
+function screens(v: unknown, strict = false): Screen[] {
+  const bad = (msg: string): never => {
+    throw new Error(msg);
+  };
+  if (!Array.isArray(v)) return strict ? bad("screens must be a list of { id, name, items }") : [];
+  if (v.length > MAX_SCREENS) {
+    if (strict) bad(`at most ${MAX_SCREENS} screens`);
+    v = v.slice(0, MAX_SCREENS);
+  }
+  const out: Screen[] = [];
+  const ids = new Set<string>();
+  for (const s of v as unknown[]) {
+    const o = (typeof s === "object" && s !== null ? s : {}) as Record<string, unknown>;
+    const id = typeof o.id === "string" && /^[A-Za-z0-9_-]{1,40}$/.test(o.id) ? o.id : null;
+    if (!id || ids.has(id)) {
+      if (strict) bad("each screen needs a unique id of letters, digits, - or _");
+      continue;
+    }
+    if (o.items !== undefined && !Array.isArray(o.items)) {
+      if (strict) bad(`screens.${id}.items must be a list of entry keys`);
+      continue;
+    }
+    ids.add(id);
+    const name = typeof o.name === "string" ? o.name.trim().slice(0, 60) : "";
+    out.push({ id, name, items: names(o.items) });
+  }
+  const home = out.findIndex((s) => s.id === HOME_SCREEN);
+  if (home < 0) out.unshift({ id: HOME_SCREEN, name: "", items: [] });
+  else if (home > 0) out.unshift(...out.splice(home, 1));
+  return out;
 }
 
 const isSize = (v: unknown): v is WidgetSize => typeof v === "string" && (WIDGET_SIZES as readonly string[]).includes(v);
