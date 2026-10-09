@@ -69,8 +69,9 @@ section + section { margin-top: 56px; }
 h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 24px; }
 
 /* A tile is wider than its 64 px icon (the name needs the room), so the grid is pulled out by the
-   difference: the first icon's edge lines up with the widget cards and the page's other content. */
-.launcher { display: grid; grid-template-columns: repeat(auto-fill, 96px); gap: 28px 20px; margin-inline: -16px; }
+   difference on both sides, and the columns spread over the width: the first icon's left edge and
+   the last column's right edge line up with the widget cards and the page's other content. */
+.launcher { display: grid; grid-template-columns: repeat(auto-fill, 96px); justify-content: space-between; gap: 28px 20px; margin-inline: -16px; }
 .tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; }
 .tile-icon {
   position: relative; width: 64px; height: 64px; border-radius: var(--radius-md);
