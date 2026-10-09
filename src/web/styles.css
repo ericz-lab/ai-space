@@ -890,6 +890,13 @@ a.widget-title:hover { color: var(--text); }
 .lib-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-left: auto; }
 .lib-tools .btn2 { padding: 6px 14px; font-size: 13px; }
 .lib-target { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.lib-section { margin: 32px 0 14px; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+.lib-grid + .lib-widgets { margin-top: 24px; }
+.lib-widgets { grid-auto-flow: dense; }
+.widget-extra { margin-left: auto; flex: none; display: inline-flex; gap: 6px; align-items: center; }
+.widget-asof + .widget-extra { margin-left: 8px; }
+.widget-extra .btn2 { padding: 4px 12px; font-size: 12px; }
+.widget-extra .lib-on { font-size: 11px; }
 .lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; }
 .lib-card {
   display: flex; align-items: center; gap: 14px; padding: 12px 14px; min-width: 0;
@@ -908,7 +915,7 @@ a.widget-title:hover { color: var(--text); }
 .lib-on { color: var(--success); }
 .lib-act { flex: none; display: flex; gap: 6px; align-items: center; }
 .lib-act .btn2 { padding: 5px 14px; font-size: 13px; }
-.lib-act .btn2.done { background: transparent; color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); opacity: 1; }
+:is(.lib-act, .widget-extra) .btn2.done { background: transparent; color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); opacity: 1; }
 .lib-size { padding: 4px 6px; font-size: 12px; }
 .lib-toast {
   position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 27;

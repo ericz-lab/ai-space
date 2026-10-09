@@ -279,7 +279,7 @@ The screens layout ([Panel design](panel.md#screens)) is implemented. How it mee
 - **Screens have no titles or names**: each has only a visually hidden heading (Home, Screen 2, …), and the dock's highlighted icon says where you are. A new screen is created at once, without a naming step.
 - **Screen changes** slide 48 px with a fade in 280 ms and do not animate under reduced motion (implemented, section 10.3).
 - **"Added" state** (implemented): in add mode the Add button turns into "✓ Added" for an entry already on the target screen, and a notice links to that screen. The check and the word carry the state, not color alone.
-- **The library opens by default** (implemented): a whole card is one link that opens the entry, lifting 1 px with a stronger border on hover. A toggle button switches to add mode (primary, "✓ Done" while on, `aria-pressed`), where the cards carry Add buttons and the target menu appears.
+- **The library opens by default** (implemented): a whole card is one link that opens the entry, lifting 1 px with a stronger border on hover. A toggle button switches to add mode (primary, "✓ Done" while on, `aria-pressed`), where the cards carry Add buttons and the target menu appears. Widgets are shown as live previews (the real widget card, packed densely) rather than list cards, with their size menu and Add in the card header.
 - **Search** (implemented): ⌘K / Ctrl+K opens the library with the search focused.
 
 Still open (proposed):

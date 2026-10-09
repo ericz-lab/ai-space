@@ -636,6 +636,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               onGoTo={goToScreen}
               onAddLink={() => setAdding({ pinTo: null })}
               focusSignal={libFocus}
+              theme={scheme}
             />
           </section>
         ) : screen ? (

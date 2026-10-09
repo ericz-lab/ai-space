@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { isImgIcon, type AgentInfo, type AppInfo, type BuiltinIcons, type WidgetInfo } from "./api.ts";
 import { type Key, localized, useLang, withLang } from "./i18n.ts";
 import { BUILTINS, type Builtin, WIDGET_SIZES, type EntryKind, type Screen, entryKey, matches } from "./screens.ts";
-import { Icon } from "./Tiles.tsx";
+import { Icon, Widget } from "./Tiles.tsx";
 
 // The library: the screen left of home, with every app, agent and widget whether pinned or not.
 // One search over the three kinds and a filter by kind. By default a card opens its entry, like a
 // launcher; the add-mode button turns the cards into Add buttons that pin to the chosen screen and
-// keep the library open, so several can be added in a row.
+// keep the library open, so several can be added in a row. Widgets show as live previews, the
+// same cards a screen draws, at the size they would be added at.
 
 type Filter = "all" | "app" | "agent" | "widget";
 const FILTERS: { value: Filter; label: Key }[] = [
@@ -22,7 +23,7 @@ const BUILTIN_TEXT: Record<Builtin, { title: Key; blurb: Key; fallback: string }
   settings: { title: "settings.title", blurb: "settings.blurb", fallback: "⚙️" },
 };
 
-type Entry = { key: string; kind: EntryKind; icon: string; fallback: string; title: string; text: string; kindLabel: string; peer?: string; href?: string; size?: string };
+type Entry = { key: string; kind: EntryKind; widget?: WidgetInfo; icon: string; fallback: string; title: string; text: string; kindLabel: string; peer?: string; href?: string; size?: string };
 
 export default function Library({
   apps,
@@ -40,6 +41,7 @@ export default function Library({
   onGoTo,
   onAddLink,
   focusSignal,
+  theme,
 }: {
   apps: AppInfo[];
   agents: AgentInfo[];
@@ -60,6 +62,8 @@ export default function Library({
   onAddLink: () => void;
   /** Changes whenever the search field should take the focus (⌘K, the dock's search). */
   focusSignal: number;
+  /** The resolved color scheme, for embedded widget previews. */
+  theme: string;
 }) {
   const { lang, t } = useLang();
   const [q, setQ] = useState("");
@@ -93,7 +97,7 @@ export default function Library({
     }
     for (const w of widgets) {
       const shown = localized(lang, w);
-      out.push({ key: entryKey("widget", w.id), kind: "widget", icon: w.icon, fallback: "📦", title: shown.title, text: w.id, kindLabel: t("library.kindWidget"), peer: w.peer, href: w.link ? withLang(w.link, lang) : undefined, size: w.size });
+      out.push({ key: entryKey("widget", w.id), kind: "widget", widget: w, icon: w.icon, fallback: "📦", title: shown.title, text: w.id, kindLabel: t("library.kindWidget"), peer: w.peer, href: w.link ? withLang(w.link, lang) : undefined, size: w.size });
     }
     return out;
   }, [apps, agents, widgets, builtins, lang, t]);
@@ -108,6 +112,7 @@ export default function Library({
     return c;
   }, [entries, q]);
   const shown = entries.filter((e) => (filter === "all" || kindOf(e) === filter) && matches(q, e.title, e.text, e.peer));
+  const shownWidgets = shown.filter((e) => e.kind === "widget");
   const targetScreen = screens.find((s) => s.id === target) ?? screens[0];
   const nameOf = (id: string) => {
     const s = screens.find((x) => x.id === id);
@@ -176,7 +181,7 @@ export default function Library({
         </div>
       </div>
       <div className="lib-grid">
-        {shown.map((e) => {
+        {shown.filter((e) => e.kind !== "widget").map((e) => {
           const pinnedHere = !!targetScreen?.items.includes(e.key);
           const on = screens.filter((s) => s.items.includes(e.key)).map(screenName);
           const body = (
@@ -210,15 +215,6 @@ export default function Library({
             <div key={e.key} className={`lib-card${pinnedHere ? " pinned" : ""}`}>
               {body}
               <div className="lib-act">
-                {e.kind === "widget" && !pinnedHere && (
-                  <select className="setselect lib-size" aria-label={t("library.size")} title={t("library.size")} value={sizes[e.key] ?? e.size} onChange={(ev) => setSizes((cur) => ({ ...cur, [e.key]: ev.target.value }))}>
-                    {WIDGET_SIZES.map((s) => (
-                      <option key={s} value={s}>
-                        {s.replace("x", "×")}
-                      </option>
-                    ))}
-                  </select>
-                )}
                 <button className={`btn2${pinnedHere ? " done" : " primary"}`} disabled={pinnedHere} onClick={() => add(e)}>
                   {pinnedHere ? `✓ ${t("library.added")}` : t("library.add")}
                 </button>
@@ -227,6 +223,46 @@ export default function Library({
           );
         })}
       </div>
+      {shownWidgets.length > 0 && (
+        <>
+          {filter === "all" && <h3 className="lib-section">{t("library.widgets")}</h3>}
+          <div className="widgets lib-widgets">
+            {shownWidgets.map((e) => {
+              const w = e.widget as WidgetInfo;
+              const pinnedHere = !!targetScreen?.items.includes(e.key);
+              const size = sizes[e.key] ?? w.size;
+              const on = screens.filter((s) => s.items.includes(e.key)).map(screenName);
+              return (
+                <Widget
+                  key={e.key}
+                  w={addMode && !pinnedHere ? { ...w, size } : w}
+                  theme={theme}
+                  extra={
+                    addMode ? (
+                      <>
+                        {!pinnedHere && (
+                          <select className="setselect lib-size" aria-label={t("library.size")} title={t("library.size")} value={size} onChange={(ev) => setSizes((cur) => ({ ...cur, [e.key]: ev.target.value }))}>
+                            {WIDGET_SIZES.map((s) => (
+                              <option key={s} value={s}>
+                                {s.replace("x", "×")}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <button className={`btn2${pinnedHere ? " done" : " primary"}`} disabled={pinnedHere} onClick={() => add(e)}>
+                          {pinnedHere ? `✓ ${t("library.added")}` : t("library.add")}
+                        </button>
+                      </>
+                    ) : on.length > 0 ? (
+                      <span className="lib-on">{t("library.onScreens", { screens: on.join(lang === "zh" ? "、" : ", ") })}</span>
+                    ) : undefined
+                  }
+                />
+              );
+            })}
+          </div>
+        </>
+      )}
       {!shown.length && q && <div className="empty">{t("library.none", { q })}</div>}
       {toast && (
         <div className="lib-toast" role="status" key={toast.n}>

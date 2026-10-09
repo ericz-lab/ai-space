@@ -117,6 +117,7 @@ export function Widget({
   theme,
   onResize,
   onRemove,
+  extra,
 }: {
   w: WidgetInfo;
   dragProps?: DragProps;
@@ -124,6 +125,8 @@ export function Widget({
   onResize?: (size: string, commit: boolean) => void;
   /** Edit mode: removes the card from the screen (it stays in the library). */
   onRemove?: () => void;
+  /** Controls at the end of the card's head (the library's Add button and size). */
+  extra?: ReactNode;
 }) {
   const { lang, t } = useLang();
   const title = localized(lang, w).title;
@@ -234,6 +237,7 @@ export function Widget({
           </span>
         )}
         {onResize && <span className="widget-size">{(resizing ?? w.size).replace("x", "×")}</span>}
+        {extra && <span className="widget-extra">{extra}</span>}
       </div>
       {onResize && <span className="widget-grip" title={t("widget.resizeHint")} draggable={false} onPointerDown={startResize} onDragStart={(e) => e.preventDefault()} />}
       {w.kind === "embed" ? (
