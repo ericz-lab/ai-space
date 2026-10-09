@@ -6,7 +6,8 @@ import { Icon } from "./Tiles.tsx";
 
 // The library: the screen left of home, with every app, agent and widget whether pinned or not.
 // One search over the three kinds, a filter by kind, and an Add button per entry that pins it to
-// the chosen screen and keeps the library open, so several can be added in a row.
+// the chosen screen and keeps the library open, so several can be added in a row. The icon, the
+// name and an Open button open the entry straight from here.
 
 type Filter = "all" | "app" | "agent" | "widget";
 const FILTERS: { value: Filter; label: Key }[] = [
@@ -175,24 +176,35 @@ export default function Library({
               <Icon icon={e.icon} fallback={e.fallback} />
             </span>
           );
+          const text = (
+            <span className="lib-text">
+              <b>{e.title}</b>
+              <span className="lib-kind">
+                {e.kindLabel}
+                {e.peer && <span className="widget-peer">{e.peer}</span>}
+              </span>
+              {on.length > 0 && <span className="lib-on">{t("library.onScreens", { screens: on.join(lang === "zh" ? "、" : ", ") })}</span>}
+            </span>
+          );
           return (
             <div key={e.key} className={`lib-card${pinnedHere ? " pinned" : ""}`}>
               {opener ? (
-                <a className="lib-open" title={t("library.open")} {...opener}>
+                <a className="lib-open" {...opener}>
                   {icon}
+                  {text}
                 </a>
               ) : (
-                <span className="lib-open">{icon}</span>
-              )}
-              <div className="lib-text">
-                <b>{e.title}</b>
-                <span className="lib-kind">
-                  {e.kindLabel}
-                  {e.peer && <span className="widget-peer">{e.peer}</span>}
+                <span className="lib-open off">
+                  {icon}
+                  {text}
                 </span>
-                {on.length > 0 && <span className="lib-on">{t("library.onScreens", { screens: on.join(lang === "zh" ? "、" : ", ") })}</span>}
-              </div>
+              )}
               <div className="lib-act">
+                {opener && (
+                  <a className="btn2" {...opener}>
+                    {t("library.open")}
+                  </a>
+                )}
                 {e.kind === "widget" && !pinnedHere && (
                   <select className="setselect lib-size" aria-label={t("library.size")} title={t("library.size")} value={sizes[e.key] ?? e.size} onChange={(ev) => setSizes((cur) => ({ ...cur, [e.key]: ev.target.value }))}>
                     {WIDGET_SIZES.map((s) => (

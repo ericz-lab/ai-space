@@ -896,15 +896,17 @@ a.widget-title:hover { color: var(--text); }
   background: var(--glass); border: 1px solid var(--glass-border); border-radius: var(--radius-md);
   -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
 }
-.lib-open { flex: none; cursor: pointer; }
-.lib-open .tile-icon { width: 48px; height: 48px; font-size: 24px; box-shadow: none; }
-.lib-open:hover .tile-icon { transform: scale(1.05); }
+.lib-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; color: inherit; text-decoration: none; cursor: pointer; border-radius: var(--radius-sm); }
+.lib-open.off { cursor: default; }
+.lib-open .tile-icon { flex: none; width: 48px; height: 48px; font-size: 24px; box-shadow: none; }
+.lib-open:not(.off):hover .tile-icon { transform: scale(1.05); }
+.lib-open:not(.off):hover b { text-decoration: underline; }
 .lib-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .lib-text b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lib-kind, .lib-on { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lib-on { color: var(--success); }
 .lib-act { flex: none; display: flex; gap: 6px; align-items: center; }
-.lib-act .btn2 { padding: 5px 14px; font-size: 13px; }
+.lib-act .btn2 { padding: 5px 14px; font-size: 13px; text-decoration: none; }
 .lib-act .btn2.done { background: transparent; color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); opacity: 1; }
 .lib-size { padding: 4px 6px; font-size: 12px; }
 .lib-toast {
@@ -917,5 +919,6 @@ a.widget-title:hover { color: var(--text); }
 .lib-toast button:hover { background: color-mix(in srgb, var(--inverse) 16%, transparent); }
 @media (max-width: 520px) {
   .lib-tools { margin-left: 0; }
-  .lib-card { padding: 10px 12px; gap: 10px; }
+  .lib-card, .lib-open { gap: 10px; }
+  .lib-card { padding: 10px 12px; }
 }
