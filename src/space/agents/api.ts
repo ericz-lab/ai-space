@@ -78,7 +78,7 @@ export function spaceAgentView(runtimes?: RuntimeRegistry, defaultModel?: string
     title: "Base",
     description: "The workspace assistant: knows the apps, reads their manifests and files, helps operate the space.",
     i18n: { zh: { title: "基础", description: "工作区助手：了解各个应用，读取它们的清单和文件，协助运维这个空间。" } },
-    avatar: "✨",
+    avatar: "/assistant.svg",
     appIcon: "✨",
     runtime: runtimes ? baseRuntime(runtimes, defaultModel) : "claude",
     ...(runtimes ? { modelOptions: chatOptions(runtimes) } : {}),

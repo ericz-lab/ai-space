@@ -59,7 +59,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const [panel, setPanel] = useState<Panel | null>(null);
   const close = () => setPanel(null);
   // The chat opens on the space agent by default; an agent tile switches to that agent.
-  const [chatAgent, setChatAgent] = useState<AgentInfo>({ id: "space/assistant", app: "space", name: "assistant", title: "Base", i18n: { zh: { title: "基础" } }, avatar: "✨", appIcon: "✨", runtime: "claude" });
+  const [chatAgent, setChatAgent] = useState<AgentInfo>({ id: "space/assistant", app: "space", name: "assistant", title: "Base", i18n: { zh: { title: "基础" } }, avatar: "/assistant.svg", appIcon: "✨", runtime: "claude" });
   const [prefs, setPrefs] = useState<Prefs>(() => {
     try {
       return (JSON.parse(localStorage.getItem("panel-prefs") || "{}") as Prefs) || {};
