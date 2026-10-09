@@ -11,7 +11,7 @@ import Events from "./Events.tsx";
 import Inbox from "./Inbox.tsx";
 import Library from "./Library.tsx";
 import ScreenNav from "./ScreenNav.tsx";
-import { type Builtin, HOME, type Screen, addScreen, entryKey, move, parseKey, pin, removeScreen, renameScreen, seedScreens, unpin } from "./screens.ts";
+import { type Builtin, HOME, type Screen, addScreen, entryKey, move, parseKey, pin, removeScreen, seedScreens, unpin } from "./screens.ts";
 import { BUILTIN_ICONS, getJson, repoUrl, sendJson, type AgentInfo, type AppInfo, type BuiltinIcons, type InboxSummary, type WidgetInfo } from "./api.ts";
 import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
 import PetField from "./PetField.tsx";
@@ -276,23 +276,20 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     if (search) setLibFocus((n) => n + 1);
     go(-1);
   };
-  const screenName = (s: Screen) => s.name || (s.id === HOME ? t("screens.home") : t("screens.defaultName", { n: rows.indexOf(s) + 1 }));
-  // Naming a new screen, or renaming one; deleting asks once more inside the header.
-  const [naming, setNaming] = useState<{ id: string | null; name: string } | null>(null);
+  // Screens carry no names on the page: home, then "Screen 2", "Screen 3"… by position, the
+  // numbers the dock shows. These names are for the library's target menu and screen readers.
+  const screenName = (s: Screen) => (s.id === HOME ? t("screens.home") : t("screens.defaultName", { n: rows.indexOf(s) + 1 }));
+  // A new screen is made at once, empty, and shown; deleting one asks once more in edit mode.
+  const newScreen = () => {
+    const cur = screensRef.current;
+    if (!cur) return;
+    const made = addScreen(cur, "");
+    saveScreens(made.screens);
+    setDir("from-right");
+    setPos(made.screens.length - 1);
+  };
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => setConfirmDelete(false), [pos, editing]);
-  const saveName = () => {
-    const cur = screensRef.current;
-    if (!naming || !cur) return;
-    if (naming.id) saveScreens(renameScreen(cur, naming.id, naming.name));
-    else {
-      const made = addScreen(cur, naming.name);
-      saveScreens(made.screens);
-      setDir("from-right");
-      setPos(made.screens.length - 1);
-    }
-    setNaming(null);
-  };
   const deleteScreen = (id: string) => {
     updateScreens((cur) => removeScreen(cur, id));
     setDir("from-left");
@@ -312,7 +309,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
 
   // Keys: ⌘K / Ctrl+K opens the library's search from anywhere; ← and → move between screens and
   // Escape leaves the library, while nothing floats over the page and no field has the focus.
-  const floating = panel !== null || adding !== null || uninstalling !== null || naming !== null;
+  const floating = panel !== null || adding !== null || uninstalling !== null;
   const keyState = useRef({ pos, floating, editing, go, openLibrary });
   keyState.current = { pos, floating, editing, go, openLibrary };
   useEffect(() => {
@@ -637,48 +634,20 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
           </section>
         ) : screen ? (
           <section className={`screen ${dir}`} key={screen.id}>
-            {/* Home carries no visible title: it is the page itself. The operator's screens show their names. */}
-            {screen.id === HOME ? (
-              <h2 className="sr-only">{screenName(screen)}</h2>
-            ) : (
-              <div className="screen-head">
-                <h2>{screenName(screen)}</h2>
-                {editing && (
-                  <div className="screen-tools">
-                    <button className="btn2" onClick={() => setNaming({ id: screen.id, name: screenName(screen) })}>
-                      {t("screens.rename")}
-                    </button>
-                    <button className={`btn2${confirmDelete ? " danger" : ""}`} onClick={() => (confirmDelete ? deleteScreen(screen.id) : setConfirmDelete(true))}>
-                      {confirmDelete ? t("screens.deleteConfirm") : t("screens.delete")}
-                    </button>
-                  </div>
-                )}
+            {/* No visible titles: a screen is the page itself, and the dock says which one it is. */}
+            <h2 className="sr-only">{screenName(screen)}</h2>
+            {editing && screen.id !== HOME && (
+              <div className="screen-tools">
+                <button className={`btn2${confirmDelete ? " danger" : ""}`} onClick={() => (confirmDelete ? deleteScreen(screen.id) : setConfirmDelete(true))}>
+                  {confirmDelete ? t("screens.deleteConfirm") : t("screens.delete")}
+                </button>
               </div>
             )}
             {renderScreen(screen)}
           </section>
         ) : null}
       </div>
-      {screens && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={() => setNaming({ id: null, name: t("screens.defaultName", { n: rows.length + 1 }) })} onSearch={() => openLibrary(HOME, true)} />}
-      {naming && (
-        <div className="overlay" onClick={() => setNaming(null)}>
-          <div className="modal" role="dialog" aria-label={naming.id ? t("screens.rename") : t("screens.new")} onClick={(e) => e.stopPropagation()}>
-            <h3>{naming.id ? t("screens.rename") : t("screens.new")}</h3>
-            <div className="field">
-              <label htmlFor="screen-name">{t("screens.nameLabel")}</label>
-              <input id="screen-name" autoFocus value={naming.name} maxLength={60} onFocus={(e) => e.target.select()} onChange={(e) => setNaming({ ...naming, name: e.target.value })} onKeyDown={(e) => e.key === "Enter" && saveName()} />
-            </div>
-            <div className="actions">
-              <button className="btn2" onClick={() => setNaming(null)}>
-                {t("common.cancel")}
-              </button>
-              <button className="btn2 primary" onClick={saveName}>
-                {naming.id ? t("common.save") : t("screens.create")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {screens && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={() => openLibrary(HOME, true)} />}
       {!prefs.noPet && <Pet sheet={petSheet} onError={onPetError} />}
       {uninstalling && (
         <UninstallForm

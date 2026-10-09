@@ -77,8 +77,6 @@ export function addScreen(screens: Screen[], name: string): { screens: Screen[];
   return { screens: [...screens, { id, name: name.trim().slice(0, 60), items: [] }], id };
 }
 
-export const renameScreen = (screens: Screen[], id: string, name: string) => mapScreen(screens, id, (s) => ({ ...s, name: name.trim().slice(0, 60) }));
-
 /** The home screen cannot be deleted; deleting a screen leaves its entries in the library. */
 export const removeScreen = (screens: Screen[], id: string) => (id === HOME ? screens : screens.filter((s) => s.id !== id));
 

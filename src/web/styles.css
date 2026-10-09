@@ -531,7 +531,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 }
 .chat-down {
   position: absolute; right: 16px; bottom: 72px; z-index: 3;
-  width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--glass-border);
+  width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--glass-border);
   background: var(--glass-strong); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
   color: var(--text); font-size: 15px; cursor: pointer; box-shadow: var(--shadow);
   display: flex; align-items: center; justify-content: center;
@@ -804,9 +804,7 @@ a.widget-title:hover { color: var(--text); }
 @keyframes slideFromLeft { from { opacity: 0; transform: translateX(-48px); } }
 @media (prefers-reduced-motion: reduce) { .screen.from-right, .screen.from-left { animation: none; } }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-.screen-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
-.screen-head h2 { margin-bottom: 0; }
-.screen-tools { display: flex; gap: 8px; }
+.screen-tools { display: flex; gap: 8px; margin-bottom: 24px; }
 .screen-tools .btn2 { padding: 4px 14px; font-size: 13px; }
 .screen .launcher + .dropzone, .screen .launcher + .widgets, .screen .dropzone + .widgets { margin-top: 40px; }
 .screen .empty p { margin-bottom: 16px; }
@@ -838,28 +836,25 @@ a.widget-title:hover { color: var(--text); }
 .edge:focus-visible .edge-btn { box-shadow: 0 0 0 3px var(--focus); }
 @media (hover: none) { .edge { display: none; } }
 
-/* The dock: library, home, one dot per screen, search. With a mouse it rises into view when the
+/* The dock: library, home, one numbered square per screen, search. With a mouse it rises into view when the
    pointer nears the bottom of the window (`shown`) or the keyboard focus enters it; touch screens
    keep it in view. */
 .dock {
   position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, calc(100% + 24px)); z-index: 26;
   opacity: 0; transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease;
-  display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 999px;
+  display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 999px;
   background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
   -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
 }
-.dock-btn, .dock-dot {
+.dock-btn {
   border: none; background: transparent; color: var(--muted); cursor: pointer; padding: 0;
   width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
 }
-.dock-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
-.dock-btn:hover, .dock-dot:hover { color: var(--text); background: var(--hairline); }
+.dock-btn svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.dock-btn:hover { color: var(--text); background: var(--hairline); }
 .dock-btn.on { color: var(--text); background: var(--hairline); }
 .dock-btn.on svg { stroke-width: 2; }
-.dock-dot { width: 22px; }
-.dock-dot i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: 0.45; transition: transform 0.15s, opacity 0.15s; }
-.dock-dot.on { color: var(--text); }
-.dock-dot.on i { opacity: 1; transform: scale(1.25); }
+.dock-screen text { fill: currentColor; stroke: none; font: 600 9px/1 Inter, -apple-system, system-ui, sans-serif; }
 .dock.shown, .dock:focus-within { transform: translateX(-50%); opacity: 1; }
 @media (hover: none) { .dock { transform: translateX(-50%); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .dock { transition: none; } }
@@ -868,9 +863,9 @@ a.widget-title:hover { color: var(--text); }
   background: #000; border-color: rgba(255, 255, 255, 0.1);
   -webkit-backdrop-filter: none; backdrop-filter: none;
 }
-:root[data-theme="dark"] :is(.dock-btn.on, .dock-btn:hover, .dock-dot:hover) { background: rgba(255, 255, 255, 0.12); }
-.dock-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--hairline); }
-.dock-btn:focus-visible, .dock-dot:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+:root[data-theme="dark"] :is(.dock-btn.on, .dock-btn:hover) { background: rgba(255, 255, 255, 0.12); }
+.dock-sep { width: 1px; height: 24px; margin: 0 4px; background: var(--hairline); }
+.dock-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 .screens-hint {
   position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 26;

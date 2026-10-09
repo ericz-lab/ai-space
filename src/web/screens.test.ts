@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { WIDGET_SIZES as SERVER_SIZES } from "../space/scheduler/manifest.ts";
-import { HOME, WIDGET_SIZES, addScreen, matches, move, parseKey, pin, removeScreen, renameScreen, screensOf, seedScreens, unpin } from "./screens.ts";
+import { HOME, WIDGET_SIZES, addScreen, matches, move, parseKey, pin, removeScreen, screensOf, seedScreens, unpin } from "./screens.ts";
 
 describe("screens", () => {
   test("a first home screen takes the panel's own tiles and the head of each list", () => {
@@ -28,15 +28,13 @@ describe("screens", () => {
     expect(move(s, HOME, ["app:a"], 0, 3)).toBe(s);
   });
 
-  test("screens get unique ids, names are trimmed, home cannot be removed", () => {
-    let { screens, id } = addScreen(seedScreens([], [], []), "  Study ");
+  test("screens get unique ids and home cannot be removed", () => {
+    const { screens, id } = addScreen(seedScreens([], [], []), "");
     expect(id).toBe("s1");
-    expect(screens[1]?.name).toBe("Study");
-    const second = addScreen(removeScreen(addScreen(screens, "x").screens, "s1"), "y");
+    const second = addScreen(removeScreen(addScreen(screens, "").screens, "s1"), "");
     expect(second.id).toBe("s3");
-    screens = renameScreen(second.screens, "s3", " z ");
-    expect(screens.map((s) => [s.id, s.name])).toEqual([[HOME, ""], ["s2", "x"], ["s3", "z"]]);
-    expect(removeScreen(screens, HOME)).toBe(screens);
+    expect(second.screens.map((s) => s.id)).toEqual([HOME, "s2", "s3"]);
+    expect(removeScreen(second.screens, HOME)).toBe(second.screens);
   });
 
   test("keys parse back into kind and id; ids may hold a peer prefix", () => {
