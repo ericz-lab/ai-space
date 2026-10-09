@@ -36,6 +36,12 @@ An app page loads the script with one line:
 <script src="/_space/usage.js" defer></script>
 ```
 
+A page built by Bun's HTML import (or another bundler) adds the script at runtime instead, because the bundler would try to resolve `/_space/usage.js` at build time and fail (ai-todo and ai-notes do this):
+
+```html
+<script>(function(){var s=document.createElement("script");s.src="/_space/usage.js";s.defer=true;document.head.appendChild(s)})()</script>
+```
+
 The script (`script.ts`, plain ES5, under 2 KB) works like this:
 
 - It keeps a random tab id in `sessionStorage`.

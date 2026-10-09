@@ -523,6 +523,8 @@ An app page can let the space count the time it is in use with one line in its `
 <script src="/_space/usage.js" defer></script>
 ```
 
+A page that Bun's HTML import (or another bundler) builds must add the script at runtime instead, because the bundler tries to resolve `/_space/usage.js` at build time and fails: `<script>(function(){var s=document.createElement("script");s.src="/_space/usage.js";s.defer=true;document.head.appendChild(s)})()</script>`.
+
 This is recommended, not required. The script keeps a random id per browser tab and sends a heartbeat to `/_space/usage/beat` on the page's own origin every 30 s, while the page is visible and had input in the last 2 minutes. The router forwards `/_space/*` to ai-space and names the app, so the page needs no token and no CORS. Only the time in use is recorded. The script sends nothing about the person, the page's content or what they do in the app. Opens from the panel are counted for every app, with or without the script. Without the router (an app reached on its port) the heartbeat has nowhere to go and fails silently. See [usage.md](usage.md).
 
 ## Full example
