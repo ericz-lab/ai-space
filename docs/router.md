@@ -68,8 +68,15 @@ Rendered from the table by a pure function (`caddyfile.ts`), deterministic, so t
 
 # a
 http://a.example.com:8080 {
-	reverse_proxy 127.0.0.1:8710 {
-		header_up X-Space-User {header.Cf-Access-Authenticated-User-Email}
+	handle /_space/* {
+		reverse_proxy 127.0.0.1:8700 {
+			header_up X-Space-App a
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8710 {
+			header_up X-Space-User {header.Cf-Access-Authenticated-User-Email}
+		}
 	}
 	log {
 		output file /home/u/.ai-space/logs/router/a.log {
@@ -88,6 +95,7 @@ http://:8080 {
 - `default_bind 127.0.0.1`: every site listens on loopback only, reachable from the tunnel and nothing else. Conflicting apps are left out of the file.
 - The admin endpoint is a unix socket in the workspace `run/` directory, so `caddy reload` works the same way on Linux and macOS and nothing listens on a TCP port for it.
 - `X-Space-User` hands the app the login that Access verified, without the app parsing a JWT. The header is set by the edge and an app should trust it only behind the edge.
+- `/_space/*` on every app's hostname goes to ai-space itself (`SPACE_PORT`) with `X-Space-App` set to the app: the usage heartbeat script and its beats ([usage.md](usage.md#heartbeat)). The page calls its own origin, and the app name is the router's, not the page's. The panel's own site (`SPACE_PANEL_HOST`) has no such block and drops a client's `X-Space-App` (`header_up -X-Space-App`).
 - The last block answers hostnames that arrive through the wildcard but belong to no app.
 - Tabs, not spaces: the Caddyfile formatter's convention.
 

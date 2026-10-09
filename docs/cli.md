@@ -82,6 +82,7 @@ Rules:
 | `space model status` | runtimes, concurrency, in flight | `GET /api/model/status` |
 | `space model run [--app] [--model] [--tag] [--system] PROMPT\|-` | one call, the answer streamed to stdout (`stream: true`); `--json` for the whole answer with the ledger row | `POST /api/model/run` |
 | `space model import APP FILE` | today's `model-import` | disk |
+| `space usage [--window 30d] [--kind app\|agent\|builtin]` | opens and time in use per app, agent and built-in, by time and then opens; the panel's App usage ([usage.md](usage.md)) | `GET /api/usage` |
 | `space notify send [--level] [--title] [--wait] TEXT` | today's `notify`, same flags | `POST /api/notify` |
 | `space notify ls [--app] [-n]` | history with deliveries | `GET /api/notifications` |
 | `space notify channels` / `test NAME` | channels and their state; a test message | `GET /api/notify/channels`, `POST .../test` |

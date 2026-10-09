@@ -60,7 +60,7 @@
 - 💬 **对话。** 带图片附件的会话线程，以及可嵌入 app 页面的聊天组件。→ [chat](docs/chat.md)
 - 💾 **存储与备份。** 每个 app 一个 SQLite 或 PostgreSQL 数据库加一个对象存储；每日快照到任意 S3 桶，每周校验，可恢复。→ [storage](docs/storage.md) · [backup](docs/backup.md)
 - 🛠️ **服务托管。** ai-space 可以把每个 app 的服务作为 systemd 用户单元（macOS 上是 LaunchAgent）运行，并与 manifest 保持一致。→ [supervision](docs/supervision.md)
-- 🖥️ **面板。** App 启动器、agent 聊天、widget、任务历史、收件箱，支持中英文。→ [panel](docs/panel.md)
+- 🖥️ **面板。** App 启动器、agent 聊天、widget、任务历史、收件箱，支持中英文；统计每个 app 和 agent 的打开次数与使用时长。→ [panel](docs/panel.md) · [usage](docs/usage.md)
 - 🌐 **Peers。** 多台机器共用一个面板。→ [peers](docs/peers.md)
 - ⌨️ **Web 终端**（默认关闭），以及覆盖全部 API 能力的 **`space` 命令行**。→ [terminal](docs/terminal.md) · [cli](docs/cli.md)
 
@@ -146,6 +146,7 @@ space app ls                          # 工作区里的所有 app
 space task run <app>/<task> --wait    # 立即运行一个任务并等待结果
 space logs <app> -f                   # 跟踪某个 app 的日志
 space model usage                     # 按 app 和模型统计 token
+space usage --window 7d               # 按 app 和 agent 统计打开次数和使用时长
 space notify send "hello"             # 测试通知渠道
 space backup ls                       # 每个 app 数据的快照
 ```
@@ -204,7 +205,7 @@ space backup ls                       # 每个 app 数据的快照
 | [Cloudflare](docs/cloudflare.md) | [调度器](docs/scheduler.md) | [服务托管](docs/supervision.md) | [入口](docs/ingress.md) |
 | [机器](docs/machines.md) | [事件与调用](docs/events.md) | [Peers](docs/peers.md) | [时间字段](docs/time.md) |
 | | [存储](docs/storage.md) | [终端](docs/terminal.md) | [多语言](docs/i18n.md) |
-| | [通知](docs/notify.md) · [模型](docs/model.md) · [对话](docs/chat.md) | [面板](docs/panel.md) | [路线图](docs/roadmap.md) |
+| | [通知](docs/notify.md) · [模型](docs/model.md) · [对话](docs/chat.md) | [面板](docs/panel.md) · [使用统计](docs/usage.md) | [路线图](docs/roadmap.md) |
 
 ## 🧑‍💻 开发
 

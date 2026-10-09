@@ -60,7 +60,7 @@ Underneath, the core gives every app what a running AI system needs and nobody w
 - 💬 **Chat.** Threads with image attachments and an embeddable widget for apps' own pages. → [chat](docs/chat.md)
 - 💾 **Storage & backup.** Per-app SQLite or PostgreSQL and a blob store; daily snapshots to any S3 bucket, weekly verification, restore. → [storage](docs/storage.md) · [backup](docs/backup.md)
 - 🛠️ **Supervision.** ai-space can run each app's service as a systemd user unit (a LaunchAgent on macOS) and keep it in step with the manifest. → [supervision](docs/supervision.md)
-- 🖥️ **Panel.** App launcher, agent chat, widgets, task history, inbox, in English or Chinese. → [panel](docs/panel.md)
+- 🖥️ **Panel.** App launcher, agent chat, widgets, task history, inbox, in English or Chinese; it counts how often each app and agent is opened and for how long. → [panel](docs/panel.md) · [usage](docs/usage.md)
 - 🌐 **Peers.** One panel over several machines. → [peers](docs/peers.md)
 - ⌨️ **Web terminal** (off by default) and a **`space` CLI** for everything the API does. → [terminal](docs/terminal.md) · [cli](docs/cli.md)
 
@@ -146,6 +146,7 @@ space app ls                          # every app in the workspace
 space task run <app>/<task> --wait    # run a task now and wait for the result
 space logs <app> -f                   # follow an app's log
 space model usage                     # tokens by app and model
+space usage --window 7d               # opens and time in use by app and agent
 space notify send "hello"             # test the notification channels
 space backup ls                       # snapshots of every app's data
 ```
@@ -204,7 +205,7 @@ The per-area table is in [docs/app-spec.md](docs/app-spec.md#implementation-stat
 | [Cloudflare](docs/cloudflare.md) | [Scheduler](docs/scheduler.md) | [Supervision](docs/supervision.md) | [Ingress](docs/ingress.md) |
 | [Machines](docs/machines.md) | [Events & calls](docs/events.md) | [Peers](docs/peers.md) | [Time fields](docs/time.md) |
 | | [Storage](docs/storage.md) | [Terminal](docs/terminal.md) | [i18n](docs/i18n.md) |
-| | [Notify](docs/notify.md) · [Model](docs/model.md) · [Chat](docs/chat.md) | [Panel](docs/panel.md) | [Roadmap](docs/roadmap.md) |
+| | [Notify](docs/notify.md) · [Model](docs/model.md) · [Chat](docs/chat.md) | [Panel](docs/panel.md) · [Usage](docs/usage.md) | [Roadmap](docs/roadmap.md) |
 
 ## 🧑‍💻 Development
 

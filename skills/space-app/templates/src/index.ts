@@ -19,6 +19,24 @@ async function refresh(): Promise<{ status: "ok" | "error" | "skipped"; error?: 
   return { status: "ok" };
 }
 
+/**
+ * The app's page. The heartbeat script lets the space count the time the page is in use
+ * (ai-space docs/usage.md); keep its line in every page the app serves.
+ */
+const page = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>my-app</title>
+    <script src="/_space/usage.js" defer></script>
+  </head>
+  <body>
+    <h1>my-app</h1>
+  </body>
+</html>
+`;
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
 
@@ -26,6 +44,7 @@ const server = Bun.serve({
   hostname: "127.0.0.1",
   port,
   routes: {
+    "/": () => new Response(page, { headers: { "content-type": "text/html; charset=utf-8" } }),
     "/healthz": () => new Response("ok"),
     "/api/widget": async () => json(await widget()),
     "/jobs/refresh": { POST: async () => json(await refresh()) },
