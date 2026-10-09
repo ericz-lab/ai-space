@@ -348,7 +348,7 @@ Then check, in this order:
 
 1. `journalctl --user -u ai-space -n 50` shows the app synced: storage provisioned, tasks registered, no manifest error.
 2. `https://space.example.com` shows the tile (next to the default app's); the settings pop-over lists the service with its health.
-3. Chat with "Base" (the space agent) and with the app's agent; the answer streams. With `acceptEdits` the agent can write in the app directory. Sessions reopen from the list.
+3. Chat with "Space Assistant" (the space agent) and with the app's agent; the answer streams. With `acceptEdits` the agent can write in the app directory. Sessions reopen from the list.
 4. Tasks drawer: run one task by hand (`POST /api/tasks/:id/run` with the token) and see the run and its output.
 5. `cat ~/.ai-space/data/<app>/space.env` holds `DATABASE_URL`, `BLOB_URL` and `SPACE_APP_TOKEN`. Under `space`, `space app service <app>` shows `space-<app>.service` active and the last sync `installed` or `unchanged`, and `~/.ai-space/run/env/<app>.env` carries those variables plus `PORT`; under `operator`, the app's own unit has `EnvironmentFile=-%h/.ai-space/data/<app>/space.env`.
 6. Stop a task's target once so it fails three times, or post a test notification: the message arrives on the default channel.

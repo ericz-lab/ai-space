@@ -43,7 +43,7 @@ export type AgentsApiOptions = {
   runtimes: RuntimeRegistry;
   /** Model when neither the request nor the manifest names one (SPACE_CHAT_MODEL). */
   defaultModel?: string;
-  /** Live workspace preference: Base's default, and every agent's last fallback. */
+  /** Live workspace preference: Space Assistant's default, and every agent's last fallback. */
   baseDefaultModel?: () => string;
   /**
    * An app's model layers that also pick its agents' model for a new chat: the panel's app-wide
@@ -75,9 +75,9 @@ export function spaceAgentView(runtimes?: RuntimeRegistry, defaultModel?: string
     id: `${SPACE_APP}/${SPACE_AGENT}`,
     app: SPACE_APP,
     name: SPACE_AGENT,
-    title: "Base",
+    title: "Space Assistant",
     description: "The workspace assistant: knows the apps, reads their manifests and files, helps operate the space.",
-    i18n: { zh: { title: "基础", description: "工作区助手：了解各个应用，读取它们的清单和文件，协助运维这个空间。" } },
+    i18n: { zh: { title: "空间助手", description: "工作区助手：了解各个应用，读取它们的清单和文件，协助运维这个空间。" } },
     avatar: "/assistant.svg",
     appIcon: "✨",
     runtime: runtimes ? baseRuntime(runtimes, defaultModel) : "claude",
@@ -159,7 +159,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
   /**
    * What a new chat with an app agent runs on when the request names no model. First runnable wins:
    * the panel's override for the app, the agent's own `runtime`/`model`, the app's `model.default`,
-   * then Base's default. A layer this space cannot chat on (a runtime it lacks or that is not
+   * then Space Assistant's default. A layer this space cannot chat on (a runtime it lacks or that is not
    * logged in as a chat runtime) falls through, as the app-model layers do for model calls.
    */
   const agentDefault = (app: string, agent: { runtime?: string; model?: string }): string => {
@@ -239,7 +239,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const reqModel = typeof body.model === "string" && MODEL_RE.test(body.model) ? body.model : undefined;
         const isBase = agent.id === `${SPACE_APP}/${SPACE_AGENT}`;
         const previous = sessionId ? sessions.get(agent.id, sessionId) : null;
-        // A session recorded before runtimes were stored ran on Base's Claude or the agent's manifest runtime.
+        // A session recorded before runtimes were stored ran on Space Assistant's Claude or the agent's manifest runtime.
         const legacyRuntime = isBase ? "claude" : agent.runtime ?? "claude";
         const appDefault = isBase ? undefined : agentDefault(agent.app, agent);
         const defaultRuntime = appDefault ? appDefault.slice(0, appDefault.indexOf("/")) : agent.runtime!;

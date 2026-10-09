@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { queuedChatTurn } from "./chat-request.ts";
 
-test("Base's first send uses its selection even before model options have reached conversation state", () => {
+test("Space Assistant's first send uses its selection even before model options have reached conversation state", () => {
   const bootstrapAgent = { app: "space", name: "assistant" };
   expect(queuedChatTurn(bootstrapAgent, "hello", "sonnet", "codex/basic", "")).toEqual({ message: "hello", model: "codex/basic", permissionMode: undefined });
   expect(queuedChatTurn(bootstrapAgent, "hello", "opus", "claude/junior", "acceptEdits")).toMatchObject({ model: "claude/junior", permissionMode: "acceptEdits" });

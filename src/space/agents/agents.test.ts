@@ -81,6 +81,10 @@ describe("agents api", () => {
   test("lists the space agent and the apps' agents", async () => {
     const r = (await (await fetch(`${base}/api/agents`)).json()) as { agents: { id: string }[] };
     expect(r.agents.map((a) => a.id)).toEqual(["notes/coder", "notes/librarian", "space/assistant"]);
+    expect(r.agents.find((a) => a.id === "space/assistant")).toMatchObject({
+      title: "Space Assistant",
+      i18n: { zh: { title: "空间助手" } },
+    });
   });
 
   test("streams a turn with the manifest identity and records the session", async () => {
@@ -166,7 +170,7 @@ describe("transcript", () => {
   });
 });
 
-describe("Base runtime selection", () => {
+describe("Space Assistant runtime selection", () => {
   test("advertises tiers, resolves both runtimes, and resumes using the recorded runtime", async () => {
     const { RuntimeRegistry } = await import("../runtimes/registry.ts");
     const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
@@ -223,7 +227,7 @@ describe("Base runtime selection", () => {
   });
 });
 
-test("Codex-only Base ignores legacy Claude defaults and honors qualified defaults", async () => {
+test("Codex-only Space Assistant ignores legacy Claude defaults and honors qualified defaults", async () => {
   const { RuntimeRegistry } = await import("../runtimes/registry.ts");
   const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
   for (const defaultModel of ["sonnet", "codex/basic"]) {
@@ -238,7 +242,7 @@ test("Codex-only Base ignores legacy Claude defaults and honors qualified defaul
   }
 });
 
-test("Base reads the live default for new chats but retains a resumed session's model", async () => {
+test("Space Assistant reads the live default for new chats but retains a resumed session's model", async () => {
   const { RuntimeRegistry } = await import("../runtimes/registry.ts");
   const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
   const configured = new RuntimeRegistry({ default: "claude", runtimes: [
@@ -295,7 +299,7 @@ test("app agents pick a chat runtime through the app's model layers and the spac
     return { session: store.list(`todo/${agent}`)[0]!, ev };
   };
   try {
-    // Nothing declared: the space's default, like Base, with every chat runtime/tier to pick from.
+    // Nothing declared: the space's default, like Space Assistant, with every chat runtime/tier to pick from.
     expect(await planner()).toMatchObject({ runtime: "codex" });
     expect((await planner()).modelOptions).toHaveLength(8);
     expect((await chat("planner")).session).toMatchObject({ runtime: "codex", model: "gpt-6-luna" });

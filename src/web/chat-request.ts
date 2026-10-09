@@ -4,7 +4,7 @@ export type QueuedChatTurn = { message: string; model?: string; permissionMode?:
 
 /**
  * Capture the visible controls at send time, before React commits conversation metadata.
- * Base, and every agent that advertises runtime/tier options, sends its own runtime/tier pick;
+ * Space Assistant, and every agent that advertises runtime/tier options, sends its own runtime/tier pick;
  * an agent of an older peer without options sends the shared Claude model pick.
  */
 export function queuedChatTurn(agent: Pick<AgentInfo, "app" | "name" | "modelOptions">, message: string, appModel: string, runtimeModel: string, permissionMode: string): QueuedChatTurn {

@@ -439,17 +439,17 @@ The repository is the source of truth for this contract:
 
 Settings → Default model selects a configured Claude Code or Codex CLI runtime and
 one of its four tiers. The preference is persisted in `space.db` and applies immediately
-to model-service requests and app chat turns that omit `model`, plus new Base chats.
+to model-service requests and app chat turns that omit `model`, plus new Space Assistant chats.
 This includes ai-todo, ai-calendar and ai-notes, which omit app-level model defaults.
 Explicit request models take precedence. In an app's chat widget, the person's
 model pick (stored per app, `PUT /api/chat/model`) takes precedence over both; see
-[chat.md](chat.md#model-choice). Base resumes keep their recorded runtime
+[chat.md](chat.md#model-choice). Space Assistant resumes keep their recorded runtime
 and model; choose a new conversation to use a changed workspace default.
 
 `GET /api/model/preferences` returns `defaultModel`, `appDefault`, `baseDefault` and
 available `options`. `PUT /api/model/preferences` accepts
 `{"defaultModel":"codex/intermediate"}`. Passing `null` restores the environment
-fallbacks: `SPACE_MODEL_DEFAULT` for apps and `SPACE_CHAT_MODEL` for Base. These
+fallbacks: `SPACE_MODEL_DEFAULT` for apps and `SPACE_CHAT_MODEL` for Space Assistant. These
 routes use the same access boundary as other panel preferences.
 
 App deployments must also use versions that omit hardcoded model defaults.

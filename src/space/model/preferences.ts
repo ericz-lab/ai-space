@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
 
-/** Workspace-wide model preference, shared by app calls and new Base chats. */
+/** Workspace-wide model preference, shared by app calls and new Space Assistant chats. */
 export class ModelPreferences {
   constructor(private readonly db: Database, private readonly runtimes: RuntimeRegistry) {
     db.exec("CREATE TABLE IF NOT EXISTS model_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
