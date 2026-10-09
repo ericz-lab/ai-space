@@ -126,6 +126,25 @@ export async function sendJson<T>(method: string, path: string, body?: unknown):
   return j;
 }
 
+// ---------------------------------------------------------------- usage (docs/usage.md)
+
+export type UsageKind = "app" | "agent" | "builtin";
+/** One entry's use over a window, as `GET /api/usage` returns it; `activeMs` null = not measured. */
+export type UsageRow = { kind: UsageKind; key: string; opens: number; activeMs: number | null; sessions: number; lastAt: string | null; daily: { day: string; opens: number; activeMs: number }[] };
+
+/**
+ * Records that a tile or a library card was opened. A beacon: it never holds up or delays the
+ * open, survives the page going to a new tab, and a failure is ignored.
+ */
+export const recordOpen = (kind: UsageKind, key: string, source: "panel" | "library") => {
+  try {
+    const body = JSON.stringify({ kind, key, source });
+    if (!navigator.sendBeacon?.("/api/panel/usage/open", new Blob([body], { type: "text/plain" }))) void fetch("/api/panel/usage/open", { method: "POST", body, keepalive: true }).catch(() => {});
+  } catch {
+    /* usage is best effort */
+  }
+};
+
 /** An icon is either an emoji or something an <img> can load. */
 export const isImgIcon = (s: string | undefined) => /^(https?:)?\/\//.test(s || "") || (s || "").startsWith("/");
 

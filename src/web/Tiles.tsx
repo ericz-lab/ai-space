@@ -25,6 +25,7 @@ export function Tile({
   onRemove,
   removeTitle,
   onOpen,
+  onUse,
   showPop = true,
   dragProps,
   stale,
@@ -41,6 +42,8 @@ export function Tile({
   onRemove?: () => void;
   removeTitle?: string;
   onOpen?: () => void;
+  /** Told on every open outside edit mode, link or not (the usage beacon); never delays the open. */
+  onUse?: () => void;
   showPop?: boolean;
   dragProps?: DragProps;
   /** The peer is not answering: the entry is its last known state. */
@@ -94,6 +97,7 @@ export function Tile({
     onMouseLeave: () => setPopHidden(false),
     onClick: () => {
       setPopHidden(true);
+      if (!editing) onUse?.();
       if (!editing && onOpen) onOpen();
     },
   };

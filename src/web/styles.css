@@ -381,6 +381,13 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .usage-bar.partial i { background: #9be9a8; }
 .usage-bar-val, .usage-bar-lbl { font-size: 10px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 @media (max-width: 520px) { .usage-cards { grid-template-columns: repeat(2, 1fr); } }
+.act-kinds { padding: 0 8px 10px; }
+.usage-cards.act-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.act-top { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-table :is(th, td):nth-child(n + 2) { text-align: right; }
+.act-table td:first-child { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.act-spark { display: block; width: 90px; height: 20px; margin-left: auto; fill: #30a14e; }
+.act-spark .zero { fill: var(--glass-border); }
 
 /* Terminal: shells on this machine and on peers, one xterm per tab, in a floating panel. */
 .term {

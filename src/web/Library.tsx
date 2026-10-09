@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { isImgIcon, type AgentInfo, type AppInfo, type BuiltinIcons, type WidgetInfo } from "./api.ts";
+import { isImgIcon, recordOpen, type AgentInfo, type AppInfo, type BuiltinIcons, type UsageRow, type WidgetInfo } from "./api.ts";
 import { type Key, localized, useLang, withLang } from "./i18n.ts";
-import { BUILTINS, type Builtin, WIDGET_SIZES, type EntryKind, type Screen, entryKey, matches } from "./screens.ts";
+import { BUILTINS, type Builtin, WIDGET_SIZES, type EntryKind, type Screen, entryKey, matches, parseKey } from "./screens.ts";
 import { Icon, Widget } from "./Tiles.tsx";
 
 // The library: the screen left of home, with every app, agent and widget whether pinned or not.
 // One search over the three kinds and a filter by kind. By default a card opens its entry, like a
 // launcher; the add-mode button turns the cards into Add buttons that pin to the chosen screen and
 // keep the library open, so several can be added in a row. Widgets show as live previews, the
-// same cards a screen draws, at the size they would be added at.
+// same cards a screen draws, at the size they would be added at. "Most used" orders the apps,
+// agents and built-ins by the last 30 days' time in use, then opens (docs/usage.md).
 
 type Filter = "all" | "app" | "agent" | "widget";
 const FILTERS: { value: Filter; label: Key }[] = [
@@ -38,6 +39,7 @@ export default function Library({
   onAddMode,
   onPin,
   onOpen,
+  usage,
   onGoTo,
   onAddLink,
   focusSignal,
@@ -58,6 +60,8 @@ export default function Library({
   onPin: (key: string, screenId: string, size?: string) => void;
   /** Agents and the panel's own tiles open in the page; apps and widgets are links. */
   onOpen: (key: string) => void;
+  /** The last 30 days of use by entry key, for the "Most used" order. */
+  usage: Map<string, UsageRow>;
   onGoTo: (screenId: string) => void;
   onAddLink: () => void;
   /** Changes whenever the search field should take the focus (⌘K, the dock's search). */
@@ -68,6 +72,21 @@ export default function Library({
   const { lang, t } = useLang();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [byUse, setByUse] = useState(() => {
+    try {
+      return localStorage.getItem("library-order") === "used";
+    } catch {
+      return false;
+    }
+  });
+  const orderByUse = (on: boolean) => {
+    setByUse(on);
+    try {
+      localStorage.setItem("library-order", on ? "used" : "default");
+    } catch {
+      /* a convenience only */
+    }
+  };
   const [sizes, setSizes] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<{ name: string; screen: string; n: number } | null>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -111,7 +130,10 @@ export default function Library({
     }
     return c;
   }, [entries, q]);
-  const shown = entries.filter((e) => (filter === "all" || kindOf(e) === filter) && matches(q, e.title, e.text, e.peer));
+  const used = (e: Entry) => usage.get(e.key);
+  const filtered = entries.filter((e) => (filter === "all" || kindOf(e) === filter) && matches(q, e.title, e.text, e.peer));
+  // A stable sort: entries never used keep the default order, after the used ones.
+  const shown = byUse ? [...filtered].sort((a, b) => (used(b)?.activeMs ?? 0) - (used(a)?.activeMs ?? 0) || (used(b)?.opens ?? 0) - (used(a)?.opens ?? 0)) : filtered;
   const shownWidgets = shown.filter((e) => e.kind === "widget");
   const targetScreen = screens.find((s) => s.id === target) ?? screens[0];
   const nameOf = (id: string) => {
@@ -125,17 +147,35 @@ export default function Library({
     onPin(e.key, targetScreen.id, size !== e.size ? size : undefined);
     setToast((cur) => ({ name: e.title, screen: targetScreen.id, n: (cur?.n ?? 0) + 1 }));
   };
+  /** An app or built-in opened from here counts as a library open; an agent counts its chat turns instead. */
+  const use = (e: Entry) => {
+    if (e.kind === "app" || e.kind === "builtin") recordOpen(e.kind, parseKey(e.key)!.id, "library");
+  };
   /** Agents and the panel's own tiles open in the page; apps and widgets are links in a new tab. */
   const opener = (e: Entry) =>
-    e.kind === "agent" || e.kind === "builtin" ? { onClick: () => onOpen(e.key) } : e.href ? { href: e.href, target: "_blank", rel: "noopener noreferrer" } : null;
+    e.kind === "agent" || e.kind === "builtin"
+      ? {
+          onClick: () => {
+            use(e);
+            onOpen(e.key);
+          },
+        }
+      : e.href
+        ? { href: e.href, target: "_blank", rel: "noopener noreferrer", onClick: () => use(e) }
+        : null;
   // Enter in the search acts on the only match left: opens it, or in add mode adds it.
   const onSearchKey = (ev: React.KeyboardEvent) => {
     if (ev.key !== "Enter" || shown.length !== 1) return;
     const only = shown[0] as Entry;
     if (addMode) {
       if (!targetScreen?.items.includes(only.key)) add(only);
-    } else if (only.kind === "agent" || only.kind === "builtin") onOpen(only.key);
-    else if (only.href) window.open(only.href, "_blank", "noopener,noreferrer");
+    } else if (only.kind === "agent" || only.kind === "builtin") {
+      use(only);
+      onOpen(only.key);
+    } else if (only.href) {
+      use(only);
+      window.open(only.href, "_blank", "noopener,noreferrer");
+    }
   };
 
   return (
@@ -160,6 +200,13 @@ export default function Library({
           ))}
         </div>
         <div className="lib-tools">
+          <label className="lib-target">
+            {t("library.sort")}
+            <select className="setselect" value={byUse ? "used" : "default"} onChange={(e) => orderByUse(e.target.value === "used")}>
+              <option value="default">{t("library.sortDefault")}</option>
+              <option value="used">{t("library.sortUsed")}</option>
+            </select>
+          </label>
           {addMode && screens.length > 1 && (
             <label className="lib-target">
               {t("library.target")}

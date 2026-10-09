@@ -6,13 +6,14 @@ import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
 import Usage from "./Usage.tsx";
+import Activity from "./Activity.tsx";
 import AppModels from "./AppModels.tsx";
 import Events from "./Events.tsx";
 import Inbox from "./Inbox.tsx";
 import Library from "./Library.tsx";
 import ScreenNav from "./ScreenNav.tsx";
 import { type Builtin, HOME, type Screen, addScreen, entryKey, move, parseKey, pin, removeScreen, seedScreens, unpin } from "./screens.ts";
-import { BUILTIN_ICONS, getJson, repoUrl, sendJson, type AgentInfo, type AppInfo, type BuiltinIcons, type InboxSummary, type WidgetInfo } from "./api.ts";
+import { BUILTIN_ICONS, fmtDuration, getJson, recordOpen, relTime, repoUrl, sendJson, type AgentInfo, type AppInfo, type BuiltinIcons, type InboxSummary, type UsageKind, type UsageRow, type WidgetInfo } from "./api.ts";
 import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
 import PetField from "./PetField.tsx";
 import { type PetChoice, resolvePet } from "./petdex.ts";
@@ -34,7 +35,7 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetChoice };
 
 /** Floating panels over the page; one at a time. */
-type Panel = "settings" | "chat" | "tasks" | "usage" | "appModels" | "events" | "terminal" | "inbox";
+type Panel = "settings" | "chat" | "tasks" | "usage" | "activity" | "appModels" | "events" | "terminal" | "inbox";
 
 /** `onLang` changes the language of the whole page; the root (main.tsx) owns the value and provides it. */
 export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
@@ -168,6 +169,32 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     };
   }, []);
 
+  // The last 30 days of use (docs/usage.md), for the hover line and the library's "Most used"
+  // order: on load, every 5 minutes while visible, and each time the library opens.
+  const [usage, setUsage] = useState<Map<string, UsageRow>>(new Map());
+  const pullUsage = () =>
+    getJson<{ usage: UsageRow[] }>("/api/usage?window=30d")
+      .then((d) => setUsage(new Map(d.usage.map((r) => [entryKey(r.kind, r.key), r]))))
+      .catch(() => {});
+  useEffect(() => {
+    const pull = () => {
+      if (!document.hidden) void pullUsage();
+    };
+    pull();
+    const t = setInterval(pull, 300_000);
+    document.addEventListener("visibilitychange", pull);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", pull);
+    };
+  }, []);
+  const usageHint = (key: string) => {
+    const u = usage.get(key);
+    if (!u || (!u.opens && !u.activeMs)) return null;
+    const parts = [t("activity.hint", { n: u.opens }), ...(u.activeMs ? [fmtDuration(u.activeMs, lang)] : []), ...(u.lastAt ? [relTime(u.lastAt, lang)] : [])];
+    return <p className="pop-hint">{parts.join(" · ")}</p>;
+  };
+
   // Long-press (550 ms, under 8 px of movement) on the background enters edit mode; a click on the
   // background leaves it. The listeners mount once and read `editing` through a ref: remounting on
   // every change would reset the `fired` flag and mistake the long-press release for an exit click.
@@ -275,6 +302,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const goToScreen = (id: string) => go(rows.findIndex((s) => s.id === id));
   /** The library, with Add pointed at `target`, the search focused when `search` is set, and in add mode when `add` is. */
   const openLibrary = (target = HOME, search = false, add = false) => {
+    void pullUsage();
     setLibTarget(target);
     setLibAdd(add);
     if (search) setLibFocus((n) => n + 1);
@@ -425,6 +453,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         name={text.title}
         editing={editing}
         onOpen={open}
+        onUse={() => recordOpen("builtin", b, "panel")}
         onRemove={onRemove}
         removeTitle={t("screens.unpin")}
         showPop={!prefs.noPop}
@@ -441,6 +470,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         </p>
         {b === "inbox" && inbox && <p className="pop-hint">{t("inbox.summary", { unread: inbox.unread, open: inbox.open })}</p>}
         <p className="pop-body">{text.blurb}</p>
+        {usageHint(key)}
       </Tile>
     );
   };
@@ -454,6 +484,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         fallback="📦"
         name={shown.title}
         href={p.url ? withLang(p.url, lang) : undefined}
+        onUse={p.url ? () => recordOpen("app", p.id, "panel") : undefined}
         editing={editing}
         onRemove={onRemove}
         removeTitle={t("screens.unpin")}
@@ -470,6 +501,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         </p>
         {p.peer && <p className="pop-hint">{t(p.stale ? "common.onPeerStale" : "common.onPeer", { peer: p.peer })}</p>}
         {shown.description && <p className="pop-body">{shown.description}</p>}
+        {usageHint(key)}
         {p.repo && (
           <p className="pop-entry">
             <a href={repoUrl(p.repo)} target="_blank" rel="noopener noreferrer">
@@ -506,6 +538,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         </p>
         {a.peer && <p className="pop-hint">{t("common.onPeer", { peer: a.peer })}</p>}
         {shown.description && <p className="pop-body">{shown.description}</p>}
+        {usageHint(key)}
         <p className="pop-hint">{t("agents.clickToChat")}</p>
       </Tile>
     );
@@ -604,6 +637,13 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     );
   };
 
+  /** An entry's title for the App usage window; a key whose entry is gone shows as itself. */
+  const nameOf = (kind: UsageKind, key: string) => {
+    if (kind === "builtin") return key === "inbox" ? t("inbox.title") : key === "terminal" ? t("term.title") : key === "settings" ? t("settings.title") : key;
+    const found = kind === "app" ? apps.find((a) => a.id === key) : agents.find((a) => a.id === key);
+    return found ? localized(lang, found).title : key;
+  };
+
   const pickLang = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const next = e.target.value as Lang;
     saveLang(next);
@@ -634,6 +674,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               onAddMode={setLibAdd}
               onPin={pinEntry}
               onOpen={openEntry}
+              usage={usage}
               onGoTo={goToScreen}
               onAddLink={() => setAdding({ pinTo: null })}
               focusSignal={libFocus}
@@ -732,6 +773,10 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 {t("settings.usage")}
                 <span>›</span>
               </button>
+              <button className="setrow setlink" onClick={() => setPanel("activity")}>
+                {t("settings.activity")}
+                <span>›</span>
+              </button>
               <button className="setrow setlink" onClick={() => setPanel("appModels")}>
                 {t("settings.appModels")}
                 <span>›</span>
@@ -747,6 +792,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       )}
       <Tasks open={panel === "tasks"} onClose={close} onBack={openSettings} />
       <Usage open={panel === "usage"} onClose={close} onBack={openSettings} />
+      <Activity open={panel === "activity"} onClose={close} onBack={openSettings} nameOf={nameOf} />
       <AppModels open={panel === "appModels"} onClose={close} onBack={openSettings} />
       <Events open={panel === "events"} onClose={close} onBack={openSettings} />
       <Terminal open={panel === "terminal"} onClose={close} />
