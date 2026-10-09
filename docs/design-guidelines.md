@@ -278,8 +278,8 @@ The screens layout ([Panel design](panel.md#screens)) is implemented. How it mee
 - **The dock** (implemented) sits bottom center on strong glass, near black in dark mode (`rgba(18, 20, 27, 0.9)`): library, home, one line monitor icon per screen, and search, all drawn as 22 px line icons on 42 px buttons, without hover tooltips. With a mouse it is out of sight until the pointer comes within 110 px of the bottom of the window or the keyboard focus enters it, and rises in over 220 ms; touch screens always show it. The current one sits on a filled circle like the other dock buttons.
 - **Screens have no titles or names**: each has only a visually hidden heading (Home, Screen 2, …), and the dock's highlighted icon says where you are. A new screen is created at once, without a naming step.
 - **Screen changes** slide 48 px with a fade in 280 ms and do not animate under reduced motion (implemented, section 10.3).
-- **"Added" state** (implemented): the Add button turns into "✓ Added" for an entry already on the target screen, and a notice links to that screen. The check and the word carry the state, not color alone.
-- **Open from the library** (implemented): a card's icon and name are one link that opens the entry, and an Open button (secondary) sits before Add, so the library is a launcher as well as a catalog.
+- **"Added" state** (implemented): in add mode the Add button turns into "✓ Added" for an entry already on the target screen, and a notice links to that screen. The check and the word carry the state, not color alone.
+- **The library opens by default** (implemented): a whole card is one link that opens the entry, lifting 1 px with a stronger border on hover. A toggle button switches to add mode (primary, "✓ Done" while on, `aria-pressed`), where the cards carry Add buttons and the target menu appears.
 - **Search** (implemented): ⌘K / Ctrl+K opens the library with the search focused.
 
 Still open (proposed):

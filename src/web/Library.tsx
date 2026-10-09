@@ -5,9 +5,9 @@ import { BUILTINS, type Builtin, WIDGET_SIZES, type EntryKind, type Screen, entr
 import { Icon } from "./Tiles.tsx";
 
 // The library: the screen left of home, with every app, agent and widget whether pinned or not.
-// One search over the three kinds, a filter by kind, and an Add button per entry that pins it to
-// the chosen screen and keeps the library open, so several can be added in a row. The icon, the
-// name and an Open button open the entry straight from here.
+// One search over the three kinds and a filter by kind. By default a card opens its entry, like a
+// launcher; the add-mode button turns the cards into Add buttons that pin to the chosen screen and
+// keep the library open, so several can be added in a row.
 
 type Filter = "all" | "app" | "agent" | "widget";
 const FILTERS: { value: Filter; label: Key }[] = [
@@ -33,6 +33,8 @@ export default function Library({
   screenName,
   target,
   onTarget,
+  addMode,
+  onAddMode,
   onPin,
   onOpen,
   onGoTo,
@@ -48,6 +50,9 @@ export default function Library({
   /** The screen Add pins to. */
   target: string;
   onTarget: (id: string) => void;
+  /** Add mode: cards pin to `target` instead of opening. */
+  addMode: boolean;
+  onAddMode: (on: boolean) => void;
   onPin: (key: string, screenId: string, size?: string) => void;
   /** Agents and the panel's own tiles open in the page; apps and widgets are links. */
   onOpen: (key: string) => void;
@@ -115,11 +120,17 @@ export default function Library({
     onPin(e.key, targetScreen.id, size !== e.size ? size : undefined);
     setToast((cur) => ({ name: e.title, screen: targetScreen.id, n: (cur?.n ?? 0) + 1 }));
   };
-  // Enter in the search adds the only match left, so a name typed after ⌘K is one keystroke from home.
+  /** Agents and the panel's own tiles open in the page; apps and widgets are links in a new tab. */
+  const opener = (e: Entry) =>
+    e.kind === "agent" || e.kind === "builtin" ? { onClick: () => onOpen(e.key) } : e.href ? { href: e.href, target: "_blank", rel: "noopener noreferrer" } : null;
+  // Enter in the search acts on the only match left: opens it, or in add mode adds it.
   const onSearchKey = (ev: React.KeyboardEvent) => {
     if (ev.key !== "Enter" || shown.length !== 1) return;
     const only = shown[0] as Entry;
-    if (!targetScreen?.items.includes(only.key)) add(only);
+    if (addMode) {
+      if (!targetScreen?.items.includes(only.key)) add(only);
+    } else if (only.kind === "agent" || only.kind === "builtin") onOpen(only.key);
+    else if (only.href) window.open(only.href, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -144,7 +155,7 @@ export default function Library({
           ))}
         </div>
         <div className="lib-tools">
-          {screens.length > 1 && (
+          {addMode && screens.length > 1 && (
             <label className="lib-target">
               {t("library.target")}
               <select className="setselect" value={targetScreen?.id} onChange={(e) => onTarget(e.target.value)}>
@@ -156,6 +167,9 @@ export default function Library({
               </select>
             </label>
           )}
+          <button className={`btn2${addMode ? " primary" : ""}`} aria-pressed={addMode} onClick={() => onAddMode(!addMode)}>
+            {addMode ? `✓ ${t("library.doneAdding")}` : `＋ ${t("library.addMode")}`}
+          </button>
           <button className="btn2" onClick={onAddLink}>
             ＋ {t("library.addLink")}
           </button>
@@ -165,46 +179,37 @@ export default function Library({
         {shown.map((e) => {
           const pinnedHere = !!targetScreen?.items.includes(e.key);
           const on = screens.filter((s) => s.items.includes(e.key)).map(screenName);
-          const opener =
-            e.kind === "agent" || e.kind === "builtin"
-              ? { onClick: () => onOpen(e.key) }
-              : e.href
-                ? { href: e.href, target: "_blank", rel: "noopener noreferrer" }
-                : null;
-          const icon = (
-            <span className={`tile-icon${isImgIcon(e.icon) ? "" : " solid"}`}>
-              <Icon icon={e.icon} fallback={e.fallback} />
-            </span>
-          );
-          const text = (
-            <span className="lib-text">
-              <b>{e.title}</b>
-              <span className="lib-kind">
-                {e.kindLabel}
-                {e.peer && <span className="widget-peer">{e.peer}</span>}
+          const body = (
+            <>
+              <span className={`tile-icon${isImgIcon(e.icon) ? "" : " solid"}`}>
+                <Icon icon={e.icon} fallback={e.fallback} />
               </span>
-              {on.length > 0 && <span className="lib-on">{t("library.onScreens", { screens: on.join(lang === "zh" ? "、" : ", ") })}</span>}
-            </span>
+              <span className="lib-text">
+                <b>{e.title}</b>
+                <span className="lib-kind">
+                  {e.kindLabel}
+                  {e.peer && <span className="widget-peer">{e.peer}</span>}
+                </span>
+                {on.length > 0 && <span className="lib-on">{t("library.onScreens", { screens: on.join(lang === "zh" ? "、" : ", ") })}</span>}
+              </span>
+            </>
           );
+          if (!addMode) {
+            const o = opener(e);
+            return o ? (
+              <a key={e.key} className="lib-card lib-link" title={t("library.open")} {...o}>
+                {body}
+              </a>
+            ) : (
+              <div key={e.key} className="lib-card off">
+                {body}
+              </div>
+            );
+          }
           return (
             <div key={e.key} className={`lib-card${pinnedHere ? " pinned" : ""}`}>
-              {opener ? (
-                <a className="lib-open" {...opener}>
-                  {icon}
-                  {text}
-                </a>
-              ) : (
-                <span className="lib-open off">
-                  {icon}
-                  {text}
-                </span>
-              )}
+              {body}
               <div className="lib-act">
-                {opener && (
-                  <a className="btn2" {...opener}>
-                    {t("library.open")}
-                  </a>
-                )}
                 {e.kind === "widget" && !pinnedHere && (
                   <select className="setselect lib-size" aria-label={t("library.size")} title={t("library.size")} value={sizes[e.key] ?? e.size} onChange={(ev) => setSizes((cur) => ({ ...cur, [e.key]: ev.target.value }))}>
                     {WIDGET_SIZES.map((s) => (

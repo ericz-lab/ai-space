@@ -260,6 +260,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const [dir, setDir] = useState<"from-left" | "from-right">("from-right");
   const [libTarget, setLibTarget] = useState(HOME);
   const [libFocus, setLibFocus] = useState(0);
+  // The library opens entries by default; add mode turns its cards into Add buttons.
+  const [libAdd, setLibAdd] = useState(false);
   const rows = screens ?? [];
   const screen = pos >= 0 ? rows[pos] : undefined;
   const go = (next: number) => {
@@ -267,12 +269,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     if (to === pos) return;
     setDir(to < pos ? "from-left" : "from-right");
     setPos(to);
+    if (to !== -1) setLibAdd(false);
     window.scrollTo({ top: 0 });
   };
   const goToScreen = (id: string) => go(rows.findIndex((s) => s.id === id));
-  /** The library, with Add pointed at `target` and the search focused when `search` is set. */
-  const openLibrary = (target = HOME, search = false) => {
+  /** The library, with Add pointed at `target`, the search focused when `search` is set, and in add mode when `add` is. */
+  const openLibrary = (target = HOME, search = false, add = false) => {
     setLibTarget(target);
+    setLibAdd(add);
     if (search) setLibFocus((n) => n + 1);
     go(-1);
   };
@@ -523,7 +527,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       return loaded ? (
         <div className="empty">
           <p>{s.items.length || s.id !== HOME || apps.length ? t("screens.empty") : t("apps.empty")}</p>
-          <button className="btn2 primary" onClick={() => openLibrary(s.id)}>
+          <button className="btn2 primary" onClick={() => openLibrary(s.id, false, true)}>
             {t("screens.emptyAction")}
           </button>
         </div>
@@ -625,6 +629,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               screenName={screenName}
               target={libTarget}
               onTarget={setLibTarget}
+              addMode={libAdd}
+              onAddMode={setLibAdd}
               onPin={pinEntry}
               onOpen={openEntry}
               onGoTo={goToScreen}

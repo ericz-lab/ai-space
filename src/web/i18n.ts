@@ -85,6 +85,8 @@ const en = {
   "library.size": "Size",
   "library.addLink": "Add an app from a link",
   "library.open": "Open",
+  "library.addMode": "Add to a screen",
+  "library.doneAdding": "Done",
 
   "add.title": "Add app",
   "add.sub": "from a link, resolved by the agent",
@@ -464,6 +466,8 @@ const zh: Record<Key, string> = {
   "library.size": "尺寸",
   "library.addLink": "从链接添加应用",
   "library.open": "打开",
+  "library.addMode": "添加到屏幕",
+  "library.doneAdding": "完成",
 
   "add.title": "添加应用",
   "add.sub": "从链接添加，由智能体解析",
