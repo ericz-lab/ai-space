@@ -1,5 +1,7 @@
 # Panel design
 
+For the visual and interaction rules, both implemented and proposed, see the [ai-space Design Guidelines](design-guidelines.md).
+
 The panel is the web entry of an ai-space: a launcher that lists the apps, opens a chat with any agent, shows the widgets apps feed it, and lets the operator add, hide and arrange things. It is served by ai-space itself, on the same loopback port as the Space API, and reads everything it shows from the apps' manifests.
 
 Status: implemented. Service supervision (starting and restarting `service.command`) and skill mounting for agent sessions are not part of this stage; the [app spec](app-spec.md) status table says what is missing.
