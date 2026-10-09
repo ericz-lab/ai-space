@@ -836,7 +836,7 @@ a.widget-title:hover { color: var(--text); }
 .edge:focus-visible .edge-btn { box-shadow: 0 0 0 3px var(--focus); }
 @media (hover: none) { .edge { display: none; } }
 
-/* The dock: library, home, one numbered square per screen, search. With a mouse it rises into view when the
+/* The dock: library, home, one monitor per screen, search. With a mouse it rises into view when the
    pointer nears the bottom of the window (`shown`) or the keyboard focus enters it; touch screens
    keep it in view. */
 .dock {
@@ -854,7 +854,6 @@ a.widget-title:hover { color: var(--text); }
 .dock-btn:hover { color: var(--text); background: var(--hairline); }
 .dock-btn.on { color: var(--text); background: var(--hairline); }
 .dock-btn.on svg { stroke-width: 2; }
-.dock-screen text { fill: currentColor; stroke: none; font: 600 9px/1 Inter, -apple-system, system-ui, sans-serif; }
 .dock.shown, .dock:focus-within { transform: translateX(-50%); opacity: 1; }
 @media (hover: none) { .dock { transform: translateX(-50%); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .dock { transition: none; } }

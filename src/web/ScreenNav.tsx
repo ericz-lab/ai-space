@@ -91,14 +91,12 @@ export default function ScreenNav({
             <path d="M3 9.2 10 3l7 6.2V17a.5.5 0 0 1-.5.5h-4v-5h-5v5h-4A.5.5 0 0 1 3 17z" />
           </svg>
         </button>
-        {/* The operator's screens: a line square with the screen's position, home being 1. */}
+        {/* The operator's screens: a monitor, in the line style of the other dock icons. */}
         {names.slice(1).map((n, i) => (
           <button key={i} className={`dock-btn dock-screen${pos === i + 1 ? " on" : ""}`} onClick={() => onGo(i + 1)} aria-label={n} aria-current={pos === i + 1 ? "page" : undefined}>
             <svg viewBox="0 0 20 20" aria-hidden="true">
-              <rect x="3" y="3" width="14" height="14" rx="3.5" />
-              <text x="10" y="10.5" textAnchor="middle" dominantBaseline="central">
-                {i + 2}
-              </text>
+              <rect x="2.5" y="3.5" width="15" height="10" rx="2" />
+              <path d="M10 13.5V17M6.5 17h7" />
             </svg>
           </button>
         ))}
