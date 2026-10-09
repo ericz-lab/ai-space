@@ -22,6 +22,7 @@ import { localMachine, syncGuide } from "./space/guide.ts";
 import { TerminalService, TerminalStore, createTerminalRoutes, terminalWebSocket } from "./space/terminal/index.ts";
 import { Router, createRouterRoutes } from "./space/router/index.ts";
 import { createLogsRoutes } from "./space/logs/index.ts";
+import { UsageService, UsageStore, createUsageRoutes } from "./space/usage/index.ts";
 import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/services/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
@@ -119,8 +120,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const layout = new LayoutStore(store.db);
   const icons = new IconPacks(ws.home, store.db);
   const sessions = new SessionStore(store.db);
+  // How often apps, agents and the panel's windows are opened, and for how long (docs/usage.md).
+  const usage = new UsageService(new UsageStore(store.db, { retentionDays: config.usageRetentionDays }));
   // Panel chat turns run in the background: a page closing does not stop them (docs/panel.md#chat).
-  const agentRuns = new RunRegistry(store.db, { timeoutMs: config.chatTimeoutMs });
+  const agentRuns = new RunRegistry(store.db, { timeoutMs: config.chatTimeoutMs, onRunStart: usage.runStarted, onRunEnd: usage.runEnded });
   const health = new HealthProbe();
   const widgets = new WidgetFeed(registry);
   const { peers: peerConfigs, errors: peerErrors } = loadPeers(env);
@@ -337,6 +340,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
       ...createRouterRoutes({ router }),
+      ...createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)) }),
       ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) }),
       ...createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest }),
       ...agentRoutes,

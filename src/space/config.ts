@@ -98,6 +98,8 @@ export type Config = {
     /** Model when a request names none (SPACE_MODEL_DEFAULT). */
     defaultModel: string;
   };
+  /** Days of app and agent usage kept (SPACE_USAGE_RETENTION_DAYS, docs/usage.md); 0 = everything. */
+  usageRetentionDays: number;
 };
 
 export function loadConfig(ws: Workspace, env: Record<string, string | undefined> = process.env): Config {
@@ -144,6 +146,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
       retentionDays: Math.max(0, Number(env.SPACE_MODEL_RETENTION_DAYS ?? 0) || 0),
       defaultModel: env.SPACE_MODEL_DEFAULT?.trim() || "sonnet",
     },
+    usageRetentionDays: Math.max(0, Number(env.SPACE_USAGE_RETENTION_DAYS ?? 0) || 0),
     ...(env.SPACE_S3_ACCESS_KEY_ID?.trim() && env.SPACE_S3_SECRET_ACCESS_KEY?.trim()
       ? {
           s3: {

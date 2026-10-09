@@ -62,6 +62,9 @@ export type RunRegistryOptions = {
   keepRows?: number;
   /** After a stop, the run is closed this long later even if the runtime has not exited (default 5 s). */
   killGraceMs?: number;
+  /** Told when a turn starts and when it ends, e.g. for the usage service; a throw here never reaches the run. */
+  onRunStart?: (run: RunInfo) => void;
+  onRunEnd?: (run: RunInfo) => void;
   now?: () => number;
 };
 
@@ -124,14 +127,16 @@ export class RunRegistry {
   private readonly live = new Map<string, Live>();
   private readonly opts: typeof DEFAULTS;
   private readonly now: () => number;
+  private readonly hooks: Pick<RunRegistryOptions, "onRunStart" | "onRunEnd">;
   private closing = false;
 
   constructor(
     private readonly db: Database,
     options: RunRegistryOptions = {},
   ) {
-    this.opts = { ...DEFAULTS, ...Object.fromEntries(Object.entries(options).filter(([k, v]) => v !== undefined && k !== "now")) };
+    this.opts = { ...DEFAULTS, ...Object.fromEntries(Object.entries(options).filter(([, v]) => typeof v === "number")) };
     this.now = options.now ?? Date.now;
+    this.hooks = { onRunStart: options.onRunStart, onRunEnd: options.onRunEnd };
     db.exec(SCHEMA);
     // A run the previous process left running died with it.
     db.query("UPDATE agent_runs SET status = 'interrupted', error = 'ai-space restarted during the turn', finished_at = COALESCE(finished_at, ?) WHERE status = 'running'").run(this.now());
@@ -169,6 +174,7 @@ export class RunRegistry {
     this.db
       .query("INSERT INTO agent_runs (id, agent, session_id, message, runtime, model, status, started_at) VALUES (?, ?, ?, ?, ?, ?, 'running', ?)")
       .run(info.id, info.agent, sessionId, info.message, info.runtime, info.model, info.startedAt);
+    this.notify("onRunStart", info);
     if (this.opts.timeoutMs > 0) {
       run.timer = setTimeout(() => this.end(run, "timeout", `timed out after ${Math.round(this.opts.timeoutMs / 60_000)} min`), this.opts.timeoutMs);
     }
@@ -273,6 +279,14 @@ export class RunRegistry {
 
   // ------------------------------------------------------------------ internals
 
+  private notify(hook: "onRunStart" | "onRunEnd", info: RunInfo): void {
+    try {
+      this.hooks[hook]?.({ ...info });
+    } catch (e) {
+      console.error(`[agents] ${hook} failed: ${(e as Error).message}`);
+    }
+  }
+
   private push(run: Live, line: string): void {
     if (run.info.status !== "running" || run.ending) return;
     const ev = { seq: ++run.info.lastSeq, line, kind: kindOf(line) };
@@ -318,6 +332,7 @@ export class RunRegistry {
     this.db.query("DELETE FROM agent_runs WHERE status != 'running' AND id NOT IN (SELECT id FROM agent_runs ORDER BY started_at DESC LIMIT ?)").run(this.opts.keepRows);
     for (const l of run.listeners) l.onEnd({ ...info });
     run.listeners.clear();
+    this.notify("onRunEnd", info);
     run.resolveEnded();
     setTimeout(() => this.live.delete(info.id), this.opts.keepFinishedMs).unref?.();
     this.evict();
