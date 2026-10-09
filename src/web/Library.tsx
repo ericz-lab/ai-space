@@ -202,17 +202,17 @@ export default function Library({
           if (!addMode) {
             const o = opener(e);
             return o ? (
-              <a key={e.key} className="lib-card lib-link" title={t("library.open")} {...o}>
+              <a key={e.key} className={`lib-card lib-link ${e.kind}`} title={t("library.open")} {...o}>
                 {body}
               </a>
             ) : (
-              <div key={e.key} className="lib-card off">
+              <div key={e.key} className={`lib-card off ${e.kind}`}>
                 {body}
               </div>
             );
           }
           return (
-            <div key={e.key} className={`lib-card${pinnedHere ? " pinned" : ""}`}>
+            <div key={e.key} className={`lib-card ${e.kind}${pinnedHere ? " pinned" : ""}`}>
               {body}
               <div className="lib-act">
                 <button className={`btn2${pinnedHere ? " done" : " primary"}`} disabled={pinnedHere} onClick={() => add(e)}>

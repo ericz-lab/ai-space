@@ -280,6 +280,8 @@ The screens layout ([Panel design](panel.md#screens)) is implemented. How it mee
 - **Screen changes** slide 48 px with a fade in 280 ms and do not animate under reduced motion (implemented, section 10.3).
 - **"Added" state** (implemented): in add mode the Add button turns into "✓ Added" for an entry already on the target screen, and a notice links to that screen. The check and the word carry the state, not color alone.
 - **The library opens by default** (implemented): a whole card is one link that opens the entry, lifting 1 px with a stronger border on hover. A toggle button switches to add mode (primary, "✓ Done" while on, `aria-pressed`), where the cards carry Add buttons and the target menu appears. Widgets are shown as live previews (the real widget card, packed densely) rather than list cards, with their size menu and Add in the card header.
+- **Agents are round** (implemented): an agent's avatar is a circle everywhere (tiles, library cards, chat tabs and headers), while apps and the panel's own tiles stay rounded squares, so the shape alone tells them apart. The badge of the app an agent belongs to is a circle on the avatar's edge.
+- **Tiles line up with the cards below** (implemented): the tile grid is pulled out by the 16 px between a 96 px tile and its 64 px icon, so the first icon's left edge sits on the widget cards' left edge.
 - **Search** (implemented): ⌘K / Ctrl+K opens the library with the search focused.
 
 Still open (proposed):

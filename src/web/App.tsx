@@ -495,6 +495,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         showPop={!prefs.noPop}
         dragProps={drag}
         corner={a.app !== "space" && a.appIcon !== a.avatar ? a.appIcon : undefined}
+        className="agent"
       >
         <p className="pop-title">
           {shown.title}

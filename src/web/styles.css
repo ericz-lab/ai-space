@@ -68,7 +68,9 @@ a { color: inherit; text-decoration: none; }
 section + section { margin-top: 56px; }
 h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 24px; }
 
-.launcher { display: grid; grid-template-columns: repeat(auto-fill, 96px); gap: 28px 20px; }
+/* A tile is wider than its 64 px icon (the name needs the room), so the grid is pulled out by the
+   difference: the first icon's edge lines up with the widget cards and the page's other content. */
+.launcher { display: grid; grid-template-columns: repeat(auto-fill, 96px); gap: 28px 20px; margin-inline: -16px; }
 .tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; }
 .tile-icon {
   position: relative; width: 64px; height: 64px; border-radius: var(--radius-md);
@@ -90,6 +92,11 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
   display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1; overflow: hidden;
 }
 .tile-corner.solid { background: var(--solid); }
+/* Agents are round, apps and the panel's own tiles rounded squares: the shape alone tells them
+   apart (design-guidelines.md section 11). The app badge on an agent is round too, sitting on the
+   circle's edge rather than past a square's corner. */
+:is(.tile.agent, .lib-card.agent) .tile-icon { border-radius: 50%; }
+.tile.agent .tile-corner { right: -3px; bottom: -3px; border-radius: 50%; }
 .tile-corner img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; display: block; }
 .tile:focus, .tile:focus-visible { outline: none; }
 .tile:focus-visible .tile-icon { box-shadow: 0 0 0 3px var(--focus); }
@@ -428,7 +435,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
   border-right: 1px solid var(--glass-border);
 }
 .chat-tab {
-  position: relative; width: 34px; height: 34px; border-radius: 10px; flex: none;
+  position: relative; width: 34px; height: 34px; border-radius: 50%; flex: none;
   border: 1px solid var(--glass-border); background: var(--glass);
   font-size: 18px; cursor: pointer; padding: 0; overflow: visible;
   display: flex; align-items: center; justify-content: center;
@@ -436,7 +443,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 }
 .chat-tab:hover { opacity: 1; }
 .chat-tab.on { opacity: 1; box-shadow: 0 0 0 2px var(--focus); }
-.chat-tab img { width: 100%; height: 100%; object-fit: cover; border-radius: 9px; }
+.chat-tab img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 .tab-busy {
   position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px;
   border-radius: 50%; background: var(--success); border: 2px solid var(--glass-strong);
@@ -445,8 +452,8 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 @keyframes tabPulse { 50% { opacity: 0.35; } }
 .chat-head { padding: 12px 16px; border-bottom: 1px solid var(--glass-border); }
 .chat-head-top { display: flex; align-items: center; gap: 10px; }
-.chat-ava { width: 26px; height: 26px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-size: 17px; flex: none; overflow: hidden; }
-.chat-ava img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+.chat-ava { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 17px; flex: none; overflow: hidden; }
+.chat-ava img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 .chat-opts { display: flex; gap: 6px; margin-top: 8px; }
 .chat-head b { font-size: 15px; }
 .chat-sub { font-size: 12px; font-weight: 400; color: var(--muted); margin-right: auto; }
@@ -470,8 +477,8 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .chat-body { flex: 1; overflow-y: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 10px; }
 .chat-hello { color: var(--muted); font-size: 13px; font-weight: 400; text-align: center; margin-top: 28px; line-height: 1.9; }
 .chat-hello b { color: var(--fg); font-size: 14px; }
-.hello-ava { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 36px; margin: 0 auto 8px; overflow: hidden; }
-.hello-ava img { width: 100%; height: 100%; object-fit: cover; border-radius: 14px; }
+.hello-ava { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; margin: 0 auto 8px; overflow: hidden; }
+.hello-ava img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 .msg {
   max-width: 88%; padding: 8px 12px; border-radius: var(--radius-sm);
   font-size: 13px; font-weight: 400; line-height: 1.65; word-break: break-word;
