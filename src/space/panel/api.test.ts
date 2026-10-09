@@ -151,13 +151,35 @@ describe("panel api", () => {
 
   test("layout: order and hidden set are stored and applied", async () => {
     const put = await call("/api/panel/layout", jsonInit("PUT", { order: { apps: ["notes", "docs"] }, hidden: ["docs"] }));
-    expect(put.body.layout).toEqual({ order: { apps: ["notes", "docs"], agents: [], widgets: [] }, hidden: ["docs"], sizes: {}, hiddenWidgets: [] });
+    expect(put.body.layout).toEqual({ order: { apps: ["notes", "docs"], agents: [], widgets: [] }, hidden: ["docs"], sizes: {}, hiddenWidgets: [], screens: null });
     expect((await call("/api/apps")).body.apps.map((a: Body) => a.name)).toEqual(["notes"]);
     expect((await call("/api/apps?all=1")).body.apps.map((a: Body) => a.name)).toEqual(["notes", "docs", "feed", "old"]);
     const unhide = await call("/api/apps/docs", jsonInit("PATCH", { hidden: false }));
     expect(unhide.body.app.hidden).toBe(false);
     expect((await call("/api/apps/docs", jsonInit("PATCH", { hidden: "yes" }))).status).toBe(400);
     expect((await call("/api/panel/layout", jsonInit("PUT", { order: { apps: "x" } }))).status).toBe(400);
+  });
+
+  test("layout: screens are stored home first and survive a reload; malformed lists are refused", async () => {
+    expect((await call("/api/panel/layout")).body.layout.screens).toBeNull();
+    const put = await call(
+      "/api/panel/layout",
+      jsonInit("PUT", { screens: [{ id: "s1", name: " Work ", items: ["app:notes", "app:notes", "widget:notes/recent"] }, { id: "home", name: "", items: ["builtin:settings"] }] }),
+    );
+    expect(put.status).toBe(200);
+    const want = [
+      { id: "home", name: "", items: ["builtin:settings"] },
+      { id: "s1", name: "Work", items: ["app:notes", "widget:notes/recent"] },
+    ];
+    expect(put.body.layout.screens).toEqual(want);
+    expect((await call("/api/panel/layout")).body.layout.screens).toEqual(want);
+    // Without a home screen one is added in front.
+    const noHome = await call("/api/panel/layout", jsonInit("PUT", { screens: [{ id: "s2", name: "x", items: [] }] }));
+    expect(noHome.body.layout.screens.map((s: Body) => s.id)).toEqual(["home", "s2"]);
+    expect((await call("/api/panel/layout", jsonInit("PUT", { screens: "x" }))).status).toBe(400);
+    expect((await call("/api/panel/layout", jsonInit("PUT", { screens: [{ id: "a b", items: [] }] }))).status).toBe(400);
+    expect((await call("/api/panel/layout", jsonInit("PUT", { screens: [{ id: "a" }, { id: "a" }] }))).status).toBe(400);
+    expect((await call("/api/panel/layout", jsonInit("PUT", { screens: [{ id: "a", items: "x" }] }))).status).toBe(400);
   });
 
   test("layout: a widget size chosen on the panel overrides the manifest's until cleared", async () => {

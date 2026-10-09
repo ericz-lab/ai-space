@@ -18,12 +18,14 @@ So the panel is a set of routes in ai-space's `Bun.serve`, a React page bundled 
 
 ## What the panel shows
 
+The tables below list what the panel knows about. It does not lay all of it out at once: the page is a row of [screens](#screens), and each screen shows only what is pinned to it; the library left of home lists everything.
+
 | Section | Source | Notes |
 | --- | --- | --- |
 | Apps | every registered manifest that has a `url`, with `status` other than `archived`, minus the hidden set; peer apps follow, minus those whose `url` is already listed ([peers.md](peers.md)) | Tile: `icon` and `title`, nothing else on the icon. Click opens `url`. Hover shows the description, the status (health when the app declares `service.health`) and the repository. |
 | Agents | `agents:` of every visible app, plus the space agent | The section is left out when the list is empty (the agents could not be loaded). Tile shows the avatar and title, with the owning app's icon in the corner when it differs from the avatar; click opens the chat in a floating panel over the page, on that agent. |
 | Widgets | `widgets:` of every visible app | `items` cards render the list in the house style; `embed` cards load the app's page in a sandboxed iframe through ai-space. |
-| Settings | built in | The last tile of the Apps grid (the Terminal tile sits just before it), not hidden, reordered or uninstalled. It opens a floating panel near the top of the page with the browser preferences (hover details, desk pet, widgets, appearance ([Appearance](#appearance)), language), the scheduled tasks, and a status line that folds the peers, services and backups into counts and a problem tally (a service or peer down, a stale backup); a click expands it to their rows. |
+| Settings | built in | A built-in tile like Inbox and Terminal: pinned, moved and unpinned like any other, never uninstalled, and always in the library. It opens a floating panel near the top of the page with the browser preferences (hover details, desk pet, widgets, appearance ([Appearance](#appearance)), language), the scheduled tasks, and a status line that folds the peers, services and backups into counts and a problem tally (a service or peer down, a stale backup); a click expands it to their rows. |
 
 | Services (in Settings) | every registered manifest with a `service` | One row per service: icon, title, loopback port, health. |
 | Language (in Settings) | the browser's preferences | English or Chinese for everything the panel owns; the browser's language is the default. Apps' titles and descriptions follow when their manifest has an `i18n:` section. Design in [i18n.md](i18n.md). |
@@ -34,6 +36,22 @@ So the panel is a set of routes in ai-space's `Bun.serve`, a React page bundled 
 Two independent axes decide where an app appears. A `url` means a person can open it: that is a tile. A `service` means a process runs: that is a row under Services. An app with both (a web app) has both; a data or background service with no page has a row and no tile, and stays registered, scheduled and probed, its agents and widgets (if any) in their own sections; a link app has a tile and no row; an app with neither (a repository that only runs tasks) appears in neither, and is still listed by `GET /api/apps?all=1`.
 
 The **space agent** (`space/assistant`, shown as "Base") is the default chat identity: a session in the workspace root with a short built-in prompt. Its model menu groups the configured chat runtimes (including Claude Code and Codex) into basic, junior, intermediate and advanced tiers, using the mappings in `runtimes.yaml`. The selection is remembered in the browser and captured for each message when it is queued, so later control changes cannot reroute an already queued turn. Switching runtimes starts a new conversation; history restores the original runtime and model. App agents have the same menu ([Agent models](#agent-models)). Base uses full native context, tools and skills; the permission menu independently controls execution access. It is the one exception to "nothing exists outside an app", on the same footing as the Space services themselves.
+
+## Screens
+
+The panel opens on the **home screen**, which holds only what the operator pinned there. Everything else is one screen to the left, in the **library**; the operator's own screens follow home on the right:
+
+```
+library  ←  home (default)  →  screen 2  →  …  →  ＋
+```
+
+- **Entries.** A screen is `{ id, name, items }`, and `items` are entry keys in order: `app:<id>`, `agent:<id>`, `widget:<id>` (the layout ids, peer prefix included) and `builtin:inbox|terminal|settings`. A screen draws its tiles (apps, agents, built-ins) in one grid and its widget cards below. A key whose entry is gone (an uninstalled app, a peer that left) is skipped and kept, so it comes back with the entry.
+- **The library** lists every app, agent, widget and built-in tile, pinned or not, with one search across the three kinds (every word of the query in the title, description or id) and a filter by kind with counts. Each entry has an Add button that pins it to the target screen (home unless chosen otherwise when there are several) and turns into "Added" when the entry is already there, so nothing is pinned twice. The library stays open after an Add, with a short notice and a link to the screen, so several entries can be added in a row; Enter in the search adds the only match left. A widget is added at the size chosen next to its button (stored like a resize, below). Clicking an icon opens the entry. "Add an app from a link" is here too.
+- **Getting around.** Each side edge shows a faint handle; under the pointer it becomes a button with the name of where it leads: the left one to the previous screen (from home, the library), the right one to the next screen, or a ＋ that creates a named screen on the last one. A dock at the bottom has the library, home, one dot per screen and a search button. ⌘K / Ctrl+K opens the library with the search focused from any screen; ← and → move between screens and Escape leaves the library when no field or window has the focus. On a touch screen the edges are hidden: the dock and a horizontal swipe do the same. A one-time hint over the dock explains the edges and the shortcut (dismissed per browser).
+- **First load.** A panel whose layout has no screens yet (`screens: null`) seeds home from what it showed before: the first eight apps, the three built-in tiles, the first four agents and the first four widgets, in the previous order, and stores it at once. From then on new apps, agents and widgets go to the library only and never crowd the home screen.
+- **Edit mode** on a screen: ✕ unpins an entry from that screen only (the app, its agents and widgets stay, and so does the library entry), dragging reorders tiles or widgets within the screen, the "Add" tile adds an app from a link and pins it there, and the screen's name can be changed; screens other than home can be deleted (after a second click), their entries staying in the library.
+
+Screens are stored in the layout (`PUT /api/panel/layout { screens }`, the whole list), so they follow the workspace across browsers and survive a reload. The panel always opens on home.
 
 ## Manifest-only apps
 
@@ -54,10 +72,10 @@ Edit mode has an "Add" tile that takes one link. The panel asks the claude runti
 
 Everything the operator does to the launcher happens in **edit mode**: long-press (or press and hold the mouse) on the panel background until the tiles start to jiggle; a click on the background leaves it. Edit mode offers four things, none of which need the API token because they come from the browser:
 
-- **Move.** Drag a tile to a new place in its group; the order is saved when the tile is dropped (`PUT /api/panel/layout`). Apps, agents and widgets are ordered separately. A peer's entries are ordered on the hub by their prefixed id (`<peer>/<app>`), so moving them never touches the peer.
-- **Hide.** The ✕ on a tile hides the app on this panel (`PATCH /api/apps/:app { hidden: true }`): its tile, agents and widgets disappear, the app itself keeps running and stays in the workspace. `?all=1` on `GET /api/apps` lists hidden apps, and the same route with `hidden: false` brings one back. For a peer's app the ✕ hides it on the hub only (`PATCH /api/peers/:peer/apps/:app`).
+- **Move.** Drag a tile or a widget to a new place on its screen; the screen's order is saved when it is dropped (`PUT /api/panel/layout { screens }`). A peer's entries are keyed on the hub by their prefixed id (`<peer>/<app>`), so moving them never touches the peer. The `order` lists still decide the library's order and the seed of a first home screen.
+- **Unpin.** The ✕ on a tile or a card takes it off the current screen ([Screens](#screens)); nothing else changes. Hiding an app on the panel (`PATCH /api/apps/:app { hidden: true }`: its tile, agents and widgets disappear everywhere, the library included, while the app keeps running) remains an API: `?all=1` on `GET /api/apps` lists hidden apps, and `hidden: false` brings one back. For a peer's app the hub hides it only on itself (`PATCH /api/peers/:peer/apps/:app`).
 - **Resize a widget.** In edit mode every widget card has a grip in its bottom-right corner; dragging it snaps the card to 1 or 2 columns and 1 or 2 rows (the head shows the size while dragging). The size is stored on release in the layout (`PUT /api/panel/layout { sizes: { "<app>/<widget>": "1x2" } }`) and overrides the manifest's `size` on this panel; `null` returns the widget to the manifest's size. The app's repository is not touched.
-- **Remove a widget.** In edit mode every widget card has a ✕ in its top-right corner; it takes the card off the panel at once and stores its id in the layout (`PUT /api/panel/layout { hiddenWidgets: { "<app>/<widget>": true } }`), so it stays off after a reload. Only the card goes: the app, its service and its other widgets stay. `/api/widgets` returns the removed ids as `hidden`, and the settings offer to show them again (`false` per id).
+- **Removed widgets.** Before screens, the ✕ on a widget card removed it from the whole panel (`PUT /api/panel/layout { hiddenWidgets: { "<app>/<widget>": true } }`); the ✕ now unpins instead. Widgets removed that way stay out of `/api/widgets` and the library; `/api/widgets` returns their ids as `hidden`, and the settings offer to show them again (`false` per id).
 - **Add.** The "Add" tile takes a link; see the previous section.
 - **Uninstall.** Below the app grid, edit mode shows an uninstall zone. Dropping a tile there opens a confirmation that says what will happen, then sends `DELETE /api/apps/:app` (for a peer's app `DELETE /api/peers/:peer/apps/:app`, which the hub forwards to the peer and then refreshes its snapshot). In order:
   1. A task of the app with a run in flight refuses the uninstall with 409 and names the tasks: stopping the service and moving the directory would pull the ground from under that run. `DELETE /api/apps/:app?force=1` (`space app uninstall APP --force`) goes ahead anyway.
@@ -71,7 +89,7 @@ Everything the operator does to the launcher happens in **edit mode**: long-pres
 
 Two tables in `space.db`, both panel-owned:
 
-- `panel_kv` holds the layout: `{ order: { apps, agents, widgets }, hidden, sizes, hiddenWidgets }`. Order lists are ids: app names, `app/name` for agents and widgets, and `<peer>/…` for entries from a peer machine; ids missing from a list follow it, local before peer, alphabetically. `hidden` is the set of apps the panel does not show; they stay registered and scheduled. `sizes` maps widget ids to the size the operator chose on the panel, applied over the manifest's `size` when widgets are listed. `hiddenWidgets` is the set of widget ids removed from the panel; `/api/widgets` leaves them out.
+- `panel_kv` holds the layout: `{ order: { apps, agents, widgets }, hidden, sizes, hiddenWidgets, screens }`. `screens` is `null` until the panel stores its first set, then a list of at most twenty `{ id, name, items }`, home (`id: "home"`) first, added in front when a write leaves it out; ids are letters, digits, `-` and `_`, names at most 60 characters, items de-duplicated per screen; a malformed list is refused with 400. Order lists are ids: app names, `app/name` for agents and widgets, and `<peer>/…` for entries from a peer machine; ids missing from a list follow it, local before peer, alphabetically. `hidden` is the set of apps the panel does not show; they stay registered and scheduled. `sizes` maps widget ids to the size the operator chose on the panel, applied over the manifest's `size` when widgets are listed. `hiddenWidgets` is the set of widget ids removed from the panel; `/api/widgets` leaves them out.
 - `chat_sessions` keeps the last ten sessions per agent (`agent`, `sid`, `title`, `ts`, `runtime`, `model`). A resumed session gets a new id from the runtime; the previous row is replaced so a conversation stays one entry.
 - `agent_runs` keeps the last 200 chat turns (`id`, `agent`, `session_id`, `sid`, `message`, `runtime`, `model`, `status`, `error`, `started_at`, `finished_at`, `last_seq`, and `events` once the turn ends), so a page loaded later can show and follow them ([Background runs](#background-runs)).
 
@@ -176,7 +194,7 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 | `DELETE /api/apps/:app[?force=1]` | uninstall: stop the service, take the directory out of the workspace, forget the app (see above); 409 while a task of the app is running, unless forced |
 | `GET /api/apps/:app/icon`, `GET /api/agents/:app/:agent/avatar` | icon files from the app directory; paths cannot escape it |
 | `GET /api/widgets`, `GET /api/widgets/:app/:name/embed` | widget payloads and embed pages |
-| `GET`/`PUT /api/panel/layout` | order, hidden apps, widget sizes and removed widgets |
+| `GET`/`PUT /api/panel/layout` | order, hidden apps, widget sizes, removed widgets and screens |
 | `GET /api/panel/appcolor?app=` | the app page's `theme-color`, for the phone shell |
 | `GET`/`PUT /api/panel/icons` | the icon packs with their files, and `{ active: <pack> \| null }` (Icon packs) |
 | `GET`/`PUT`/`DELETE /api/panel/icons/:pack/:kind?id=` | one icon of a pack (`kind`: `app` or `agent`): read, upload as the request body (`content-type` `image/svg+xml`, `image/png` or `image/webp`; creates the pack), remove |
@@ -212,7 +230,7 @@ src/space/peers/    other machines' panels merged into this one, and this one se
 src/space/terminal/ the web terminal: PTY backends, tickets and sessions, audit rows, routes and the socket bridge to a peer (terminal.md)
 src/space/agents/   runtime.ts (a run as SSE), runs.ts (background runs, agent_runs), sessions.ts (chat_sessions),
                     transcript.ts, api.ts (routes, space agent)
-src/web/            index.html, main.tsx (language root), App.tsx, Chat.tsx, Tasks.tsx, Inbox.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
+src/web/            index.html, main.tsx (language root), App.tsx, screens.ts (screen operations), Library.tsx, ScreenNav.tsx (edges, dock, hint), Chat.tsx, Tasks.tsx, Inbox.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
                     theme.ts (appearance: presets, resolution, storage), ThemeSettings.tsx (its settings rows),
                     i18n.ts (dictionaries, language choice), styles.css, api.ts, routes.ts (HTML import + public files),
                     public/ (PWA shell, pet sprite)

@@ -141,9 +141,8 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .empty code { font-size: 13px; }
 
 /* Settings: a floating panel near the top of the page, scrolling on its own; the same shell as the
-   chat and tasks panels. Its tile is the last one in the Apps grid and is not editable. */
+   chat and tasks panels. Its tile, like the inbox's and the terminal's, is pinned like any other. */
 .tile.builtin .tile-icon { background: var(--solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
-.launcher.editing .tile.builtin { animation: none; cursor: default; opacity: 0.6; }
 .panel {
   position: relative; display: flex; flex-direction: column; max-height: 100%;
   background: var(--panel);
@@ -794,3 +793,133 @@ a.widget-title:hover { color: var(--text); }
 .app-model { margin: 8px 12px; }
 .app-model label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .app-model .task-name { color: var(--text, inherit); font-size: 13px; }
+
+/* Screens (docs/panel.md#screens): one screen at a time, sliding in from the side it lies on. The
+   shell leaves room at the bottom for the dock. */
+.shell { padding-bottom: 120px; }
+.shell.wide { max-width: 1240px; }
+.screen.from-right { animation: slideFromRight 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.screen.from-left { animation: slideFromLeft 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes slideFromRight { from { opacity: 0; transform: translateX(48px); } }
+@keyframes slideFromLeft { from { opacity: 0; transform: translateX(-48px); } }
+@media (prefers-reduced-motion: reduce) { .screen.from-right, .screen.from-left { animation: none; } }
+.screen-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.screen-head h2 { margin-bottom: 0; }
+.screen-tools { display: flex; gap: 8px; }
+.screen-tools .btn2 { padding: 4px 14px; font-size: 13px; }
+.screen .launcher + .dropzone, .screen .launcher + .widgets, .screen .dropzone + .widgets { margin-top: 40px; }
+.screen .empty p { margin-bottom: 16px; }
+
+/* Edges: a faint handle always, the button and its label under the pointer. Touch screens swipe and
+   use the dock instead. */
+.edge {
+  position: fixed; top: 0; bottom: 0; z-index: 24; width: 56px; border: none; padding: 0; margin: 0;
+  background: transparent; color: var(--text); font: inherit; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.edge.left { left: 0; }
+.edge.right { right: 0; }
+.edge-handle {
+  position: absolute; top: 50%; width: 4px; height: 44px; margin-top: -22px; border-radius: 4px;
+  background: var(--muted); opacity: 0.22; transition: opacity 0.2s;
+}
+.edge.left .edge-handle { left: 6px; }
+.edge.right .edge-handle { right: 6px; }
+.edge-btn {
+  width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 22px; line-height: 1; background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
+  -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+  opacity: 0; transform: scale(0.8); transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.edge-label {
+  position: absolute; top: calc(50% + 28px); white-space: nowrap; font-size: 12px; color: var(--muted);
+  padding: 2px 8px; border-radius: 999px; background: var(--glass-strong); border: 1px solid var(--glass-border);
+  opacity: 0; transition: opacity 0.18s ease; pointer-events: none;
+}
+.edge.left .edge-label { left: 8px; }
+.edge.right .edge-label { right: 8px; }
+.edge:hover .edge-btn, .edge:focus-visible .edge-btn { opacity: 1; transform: scale(1); }
+.edge:hover .edge-label, .edge:focus-visible .edge-label { opacity: 1; }
+.edge:hover .edge-handle, .edge:focus-visible .edge-handle { opacity: 0; }
+.edge:focus-visible { outline: none; }
+.edge:focus-visible .edge-btn { box-shadow: 0 0 0 3px var(--focus); }
+@media (hover: none) { .edge { display: none; } }
+
+/* The dock: library, home, one dot per screen, search. */
+.dock {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 26;
+  display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 999px;
+  background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
+  -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+}
+.dock-btn, .dock-dot {
+  border: none; background: transparent; color: var(--muted); cursor: pointer; padding: 0;
+  width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+}
+.dock-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.dock-btn:hover, .dock-dot:hover { color: var(--text); background: var(--hairline); }
+.dock-btn.on { color: var(--text); background: var(--hairline); }
+.dock-btn.on svg { stroke-width: 2; }
+.dock-dot { width: 22px; }
+.dock-dot i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: 0.45; transition: transform 0.15s, opacity 0.15s; }
+.dock-dot.on { color: var(--text); }
+.dock-dot.on i { opacity: 1; transform: scale(1.25); }
+.dock-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--hairline); }
+.dock-btn:focus-visible, .dock-dot:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.screens-hint {
+  position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 26;
+  width: min(460px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  border-radius: var(--radius-sm); background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
+  -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+  font-size: 13px; font-weight: 400; color: var(--text); animation: rise 0.25s ease;
+}
+.screens-hint .btn2 { flex: none; padding: 5px 14px; font-size: 13px; }
+
+/* The library: search, kind filter, target screen, then one card per entry. */
+.lib-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 20px; }
+.lib-search {
+  flex: 1 1 280px; min-width: 0; border: 1px solid var(--glass-border); background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+  border-radius: 999px; padding: 10px 18px; font: inherit; font-size: 15px; color: var(--text);
+}
+.lib-search:focus { outline: 2px solid color-mix(in srgb, var(--link) 40%, transparent); }
+.lib-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.lib-chip {
+  border: 1px solid var(--glass-border); background: var(--glass); color: var(--muted); cursor: pointer;
+  border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; display: inline-flex; gap: 6px; align-items: center;
+}
+.lib-chip span { font-size: 11px; font-variant-numeric: tabular-nums; opacity: 0.8; }
+.lib-chip.on { background: var(--text); color: var(--inverse); border-color: transparent; }
+.lib-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.lib-tools .btn2 { padding: 6px 14px; font-size: 13px; }
+.lib-target { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+.lib-card {
+  display: flex; align-items: center; gap: 14px; padding: 12px 14px; min-width: 0;
+  background: var(--glass); border: 1px solid var(--glass-border); border-radius: var(--radius-md);
+  -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+}
+.lib-open { flex: none; cursor: pointer; }
+.lib-open .tile-icon { width: 48px; height: 48px; font-size: 24px; box-shadow: none; }
+.lib-open:hover .tile-icon { transform: scale(1.05); }
+.lib-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lib-text b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-kind, .lib-on { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-on { color: var(--success); }
+.lib-act { flex: none; display: flex; gap: 6px; align-items: center; }
+.lib-act .btn2 { padding: 5px 14px; font-size: 13px; }
+.lib-act .btn2.done { background: transparent; color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); opacity: 1; }
+.lib-size { padding: 4px 6px; font-size: 12px; }
+.lib-toast {
+  position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 27;
+  max-width: calc(100vw - 32px); display: flex; align-items: center; gap: 14px; padding: 10px 12px 10px 16px;
+  border-radius: 999px; background: var(--text); color: var(--inverse); box-shadow: var(--shadow);
+  font-size: 13px; animation: rise 0.2s ease;
+}
+.lib-toast button { border: none; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
+.lib-toast button:hover { background: color-mix(in srgb, var(--inverse) 16%, transparent); }
+@media (max-width: 520px) {
+  .lib-tools { margin-left: 0; }
+  .lib-card { padding: 10px 12px; gap: 10px; }
+}

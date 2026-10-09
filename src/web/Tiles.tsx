@@ -122,7 +122,7 @@ export function Widget({
   dragProps?: DragProps;
   theme: string;
   onResize?: (size: string, commit: boolean) => void;
-  /** Edit mode: removes the card from the panel (the app stays). */
+  /** Edit mode: removes the card from the screen (it stays in the library). */
   onRemove?: () => void;
 }) {
   const { lang, t } = useLang();
@@ -203,8 +203,8 @@ export function Widget({
       {onRemove && (
         <button
           className="tile-del"
-          title={t("widget.remove")}
-          aria-label={t("widget.remove")}
+          title={t("screens.unpin")}
+          aria-label={t("screens.unpin")}
           draggable={false}
           onClick={(e) => {
             e.preventDefault();
