@@ -803,6 +803,7 @@ a.widget-title:hover { color: var(--text); }
 @keyframes slideFromRight { from { opacity: 0; transform: translateX(48px); } }
 @keyframes slideFromLeft { from { opacity: 0; transform: translateX(-48px); } }
 @media (prefers-reduced-motion: reduce) { .screen.from-right, .screen.from-left { animation: none; } }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .screen-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
 .screen-head h2 { margin-bottom: 0; }
 .screen-tools { display: flex; gap: 8px; }
@@ -810,10 +811,10 @@ a.widget-title:hover { color: var(--text); }
 .screen .launcher + .dropzone, .screen .launcher + .widgets, .screen .dropzone + .widgets { margin-top: 40px; }
 .screen .empty p { margin-bottom: 16px; }
 
-/* Edges: a faint handle always, the button and its label under the pointer. Touch screens swipe and
+/* Edges: a faint handle always, the button under the pointer. Touch screens swipe and
    use the dock instead. */
 .edge {
-  position: fixed; top: 0; bottom: 0; z-index: 24; width: 56px; border: none; padding: 0; margin: 0;
+  position: fixed; top: 0; bottom: 0; z-index: 24; width: 72px; border: none; padding: 0; margin: 0;
   background: transparent; color: var(--text); font: inherit; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
 }
@@ -826,28 +827,23 @@ a.widget-title:hover { color: var(--text); }
 .edge.left .edge-handle { left: 6px; }
 .edge.right .edge-handle { right: 6px; }
 .edge-btn {
-  width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  font-size: 22px; line-height: 1; background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
+  width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 34px; line-height: 1; padding-bottom: 3px; background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
   -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
   opacity: 0; transform: scale(0.8); transition: opacity 0.18s ease, transform 0.18s ease;
 }
-.edge-label {
-  position: absolute; top: calc(50% + 28px); white-space: nowrap; font-size: 12px; color: var(--muted);
-  padding: 2px 8px; border-radius: 999px; background: var(--glass-strong); border: 1px solid var(--glass-border);
-  opacity: 0; transition: opacity 0.18s ease; pointer-events: none;
-}
-.edge.left .edge-label { left: 8px; }
-.edge.right .edge-label { right: 8px; }
 .edge:hover .edge-btn, .edge:focus-visible .edge-btn { opacity: 1; transform: scale(1); }
-.edge:hover .edge-label, .edge:focus-visible .edge-label { opacity: 1; }
 .edge:hover .edge-handle, .edge:focus-visible .edge-handle { opacity: 0; }
 .edge:focus-visible { outline: none; }
 .edge:focus-visible .edge-btn { box-shadow: 0 0 0 3px var(--focus); }
 @media (hover: none) { .edge { display: none; } }
 
-/* The dock: library, home, one dot per screen, search. */
+/* The dock: library, home, one dot per screen, search. With a mouse it rises into view when the
+   pointer nears the bottom of the window (`shown`) or the keyboard focus enters it; touch screens
+   keep it in view. */
 .dock {
-  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 26;
+  position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, calc(100% + 24px)); z-index: 26;
+  opacity: 0; transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease;
   display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 999px;
   background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
   -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
@@ -864,6 +860,15 @@ a.widget-title:hover { color: var(--text); }
 .dock-dot i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: 0.45; transition: transform 0.15s, opacity 0.15s; }
 .dock-dot.on { color: var(--text); }
 .dock-dot.on i { opacity: 1; transform: scale(1.25); }
+.dock.shown, .dock:focus-within { transform: translateX(-50%); opacity: 1; }
+@media (hover: none) { .dock { transform: translateX(-50%); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .dock { transition: none; } }
+/* Dark: the dock and the edge buttons are pure black. */
+:root[data-theme="dark"] :is(.dock, .edge-btn) {
+  background: #000; border-color: rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+:root[data-theme="dark"] :is(.dock-btn.on, .dock-btn:hover, .dock-dot:hover) { background: rgba(255, 255, 255, 0.12); }
 .dock-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--hairline); }
 .dock-btn:focus-visible, .dock-dot:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 

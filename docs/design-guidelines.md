@@ -274,8 +274,9 @@ Motion explains where something came from or that something changed. Nothing loo
 
 The screens layout ([Panel design](panel.md#screens)) is implemented. How it meets this document:
 
-- **Edges are discoverable without hover** (implemented): a faint 4 × 44 px handle in `muted` at 0.22 opacity at each edge with a destination, which becomes a 40 px strong-glass button with a label on hover or keyboard focus (3 px focus ring). Touch screens hide the edges and use the dock and swipes.
-- **The dock** (implemented) sits bottom center on strong glass: library, home, one dot per screen, and search. The current dot is full opacity; the others are at 0.45.
+- **Edges are discoverable without hover** (implemented): a faint 4 × 44 px handle in `muted` at 0.22 opacity at each edge with a destination, which becomes a 52 px round button with a large arrow (or ＋) on hover or keyboard focus (3 px focus ring), with no text label; the destination is in its accessible name. In dark mode the button is pure black. Touch screens hide the edges and use the dock and swipes.
+- **The dock** (implemented) sits bottom center on strong glass, pure black in dark mode: library, home, one dot per screen, and search, without hover tooltips. With a mouse it is out of sight until the pointer comes within 110 px of the bottom of the window or the keyboard focus enters it, and rises in over 220 ms; touch screens always show it. The current dot is full opacity; the others are at 0.45.
+- **Home has no title**: its name is only in a visually hidden heading. The operator's screens show their names.
 - **Screen changes** slide 48 px with a fade in 280 ms and do not animate under reduced motion (implemented, section 10.3).
 - **"Added" state** (implemented): the Add button turns into "✓ Added" for an entry already on the target screen, and a notice links to that screen. The check and the word carry the state, not color alone.
 - **Search** (implemented): ⌘K / Ctrl+K opens the library with the search focused.

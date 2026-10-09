@@ -637,21 +637,24 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
           </section>
         ) : screen ? (
           <section className={`screen ${dir}`} key={screen.id}>
-            <div className="screen-head">
-              <h2>{screenName(screen)}</h2>
-              {editing && (
-                <div className="screen-tools">
-                  <button className="btn2" onClick={() => setNaming({ id: screen.id, name: screenName(screen) })}>
-                    {t("screens.rename")}
-                  </button>
-                  {screen.id !== HOME && (
+            {/* Home carries no visible title: it is the page itself. The operator's screens show their names. */}
+            {screen.id === HOME ? (
+              <h2 className="sr-only">{screenName(screen)}</h2>
+            ) : (
+              <div className="screen-head">
+                <h2>{screenName(screen)}</h2>
+                {editing && (
+                  <div className="screen-tools">
+                    <button className="btn2" onClick={() => setNaming({ id: screen.id, name: screenName(screen) })}>
+                      {t("screens.rename")}
+                    </button>
                     <button className={`btn2${confirmDelete ? " danger" : ""}`} onClick={() => (confirmDelete ? deleteScreen(screen.id) : setConfirmDelete(true))}>
                       {confirmDelete ? t("screens.deleteConfirm") : t("screens.delete")}
                     </button>
-                  )}
-                </div>
-              )}
-            </div>
+                  </div>
+                )}
+              </div>
+            )}
             {renderScreen(screen)}
           </section>
         ) : null}
