@@ -247,6 +247,21 @@ describe("other nouns", () => {
     expect(r.out[3]).toMatch(/^demo +3 +1 +1\.0k +500\/0 +200 +\$0\.05 +1\.0s\/call$/);
   });
 
+  test("usage prints the table by time in use; a dash where time is not measured", async () => {
+    const usage = [
+      { kind: "builtin", key: "settings", opens: 9, activeMs: null, sessions: 0, lastAt: null, daily: [] },
+      { kind: "app", key: "ai-todo", opens: 2, activeMs: 300_000, sessions: 1, lastAt: null, daily: [] },
+    ];
+    const r = await runCli(["usage", "--window", "7d", "--kind", "app"], (t) => t.scripted.reply({ status: 200, body: { ok: true, window: "7d", usage } }));
+    expect(r.calls[0]!.url).toBe("http://127.0.0.1:8700/api/usage?window=7d&kind=app");
+    expect(r.out[0]).toBe("last 7d · app: 11 opens, 5m in use");
+    expect(r.out[3]).toMatch(/^app +ai-todo +2 +5m +1/);
+    expect(r.out[4]).toMatch(/^builtin +settings +9 +–/);
+    const bare = await runCli(["usage"], (t) => t.scripted.reply({ status: 200, body: { ok: true, window: "30d", usage: [] } }));
+    expect(bare.calls[0]!.url).toBe("http://127.0.0.1:8700/api/usage");
+    expect(bare.code).toBe(0);
+  });
+
   test("event emit and api pass bodies through", async () => {
     const r = await runCli(["event", "emit", "ping", "--app", "demo", "--data", '{"x":1}'], (t) => t.scripted.reply({ status: 202, body: { ok: true, event: { id: 1, name: "demo/ping", app: "demo", at: "x" }, matched: ["demo/tick"] } }));
     expect(r.calls[0]).toMatchObject({ method: "POST", body: { name: "ping", app: "demo", data: { x: 1 } } });
