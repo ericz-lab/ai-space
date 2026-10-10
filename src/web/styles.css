@@ -91,6 +91,9 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .tile:hover .tile-icon { transform: translateY(-3px) scale(1.05); }
 /* An emoji icon sits on an opaque plate; image icons bring their own background. */
 .tile-icon.solid { background: var(--solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* An image covers the whole plate, so the glass and its light border come off: the border would
+   ring the artwork. A broken image falls back to an emoji and gets the plate back. */
+.tile-icon:has(> img) { background: none; border: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
 
 /* The app an agent belongs to, over the avatar's bottom-right corner. */
 .tile-corner {

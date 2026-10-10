@@ -177,7 +177,7 @@ Rules:
 
 - **App icons keep their artwork.** The panel standardizes only the plate: 64 px, `--radius-md`, centered, 8 px above a two-line name (implemented). Icon packs (panel.md#icon-packs) follow the same plate.
 - **Emoji icons sit on the solid plate** (`.tile-icon.solid`, implemented). Image icons cover their plate.
-- **Proposed: no glass under image icons.** An image icon covers the tile completely, so its backdrop filter is invisible but still costs a compositing layer per tile. With 40+ apps that is 40+ blurred layers. Give image tiles the solid plate as well.
+- **No glass or border under image icons** (implemented, `.tile-icon:has(> img)`). An image icon covers the tile completely, so the glass border would only ring the artwork in white, and the backdrop filter would cost a compositing layer per tile without being seen. A broken image falls back to an emoji and gets the plate back.
 - **Built-in controls use one icon family** with the same stroke weight (1.75 px at 24 px) and optical size. The built-in tiles (Terminal, Settings) keep their opaque plates.
 - **Badges** sit at the top right of the icon (`-6px, -6px`), 20 px high, `danger` fill for unread or failed, with a number. The agent's app sits at the bottom right (implemented). No other positions.
 
