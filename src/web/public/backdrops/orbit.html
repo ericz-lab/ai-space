@@ -86,7 +86,7 @@ body { background: var(--bg1); color: var(--fg); font: 13px/1.3 -apple-system, B
   <stop offset="1" style="stop-color:var(--h2)" stop-opacity="0"/>
 </radialGradient>
 <radialGradient id="gNear" gradientUnits="userSpaceOnUse" cx="780" cy="432" r="1900">
-  <stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset=".22" stop-color="#fff" stop-opacity=".8"/>
+  <stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset=".22" stop-color="#fff" stop-opacity=".65"/>
   <stop offset=".5" stop-color="#fff" stop-opacity=".46"/><stop offset="1" stop-color="#fff" stop-opacity=".24"/>
 </radialGradient>
 <mask id="mNear" maskUnits="userSpaceOnUse" x="-3000" y="-3000" width="7000" height="7000"><rect x="-3000" y="-3000" width="7000" height="7000" fill="url(#gNear)"/></mask>
@@ -125,8 +125,8 @@ body { background: var(--bg1); color: var(--fg); font: 13px/1.3 -apple-system, B
 </radialGradient>
 <clipPath id="cDisc"><circle cx="1220" cy="-330" r="880"/></clipPath>
 <radialGradient id="gRim" gradientUnits="userSpaceOnUse" cx="780" cy="432" r="1500">
-  <stop offset="0" style="stop-color:var(--c0)" stop-opacity="1"/>
-  <stop offset=".06" style="stop-color:var(--r0)" stop-opacity="1"/>
+  <stop offset="0" style="stop-color:var(--c0)" stop-opacity=".3"/>
+  <stop offset=".06" style="stop-color:var(--r0)" stop-opacity=".5"/>
   <stop offset=".2" style="stop-color:var(--r1)" stop-opacity=".95"/>
   <stop offset=".5" style="stop-color:var(--r2)" stop-opacity=".7"/>
   <stop offset="1" style="stop-color:var(--r3)" stop-opacity=".3"/>
@@ -167,22 +167,22 @@ body { background: var(--bg1); color: var(--fg); font: 13px/1.3 -apple-system, B
   <!-- halo outside the limb, strongest near the hidden star -->
   <g mask="url(#mNear)" class="halo"><circle cx="1220" cy="-330" r="1320" fill="url(#gHalo)"/></g>
   <!-- the star's bloom behind the planet -->
-  <circle cx="780" cy="432" r="820" fill="url(#gWarm)" opacity=".38"/>
-  <g transform="translate(780 432) rotate(30)" opacity=".32">
+  <circle cx="780" cy="432" r="820" fill="url(#gWarm)" opacity=".18"/>
+  <g transform="translate(780 432) rotate(30)" opacity=".12">
     <ellipse rx="620" ry="4.5" fill="url(#gStreak)" opacity=".85"/>
     <ellipse rx="230" ry="16" fill="url(#gStreak)" opacity=".5"/>
   </g>
-  <circle cx="780" cy="432" r="96" fill="url(#gCore)" opacity=".35"/>
+  <circle cx="780" cy="432" r="96" fill="url(#gCore)" opacity=".12"/>
   <!-- planet -->
   <circle cx="1220" cy="-330" r="880" fill="url(#gDisc)"/>
   <g clip-path="url(#cDisc)">
-    <g mask="url(#mLimb)" opacity=".5"><circle cx="780" cy="432" r="1250" fill="url(#gScatter)"/></g>
-    <circle cx="780" cy="432" r="210" fill="url(#gBleed)" opacity=".32"/>
+    <g mask="url(#mLimb)" opacity=".22"><circle cx="780" cy="432" r="1250" fill="url(#gScatter)"/></g>
+    <circle cx="780" cy="432" r="210" fill="url(#gBleed)" opacity=".12"/>
   </g>
   <circle cx="1220" cy="-330" r="877" fill="none" stroke="url(#gRim)" stroke-width="7" opacity=".28"/>
   <circle cx="1220" cy="-330" r="865" fill="none" stroke="url(#gRim)" stroke-width=".7" opacity=".3" vector-effect="non-scaling-stroke"/>
   <circle cx="1220" cy="-330" r="880" fill="none" stroke="url(#gRim)" stroke-width="1.6" opacity=".75" vector-effect="non-scaling-stroke"/>
-  <circle cx="780" cy="432" r="34" fill="url(#gCore)" opacity=".32"/>
+  <circle cx="780" cy="432" r="34" fill="url(#gCore)" opacity=".1"/>
   <!-- orbital rings -->
   <g transform="translate(1220 -330) rotate(-35)">
     <g mask="url(#mFar)">
