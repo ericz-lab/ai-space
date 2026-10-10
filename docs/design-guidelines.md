@@ -51,7 +51,7 @@ These decisions were made while reviewing the v0.1 draft. They are binding for t
 
 **Implemented (Aurora).** Three blurred blobs (`.aurora i` in `src/web/styles.css`), colored by `--blob-a/b/c`, opacity `--glow-opacity` (0.55 or 0).
 
-**Implemented (Orbit, Northern Lights, Paper Cut, Prism).** These presets are deliberately expressive: a full-viewport drawing (a preset's `backdrop`, [panel.md](panel.md#appearance)) carries weight through the upper and middle of the page, not only its edges. They trade the quiet content area of section 1 for a memorable field, so names on the field get a halo and everything else sits on glass or a reading surface. The `glow` switch removes the drawing. The contrast method of section 9.2 does not cover a drawing; these four are checked by eye on the screens of section 12.
+**Implemented (Orbit, Northern Lights, Paper Cut, Prism).** These presets are deliberately expressive: a full-viewport drawing (a preset's `backdrop`, [panel.md](panel.md#appearance)) carries weight through the upper and middle of the page, not only its edges. They trade the quiet content area of section 1 for a memorable field, so headings on the field get a halo, tile names stay plain text, and everything else sits on glass or a reading surface. The `glow` switch removes the drawing. The contrast method of section 9.2 does not cover a drawing; these four are checked by eye on the screens of section 12.
 
 ## 4. Color
 

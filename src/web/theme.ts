@@ -585,7 +585,7 @@ function paint(a: Appearance) {
   const root = document.documentElement;
   for (const [k, v] of Object.entries(toCssVars(a.resolved))) root.style.setProperty(k, v);
   root.dataset.theme = a.scheme;
-  // styles.css gives labels on the open field a halo while artwork is behind them.
+  // styles.css gives headings on the open field a halo while artwork is behind them.
   const backdrop = backdropOf(a.draft ?? a.saved, a.resolved);
   if (backdrop) root.dataset.backdrop = backdrop;
   else delete root.dataset.backdrop;
