@@ -142,7 +142,7 @@ export function createTerminalRoutes(opts: TerminalApiOptions): Routes {
       const ticket = new URL(req.url).searchParams.get("ticket") ?? "";
       if (!ticket) return error(401, "ticket is required");
       const url = `${client.config.url.replace(/^http/, "ws")}/api/peer/terminal/ws?ticket=${encodeURIComponent(ticket)}`;
-      const attachment = bridge(url, client.authHeaders(), client.name);
+      const attachment = bridge(url, client.authHeaders(), `peer ${client.name}`);
       if (server.upgrade(req, { data: { attachment } })) return undefined;
       return error(400, "expected a websocket upgrade");
     }),
@@ -178,9 +178,11 @@ export const terminalWebSocket: WebSocketHandler<WsData> = {
 /**
  * A browser socket on the hub bridged to a session socket on the peer: frames
  * pass through unchanged in both directions, the peer's close code and reason
- * reach the browser, and the browser leaving closes the peer side.
+ * reach the browser, and the browser leaving closes the peer side. The peer app
+ * proxy (docs/peers.md) bridges an app's own socket the same way, on both sides;
+ * `target` names the far end in the close reason ("peer david", "app media").
  */
-function bridge(url: string, headers: Record<string, string>, peer: string): WsAttachment {
+export function bridge(url: string, headers: Record<string, string>, target: string): WsAttachment {
   let up: WebSocket | undefined;
   let queue: (string | Uint8Array)[] = [];
   return {
@@ -189,7 +191,7 @@ function bridge(url: string, headers: Record<string, string>, peer: string): WsA
       try {
         up = new WebSocket(url, { headers } as unknown as string[]);
       } catch (e) {
-        ws.close(4002, `peer ${peer} unreachable: ${(e as Error).message}`.slice(0, 120));
+        ws.close(4002, `${target} unreachable: ${(e as Error).message}`.slice(0, 120));
         return;
       }
       up.binaryType = "arraybuffer";
@@ -206,7 +208,7 @@ function bridge(url: string, headers: Record<string, string>, peer: string): WsA
         if (ws.readyState !== 1) return;
         // Only 1000 and 3000-4999 may be sent; anything else (a dropped connection, a 401) becomes 4002 with the reason.
         const code = e.code === 1000 || (e.code >= 3000 && e.code <= 4999) ? e.code : 4002;
-        const reason = opened ? e.reason || "peer closed" : `peer ${peer} refused the socket${e.reason ? ` (${e.reason})` : ""}`;
+        const reason = opened ? e.reason || "peer closed" : `${target} refused the socket${e.reason ? ` (${e.reason})` : ""}`;
         ws.close(code, reason.slice(0, 120));
       };
       up.onerror = () => {
@@ -221,13 +223,16 @@ function bridge(url: string, headers: Record<string, string>, peer: string): WsA
     close() {
       queue = [];
       try {
-        up?.close(1000, "browser left");
+        up?.close(1000, "client left");
       } catch {
         /* already closed */
       }
     },
   };
 }
+
+/** Whether a request asks for a WebSocket. */
+export const wantsWebSocket = (req: Request): boolean => req.headers.get("upgrade")?.toLowerCase() === "websocket";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });

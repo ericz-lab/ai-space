@@ -2,6 +2,8 @@ import type { LayoutStore } from "../panel/layout.ts";
 import type { AppRegistry } from "../panel/registry.ts";
 import type { PeerHub } from "./hub.ts";
 import { peerId } from "./merge.ts";
+import { sameOrigin } from "../auth.ts";
+import { bridge, wantsWebSocket } from "../terminal/api.ts";
 
 /**
  * The hub side of peers, shaped as a Bun.serve `routes` table.
@@ -20,6 +22,10 @@ import { peerId } from "./merge.ts";
  *   POST  /api/peers/:peer/agents/:app/:agent/runs/:id/stop │
  *   GET   /api/peers/:peer/apps/:app/proxy/api/*        ┘ (the peer app's own API; docs/peers.md)
  *
+ * A WebSocket upgrade on the last one is bridged to the peer app's socket at that path, frame
+ * by frame, for an app on the hub that relays a live stream of its counterpart; a browser may
+ * open it from the panel's own origin only.
+ *
  * Only these paths are forwarded; anything else under /api/peers/ is 404 on
  * the hub without a call to the peer. Like the panel routes they carry no
  * bearer token; see docs/peers.md.
@@ -31,7 +37,8 @@ export type PeerApiOptions = {
   registry: AppRegistry;
 };
 
-type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
+// The server argument only matters to the app proxy, which may upgrade the request to a socket.
+type Handler = (req: Request & { params: Record<string, string> }, server: Bun.Server<unknown>) => Response | undefined | Promise<Response | undefined>;
 type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "PATCH" | "DELETE", Handler>>>;
 
 const FORWARD_TIMEOUT_MS = 8_000;
@@ -126,7 +133,22 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
     "/api/peers/:peer/agents/:app/:agent/sessions": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/sessions/:sid": { GET: proxy(FORWARD_TIMEOUT_MS) },
     // An app on this hub reading a peer app's API; the peer bounds the call with its own timeout.
-    "/api/peers/:peer/apps/:app/proxy/*": { GET: proxy(PROXY_TIMEOUT_MS) },
+    "/api/peers/:peer/apps/:app/proxy/*": {
+      GET: (req, server) => {
+        if (!wantsWebSocket(req)) return proxy(PROXY_TIMEOUT_MS)(req, server);
+        // A socket carries no token here, like the panel routes; an app's server sends no Origin,
+        // and a page on another site must not reach a peer app through the operator's browser.
+        if (!sameOrigin(req)) return error(403, "cross-origin request refused");
+        const client = req.params.peer ? hub.get(req.params.peer) : undefined;
+        if (!client) return error(404, `unknown peer: ${req.params.peer}`);
+        const u = new URL(req.url);
+        const rest = u.pathname.replace(/^\/api\/peers\/[^/]+\/apps\/[^/]+\/proxy/, "");
+        if (!rest.startsWith("/api/")) return error(404, "only the app's /api/ paths are proxied");
+        const url = `${client.config.url.replace(/^http/, "ws")}${u.pathname.replace(/^\/api\/peers\/[^/]+/, "/api/peer")}${u.search}`;
+        if (server.upgrade(req, { data: { attachment: bridge(url, client.authHeaders(), `peer ${client.name}`) } })) return undefined;
+        return error(400, "websocket upgrade failed");
+      },
+    },
   };
 
   /** Local manifest-only apps whose url is a peer app's url: link apps the peer makes unnecessary. */

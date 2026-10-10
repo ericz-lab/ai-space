@@ -26,6 +26,7 @@ import type { WidgetView } from "../panel/widgets.ts";
 import { dropSameLink, dropSameUrl, peerRoute } from "./merge.ts";
 import { createPeerServeRoutes } from "./serve.ts";
 import { PeerStore } from "./store.ts";
+import { terminalWebSocket } from "../terminal/api.ts";
 
 // Two spaces in one process: a peer (its panel behind /api/peer/*) and a hub that merges it.
 
@@ -45,6 +46,25 @@ const fakeLoopback = (async (input: string | URL | Request) => {
   if (url.includes("/board?theme=")) return new Response(`<html>board ${url.split("theme=")[1]}</html>`, { headers: { "content-type": "text/html" } });
   return new Response("<html><head><meta name=\"theme-color\" content=\"#abcdef\"></head></html>", { headers: { "content-type": "text/html" } });
 }) as typeof fetch;
+
+// The media app's own socket on the peer: echoes text upper-cased and binary frames as they came,
+// says which path and query it was opened with, and closes with 4100 on "bye".
+const appSocket = Bun.serve<{ opened: string; auth: string | null }>({
+  port: 0,
+  hostname: "127.0.0.1",
+  fetch: (req, server) => {
+    const u = new URL(req.url);
+    if (u.pathname !== "/api/live") return new Response("not found", { status: 404 });
+    return server.upgrade(req, { data: { opened: u.pathname + u.search, auth: req.headers.get("authorization") } }) ? undefined : new Response("expected a socket", { status: 400 });
+  },
+  websocket: {
+    open: (ws) => void ws.send(JSON.stringify(ws.data)),
+    message: (ws, m) => {
+      if (m === "bye") ws.close(4100, "done here");
+      else ws.send(typeof m === "string" ? m.toUpperCase() : m);
+    },
+  },
+});
 
 let peerServer: ReturnType<typeof Bun.serve>;
 let hubServer: ReturnType<typeof Bun.serve>;
@@ -122,7 +142,7 @@ widgets:
   });
   peerBus.syncApp("media", { events: { publishes: [{ name: "clip.added" }], consumes: [] }, provides: [{ name: "clip", method: "POST", path: "/api/clip", timeoutMs: 5000 }] });
   // The peer routes may upgrade a socket (the terminal's), so the server declares a websocket handler.
-  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents }) }, websocket: { message() {} } });
+  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents }) }, websocket: terminalWebSocket });
   peerBase = `http://127.0.0.1:${peerServer.port}`;
 
   // ---- the hub: a local app, a link app that duplicates the peer's app, and the peer
@@ -152,7 +172,7 @@ widgets:
   const hubPanel = createPanelRoutes({ ws: hws, registry: hubRegistry, layout, widgets: new WidgetFeed(hubRegistry, { fetch: fakeLoopback }), health: new HealthProbe({ fetch: fakeLoopback }), onCreate: async () => {}, onRemove: async () => {}, fetch: fakeLoopback, peers, icons: hubIcons });
   const hubAgents = createAgentRoutes({ ws: hws, registry: hubRegistry, layout, sessions: new SessionStore(hubDb), runtimes, defaultModel: "sonnet", home: hubHome, peers, icons: hubIcons });
   // The hub also serves as a peer (a hub of hubs), to check its snapshot carries only its own entries.
-  hubServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...hubPanel, ...hubAgents, ...hubBusRoutes, ...createPeerRoutes({ hub: peers, layout, registry: hubRegistry }), ...createPeerServeRoutes({ token: "hubtok", name: "hub-box", panel: hubPanel, agents: hubAgents, events: hubEvents }) }, websocket: { message() {} } });
+  hubServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...hubPanel, ...hubAgents, ...hubBusRoutes, ...createPeerRoutes({ hub: peers, layout, registry: hubRegistry }), ...createPeerServeRoutes({ token: "hubtok", name: "hub-box", panel: hubPanel, agents: hubAgents, events: hubEvents }) }, websocket: terminalWebSocket });
   hub = `http://127.0.0.1:${hubServer.port}`;
 });
 
@@ -160,6 +180,7 @@ afterAll(() => {
   peers.stop();
   peerServer.stop(true);
   hubServer.stop(true);
+  appSocket.stop(true);
 });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -322,6 +343,55 @@ describe("hub", () => {
     expect((await fetch(`${hub}/api/peers/david/apps/media`)).status).toBe(404);
     expect((await fetch(`${hub}/api/peers/david/panel/layout`)).status).toBe(404);
     expect((await fetch(`${hub}/api/peers/david/apps`, jsonInit("POST", { name: "x" }))).status).toBe(404);
+  });
+
+  test("a socket of the peer app is bridged through the hub in both directions", async () => {
+    const ws = new WebSocket(`${hub.replace("http", "ws")}/api/peers/david/apps/media/proxy/api/live?room=7`);
+    ws.binaryType = "arraybuffer";
+    const got: (string | number[])[] = [];
+    const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+      ws.onclose = (e) => resolve({ code: e.code, reason: e.reason });
+    });
+    const next = (n: number) =>
+      new Promise<void>((resolve) => {
+        const check = () => (got.length >= n ? resolve() : setTimeout(check, 5));
+        check();
+      });
+    ws.onmessage = (e) => void got.push(typeof e.data === "string" ? e.data : [...new Uint8Array(e.data as ArrayBuffer)]);
+    // Sent before the far end is open: queued by the bridge, not lost.
+    await new Promise<void>((resolve) => (ws.onopen = () => resolve()));
+    ws.send("hello");
+    ws.send(new Uint8Array([1, 2, 250]));
+    await next(3);
+    // The app saw its own path and query, and none of the hub's credentials.
+    expect(JSON.parse(got[0] as string)).toEqual({ opened: "/api/live?room=7", auth: null });
+    expect(got.slice(1)).toEqual(["HELLO", [1, 2, 250]]);
+    ws.send("bye");
+    expect(await closed).toEqual({ code: 4100, reason: "done here" });
+  });
+
+  test("the socket proxy keeps the rules of the GET proxy and refuses other sites", async () => {
+    const open = (url: string, headers: Record<string, string> = {}) =>
+      new Promise<{ opened: boolean; code: number; reason: string }>((resolve) => {
+        const ws = new WebSocket(url, { headers } as unknown as string[]);
+        let opened = false;
+        ws.onopen = () => (opened = true);
+        ws.onclose = (e) => resolve({ opened, code: e.code, reason: e.reason });
+      });
+    const hubWs = hub.replace("http", "ws");
+    // Refused before any upgrade: another site's page, an unknown peer, a path outside /api/.
+    expect((await open(`${hubWs}/api/peers/david/apps/media/proxy/api/live`, { origin: "https://evil.example" })).opened).toBe(false);
+    expect((await open(`${hubWs}/api/peers/nope/apps/media/proxy/api/live`)).opened).toBe(false);
+    expect((await open(`${hubWs}/api/peers/david/apps/media/proxy/board`)).opened).toBe(false);
+    // The peer side still wants the hub's token.
+    expect((await open(`${peerBase.replace("http", "ws")}/api/peer/apps/media/proxy/api/live`)).opened).toBe(false);
+    // Upgraded on the hub, then closed with the reason when the far end refuses: no such app, no such socket.
+    const noApp = await open(`${hubWs}/api/peers/david/apps/notes-link/proxy/api/live`);
+    expect(noApp).toMatchObject({ code: 4002 });
+    expect(noApp.reason).toContain("peer david refused the socket");
+    const noSocket = await open(`${hubWs}/api/peers/david/apps/media/proxy/api/nothing`);
+    expect(noSocket).toMatchObject({ code: 4002 });
+    expect(noSocket.reason).toContain("app media refused the socket");
   });
 
   test("hides a peer app on the hub only; its agents and widgets follow", async () => {

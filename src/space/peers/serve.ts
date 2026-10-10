@@ -4,6 +4,7 @@ import { MAX_CALL_BODY_BYTES } from "../bus/types.ts";
 import { eventPayload } from "../scheduler/events.ts";
 import type { Store } from "../scheduler/store.ts";
 import { bearer, tokenEquals } from "../auth.ts";
+import { bridge, wantsWebSocket } from "../terminal/api.ts";
 
 /**
  * The peer side: `/api/peer/*`, present only when `SPACE_HUB_TOKEN` is set.
@@ -17,7 +18,8 @@ import { bearer, tokenEquals } from "../auth.ts";
  *   GET  /api/peer/apps/:app/appcolor              = /api/panel/appcolor?app=
  *   GET  /api/peer/agents/:app/:agent/avatar       = /api/agents/:app/:agent/avatar
  *   GET  /api/peer/widgets/:app/:name/embed        = /api/widgets/:app/:name/embed
- *   GET  /api/peer/apps/:app/proxy/api/*           GET http://127.0.0.1:<service.port>/api/* on the app itself: an app on the
+ *   GET  /api/peer/apps/:app/proxy/api/*           GET http://127.0.0.1:<service.port>/api/* on the app itself (a WebSocket
+ *                                                  upgrade is bridged to the app's socket at that path): an app on the
  *                                                  hub reading a peer app's API (an app without a service, or a path outside
  *                                                  /api/, is 404; only GET, so nothing is changed from afar)
  *   POST /api/peer/agents/:app/:agent/chat         = /api/agents/:app/:agent/chat
@@ -132,12 +134,18 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     },
     "/api/peer/agents/:app/:agent/avatar": { GET: guard(mirror(opts.panel, "/api/agents/:app/:agent/avatar", "GET")) },
     "/api/peer/apps/:app/proxy/*": {
-      GET: guard(async (req) => {
+      GET: guard(async (req, server) => {
         const port = opts.servicePort?.(req.params.app ?? "");
         if (!port) return json({ ok: false, error: `no service for app "${req.params.app ?? ""}"` }, 404);
         const u = new URL(req.url);
         const rest = u.pathname.replace(/^\/api\/peer\/apps\/[^/]+\/proxy/, "");
         if (!rest.startsWith("/api/")) return json({ ok: false, error: "only the app's /api/ paths are proxied" }, 404);
+        // The app's own socket (a live stream an app on the hub relays): bridged frame by frame.
+        if (wantsWebSocket(req)) {
+          const attachment = bridge(`ws://127.0.0.1:${port}${rest}${u.search}`, {}, `app ${req.params.app}`);
+          if (server.upgrade(req, { data: { attachment } })) return undefined;
+          return json({ ok: false, error: "websocket upgrade failed" }, 400);
+        }
         const up = await (opts.fetch ?? fetch)(`http://127.0.0.1:${port}${rest}${u.search}`, { headers: { accept: req.headers.get("accept") ?? "application/json" }, signal: AbortSignal.any([req.signal, AbortSignal.timeout(opts.proxyTimeoutMs ?? PROXY_TIMEOUT_MS)]) });
         return new Response(up.body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store" } });
       }),
