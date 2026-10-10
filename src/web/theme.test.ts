@@ -8,6 +8,7 @@ import {
   LEGACY_KEY,
   MAX_IMPORT_BYTES,
   PRESETS,
+  backdropOf,
   STORAGE_KEY,
   bootRecord,
   contrastOn,
@@ -112,6 +113,20 @@ describe("resolution", () => {
         const vars = toCssVars(resolveTokens({ ...defaultPreferences(), presetId: p.id }, s));
         for (const v of Object.values(COLOR_VARS)) expect(parseColor(vars[v]), `${p.id} ${s} ${v}`).not.toBeNull();
       }
+  });
+
+  test("a preset's backdrop shows while the glow is on, and its file is a public route", async () => {
+    const { createWebRoutes } = await import("./routes.ts");
+    const routes = createWebRoutes();
+    for (const p of PRESETS) {
+      const prefs = { ...defaultPreferences("dark"), presetId: p.id };
+      expect(backdropOf(prefs, resolveTokens(prefs, "dark"))).toBe(p.backdrop);
+      const off = { ...prefs, overrides: { light: {}, dark: { glow: false } } };
+      expect(backdropOf(off, resolveTokens(off, "dark"))).toBeUndefined();
+      if (!p.backdrop) continue;
+      expect(routes[`/backdrops/${p.backdrop}.html`], p.id).toBeDefined();
+      expect(await Bun.file(`${import.meta.dir}/public/backdrops/${p.backdrop}.html`).exists(), p.id).toBe(true);
+    }
   });
 
   test("an unknown preset id falls back to the default", () => {

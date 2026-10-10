@@ -18,7 +18,7 @@ import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n
 import PetField from "./PetField.tsx";
 import { type PetChoice, resolvePet } from "./petdex.ts";
 import SettingsStatus from "./SettingsStatus.tsx";
-import { useAppearance } from "./theme.ts";
+import { backdropOf, useAppearance } from "./theme.ts";
 import ThemeSettings from "./ThemeSettings.tsx";
 import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 
@@ -36,6 +36,35 @@ type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetCh
 
 /** Floating panels over the page; one at a time. */
 type Panel = "settings" | "chat" | "tasks" | "usage" | "activity" | "appModels" | "events" | "terminal" | "inbox";
+
+/**
+ * What is behind the page: the three glow blobs, or the preset's backdrop (theme.ts) framed from
+ * `/backdrops/<name>.html`. The frame keeps the artwork's styles and SVG ids out of the page; its
+ * document reads the scheme from this page when it loads, and a later change is pushed to it.
+ */
+function Backdrop() {
+  const a = useAppearance();
+  const art = backdropOf(a.draft ?? a.saved, a.resolved);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const sync = () => {
+    const root = frame.current?.contentDocument?.documentElement;
+    if (root) root.dataset.theme = a.scheme;
+  };
+  useEffect(sync, [a.scheme, art]);
+  return (
+    <div className="aurora" aria-hidden="true">
+      {art ? (
+        <iframe key={art} ref={frame} src={`/backdrops/${art}.html`} onLoad={sync} tabIndex={-1} title="" />
+      ) : (
+        <>
+          <i />
+          <i />
+          <i />
+        </>
+      )}
+    </div>
+  );
+}
 
 /** `onLang` changes the language of the whole page; the root (main.tsx) owns the value and provides it. */
 export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
@@ -652,11 +681,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
 
   return (
     <>
-      <div className="aurora">
-        <i />
-        <i />
-        <i />
-      </div>
+      <Backdrop />
       <div className={`shell${pos === -1 ? " wide" : ""}`}>
         {pos === -1 ? (
           <section className={`screen ${dir}`} key="library">

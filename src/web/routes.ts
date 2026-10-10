@@ -17,6 +17,11 @@ const PUBLIC: Record<string, string> = {
   "/apple-touch-icon.png": "apple-touch-icon.png",
   "/icon-512.png": "icon-512.png",
   "/pet.webp": "pet.webp",
+  // The presets' backdrops (theme.ts `backdrop`), framed behind the page.
+  "/backdrops/orbit.html": "backdrops/orbit.html",
+  "/backdrops/northern.html": "backdrops/northern.html",
+  "/backdrops/papercut.html": "backdrops/papercut.html",
+  "/backdrops/prism.html": "backdrops/prism.html",
 };
 
 type WebRoutes = Record<string, typeof index | (() => Response)>;

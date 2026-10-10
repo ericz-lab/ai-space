@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prism</title>
+<!-- A panel backdrop (docs/panel.md#appearance): static artwork the panel frames behind the page.
+     data-theme on <html> picks the light or dark version; the framing page sets it. -->
+<script>
+(function () {
+  var e = document.documentElement, t;
+  try { t = parent.document.documentElement.dataset.theme; } catch (_) {}
+  if (t !== "dark" && t !== "light") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  e.dataset.theme = t;
+})();
+</script>
+<style>
+
+:root {
+  /* dark: glowing glass on ink */
+  --ground-0: #07080c;
+  --ground-1: #12141c;
+  --ground-2: #1b1e2b;
+  --blend: screen;
+  --body-lit-o: .16;
+  --body-deep-o: .80;
+  --edge-o: .55;
+  --shadow-o: .34;
+  --caustic-o: .55;
+  --beam: #ffffff;
+  --beam-o: .92;
+  --halo-o: .22;
+  --fan-o: .95;
+  --rim-o: 1;
+  --grain-o: .22;
+  --ray-o: .42; --inner-o: .9; --inner-blend: screen;
+  --grain-blend: soft-light;
+  --vio-1: #b9a8ff; --vio-2: #5b3df5;
+  --ros-1: #ffb3cf; --ros-2: #ff2d78;
+  --amb-1: #ffe2a6; --amb-2: #ff9a1f;
+  --cya-1: #b4f6ff; --cya-2: #06b6d4;
+  --blu-1: #b3d2ff; --blu-2: #2563ff;
+  --clr-1: #ffffff; --clr-2: #8fa4d8;
+  --ink: #f4f5f8;
+  --ink-shadow: 0 1px 2px rgba(0,0,0,.75), 0 0 12px rgba(0,0,0,.55);
+  --card: rgba(22,24,32,.42);
+  --card-line: rgba(255,255,255,.14);
+  --card-ink: rgba(255,255,255,.92);
+  --card-sub: rgba(255,255,255,.58);
+}
+:root[data-theme="light"] {
+  --ground-0: #d6d9e1;
+  --ground-1: #e6e8ed;
+  --ground-2: #f2f3f6;
+  --blend: multiply;
+  --body-lit-o: .30;
+  --body-deep-o: .88;
+  --edge-o: .50;
+  --shadow-o: .42;
+  --caustic-o: .0;
+  --beam: #ffffff;
+  --beam-o: 1;
+  --halo-o: .55;
+  --fan-o: .78;
+  --rim-o: 1;
+  --grain-o: .20;
+  --ray-o: .8; --inner-o: .75; --inner-blend: soft-light;
+  --grain-blend: multiply;
+  --vio-1: #cfc6ff; --vio-2: #7257ff;
+  --ros-1: #ffd0e0; --ros-2: #ff4f8f;
+  --amb-1: #ffeac2; --amb-2: #ffab2e;
+  --cya-1: #c9f7fc; --cya-2: #1cc8dd;
+  --blu-1: #cfe1ff; --blu-2: #3f83ff;
+  --clr-1: #ffffff; --clr-2: #a9b8de;
+  --ink: #14161c;
+  --ink-shadow: 0 0 10px rgba(255,255,255,.9), 0 1px 1px rgba(255,255,255,.7);
+  --card: rgba(255,255,255,.50);
+  --card-line: rgba(255,255,255,.75);
+  --card-ink: rgba(16,18,24,.92);
+  --card-sub: rgba(16,18,24,.58);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--ground-1);
+  font: 13px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  color: var(--ink);
+  overflow: hidden;
+}
+
+/* ---------- background ---------- */
+.bg { position: fixed; inset: 0; overflow: hidden; isolation: isolate;
+  background:
+    radial-gradient(120% 90% at 30% 22%, var(--ground-2) 0%, var(--ground-1) 45%, var(--ground-0) 100%);
+}
+.bg svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.scene { transform-box: view-box; transform-origin: 800px 450px; }
+@media (max-aspect-ratio: 1/1) {
+  .scene { transform: translate(-10px, -30px) rotate(54deg) scale(.56); }
+}
+@media (min-aspect-ratio: 2/1) {
+  .scene { transform: translate(0, 40px) scale(.94); }
+}
+.mix { mix-blend-mode: var(--blend); }
+.shadow { opacity: var(--shadow-o); }
+.caustic { opacity: var(--caustic-o); mix-blend-mode: screen; }
+.fan { opacity: var(--fan-o); }
+.beam-core { fill: url(#gBeam); opacity: var(--beam-o); }
+.beam-halo { fill: url(#gBeam); opacity: var(--halo-o); }
+.rims { opacity: var(--rim-o); }
+.rays { opacity: var(--ray-o); }
+.inner { opacity: var(--inner-o); mix-blend-mode: var(--inner-blend); }
+.grain { opacity: var(--grain-o); mix-blend-mode: var(--grain-blend); }
+
+.lit { stop-opacity: var(--body-lit-o); }
+.deep { stop-opacity: var(--body-deep-o); }
+.vio1 { stop-color: var(--vio-1); } .vio2 { stop-color: var(--vio-2); }
+.ros1 { stop-color: var(--ros-1); } .ros2 { stop-color: var(--ros-2); }
+.amb1 { stop-color: var(--amb-1); } .amb2 { stop-color: var(--amb-2); }
+.cya1 { stop-color: var(--cya-1); } .cya2 { stop-color: var(--cya-2); }
+.blu1 { stop-color: var(--blu-1); } .blu2 { stop-color: var(--blu-2); }
+.beamc { stop-color: var(--beam); }
+.clr1 { stop-color: var(--clr-1); } .clr2 { stop-color: var(--clr-2); }
+.f-clr { fill: var(--clr-2); opacity: .5; }
+.f-vio { fill: var(--vio-2); } .f-ros { fill: var(--ros-2); } .f-amb { fill: var(--amb-2); }
+.f-cya { fill: var(--cya-2); } .f-blu { fill: var(--blu-2); }
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true">
+  <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <!-- glass shapes -->
+      <circle id="sA" cx="470" cy="400" r="290"/>
+      <circle id="sB" cx="830" cy="275" r="205"/>
+      <rect   id="sC" x="-135" y="-255" width="270" height="510" rx="135" transform="translate(1150 450) rotate(32)"/>
+      <circle id="sD" cx="745" cy="610" r="150"/>
+      <circle id="sE" cx="1385" cy="215" r="165"/>
+
+      <!-- body gradients: pale frosted on the lit side, saturated on the far side -->
+      <radialGradient id="bVio" cx=".28" cy=".24" r=".95"><stop offset="0" class="vio1 lit"/><stop offset=".5" class="vio2" stop-opacity=".5"/><stop offset="1" class="vio2 deep"/></radialGradient>
+      <radialGradient id="bRos" cx=".28" cy=".24" r=".95"><stop offset="0" class="ros1 lit"/><stop offset=".5" class="ros2" stop-opacity=".5"/><stop offset="1" class="ros2 deep"/></radialGradient>
+      <radialGradient id="bAmb" cx=".3" cy=".2" r=".95"><stop offset="0" class="amb1 lit"/><stop offset=".5" class="amb2" stop-opacity=".5"/><stop offset="1" class="amb2 deep"/></radialGradient>
+      <radialGradient id="bCya" cx=".28" cy=".24" r=".95"><stop offset="0" class="cya1 lit"/><stop offset=".5" class="cya2" stop-opacity=".5"/><stop offset="1" class="cya2 deep"/></radialGradient>
+      <radialGradient id="bClr" cx=".3" cy=".2" r=".95"><stop offset="0" class="clr1 lit"/><stop offset=".55" class="clr2" stop-opacity=".22"/><stop offset="1" class="clr2" stop-opacity=".5"/></radialGradient>
+      <radialGradient id="bBlu" cx=".28" cy=".24" r=".95"><stop offset="0" class="blu1 lit"/><stop offset=".5" class="blu2" stop-opacity=".5"/><stop offset="1" class="blu2 deep"/></radialGradient>
+
+      <!-- rim: bright on the lit side, fading, faint return on the far side -->
+      <linearGradient id="gRim" x1=".12" y1=".06" x2=".88" y2=".94">
+        <stop offset="0" stop-color="#fff" stop-opacity="1"/>
+        <stop offset=".32" stop-color="#fff" stop-opacity=".55"/>
+        <stop offset=".58" stop-color="#fff" stop-opacity=".04"/>
+        <stop offset="1" stop-color="#fff" stop-opacity=".38"/>
+      </linearGradient>
+      <linearGradient id="gRimSoft" x1=".12" y1=".06" x2=".7" y2=".75">
+        <stop offset="0" stop-color="#fff" stop-opacity=".75"/>
+        <stop offset=".5" stop-color="#fff" stop-opacity=".12"/>
+        <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+      </linearGradient>
+
+      <!-- white beam, brightening toward the glass -->
+      <linearGradient id="gBeam" gradientUnits="userSpaceOnUse" x1="-160" y1="-115" x2="600" y2="360">
+        <stop offset="0" class="beamc" stop-opacity=".45"/>
+        <stop offset="1" class="beamc" stop-opacity="1"/>
+      </linearGradient>
+
+      <!-- spectrum bands fade with distance -->
+      <linearGradient id="fAmb" gradientUnits="userSpaceOnUse" x1="600" y1="360" x2="1750" y2="620"><stop offset="0" class="amb2" stop-opacity=".95"/><stop offset=".55" class="amb2" stop-opacity=".6"/><stop offset="1" class="amb2" stop-opacity=".22"/></linearGradient>
+      <linearGradient id="fRos" gradientUnits="userSpaceOnUse" x1="600" y1="360" x2="1750" y2="620"><stop offset="0" class="ros2" stop-opacity=".95"/><stop offset=".55" class="ros2" stop-opacity=".6"/><stop offset="1" class="ros2" stop-opacity=".22"/></linearGradient>
+      <linearGradient id="fVio" gradientUnits="userSpaceOnUse" x1="600" y1="360" x2="1750" y2="620"><stop offset="0" class="vio2" stop-opacity=".95"/><stop offset=".55" class="vio2" stop-opacity=".6"/><stop offset="1" class="vio2" stop-opacity=".22"/></linearGradient>
+      <linearGradient id="fBlu" gradientUnits="userSpaceOnUse" x1="600" y1="360" x2="1750" y2="620"><stop offset="0" class="blu2" stop-opacity=".95"/><stop offset=".55" class="blu2" stop-opacity=".6"/><stop offset="1" class="blu2" stop-opacity=".22"/></linearGradient>
+      <linearGradient id="fCya" gradientUnits="userSpaceOnUse" x1="600" y1="360" x2="1750" y2="620"><stop offset="0" class="cya2" stop-opacity=".95"/><stop offset=".55" class="cya2" stop-opacity=".6"/><stop offset="1" class="cya2" stop-opacity=".22"/></linearGradient>
+
+      <linearGradient id="gRay" gradientUnits="userSpaceOnUse" x1="600" y1="360" x2="1700" y2="700"><stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset=".5" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+      <radialGradient id="gHot" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset=".12" stop-color="#fff" stop-opacity=".8"/><stop offset=".4" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+
+      <linearGradient id="iVio" x1=".2" y1=".15" x2=".85" y2=".9"><stop offset=".35" class="vio1" stop-opacity="0"/><stop offset="1" class="vio1" stop-opacity="1"/></linearGradient>
+      <linearGradient id="iRos" x1=".2" y1=".15" x2=".85" y2=".9"><stop offset=".35" class="ros1" stop-opacity="0"/><stop offset="1" class="ros1" stop-opacity="1"/></linearGradient>
+      <linearGradient id="iClr" x1=".2" y1=".15" x2=".85" y2=".9"><stop offset=".35" class="clr1" stop-opacity="0"/><stop offset="1" class="clr1" stop-opacity="1"/></linearGradient>
+      <linearGradient id="iCya" x1=".2" y1=".15" x2=".85" y2=".9"><stop offset=".35" class="cya1" stop-opacity="0"/><stop offset="1" class="cya1" stop-opacity="1"/></linearGradient>
+      <linearGradient id="iAmb" x1=".2" y1=".15" x2=".85" y2=".9"><stop offset=".35" class="amb1" stop-opacity="0"/><stop offset="1" class="amb1" stop-opacity="1"/></linearGradient>
+      <clipPath id="cA"><use href="#sA"/></clipPath>
+      <clipPath id="cB"><use href="#sB"/></clipPath>
+      <clipPath id="cC"><use href="#sC"/></clipPath>
+      <clipPath id="cD"><use href="#sD"/></clipPath>
+      <clipPath id="cE"><use href="#sE"/></clipPath>
+      <filter id="blur18" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="18"/></filter>
+      <filter id="blur3" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.2"/></filter>
+      <filter id="blur6"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6"/></filter>
+      <filter id="blur10" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+      <filter id="blur28" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="28"/></filter>
+      <filter id="blur46" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="46"/></filter>
+    </defs>
+
+    <g class="scene">
+      <!-- coloured shadows (light) / coloured glow (dark), thrown away from the light -->
+      <g class="mix shadow" filter="url(#blur46)" transform="translate(46 54)">
+        <use href="#sA" class="f-vio"/><use href="#sB" class="f-ros"/><use href="#sC" class="f-clr"/>
+        <use href="#sD" class="f-cya"/><use href="#sE" class="f-amb"/>
+      </g>
+
+      <!-- incoming white beam -->
+      <g>
+        <polygon class="beam-halo" filter="url(#blur28)" points="-1990,-1150 555,430 645,290 -1900,-1310"/>
+        <polygon class="beam-halo" filter="url(#blur10)" points="-1960,-1204 584,385 616,335 -1928,-1256" style="opacity:calc(var(--halo-o) * 1.6)"/>
+        <polygon class="beam-core" filter="url(#blur3)" points="-1948,-1223.5 596,366.5 604,353.5 -1940,-1236.5"/>
+        <polygon class="beam-halo" filter="url(#blur28)" points="-1300,-1260 2700,1240 2740,1175 -1260,-1325" style="opacity:calc(var(--halo-o) * .3)"/>
+      </g>
+
+      <!-- refracted spectrum -->
+      <g class="mix fan" filter="url(#blur10)">
+        <polygon fill="url(#fAmb)" points="600,360 3175,-2 3190,587"/>
+        <polygon fill="url(#fRos)" points="600,360 3200,405 3133,945"/>
+        <polygon fill="url(#fVio)" points="600,360 3168,767 3027,1292"/>
+        <polygon fill="url(#fBlu)" points="600,360 3086,1120 2874,1620"/>
+        <polygon fill="url(#fCya)" points="600,360 2956,1459 2676,1925"/>
+      </g>
+      <g class="rays" stroke="url(#gRay)" stroke-width="1.2" fill="none">
+        <path d="M600 360L2092 203M600 360L2099 412M600 360L2077 620M600 360L2027 824M600 360L1948 1018M600 360L1844 1199"/>
+      </g>
+
+      <!-- glass bodies -->
+      <g class="mix"><use href="#sE" fill="url(#bAmb)"/></g>
+      <g class="mix"><use href="#sA" fill="url(#bVio)"/></g>
+      <g class="mix"><use href="#sC" fill="url(#bClr)"/></g>
+      <g class="mix"><use href="#sB" fill="url(#bRos)"/></g>
+      <g class="mix"><use href="#sD" fill="url(#bCya)"/></g>
+
+      <!-- light gathering at the far inner edge of each glass -->
+      <g class="inner" fill="none" stroke-width="46">
+        <g clip-path="url(#cA)"><use href="#sA" stroke="url(#iVio)" filter="url(#blur18)"/></g>
+        <g clip-path="url(#cB)"><use href="#sB" stroke="url(#iRos)" filter="url(#blur18)"/></g>
+        <g clip-path="url(#cC)"><use href="#sC" stroke="url(#iClr)" filter="url(#blur18)"/></g>
+        <g clip-path="url(#cD)"><use href="#sD" stroke="url(#iCya)" filter="url(#blur18)"/></g>
+        <g clip-path="url(#cE)"><use href="#sE" stroke="url(#iAmb)" filter="url(#blur18)"/></g>
+      </g>
+
+      <!-- caustic hot spots on the ground (dark theme) -->
+      <g class="caustic" filter="url(#blur28)">
+        <ellipse cx="640" cy="640" rx="120" ry="34" class="f-vio" transform="rotate(32 640 640)"/>
+        <ellipse cx="960" cy="455" rx="90" ry="26" class="f-ros" transform="rotate(32 960 455)"/>
+        <ellipse cx="1290" cy="640" rx="120" ry="30" class="f-blu" transform="rotate(32 1290 640)"/>
+        <ellipse cx="850" cy="735" rx="70" ry="20" class="f-cya" transform="rotate(32 850 735)"/>
+      </g>
+
+      <!-- where the beam meets the glass -->
+      <ellipse cx="600" cy="360" rx="190" ry="190" fill="url(#gHot)" style="mix-blend-mode:screen"/>
+      <ellipse cx="600" cy="360" rx="260" ry="5" fill="url(#gHot)" transform="rotate(-58 600 360)" opacity=".8"/>
+
+      <!-- rims -->
+      <g class="rims" fill="none">
+        <g stroke="url(#gRimSoft)" stroke-width="14" filter="url(#blur6)" opacity=".8">
+          <circle cx="470" cy="400" r="280"/><circle cx="830" cy="275" r="196"/>
+          <rect x="-126" y="-246" width="252" height="492" rx="126" transform="translate(1150 450) rotate(32)"/>
+          <circle cx="745" cy="610" r="142"/><circle cx="1385" cy="215" r="157"/>
+        </g>
+        <g stroke="url(#gRim)" stroke-width="1.6">
+          <use href="#sA"/><use href="#sB"/><use href="#sC"/><use href="#sD"/><use href="#sE"/>
+        </g>
+      </g>
+    </g>
+  </svg>
+
+  <!-- grain at device scale -->
+  <svg class="grain">
+    <filter id="fGrain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="7" stitchTiles="stitch"/>
+      <feColorMatrix values="0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  1.4 0 0 0 -.25"/>
+    </filter>
+    <rect width="100%" height="100%" filter="url(#fGrain)"/>
+  </svg>
+</div>
+</body>
+</html>

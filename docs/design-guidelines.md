@@ -51,6 +51,8 @@ These decisions were made while reviewing the v0.1 draft. They are binding for t
 
 **Implemented (Aurora).** Three blurred blobs (`.aurora i` in `src/web/styles.css`), colored by `--blob-a/b/c`, opacity `--glow-opacity` (0.55 or 0).
 
+**Implemented (Orbit, Northern Lights, Paper Cut, Prism).** These presets are deliberately expressive: a full-viewport drawing (a preset's `backdrop`, [panel.md](panel.md#appearance)) carries weight through the upper and middle of the page, not only its edges. They trade the quiet content area of section 1 for a memorable field, so names on the field get a halo and everything else sits on glass or a reading surface. The `glow` switch removes the drawing. The contrast method of section 9.2 does not cover a drawing; these four are checked by eye on the screens of section 12.
+
 ## 4. Color
 
 ### 4.1 Token roles
@@ -326,7 +328,7 @@ A change to the panel's look is ready when every box can be checked. Screens to 
 
 ## 13. Themes and customization
 
-Implemented (panel.md#appearance): every preset defines light and dark; resolution is default → preset → operator overrides; the settings offer accent, background, radius (0–28), blur (0–40), glass opacity, and glow, with live preview, Save, Cancel, and reset to Aurora; import and export are strict JSON.
+Implemented (panel.md#appearance): seven presets (Aurora, Simple, Warm, and the four with a backdrop: Orbit, Northern Lights, Paper Cut, Prism); every preset defines light and dark; resolution is default → preset → operator overrides; the settings offer accent, background, radius (0–28), blur (0–40), glass opacity, and glow, with live preview, Save, Cancel, and reset to Aurora; import and export are strict JSON.
 
 Rules for presets:
 

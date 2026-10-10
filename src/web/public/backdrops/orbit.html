@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit</title>
+<!-- A panel backdrop (docs/panel.md#appearance): static artwork the panel frames behind the page.
+     data-theme on <html> picks the light or dark version; the framing page sets it. -->
+<script>
+(function () {
+  var e = document.documentElement, t;
+  try { t = parent.document.documentElement.dataset.theme; } catch (_) {}
+  if (t !== "dark" && t !== "light") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  e.dataset.theme = t;
+})();
+</script>
+<style>
+
+:root {
+  /* light: pale dawn sky */
+  --bg0:#b4c1f6; --bg1:#d3d2f6; --bg2:#f2d2df;
+  --n0:#f6bfd6; --n1:#a3c0fb; --n2:#ffd9b8;
+  --d0:#7582d8; --d1:#7d8add; --d2:#919de6; --d3:#b6bff3; --d4:#f3efff;
+  --h0:#ffffff; --h1:#fff8ee; --h2:#fbeef6;
+  --w0:#fff3cf; --w1:#ffdf9c; --w2:#ffc58a; --w3:#ffb4ad; --w4:#eac6f6;
+  --c0:#ffffff;
+  --s0:#fff6da; --s1:#ffe2b0; --s2:#ffe9e0; --s3:#eef0ff;
+  --r0:#fff0c2; --r1:#ffffff; --r2:#f6f2ff; --r3:#e2e2ff;
+  --g0:#2f3a8c; --g1:#5550b8; --g2:#8a78d6;
+  --b0:#ffffff; --bcore:#ffffff; --bwarm:#ffb45e;
+  --star:#ffffff; --star-c:#f4f8ff; --star-w:#fff3dc; --star-op:.9;
+  --band-op:.07; --halo-op:1; --grain-op:.1;
+  --fg:#1a1d3d; --fg-shadow:0 1px 10px rgba(255,255,255,.55);
+  --glass:rgba(255,255,255,.38); --glass-b:rgba(255,255,255,.7); --glass-sh:0 18px 50px rgba(60,60,140,.16);
+  --muted:rgba(26,29,61,.6); --line:rgba(26,29,61,.1);
+}
+:root[data-theme="dark"] {
+  --bg0:#070b1f; --bg1:#04050e; --bg2:#090720;
+  --n0:#2a1670; --n1:#0b2a66; --n2:#3a1250;
+  --d0:#03040b; --d1:#04060f; --d2:#070b22; --d3:#0d1a4c; --d4:#1c3c92;
+  --h0:#bfe6ff; --h1:#7fa8ff; --h2:#6a52e8;
+  --w0:#ffe6bd; --w1:#ffbe7a; --w2:#ff8c5c; --w3:#d8589c; --w4:#6c4ee0;
+  --c0:#ffffff;
+  --s0:#ffd9a6; --s1:#ff9a6a; --s2:#7f8cff; --s3:#3f7ae8;
+  --r0:#ffe2b8; --r1:#c8ecff; --r2:#93b4ff; --r3:#8f7dff;
+  --g0:#d9efff; --g1:#a9b8ff; --g2:#9a84ff;
+  --b0:#bfe2ff; --bcore:#ffffff; --bwarm:#ffc78a;
+  --star:#ffffff; --star-c:#cfe6ff; --star-w:#ffe4c4; --star-op:1;
+  --band-op:.09; --halo-op:1; --grain-op:.14;
+  --fg:#f3f5ff; --fg-shadow:0 1px 8px rgba(0,0,10,.7);
+  --glass:rgba(160,180,255,.08); --glass-b:rgba(200,215,255,.16); --glass-sh:0 18px 60px rgba(0,0,0,.4);
+  --muted:rgba(243,245,255,.62); --line:rgba(243,245,255,.1);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg1); color: var(--fg); font: 13px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+.bg { position: fixed; inset: 0; overflow: hidden; }
+.bg svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.bg .tall { display: none; }
+@media (max-aspect-ratio: 1/1) { .bg .wide { display: none; } .bg .tall { display: block; } }
+.sn { fill: var(--star); color: var(--star); } .sc { fill: var(--star-c); color: var(--star-c); } .sw { fill: var(--star-w); color: var(--star-w); }
+.stars { opacity: var(--star-op); }
+.band { opacity: var(--band-op); }
+.halo { opacity: var(--halo-op); }
+.grain { opacity: var(--grain-op); mix-blend-mode: soft-light; }
+.body .core { fill: var(--bcore); }
+.body.warm .core { fill: var(--bwarm); }
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true">
+  <svg width="0" height="0" style="position:absolute;width:0;height:0"><defs>
+<radialGradient id="gDisc" gradientUnits="userSpaceOnUse" cx="1220" cy="-330" r="880">
+  <stop offset="0" style="stop-color:var(--d0)"/><stop offset=".62" style="stop-color:var(--d1)"/>
+  <stop offset=".86" style="stop-color:var(--d2)"/><stop offset=".955" style="stop-color:var(--d3)"/>
+  <stop offset="1" style="stop-color:var(--d4)"/>
+</radialGradient>
+<radialGradient id="gHalo" gradientUnits="userSpaceOnUse" cx="1220" cy="-330" r="1320">
+  <stop offset="0.6659" style="stop-color:var(--h0)" stop-opacity="0"/>
+  <stop offset="0.6667" style="stop-color:var(--h0)" stop-opacity=".95"/>
+  <stop offset="0.6742" style="stop-color:var(--h0)" stop-opacity=".6"/>
+  <stop offset="0.6894" style="stop-color:var(--h1)" stop-opacity=".44"/>
+  <stop offset="0.7273" style="stop-color:var(--h1)" stop-opacity=".27"/>
+  <stop offset="0.7955" style="stop-color:var(--h2)" stop-opacity=".14"/>
+  <stop offset="0.8939" style="stop-color:var(--h2)" stop-opacity=".045"/>
+  <stop offset="1" style="stop-color:var(--h2)" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="gNear" gradientUnits="userSpaceOnUse" cx="780" cy="432" r="1900">
+  <stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset=".22" stop-color="#fff" stop-opacity=".8"/>
+  <stop offset=".5" stop-color="#fff" stop-opacity=".46"/><stop offset="1" stop-color="#fff" stop-opacity=".24"/>
+</radialGradient>
+<mask id="mNear" maskUnits="userSpaceOnUse" x="-3000" y="-3000" width="7000" height="7000"><rect x="-3000" y="-3000" width="7000" height="7000" fill="url(#gNear)"/></mask>
+<radialGradient id="gWarm" gradientUnits="userSpaceOnUse" cx="780" cy="432" r="820">
+  <stop offset="0" style="stop-color:var(--w0)" stop-opacity=".95"/>
+  <stop offset=".035" style="stop-color:var(--w1)" stop-opacity=".72"/>
+  <stop offset=".1" style="stop-color:var(--w2)" stop-opacity=".4"/>
+  <stop offset=".24" style="stop-color:var(--w3)" stop-opacity=".2"/>
+  <stop offset=".5" style="stop-color:var(--w4)" stop-opacity=".08"/>
+  <stop offset="1" style="stop-color:var(--w4)" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="gCore">
+  <stop offset="0" style="stop-color:var(--c0)" stop-opacity="1"/><stop offset=".16" style="stop-color:var(--c0)" stop-opacity=".95"/>
+  <stop offset=".4" style="stop-color:var(--w0)" stop-opacity=".45"/><stop offset="1" style="stop-color:var(--w1)" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="gStreak">
+  <stop offset="0" style="stop-color:var(--c0)" stop-opacity=".95"/><stop offset=".2" style="stop-color:var(--w0)" stop-opacity=".5"/>
+  <stop offset=".55" style="stop-color:var(--h0)" stop-opacity=".16"/><stop offset="1" style="stop-color:var(--h0)" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="gScatter" gradientUnits="userSpaceOnUse" cx="780" cy="432" r="1250">
+  <stop offset="0" style="stop-color:var(--s0)" stop-opacity="1"/>
+  <stop offset=".07" style="stop-color:var(--s1)" stop-opacity=".85"/>
+  <stop offset=".22" style="stop-color:var(--s2)" stop-opacity=".6"/>
+  <stop offset=".55" style="stop-color:var(--s3)" stop-opacity=".34"/>
+  <stop offset="1" style="stop-color:var(--s3)" stop-opacity=".12"/>
+</radialGradient>
+<radialGradient id="gLimb" gradientUnits="userSpaceOnUse" cx="1220" cy="-330" r="880">
+  <stop offset=".8" stop-color="#fff" stop-opacity="0"/><stop offset=".9" stop-color="#fff" stop-opacity=".1"/>
+  <stop offset=".96" stop-color="#fff" stop-opacity=".34"/><stop offset=".99" stop-color="#fff" stop-opacity=".8"/>
+  <stop offset="1" stop-color="#fff" stop-opacity="1"/>
+</radialGradient>
+<mask id="mLimb" maskUnits="userSpaceOnUse" x="340" y="-1210" width="1760" height="1760"><circle cx="1220" cy="-330" r="880" fill="url(#gLimb)"/></mask>
+<radialGradient id="gBleed" gradientUnits="userSpaceOnUse" cx="780" cy="432" r="210">
+  <stop offset="0" style="stop-color:var(--w0)" stop-opacity=".7"/><stop offset=".25" style="stop-color:var(--w2)" stop-opacity=".26"/>
+  <stop offset="1" style="stop-color:var(--w3)" stop-opacity="0"/>
+</radialGradient>
+<clipPath id="cDisc"><circle cx="1220" cy="-330" r="880"/></clipPath>
+<radialGradient id="gRim" gradientUnits="userSpaceOnUse" cx="780" cy="432" r="1500">
+  <stop offset="0" style="stop-color:var(--c0)" stop-opacity="1"/>
+  <stop offset=".06" style="stop-color:var(--r0)" stop-opacity="1"/>
+  <stop offset=".2" style="stop-color:var(--r1)" stop-opacity=".95"/>
+  <stop offset=".5" style="stop-color:var(--r2)" stop-opacity=".7"/>
+  <stop offset="1" style="stop-color:var(--r3)" stop-opacity=".3"/>
+</radialGradient>
+<linearGradient id="gRing" gradientUnits="userSpaceOnUse" x1="-1500" y1="0" x2="900" y2="0">
+  <stop offset="0" style="stop-color:var(--g0)" stop-opacity=".3"/>
+  <stop offset=".16" style="stop-color:var(--g0)" stop-opacity=".95"/>
+  <stop offset=".42" style="stop-color:var(--g1)" stop-opacity=".7"/>
+  <stop offset=".75" style="stop-color:var(--g2)" stop-opacity=".3"/>
+  <stop offset="1" style="stop-color:var(--g2)" stop-opacity=".06"/>
+</linearGradient>
+<mask id="mFar" maskUnits="userSpaceOnUse" x="-3000" y="-3000" width="6000" height="6000">
+  <rect x="-3000" y="-3000" width="6000" height="6000" fill="#fff"/>
+  <path d="M-880 0A880 880 0 0 1 880 0Z" fill="#000"/>
+</mask>
+<radialGradient id="gBody">
+  <stop offset="0" style="stop-color:var(--b0)" stop-opacity=".9"/><stop offset=".3" style="stop-color:var(--b0)" stop-opacity=".22"/>
+  <stop offset="1" style="stop-color:var(--b0)" stop-opacity="0"/>
+</radialGradient>
+<linearGradient id="gBg" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" style="stop-color:var(--bg0)"/><stop offset=".5" style="stop-color:var(--bg1)"/><stop offset="1" style="stop-color:var(--bg2)"/>
+</linearGradient>
+<radialGradient id="gNebA" cx=".08" cy=".98" r=".75">
+  <stop offset="0" style="stop-color:var(--n0)" stop-opacity=".8"/><stop offset=".45" style="stop-color:var(--n0)" stop-opacity=".28"/><stop offset="1" style="stop-color:var(--n0)" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="gNebB" cx=".02" cy=".1" r=".7">
+  <stop offset="0" style="stop-color:var(--n1)" stop-opacity=".7"/><stop offset=".5" style="stop-color:var(--n1)" stop-opacity=".2"/><stop offset="1" style="stop-color:var(--n1)" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="gNebC" cx=".95" cy="1.05" r=".6">
+  <stop offset="0" style="stop-color:var(--n2)" stop-opacity=".7"/><stop offset=".5" style="stop-color:var(--n2)" stop-opacity=".2"/><stop offset="1" style="stop-color:var(--n2)" stop-opacity="0"/>
+</radialGradient>
+<filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+  <feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="11"/>
+  <feColorMatrix values=".33 .33 .33 0 0  .33 .33 .33 0 0  .33 .33 .33 0 0  0 0 0 0 1"/>
+</filter>
+
+<g id="scene">
+  <!-- halo outside the limb, strongest near the hidden star -->
+  <g mask="url(#mNear)" class="halo"><circle cx="1220" cy="-330" r="1320" fill="url(#gHalo)"/></g>
+  <!-- the star's bloom behind the planet -->
+  <circle cx="780" cy="432" r="820" fill="url(#gWarm)"/>
+  <g transform="translate(780 432) rotate(30)">
+    <ellipse rx="620" ry="4.5" fill="url(#gStreak)" opacity=".85"/>
+    <ellipse rx="230" ry="16" fill="url(#gStreak)" opacity=".5"/>
+  </g>
+  <circle cx="780" cy="432" r="96" fill="url(#gCore)"/>
+  <!-- planet -->
+  <circle cx="1220" cy="-330" r="880" fill="url(#gDisc)"/>
+  <g clip-path="url(#cDisc)">
+    <g mask="url(#mLimb)"><circle cx="780" cy="432" r="1250" fill="url(#gScatter)"/></g>
+    <circle cx="780" cy="432" r="210" fill="url(#gBleed)"/>
+  </g>
+  <circle cx="1220" cy="-330" r="877" fill="none" stroke="url(#gRim)" stroke-width="7" opacity=".28"/>
+  <circle cx="1220" cy="-330" r="865" fill="none" stroke="url(#gRim)" stroke-width=".7" opacity=".3" vector-effect="non-scaling-stroke"/>
+  <circle cx="1220" cy="-330" r="880" fill="none" stroke="url(#gRim)" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+  <circle cx="780" cy="432" r="34" fill="url(#gCore)" opacity=".95"/>
+  <!-- orbital rings -->
+  <g transform="translate(1220 -330) rotate(-35)">
+    <g mask="url(#mFar)">
+      <path class="band" fill="url(#gRing)" fill-rule="evenodd" d="M-1100 0A1100 419.3 0 1 0 1100 0A1100 419.3 0 1 0 -1100 0ZM-1226 0A1226 481.8 0 1 0 1226 0A1226 481.8 0 1 0 -1226 0Z"/>
+      <path class="band" fill="url(#gRing)" fill-rule="evenodd" d="M-1340 0A1340 540.9 0 1 0 1340 0A1340 540.9 0 1 0 -1340 0ZM-1392 0A1392 568.7 0 1 0 1392 0A1392 568.7 0 1 0 -1392 0Z"/>
+      <ellipse rx="1100" ry="419.3" fill="none" stroke="url(#gRing)" stroke-width=".7" opacity="0.34" vector-effect="non-scaling-stroke"/><ellipse rx="1118" ry="428.0" fill="none" stroke="url(#gRing)" stroke-width=".7" opacity="0.16" vector-effect="non-scaling-stroke"/><ellipse rx="1142" ry="439.8" fill="none" stroke="url(#gRing)" stroke-width=".7" opacity="0.26" vector-effect="non-scaling-stroke"/><ellipse rx="1152" ry="444.7" fill="none" stroke="url(#gRing)" stroke-width=".7" opacity="0.12" vector-effect="non-scaling-stroke"/><ellipse rx="1186" ry="461.6" fill="none" stroke="url(#gRing)" stroke-width=".7" opacity="0.3" vector-effect="non-scaling-stroke"/><ellipse rx="1226" ry="481.8" fill="none" stroke="url(#gRing)" stroke-width=".7" opacity="0.36" vector-effect="non-scaling-stroke"/><ellipse rx="1340" ry="540.9" fill="none" stroke="url(#gRing)" stroke-width=".7" opacity="0.22" vector-effect="non-scaling-stroke"/><ellipse rx="1356" ry="549.4" fill="none" stroke="url(#gRing)" stroke-width=".7" opacity="0.12" vector-effect="non-scaling-stroke"/><ellipse rx="1392" ry="568.7" fill="none" stroke="url(#gRing)" stroke-width=".7" opacity="0.24" vector-effect="non-scaling-stroke"/><ellipse rx="1436" ry="592.6" fill="none" stroke="url(#gRing)" stroke-width=".7" opacity="0.14" vector-effect="non-scaling-stroke"/>
+      <ellipse rx="1060" ry="400" fill="none" stroke="url(#gRing)" stroke-width="1.1" opacity="0.8" vector-effect="non-scaling-stroke"/>
+      <ellipse rx="1300" ry="520" fill="none" stroke="url(#gRing)" stroke-width="1.5" opacity="1" vector-effect="non-scaling-stroke"/>
+      <ellipse rx="1500" ry="628" fill="none" stroke="url(#gRing)" stroke-width="1" opacity="0.7" vector-effect="non-scaling-stroke"/>
+      <g transform="translate(-1137.0 252.1)" class="body warm"><circle r="45.5" fill="url(#gBody)"/><circle r="15.6" fill="url(#gBody)"/><circle r="6.5" class="core"/></g>
+      <g transform="translate(-984.1 474.0)" class="body"><circle r="28" fill="url(#gBody)"/><circle r="9.6" fill="url(#gBody)"/><circle r="4" class="core"/></g>
+      <g transform="translate(-975.7 -156.3)" class="body"><circle r="22.400000000000002" fill="url(#gBody)"/><circle r="7.68" fill="url(#gBody)"/><circle r="3.2" class="core"/></g>
+    </g>
+  </g>
+</g></defs></svg>
+  <svg class="wide" viewBox="0 0 1600 1000" preserveAspectRatio="xMaxYMin slice">
+    <rect x="-2000" y="-100" width="5600" height="2400" fill="url(#gBg)"/>
+    <svg x="0" y="0" width="1600" height="1000" overflow="visible"><rect width="100%" height="100%" fill="url(#gBg)"/><rect width="100%" height="100%" fill="url(#gNebA)"/><rect width="100%" height="100%" fill="url(#gNebB)"/><rect width="100%" height="100%" fill="url(#gNebC)"/></svg>
+    <g class="stars"><circle class="sc" cx="1363.9" cy="669.7" r="0.71" opacity="0.35"/><circle class="sc" cx="399.9" cy="882.1" r="1.12" opacity="0.61"/><circle class="sn" cx="1098.6" cy="610.6" r="0.69" opacity="0.54"/><circle class="sw" cx="297.1" cy="783.5" r="0.51" opacity="0.31"/><circle class="sn" cx="780.4" cy="809.0" r="0.68" opacity="0.26"/><circle class="sn" cx="890.6" cy="596.7" r="0.76" opacity="0.32"/><circle class="sn" cx="1181.8" cy="858.7" r="0.58" opacity="0.35"/><circle class="sn" cx="119.5" cy="659.9" r="1.28" opacity="0.83"/><circle class="sw" cx="177.5" cy="15.8" r="0.69" opacity="0.46"/><circle class="sn" cx="124.1" cy="719.6" r="1.11" opacity="0.76"/><circle class="sw" cx="832.5" cy="821.9" r="0.90" opacity="0.45"/><circle class="sc" cx="694.4" cy="578.5" r="0.74" opacity="0.36"/><circle class="sw" cx="472.3" cy="449.8" r="1.28" opacity="0.85"/><circle class="sn" cx="691.0" cy="545.2" r="0.54" opacity="0.49"/><circle class="sn" cx="1257.5" cy="904.8" r="0.69" opacity="0.54"/><circle class="sc" cx="1135.1" cy="699.7" r="0.67" opacity="0.31"/><circle class="sn" cx="1006.2" cy="886.9" r="0.82" opacity="0.39"/><circle class="sn" cx="15.2" cy="737.4" r="0.85" opacity="0.57"/><circle class="sn" cx="294.4" cy="47.5" r="1.28" opacity="0.64"/><circle class="sn" cx="353.4" cy="993.5" r="0.90" opacity="0.31"/><circle class="sn" cx="631.5" cy="434.4" r="0.77" opacity="0.39"/><circle class="sn" cx="792.4" cy="610.9" r="0.74" opacity="0.33"/><circle class="sc" cx="478.0" cy="320.6" r="0.59" opacity="0.31"/><circle class="sw" cx="1139.3" cy="912.6" r="1.18" opacity="0.60"/><circle class="sc" cx="841.1" cy="840.4" r="1.18" opacity="0.59"/><g class="sw" opacity="0.95"><circle cx="623.4" cy="545.7" r="6.54" opacity=".16"/><path d="M614.2 545.7H632.6M623.4 536.4V554.9" stroke="currentColor" stroke-width="0.50" opacity=".4" fill="none"/><circle cx="623.4" cy="545.7" r="2.04"/></g><circle class="sw" cx="110.9" cy="169.3" r="0.77" opacity="0.52"/><circle class="sn" cx="1305.6" cy="631.6" r="1.34" opacity="0.73"/><circle class="sc" cx="715.1" cy="878.4" r="1.14" opacity="0.83"/><circle class="sn" cx="526.9" cy="844.7" r="0.65" opacity="0.26"/><g class="sc" opacity="0.95"><circle cx="1036.3" cy="726.4" r="7.41" opacity=".16"/><path d="M1027.7 726.4H1044.8M1036.3 717.8V734.9" stroke="currentColor" stroke-width="0.50" opacity=".4" fill="none"/><circle cx="1036.3" cy="726.4" r="2.32"/></g><circle class="sn" cx="232.2" cy="273.1" r="0.52" opacity="0.35"/><circle class="sc" cx="910.0" cy="716.4" r="1.31" opacity="0.61"/><circle class="sn" cx="750.4" cy="459.1" r="0.63" opacity="0.36"/><circle class="sn" cx="848.9" cy="548.0" r="0.67" opacity="0.30"/><circle class="sc" cx="237.1" cy="943.2" r="0.85" opacity="0.40"/><circle class="sc" cx="158.1" cy="821.7" r="0.65" opacity="0.33"/><circle class="sw" cx="1546.2" cy="750.1" r="0.82" opacity="0.44"/><circle class="sc" cx="124.9" cy="95.9" r="0.61" opacity="0.49"/><circle class="sn" cx="897.6" cy="976.6" r="0.66" opacity="0.37"/><circle class="sw" cx="327.9" cy="944.3" r="1.11" opacity="0.71"/><circle class="sc" cx="1496.6" cy="685.0" r="0.82" opacity="0.36"/><g class="sn" opacity="0.95"><circle cx="873.6" cy="967.0" r="7.16" opacity=".16"/><path d="M865.5 967.0H881.8M873.6 958.8V975.1" stroke="currentColor" stroke-width="0.50" opacity=".4" fill="none"/><circle cx="873.6" cy="967.0" r="2.24"/></g><circle class="sw" cx="1068.7" cy="864.7" r="0.85" opacity="0.36"/><circle class="sn" cx="852.6" cy="836.8" r="0.85" opacity="0.49"/><circle class="sc" cx="458.8" cy="961.4" r="0.61" opacity="0.47"/></g>
+    <use href="#scene"/>
+    <rect width="100%" height="100%" filter="url(#grain)" class="grain"/>
+  </svg>
+  <svg class="tall" viewBox="0 0 600 1300" preserveAspectRatio="xMaxYMin slice">
+    <rect width="100%" height="100%" fill="url(#gBg)"/><rect width="100%" height="100%" fill="url(#gNebA)"/><rect width="100%" height="100%" fill="url(#gNebB)"/><rect width="100%" height="100%" fill="url(#gNebC)"/>
+    <g class="stars"><circle class="sn" cx="586.1" cy="908.7" r="0.83" opacity="0.41"/><circle class="sc" cx="332.0" cy="948.8" r="0.70" opacity="0.52"/><circle class="sw" cx="118.3" cy="478.3" r="0.89" opacity="0.35"/><circle class="sn" cx="148.5" cy="1141.1" r="0.70" opacity="0.30"/><circle class="sc" cx="328.7" cy="990.4" r="1.08" opacity="0.44"/><circle class="sn" cx="408.1" cy="1255.8" r="1.09" opacity="0.54"/><circle class="sc" cx="105.0" cy="464.1" r="0.64" opacity="0.28"/><circle class="sc" cx="221.4" cy="554.7" r="1.10" opacity="0.50"/><circle class="sw" cx="114.2" cy="821.9" r="0.65" opacity="0.49"/><circle class="sc" cx="328.7" cy="1074.6" r="1.08" opacity="0.29"/><g class="sc" opacity="0.95"><circle cx="389.5" cy="1158.4" r="9.15" opacity=".16"/><path d="M377.2 1158.4H401.8M389.5 1146.1V1170.7" stroke="currentColor" stroke-width="0.63" opacity=".4" fill="none"/><circle cx="389.5" cy="1158.4" r="2.86"/></g><circle class="sn" cx="580.5" cy="713.1" r="1.25" opacity="0.70"/><circle class="sw" cx="434.6" cy="714.3" r="1.74" opacity="0.72"/><circle class="sn" cx="258.0" cy="835.1" r="1.53" opacity="0.64"/><circle class="sc" cx="566.0" cy="1083.4" r="0.63" opacity="0.47"/><circle class="sw" cx="430.1" cy="1293.3" r="1.12" opacity="0.48"/><circle class="sc" cx="374.6" cy="1079.2" r="1.12" opacity="0.43"/><circle class="sc" cx="96.5" cy="515.0" r="1.03" opacity="0.55"/><circle class="sc" cx="395.1" cy="1287.3" r="0.99" opacity="0.58"/><circle class="sc" cx="137.9" cy="759.2" r="1.68" opacity="0.61"/><circle class="sc" cx="286.6" cy="683.3" r="0.75" opacity="0.40"/><g class="sn" opacity="0.95"><circle cx="64.3" cy="1139.2" r="6.97" opacity=".16"/><path d="M55.6 1139.2H73.1M64.3 1130.4V1148.0" stroke="currentColor" stroke-width="0.63" opacity=".4" fill="none"/><circle cx="64.3" cy="1139.2" r="2.18"/></g><circle class="sc" cx="299.4" cy="952.0" r="0.81" opacity="0.53"/><circle class="sn" cx="480.1" cy="689.0" r="1.46" opacity="0.72"/><circle class="sw" cx="316.4" cy="1009.4" r="0.75" opacity="0.54"/><circle class="sw" cx="214.1" cy="1196.4" r="0.81" opacity="0.42"/><circle class="sc" cx="242.4" cy="1266.9" r="0.84" opacity="0.37"/><circle class="sc" cx="176.0" cy="1149.4" r="1.12" opacity="0.54"/><circle class="sn" cx="262.1" cy="907.0" r="1.53" opacity="0.75"/><circle class="sc" cx="365.8" cy="1112.8" r="0.77" opacity="0.28"/><circle class="sc" cx="439.3" cy="1254.0" r="0.75" opacity="0.27"/><circle class="sw" cx="555.7" cy="1019.4" r="1.73" opacity="0.62"/><circle class="sc" cx="169.6" cy="700.0" r="0.98" opacity="0.52"/><circle class="sc" cx="435.3" cy="808.0" r="0.76" opacity="0.54"/><circle class="sw" cx="83.9" cy="939.3" r="0.90" opacity="0.44"/><circle class="sc" cx="546.0" cy="1114.4" r="1.08" opacity="0.35"/><circle class="sw" cx="555.6" cy="878.7" r="1.42" opacity="0.82"/><circle class="sn" cx="100.5" cy="978.4" r="0.67" opacity="0.57"/><circle class="sn" cx="476.3" cy="935.5" r="0.85" opacity="0.59"/><circle class="sc" cx="51.3" cy="495.6" r="1.60" opacity="0.63"/></g>
+    <use href="#scene" transform="translate(560 -90) rotate(-20) scale(0.75) translate(-1220 330)"/>
+    <rect width="100%" height="100%" filter="url(#grain)" class="grain"/>
+  </svg>
+</div>
+</body>
+</html>

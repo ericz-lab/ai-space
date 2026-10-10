@@ -63,6 +63,12 @@ a { color: inherit; text-decoration: none; }
 .aurora i:nth-child(2) { width: 38vw; height: 38vw; right: -6vw; top: 10vh; background: var(--blob-b); }
 .aurora i:nth-child(3) { width: 42vw; height: 42vw; left: 24vw; bottom: -22vh; background: var(--blob-c); }
 
+/* A preset's backdrop (theme.ts) replaces the blobs: sharp, so the layer's blur comes off, and
+   names on the open field get a halo in the ground color to stay readable over the artwork. */
+:root[data-backdrop] .aurora { filter: none; }
+.aurora iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
+:root[data-backdrop] :is(.tile-name, .shell h2) { text-shadow: 0 0 6px var(--bg), 0 0 14px var(--bg), 0 1px 2px var(--bg); }
+
 .shell { max-width: 1080px; margin: 0 auto; padding: clamp(40px, 8vh, 80px) clamp(24px, 5vw, 64px) 48px; }
 
 section + section { margin-top: 56px; }

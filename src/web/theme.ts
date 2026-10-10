@@ -56,7 +56,12 @@ export type ResolvedTokens = Record<ColorToken, string> & Record<NumberToken, nu
 /** What the operator adjusts per mode: any token, plus the opacity of the glass surface (0..1). */
 export type Overrides = Tokens & { surfaceAlpha?: number };
 
-export type ThemeDefinition = { version: 1; id: string; name: string; light: Tokens; dark: Tokens };
+/**
+ * `backdrop` names drawn artwork for the page background: `public/backdrops/<backdrop>.html`, a
+ * static document with a light and a dark version that the panel frames in place of the glow
+ * while the glow is on.
+ */
+export type ThemeDefinition = { version: 1; id: string; name: string; light: Tokens; dark: Tokens; backdrop?: string };
 export type ThemePreferences = { version: 1; mode: Mode; presetId: string; overrides: Record<Scheme, Overrides> };
 
 export const PREFS_VERSION = 1;
@@ -224,6 +229,68 @@ export const PRESETS: ThemeDefinition[] = [
       radius: 20,
     },
   },
+  // The four below bring a backdrop; their backgrounds are the artwork's own ground color, so the
+  // page looks the same before the frame loads and with the glow switched off.
+  {
+    version: 1,
+    id: "orbit",
+    name: "Orbit",
+    backdrop: "orbit",
+    light: { background: "#d3d2f6", accent: "#5550b8", selection: "rgba(85, 80, 184, 0.24)" },
+    dark: {
+      background: "#04050e",
+      surfaceStrong: "rgba(20, 24, 46, 0.88)",
+      panel: "rgba(20, 24, 46, 0.97)",
+      solid: "#1c2140",
+      accent: "#93a4ff",
+      selection: "rgba(147, 164, 255, 0.35)",
+    },
+  },
+  {
+    version: 1,
+    id: "northern",
+    name: "Northern Lights",
+    backdrop: "northern",
+    light: { background: "#f3f1fa", accent: "#0b7fc9", selection: "rgba(11, 127, 201, 0.22)" },
+    dark: {
+      background: "#040816",
+      surfaceStrong: "rgba(16, 24, 44, 0.88)",
+      panel: "rgba(16, 24, 44, 0.97)",
+      solid: "#182540",
+      accent: "#4be3a8",
+      selection: "rgba(75, 227, 168, 0.3)",
+    },
+  },
+  {
+    version: 1,
+    id: "papercut",
+    name: "Paper Cut",
+    backdrop: "papercut",
+    light: { background: "#f8f5ef", accent: "#4d79de", selection: "rgba(77, 121, 222, 0.24)" },
+    dark: {
+      background: "#1a2337",
+      surfaceStrong: "rgba(30, 40, 62, 0.88)",
+      panel: "rgba(30, 40, 62, 0.97)",
+      solid: "#26324c",
+      accent: "#7cc4ea",
+      selection: "rgba(124, 196, 234, 0.32)",
+    },
+  },
+  {
+    version: 1,
+    id: "prism",
+    name: "Prism",
+    backdrop: "prism",
+    light: { background: "#e6e8ed", accent: "#7257ff", selection: "rgba(114, 87, 255, 0.22)" },
+    dark: {
+      background: "#12141c",
+      surfaceStrong: "rgba(28, 31, 44, 0.88)",
+      panel: "rgba(28, 31, 44, 0.97)",
+      solid: "#242838",
+      accent: "#a394ff",
+      selection: "rgba(163, 148, 255, 0.35)",
+    },
+  },
 ];
 
 export const presetById = (id: string) => PRESETS.find((p) => p.id === id);
@@ -389,6 +456,9 @@ export function toCssVars(t: ResolvedTokens): Record<string, string> {
   return vars;
 }
 
+/** The backdrop to frame behind the page: the preset's, while the resolved glow is on. */
+export const backdropOf = (prefs: ThemePreferences, t: ResolvedTokens): string | undefined => (t.glow ? presetById(prefs.presetId)?.backdrop : undefined);
+
 export const hasOverrides = (p: ThemePreferences) => Object.keys(p.overrides.light).length > 0 || Object.keys(p.overrides.dark).length > 0;
 
 export const samePreferences = (a: ThemePreferences, b: ThemePreferences) => JSON.stringify(a) === JSON.stringify(b);
@@ -515,6 +585,10 @@ function paint(a: Appearance) {
   const root = document.documentElement;
   for (const [k, v] of Object.entries(toCssVars(a.resolved))) root.style.setProperty(k, v);
   root.dataset.theme = a.scheme;
+  // styles.css gives labels on the open field a halo while artwork is behind them.
+  const backdrop = backdropOf(a.draft ?? a.saved, a.resolved);
+  if (backdrop) root.dataset.backdrop = backdrop;
+  else delete root.dataset.backdrop;
   root.style.colorScheme = a.scheme;
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", toHex(a.resolved.background));
 }
