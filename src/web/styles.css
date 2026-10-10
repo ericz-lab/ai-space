@@ -65,11 +65,14 @@ a { color: inherit; text-decoration: none; }
 
 /* A preset's backdrop (theme.ts) replaces the blobs: sharp, so the layer's blur comes off, and
    headings on the open field get a halo in the ground color to stay readable over the artwork.
-   Tile names get only a tight edge in that color and a heavier weight: a wide halo under every
-   name reads as a smudge behind the text. */
+   A wide halo under every tile name reads as a smudge, so names are set like a phone's home
+   screen instead: white with a soft dark shadow wherever the artwork is deep enough to carry it
+   (every dark version, and Orbit's light one). The other light versions are near white, where
+   white names would vanish; there the names keep the text color with a tight edge in the ground. */
 :root[data-backdrop] .aurora { filter: none; }
 .aurora iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
 :root[data-backdrop] .tile-name { font-weight: 600; text-shadow: 0 0 1px var(--bg), 0 0 3px var(--bg), 0 1px 2px var(--bg); }
+:root:is([data-theme="dark"][data-backdrop], [data-backdrop="orbit"]) .tile-name { color: #fff; text-shadow: 0 1px 2px rgba(15, 18, 60, 0.55), 0 0 5px rgba(15, 18, 60, 0.35); }
 :root[data-backdrop] .shell h2 { text-shadow: 0 0 6px var(--bg), 0 0 14px var(--bg), 0 1px 2px var(--bg); }
 
 .shell { max-width: 1080px; margin: 0 auto; padding: clamp(40px, 8vh, 80px) clamp(24px, 5vw, 64px) 48px; }
