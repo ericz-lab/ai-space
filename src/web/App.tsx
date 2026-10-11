@@ -51,10 +51,11 @@ function Backdrop() {
     if (root) root.dataset.theme = a.scheme;
   };
   useEffect(sync, [a.scheme, art]);
+  // The query bypasses documents cached under the former one-day cache policy.
   return (
     <div className="aurora" aria-hidden="true">
       {art ? (
-        <iframe key={art} ref={frame} src={`/backdrops/${art}.html`} onLoad={sync} tabIndex={-1} title="" />
+        <iframe key={art} ref={frame} src={`/backdrops/${art}.html?v=2`} onLoad={sync} tabIndex={-1} title="" />
       ) : (
         <>
           <i />

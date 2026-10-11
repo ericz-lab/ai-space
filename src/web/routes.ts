@@ -29,7 +29,9 @@ type WebRoutes = Record<string, typeof index | (() => Response)>;
 export function createWebRoutes(): WebRoutes {
   const routes: WebRoutes = { "/": index };
   for (const [path, file] of Object.entries(PUBLIC)) {
-    routes[path] = () => new Response(Bun.file(join(import.meta.dir, "public", file)), { headers: { "cache-control": "public, max-age=86400" } });
+    // Backdrop URLs stay stable across artwork edits, so revalidate on every load.
+    const cacheControl = path.startsWith("/backdrops/") ? "no-cache" : "public, max-age=86400";
+    routes[path] = () => new Response(Bun.file(join(import.meta.dir, "public", file)), { headers: { "cache-control": cacheControl } });
   }
   return routes;
 }
