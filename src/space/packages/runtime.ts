@@ -57,7 +57,7 @@ export class PackageRuntime {
     return { app, state: s.app.manifest.status !== "active" ? s.app.manifest.status : s.starting ? "starting" : s.child ? "running" : s.app.manifest.launch?.kind === "static" ? "static" : s.error ? "failed" : "idle", leases: s.leases, port: s.port, error: s.error };
   }
 
-  async acquire(app: string): Promise<{ port?: number; release: () => void }> {
+  async acquire(app: string, startProcess = true): Promise<{ port?: number; release: () => void }> {
     if (this.closing) throw new Error("application runtime is shutting down");
     const s = this.apps.get(app);
     if (!s) throw new Error(`unknown package application: ${app}`);
@@ -69,7 +69,7 @@ export class PackageRuntime {
       released = true;
       s.leases--; s.lastUsed = this.now();
     };
-    try { await this.ensure(s); return { port: s.port, release }; }
+    try { if (startProcess) await this.ensure(s); return { port: s.port, release }; }
     catch (e) { release(); throw e; }
   }
 

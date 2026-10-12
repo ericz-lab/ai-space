@@ -8,7 +8,7 @@ export type AppLaunch =
   | { kind: "static"; root: string; index: string }
   | { kind: "process"; runtime: "bun" | "native"; entry: string; args: string[]; mode: "on-demand" | "background"; idleTimeoutMs: number; health: string };
 
-/** Validated but not activated: legacy sync intentionally continues to reject spec 2. */
+/** Package manifests enter the registry only through receipt-verified installation loading. */
 export type PackageManifest = Omit<Manifest, "spec" | "service" | "url" | "deploy"> & {
   spec: 2;
   version: string;
@@ -43,7 +43,17 @@ export function parsePackageManifest(yaml: string): PackageManifest {
   const backup = parseBackupSpec(doc.backup);
   if (backup.schedule && !backup.timezone) throw new Error("backup.schedule requires an explicit timezone");
   const { spec: _spec, service: _service, url: _url, deploy: _deploy, ...rest } = legacy;
+  for (const agent of legacy.agents) {
+    if (agent.cwd !== ".") packagePath(agent.cwd, "agent.cwd");
+    if (agent.prompt) packagePath(agent.prompt.replace(/^\.\//, ""), "agent.prompt");
+  }
   for (const task of legacy.tasks) {
+    if (task.target.kind === "http") {
+      const url = task.target.url;
+      if (url.startsWith("/")) {
+        if (launch?.kind !== "process" || url.startsWith("//") || /[\\\\#\x00-\x20]/.test(url)) throw new Error(`task ${task.name} needs a local path and process launch`);
+      } else if (!/^https:\/\//.test(url)) throw new Error(`task ${task.name} must use a local path or an HTTPS URL`);
+    }
     if (task.schedule.kind === "cron" && !task.schedule.tz) throw new Error(`task ${task.name} requires an explicit timezone`);
     if (task.schedule.kind === "at" && !/(Z|[+-]\d{2}:\d{2})$/i.test(task.schedule.at)) throw new Error(`task ${task.name} requires an offset-bearing at timestamp`);
   }

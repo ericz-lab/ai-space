@@ -34,6 +34,7 @@ let base = "";
 let home = "";
 let appDir = "";
 let runtimes: RuntimeRegistry;
+let heldApps = 0;
 const sessions = new SessionStore(new Database(":memory:"));
 
 beforeAll(async () => {
@@ -51,7 +52,7 @@ beforeAll(async () => {
   server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    routes: createAgentRoutes({ ws, registry, layout: new LayoutStore(new Database(":memory:")), sessions, runtimes, defaultModel: "sonnet", home }),
+    routes: createAgentRoutes({ ws, registry, layout: new LayoutStore(new Database(":memory:")), sessions, runtimes, defaultModel: "sonnet", home, holdApp: async () => { heldApps++; return () => { heldApps--; }; } }),
   });
   base = `http://127.0.0.1:${server.port}`;
 });
@@ -97,6 +98,7 @@ describe("agents api", () => {
     expect(text).toContain("prompt=You are the librarian.");
     expect(text).toContain(`cwd=${appDir}`);
     expect(ev.at(-1)).toEqual({ type: "done" });
+    expect(heldApps).toBe(0);
     expect(sessions.list("notes/librarian")).toMatchObject([{ sid: "cafe0001-0000-4000-8000-000000000000", title: "hello" }]);
 
     // Resuming keeps one row and its title.

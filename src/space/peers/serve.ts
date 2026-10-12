@@ -46,6 +46,8 @@ export type PeerServeOptions = {
   token: string;
   /** What this space calls itself (`SPACE_NAME`). */
   name: string;
+  /** Package grants use a separate channel; legacy credentials must not inherit their access. */
+  allowApp?: (app: string) => boolean;
   panel: Routes;
   agents: Routes;
   /** The terminal routes, when the terminal is enabled on this machine; absent = no terminal for the hub. */
@@ -70,6 +72,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     (h: Handler): Handler =>
     async (req, server) => {
       if (!tokenEquals(bearer(req), opts.token)) return json({ ok: false, error: "unauthorized" }, 401);
+      if (req.params.app && opts.allowApp?.(req.params.app) === false) return json({ ok: false, error: "application is not shared through legacy peers" }, 403);
       try {
         return await h(req, server);
       } catch (e) {
@@ -108,7 +111,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
         const apps = await local<{ apps: unknown[] }>(opts.panel, "/api/apps", base);
         // Only what lives here: a peer that is itself a hub does not pass its own peers on
         // (a hub of hubs would list them twice, under the wrong name).
-        const own = <T extends { peer?: string }>(list: T[]) => list.filter((x) => !x.peer);
+        const own = <T extends { peer?: string; app?: string; name?: string }>(list: T[]) => list.filter((x) => !x.peer && opts.allowApp?.(x.app ?? x.name ?? "") !== false);
         return json({
           ok: true,
           name: opts.name,
@@ -118,7 +121,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
           // The hub has its own space agent.
           agents: own(agents.agents as { id: string; peer?: string }[]).filter((a) => a.id !== `${SPACE_APP}/${SPACE_AGENT}`),
           terminal: opts.terminal !== undefined,
-          capabilities: opts.bus?.capabilities() ?? [],
+          capabilities: (opts.bus?.capabilities() ?? []).filter((c) => opts.allowApp?.(c.app) !== false),
           asOf: new Date().toISOString(),
         });
       }),
@@ -159,7 +162,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
               const since = Math.max(0, Number(q.get("since") ?? 0) || 0);
               const limit = Number(q.get("limit") ?? 200);
               const events = opts.events!.listEventsSince(since, Number.isFinite(limit) ? limit : 200, { localOnly: true });
-              return json({ ok: true, events: events.map((e) => ({ id: e.id, ...eventPayload(e) })), latestId: opts.events!.latestEventId() });
+              return json({ ok: true, events: events.filter((e) => opts.allowApp?.(e.app) !== false).map((e) => ({ id: e.id, ...eventPayload(e) })), latestId: opts.events!.latestEventId() });
             }),
           },
         }
@@ -191,7 +194,12 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     "/api/peer/agents/:app/:agent/chat": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/chat", "POST")) },
     "/api/peer/agents/:app/:agent/sessions": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions", "GET")) },
     "/api/peer/agents/:app/:agent/sessions/:sid": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions/:sid", "GET")) },
-    "/api/peer/agents/runs": { GET: guard(mirror(opts.agents, "/api/agents/runs", "GET")) },
+    "/api/peer/agents/runs": { GET: guard(async (req, server) => {
+      const response = await mirror(opts.agents, "/api/agents/runs", "GET")(req, server);
+      if (!response || !opts.allowApp || !response.ok) return response;
+      const data = await response.json() as { runs: { agent: string }[] };
+      return json({ ...data, runs: data.runs.filter((r) => opts.allowApp!(r.agent.split("/")[0]!)) });
+    }) },
     "/api/peer/agents/:app/:agent/runs": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs", "GET")) },
     "/api/peer/agents/:app/:agent/runs/:id": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id", "GET")) },
     "/api/peer/agents/:app/:agent/runs/:id/events": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id/events", "GET")) },

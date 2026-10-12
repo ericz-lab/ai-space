@@ -226,6 +226,7 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
       DELETE: wrap(async (req) => {
         const n = name(req.params.app);
         const entry = entryOf(n);
+        if (entry.manifest.spec === 2) return error(409, "use the package lifecycle API to uninstall this application");
         const running = opts.runningTasks?.(n) ?? [];
         if (running.length && new URL(req.url).searchParams.get("force") !== "1") {
           return error(409, `"${n}" has ${running.length} task run(s) in flight (${running.join(", ")}); wait for them to finish, or uninstall with force`);

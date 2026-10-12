@@ -62,7 +62,7 @@ export class PackageInstaller {
     if (manifest.app !== operation.app || manifest.version !== operation.version) throw new Error("installed manifest does not match the journal");
     assertTarget(index.target, this.host);
     assertPackageCompatibility(manifest, this.host.bun);
-    return { dir, index, manifest };
+    return { dir, index, manifest: { ...manifest, dir } };
   }
 
   private async performInstall(bytes: Uint8Array, options: InstallOptions): Promise<InstallOperation> {
