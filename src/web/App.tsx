@@ -18,6 +18,7 @@ import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n
 import PetField from "./PetField.tsx";
 import { type PetChoice, resolvePet } from "./petdex.ts";
 import SettingsStatus from "./SettingsStatus.tsx";
+import Packages from "./Packages.tsx";
 import { backdropOf, useAppearance } from "./theme.ts";
 import ThemeSettings from "./ThemeSettings.tsx";
 import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
@@ -813,6 +814,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 <span>›</span>
               </button>
               <SettingsStatus />
+              <Packages onChange={reload} />
             </div>
           </div>
         </div>

@@ -52,6 +52,8 @@ export type AgentsApiOptions = {
   appModel?: (app: string) => { override?: string; manifest?: string };
   /** Provisioned variables for an app, merged into the session environment. */
   envFor?: (app: string) => Promise<Record<string, string>>;
+  /** Hold installed code for the complete background turn, even after its browser disconnects. */
+  holdApp?: (app: string) => Promise<(() => void) | undefined>;
   /** Home directory for transcripts; default: the process's. */
   home?: string;
   /** Other machines whose agents this panel lists; chat with them is forwarded by the peer routes. */
@@ -261,6 +263,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const permissionMode = typeof body.permissionMode === "string" ? body.permissionMode : undefined;
         const env: Record<string, string | undefined> = { ...process.env, ...(await loadAppEnv(agent.cwd)), ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}) };
         let run;
+        const release = await opts.holdApp?.(agent.app);
         try {
           run = runs.start({
             agent: agent.id,
@@ -270,7 +273,9 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
             turn: { message, sessionId, model, permissionMode, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
             onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model),
           });
+          if (release) runs.subscribe(run.id, run.lastSeq, { onEvent() {}, onEnd: release });
         } catch (e) {
+          release?.();
           if (e instanceof RunBusyError) return error(409, e.message);
           if (e instanceof RunClosedError) return error(503, e.message);
           throw e;

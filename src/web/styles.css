@@ -970,3 +970,18 @@ a.widget-title:hover { color: var(--text); }
   .lib-tools { margin-left: 0; }
   .lib-card { padding: 10px 12px; gap: 10px; }
 }
+
+.package-settings { padding: 0 12px 16px; overflow-wrap: anywhere; }
+.package-settings form { display: grid; gap: 10px; margin: 12px 0; }
+.package-settings label { display: block; font-size: 13px; margin: 6px 0; }
+.package-settings input:not([type=checkbox]), .package-settings textarea, .package-settings select { max-width: 100%; box-sizing: border-box; }
+.package-settings input:not([type=checkbox]), .package-settings textarea { display: block; width: 100%; margin-top: 5px; }
+.package-settings input[type=checkbox] { margin-right: 8px; }
+.package-card { padding: 12px 0; border-bottom: 1px solid var(--hairline); }
+.package-line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.package-line b { flex: 1; }
+.package-settings input:not([type=checkbox]), .package-settings textarea, .package-settings select { padding: 7px 10px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--glass); color: var(--text); font: inherit; }
+.package-settings button { border: 1px solid var(--hairline); border-radius: 8px; padding: 6px 12px; color: var(--text); background: var(--glass); font: inherit; cursor: pointer; }
+.package-settings button:disabled { opacity: .55; cursor: default; }
+.package-settings a { color: var(--link); }
+.package-card { border-bottom-color: var(--hairline); }

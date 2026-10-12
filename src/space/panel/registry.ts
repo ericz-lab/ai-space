@@ -23,7 +23,7 @@ export class AppRegistry {
   private readonly apps = new Map<string, RegisteredApp>();
 
   async set(manifest: Manifest): Promise<RegisteredApp> {
-    const manifestOnly = !manifest.service && !(await isDir(join(manifest.dir, ".git")));
+    const manifestOnly = manifest.spec !== 2 && !manifest.service && !(await isDir(join(manifest.dir, ".git")));
     const entry = { manifest, manifestOnly, registeredAt: Date.now() };
     this.apps.set(manifest.app, entry);
     return entry;

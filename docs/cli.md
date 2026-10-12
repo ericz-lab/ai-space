@@ -60,6 +60,8 @@ Rules:
 | --- | --- | --- |
 | `space status` | health, app services with their health, tasks failing or overdue, last backup per app, model calls in flight, peers up or down; one screen | `/healthz`, `/api/services`, `/api/tasks`, `/api/backups`, `/api/model/status`, `/api/peers` |
 | `space app ls [--panel]` | every app: title, status, service health, url, hidden (`--panel`: only what the panel shows) | `GET /api/apps?all=1` |
+| `space app pack DIR --output FILE [--include PATH,...] [--target OS/ARCH] [--source-included] [--sign-key FILE]` | build a package from explicitly selected prepared files, without network or build hooks ([app-packages.md](app-packages.md)) | disk, works without ai-space |
+| `space app inspect-package FILE [--trusted-key FILE] [--check-host]` | verify every file and inspect signature/compatibility without executing code | disk, works without ai-space |
 | `space app show APP` | the manifest as synced, storage, tasks, agents, widgets, last backup | `GET /api/apps/:app`, `.../storage`, `.../backups` |
 | `space app sync [APP]` | re-read one `space.yaml` or every app directory | `POST /api/apps/sync`, `POST /api/apps/:app/sync` |
 | `space app deploy APP [--rev REV] [--git-dir DIR] [--no-restart]` | on the host: check out `REV`, run the manifest's `deploy` install, check and build commands, then sync and restart; a failure restores the previous tree and leaves the service running, exit 1 ([app-spec.md](app-spec.md#deploy)) | disk (`src/space/deploy/`), then `POST /api/apps/:app/sync`, `GET`/`POST /api/apps/:app/service` |
@@ -156,3 +158,28 @@ Everything in the table, in one change: the skeleton with help and exit codes, t
 Model calls accept `space model run --mode slim|full --system "Custom instructions" PROMPT`.
 The default text-only mode is slim. Full retains native runtime context and tools;
 custom system instructions are supported in either mode. See [completion modes](runtimes.md#completion-modes).
+
+### Package applications and Hub connections
+
+`space app pack DIR --output FILE --include web,dist --target any/any` builds an explicitly selected artifact. Add `--manifest FILE` to use a reviewed spec-2 release manifest without changing the source tree's legacy manifest; see [package-migration.md](package-migration.md). `space app inspect-package FILE --check-host` verifies it without running code. On the selected Space (`--url`, with its operator credential), use:
+
+```sh
+space app install notes.spaceapp
+space app upgrade notes-v2.spaceapp
+space app packages
+space app open notes
+space app open notes --space-id HUB_UUID --connection CONNECTION_UUID
+space app rollback notes RETAINED_OPERATION_ID --yes
+space app remove-package notes --yes
+space connection ls
+space connection create incoming PEER_UUID --apps notes
+space connection create outgoing HUB_UUID --endpoint https://hub.example.com --token-env MY_HUB_TOKEN
+space connection grant CONNECTION_UUID --apps notes
+space connection grant CONNECTION_UUID --apps ''
+space connection disable CONNECTION_UUID
+space connection rm CONNECTION_UUID
+```
+
+`--allow-unsigned` is an explicit trust decision for a package without a signature. Signed packages use the host's configured publisher keys. Install/upgrade/change commands print an operation UUID before writing; reuse it with `--operation-id UUID` if the response is interrupted. `app open` prints a one-use URL rather than launching a browser on the server. A use-only peer connection cannot install or manage remote apps; `--url` requires a separate operator credential for that Space.
+
+Creating an incoming connection returns its token once. Store it in the outgoing peer's host environment under the selected name; restart that Space to load a new environment variable. The `--apps` list always names apps **owned by the machine where the command runs**. On a peer's outgoing connection it controls Hub-to-peer access and starts empty. Existing `space peer ls` continues to describe legacy peer snapshots.

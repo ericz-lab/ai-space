@@ -25,6 +25,17 @@ import { createLogsRoutes } from "./space/logs/index.ts";
 import { UsageService, UsageStore, createUsageRoutes } from "./space/usage/index.ts";
 import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/services/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
+import { createPackageRoutes } from "./space/packages/api.ts";
+import { PackageStore } from "./space/packages/store.ts";
+import { PackageInstaller } from "./space/packages/install.ts";
+import { PackageRuntime } from "./space/packages/runtime.ts";
+import { Connections } from "./space/packages/connections.ts";
+import { PackageLinks, createConnectionRoutes } from "./space/packages/links.ts";
+import { PackageGateway, createPackageOpenRoutes } from "./space/packages/gateway.ts";
+import { runPackageTask } from "./space/packages/tasks.ts";
+import { loadAppEnv } from "./space/scheduler/targets.ts";
+import { PackageLifecycle } from "./space/packages/lifecycle.ts";
+import { createPackagePanelRoutes } from "./space/packages/panel.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { guardBrowserWrites } from "./space/auth.ts";
@@ -49,7 +60,49 @@ export { parseNotifyArgs } from "./cli/notify.ts";
 
 export async function boot(ws: Workspace, config: Config, env: Record<string, string | undefined> = process.env) {
   const store = new Store(config.dbPath, { eventRetentionMs: config.eventRetentionMs });
+  const packageStore = new PackageStore(store.db);
+  const packageInstaller = new PackageInstaller(ws, packageStore);
+  await packageInstaller.recover();
+  const packageTrustKeys = await Promise.all(config.packageTrustKeys.map((path) => Bun.file(path).text()));
   const storage = await openStorage(ws, config);
+  const packageEnvFor = async (app: string) => ({ ...await loadAppEnv(storage.appDataDir(app)), ...await storage.envFor(app) });
+  const appEnvFor = (app: string) => packageStore.list().some((o) => o.app === app && o.state === "installed") ? packageEnvFor(app) : storage.envFor(app);
+  const packageRuntime = new PackageRuntime({ envFor: packageEnvFor, logDir: ws.logs });
+  let registerPackage: ((dir: string) => Promise<void>) | undefined;
+  const activatePackage = async (app: string) => {
+    const installed = await packageInstaller.load(app);
+    await storage.syncApp(app, parseStorageSpec(installed.manifest.storage));
+    await packageRuntime.register(installed);
+    await registerPackage?.(installed.dir);
+  };
+  const packageLifecycle = new PackageLifecycle(packageInstaller, {
+    suspend: (app) => packageRuntime.suspend(app),
+    activate: activatePackage,
+    verify: (app) => packageRuntime.verify(app),
+    remove: async (app) => {
+      await packageRuntime.remove(app);
+      scheduler.forget(app); registry.remove(app); bus.forget(app);
+      await discover();
+    },
+  });
+  const blockedPackages = new Set<string>();
+  for (const { change, error } of await packageLifecycle.recover()) {
+    blockedPackages.add(change.app);
+    console.error(`[packages] ${change.app}: interrupted ${change.kind} ${change.id} could not be recovered and the app stays off: ${error}`);
+  }
+  for (const operation of packageStore.list().filter((o) => o.state === "installed" && !blockedPackages.has(o.app))) {
+    await activatePackage(operation.app).catch((e) => console.error(`[packages] ${operation.app}: ${(e as Error).message}`));
+  }
+  const packageConnections = new Connections(store.db, packageStore.spaceId);
+  let packageGateway: PackageGateway;
+  const packageLinks = new PackageLinks(packageConnections, {
+    env,
+    handle: (_connection, meta, body, signal) => packageGateway.local(meta, body, signal),
+    apps: () => packageStore.list().filter((o) => o.state === "installed" && packageRuntime.get(o.app)).map((o) => ({ app: o.app, title: packageRuntime.get(o.app)!.manifest.title ?? o.app, version: o.version, page: !!packageRuntime.get(o.app)!.manifest.launch })),
+  });
+  packageGateway = new PackageGateway(packageRuntime, packageLinks, packageStore.spaceId);
+  if (config.packagePort !== undefined) packageGateway.start(config.packagePort, config.packageBaseUrl);
+  packageLinks.refresh();
   const backups = await openBackups(config);
   const taskDefaults = backupTaskDefaults(ws, config);
   const { channels, errors: channelErrors } = loadChannels(env);
@@ -72,6 +125,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     store: busStore,
     events: store,
     servicePort: (app) => registry.get(app)?.manifest.service?.port,
+    appFetch: (app) => packageRuntime.get(app)?.manifest.launch?.kind === "process" ? (path, init) => packageGateway.request(app, path, init) : undefined,
     onDead: (d, event) =>
       void notify
         .send(isConsumerKey(d.app) ? "space" : d.app, { level: "alert", title: `event ${d.event} not delivered${isConsumerKey(d.app) ? ` to ${d.app}` : ""}`, text: `Delivery #${d.id} (${d.kind}) gave up after ${d.attempts} attempt(s): ${d.lastError ?? "no error text"}${event ? `\nEvent #${event.id} from ${event.app} at ${new Date(event.at).toISOString()}` : ""}`, key: `bus:${d.app}:${d.event}`, windowMs: 3_600_000 })
@@ -109,10 +163,12 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const scheduler = new Scheduler({
     store,
     maxConcurrency: config.maxConcurrency,
-    envFor: (app) => storage.envFor(app),
+    envFor: appEnvFor,
     runner: async (task, ctx) => {
       const startedAt = Date.now();
-      const result = await runTarget(task.target, { ...ctx, runtimes });
+      const result = packageStore.list().some((o) => o.app === task.app && o.state === "installed")
+        ? await runPackageTask(packageRuntime, task, { ...ctx, runtimes })
+        : await runTarget(task.target, { ...ctx, runtimes });
       recordAgent(task, result, startedAt, Date.now());
       return result;
     },
@@ -127,7 +183,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // Panel chat turns run in the background: a page closing does not stop them (docs/panel.md#chat).
   const agentRuns = new RunRegistry(store.db, { timeoutMs: config.chatTimeoutMs, onRunStart: usage.runStarted, onRunEnd: usage.runEnded });
   const health = new HealthProbe();
-  const widgets = new WidgetFeed(registry);
+  const widgets = new WidgetFeed(registry, { appFetch: (app, path, init) => packageGateway.request(app, path, init) });
   const { peers: peerConfigs, errors: peerErrors } = loadPeers(env);
   for (const [name, reason] of peerErrors) console.error(`[peers] ${name}: ${reason}`);
   // Peers' events are mirrored here (docs/events.md): published under the same app name, marked with the peer.
@@ -192,18 +248,27 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     bus.syncApp(manifest.app, { events: manifest.events, provides: manifest.provides });
     const backup = backupTask(manifest.app, parseBackupSpec(manifest.backup), taskDefaults);
     if (backup && manifest.tasks.some((t) => t.name === BACKUP_TASK)) throw new Error(`task name "${BACKUP_TASK}" is reserved for ai-space's backup task; rename it, or set backup: false to bring your own`);
-    await registry.set(manifest);
+    await registry.set(manifest.spec === 2 && packageRuntime.get(manifest.app)?.manifest.launch ? { ...manifest, url: `/_space/apps/${encodeURIComponent(manifest.app)}` } : manifest);
     // After storage, so the unit's environment has the app's space.env. Never throws: a unit that
     // fails is recorded and shows on the Services list, the rest of the app still registers.
-    await supervisor.apply(manifest);
+    if (manifest.spec !== 2) await supervisor.apply(manifest);
     void router.sync();
     return backup ? [backup] : [];
   };
 
   // What this machine registers for a manifest: boot and the sync routes go through the same step.
-  const resolve = (manifest: Manifest) => applyEnvOverrides(manifest, env, { domain: config.router.domain });
-  const syncDir = async (dir: string) => {
-    const manifest = resolve(await loadManifest(dir));
+  const resolve = (manifest: Manifest) => manifest.spec === 2 ? manifest : applyEnvOverrides(manifest, env, { domain: config.router.domain });
+  const loadApp = async (dir: string, changing = false): Promise<Manifest> => {
+    if (!changing && packageLifecycle.list().some((c) => c.app === basename(dir) && c.state === "pending")) throw new Error("package is changing version");
+    const operation = packageStore.list().find((o) => o.app === basename(dir) && o.state === "installed");
+    if (!operation) return loadManifest(dir);
+    const installed = await packageInstaller.load(operation.app);
+    if (installed.dir !== dir) throw new Error("package identity conflicts with an extra app directory");
+    await packageRuntime.register(installed);
+    return installed.manifest;
+  };
+  const syncDir = async (dir: string, changing = false) => {
+    const manifest = resolve(await loadApp(dir, changing));
     const extra = await provision(manifest);
     scheduler.syncManifest(Scheduler.schedulable(manifest), extra);
   };
@@ -222,6 +287,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     }
     return dirs;
   };
+  registerPackage = async (dir) => { await syncDir(dir, true); await discover(); };
   const skippedNames = new Set<string>();
   for (const dir of await discover()) {
     try {
@@ -258,6 +324,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   void router.sync();
 
   const panelRoutes = createPanelRoutes({
+    packageCheckUrl: (app, check) => `http://127.0.0.1:${config.port}/api/panel/packages/apps/${encodeURIComponent(app)}/checks/${encodeURIComponent(check)}`,
     ws,
     registry,
     layout,
@@ -288,7 +355,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) }
         : {}),
   });
-  const agentRoutes = createAgentRoutes({ ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: (app) => storage.envFor(app), peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
+  const agentRoutes = createAgentRoutes({ holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");
@@ -310,6 +377,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         runtimes,
         token: config.apiToken,
         resolve,
+        load: loadApp,
         onManifest: provision,
         discover,
         onGone: async (app) => {
@@ -341,6 +409,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) }),
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
+      ...createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage }),
+      ...createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks }),
+      ...createConnectionRoutes({ links: packageLinks, token: config.apiToken }),
+      ...createPackageOpenRoutes(packageGateway, config.apiToken),
       ...createRouterRoutes({ router }),
       ...createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)) }),
       ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) }),
@@ -348,7 +420,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...agentRoutes,
       ...createPeerRoutes({ hub: peers, layout, registry }),
       ...terminalRoutes,
-      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, servicePort: (app) => registry.get(app)?.manifest.service?.port, bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
+      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
       ...createWebRoutes(),
     }),
     websocket: terminalWebSocket,
@@ -370,10 +442,15 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     peers.stop();
     terminal.stop();
     router.stop();
+    packageLinks.close();
+    packageGateway.close();
     const at = Date.now();
     const [runs, calls, chats] = await Promise.all([scheduler.drain(config.drainMs), model.drain(config.drainMs), agentRuns.shutdown(config.drainMs)]);
     console.log(`[space] drained in ${Date.now() - at}ms: ${runs.finished} run(s) finished, ${runs.aborted} aborted; ${calls.finished} model call(s) finished, ${calls.interrupted} interrupted; ${chats.finished} chat turn(s) finished, ${chats.interrupted} interrupted`);
     server.stop();
+    await packageInstaller.drain();
+    await packageLifecycle.drain();
+    await packageRuntime.close(config.drainMs);
     await bus.idle();
     await notify.idle();
     store.close();

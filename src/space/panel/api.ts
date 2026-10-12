@@ -51,6 +51,7 @@ import { type WidgetFeed, sourceUrl } from "./widgets.ts";
  */
 
 export type PanelApiOptions = {
+  packageCheckUrl?: (app: string, check: string) => string;
   ws: Workspace;
   registry: AppRegistry;
   layout: LayoutStore;
@@ -81,9 +82,9 @@ type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "PATCH" |
 const NAME_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 
 /** The declared checks of an active app with a service, each with the loopback URL it reads. */
-export function checkViews(entry: RegisteredApp): CheckView[] {
+export function checkViews(entry: RegisteredApp, packageUrl?: (app: string, check: string) => string): CheckView[] {
   const m = entry.manifest;
-  if (m.status !== "active" || !m.service || !m.checks?.length) return [];
+  if (m.status !== "active" || (!m.service && !(m.spec === 2 && packageUrl)) || !m.checks?.length) return [];
   const i18n = (c: { name: string }) => {
     const out: Record<string, { title?: string; description?: string }> = {};
     for (const [lang, text] of Object.entries(m.i18n ?? {})) {
@@ -97,7 +98,7 @@ export function checkViews(entry: RegisteredApp): CheckView[] {
     app: m.app,
     appTitle: m.title ?? m.app,
     ...c,
-    url: `http://127.0.0.1:${m.service!.port}${c.path}`,
+    url: m.spec === 2 && packageUrl ? packageUrl(m.app, c.name) : `http://127.0.0.1:${m.service!.port}${c.path}`,
     ...i18n(c),
   }));
 }
@@ -226,6 +227,7 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
       DELETE: wrap(async (req) => {
         const n = name(req.params.app);
         const entry = entryOf(n);
+        if (entry.manifest.spec === 2) return error(409, "use the package lifecycle API to uninstall this application");
         const running = opts.runningTasks?.(n) ?? [];
         if (running.length && new URL(req.url).searchParams.get("force") !== "1") {
           return error(409, `"${n}" has ${running.length} task run(s) in flight (${running.join(", ")}); wait for them to finish, or uninstall with force`);
@@ -272,7 +274,7 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
 
     // Local only: each space's inspection page reads its own apps and shows its peers' through their snapshots.
     "/api/checks": {
-      GET: wrap(async () => json({ ok: true, checks: registry.list().flatMap(checkViews), asOf: new Date().toISOString() })),
+      GET: wrap(async () => json({ ok: true, checks: registry.list().flatMap((entry) => checkViews(entry, opts.packageCheckUrl)), asOf: new Date().toISOString() })),
     },
 
     "/api/widgets": {
@@ -416,7 +418,7 @@ async function serveFile(dir: string, rel: string): Promise<Response> {
   if (!rel || (path !== root && !path.startsWith(root + sep))) throw new NotFound("file not found");
   const file = Bun.file(path);
   if (!(await file.exists())) throw new NotFound("file not found");
-  return new Response(file, { headers: { "cache-control": "no-cache" } });
+  return new Response(file, { headers: { "cache-control": "no-cache", "content-security-policy": "sandbox; default-src 'none'", "x-content-type-options": "nosniff" } });
 }
 
 function json(body: unknown, status = 200): Response {

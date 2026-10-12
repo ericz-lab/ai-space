@@ -3,6 +3,7 @@ import { parseArgs, need, noMore } from "./args.ts";
 import { type TaskView, confirm, listTasks, scheduleText, taskRef } from "./common.ts";
 import { deployVerb } from "./deploy.ts";
 import { newApp } from "./newapp.ts";
+import { inspectPackageVerb, packVerb, installPackageVerb, packagesVerb, openPackageVerb, packageChangeVerb } from "./package.ts";
 import { ago, bytes, until } from "./output.ts";
 import { ApiError, type Ctx, type Noun, UsageError } from "./types.ts";
 
@@ -235,6 +236,14 @@ export const appNoun: Noun = {
   name: "app",
   summary: "the apps of the workspace: list, show, sync, deploy, service, start/stop/restart, supervise, hide, uninstall, env, new",
   verbs: {
+    install: { usage: "FILE [--allow-unsigned] [--operation-id UUID]", summary: "install a prepared package on the selected Space", run: installPackageVerb() },
+    upgrade: { usage: "FILE [--allow-unsigned] [--operation-id UUID]", summary: "replace an installed package, retaining previous code and data", run: installPackageVerb(true) },
+    packages: { usage: "", summary: "Space identity and package installation history", run: packagesVerb },
+    open: { usage: "APP [--space-id UUID --connection UUID]", summary: "print a one-use URL for a local or authorized remote package app", run: openPackageVerb },
+    rollback: { usage: "APP RETAINED_OPERATION_ID [--yes] [--operation-id UUID]", summary: "restore retained package code without restoring data", run: packageChangeVerb("rollback") },
+    "remove-package": { usage: "APP [--yes] [--operation-id UUID]", summary: "unregister a package and retain code and data", run: packageChangeVerb("remove") },
+    pack: { usage: "DIR --output FILE [--include PATH,...] [--manifest FILE] [--target OS/ARCH] [--source-included] [--sign-key FILE]", summary: "create an offline application package from explicitly selected prepared files", run: packVerb },
+    "inspect-package": { usage: "FILE [--trusted-key FILE] [--check-host]", summary: "verify package contents and inspect its signature without executing code", run: inspectPackageVerb },
     ls: { usage: "[--panel]", summary: "every app (--panel: only what the panel shows)", run: ls },
     show: { usage: "APP", summary: "manifest, storage, backups and tasks of one app", run: show },
     sync: { usage: "[APP]", summary: "re-read one space.yaml, or every app directory", run: sync },

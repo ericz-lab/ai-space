@@ -41,7 +41,7 @@ export class WidgetFeed {
 
   constructor(
     private readonly registry: AppRegistry,
-    private readonly opts: { fetch?: typeof fetch; timeoutMs?: number } = {},
+    private readonly opts: { fetch?: typeof fetch; timeoutMs?: number; appFetch?: (app: string, path: string, init: RequestInit) => Promise<Response> } = {},
   ) {}
 
   /** Every widget of every visible app, in registry order (the API applies the layout order). */
@@ -81,9 +81,11 @@ export class WidgetFeed {
 
   private async fetchItems(m: Manifest, w: ManifestWidget): Promise<WidgetResult> {
     const url = sourceUrl(m, w);
-    if (!url) return { ok: false, error: "source is a path but the app declares no service" };
+    const local = m.spec === 2 && w.source.startsWith("/") && this.opts.appFetch;
+    if (!url && !local) return { ok: false, error: "source is a path but the app declares no service" };
     try {
-      const r = await (this.opts.fetch ?? fetch)(url, { signal: AbortSignal.timeout(this.opts.timeoutMs ?? 8_000) });
+      const init = { signal: AbortSignal.timeout(this.opts.timeoutMs ?? 8_000) };
+      const r = await (local ? local(m.app, w.source, init) : (this.opts.fetch ?? fetch)(url!, init));
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = (await r.json()) as { ok?: unknown; items?: unknown; error?: unknown; blocks?: unknown; asOf?: unknown; staleAfter?: unknown };
       if (j.ok !== true || !Array.isArray(j.items)) throw new Error(typeof j.error === "string" ? j.error : "response is not { ok: true, items: [] }");
@@ -113,7 +115,7 @@ export class WidgetFeed {
 /** An item's or block's link, relative to the app's public URL; only http(s) reaches the page. */
 function contentLink(m: Manifest, url: string): string {
   const abs = resolveLink(m, url);
-  return /^https?:\/\//.test(abs) ? abs : "";
+  return /^https?:\/\//.test(abs) || m.spec === 2 && abs.startsWith("/_space/apps/") ? abs : "";
 }
 
 /** Absolute URL of a widget source, or undefined when a path has no service to attach to. */
