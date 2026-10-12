@@ -15,7 +15,7 @@
  * the page, so a late response never lands in a thread it was not asked for.
  */
 import css from "./widget.css" with { type: "text" };
-import { Drafts, isSendKey, type DraftStorage } from "./compose.ts";
+import { Drafts, giveBack, isSendKey, type DraftStorage } from "./compose.ts";
 import { strings, type Strings } from "./i18n.ts";
 import { esc, renderMd } from "./md.ts";
 import { followTurn, newRequestId, turnBody, type Attachment, type Context, type Final, type Message, type Thread } from "./turn.ts";
@@ -118,7 +118,7 @@ type Turn = {
   /** The service has said the turn exists. */
   started: boolean;
   stopping: boolean;
-  /** What was taken from the box, to give back when the turn never starts. */
+  /** What was taken from the box, to give back when the turn never starts; empty for a retry, which takes nothing from it. */
   text: string;
   held: Pending[];
   user?: Message;
@@ -269,7 +269,7 @@ function mount(host: HTMLElement, opts: Options): Widget {
     const local = retries.get(m);
     if (local) return local;
     const asked = messages[messages.indexOf(m) - 1];
-    return asked?.role === "user" && asked.content.trim() ? () => void send(asked.content) : undefined;
+    return asked?.role === "user" && asked.content.trim() ? () => void submit(asked.content, undefined, true) : undefined;
   };
 
   const renderMessage = (m: Message): HTMLElement => {
@@ -483,7 +483,7 @@ function mount(host: HTMLElement, opts: Options): Widget {
   const abandon = (tn: Turn, why: "left" | "stopped" | "refused", reason?: string) => {
     if (turn === tn) turn = null;
     tn.aborter.abort();
-    const back = (now: string) => (now.trim() ? `${tn.text}\n${now}` : tn.text);
+    const back = (now: string) => giveBack(tn.text, now);
     if (why === "left") {
       if (keepDrafts) drafts.set(tn.thread.scope, tn.thread.id, back(drafts.get(tn.thread.scope, tn.thread.id)));
       else els.input.value = back(els.input.value);
@@ -624,32 +624,42 @@ function mount(host: HTMLElement, opts: Options): Widget {
     opts.onError?.(t.connectionLost, tn.assistant);
   };
 
-  const send = async (text: string, files?: File[]) => {
+  /**
+   * Send a message in what the widget shows when this is called. That view is fixed here, before the first wait:
+   * if the widget turns to another scope or thread while the listing, an upload or the new thread is awaited, the
+   * message is not sent anywhere (what was typed is still in the box's draft for where it was typed).
+   * `retry` asks an earlier question again: the box and the images waiting in it are the person's next message and stay as they are.
+   */
+  const submit = async (text: string, files?: File[], retry = false) => {
     if (busy()) { toast(t.busy); return; }
+    const my = view;
     await loading;
+    if (my !== view) return;
     if (files?.length) await addFiles(files);
+    if (my !== view) return;
     if (busy()) { toast(t.busy); return; }
-    if (pending.some((p) => p.id === null)) { toast(t.uploading); return; }
+    if (!retry && pending.some((p) => p.id === null)) { toast(t.uploading); return; }
     const message = text.trim();
     if (!message) return;
     if (!thread) {
       try {
         await newThread(true);
       } catch (e) {
-        toast((e as Error).message);
+        if (my === view) toast((e as Error).message);
         return;
       }
     }
-    if (!thread || busy()) return;
+    if (my !== view || !thread || busy()) return;
     const th = thread;
-    const my = view;
-    const held = pending;
-    pending = [];
-    els.previews.replaceChildren();
+    const held = retry ? [] : pending;
+    if (!retry) {
+      pending = [];
+      els.previews.replaceChildren();
+      els.input.value = "";
+      stashDraft();
+    }
     const attachments = held.map((p) => p.id!);
     const previews = held.map((p) => ({ id: p.id!, name: p.file.name, type: p.file.type, size: p.file.size, url: `/api/chat/attachments/${p.id}` }));
-    els.input.value = "";
-    stashDraft();
 
     const user: Message = { id: -1, role: "user", content: message, createdAt: new Date().toISOString(), attachments: previews };
     const assistant: Message = { id: -2, role: "assistant", content: "", createdAt: new Date().toISOString(), attachments: [], live: true };
@@ -661,7 +671,7 @@ function mount(host: HTMLElement, opts: Options): Widget {
     setStick(true);
     scrollDown();
 
-    const tn: Turn = { view: my, thread: th, aborter: new AbortController(), open: null, mine: true, posted: false, started: false, stopping: false, text: message, held, user, userEl, assistant, el };
+    const tn: Turn = { view: my, thread: th, aborter: new AbortController(), open: null, mine: true, posted: false, started: false, stopping: false, text: retry ? "" : message, held, user, userEl, assistant, el };
     turn = tn;
     setBusy();
     let ctx: Context;
@@ -684,6 +694,7 @@ function mount(host: HTMLElement, opts: Options): Widget {
     await follow(tn);
     if (my === view && !turn) els.input.focus();
   };
+  const send = (text: string, files?: File[]) => submit(text, files);
 
   /** A thread opened while it answers: show the answer so far and follow the rest. */
   const attach = (th: Thread, text: string) => {
@@ -770,8 +781,15 @@ function mount(host: HTMLElement, opts: Options): Widget {
     const r = await api<{ threads: Thread[] }>(`/threads?scope=${encodeURIComponent(scope)}`);
     if (my !== view) return;
     threads = r.threads;
-    if (threads.length) await show(threads[0]!.id, my);
-    else {
+    if (threads.length) {
+      // Typed before the listing arrived, it was kept for the scope: it is for the thread the scope opens with.
+      const early = keepDrafts ? drafts.get(scope, null) : "";
+      if (early) {
+        drafts.set(scope, null, "");
+        if (!els.input.value.trim()) els.input.value = early;
+      }
+      await show(threads[0]!.id, my);
+    } else {
       renderThreads();
       restoreDraft();
     }

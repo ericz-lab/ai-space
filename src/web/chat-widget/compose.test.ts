@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Drafts, isSendKey, type DraftStorage } from "./compose.ts";
+import { Drafts, giveBack, isSendKey, type DraftStorage } from "./compose.ts";
 
 function memory(): DraftStorage & { data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -37,6 +37,19 @@ describe("drafts", () => {
     expect(d.get("s", 1)).toBe("");
     d.set("s", 1, "kept");
     expect(d.get("s", 1)).toBe("kept");
+  });
+});
+
+describe("giveBack", () => {
+  test("a message that was never sent returns to the box, before what was typed since", () => {
+    expect(giveBack("the question", "")).toBe("the question");
+    expect(giveBack("the question", "  \n")).toBe("the question");
+    expect(giveBack("the question", "typed since")).toBe("the question\ntyped since");
+  });
+
+  test("a retry took nothing from the box, so a retry that never starts leaves the box exactly as it is", () => {
+    expect(giveBack("", "important new draft")).toBe("important new draft");
+    expect(giveBack("", "")).toBe("");
   });
 });
 

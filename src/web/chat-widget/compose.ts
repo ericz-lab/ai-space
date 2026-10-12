@@ -49,6 +49,16 @@ export class Drafts {
 }
 
 /**
+ * What the box (or a thread's draft) holds once a message that was never sent
+ * comes back to it: the message, before whatever was typed since. A turn that
+ * took nothing from the box (a retry) gives nothing back and leaves it as it is.
+ */
+export function giveBack(taken: string, now: string): string {
+  if (!taken) return now;
+  return now.trim() ? `${taken}\n${now}` : taken;
+}
+
+/**
  * Whether a key press in the box sends the message: Enter alone. Enter that
  * confirms an input method's candidate does not: browsers mark it with
  * `isComposing`, and Safari, which ends the composition first, with key code 229.
