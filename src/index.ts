@@ -31,7 +31,7 @@ import { PackageInstaller } from "./space/packages/install.ts";
 import { PackageRuntime } from "./space/packages/runtime.ts";
 import { Connections } from "./space/packages/connections.ts";
 import { PackageLinks, createConnectionRoutes } from "./space/packages/links.ts";
-import { RemoteCatalogue } from "./space/packages/catalogue.ts";
+import { RemoteCatalogue, sharedIcon, sharedIconResponse } from "./space/packages/catalogue.ts";
 import { PackageGateway, createPackageOpenRoutes } from "./space/packages/gateway.ts";
 import { runPackageTask } from "./space/packages/tasks.ts";
 import { loadAppEnv } from "./space/scheduler/targets.ts";
@@ -100,7 +100,12 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     env,
     name: config.name,
     handle: (_connection, meta, body, signal) => packageGateway.local(meta, body, signal),
-    apps: () => packageStore.list().filter((o) => o.state === "installed" && packageRuntime.get(o.app)).map((o) => ({ app: o.app, title: packageRuntime.get(o.app)!.manifest.title ?? o.app, version: o.version, page: !!packageRuntime.get(o.app)!.manifest.launch })),
+    apps: () => packageStore.list().filter((o) => o.state === "installed" && packageRuntime.get(o.app)).map((o) => {
+      const app = packageRuntime.get(o.app)!;
+      const icon = sharedIcon(app);
+      return { app: o.app, title: app.manifest.title ?? o.app, version: o.version, page: !!app.manifest.launch, ...(icon.text ? { icon: icon.text } : {}), ...(icon.file ? { iconFile: true } : {}) };
+    }),
+    icon: (app) => sharedIconResponse(packageRuntime.get(app)),
   });
   packageGateway = new PackageGateway(packageRuntime, packageLinks, packageStore.spaceId);
   if (config.packagePort !== undefined) packageGateway.start(config.packagePort, config.packageBaseUrl);
@@ -329,6 +334,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
 
   const panelRoutes = createPanelRoutes({
     sharedApps: (hidden) => packageCatalogue.views(hidden),
+    sharedIcon: (connection, app) => packageCatalogue.icon(connection, app),
     packageCheckUrl: (app, check) => `http://127.0.0.1:${config.port}/api/panel/packages/apps/${encodeURIComponent(app)}/checks/${encodeURIComponent(check)}`,
     ws,
     registry,
