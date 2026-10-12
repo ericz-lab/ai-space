@@ -2,7 +2,9 @@ import { lstat, mkdir, open, rename, rm, rmdir, statfs } from "node:fs/promises"
 import { dirname, join } from "node:path";
 import type { Workspace } from "../workspace.ts";
 import { assertTarget, installationKey } from "./contract.ts";
-import { assertPackageCompatibility } from "./manifest.ts";
+import { parsePackageIndex } from "./contract.ts";
+import { assertPackageCompatibility, parsePackageManifest } from "./manifest.ts";
+import type { RuntimeApp } from "./runtime.ts";
 import { inspectPackage, sha256 } from "./pack.ts";
 import { PackageStore, type InstallOperation } from "./store.ts";
 
@@ -32,6 +34,35 @@ export class PackageInstaller {
   async drain(): Promise<void> {
     this.closing = true;
     await Promise.allSettled(this.pending);
+  }
+
+  async load(app: string): Promise<RuntimeApp> {
+    const operation = this.store.list().find((o) => o.app === app && o.state === "installed");
+    if (!operation) throw new Error(`no installed package: ${app}`);
+    return this.readInstalled(operation);
+  }
+
+  private async readInstalled(operation: InstallOperation): Promise<RuntimeApp> {
+    const dir = join(this.ws.apps, operation.app);
+    if (!(await lstat(dir)).isDirectory()) throw new Error("installed app must be a real directory");
+    const receiptPath = join(dir, RECEIPT);
+    const stat = await lstat(receiptPath);
+    if (!stat.isFile() || stat.size > 32 * 1024 ** 2) throw new Error("invalid installation receipt");
+    const receipt = await Bun.file(receiptPath).json() as { id?: string; digest?: string; index?: unknown };
+    if (receipt.id !== operation.id || receipt.digest !== operation.digest) throw new Error("installation receipt does not match the journal");
+    const index = parsePackageIndex(receipt.index);
+    for (const f of index.files) {
+      const pieces = f.path.split("/");
+      for (let i = 1; i < pieces.length; i++) if (!(await lstat(join(dir, ...pieces.slice(0, i)))).isDirectory()) throw new Error("installed path has an unsafe ancestor");
+      const file = join(dir, f.path);
+      const s = await lstat(file);
+      if (!s.isFile() || s.size !== f.size || !!(s.mode & 0o111) !== f.executable || sha256(new Uint8Array(await Bun.file(file).arrayBuffer())) !== f.sha256) throw new Error(`installed file failed recovery validation: ${f.path}`);
+    }
+    const manifest = parsePackageManifest(await Bun.file(join(dir, "space.yaml")).text());
+    if (manifest.app !== operation.app || manifest.version !== operation.version) throw new Error("installed manifest does not match the journal");
+    assertTarget(index.target, this.host);
+    assertPackageCompatibility(manifest, this.host.bun);
+    return { dir, index, manifest };
   }
 
   private async performInstall(bytes: Uint8Array, options: InstallOptions): Promise<InstallOperation> {
@@ -89,23 +120,8 @@ export class PackageInstaller {
   async recover(): Promise<InstallOperation[]> {
     const recovered: InstallOperation[] = [];
     for (const operation of this.store.list().filter((o) => o.state === "installing")) {
-      const destination = join(this.ws.apps, operation.app);
       try {
-        const stat = await lstat(destination).catch(() => undefined);
-        if (!stat?.isDirectory()) throw new Error("installation interrupted before publication");
-        const receiptPath = join(destination, RECEIPT);
-        if (!(await lstat(receiptPath)).isFile()) throw new Error("installation receipt is not a regular file");
-        const receipt = await Bun.file(receiptPath).json() as { id?: string; digest?: string; index?: unknown };
-        if (receipt.id !== operation.id || receipt.digest !== operation.digest) throw new Error("installation receipt does not match the journal");
-        const { parsePackageIndex } = await import("./contract.ts");
-        const index = parsePackageIndex(receipt.index);
-        for (const f of index.files) {
-          const pieces = f.path.split("/");
-          for (let i = 1; i < pieces.length; i++) if (!(await lstat(join(destination, ...pieces.slice(0, i)))).isDirectory()) throw new Error("installed path has an unsafe ancestor");
-          const file = join(destination, f.path);
-          const s = await lstat(file);
-          if (!s.isFile() || s.size !== f.size || !!(s.mode & 0o111) !== f.executable || sha256(new Uint8Array(await Bun.file(file).arrayBuffer())) !== f.sha256) throw new Error(`installed file failed recovery validation: ${f.path}`);
-        }
+        await this.readInstalled(operation);
         recovered.push(this.store.finish(operation.id, "installed"));
       } catch (e) {
         recovered.push(this.store.finish(operation.id, "failed", (e as Error).message));

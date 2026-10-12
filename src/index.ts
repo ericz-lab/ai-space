@@ -28,6 +28,7 @@ import { createWebRoutes } from "./web/routes.ts";
 import { createPackageRoutes } from "./space/packages/api.ts";
 import { PackageStore } from "./space/packages/store.ts";
 import { PackageInstaller } from "./space/packages/install.ts";
+import { PackageRuntime } from "./space/packages/runtime.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { guardBrowserWrites } from "./space/auth.ts";
@@ -57,6 +58,15 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   await packageInstaller.recover();
   const packageTrustKeys = await Promise.all(config.packageTrustKeys.map((path) => Bun.file(path).text()));
   const storage = await openStorage(ws, config);
+  const packageRuntime = new PackageRuntime({ envFor: (app) => storage.envFor(app), logDir: ws.logs });
+  const activatePackage = async (app: string) => {
+    const installed = await packageInstaller.load(app);
+    await storage.syncApp(app, parseStorageSpec(installed.manifest.storage));
+    await packageRuntime.register(installed);
+  };
+  for (const operation of packageStore.list().filter((o) => o.state === "installed")) {
+    await activatePackage(operation.app).catch((e) => console.error(`[packages] ${operation.app}: ${(e as Error).message}`));
+  }
   const backups = await openBackups(config);
   const taskDefaults = backupTaskDefaults(ws, config);
   const { channels, errors: channelErrors } = loadChannels(env);
@@ -346,7 +356,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) }),
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
-      ...createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys }),
+      ...createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, activate: activatePackage }),
       ...createRouterRoutes({ router }),
       ...createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)) }),
       ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) }),
@@ -381,6 +391,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     console.log(`[space] drained in ${Date.now() - at}ms: ${runs.finished} run(s) finished, ${runs.aborted} aborted; ${calls.finished} model call(s) finished, ${calls.interrupted} interrupted; ${chats.finished} chat turn(s) finished, ${chats.interrupted} interrupted`);
     server.stop();
     await packageInstaller.drain();
+    await packageRuntime.close(config.drainMs);
     await bus.idle();
     await notify.idle();
     store.close();

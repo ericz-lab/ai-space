@@ -1,11 +1,12 @@
 import { isOperator } from "../auth.ts";
 import { DEFAULT_ARCHIVE_LIMIT } from "./archive.ts";
 import type { PackageInstaller } from "./install.ts";
+import type { PackageRuntime } from "./runtime.ts";
 
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
 
 /** Operator-only installation. Trust roots are host configuration, never supplied by an upload. */
-export function createPackageRoutes(opts: { installer: PackageInstaller; token: string; trustedKeys?: string[] }): Record<string, Record<string, Handler>> {
+export function createPackageRoutes(opts: { installer: PackageInstaller; token: string; trustedKeys?: string[]; runtime?: PackageRuntime; activate?: (app: string) => Promise<void> }): Record<string, Record<string, Handler>> {
   const json = (data: unknown, status = 200) => Response.json(data, { status });
   const denied = (req: Request) => !isOperator(req, opts.token);
   let uploads = 0;
@@ -38,6 +39,10 @@ export function createPackageRoutes(opts: { installer: PackageInstaller; token: 
             id: req.headers.get("idempotency-key") ?? undefined, trustedKeys: opts.trustedKeys,
             allowUnsigned: req.headers.get("x-space-allow-unsigned") === "true",
           });
+          if (operation.state === "installed" && opts.activate) {
+            try { await opts.activate(operation.app); }
+            catch (e) { return json({ ok: false, operation, activation: "failed", error: (e as Error).message }, 409); }
+          }
           return json({ ok: operation.state !== "failed", operation }, operation.state === "failed" ? 409 : operation.state === "installing" ? 202 : 200);
         } catch (e) { return json({ ok: false, error: (e as Error).message }, 400); }
         finally { uploads--; }
@@ -48,6 +53,13 @@ export function createPackageRoutes(opts: { installer: PackageInstaller; token: 
         if (denied(req)) return json({ ok: false, error: "unauthorized" }, 401);
         const operation = opts.installer.store.get(req.params.id!);
         return operation ? json({ ok: true, operation }) : json({ ok: false, error: "operation not found" }, 404);
+      },
+    },
+    "/api/packages/apps/:app/runtime": {
+      GET: (req) => {
+        if (denied(req)) return json({ ok: false, error: "unauthorized" }, 401);
+        const runtime = opts.runtime?.status(req.params.app!);
+        return runtime ? json({ ok: true, runtime }) : json({ ok: false, error: "package runtime not found" }, 404);
       },
     },
   };
