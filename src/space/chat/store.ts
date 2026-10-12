@@ -1,11 +1,12 @@
 import { Database } from "bun:sqlite";
-import type { Attachment, Message, Role, Thread } from "./types.ts";
+import type { Attachment, Message, MessageState, Role, Thread, TurnRecord, TurnStatus } from "./types.ts";
 
 /**
- * Threads, messages and attachments, in ai-space's own database next to the
- * ledger. Same migration rule as the other stores: extend ADDED_COLUMNS with
- * nullable columns, never rewrite tables. Attachment bytes live on disk; the
- * row holds the path, and whoever deletes a row deletes the file.
+ * Threads, messages, turns and attachments, in ai-space's own database next
+ * to the ledger. Same migration rule as the other stores: extend ADDED_COLUMNS
+ * with nullable columns, never rewrite tables. Attachment bytes live on disk;
+ * the row holds the path, and whoever deletes a row deletes the file. A turn
+ * row says how a turn ended and, while it runs, holds the answer so far.
  */
 
 const SCHEMA = `
@@ -45,19 +46,48 @@ CREATE TABLE IF NOT EXISTS chat_model_choices (
   model       TEXT NOT NULL,
   updated_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chat_turns (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  app                   TEXT NOT NULL,
+  thread_id             INTEGER NOT NULL,
+  request_id            TEXT,
+  status                TEXT NOT NULL,
+  user_message_id       INTEGER NOT NULL,
+  assistant_message_id  INTEGER,
+  partial               TEXT NOT NULL DEFAULT '',
+  created_at            INTEGER NOT NULL,
+  finished_at           INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS chat_turns_request ON chat_turns(thread_id, request_id) WHERE request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS chat_turns_status ON chat_turns(status);
 `;
 
-const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [];
+const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [
+  { table: "chat_messages", column: "state", ddl: "TEXT" },
+  { table: "chat_messages", column: "omitted", ddl: "INTEGER" },
+];
 
 type ThreadRow = { id: number; app: string; scope: string; title: string; created_at: number; updated_at: number };
-type MessageRow = { id: number; thread_id: number; role: Role; content: string; error: string | null; call_id: number | null; created_at: number };
+type MessageRow = { id: number; thread_id: number; role: Role; content: string; error: string | null; call_id: number | null; created_at: number; state: MessageState | null; omitted: number | null };
+type TurnRow = {
+  id: number; app: string; thread_id: number; request_id: string | null; status: TurnStatus; user_message_id: number; assistant_message_id: number | null;
+  partial: string; created_at: number; finished_at: number | null;
+};
 type AttachmentRow = { id: number; app: string; thread_id: number; message_id: number | null; name: string; type: string; size: number; path: string; created_at: number };
 
 const thread = (r: ThreadRow): Thread => ({ id: r.id, app: r.app, scope: r.scope, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at });
 const message = (r: MessageRow): Message => ({
   id: r.id, threadId: r.thread_id, role: r.role, content: r.content, createdAt: r.created_at,
   ...(r.error === null ? {} : { error: r.error }),
+  ...(r.state === null ? {} : { state: r.state }),
+  ...(r.omitted ? { omitted: r.omitted } : {}),
   ...(r.call_id === null ? {} : { callId: r.call_id }),
+});
+const turn = (r: TurnRow): TurnRecord => ({
+  id: r.id, app: r.app, threadId: r.thread_id, status: r.status, userMessageId: r.user_message_id, partial: r.partial, createdAt: r.created_at,
+  ...(r.request_id === null ? {} : { requestId: r.request_id }),
+  ...(r.assistant_message_id === null ? {} : { assistantMessageId: r.assistant_message_id }),
+  ...(r.finished_at === null ? {} : { finishedAt: r.finished_at }),
 });
 const attachment = (r: AttachmentRow): Attachment => ({
   id: r.id, app: r.app, threadId: r.thread_id, name: r.name, type: r.type, size: r.size, path: r.path, createdAt: r.created_at,
@@ -132,6 +162,7 @@ export class ChatStore {
     this.db.transaction(() => {
       this.db.query("DELETE FROM chat_attachments WHERE thread_id = ?").run(id);
       this.db.query("DELETE FROM chat_messages WHERE thread_id = ?").run(id);
+      this.db.query("DELETE FROM chat_turns WHERE thread_id = ?").run(id);
       this.db.query("DELETE FROM chat_threads WHERE id = ?").run(id);
     })();
     return paths;
@@ -146,11 +177,20 @@ export class ChatStore {
 
   // ---------------------------------------------------------------- messages
 
-  addMessage(threadId: number, m: { role: Role; content: string; error?: string; callId?: number }, at = Date.now()): Message {
+  addMessage(threadId: number, m: { role: Role; content: string; error?: string; callId?: number; state?: MessageState }, at = Date.now()): Message {
     const r = this.db
-      .query("INSERT INTO chat_messages (thread_id, role, content, error, call_id, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(threadId, m.role, m.content, m.error ?? null, m.callId ?? null, at);
+      .query("INSERT INTO chat_messages (thread_id, role, content, error, call_id, created_at, state) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(threadId, m.role, m.content, m.error ?? null, m.callId ?? null, at, m.state ?? null);
     return this.getMessage(Number(r.lastInsertRowid))!;
+  }
+
+  removeMessage(id: number): void {
+    this.db.query("DELETE FROM chat_messages WHERE id = ?").run(id);
+  }
+
+  /** On a person's message: how many earlier images of the thread its turn did not ship. */
+  setOmitted(id: number, omitted: number): void {
+    this.db.query("UPDATE chat_messages SET omitted = ? WHERE id = ?").run(omitted, id);
   }
 
   getMessage(id: number): Message | undefined {
@@ -164,6 +204,41 @@ export class ChatStore {
 
   countMessages(threadId: number): number {
     return this.db.query<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM chat_messages WHERE thread_id = ?").get(threadId)!.n;
+  }
+
+  // ---------------------------------------------------------------- turns
+
+  /** A turn that starts running now. Throws when the thread already has one under this request id. */
+  addTurn(t: { app: string; threadId: number; requestId?: string; userMessageId: number }, at = Date.now()): TurnRecord {
+    const r = this.db
+      .query("INSERT INTO chat_turns (app, thread_id, request_id, status, user_message_id, created_at) VALUES (?, ?, ?, 'running', ?, ?)")
+      .run(t.app, t.threadId, t.requestId ?? null, t.userMessageId, at);
+    return this.getTurn(Number(r.lastInsertRowid))!;
+  }
+
+  getTurn(id: number): TurnRecord | undefined {
+    const r = this.db.query<TurnRow, [number]>("SELECT * FROM chat_turns WHERE id = ?").get(id);
+    return r ? turn(r) : undefined;
+  }
+
+  /** The turn a request id already started on a thread. */
+  findTurn(threadId: number, requestId: string): TurnRecord | undefined {
+    const r = this.db.query<TurnRow, [number, string]>("SELECT * FROM chat_turns WHERE thread_id = ? AND request_id = ?").get(threadId, requestId);
+    return r ? turn(r) : undefined;
+  }
+
+  /** Turns still marked running: the ones in flight, or after a restart the ones it cut. */
+  runningTurns(): TurnRecord[] {
+    return this.db.query<TurnRow, []>("SELECT * FROM chat_turns WHERE status = 'running' ORDER BY id").all().map(turn);
+  }
+
+  savePartial(id: number, partial: string): void {
+    this.db.query("UPDATE chat_turns SET partial = ? WHERE id = ? AND status = 'running'").run(partial, id);
+  }
+
+  /** Close a turn with the answer that ended it; the saved partial text has served its purpose. */
+  finishTurn(id: number, status: Exclude<TurnStatus, "running">, assistantMessageId: number, at = Date.now()): void {
+    this.db.query("UPDATE chat_turns SET status = ?, assistant_message_id = ?, partial = '', finished_at = ? WHERE id = ?").run(status, assistantMessageId, at, id);
   }
 
   // ---------------------------------------------------------------- attachments

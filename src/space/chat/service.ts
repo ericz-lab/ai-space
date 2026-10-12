@@ -9,8 +9,9 @@ import type { CompleteFile, OnDelta } from "../runtimes/types.ts";
 import { buildPrompt } from "./prompt.ts";
 import type { ChatStore } from "./store.ts";
 import {
-  IMAGE_TYPES, MAX_ATTACHMENTS_PER_THREAD, MAX_ATTACHMENT_BYTES, MAX_FILES_BYTES_PER_TURN, MAX_FILES_PER_TURN, MAX_OUTPUT_TOKENS, MAX_TITLE_CHARS, ORPHAN_TTL_MS,
-  type Attachment, type Message, type Thread, type TurnInput,
+  IMAGE_TYPES, INTERRUPTED, MAX_ATTACHMENTS_PER_THREAD, MAX_ATTACHMENT_BYTES, MAX_FILES_BYTES_PER_TURN, MAX_FILES_PER_TURN, MAX_OUTPUT_TOKENS, MAX_TITLE_CHARS, ORPHAN_TTL_MS,
+  PARTIAL_SAVE_MS, STOPPED,
+  type Attachment, type Message, type Thread, type TurnInput, type TurnRecord, type TurnStatus,
 } from "./types.ts";
 
 /**
@@ -21,6 +22,13 @@ import {
  * a time per thread. Attachments are images on disk under the app's data
  * directory; a turn ships the current message's plus the newest earlier ones
  * up to a cap, since the runtime reads every shipped image again.
+ *
+ * A turn runs in the background of whoever asked for it: `begin` starts it
+ * and returns at once, any number of callers follow it with `subscribe`, and
+ * it ends by finishing, by its timeout or by `stop`. Each turn has a row in
+ * `chat_turns`, so a second request with the same `requestId` finds the first
+ * one instead of running again, and a turn the process did not live to finish
+ * is closed as interrupted on the next boot (`settleInterrupted`).
  */
 
 export type ChatServiceOptions = {
@@ -46,6 +54,23 @@ export type ModelOption = { value: string; runtime: string; tier: ModelTier; mod
 export type EffectiveModel = { value: string; source: "choice" | "app" | "default"; runtime?: string; model?: string; /** What the ledger records as `modelSource`. */ ledgerSource: ModelSource };
 
 export type TurnResult = { ok: boolean; error?: string; user: Message; assistant: Message; thread: Thread; call?: ModelCall };
+
+/** What a follower of a turn receives: the text as it is produced, then how it ended. `lost` means the answer could not be stored. */
+export type TurnEvent = { type: "delta"; text: string } | { type: "end"; result: TurnResult } | { type: "lost"; error: string };
+
+/** A turn as `begin` hands it back. `started` is false when the request id named a turn that already existed. */
+export type TurnHandle = { record: TurnRecord; user: Message; started: boolean; done: Promise<TurnResult> };
+
+/** A turn in flight: what followers need to read it and what a stop needs to end it. */
+type Live = {
+  record: TurnRecord;
+  text: string;
+  listeners: Set<(e: TurnEvent) => void>;
+  aborter: AbortController;
+  /** Set by an explicit stop, so the answer is stored as stopped rather than as a failure. */
+  stopped: boolean;
+  done: Promise<TurnResult>;
+};
 
 export class Locked extends Error {
   constructor() {
@@ -74,7 +99,8 @@ export class ChatService {
   readonly defaultModel: ChatServiceOptions["defaultModel"];
   private readonly log: (m: string) => void;
   private readonly now: () => number;
-  private readonly running = new Set<number>();
+  /** Turns in flight, by thread. */
+  private readonly live = new Map<number, Live>();
 
   constructor(opts: ChatServiceOptions) {
     this.store = opts.store;
@@ -86,7 +112,13 @@ export class ChatService {
   }
 
   isRunning(threadId: number): boolean {
-    return this.running.has(threadId);
+    return this.live.has(threadId);
+  }
+
+  /** The turn a thread is answering now, with the text so far. */
+  liveTurn(threadId: number): { record: TurnRecord; text: string } | undefined {
+    const l = this.live.get(threadId);
+    return l ? { record: l.record, text: l.text } : undefined;
   }
 
   /** The ledger row behind an answer, for the backend and cost a message shows. */
@@ -189,7 +221,7 @@ export class ChatService {
 
   /** Throws `Locked` while the thread is answering: the turn would write its reply into a deleted thread. */
   async deleteThread(app: string, id: number): Promise<boolean> {
-    if (this.running.has(id)) throw new Locked();
+    if (this.live.has(id)) throw new Locked();
     const paths = this.store.deleteThread(app, id);
     if (!paths) return false;
     await this.unlinkAll(paths);
@@ -200,7 +232,7 @@ export class ChatService {
   /** Throws `Locked`, deleting nothing, while any thread of the scope is answering. */
   async deleteScope(app: string, scope: string): Promise<number> {
     const threads = this.store.listThreads(app, scope, 100_000);
-    if (threads.some((t) => this.running.has(t.id))) throw new Locked();
+    if (threads.some((t) => this.live.has(t.id))) throw new Locked();
     // Every row goes before the first await, so no turn can start on a thread about to be deleted.
     const removed = threads.map((t) => ({ id: t.id, paths: this.store.deleteThread(app, t.id) ?? [] }));
     let n = 0;
@@ -223,60 +255,198 @@ export class ChatService {
   // ---------------------------------------------------------------- turns
 
   /**
-   * Run one turn. Throws `Locked` while the thread is answering and `Refused`
-   * for attachments that are not this thread's; a model failure is a result
-   * with `ok: false`, stored like a success.
+   * Start a turn and return at once; `done` settles when the answer is stored.
+   * Throws `Locked` while the thread is answering and `Refused` for attachments
+   * that are not this thread's. With a `requestId` the thread has already seen,
+   * nothing is stored or run again: the handle is the earlier turn's, running
+   * or finished.
+   */
+  begin(app: string, thread: Thread, input: TurnInput): TurnHandle {
+    if (input.requestId) {
+      const known = this.store.findTurn(thread.id, input.requestId);
+      if (known) {
+        const live = this.live.get(thread.id);
+        const done = live?.record.id === known.id ? live.done : Promise.resolve().then(() => this.resultOf(app, known));
+        return { record: known, user: this.store.getMessage(known.userMessageId)!, started: false, done };
+      }
+    }
+    if (this.live.has(thread.id)) throw new Locked();
+    // Everything up to the live entry is synchronous, so two requests can never both pass the check above.
+    const history = this.store.listMessages(thread.id);
+    const startedAt = this.now();
+    const user = this.store.addMessage(thread.id, { role: "user", content: input.message }, startedAt);
+    if (!this.store.bindAttachments(input.attachments, thread.id, user.id)) {
+      this.store.removeMessage(user.id);
+      throw new Refused(400, "attachments must be unsent uploads of this thread");
+    }
+    this.store.touchThread(thread.id, startedAt, thread.title ? undefined : titleOf(input.message));
+    const record = this.store.addTurn({ app, threadId: thread.id, userMessageId: user.id, ...(input.requestId ? { requestId: input.requestId } : {}) }, startedAt);
+    const live: Live = { record, text: "", listeners: new Set(), aborter: new AbortController(), stopped: false, done: undefined as unknown as Promise<TurnResult> };
+    this.live.set(thread.id, live);
+    live.done = this.run(app, thread, input, live, history, user).catch((e) => {
+      // The answer could not be stored (the database went away under a shutdown): the row stays running and the next boot settles it.
+      this.live.delete(thread.id);
+      this.emit(live, { type: "lost", error: (e as Error).message ?? String(e) });
+      throw e;
+    });
+    live.done.catch(() => {});
+    return { record, user, started: true, done: live.done };
+  }
+
+  /**
+   * Run one turn and wait for it. `signal` ends the turn like a stop does, but
+   * is stored as the failure `aborted`: it is the caller's connection going
+   * away, not the person asking to stop. A model failure is a result with
+   * `ok: false`, stored like a success.
    */
   async turn(app: string, thread: Thread, input: TurnInput, signal?: AbortSignal, onDelta?: OnDelta): Promise<TurnResult> {
-    if (this.running.has(thread.id)) throw new Locked();
-    this.running.add(thread.id);
+    const h = this.begin(app, thread, input);
+    const sub = onDelta ? this.subscribe(thread.id, h.record.id, (e) => e.type === "delta" && onDelta(e.text)) : undefined;
+    if (sub?.text) onDelta!(sub.text);
+    const onAbort = () => this.abort(thread.id, h.record.id);
+    if (h.started && signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    }
+    try {
+      return await h.done;
+    } finally {
+      sub?.off();
+      signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  /** Follow a turn in flight: the text so far, then every event until it ends. Undefined when that turn is not running. */
+  subscribe(threadId: number, turnId: number, listener: (e: TurnEvent) => void): { text: string; off: () => void } | undefined {
+    const live = this.live.get(threadId);
+    if (!live || live.record.id !== turnId) return undefined;
+    live.listeners.add(listener);
+    return { text: live.text, off: () => live.listeners.delete(listener) };
+  }
+
+  /** The person's stop: the answer is stored with what arrived and marked stopped. False when the thread is not answering. */
+  stop(threadId: number): boolean {
+    const live = this.live.get(threadId);
+    if (!live) return false;
+    live.stopped = true;
+    live.aborter.abort();
+    return true;
+  }
+
+  /** End a turn because its caller went away (a turn posted without a request id). */
+  abort(threadId: number, turnId: number): void {
+    const live = this.live.get(threadId);
+    if (live?.record.id === turnId) live.aborter.abort();
+  }
+
+  /** A finished turn as its result, read back from the store. */
+  resultOf(app: string, record: TurnRecord): TurnResult {
+    const fresh = this.store.getTurn(record.id) ?? record;
+    const user = this.store.getMessage(fresh.userMessageId)!;
+    // A row still running with nothing behind it was cut by a restart that has not been settled yet.
+    const assistant = fresh.assistantMessageId !== undefined ? this.store.getMessage(fresh.assistantMessageId)! : this.settle(fresh);
+    const thread = this.store.getThread(app, fresh.threadId)!;
+    const call = assistant.callId === undefined ? undefined : this.callOf(assistant.callId);
+    return { ok: assistant.error === undefined, ...(assistant.error === undefined ? {} : { error: assistant.error }), user, assistant, thread, ...(call ? { call } : {}) };
+  }
+
+  /**
+   * Close the turns a restart cut: each gets an answer holding the text saved
+   * so far and the reason, so the thread shows what happened and the next turn
+   * replays without that pair. Called once at boot, by the process that serves
+   * the API; returns how many were closed.
+   */
+  settleInterrupted(): number {
+    let n = 0;
+    for (const r of this.store.runningTurns()) {
+      if (this.live.get(r.threadId)?.record.id === r.id) continue;
+      this.settle(r);
+      n++;
+    }
+    if (n) this.log(`${n} turn(s) were cut by a restart and are stored as interrupted`);
+    return n;
+  }
+
+  private settle(record: TurnRecord): Message {
+    const at = this.now();
+    const assistant = this.store.addMessage(record.threadId, { role: "assistant", content: record.partial, error: INTERRUPTED, state: "interrupted" }, at);
+    this.store.finishTurn(record.id, "interrupted", assistant.id, at);
+    return assistant;
+  }
+
+  private emit(live: Live, event: TurnEvent): void {
+    for (const l of [...live.listeners]) {
+      try {
+        l(event);
+      } catch {
+        /* a follower that fails does not end the turn */
+      }
+    }
+  }
+
+  private async run(app: string, thread: Thread, input: TurnInput, live: Live, history: Message[], user: Message): Promise<TurnResult> {
+    const { record } = live;
+    let call: ModelCall | undefined;
+    let text: string | undefined;
+    let error = "";
     try {
       await this.pruneOrphans();
-      const history = this.store.listMessages(thread.id);
-      const startedAt = this.now();
-      const user = this.store.addMessage(thread.id, { role: "user", content: input.message }, startedAt);
-      if (!this.store.bindAttachments(input.attachments, thread.id, user.id)) {
-        this.store.db.query("DELETE FROM chat_messages WHERE id = ?").run(user.id);
-        throw new Refused(400, "attachments must be unsent uploads of this thread");
-      }
-      this.store.touchThread(thread.id, startedAt, thread.title ? undefined : titleOf(input.message));
-
       const all = this.store.listAttachments(thread.id);
       const byMessage = new Map<number, Attachment[]>();
       for (const a of all) if (a.messageId !== undefined) byMessage.set(a.messageId, [...(byMessage.get(a.messageId) ?? []), a]);
       const shipped = pickFiles(all, user.id);
+      const omitted = all.filter((a) => a.messageId !== undefined).length - shipped.length;
+      if (omitted > 0) this.store.setOmitted(user.id, omitted);
       const files: CompleteFile[] = shipped.map((a) => ({ name: fileNameOf(a), path: a.path }));
       const prompt = buildPrompt({
         context: input.context, history, attachments: byMessage, shipped: new Set(shipped.map((a) => a.id)), fileName: fileNameOf,
         message: input.message, messageAttachments: byMessage.get(user.id) ?? [],
       });
 
-      let partial = "";
+      // The first text is saved at once, later text at most once per interval.
+      let savedAt = 0;
       const chosen = this.effectiveModel(app, input.model);
-      const { outcome, call } = await this.model.run(
+      const r = await this.model.run(
         app,
         {
           prompt, system: input.context?.system ?? DEFAULT_SYSTEM, model: chosen.value, tag: "chat", tools: input.tools,
           timeoutMs: input.timeoutMs, maxTokens: MAX_OUTPUT_TOKENS, ...(input.thinking !== undefined ? { thinking: input.thinking } : {}), ...(files.length ? { files } : {}),
         },
-        signal,
-        (text) => {
-          partial += text;
-          onDelta?.(text);
+        live.aborter.signal,
+        (delta) => {
+          live.text += delta;
+          this.emit(live, { type: "delta", text: delta });
+          const now = this.now();
+          if (now - savedAt >= PARTIAL_SAVE_MS) {
+            savedAt = now;
+            this.store.savePartial(record.id, live.text);
+          }
         },
         chosen.ledgerSource,
       );
-      const at = this.now();
-      const assistant = outcome.ok
-        ? this.store.addMessage(thread.id, { role: "assistant", content: outcome.text, callId: call.id }, at)
-        : this.store.addMessage(thread.id, { role: "assistant", content: partial, error: outcome.error.slice(0, 500), callId: call.id }, at);
-      this.store.touchThread(thread.id, at);
-      if (!outcome.ok) this.log(`${app} thread ${thread.id}: ${outcome.error}`);
-      const after = this.store.getThread(app, thread.id)!;
-      return outcome.ok ? { ok: true, user, assistant, thread: after, call } : { ok: false, error: outcome.error, user, assistant, thread: after, call };
-    } finally {
-      this.running.delete(thread.id);
+      call = r.call;
+      if (r.outcome.ok) text = r.outcome.text;
+      else error = r.outcome.error;
+    } catch (e) {
+      error = (e as Error).message ?? String(e);
     }
+
+    const at = this.now();
+    const ok = text !== undefined;
+    const status: Exclude<TurnStatus, "running"> = ok ? "done" : live.stopped ? "stopped" : "failed";
+    const callId = call ? { callId: call.id } : {};
+    const assistant = ok
+      ? this.store.addMessage(thread.id, { role: "assistant", content: text!, ...callId }, at)
+      : this.store.addMessage(thread.id, { role: "assistant", content: live.text, error: (live.stopped ? STOPPED : error || "failed").slice(0, 500), ...(live.stopped ? { state: "stopped" as const } : {}), ...callId }, at);
+    this.store.finishTurn(record.id, status, assistant.id, at);
+    this.store.touchThread(thread.id, at);
+    if (status === "failed") this.log(`${app} thread ${thread.id}: ${error}`);
+    this.live.delete(thread.id);
+    const result: TurnResult = {
+      ok, ...(ok ? {} : { error: assistant.error! }), user: this.store.getMessage(user.id) ?? user, assistant, thread: this.store.getThread(app, thread.id)!, ...(call ? { call } : {}),
+    };
+    this.emit(live, { type: "end", result });
+    return result;
   }
 }
 

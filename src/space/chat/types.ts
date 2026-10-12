@@ -30,6 +30,14 @@ export const DEFAULT_TIMEOUT_MS = 300_000;
 export const MAX_OUTPUT_TOKENS = 8_000;
 /** Tools a page may ask for: a browser reaches the turn route through its app's proxy, so nothing that touches the machine. */
 export const CHAT_TOOLS = new Set(["Read", "WebSearch", "WebFetch"]);
+/** A client's idempotency key for one turn: the same key on the same thread never stores a second message or runs a second call. */
+export const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,79}$/;
+/** How often the text written so far is saved with the turn's row, so a restart keeps most of an interrupted answer. */
+export const PARTIAL_SAVE_MS = 1_000;
+/** Stored as the error of an answer the person stopped. */
+export const STOPPED = "stopped";
+/** Stored as the error of an answer ai-space did not live to finish. */
+export const INTERRUPTED = "interrupted: ai-space restarted while this answer was being written";
 
 export type Role = "user" | "assistant";
 
@@ -48,9 +56,33 @@ export type Message = {
   role: Role;
   content: string;
   error?: string;
+  /** Why a failed answer has no end: the person stopped it, or ai-space restarted under it. Absent on an ordinary failure. */
+  state?: MessageState;
+  /** On a person's message: how many earlier images of the thread were not shipped to the model on that turn. */
+  omitted?: number;
   /** The ledger row of the call that produced an answer. */
   callId?: number;
   createdAt: number;
+};
+
+export type MessageState = "stopped" | "interrupted";
+
+export type TurnStatus = "running" | "done" | "failed" | "stopped" | "interrupted";
+
+/** One turn as the service keeps it: which message asked, which answered, and how it ended. */
+export type TurnRecord = {
+  id: number;
+  app: string;
+  threadId: number;
+  /** The client's idempotency key; a turn posted without one is tied to its connection instead. */
+  requestId?: string;
+  status: TurnStatus;
+  userMessageId: number;
+  assistantMessageId?: number;
+  /** The answer so far, saved while it is written. */
+  partial: string;
+  createdAt: number;
+  finishedAt?: number;
 };
 
 export type Attachment = {
@@ -77,4 +109,6 @@ export type TurnInput = {
   tools: string[];
   thinking?: number;
   timeoutMs: number;
+  /** With one, the turn outlives the connection that posted it and a repeat of the same id is the same turn. */
+  requestId?: string;
 };
