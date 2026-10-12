@@ -87,7 +87,9 @@ export class PackageChannel {
     try {
       const response = await this.handler(meta, s.body!.stream, s.abort.signal);
       if (s.abort.signal.aborted) return;
-      this.send({ kind: "response", id, status: response.status, headers: [...response.headers] });
+      const headers = [...response.headers].filter(([name]) => name !== "set-cookie");
+      for (const cookie of response.headers.getSetCookie()) headers.push(["set-cookie", cookie]);
+      this.send({ kind: "response", id, status: response.status, headers });
       await this.pump(id, s, response.body);
       this.finish(id);
     } catch (e) { this.cancel(id, e as Error); }

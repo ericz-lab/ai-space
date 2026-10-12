@@ -34,6 +34,8 @@ export type Config = {
   apiToken: string;
   /** Host-owned Ed25519 public key files for package publishers; never supplied by uploaders. */
   packageTrustKeys: string[];
+  packagePort?: number;
+  packageBaseUrl?: string;
   maxConcurrency: number;
   /**
    * How long a shutdown waits for the task runs and model calls in flight before it
@@ -113,6 +115,8 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
   const router = loadRouterConfig(env);
   for (const w of router.warnings) console.warn(`[router] ${w}`);
   const supervisor = loadSupervisor(env);
+  const packagePort = env.SPACE_PACKAGE_PORT?.trim() ? Number(env.SPACE_PACKAGE_PORT) : undefined;
+  if (packagePort !== undefined && (!Number.isInteger(packagePort) || packagePort < 1 || packagePort > 65535)) throw new Error("SPACE_PACKAGE_PORT must be an integer from 1 to 65535");
   return {
     // One prefix per machine: several spaces sharing a bucket must not mix their `space/` (and same-named apps') snapshots.
     backupUrl: env.SPACE_BACKUP_URL?.trim() || (s3Configured && s3Bucket ? `s3://${s3Bucket}/backups/${name}/` : ""),
@@ -130,6 +134,8 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
       .map((p) => resolve(p.replace(/^~(?=$|\/)/, process.env.HOME ?? "~"))),
     apiToken: env.SPACE_API_TOKEN?.trim() ?? "",
     packageTrustKeys: (env.SPACE_PACKAGE_TRUST_KEYS ?? "").split(",").map((s) => s.trim()).filter(Boolean).map((p) => resolve(ws.home, p)),
+    packagePort,
+    packageBaseUrl: env.SPACE_PACKAGE_BASE_URL?.trim() || undefined,
     maxConcurrency: Math.max(1, Number(env.SPACE_MAX_CONCURRENCY ?? 2) || 2),
     drainMs: Math.max(0, Number(env.SPACE_DRAIN_SECONDS ?? 300) || 300) * 1000,
     pgAdminUrl: env.SPACE_PG_ADMIN_URL?.trim() ?? "",

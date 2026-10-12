@@ -31,6 +31,7 @@ import { PackageInstaller } from "./space/packages/install.ts";
 import { PackageRuntime } from "./space/packages/runtime.ts";
 import { Connections } from "./space/packages/connections.ts";
 import { PackageLinks, createConnectionRoutes } from "./space/packages/links.ts";
+import { PackageGateway, createPackageOpenRoutes } from "./space/packages/gateway.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { guardBrowserWrites } from "./space/auth.ts";
@@ -70,10 +71,14 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     await activatePackage(operation.app).catch((e) => console.error(`[packages] ${operation.app}: ${(e as Error).message}`));
   }
   const packageConnections = new Connections(store.db, packageStore.spaceId);
+  let packageGateway: PackageGateway;
   const packageLinks = new PackageLinks(packageConnections, {
     env,
+    handle: (_connection, meta, body, signal) => packageGateway.local(meta, body, signal),
     apps: () => packageStore.list().filter((o) => o.state === "installed" && packageRuntime.get(o.app)).map((o) => ({ app: o.app, title: packageRuntime.get(o.app)!.manifest.title ?? o.app, version: o.version })),
   });
+  packageGateway = new PackageGateway(packageRuntime, packageLinks, packageStore.spaceId);
+  if (config.packagePort !== undefined) packageGateway.start(config.packagePort, config.packageBaseUrl);
   packageLinks.refresh();
   const backups = await openBackups(config);
   const taskDefaults = backupTaskDefaults(ws, config);
@@ -366,6 +371,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...panelRoutes,
       ...createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, activate: activatePackage }),
       ...createConnectionRoutes({ links: packageLinks, token: config.apiToken }),
+      ...createPackageOpenRoutes(packageGateway, config.apiToken),
       ...createRouterRoutes({ router }),
       ...createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)) }),
       ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) }),
@@ -396,6 +402,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     terminal.stop();
     router.stop();
     packageLinks.close();
+    packageGateway.close();
     const at = Date.now();
     const [runs, calls, chats] = await Promise.all([scheduler.drain(config.drainMs), model.drain(config.drainMs), agentRuns.shutdown(config.drainMs)]);
     console.log(`[space] drained in ${Date.now() - at}ms: ${runs.finished} run(s) finished, ${runs.aborted} aborted; ${calls.finished} model call(s) finished, ${calls.interrupted} interrupted; ${chats.finished} chat turn(s) finished, ${chats.interrupted} interrupted`);
