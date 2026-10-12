@@ -14,7 +14,7 @@ export function createPackagePanelRoutes(opts: Parameters<typeof createPackageRo
       const connectionId = req.params.connection;
       const spaceId = connectionId ? opts.links.connections.get(connectionId)?.remoteSpaceId : opts.installer.store.spaceId;
       if (!spaceId) throw new Error("unknown Space connection");
-      const result = await opts.gateway.open({ app: req.params.app!, spaceId, ...(connectionId ? { connectionId } : {}) });
+      const result = await opts.gateway.open({ app: req.params.app!, spaceId, ...(connectionId ? { connectionId } : {}) }, new URL(req.url).searchParams.get("path") ?? "/");
       return new Response(null, { status: 303, headers: { location: result.url, "cache-control": "no-store", "referrer-policy": "no-referrer" } });
     } catch (e) { return new Response((e as Error).message, { status: 503 }); }
   };
@@ -22,6 +22,14 @@ export function createPackagePanelRoutes(opts: Parameters<typeof createPackageRo
     ...Object.fromEntries(Object.entries(packages).map(([path, value]) => [path.replace("/api/packages", "/api/panel/packages"), value])),
     ...Object.fromEntries(Object.entries(connections).filter(([path]) => path !== "/api/connections/channel").map(([path, value]) => [path.replace("/api/connections", "/api/panel/connections"), value])),
     "/_space/apps/:app": { GET: entry },
+    "/api/panel/packages/apps/:app/checks/:check": { GET: async (req: RequestWithParams) => {
+      const check = opts.runtime.get(req.params.app!)?.manifest.checks?.find((c) => c.name === req.params.check);
+      if (!check) return Response.json({ ok: false, error: "check not found" }, { status: 404 });
+      try {
+        const response = await opts.gateway.request(req.params.app!, check.path, { signal: AbortSignal.timeout(10_000) });
+        return Response.json(await response.json(), { status: response.status });
+      } catch { return Response.json({ ok: false, error: "check unavailable" }, { status: 502 }); }
+    } },
     "/_space/connections/:connection/apps/:app": { GET: entry },
     "/api/panel/package-catalogue": { GET: async () => {
       const apps = opts.installer.store.list().filter((o) => o.state === "installed").map((o) => {

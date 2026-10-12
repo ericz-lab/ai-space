@@ -33,6 +33,7 @@ import { Connections } from "./space/packages/connections.ts";
 import { PackageLinks, createConnectionRoutes } from "./space/packages/links.ts";
 import { PackageGateway, createPackageOpenRoutes } from "./space/packages/gateway.ts";
 import { runPackageTask } from "./space/packages/tasks.ts";
+import { loadAppEnv } from "./space/scheduler/targets.ts";
 import { PackageLifecycle } from "./space/packages/lifecycle.ts";
 import { createPackagePanelRoutes } from "./space/packages/panel.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
@@ -64,7 +65,9 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   await packageInstaller.recover();
   const packageTrustKeys = await Promise.all(config.packageTrustKeys.map((path) => Bun.file(path).text()));
   const storage = await openStorage(ws, config);
-  const packageRuntime = new PackageRuntime({ envFor: (app) => storage.envFor(app), logDir: ws.logs });
+  const packageEnvFor = async (app: string) => ({ ...await loadAppEnv(storage.appDataDir(app)), ...await storage.envFor(app) });
+  const appEnvFor = (app: string) => packageStore.list().some((o) => o.app === app && o.state === "installed") ? packageEnvFor(app) : storage.envFor(app);
+  const packageRuntime = new PackageRuntime({ envFor: packageEnvFor, logDir: ws.logs });
   let registerPackage: ((dir: string) => Promise<void>) | undefined;
   const activatePackage = async (app: string) => {
     const installed = await packageInstaller.load(app);
@@ -117,6 +120,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     store: busStore,
     events: store,
     servicePort: (app) => registry.get(app)?.manifest.service?.port,
+    appFetch: (app) => packageRuntime.get(app)?.manifest.launch?.kind === "process" ? (path, init) => packageGateway.request(app, path, init) : undefined,
     onDead: (d, event) =>
       void notify
         .send(isConsumerKey(d.app) ? "space" : d.app, { level: "alert", title: `event ${d.event} not delivered${isConsumerKey(d.app) ? ` to ${d.app}` : ""}`, text: `Delivery #${d.id} (${d.kind}) gave up after ${d.attempts} attempt(s): ${d.lastError ?? "no error text"}${event ? `\nEvent #${event.id} from ${event.app} at ${new Date(event.at).toISOString()}` : ""}`, key: `bus:${d.app}:${d.event}`, windowMs: 3_600_000 })
@@ -152,7 +156,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const scheduler = new Scheduler({
     store,
     maxConcurrency: config.maxConcurrency,
-    envFor: (app) => storage.envFor(app),
+    envFor: appEnvFor,
     runner: async (task, ctx) => {
       const startedAt = Date.now();
       const result = packageStore.list().some((o) => o.app === task.app && o.state === "installed")
@@ -172,7 +176,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // Panel chat turns run in the background: a page closing does not stop them (docs/panel.md#chat).
   const agentRuns = new RunRegistry(store.db, { timeoutMs: config.chatTimeoutMs, onRunStart: usage.runStarted, onRunEnd: usage.runEnded });
   const health = new HealthProbe();
-  const widgets = new WidgetFeed(registry);
+  const widgets = new WidgetFeed(registry, { appFetch: (app, path, init) => packageGateway.request(app, path, init) });
   const { peers: peerConfigs, errors: peerErrors } = loadPeers(env);
   for (const [name, reason] of peerErrors) console.error(`[peers] ${name}: ${reason}`);
   // Peers' events are mirrored here (docs/events.md): published under the same app name, marked with the peer.
@@ -313,6 +317,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   void router.sync();
 
   const panelRoutes = createPanelRoutes({
+    packageCheckUrl: (app, check) => `http://127.0.0.1:${config.port}/api/panel/packages/apps/${encodeURIComponent(app)}/checks/${encodeURIComponent(check)}`,
     ws,
     registry,
     layout,
@@ -343,7 +348,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) }
         : {}),
   });
-  const agentRoutes = createAgentRoutes({ holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: (app) => storage.envFor(app), peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
+  const agentRoutes = createAgentRoutes({ holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");

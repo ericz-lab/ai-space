@@ -18,6 +18,14 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 
 const manifest = (deploy: string) => `name: a\nservice: { command: bun src/index.ts, port: 8710, health: /healthz }\n${deploy}\n`;
 
+test("source deployment refuses package ownership before running git or commands", async () => {
+  await Bun.write(join(root, ".space-install.json"), "{}");
+  const forbidden = async (): Promise<never> => { throw new Error("must not execute"); };
+  const result = await prepareDeploy({ app: "a", dir: root, rev: "main", exec: forbidden, shell: forbidden });
+  expect(result).toMatchObject({ ok: false, step: "checkout" });
+  expect(await Bun.file(join(root, ".space-install.json")).text()).toBe("{}");
+});
+
 /** A source repository with two commits, the second carrying `second`; returns both shas. */
 async function source(second: { manifest: string; files?: Record<string, string> }): Promise<{ src: string; one: string; two: string }> {
   const src = join(root, "src");

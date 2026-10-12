@@ -15,6 +15,7 @@
     "new-app": "bun src/index.ts app new",
     "codex-upgrade": "bun src/index.ts codex-upgrade run",
     "space": "bun src/index.ts",
+    "package-pilot": "bun src/space/packages/pilot.ts",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test",
     "hooks": "git config core.hooksPath .githooks"

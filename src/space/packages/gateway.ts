@@ -11,11 +11,11 @@ import { processSocket, safeCloseCode, socketFrames, socketMessage, socketQueue 
 
 type Target = { app: string; spaceId: string; connectionId?: string };
 type Entry = Target & { label: string; origin: string };
-type Session = { entry: Entry; expires: number };
+type Session = { entry: Entry; expires: number; path?: string };
 const COOKIE = "__space_package_session";
 const TICKET_PATH = "/_space/package-session";
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
-const REQUEST_HEADERS = ["accept", "accept-language", "content-type", "range", "if-none-match", "if-modified-since", "last-event-id", "authorization", "cookie", "sec-websocket-protocol"];
+const PRIVATE_HEADERS = new Set(["host", "origin", "connection", "upgrade", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "content-length", "forwarded"]);
 
 /** An app-only virtual-host server, deliberately separate from the operator panel's routes. */
 export class PackageGateway {
@@ -37,7 +37,8 @@ export class PackageGateway {
 
   close(): void { this.server?.stop(true); this.tickets.clear(); this.sessions.clear(); this.entries.clear(); }
 
-  async open(target: Target): Promise<{ url: string; spaceId: string; app: string }> {
+  async open(target: Target, path = "/"): Promise<{ url: string; spaceId: string; app: string }> {
+    requestPath(path);
     if (!this.base) throw new Error("application gateway is disabled; configure SPACE_PACKAGE_PORT");
     installationKey(target.spaceId, target.app);
     if (target.spaceId === this.spaceId) {
@@ -56,12 +57,12 @@ export class PackageGateway {
     const entry = { ...target, label, origin: origin.origin };
     this.entries.set(origin.host, entry);
     const ticket = randomBytes(32).toString("base64url");
-    this.tickets.set(ticket, { entry, expires: Date.now() + 30_000 });
+    this.tickets.set(ticket, { entry, path, expires: Date.now() + 30_000 });
     return { url: `${origin.origin}${TICKET_PATH}?ticket=${ticket}`, spaceId: target.spaceId, app: target.app };
   }
 
   /** The owning Space calls this only after its connection's local app grant was checked. */
-  async local(meta: unknown, body: ReadableStream<Uint8Array> | null, signal: AbortSignal): Promise<Response> {
+  async local(meta: unknown, body: ReadableStream<Uint8Array> | null, signal: AbortSignal, trustedHeaders = false): Promise<Response> {
     const m = mapping(meta, "app request", ["operation", "app", "path", "method", "headers"]);
     const app = text(m.app, "app", 64);
     const path = requestPath(m.path);
@@ -84,7 +85,7 @@ export class PackageGateway {
     const release = () => { signal.removeEventListener("abort", abort); controller.abort(); lease.release(); };
     try {
       const origin = `http://127.0.0.1:${lease.port}`;
-      const headers = appHeaders(m.headers);
+      const headers = trustedHeaders ? new Headers(m.headers as HeadersInit) : appHeaders(m.headers);
       headers.set("origin", origin);
       const response = await fetch(origin + path, { method, headers, body: method === "GET" || method === "HEAD" ? null : body, redirect: "manual", signal: controller.signal, decompress: false });
       const output = new Headers(response.headers);
@@ -97,6 +98,12 @@ export class PackageGateway {
       output.delete("transfer-encoding"); output.delete("connection");
       return holdResponse(response, output, release);
     } catch (e) { release(); throw e; }
+  }
+
+  /** Host-owned calls keep bus/task headers; this entry point is not exposed through peer metadata. */
+  request(app: string, path: string, init: RequestInit = {}): Promise<Response> {
+    const req = new Request("http://local" + requestPath(path), init);
+    return this.local({ operation: "fetch", app, path, method: req.method, headers: [...req.headers] }, req.body, req.signal, true);
   }
 
   private async localSocket(app: string, path: string, rawHeaders: unknown, body: ReadableStream<Uint8Array> | null, signal: AbortSignal): Promise<Response> {
@@ -118,7 +125,8 @@ export class PackageGateway {
       this.sessions.set(session, { entry, expires: Date.now() + 12 * 3600_000 });
       // Commit a document on the app origin before navigating: Strict cookies are omitted in
       // a cross-site HTTP redirect chain, including a freshly issued cookie on its final hop.
-      return new Response('<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=/"><title>Opening application</title><a href="/">Open application</a>', { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'", "cache-control": "no-store", "referrer-policy": "no-referrer", "set-cookie": `${COOKIE}=${session}; HttpOnly; SameSite=Strict; Path=/${entry.origin.startsWith("https:") ? "; Secure" : ""}` } });
+      const path = (ticket.path ?? "/").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+      return new Response(`<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${path}"><title>Opening application</title><a href="${path}">Open application</a>`, { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'", "cache-control": "no-store", "referrer-policy": "no-referrer", "set-cookie": `${COOKIE}=${session}; HttpOnly; SameSite=Strict; Path=/${entry.origin.startsWith("https:") ? "; Secure" : ""}` } });
     }
     const values = (req.headers.get("cookie") ?? "").split(";").map((p) => p.trim()).filter((p) => p.startsWith(`${COOKIE}=`)).map((p) => p.slice(COOKIE.length + 1));
     const session = values.length === 1 ? this.sessions.get(values[0]!) : undefined;
@@ -195,12 +203,16 @@ export class PackageGateway {
 function appHeaders(raw: unknown): Headers {
   const input = new Headers(raw as HeadersInit | undefined);
   const headers = new Headers();
-  for (const key of REQUEST_HEADERS) { const value = input.get(key); if (value !== null) headers.set(key, value); }
+  const nominated = new Set((input.get("connection") ?? "").toLowerCase().split(",").map((v) => v.trim()));
+  for (const [key, value] of input) {
+    if (PRIVATE_HEADERS.has(key) || nominated.has(key) || key.startsWith("x-forwarded-") || key.startsWith("x-space-") || key.startsWith("sec-") && key !== "sec-websocket-protocol") continue;
+    headers.set(key, value);
+  }
   return headers;
 }
 function requestPath(raw: unknown): string {
   const path = text(raw, "path", 8192);
-  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || path.includes("#")) throw new Error("application path must be local");
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || path.includes("#") || /[\x00-\x20\x7f]/.test(path)) throw new Error("application path must be local");
   return path;
 }
 function holdResponse(response: Response, headers: Headers, release: () => void): Response {

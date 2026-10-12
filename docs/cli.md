@@ -161,7 +161,7 @@ custom system instructions are supported in either mode. See [completion modes](
 
 ### Package applications and Hub connections
 
-`space app pack DIR --output FILE --include web,dist --target any/any` builds an explicitly selected artifact. `space app inspect-package FILE --check-host` verifies it without running code. On the selected Space (`--url`, with its operator credential), use:
+`space app pack DIR --output FILE --include web,dist --target any/any` builds an explicitly selected artifact. Add `--manifest FILE` to use a reviewed spec-2 release manifest without changing the source tree's legacy manifest; see [package-migration.md](package-migration.md). `space app inspect-package FILE --check-host` verifies it without running code. On the selected Space (`--url`, with its operator credential), use:
 
 ```sh
 space app install notes.spaceapp

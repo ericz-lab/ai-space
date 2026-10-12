@@ -4,6 +4,27 @@ import { Bus, CallError, type Fetch } from "./bus.ts";
 import { BusStore } from "./store.ts";
 import { ACK_TIMEOUT_MS, type DeliveryPayload, MAX_ATTEMPTS, RETRY_DELAYS_MS } from "./types.ts";
 
+test("dynamic package providers need no fixed port and release delivery response bodies", async () => {
+  const events = new Store(":memory:"), store = new BusStore(":memory:");
+  const calls: { path: string; headers: Headers }[] = [];
+  let cancelled = false;
+  const bus = new Bus({ store, events, servicePort: () => undefined, log: () => {}, appFetch: () => async (path, init) => {
+    calls.push({ path, headers: new Headers(init.headers) });
+    return path === "/events" ? new Response(new ReadableStream({ cancel() { cancelled = true; } })) : Response.json({ answer: 42 });
+  } });
+  try {
+    bus.syncApp("app", { events: { publishes: [], consumes: [{ event: "source/updated", kind: "http", method: "POST", path: "/events" }] }, provides: [{ name: "answer", method: "GET", path: "/answer", timeoutMs: 1000 }] });
+    bus.onEvent(events.addEvent({ app: "source", name: "updated", data: {} }, Date.now()));
+    await bus.tick();
+    expect(cancelled).toBe(true);
+    const result = await bus.call("caller", "app", "answer");
+    expect(JSON.parse(new TextDecoder().decode(result.body))).toEqual({ answer: 42 });
+    expect(calls.map((c) => c.path)).toEqual(["/events", "/answer"]);
+    expect(calls[0]!.headers.get("x-space-event")).toBe("source/updated");
+    expect(calls[1]!.headers.get("x-space-caller")).toBe("caller");
+  } finally { store.close(); events.close(); }
+});
+
 /** Fake clock, scripted fetch (one answer per call, in order), no timers: ticks are driven by hand. */
 function harness(answers: (number | Error | ((url: string, init: RequestInit) => Response))[] = []) {
   let t = Date.parse("2026-09-22T00:00:00Z");

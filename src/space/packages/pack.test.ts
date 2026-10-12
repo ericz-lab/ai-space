@@ -34,6 +34,19 @@ test("package round trip is deterministic, offline and contains only selected fi
   await expect(packApplication(opts)).rejects.toThrow(/exist/);
 });
 
+test("release manifest overrides leave legacy source unchanged and exclude named environment files", async () => {
+  const opts = await fixture();
+  const release = await Bun.file(join(opts.dir, "space.yaml")).text();
+  const legacy = "spec: 1\nname: demo\nservice: {command: bun app.ts, port: 8980}\n";
+  await Bun.write(join(opts.dir, "space.yaml"), legacy);
+  await Bun.write(join(opts.dir, "config.env"), "SECRET=not-shipped");
+  await packApplication({ ...opts, manifest: release, include: [...opts.include, "config.env"] });
+  const inspected = await inspectPackage(new Uint8Array(await Bun.file(opts.output).arrayBuffer()));
+  expect(inspected.manifest.spec).toBe(2);
+  expect(inspected.files.has("config.env")).toBe(false);
+  expect(await Bun.file(join(opts.dir, "space.yaml")).text()).toBe(legacy);
+});
+
 test("signatures cover the exact inventory and require an independently trusted key", async () => {
   const opts = await fixture();
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");

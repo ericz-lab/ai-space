@@ -1,6 +1,17 @@
 import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { parseManifest } from "../scheduler/manifest.ts";
 import { WidgetFeed } from "./widgets.ts";
+import { parsePackageManifest } from "../packages/manifest.ts";
+
+test("package item widgets use dynamic services and isolated application deep links", async () => {
+  const parsed = parsePackageManifest("spec: 2\nname: n\nversion: 1.0.0\nrequires: { spaceApi: 1, bun: 1.3.0 }\noffline: { features: [Read], online: [] }\nlaunch: { kind: process, runtime: bun, entry: app.ts, health: /healthz }\nwidgets:\n  - { name: w, source: /api/widget }\n");
+  const m = { ...parsed, url: "/_space/apps/n" };
+  const feed = new WidgetFeed({ list: () => [{ manifest: m }] } as never, { appFetch: async (app, path) => {
+    expect([app, path]).toEqual(["n", "/api/widget"]);
+    return Response.json({ ok: true, items: [{ text: "note", url: "/notes?id=1" }] });
+  } });
+  expect(await feed.one(m, m.widgets[0]!)).toMatchObject({ ok: true, items: [{ url: "/_space/apps/n?path=%2Fnotes%3Fid%3D1" }] });
+});
 
 afterEach(() => setSystemTime());
 

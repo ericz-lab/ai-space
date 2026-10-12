@@ -43,6 +43,7 @@ export function parsePackageManifest(yaml: string): PackageManifest {
   const backup = parseBackupSpec(doc.backup);
   if (backup.schedule && !backup.timezone) throw new Error("backup.schedule requires an explicit timezone");
   const { spec: _spec, service: _service, url: _url, deploy: _deploy, ...rest } = legacy;
+  if (legacy.widgets.some((w) => w.kind === "embed")) throw new Error("package embed widgets require isolated frame support; use an items widget or the app page");
   for (const agent of legacy.agents) {
     if (agent.cwd !== ".") packagePath(agent.cwd, "agent.cwd");
     if (agent.prompt) packagePath(agent.prompt.replace(/^\.\//, ""), "agent.prompt");

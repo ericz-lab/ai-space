@@ -60,6 +60,8 @@ export type BusOptions = {
   events: { getEvent(id: number): SpaceEvent | undefined };
   /** Loopback port of an app's service; undefined = it has none (deliveries are skipped, calls answer 503). */
   servicePort: (app: string) => number | undefined;
+  /** Optional dynamically activated local service, retaining its lease through the response. */
+  appFetch?: (app: string) => Fetch | undefined;
   fetch?: Fetch;
   now?: () => number;
   log?: (message: string) => void;
@@ -96,6 +98,7 @@ export class Bus {
   private readonly store: BusStore;
   private readonly events: BusOptions["events"];
   private readonly servicePort: BusOptions["servicePort"];
+  private readonly appFetch?: BusOptions["appFetch"];
   private readonly fetch: Fetch;
   private readonly now: () => number;
   private readonly log: (message: string) => void;
@@ -114,6 +117,7 @@ export class Bus {
     this.store = opts.store;
     this.events = opts.events;
     this.servicePort = opts.servicePort;
+    this.appFetch = opts.appFetch;
     this.fetch = opts.fetch ?? ((url, init) => fetch(url, init));
     this.now = opts.now ?? Date.now;
     this.log = opts.log ?? ((m) => console.log(`[bus] ${m}`));
@@ -361,11 +365,12 @@ export class Bus {
     if (!e) return this.skip(d, "event pruned before delivery", now);
     if (!this.specs.has(d.app)) return this.skip(d, "app left the space", now);
     const port = this.servicePort(d.app);
-    if (!port) return this.skip(d, "app has no service port", now);
+    const appFetch = this.appFetch?.(d.app);
+    if (!port && !appFetch) return this.skip(d, "app has no service port", now);
     const attempts = d.attempts + 1;
     const url = `http://127.0.0.1:${port}${d.path}`;
     try {
-      const res = await this.fetch(url, {
+      const res = await (appFetch ?? this.fetch)(appFetch ? d.path! : url, {
         method: d.method ?? "POST",
         headers: {
           "content-type": "application/json",
@@ -379,6 +384,7 @@ export class Bus {
       });
       const ended = this.now();
       if (res.ok) {
+        await res.body?.cancel();
         this.store.patchDelivery(d.id, { status: "ok", attempts, lastStatus: res.status, lastError: undefined, endedAt: ended, nextAt: undefined });
         return true;
       }
@@ -455,7 +461,8 @@ export class Bus {
     if (!cap) throw new CallError(404, this.specs.has(app) ? `${app} does not provide "${name}"` : `unknown app: ${app}`);
     if (cap.callers && !cap.callers.includes(caller)) throw new CallError(403, `${app}/${name} does not accept calls from ${caller}`);
     const port = this.servicePort(app);
-    if (!port) throw new CallError(503, `${app} has no running service to call`);
+    const appFetch = this.appFetch?.(app);
+    if (!port && !appFetch) throw new CallError(503, `${app} has no running service to call`);
     const startedAt = this.now();
     const record = (status: number, ok: boolean, error?: string): CallRecord =>
       this.store.addCall({ caller, app, capability: name, status, ok, durationMs: Math.max(0, this.now() - startedAt), ...(error ? { error } : {}), at: startedAt });
@@ -464,7 +471,7 @@ export class Bus {
     let res: Response | undefined;
     let body: ArrayBuffer;
     try {
-      res = await this.fetch(`http://127.0.0.1:${port}${cap.path}`, {
+      res = await (appFetch ?? this.fetch)(appFetch ? cap.path : `http://127.0.0.1:${port}${cap.path}`, {
         method: cap.method,
         headers: {
           ...(req.contentType ? { "content-type": req.contentType } : {}),

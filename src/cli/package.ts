@@ -10,6 +10,7 @@ export async function packVerb(ctx: Ctx, argv: string[]): Promise<number> {
   const { flags, positional } = parseArgs(argv, {
     output: { kind: "value" }, include: { kind: "value" }, target: { kind: "value" },
     "source-included": { kind: "bool" }, "sign-key": { kind: "value" },
+    manifest: { kind: "value" },
   });
   const dir = resolve(ctx.io.cwd, need(positional, 0, "DIR"));
   noMore(positional, 1);
@@ -20,6 +21,7 @@ export async function packVerb(ctx: Ctx, argv: string[]): Promise<number> {
     dir, output, include: flags.include ? String(flags.include).split(",") : [],
     target: { os: choice(os, "target.os", ["any", "linux", "darwin"]), arch: choice(arch, "target.arch", ["any", "x64", "arm64"]) },
     sourceIncluded: !!flags["source-included"],
+    ...(flags.manifest ? { manifest: await Bun.file(resolve(ctx.io.cwd, String(flags.manifest))).text() } : {}),
     ...(flags["sign-key"] ? { signingKey: await Bun.file(resolve(ctx.io.cwd, String(flags["sign-key"]))).text() } : {}),
   });
   if (ctx.flags.json) ctx.print.data(result);

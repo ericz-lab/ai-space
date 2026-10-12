@@ -109,6 +109,7 @@ export function avatarUrl(m: Manifest, a: ManifestAgent): string {
 /** A widget or agent link relative to the app's public URL; falls back to the app URL or empty. */
 export function resolveLink(m: Manifest, link: string | undefined): string {
   if (link && /^https?:\/\//.test(link)) return link;
+  if (m.spec === 2 && m.url) return link ? `${m.url}?path=${encodeURIComponent(link.startsWith("/") ? link : "/" + link)}` : m.url;
   if (!m.url) return "";
   if (!link) return m.url;
   try {

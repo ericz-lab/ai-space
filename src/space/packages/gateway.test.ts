@@ -30,7 +30,7 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: Number(process.env.PORT)
     if (path === "/redirect") return new Response(null, {status: 302, headers: {location: "http://127.0.0.1:"+server.port+"/api/echo"}});
     if (path === "/cookies") { const h=new Headers(); h.append("set-cookie", "one=1; Domain=localhost; Path=/"); h.append("set-cookie", "two=2; Path=/"); return new Response("cookies",{headers:h}); }
     if (path === "/stream") return new Response(new ReadableStream({start(c){c.enqueue(new TextEncoder().encode("data: started\\n\\n"));}}), {headers:{"content-type":"text/event-stream"}});
-    return Response.json({label:process.env.LABEL, method:req.method, body:await req.text(),cookie:req.headers.get("cookie")});
+    return Response.json({label:process.env.LABEL, method:req.method, body:await req.text(),cookie:req.headers.get("cookie"), custom:req.headers.get("x-keep-token"), caller:req.headers.get("x-space-caller"), forwarded:req.headers.get("x-forwarded-host")});
   }, websocket: {message(ws,m){ws.send(m)}}
 });`);
   const manifest = parsePackageManifest("spec: 2\nname: notes\nversion: 1.0.0\nrequires: { spaceApi: 1, bun: 1.3.0 }\noffline: { features: [Read], online: [] }\nlaunch: { kind: process, runtime: bun, entry: app.ts, health: /healthz, idleTimeoutMs: 1000 }\n");
@@ -68,6 +68,9 @@ test("local app has an isolated authenticated origin, proxies writes and preserv
   expect((await b.request("/redirect")).headers.get("location")).toBe("/api/echo");
   const cookies = (await b.request("/cookies")).headers.getSetCookie();
   expect(cookies).toHaveLength(2); expect(cookies.join(";")).not.toContain("Domain=");
+  expect(await (await b.request("/api/echo", { headers: { "x-keep-token": "app-secret", "x-space-caller": "operator", "x-forwarded-host": "spoofed" } })).json()).toMatchObject({ custom: "app-secret", caller: null, forwarded: null });
+  expect(await (await m.gateway.request("notes", "/api/echo", { headers: { "x-space-caller": "trusted-app" } })).json()).toMatchObject({ caller: "trusted-app" });
+  await expect(m.gateway.open({ app: "notes", spaceId: m.connections.spaceId }, "//evil.example")).rejects.toThrow(/local/);
 });
 
 test("a streaming response holds its runtime lease until cancellation", async () => {

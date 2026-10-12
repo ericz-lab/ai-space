@@ -21,6 +21,8 @@ export async function packApplication(opts: {
   output: string;
   target: PackageTarget;
   sourceIncluded: boolean;
+  /** Reviewed release declaration; preserves the source checkout's legacy deployment manifest. */
+  manifest?: string;
   signingKey?: string;
   limit?: number;
 }): Promise<{ path: string; app: string; version: string; files: number; bytes: number; sha256: string; excluded: string[] }> {
@@ -56,6 +58,11 @@ export async function packApplication(opts: {
     files.set(path, { path, bytes: content, executable: !!(stat.mode & 0o111) });
   };
   for (const path of ["space.yaml", ...opts.include]) await visit(path);
+  if (opts.manifest !== undefined) {
+    const content = new TextEncoder().encode(opts.manifest);
+    if (content.length > MAX_METADATA_BYTES) throw new Error("release manifest exceeds metadata limit");
+    files.set("space.yaml", { path: "space.yaml", bytes: content, executable: false });
+  }
   const entries = [...files.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   const index = parsePackageIndex({ format: 1, target: opts.target, sourceIncluded: opts.sourceIncluded, files: entries.map((f) => ({ path: f.path, size: f.bytes.length, sha256: sha256(f.bytes), executable: f.executable })) });
   const manifest = validatePayload(index, files);
@@ -142,7 +149,7 @@ function excludedPath(path: string): boolean {
   return path.split("/").some((part) => {
     const p = part.toLowerCase();
     return [".git", ".ssh", "data", "logs", "secrets", "space.env", ".ds_store", "id_rsa", "id_ed25519"].includes(p)
-      || (p === ".env" || p.startsWith(".env.")) && p !== ".env.example"
+      || (p === ".env" || p.startsWith(".env.") || p.endsWith(".env") || p.includes(".env.")) && !p.endsWith(".env.example")
       || /\.(db|sqlite|sqlite3)(-wal|-shm)?$/.test(p) || /\.(pem|key|log)$/.test(p);
   });
 }

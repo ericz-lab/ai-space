@@ -70,6 +70,7 @@ export async function prepareDeploy(opts: PrepareOptions): Promise<PrepareResult
   const log = opts.log ?? (() => {});
   const { dir } = opts;
   if (!existsSync(dir)) return { ok: false, step: "checkout", error: `${dir} does not exist` };
+  if (existsSync(join(dir, ".space-install.json"))) return { ok: false, step: "checkout", error: "package-managed application: use app upgrade instead of source deployment" };
 
   let source: Source | undefined;
   let rev: string | undefined;

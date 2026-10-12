@@ -242,7 +242,7 @@ export const appNoun: Noun = {
     open: { usage: "APP [--space-id UUID --connection UUID]", summary: "print a one-use URL for a local or authorized remote package app", run: openPackageVerb },
     rollback: { usage: "APP RETAINED_OPERATION_ID [--yes] [--operation-id UUID]", summary: "restore retained package code without restoring data", run: packageChangeVerb("rollback") },
     "remove-package": { usage: "APP [--yes] [--operation-id UUID]", summary: "unregister a package and retain code and data", run: packageChangeVerb("remove") },
-    pack: { usage: "DIR --output FILE [--include PATH,...] [--target OS/ARCH] [--source-included] [--sign-key FILE]", summary: "create an offline application package from explicitly selected prepared files", run: packVerb },
+    pack: { usage: "DIR --output FILE [--include PATH,...] [--manifest FILE] [--target OS/ARCH] [--source-included] [--sign-key FILE]", summary: "create an offline application package from explicitly selected prepared files", run: packVerb },
     "inspect-package": { usage: "FILE [--trusted-key FILE] [--check-host]", summary: "verify package contents and inspect its signature without executing code", run: inspectPackageVerb },
     ls: { usage: "[--panel]", summary: "every app (--panel: only what the panel shows)", run: ls },
     show: { usage: "APP", summary: "manifest, storage, backups and tasks of one app", run: show },
