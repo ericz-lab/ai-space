@@ -1,0 +1,163 @@
+import SwiftUI
+
+/// An icon or avatar from the Space: an emoji, a loaded image, or a symbol while it loads.
+struct EntryIcon: View {
+    let icon: String?
+    let fallback: String
+    @ObservedObject var icons: IconStore
+    var size: CGFloat = 60
+
+    var body: some View {
+        let radius = size * 0.26
+        Group {
+            if let emoji = Icon.emoji(icon) {
+                Text(verbatim: emoji).font(.system(size: size * 0.52))
+                    .frame(width: size, height: size)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            } else if let image = icons.image(icon) {
+                Image(uiImage: image).resizable().scaledToFit().frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            } else {
+                Image(systemName: fallback).font(.system(size: size * 0.4)).foregroundStyle(.secondary)
+                    .frame(width: size, height: size)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.hairline))
+        .accessibilityHidden(true)
+    }
+}
+
+struct EntryTile: View {
+    let entry: CatalogueEntry
+    @ObservedObject var icons: IconStore
+    let peer: PeerStatus?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                EntryIcon(icon: entry.icon, fallback: entry.kind == .agent ? "person.crop.circle" : "app", icons: icons)
+                    .overlay(alignment: .topTrailing) { badge.offset(x: 4, y: -4) }
+                    .opacity(dimmed ? 0.5 : 1)
+                Text(verbatim: entry.displayTitle())
+                    .font(.caption.weight(.medium)).foregroundStyle(Theme.text)
+                    .multilineTextAlignment(.center).lineLimit(2)
+                    .frame(maxWidth: .infinity)
+                if let note {
+                    Text(note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: entry.displayTitle()))
+        .accessibilityValue(Text(stateLabel))
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var dimmed: Bool { entry.reach == .peerOffline || entry.reach == .paused }
+
+    /// The line under the title: the peer the entry lives on, or why it will not answer.
+    private var note: String? {
+        switch entry.reach {
+        case .down: return String(localized: "not answering")
+        case .paused: return String(localized: "paused")
+        case .peerOffline: return entry.peer.map { String(localized: "\($0) offline") } ?? String(localized: "offline")
+        default: return entry.peer
+        }
+    }
+
+    private var stateLabel: String {
+        switch entry.reach {
+        case .up: return String(localized: "running")
+        case .unknown, .link: return entry.peer ?? ""
+        default: return note ?? ""
+        }
+    }
+
+    @ViewBuilder private var badge: some View {
+        switch entry.reach {
+        case .up: dot(Theme.success)
+        case .down: dot(Theme.danger)
+        case .peerOffline: symbol("wifi.slash")
+        case .paused: symbol("pause.fill")
+        case .unknown, .link: EmptyView()
+        }
+    }
+
+    private func dot(_ color: Color) -> some View {
+        Circle().fill(color).frame(width: 12, height: 12).overlay(Circle().strokeBorder(Theme.solid, lineWidth: 2))
+    }
+
+    private func symbol(_ name: String) -> some View {
+        Image(systemName: name).font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+            .frame(width: 18, height: 18).background(Color.gray, in: Circle())
+            .overlay(Circle().strokeBorder(Theme.solid, lineWidth: 2))
+    }
+}
+
+/// A widget of the Space as a card: its latest rows as the Space last read them from the app.
+/// A widget drawn by the app itself (an embedded page) opens in the app's page instead.
+struct WidgetCard: View {
+    let widget: CatalogWidget
+    @ObservedObject var icons: IconStore
+    let isFavorite: Bool
+    /// Opens a row's link, or the widget's own page for nil.
+    let open: (String?) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { open(nil) } label: {
+                HStack(spacing: 10) {
+                    EntryIcon(icon: widget.icon, fallback: "rectangle.3.group", icons: icons, size: 28)
+                    Text(verbatim: Lang.pick(widget.title, widget.i18n, \.title)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                    if let peer = widget.peer { Text(verbatim: peer).font(.caption).foregroundStyle(.secondary) }
+                    Spacer(minLength: 0)
+                    if isFavorite { Image(systemName: "star.fill").font(.caption).foregroundStyle(Theme.warning).accessibilityLabel(Text("Favorite")) }
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Divider()
+            rows.padding(.horizontal, 14).padding(.vertical, 10)
+        }
+        .glass()
+        .opacity(widget.stale == true ? 0.6 : 1)
+    }
+
+    @ViewBuilder private var rows: some View {
+        if widget.ok == false {
+            Label { Text(verbatim: widget.error ?? String(localized: "not answering")) } icon: { Image(systemName: "exclamationmark.circle") }
+                .font(.footnote).foregroundStyle(.secondary)
+        } else if widget.kind == "embed" {
+            Text("Drawn by the app. Open it to see.").font(.footnote).foregroundStyle(.secondary)
+        } else if let items = widget.items, !items.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(items.prefix(4).enumerated()), id: \.offset) { _, item in
+                    Button { open(item.url) } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(verbatim: item.text).font(.subheadline).foregroundStyle(Theme.text).lineLimit(2).multilineTextAlignment(.leading)
+                            Spacer(minLength: 8)
+                            if let date = item.time.flatMap(Times.parse) {
+                                Text(verbatim: Times.ago(date))
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).layoutPriority(1)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                if widget.stale == true {
+                    Text("Last known; its machine is offline.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            Text("Nothing to show.").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+}

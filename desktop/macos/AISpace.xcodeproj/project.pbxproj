@@ -1,0 +1,583 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		068F158F3D76C5E33C003660 /* ConnectionStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBFE87C7A9C4B1F8341F2A21 /* ConnectionStoreTests.swift */; };
+		0C77DE7BD96D2CB7261FD454 /* SpaceCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D0E317F0870DDFFA7CC375B /* SpaceCheck.swift */; };
+		3AE251EEF63C15134ACD40C5 /* AISpaceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D600D381A80916B86183CC5 /* AISpaceApp.swift */; };
+		41AD44EC6FE641BD0FB47C7F /* SpaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689A4C7B3EDEA0DB45D3DDEE /* SpaceModels.swift */; };
+		4220E00EC21FCBC3A83D25D9 /* ChatStreamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35F50DEC4652C093798D4BD4 /* ChatStreamTests.swift */; };
+		63339534FB210EC40879A141 /* PanelWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DAEF61AC51912B0F389D2A7 /* PanelWebView.swift */; };
+		6878425197B3210BB49A1813 /* SpaceCheckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A2CAB5E54700355EBDC17 /* SpaceCheckTests.swift */; };
+		767F15D30E46A926FF467A1F /* Preferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20B50FE851051A67C4F681C /* Preferences.swift */; };
+		78B7371A7A5903A9314465D7 /* HotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 997D75FEF3DD86EA8D26B5A8 /* HotKey.swift */; };
+		8F4FEB170DC9FA0F19365253 /* SpaceLive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6340C48A17B9D17172ACCB56 /* SpaceLive.swift */; };
+		91E56D0C2210DA2D1F32A047 /* NavigationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61162809EB69AE573A95376 /* NavigationPolicy.swift */; };
+		92359CF6B1AB227019AD3782 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D448B77713420B9C5A5EEDD7 /* ChatView.swift */; };
+		92895D1E42713BF8D4524913 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4006574B7F93B9EE117663AB /* MainView.swift */; };
+		A7422A710B6CF003150D2D9B /* ChatController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06E5A196F46E34241D86027F /* ChatController.swift */; };
+		AB89490D5E4404A8926FFC80 /* DesktopRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA6D130858D1D70A78FCC69F /* DesktopRules.swift */; };
+		AD67C731330EC453DC6F239F /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 3E98F2815C0F7222F77A6E3C /* Localizable.strings */; };
+		AF5E347C32F0B70C75E24E4E /* PanelSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A12CCB54B34FEB2DD082944 /* PanelSession.swift */; };
+		B3084E4CBA24B7FEE6F0F293 /* InboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1929568A20DD1284CAA1D7D3 /* InboxView.swift */; };
+		B4D4D3E7AD99BA5D45D42601 /* DesktopRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B1B2AF632C7C5C500B74AA /* DesktopRulesTests.swift */; };
+		B60C1BC5DA19DC8431341F68 /* ConnectionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07D433BA9AC048F21AC08977 /* ConnectionSettings.swift */; };
+		C0482ED95461E2E92CAAD43A /* Connection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BFB91DB9E338925FE8BBD1F /* Connection.swift */; };
+		C57C08D6B333E957DCA6FEB6 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBF0A76C75AB625B76B33DA8 /* AppModel.swift */; };
+		C834661133EF60312D297EEF /* GeneralSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24E765CBD4C0B3DFBD8C0963 /* GeneralSettings.swift */; };
+		C8A2E4613F2179E76B6BB112 /* Notifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E2A011F98D582DF19559C3A /* Notifier.swift */; };
+		DACBA7EE8202BB2D3BF41C77 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = F748DACACF7AFC5A78106169 /* AppIcon.icns */; };
+		DF4E2C7E64D1904127C018DB /* QuickChat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0495B5D192024EFFB79D7AB6 /* QuickChat.swift */; };
+		E3DDBDFDC7363266DF631B2F /* ConnectionRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A5F720897FA7EAB07098E99 /* ConnectionRulesTests.swift */; };
+		EC36CA0F525586D538A7C2DE /* NavigationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52729B0ED8E899C5BA568374 /* NavigationPolicyTests.swift */; };
+		FA618579A11448FB05B1B16D /* AppWindows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B7FFA32C183F3DC418BE58 /* AppWindows.swift */; };
+		FA7B3C79D523D3142D7FE741 /* ConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE1F1F9182F48C764DCBCBD /* ConnectionStore.swift */; };
+		FC41594D49B2E41366BE0427 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1332C1D01848A19B2FA03323 /* MenuBarView.swift */; };
+		FD1B2FEF2ED4D379A2386F1E /* ChatStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDB619A2B1FFFE69951FC9B /* ChatStream.swift */; };
+		FEFB9D3EEE59D225FB3D0B81 /* SpaceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD93F537EFEEEEC0864886FF /* SpaceAPI.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		BCAC580BA4FA33A93225E2BC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 26693DC446601C35F66D8DF4 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7141303FD599D99D2A95E0DE;
+			remoteInfo = AISpace;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0495B5D192024EFFB79D7AB6 /* QuickChat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickChat.swift; sourceTree = "<group>"; };
+		06E5A196F46E34241D86027F /* ChatController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatController.swift; sourceTree = "<group>"; };
+		07D433BA9AC048F21AC08977 /* ConnectionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSettings.swift; sourceTree = "<group>"; };
+		09B1B2AF632C7C5C500B74AA /* DesktopRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopRulesTests.swift; sourceTree = "<group>"; };
+		1332C1D01848A19B2FA03323 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		1929568A20DD1284CAA1D7D3 /* InboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxView.swift; sourceTree = "<group>"; };
+		1D600D381A80916B86183CC5 /* AISpaceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISpaceApp.swift; sourceTree = "<group>"; };
+		24E765CBD4C0B3DFBD8C0963 /* GeneralSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettings.swift; sourceTree = "<group>"; };
+		2A5F720897FA7EAB07098E99 /* ConnectionRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionRulesTests.swift; sourceTree = "<group>"; };
+		2BFB91DB9E338925FE8BBD1F /* Connection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Connection.swift; sourceTree = "<group>"; };
+		35F50DEC4652C093798D4BD4 /* ChatStreamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStreamTests.swift; sourceTree = "<group>"; };
+		3AE1F1F9182F48C764DCBCBD /* ConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStore.swift; sourceTree = "<group>"; };
+		4006574B7F93B9EE117663AB /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		4B7D69376B41451E1986F0EE /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		52729B0ED8E899C5BA568374 /* NavigationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationPolicyTests.swift; sourceTree = "<group>"; };
+		5A12CCB54B34FEB2DD082944 /* PanelSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelSession.swift; sourceTree = "<group>"; };
+		6340C48A17B9D17172ACCB56 /* SpaceLive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceLive.swift; sourceTree = "<group>"; };
+		689A4C7B3EDEA0DB45D3DDEE /* SpaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceModels.swift; sourceTree = "<group>"; };
+		6D0E317F0870DDFFA7CC375B /* SpaceCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceCheck.swift; sourceTree = "<group>"; };
+		6DAEF61AC51912B0F389D2A7 /* PanelWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelWebView.swift; sourceTree = "<group>"; };
+		6DDB619A2B1FFFE69951FC9B /* ChatStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStream.swift; sourceTree = "<group>"; };
+		6E2A011F98D582DF19559C3A /* Notifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifier.swift; sourceTree = "<group>"; };
+		997D75FEF3DD86EA8D26B5A8 /* HotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKey.swift; sourceTree = "<group>"; };
+		9C0A0491487C714C3B6BE85D /* AISpaceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AISpaceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A4B7FFA32C183F3DC418BE58 /* AppWindows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppWindows.swift; sourceTree = "<group>"; };
+		A61162809EB69AE573A95376 /* NavigationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationPolicy.swift; sourceTree = "<group>"; };
+		B344C230B77398763C623CD8 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		BD93F537EFEEEEC0864886FF /* SpaceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceAPI.swift; sourceTree = "<group>"; };
+		CA6D130858D1D70A78FCC69F /* DesktopRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopRules.swift; sourceTree = "<group>"; };
+		D448B77713420B9C5A5EEDD7 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		E10A2CAB5E54700355EBDC17 /* SpaceCheckTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceCheckTests.swift; sourceTree = "<group>"; };
+		EBA65945DD70CE21132A36E4 /* AISpace.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AISpace.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EBFE87C7A9C4B1F8341F2A21 /* ConnectionStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStoreTests.swift; sourceTree = "<group>"; };
+		F20B50FE851051A67C4F681C /* Preferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preferences.swift; sourceTree = "<group>"; };
+		F748DACACF7AFC5A78106169 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
+		FBF0A76C75AB625B76B33DA8 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0E7D1AF504ECBC3FE059685B /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				6DDB619A2B1FFFE69951FC9B /* ChatStream.swift */,
+				2BFB91DB9E338925FE8BBD1F /* Connection.swift */,
+				3AE1F1F9182F48C764DCBCBD /* ConnectionStore.swift */,
+				CA6D130858D1D70A78FCC69F /* DesktopRules.swift */,
+				BD93F537EFEEEEC0864886FF /* SpaceAPI.swift */,
+				6D0E317F0870DDFFA7CC375B /* SpaceCheck.swift */,
+				689A4C7B3EDEA0DB45D3DDEE /* SpaceModels.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		1B40997756950F4A4C4CA250 /* AISpace */ = {
+			isa = PBXGroup;
+			children = (
+				1D600D381A80916B86183CC5 /* AISpaceApp.swift */,
+				FBF0A76C75AB625B76B33DA8 /* AppModel.swift */,
+				FB24D4FCC7D68A911DA1D205 /* Desktop */,
+				5DE48DEFA4002D96CE7F5398 /* Resources */,
+				0E7D1AF504ECBC3FE059685B /* Services */,
+				27A1DF23E20E456A08412E90 /* Views */,
+				9B71F0259F07FDAD018A743A /* Web */,
+			);
+			path = AISpace;
+			sourceTree = "<group>";
+		};
+		27A1DF23E20E456A08412E90 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				D448B77713420B9C5A5EEDD7 /* ChatView.swift */,
+				07D433BA9AC048F21AC08977 /* ConnectionSettings.swift */,
+				24E765CBD4C0B3DFBD8C0963 /* GeneralSettings.swift */,
+				1929568A20DD1284CAA1D7D3 /* InboxView.swift */,
+				4006574B7F93B9EE117663AB /* MainView.swift */,
+				1332C1D01848A19B2FA03323 /* MenuBarView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		31B19820736C6DC898FD2850 /* AISpaceTests */ = {
+			isa = PBXGroup;
+			children = (
+				35F50DEC4652C093798D4BD4 /* ChatStreamTests.swift */,
+				2A5F720897FA7EAB07098E99 /* ConnectionRulesTests.swift */,
+				EBFE87C7A9C4B1F8341F2A21 /* ConnectionStoreTests.swift */,
+				09B1B2AF632C7C5C500B74AA /* DesktopRulesTests.swift */,
+				52729B0ED8E899C5BA568374 /* NavigationPolicyTests.swift */,
+				E10A2CAB5E54700355EBDC17 /* SpaceCheckTests.swift */,
+			);
+			path = AISpaceTests;
+			sourceTree = "<group>";
+		};
+		5DE48DEFA4002D96CE7F5398 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				F748DACACF7AFC5A78106169 /* AppIcon.icns */,
+				3E98F2815C0F7222F77A6E3C /* Localizable.strings */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		6330D01B3F65B7CB2B8270A6 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				EBA65945DD70CE21132A36E4 /* AISpace.app */,
+				9C0A0491487C714C3B6BE85D /* AISpaceTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9B71F0259F07FDAD018A743A /* Web */ = {
+			isa = PBXGroup;
+			children = (
+				A61162809EB69AE573A95376 /* NavigationPolicy.swift */,
+				5A12CCB54B34FEB2DD082944 /* PanelSession.swift */,
+				6DAEF61AC51912B0F389D2A7 /* PanelWebView.swift */,
+			);
+			path = Web;
+			sourceTree = "<group>";
+		};
+		D238F3B72088D103B58FB55F = {
+			isa = PBXGroup;
+			children = (
+				1B40997756950F4A4C4CA250 /* AISpace */,
+				31B19820736C6DC898FD2850 /* AISpaceTests */,
+				6330D01B3F65B7CB2B8270A6 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		FB24D4FCC7D68A911DA1D205 /* Desktop */ = {
+			isa = PBXGroup;
+			children = (
+				A4B7FFA32C183F3DC418BE58 /* AppWindows.swift */,
+				06E5A196F46E34241D86027F /* ChatController.swift */,
+				997D75FEF3DD86EA8D26B5A8 /* HotKey.swift */,
+				6E2A011F98D582DF19559C3A /* Notifier.swift */,
+				F20B50FE851051A67C4F681C /* Preferences.swift */,
+				0495B5D192024EFFB79D7AB6 /* QuickChat.swift */,
+				6340C48A17B9D17172ACCB56 /* SpaceLive.swift */,
+			);
+			path = Desktop;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		09EB7CBA36102B6235C27984 /* AISpaceTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F6C4B6FE3917FEA9B73F8F0A /* Build configuration list for PBXNativeTarget "AISpaceTests" */;
+			buildPhases = (
+				75C459E1B5C7196E136550D5 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DA0A1F3C22D86BC2893B0033 /* PBXTargetDependency */,
+			);
+			name = AISpaceTests;
+			packageProductDependencies = (
+			);
+			productName = AISpaceTests;
+			productReference = 9C0A0491487C714C3B6BE85D /* AISpaceTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		7141303FD599D99D2A95E0DE /* AISpace */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2CC69E7D5DED3B03EFF74FEB /* Build configuration list for PBXNativeTarget "AISpace" */;
+			buildPhases = (
+				251161D4DF2EB1D3DCE1B1A8 /* Sources */,
+				7B50F7A6BBAE1C36B92E5617 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AISpace;
+			packageProductDependencies = (
+			);
+			productName = AISpace;
+			productReference = EBA65945DD70CE21132A36E4 /* AISpace.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		26693DC446601C35F66D8DF4 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					7141303FD599D99D2A95E0DE = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 9481CD16187D2F88E5FACB02 /* Build configuration list for PBXProject "AISpace" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+				"zh-Hans",
+			);
+			mainGroup = D238F3B72088D103B58FB55F;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 6330D01B3F65B7CB2B8270A6 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				7141303FD599D99D2A95E0DE /* AISpace */,
+				09EB7CBA36102B6235C27984 /* AISpaceTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		7B50F7A6BBAE1C36B92E5617 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DACBA7EE8202BB2D3BF41C77 /* AppIcon.icns in Resources */,
+				AD67C731330EC453DC6F239F /* Localizable.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		251161D4DF2EB1D3DCE1B1A8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3AE251EEF63C15134ACD40C5 /* AISpaceApp.swift in Sources */,
+				C57C08D6B333E957DCA6FEB6 /* AppModel.swift in Sources */,
+				FA618579A11448FB05B1B16D /* AppWindows.swift in Sources */,
+				A7422A710B6CF003150D2D9B /* ChatController.swift in Sources */,
+				FD1B2FEF2ED4D379A2386F1E /* ChatStream.swift in Sources */,
+				92359CF6B1AB227019AD3782 /* ChatView.swift in Sources */,
+				C0482ED95461E2E92CAAD43A /* Connection.swift in Sources */,
+				B60C1BC5DA19DC8431341F68 /* ConnectionSettings.swift in Sources */,
+				FA7B3C79D523D3142D7FE741 /* ConnectionStore.swift in Sources */,
+				AB89490D5E4404A8926FFC80 /* DesktopRules.swift in Sources */,
+				C834661133EF60312D297EEF /* GeneralSettings.swift in Sources */,
+				78B7371A7A5903A9314465D7 /* HotKey.swift in Sources */,
+				B3084E4CBA24B7FEE6F0F293 /* InboxView.swift in Sources */,
+				92895D1E42713BF8D4524913 /* MainView.swift in Sources */,
+				FC41594D49B2E41366BE0427 /* MenuBarView.swift in Sources */,
+				91E56D0C2210DA2D1F32A047 /* NavigationPolicy.swift in Sources */,
+				C8A2E4613F2179E76B6BB112 /* Notifier.swift in Sources */,
+				AF5E347C32F0B70C75E24E4E /* PanelSession.swift in Sources */,
+				63339534FB210EC40879A141 /* PanelWebView.swift in Sources */,
+				767F15D30E46A926FF467A1F /* Preferences.swift in Sources */,
+				DF4E2C7E64D1904127C018DB /* QuickChat.swift in Sources */,
+				FEFB9D3EEE59D225FB3D0B81 /* SpaceAPI.swift in Sources */,
+				0C77DE7BD96D2CB7261FD454 /* SpaceCheck.swift in Sources */,
+				8F4FEB170DC9FA0F19365253 /* SpaceLive.swift in Sources */,
+				41AD44EC6FE641BD0FB47C7F /* SpaceModels.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		75C459E1B5C7196E136550D5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4220E00EC21FCBC3A83D25D9 /* ChatStreamTests.swift in Sources */,
+				E3DDBDFDC7363266DF631B2F /* ConnectionRulesTests.swift in Sources */,
+				068F158F3D76C5E33C003660 /* ConnectionStoreTests.swift in Sources */,
+				B4D4D3E7AD99BA5D45D42601 /* DesktopRulesTests.swift in Sources */,
+				EC36CA0F525586D538A7C2DE /* NavigationPolicyTests.swift in Sources */,
+				6878425197B3210BB49A1813 /* SpaceCheckTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		DA0A1F3C22D86BC2893B0033 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7141303FD599D99D2A95E0DE /* AISpace */;
+			targetProxy = BCAC580BA4FA33A93225E2BC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		3E98F2815C0F7222F77A6E3C /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				B344C230B77398763C623CD8 /* en */,
+				4B7D69376B41451E1986F0EE /* zh-Hans */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		0BA3BBAEB8C0EDD0D27545AB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.ai-space.AISpaceTests";
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AISpace.app/Contents/MacOS/AISpace";
+			};
+			name = Release;
+		};
+		27B8D4D4015F0B69E036399F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.ai-space.AISpaceTests";
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AISpace.app/Contents/MacOS/AISpace";
+			};
+			name = Debug;
+		};
+		37B29EE5EBA8A0A95812DE51 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AISpace/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.ai-space.desktop";
+				PRODUCT_NAME = AISpace;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		62BD582995E9F6ADCFF50CF9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AA1A5648D3AB3308E5AFFCB6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AISpace/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.ai-space.desktop";
+				PRODUCT_NAME = AISpace;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		E1946E17E3087CE5FA603493 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2CC69E7D5DED3B03EFF74FEB /* Build configuration list for PBXNativeTarget "AISpace" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA1A5648D3AB3308E5AFFCB6 /* Debug */,
+				37B29EE5EBA8A0A95812DE51 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9481CD16187D2F88E5FACB02 /* Build configuration list for PBXProject "AISpace" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				62BD582995E9F6ADCFF50CF9 /* Debug */,
+				E1946E17E3087CE5FA603493 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F6C4B6FE3917FEA9B73F8F0A /* Build configuration list for PBXNativeTarget "AISpaceTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				27B8D4D4015F0B69E036399F /* Debug */,
+				0BA3BBAEB8C0EDD0D27545AB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 26693DC446601C35F66D8DF4 /* Project object */;
+}

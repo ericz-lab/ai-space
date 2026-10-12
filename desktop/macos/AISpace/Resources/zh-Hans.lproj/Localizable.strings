@@ -1,0 +1,126 @@
+/* Main window */
+"Connection" = "连接";
+"Switch Space" = "切换 Space";
+"Reload" = "重新载入";
+"Open in Browser" = "在浏览器中打开";
+"Connecting…" = "正在连接…";
+"Sign in to continue. If sign-in does not work here, use the browser." = "请登录后继续。如果这里无法登录，请改用浏览器。";
+"Retry" = "重试";
+"Cannot reach this Space" = "无法连接到这个 Space";
+"This address is not an ai-space panel" = "这个地址不是 ai-space 面板";
+"Start ai-space on this Mac with `space start`, then retry. The app never starts a second Space on its own." = "请先在这台 Mac 上运行 `space start` 启动 ai-space，再重试。本应用不会自行启动第二个 Space。";
+"Edit Connections…" = "编辑连接…";
+"Connect to a Space" = "连接到 Space";
+"Open an ai-space that is already running, on this Mac or on a server. Nothing is installed or started." = "打开一个已在运行的 ai-space，可以在这台 Mac 上，也可以在服务器上。不会安装或启动任何东西。";
+
+/* Connection form */
+"Space" = "Space";
+"On this Mac" = "这台 Mac";
+"Remote (HTTPS)" = "远程（HTTPS）";
+"Name" = "名称";
+"This Mac" = "这台 Mac";
+"Seoul" = "首尔";
+"Panel address" = "面板地址";
+"Sign-in to the server's access layer happens in the window after connecting." = "服务器访问层的登录在连接后于窗口内完成。";
+"Changing the address reloads the page; unsent text on it is lost." = "修改地址会重新载入页面，页面上未发送的内容会丢失。";
+"Connect" = "连接";
+"Save" = "保存";
+"Cancel" = "取消";
+"Enter the panel's address." = "请输入面板地址。";
+"This is not a valid address." = "这不是有效的地址。";
+"Use an http:// or https:// address." = "请使用 http:// 或 https:// 开头的地址。";
+"Do not put a user name or password in the address." = "地址中不要包含用户名或密码。";
+"A remote Space needs HTTPS. Plain HTTP is allowed only for this Mac (127.0.0.1 or localhost)." = "远程 Space 必须使用 HTTPS。只有这台 Mac（127.0.0.1 或 localhost）可以使用 HTTP。";
+
+/* Settings */
+"The saved connections could not be read and were moved to %@." = "已保存的连接无法读取，已移到 %@。";
+"Default" = "默认";
+"Add Connection" = "添加连接";
+"Remove Connection" = "移除连接";
+"Edit…" = "编辑…";
+"Make Default" = "设为默认";
+"Open" = "打开";
+"Remove…" = "移除…";
+"Remove" = "移除";
+"Removing a connection forgets it on this Mac only. The Space keeps running, and its agents, tasks and data are untouched." = "移除连接只会让这台 Mac 忘记它。Space 会继续运行，其中的智能体、任务和数据都不受影响。";
+"Remove %@?" = "移除 %@？";
+"Unsent text on its page is lost. The Space itself is not changed." = "该页面上未发送的内容会丢失。Space 本身不会改变。";
+"Also remove its saved sign-in" = "同时移除已保存的登录状态";
+
+/* Menus and dialogs */
+"OK" = "好";
+
+/* Sidebar and main window */
+"Home" = "主页";
+"Inbox" = "收件箱";
+"Agents" = "智能体";
+"Apps" = "应用";
+"Working" = "工作中";
+"Connected" = "已连接";
+"%lld agents working" = "%lld 个智能体工作中";
+"Sign in on Home" = "请在主页登录";
+"Offline" = "离线";
+"Agent not available" = "智能体不可用";
+"Sign in on the panel or check the connection." = "请在面板上登录，或检查连接。";
+"Cannot reach this app" = "无法打开这个应用";
+
+/* Chat */
+"Message %@" = "给%@发消息";
+"Send" = "发送";
+"Stop" = "停止";
+"New Conversation" = "新对话";
+"Starting…" = "正在开始…";
+"Reconnecting…" = "正在重新连接…";
+"Thinking…" = "思考中…";
+"Thinking with %@…" = "%@ 思考中…";
+"Running %@…" = "正在运行 %@…";
+"(stopped)" = "（已停止）";
+"Sign in on the panel first, then try again." = "请先在面板上登录，再试一次。";
+"The connection to the agent was lost." = "与智能体的连接已断开。";
+
+/* Quick Chat */
+"Quick Chat" = "快速对话";
+"Choose an Agent" = "选择智能体";
+"Open in Main Window" = "在主窗口中打开";
+"Add a connection first." = "请先添加一个连接。";
+"No agents yet. Sign in on the panel or check the connection." = "还没有智能体。请在面板上登录，或检查连接。";
+
+/* Inbox */
+"Mark All as Read" = "全部标为已读";
+"Mark as Read" = "标为已读";
+"Mark as Unread" = "标为未读";
+"Done" = "完成";
+"Nothing open" = "没有待处理的消息";
+"Sign in on Home first" = "请先在主页登录";
+"×%lld" = "×%lld";
+
+/* Menu bar */
+"No connection yet." = "还没有连接。";
+"%lld working" = "%lld 个工作中";
+"Sign In" = "登录";
+"Inbox (%lld unread)" = "收件箱（%lld 条未读）";
+"Open ai-space" = "打开 ai-space";
+"Settings…" = "设置…";
+"Quit" = "退出";
+
+/* Settings */
+"General" = "通用";
+"Connections" = "连接";
+"Off" = "关闭";
+"Quick Chat shortcut" = "快速对话快捷键";
+"Opens a chat with an agent over any app. Services > Ask ai-space sends selected text to it, and Shortcuts can open aispace://chat?agent=<app>/<agent>&text=… — a message is never sent without you." = "在任何应用之上打开与智能体的对话。“服务 > Ask ai-space”会把选中的文字放进去，快捷指令也可以打开 aispace://chat?agent=<app>/<agent>&text=…。消息不会在未经你确认时发出。";
+"Show in the menu bar" = "在菜单栏中显示";
+"Notify me of new inbox messages" = "收件箱有新消息时通知我";
+"The unread count also shows on the Dock icon. Notifications follow the Space's inbox; nothing is sent twice." = "未读数也会显示在 Dock 图标上。通知跟随 Space 的收件箱，同一条不会重复提醒。";
+"Main Window" = "主窗口";
+
+/* App tabs and windows */
+"Open in New Window" = "在新窗口中打开";
+"Open in New Window (⌥⌘T)" = "在新窗口中打开（⌥⌘T）";
+"Move to Main Window" = "移回主窗口";
+"Move to Main Window (⌥⌘T)" = "移回主窗口（⌥⌘T）";
+"Move App Between Tab and Window" = "应用在标签页与独立窗口间切换";
+"In its own window" = "在独立窗口中";
+"Show Window" = "显示窗口";
+"Close" = "关闭";
+"This app is not open" = "这个应用尚未打开";

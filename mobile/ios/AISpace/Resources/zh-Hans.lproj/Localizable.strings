@@ -1,0 +1,90 @@
+/* Tabs */
+"Home" = "主页";
+"Panel" = "面板";
+"Settings" = "设置";
+
+/* Connect */
+"Connect to a Space" = "连接到 Space";
+"Enter the address you open your ai-space panel at. Sign-in, when your Space asks for one, happens after connecting." = "输入你平时打开 ai-space 面板的地址。如果你的 Space 需要登录，会在连接之后进行。";
+"Panel address" = "面板地址";
+"Name (optional)" = "名称（可选）";
+"Connect" = "连接";
+"Cancel" = "取消";
+"Use a Space on this Mac (%@)" = "使用这台 Mac 上的 Space（%@）";
+"Enter the panel's address." = "请输入面板地址。";
+"This is not a valid address." = "这不是有效的地址。";
+"The address must start with https://." = "地址必须以 https:// 开头。";
+"Leave user names and passwords out of the address; sign in after connecting." = "地址里不要带用户名和密码，连接后再登录。";
+"A Space on another machine must use https://." = "其他机器上的 Space 必须使用 https://。";
+"This Space is already saved." = "这个 Space 已经保存过了。";
+
+/* Home */
+"Search apps, agents and widgets" = "搜索应用、智能体和小组件";
+"Favorites" = "收藏";
+"Favorite" = "已收藏";
+"Apps" = "应用";
+"Agents" = "智能体";
+"Widgets" = "小组件";
+"Nothing here yet" = "这里还没有内容";
+"This Space has no apps with a page. Add one on the panel." = "这个 Space 还没有带页面的应用，可以在面板里添加。";
+"Add to Favorites" = "加入收藏";
+"Remove from Favorites" = "取消收藏";
+"Open in Safari" = "在 Safari 中打开";
+"Copy Link" = "拷贝链接";
+"Switch Space" = "切换 Space";
+"Add a Space" = "添加 Space";
+
+/* Status */
+"Connecting…" = "正在连接…";
+"Sign in to %@" = "登录 %@";
+"Your Space is behind a sign-in. It opens on the Panel tab and is kept for this Space only." = "你的 Space 需要登录。登录页会在“面板”标签中打开，登录状态只用于这个 Space。";
+"Sign In" = "登录";
+"Cannot reach this Space" = "无法连接到这个 Space";
+"This address is not an ai-space panel" = "这个地址不是 ai-space 面板";
+"not an ai-space response" = "不是 ai-space 的响应";
+"Retry" = "重试";
+"Below is what this Space had %@. It may have changed." = "下面是这个 Space 在%@的内容，现在可能已经变化。";
+"offline" = "离线";
+"offline, last seen %@" = "离线，最后在线：%@";
+"%@, offline" = "%@，离线";
+"%@, online" = "%@，在线";
+"%@ offline" = "%@ 离线";
+"not answering" = "未响应";
+"paused" = "已暂停";
+"running" = "运行中";
+
+/* Widgets */
+"Drawn by the app. Open it to see." = "由应用自己绘制，打开后查看。";
+"Last known; its machine is offline." = "这是最后一次的内容，所在机器已离线。";
+"Nothing to show." = "暂无内容。";
+"now" = "刚刚";
+
+/* Pages */
+"Signing in at %@" = "正在 %@ 登录";
+"Cannot load this page" = "无法载入这个页面";
+"Download failed" = "下载失败";
+"Close" = "关闭";
+"Back" = "后退";
+"Forward" = "前进";
+"Stop" = "停止";
+"Reload" = "重新载入";
+"Share" = "共享";
+"OK" = "好";
+
+/* Settings */
+"Spaces" = "Space";
+"Selected" = "已选中";
+"Remove" = "移除";
+"Removing a Space here forgets its address, sign-in and favorites on this iPhone. Nothing changes on the server." = "在这里移除 Space，只会让这台 iPhone 忘记它的地址、登录状态和收藏，服务器上不会有任何变化。";
+"Session" = "会话";
+"Status" = "状态";
+"Sign Out" = "退出登录";
+"Sign out of %@?" = "要退出 %@ 吗？";
+"This clears the Space's cookies and saved pages from this iPhone." = "这会清除这台 iPhone 上该 Space 的 Cookie 和已保存的页面数据。";
+"The sign-in belongs to whatever stands in front of your Space (for example Cloudflare Access). The app stores no password or token; the session lives in this Space's own web data, apart from Safari." = "登录由 Space 前面的访问层（例如 Cloudflare Access）负责。本应用不保存密码或令牌，会话只存在于这个 Space 自己的网页数据中，与 Safari 相互独立。";
+"About" = "关于";
+"Version" = "版本";
+"Chat, the inbox, tasks and the Space's own settings are on the Panel tab." = "对话、收件箱、任务和 Space 自身的设置都在“面板”标签中。";
+"Connected" = "已连接";
+"Signed out" = "未登录";
+"Not an ai-space panel" = "不是 ai-space 面板";

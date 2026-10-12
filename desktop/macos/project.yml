@@ -1,0 +1,47 @@
+# XcodeGen spec for AISpace.xcodeproj; run `bun run desktop:xcode` after adding or moving files.
+# scripts/build.sh and scripts/test.sh build the same sources with swiftc and need no Xcode.
+name: AISpace
+options:
+  bundleIdPrefix: dev.ai-space
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+targets:
+  AISpace:
+    type: application
+    platform: macOS
+    sources:
+      - path: AISpace
+        excludes: [Info.plist, Resources/AppIcon.svg]
+    settings:
+      base:
+        PRODUCT_NAME: AISpace
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ai-space.desktop
+        INFOPLIST_FILE: AISpace/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+  AISpaceTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [AISpaceTests]
+    dependencies:
+      - target: AISpace
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: $(TEST_HOST)
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/AISpace.app/Contents/MacOS/AISpace
+schemes:
+  AISpace:
+    build:
+      targets:
+        AISpace: all
+        AISpaceTests: [test]
+    test:
+      targets: [AISpaceTests]
