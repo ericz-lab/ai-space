@@ -829,9 +829,17 @@ a.widget-title:hover { color: var(--text); }
 .shell.wide { max-width: 1240px; }
 .screen.from-right { animation: slideFromRight 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .screen.from-left { animation: slideFromLeft 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
-@keyframes slideFromRight { from { opacity: 0; transform: translateX(48px); } }
-@keyframes slideFromLeft { from { opacity: 0; transform: translateX(-48px); } }
-@media (prefers-reduced-motion: reduce) { .screen.from-right, .screen.from-left { animation: none; } }
+@keyframes slideFromRight { from { transform: translateX(48px); } }
+@keyframes slideFromLeft { from { transform: translateX(-48px); } }
+/* The fade is on the screen's pieces, never on the screen: an ancestor below full opacity is a
+   backdrop root, so the glass inside it (widgets, library cards) blurs nothing until the slide
+   ends and the frost pops in late. A glass element fading by itself keeps its blur throughout. */
+.screen:is(.from-right, .from-left) :is(.tile, .widget, .empty, .dropzone, .screen-tools, .lib-bar > *, .lib-card, .lib-section) {
+  animation: fadeIn 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen:is(.from-right, .from-left), .screen:is(.from-right, .from-left) :is(.tile, .widget, .empty, .dropzone, .screen-tools, .lib-bar > *, .lib-card, .lib-section) { animation: none; }
+}
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .screen-tools { display: flex; gap: 8px; margin-bottom: 24px; }
 .screen-tools .btn2 { padding: 4px 14px; font-size: 13px; }
