@@ -619,7 +619,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch }: { 
           </div>
           <div className="chat-opts">
             {agent.modelOptions ? (
-              <select className="chat-model" value={selectedBaseModel} disabled={conv.busy} onChange={(e) => pickBaseModel(e.target.value)} title={t("chat.runtimeModelTitle")}>
+              <select className="chat-model" value={selectedBaseModel} disabled={conv.busy} onChange={(e) => pickBaseModel(e.target.value)} title={t("chat.runtimeModelTitle")} aria-label={t("chat.runtimeModelTitle")}>
                 <option value="">{t("chat.modelDefault")} · {agent.runtime}</option>
                 {selectedBaseModel && !agent.modelOptions.some((o) => o.value === selectedBaseModel) && <option value={selectedBaseModel}>{selectedBaseModel}</option>}
                 {[...new Set(agent.modelOptions.map((o) => o.runtime))].map((runtime) => (
@@ -629,7 +629,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch }: { 
                 ))}
               </select>
             ) : (
-              <select className="chat-model" value={model} onChange={pickModel} title={t("chat.modelTitle")}>
+              <select className="chat-model" value={model} onChange={pickModel} title={t("chat.modelTitle")} aria-label={t("chat.modelTitle")}>
                 <option value="">{t("chat.modelDefault")}</option>
                 <option value="haiku">{t("chat.modelHaiku")}</option>
                 <option value="sonnet">{t("chat.modelSonnet")}</option>
@@ -637,7 +637,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch }: { 
                 <option value="fable">{t("chat.modelFable")}</option>
               </select>
             )}
-            <select className="chat-model" value={perm} onChange={pickPerm} title={t("chat.permTitle")}>
+            <select className="chat-model" value={perm} onChange={pickPerm} title={t("chat.permTitle")} aria-label={t("chat.permTitle")}>
               <option value="">{t("chat.permRead")}</option>
               <option value="acceptEdits">{t("chat.permEdit")}</option>
               <option value="bypassPermissions">{t("chat.permAll")}</option>
@@ -699,6 +699,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch }: { 
             ref={inputRef}
             rows={1}
             value={input}
+            aria-label={t("chat.inputLabel")}
             placeholder={conv.busy ? t("chat.placeholderBusy") : t("chat.placeholder")}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {

@@ -268,6 +268,7 @@ const en = {
   "backup.verifyFailed": "verification failed: {error}",
   "backup.lastError": "last run failed: {error}",
 
+  "pet.label": "Pet name",
   "pet.placeholder": "Pet name from petdex.dev",
   "pet.reset": "Back to the default pet",
   "pet.lookingUp": "Looking up…",
@@ -338,6 +339,7 @@ const en = {
   "chat.grantRetry": "Grant and retry",
   "chat.retryMessage": "I have granted more permissions. Please finish the step that was refused for lack of permission.",
   "chat.latest": "Latest",
+  "chat.inputLabel": "Message",
   "chat.placeholder": "Message, Enter to send",
   "chat.placeholderBusy": "Keep typing; sent when the reply finishes…",
 
@@ -731,6 +733,7 @@ const zh: Record<Key, string> = {
   "backup.verifyFailed": "校验失败：{error}",
   "backup.lastError": "上次失败：{error}",
 
+  "pet.label": "宠物名",
   "pet.placeholder": "petdex.dev 上的宠物名",
   "pet.reset": "恢复默认宠物",
   "pet.lookingUp": "查找中…",
@@ -801,6 +804,7 @@ const zh: Record<Key, string> = {
   "chat.grantRetry": "授权并重试",
   "chat.retryMessage": "我已授予更多权限，请完成刚才因权限不足被拒绝的步骤。",
   "chat.latest": "最新",
+  "chat.inputLabel": "消息",
   "chat.placeholder": "输入消息，回车发送",
   "chat.placeholderBusy": "可以继续输入；回复结束后发送…",
 

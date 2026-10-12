@@ -220,7 +220,7 @@ Measured this way on 2026-10-09 (lowest value over the three glows):
 | `success` as text on glass | **1.99** | 4.53 | 4.67 | 6.45 |
 | `danger` on panel | **3.70** | 3.63 | 5.46 | 6.23 |
 
-Bold values miss the 4.5:1 text target. Per D7, the Aurora fixes are a separate change: darken light `muted` to about 0.62 alpha, use text-safe `warning`/`success`/`danger` values for text (keep the bright ones for dots), and lighten the dark `link` and `accent`. Simple and Warm inherit some of these values and must be rechecked after that change.
+Bold values miss the 4.5:1 text target. Per D7, the Aurora fixes are a separate change: darken light `muted` to about 0.62 alpha, use text-safe `warning`/`success`/`danger` values for text (keep the bright ones for dots), and lighten the dark `link` and `accent`. Done since the table was measured: light `muted` is 0.62 alpha (5.2 on a library card, `#fbfbfd` as rendered, up from 4.14), and `success` as text goes through `--success-text` (the token mixed half with `text`: 6.2 on the same card, up from 2.14; the library's "on screen" line and its Added button). The table above has not been measured again. `warning`, `danger`, `link` and `accent` are still open. Simple and Warm inherit some of these values and must be rechecked after that change.
 
 ### 9.4 Keyboard, focus, motion
 
@@ -276,7 +276,7 @@ Motion explains where something came from or that something changed. Nothing loo
 
 The screens layout ([Panel design](panel.md#screens)) is implemented. How it meets this document:
 
-- **Edges are discoverable without hover** (implemented): a faint 4 × 44 px handle in `muted` at 0.22 opacity at each edge with a destination, which becomes a 52 px round button with a large arrow (or ＋) on hover or keyboard focus (3 px focus ring), with no text label; the destination is in its accessible name. In dark mode the button is near black like the dock. Touch screens hide the edges and use the dock and swipes.
+- **Edges are discoverable without hover** (implemented): a faint 4 × 44 px handle in `muted` at 0.22 opacity at each edge with a destination, which becomes a 52 px round button with a large arrow (or ＋) on hover or keyboard focus (3 px focus ring), with no text label; the destination is in its accessible name. In dark mode the button is near black like the dock. An edge is as wide as the page's gutter (72 px at most) and its button takes no pointer events, so an edge never takes a click meant for a tile; at 640 px and below, where the gutter is 20 px, the handle alone lights up under the pointer or the focus. Touch screens hide the edges and use the dock and swipes.
 - **The dock** (implemented) sits bottom center on strong glass, near black in dark mode (`rgba(18, 20, 27, 0.9)`): library, home, one line monitor icon per screen, and search, all drawn as 22 px line icons on 42 px buttons, without hover tooltips. With a mouse it is out of sight until the pointer comes within 110 px of the bottom of the window or the keyboard focus enters it, and rises in over 220 ms; touch screens always show it. The current one sits on a filled circle like the other dock buttons.
 - **Screens have no titles or names**: each has only a visually hidden heading (Home, Screen 2, …), and the dock's highlighted icon says where you are. A new screen is created at once, without a naming step.
 - **Screen changes** slide 48 px with a fade in 280 ms and do not animate under reduced motion (implemented, section 10.3).

@@ -247,7 +247,7 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
         <div className="task-head">
           <b>{t("term.title")}</b>
           <span className="chat-sub">{status ? `${t("term.openCount", { n: status.sessions.length + tabs.filter((x) => x.machine.peer && x.state === "open").length })}${status.idleMs ? ` · ${t("term.idleAfter", { idle: fmtDuration(status.idleMs, lang) })}` : ""}` : ""}</span>
-          <select className="chat-model" value={machine} onChange={(e) => setMachine(e.target.value)} title={t("term.machine")} disabled={!machines.length}>
+          <select className="chat-model" value={machine} onChange={(e) => setMachine(e.target.value)} title={t("term.machine")} aria-label={t("term.machine")} disabled={!machines.length}>
             {machines.map((m) => (
               <option key={m.name} value={m.name} disabled={!m.enabled || m.health !== "ok"}>
                 {label(m)}
