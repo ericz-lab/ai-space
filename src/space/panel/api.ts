@@ -54,6 +54,8 @@ export type PanelApiOptions = {
   packageCheckUrl?: (app: string, check: string) => string;
   /** Package apps that connected Spaces share with this one, from a local cache (docs/app-packages.md). */
   sharedApps?: (hidden: Set<string>) => AppView[];
+  /** The icon image of one such app, as last fetched over its connection. */
+  sharedIcon?: (connection: string, app: string) => { type: string; bytes: Uint8Array } | undefined;
   ws: Workspace;
   registry: AppRegistry;
   layout: LayoutStore;
@@ -249,6 +251,15 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
         registry.remove(n);
         await opts.onRemove(n);
         return json({ ok: true, app: n, stopped, dir, data: join(opts.ws.data, n) });
+      }),
+    },
+
+    "/api/panel/shared-apps/:connection/:app/icon": {
+      GET: wrap(async (req) => {
+        const icon = opts.sharedIcon?.(req.params.connection ?? "", req.params.app ?? "");
+        if (!icon) throw new NotFound("app has no icon");
+        // The image comes from another Space: the same headers as an uploaded pack icon.
+        return new Response(icon.bytes as BodyInit, { headers: { "content-type": icon.type, ...ICON_HEADERS } });
       }),
     },
 

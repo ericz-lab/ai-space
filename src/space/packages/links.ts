@@ -5,7 +5,8 @@ import { PackageChannel } from "./channel.ts";
 import { Connections, type Connection } from "./connections.ts";
 import { mapping } from "./contract.ts";
 
-export type SharedApp = { app: string; title: string; version: string; page?: boolean };
+/** `icon` is a short text icon (an emoji); `iconFile` says the `icon` operation returns an image. */
+export type SharedApp = { app: string; title: string; version: string; page?: boolean; icon?: string; iconFile?: boolean };
 export type LinkHandler = (connection: Connection, meta: unknown, body: ReadableStream<Uint8Array>, signal: AbortSignal) => Promise<Response>;
 type Live = { channel?: PackageChannel; close: () => void };
 
@@ -21,6 +22,8 @@ export class PackageLinks {
     apps: () => SharedApp[];
     /** This Space's name (`SPACE_NAME`), sent with the catalogue as the label of its tiles elsewhere. */
     name?: string;
+    /** The icon image of a locally owned app, for the tile a connected Space shows. */
+    icon?: (app: string) => Promise<Response | undefined>;
     handle?: LinkHandler;
   }) {
     this.unsubscribe = connections.onChange((id) => {
@@ -102,6 +105,7 @@ export class PackageLinks {
     const m = mapping(meta, "request", ["operation", "app", "path", "method", "headers"]);
     if (m.operation === "catalogue") return Response.json({ spaceId: this.connections.spaceId, ...(this.options.name ? { name: this.options.name } : {}), apps: this.options.apps().filter((a) => this.connections.allows(id, a.app)) });
     if (typeof m.app !== "string" || !this.connections.allows(id, m.app)) return Response.json({ error: "application access denied" }, { status: 403 });
+    if (m.operation === "icon") return (this.options.apps().some((a) => a.app === m.app) && await this.options.icon?.(m.app)) || Response.json({ error: "application has no icon" }, { status: 404 });
     if (m.operation !== "fetch" && m.operation !== "socket") return Response.json({ error: "operation not allowed" }, { status: 403 });
     // Only locally owned apps are dispatched. No forwarding to another connection or admin API.
     if (!this.options.apps().some((a) => a.app === m.app)) return Response.json({ error: "application not found" }, { status: 404 });
