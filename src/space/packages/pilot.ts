@@ -37,7 +37,7 @@ export async function keepPilot(source: string): Promise<string> {
   const db = new Database(join(ws.data, "space.db"));
   const store = new PackageStore(db), installer = new PackageInstaller(ws, store);
   const runtime = new PackageRuntime({ logDir: ws.logs, envFor: async () => ({ DATABASE_URL_KEEP: `sqlite://${database}` }) });
-  const lifecycle = new PackageLifecycle(installer, { suspend: (app) => runtime.suspend(app), remove: (app) => runtime.remove(app), activate: async (app) => runtime.register(await installer.load(app)) });
+  const lifecycle = new PackageLifecycle(installer, { suspend: (app) => runtime.suspend(app), remove: (app) => runtime.remove(app), activate: async (app) => runtime.register(await installer.load(app)), verify: (app) => runtime.verify(app) });
   const cases: string[] = [];
   const request = async (path: string, body?: unknown) => {
     const lease = await runtime.acquire("keep");

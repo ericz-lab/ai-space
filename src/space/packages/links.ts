@@ -23,6 +23,7 @@ export class PackageLinks {
   }) {
     this.unsubscribe = connections.onChange((id) => {
       this.disconnect(id); // Revocation/rotation closes in-flight work, including streaming responses.
+      if (!connections.get(id)) this.errors.delete(id);
       this.refresh();
     });
     this.timer = setInterval(() => this.refresh(), 5000); this.timer.unref();
@@ -124,7 +125,7 @@ export function createConnectionRoutes(opts: { links: PackageLinks; token: strin
     },
     "/api/connections/:id": {
       PATCH: guard(async (req) => ({ connection: opts.links.connections.update(req.params.id!, await req.json()) })),
-      DELETE: guard((req) => ({ connection: opts.links.connections.update(req.params.id!, { enabled: false }) })),
+      DELETE: guard((req) => ({ connection: opts.links.connections.remove(req.params.id!) })),
     },
     "/api/connections/:id/rotate": { POST: guard((req) => ({ token: opts.links.connections.rotate(req.params.id!) })) },
     "/api/connections/channel": {

@@ -20,7 +20,7 @@ async function fixture() {
   const runtime = new PackageRuntime({ logDir: ws.logs, envFor: async () => ({}) }); cleanup.push(() => runtime.close(0));
   let failVersion = "";
   const activate = async (app: string) => { const loaded = await installer.load(app); if (loaded.manifest.version === failVersion) throw new Error("activation rejected"); await runtime.register(loaded); };
-  const lifecycle = new PackageLifecycle(installer, { suspend: (app) => runtime.suspend(app), activate, remove: (app) => runtime.remove(app) });
+  const lifecycle = new PackageLifecycle(installer, { suspend: (app) => runtime.suspend(app), activate, remove: (app) => runtime.remove(app), verify: (app) => runtime.verify(app) });
   const pack = async (version: string) => {
     const dir = join(root, "source");
     await Bun.write(join(dir, "space.yaml"), `spec: 2\nname: demo\nversion: ${version}\nrequires: {spaceApi: 1}\noffline: {features: [Read], online: []}\nlaunch: {kind: static, root: web}\n`);
@@ -85,4 +85,39 @@ test("restart restores old code if publication committed but activation completi
   expect((await f.installer.load("demo")).manifest.version).toBe("1.0.0");
   expect(f.store.get(changed.newId!)?.state).toBe("retired");
   expect(await Bun.file(join(f.ws.run, "package-changes", changed.id, "rejected/web/index.html")).text()).toBe("2.0.0");
+});
+
+test("an on-demand version that never becomes healthy is not committed", async () => {
+  const f = await fixture();
+  const pack = async (version: string, code: string) => {
+    const dir = join(f.root, `process-${version}`);
+    await Bun.write(join(dir, "space.yaml"), `spec: 2\nname: demo\nversion: ${version}\nrequires: {spaceApi: 1, bun: 1.3.0}\noffline: {features: [Read], online: []}\nlaunch: {kind: process, runtime: bun, entry: server.js, health: /healthz}\n`);
+    await Bun.write(join(dir, "server.js"), code);
+    const output = join(f.root, `process-${version}.spaceapp`);
+    await packApplication({ dir, output, include: ["server.js"], sourceIncluded: true, target: { os: "any", arch: "any" } });
+    return readPackageFile(output);
+  };
+  const healthy = 'Bun.serve({hostname:"127.0.0.1",port:Number(process.env.PORT),fetch:()=>new Response("ok")});';
+  expect((await f.lifecycle.upgrade(await pack("2.0.0", healthy), { allowUnsigned: true })).state).toBe("done");
+  expect(f.runtime.status("demo")).toMatchObject({ state: "running", leases: 0 });
+  const broken = await f.lifecycle.upgrade(await pack("3.0.0", "process.exit(3)"), { allowUnsigned: true });
+  expect(broken).toMatchObject({ state: "failed", error: expect.stringContaining("exited during startup") });
+  expect((await f.installer.load("demo")).manifest.version).toBe("2.0.0");
+  const lease = await f.runtime.acquire("demo");
+  expect((await fetch(`http://127.0.0.1:${lease.port}/healthz`)).status).toBe(200);
+  lease.release();
+});
+
+test("a change that cannot be recovered blocks its app only and is reported instead of thrown", async () => {
+  const f = await fixture(); const id = crypto.randomUUID();
+  const root = join(f.ws.run, "package-changes", id); await mkdir(root, { recursive: true });
+  f.db.query("INSERT INTO package_changes(id,app,kind,old_id,state,created_at,updated_at) VALUES(?,?,'uninstall',?,'pending',?,?)").run(id, "demo", f.first.id, Date.now(), Date.now());
+  await rename(join(f.ws.apps, "demo"), join(root, "previous"));
+  await Bun.write(join(root, "previous/web/index.html"), "altered");
+  const blocked = await f.lifecycle.recover();
+  expect(blocked).toHaveLength(1);
+  expect(blocked[0]).toMatchObject({ change: { id, app: "demo" }, error: expect.stringContaining("failed recovery validation") });
+  expect(f.lifecycle.get(id)?.state).toBe("pending");
+  expect(await Bun.file(join(root, "previous/web/index.html")).text()).toBe("altered");
+  expect((await f.lifecycle.uninstall("demo").catch((e: Error) => e)) as Error).toMatchObject({ message: expect.stringContaining("UNIQUE") });
 });

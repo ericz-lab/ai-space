@@ -75,6 +75,17 @@ export class PackageRuntime {
     catch (e) { release(); throw e; }
   }
 
+  /**
+   * Start a process app once and wait for its health, also while a version change holds the app
+   * suspended. An on-demand process is otherwise first started by a visitor, after the change committed.
+   */
+  async verify(app: string): Promise<void> {
+    const s = this.apps.get(app);
+    if (!s || s.app.manifest.status !== "active" || s.app.manifest.launch?.kind !== "process") return;
+    await this.ensure(s);
+    s.lastUsed = this.now();
+  }
+
   async staticResponse(app: string, pathname: string): Promise<Response> {
     const lease = await this.acquire(app);
     try {

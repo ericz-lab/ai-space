@@ -32,4 +32,7 @@ test("connection grants only share named local apps and package removal requires
   const remove = await runCli(["app", "remove-package", "demo", "--yes"]);
   expect(remove.calls[0]?.url).toEndWith("/api/packages/apps/demo");
   expect(remove.calls[0]?.method).toBe("DELETE");
+  expect((await runCli(["connection", "rm", "connection-id"])).calls).toHaveLength(0);
+  const gone = await runCli(["connection", "rm", "connection-id", "--yes"]);
+  expect(gone.calls[0]).toMatchObject({ method: "DELETE", url: expect.stringMatching(/\/api\/connections\/connection-id$/) });
 });

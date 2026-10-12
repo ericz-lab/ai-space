@@ -1,4 +1,5 @@
 import { need, noMore, parseArgs } from "./args.ts";
+import { confirm } from "./common.ts";
 import type { Ctx, Noun } from "./types.ts";
 
 const ls = async (ctx: Ctx, argv: string[]) => {
@@ -22,6 +23,11 @@ const enabled = (value: boolean) => async (ctx: Ctx, argv: string[]) => {
   const { positional } = parseArgs(argv, {}); const id = need(positional, 0, "CONNECTION_ID"); noMore(positional, 1);
   ctx.print.data(await (await ctx.client()).patch(`/api/connections/${encodeURIComponent(id)}`, { enabled: value })); return 0;
 };
+const rm = async (ctx: Ctx, argv: string[]) => {
+  const { flags, positional } = parseArgs(argv, { yes: { kind: "bool" } }); const id = need(positional, 0, "CONNECTION_ID"); noMore(positional, 1);
+  if (!await confirm(ctx, !!flags.yes, `remove connection ${id}? Its grants and incoming credential are deleted.`)) return 1;
+  ctx.print.data(await (await ctx.client()).json("DELETE", `/api/connections/${encodeURIComponent(id)}`)); return 0;
+};
 function names(raw: unknown): string[] { return String(raw ?? "").split(",").map((v) => v.trim()).filter(Boolean); }
 export const connectionNoun: Noun = { name: "connection", summary: "package Hub connections and directional local-app grants", verbs: {
   ls: { usage: "", summary: "identity, grants and connection state", run: ls },
@@ -29,4 +35,5 @@ export const connectionNoun: Noun = { name: "connection", summary: "package Hub 
   grant: { usage: "CONNECTION_ID --apps APP,...", summary: "replace this machine's shared-app list (empty revokes all)", run: grant },
   enable: { usage: "CONNECTION_ID", summary: "enable reconnection with existing grants", run: enabled(true) },
   disable: { usage: "CONNECTION_ID", summary: "disconnect and abort current remote work", run: enabled(false) },
+  rm: { usage: "CONNECTION_ID [--yes]", summary: "disconnect and delete the connection, its grants and credential", run: rm },
 } };

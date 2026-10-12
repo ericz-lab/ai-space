@@ -113,6 +113,7 @@ export default function Packages({ onChange }: { onChange?: () => void }) {
         <p className="setnote">{c.remoteSpaceId} · {t(c.connected ? "status.up" : "status.down")}</p>
         <label><input type="checkbox" checked={c.enabled} disabled={busy} onChange={(e) => void act(() => sendJson("PATCH", `/api/panel/connections/${c.id}`, { enabled: e.target.checked }))} />{t("packages.connected")}</label>
         {data?.apps.map((a) => <label key={a.app}><input type="checkbox" disabled={busy} checked={c.apps.includes(a.app)} onChange={(e) => void act(() => sendJson("PATCH", `/api/panel/connections/${c.id}`, { apps: e.target.checked ? [...c.apps, a.app] : c.apps.filter((v) => v !== a.app) }))} />{a.title}</label>)}
+        <button disabled={busy} onClick={() => { if (window.confirm(t("packages.removeConnectionConfirm"))) void act(() => sendJson("DELETE", `/api/panel/connections/${c.id}`)); }}>{t("packages.removeConnection")}</button>
       </div>)}
       <form onSubmit={(e) => { e.preventDefault(); void act(async () => {
         const result = await sendJson<{ token?: string }>("POST", "/api/panel/connections", { remoteSpaceId: remote.trim(), direction, apps: [], ...(direction === "outgoing" ? { url: endpoint.trim(), tokenEnv: credential.trim() } : {}) });

@@ -27,6 +27,21 @@ test("local grants default closed, credentials bind remote identity and patches 
   expect(() => peer.create({ remoteSpaceId: crypto.randomUUID(), direction: "outgoing", url: "http://public.example", tokenEnv: "TOKEN" })).toThrow(/HTTPS/);
 });
 
+test("a removed connection loses its credential and grants and can be created again", () => {
+  const hub = store(), peer = store();
+  const first = hub.create({ remoteSpaceId: peer.spaceId, direction: "incoming", apps: ["notes"] });
+  expect(() => hub.create({ remoteSpaceId: peer.spaceId, direction: "incoming" })).toThrow();
+  const seen: string[] = []; hub.onChange((id) => seen.push(id));
+  expect(hub.remove(first.connection.id).id).toBe(first.connection.id);
+  expect(seen).toEqual([first.connection.id]);
+  expect(hub.authenticate(first.token!, peer.spaceId)).toBeUndefined();
+  expect(hub.allows(first.connection.id, "notes")).toBe(false);
+  expect(() => hub.remove(first.connection.id)).toThrow(/not found/);
+  const second = hub.create({ remoteSpaceId: peer.spaceId, direction: "incoming" });
+  expect(second.connection.apps).toEqual([]);
+  expect(hub.authenticate(second.token!, peer.spaceId)?.id).toBe(second.connection.id);
+});
+
 test("one outbound peer connection carries both directions; reverse grants are enforced and revocable", async () => {
   const hubStore = store(), peerStore = store();
   const incoming = hubStore.create({ remoteSpaceId: peerStore.spaceId, direction: "incoming", apps: ["hub-app"] });

@@ -177,6 +177,7 @@ space connection create outgoing HUB_UUID --endpoint https://hub.example.com --t
 space connection grant CONNECTION_UUID --apps notes
 space connection grant CONNECTION_UUID --apps ''
 space connection disable CONNECTION_UUID
+space connection rm CONNECTION_UUID
 ```
 
 `--allow-unsigned` is an explicit trust decision for a package without a signature. Signed packages use the host's configured publisher keys. Install/upgrade/change commands print an operation UUID before writing; reuse it with `--operation-id UUID` if the response is interrupted. `app open` prints a one-use URL rather than launching a browser on the server. A use-only peer connection cannot install or manage remote apps; `--url` requires a separate operator credential for that Space.

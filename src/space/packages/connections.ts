@@ -62,6 +62,14 @@ export class Connections {
     this.changed(id); return token;
   }
 
+  /** Forget a connection and its grants, for one made with a wrong endpoint, credential name or identity. */
+  remove(id: string): Connection {
+    const c = this.get(id);
+    if (!c) throw new Error("connection not found");
+    this.db.query("DELETE FROM package_connections WHERE id=?").run(id);
+    this.changed(id); return c;
+  }
+
   authenticate(token: string, remoteSpaceId: string): Connection | undefined {
     if (!token || token.length > 256) return undefined;
     const row = this.db.query("SELECT * FROM package_connections WHERE direction='incoming' AND enabled=1 AND token_hash=? AND remoteSpaceId=?").get(digest(token), remoteSpaceId) as Row | null;

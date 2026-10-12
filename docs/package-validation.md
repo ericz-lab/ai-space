@@ -10,7 +10,7 @@ Final full local validation, including the explicit Caddy lane: 863 tests passed
 | --- | --- |
 | Artifact and installation | Contract validation, deterministic inventory, publisher trust, digest mismatch, extra/missing files, archive limits, traversal/link rejection, target/runtime compatibility, existing checkout protection, idempotent operations and restart recovery |
 | Runtime | Static app without a process, concurrent on-demand startup, health failure cleanup, idle leases, background restart, private loopback listeners and stripped inherited operator secrets |
-| Lifecycle | Upgrade, retained versions, code rollback and removal retain data; busy requests refuse replacement; failed activation and interrupted publication restore verified previous code |
+| Lifecycle | Upgrade, retained versions, code rollback and removal retain data; busy requests refuse replacement; failed activation, a new version whose process does not reach health, and interrupted publication restore verified previous code; an unrecoverable change blocks only its application |
 | Local components | Stable scheduled task IDs/overrides; local HTTP/command execution; agent leases; dynamic check/widget/bus calls; old peer grants cannot invoke package apps |
 | Connection and gateway | Peer-to-Hub HTTP/WS, default-off reverse sharing, explicit reverse enable/revoke, immediate stream/socket closure, reconnect, same-name origin separation, local use during Hub outage and no remote-to-local substitution |
 | Operator controls | CLI routes and binary upload; same-origin panel writes; no management routes on app gateway; upload operation reconciliation; no tokens in connection listings |

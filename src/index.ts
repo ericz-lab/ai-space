@@ -78,14 +78,19 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const packageLifecycle = new PackageLifecycle(packageInstaller, {
     suspend: (app) => packageRuntime.suspend(app),
     activate: activatePackage,
+    verify: (app) => packageRuntime.verify(app),
     remove: async (app) => {
       await packageRuntime.remove(app);
       scheduler.forget(app); registry.remove(app); bus.forget(app);
       await discover();
     },
   });
-  await packageLifecycle.recover();
-  for (const operation of packageStore.list().filter((o) => o.state === "installed")) {
+  const blockedPackages = new Set<string>();
+  for (const { change, error } of await packageLifecycle.recover()) {
+    blockedPackages.add(change.app);
+    console.error(`[packages] ${change.app}: interrupted ${change.kind} ${change.id} could not be recovered and the app stays off: ${error}`);
+  }
+  for (const operation of packageStore.list().filter((o) => o.state === "installed" && !blockedPackages.has(o.app))) {
     await activatePackage(operation.app).catch((e) => console.error(`[packages] ${operation.app}: ${(e as Error).message}`));
   }
   const packageConnections = new Connections(store.db, packageStore.spaceId);

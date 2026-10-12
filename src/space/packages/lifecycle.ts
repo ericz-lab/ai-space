@@ -9,7 +9,11 @@ import { PackageStore, type InstallOperation } from "./store.ts";
 
 type Change = { id: string; app: string; kind: "upgrade" | "rollback" | "uninstall"; oldId: string; newId: string | null; state: "pending" | "done" | "failed"; error: string | null; createdAt: string; updatedAt: string };
 type Row = { id: string; app: string; kind: Change["kind"]; old_id: string; new_id: string | null; state: Change["state"]; error: string | null; created_at: number; updated_at: number };
-type Hooks = { suspend: (app: string) => Promise<() => void>; activate: (app: string) => Promise<void>; remove: (app: string) => Promise<void> };
+type Hooks = {
+  suspend: (app: string) => Promise<() => void>; activate: (app: string) => Promise<void>; remove: (app: string) => Promise<void>;
+  /** Proves the newly activated version starts; a throw restores the previous code. */
+  verify?: (app: string) => Promise<void>;
+};
 
 /** Journaled code replacement. Data is deliberately never moved, deleted or rolled back here. */
 export class PackageLifecycle {
@@ -90,12 +94,20 @@ export class PackageLifecycle {
 
   async drain(): Promise<void> { this.closing = true; await Promise.allSettled(this.pending); }
 
-  /** Before runtime activation, restore the last committed code for any interrupted change. */
-  async recover(): Promise<void> {
+  /**
+   * Before runtime activation, restore the last committed code for any interrupted change.
+   * A tree that cannot be verified stays pending (its app is not activated and takes no new
+   * change) and is returned for the operator; the other apps and the Space still start.
+   */
+  async recover(): Promise<{ change: Change; error: string }[]> {
+    const blocked: { change: Change; error: string }[] = [];
     for (const change of this.list().filter((c) => c.state === "pending")) {
-      await this.restore(change);
-      this.finish(change.id, "failed", "interrupted change; previous version restored");
+      try {
+        await this.restore(change);
+        this.finish(change.id, "failed", "interrupted change; previous version restored");
+      } catch (e) { blocked.push({ change, error: (e as Error).message }); }
     }
+    return blocked;
   }
 
   private async switch(change: Change, source?: string): Promise<Change> {
@@ -110,7 +122,7 @@ export class PackageLifecycle {
       if (source) { await rename(source, destination); await syncDirectory(this.installer.ws.apps); }
       await this.hooks.remove(change.app);
       this.store.switchInstalled(change.app, change.newId ?? undefined);
-      if (change.newId) await this.hooks.activate(change.app);
+      if (change.newId) { await this.hooks.activate(change.app); await this.hooks.verify?.(change.app); }
       return this.finish(change.id, "done");
     } catch (e) {
       // A failed activation can already have written app data. Only program files are restored.
