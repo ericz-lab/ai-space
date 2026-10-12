@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isImgIcon, recordOpen, type AgentInfo, type AppInfo, type BuiltinIcons, type UsageRow, type WidgetInfo } from "./api.ts";
-import { type Key, localized, useLang, withLang } from "./i18n.ts";
+import { type Key, localized, searchKeyText, searchText, useLang, withLang } from "./i18n.ts";
 import { BUILTINS, type Builtin, WIDGET_SIZES, type EntryKind, type Screen, entryKey, matches, parseKey } from "./screens.ts";
 import { Icon, Widget } from "./Tiles.tsx";
 
@@ -24,6 +24,7 @@ const BUILTIN_TEXT: Record<Builtin, { title: Key; blurb: Key; fallback: string }
   settings: { title: "settings.title", blurb: "settings.blurb", fallback: "⚙️" },
 };
 
+/** `text` is what the search reads besides the peer: the title and description in every language, and the id. */
 type Entry = { key: string; kind: EntryKind; widget?: WidgetInfo; icon: string; fallback: string; title: string; text: string; kindLabel: string; peer?: string; href?: string; size?: string };
 
 export default function Library({
@@ -107,19 +108,19 @@ export default function Library({
     const out: Entry[] = [];
     for (const a of apps) {
       const shown = localized(lang, a);
-      out.push({ key: entryKey("app", a.id), kind: "app", icon: a.icon, fallback: "📦", title: shown.title, text: [shown.description, a.name].join(" "), kindLabel: t("library.kindApp"), peer: a.peer, href: a.url ? withLang(a.url, lang) : undefined });
+      out.push({ key: entryKey("app", a.id), kind: "app", icon: a.icon, fallback: "📦", title: shown.title, text: [searchText(a), a.id].join(" "), kindLabel: t("library.kindApp"), peer: a.peer, href: a.url ? withLang(a.url, lang) : undefined });
     }
     for (const b of BUILTINS) {
       const x = BUILTIN_TEXT[b];
-      out.push({ key: entryKey("builtin", b), kind: "builtin", icon: builtins[b], fallback: x.fallback, title: t(x.title), text: t(x.blurb), kindLabel: t("status.builtIn") });
+      out.push({ key: entryKey("builtin", b), kind: "builtin", icon: builtins[b], fallback: x.fallback, title: t(x.title), text: [searchKeyText(x.title, x.blurb), b].join(" "), kindLabel: t("status.builtIn") });
     }
     for (const a of agents) {
       const shown = localized(lang, a);
-      out.push({ key: entryKey("agent", a.id), kind: "agent", icon: a.avatar, fallback: "🦾", title: shown.title, text: [shown.description, a.id].join(" "), kindLabel: t("library.kindAgent"), peer: a.peer });
+      out.push({ key: entryKey("agent", a.id), kind: "agent", icon: a.avatar, fallback: "🦾", title: shown.title, text: [searchText(a), a.id].join(" "), kindLabel: t("library.kindAgent"), peer: a.peer });
     }
     for (const w of widgets) {
       const shown = localized(lang, w);
-      out.push({ key: entryKey("widget", w.id), kind: "widget", widget: w, icon: w.icon, fallback: "📦", title: shown.title, text: w.id, kindLabel: t("library.kindWidget"), peer: w.peer, href: w.link ? withLang(w.link, lang) : undefined, size: w.size });
+      out.push({ key: entryKey("widget", w.id), kind: "widget", widget: w, icon: w.icon, fallback: "📦", title: shown.title, text: [searchText(w), w.id].join(" "), kindLabel: t("library.kindWidget"), peer: w.peer, href: w.link ? withLang(w.link, lang) : undefined, size: w.size });
     }
     return out;
   }, [apps, agents, widgets, builtins, lang, t]);
@@ -127,14 +128,14 @@ export default function Library({
   const kindOf = (e: Entry): Filter => (e.kind === "builtin" ? "app" : e.kind);
   const counts = useMemo(() => {
     const c: Record<Filter, number> = { all: 0, app: 0, agent: 0, widget: 0 };
-    for (const e of entries) if (matches(q, e.title, e.text, e.peer)) {
+    for (const e of entries) if (matches(q, e.text, e.peer)) {
       c.all++;
       c[kindOf(e)]++;
     }
     return c;
   }, [entries, q]);
   const used = (e: Entry) => usage.get(e.key);
-  const filtered = entries.filter((e) => (filter === "all" || kindOf(e) === filter) && matches(q, e.title, e.text, e.peer));
+  const filtered = entries.filter((e) => (filter === "all" || kindOf(e) === filter) && matches(q, e.text, e.peer));
   // A stable sort: entries never used keep the default order, after the used ones.
   const shown = byUse ? [...filtered].sort((a, b) => (used(b)?.activeMs ?? 0) - (used(a)?.activeMs ?? 0) || (used(b)?.opens ?? 0) - (used(a)?.opens ?? 0)) : filtered;
   const shownWidgets = shown.filter((e) => e.kind === "widget");

@@ -887,6 +887,21 @@ export function localized<T extends { title: string; description?: string; i18n?
 }
 
 /**
+ * Everything a search should find a manifest entry by, whatever language the panel is in: the plain
+ * title and description and every translation of them. A reader who knows an app by its English name
+ * finds it from a Chinese panel and the other way round.
+ */
+export function searchText(x: { title: string; description?: string; i18n?: I18n }): string {
+  const texts = [x.title, x.description, ...Object.values(x.i18n ?? {}).flatMap((e) => [e.title, e.description])];
+  return [...new Set(texts.filter(Boolean))].join(" ");
+}
+
+/** A panel string in every language, for searching the panel's own entries the same way. */
+export function searchKeyText(...keys: Key[]): string {
+  return [...new Set(keys.flatMap((key) => LANGS.map(({ code }) => MESSAGES[code][key])))].join(" ");
+}
+
+/**
  * An app URL with the `{lang}` placeholder filled (app-spec.md: an app opts in to the panel's language
  * by putting it in its `url` query). `%7Blang%7D` is the same placeholder after URL normalisation.
  */

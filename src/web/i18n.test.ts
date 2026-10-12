@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { fmtDuration, relTime, scheduleText, untilTime } from "./api.ts";
-import { LANGS, MESSAGES, detectLang, localized, translate, withLang } from "./i18n.ts";
+import { LANGS, MESSAGES, detectLang, localized, searchKeyText, searchText, translate, withLang } from "./i18n.ts";
+import { matches } from "./screens.ts";
 
 describe("dictionaries", () => {
   test("every language has every key of English and no empty text", () => {
@@ -42,6 +43,28 @@ describe("localized", () => {
     expect(localized("zh", { title: "Notes", i18n: { "zh-Hant": { title: "筆記", description: "個人筆記。" } } })).toEqual({ title: "筆記", description: "個人筆記。" });
     expect(localized("en", app)).toEqual({ title: "Notes", description: "Personal notes." });
     expect(localized("zh", { title: "Plain" })).toEqual({ title: "Plain" });
+  });
+});
+
+describe("searchText", () => {
+  const app = { id: "ai-todo", title: "Todo", description: "A todo list with one AI entry.", i18n: { zh: { title: "AI 待办", description: "一个 AI 入口的待办清单。" } } };
+  const find = (q: string) => matches(q, searchText(app), app.id);
+  test("an entry is found by its English title, its Chinese title and its id, in any panel language", () => {
+    expect(searchText(app)).toBe("Todo A todo list with one AI entry. AI 待办 一个 AI 入口的待办清单。");
+    expect(find("todo")).toBe(true);
+    expect(find("待办")).toBe(true);
+    expect(find("ai-todo")).toBe(true);
+    expect(find("清单 list")).toBe(true);
+    expect(find("notes")).toBe(false);
+  });
+  test("an entry without translations or a description is its plain title; repeats are dropped", () => {
+    expect(searchText({ title: "Vault" })).toBe("Vault");
+    expect(searchText({ title: "AI Usage", i18n: { zh: { title: "AI 用量" }, "zh-Hant": { title: "AI 用量" } } })).toBe("AI Usage AI 用量");
+  });
+  test("the panel's own entries carry their name in every language", () => {
+    expect(searchKeyText("inbox.title")).toBe("Inbox 收件箱");
+    expect(matches("终端", searchKeyText("term.title", "term.blurb"))).toBe(true);
+    expect(matches("terminal", searchKeyText("term.title", "term.blurb"))).toBe(true);
   });
 });
 
