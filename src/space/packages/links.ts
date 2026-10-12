@@ -19,6 +19,8 @@ export class PackageLinks {
   constructor(readonly connections: Connections, private readonly options: {
     env: Record<string, string | undefined>;
     apps: () => SharedApp[];
+    /** This Space's name (`SPACE_NAME`), sent with the catalogue as the label of its tiles elsewhere. */
+    name?: string;
     handle?: LinkHandler;
   }) {
     this.unsubscribe = connections.onChange((id) => {
@@ -98,7 +100,7 @@ export class PackageLinks {
     const c = this.connections.get(id);
     if (!c?.enabled) return Response.json({ error: "connection revoked" }, { status: 403 });
     const m = mapping(meta, "request", ["operation", "app", "path", "method", "headers"]);
-    if (m.operation === "catalogue") return Response.json({ spaceId: this.connections.spaceId, apps: this.options.apps().filter((a) => this.connections.allows(id, a.app)) });
+    if (m.operation === "catalogue") return Response.json({ spaceId: this.connections.spaceId, ...(this.options.name ? { name: this.options.name } : {}), apps: this.options.apps().filter((a) => this.connections.allows(id, a.app)) });
     if (typeof m.app !== "string" || !this.connections.allows(id, m.app)) return Response.json({ error: "application access denied" }, { status: 403 });
     if (m.operation !== "fetch" && m.operation !== "socket") return Response.json({ error: "operation not allowed" }, { status: 403 });
     // Only locally owned apps are dispatched. No forwarding to another connection or admin API.

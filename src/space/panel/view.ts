@@ -37,6 +37,11 @@ export type AppView = {
   name: string;
   /** Set when the app lives on a peer machine. */
   peer?: string;
+  /**
+   * Set when the app is a package another Space shares over a connection (docs/app-packages.md):
+   * `peer` is then that Space's name, and the app is only used here, never managed.
+   */
+  connection?: string;
   /** True when the entry comes from a snapshot of a peer that is not answering. */
   stale?: boolean;
   title: string;

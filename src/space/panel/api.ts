@@ -52,6 +52,8 @@ import { type WidgetFeed, sourceUrl } from "./widgets.ts";
 
 export type PanelApiOptions = {
   packageCheckUrl?: (app: string, check: string) => string;
+  /** Package apps that connected Spaces share with this one, from a local cache (docs/app-packages.md). */
+  sharedApps?: (hidden: Set<string>) => AppView[];
   ws: Workspace;
   registry: AppRegistry;
   layout: LayoutStore;
@@ -161,7 +163,9 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
       views,
       peers?.apps(hidden).filter((v) => all || (v.url && !v.hidden)) ?? [],
     );
-    return orderBy([...views, ...remote], lay.order.apps, (v) => v.id, tier);
+    const taken = new Set([...views, ...remote].map((v) => v.id));
+    const shared = (opts.sharedApps?.(hidden) ?? []).filter((v) => !taken.has(v.id) && (all || (v.url && !v.hidden)));
+    return orderBy([...views, ...remote, ...shared], lay.order.apps, (v) => v.id, tier);
   };
 
   const listServices = async (): Promise<ServiceView[]> => {
