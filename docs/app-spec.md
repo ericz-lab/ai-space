@@ -82,7 +82,7 @@ i18n:                              # translations of the display text, by langua
 | --- | --- | --- |
 | `spec` | int | Spec version. Missing means `1` while `1` is the only version. |
 | `name` | string | App name, rule 2 above. Missing means the directory name. |
-| `title` | string | Shown on the panel. |
+| `title` | string | Shown on the panel. An English product name; see [Display names](#display-names). |
 | `description` | string | One sentence, shown on the panel card and to agents. |
 | `icon` | string | Repository path to an SVG or PNG, a single emoji, or an http(s) URL. |
 | `url` | string | Public entry URL; the panel shows a tile only for apps that have one. Widget and agent links are resolved relative to it. A `{lang}` placeholder in its query (`https://my-app.example.com/?lang={lang}`) is replaced by the panel's language when the tile is opened; without one the app sees only the browser's language. See [i18n](i18n.md#apps). A **path** (`/`, `/docs?lang={lang}`) means "my page, on the hostname the space assigns": it resolves to `https://<name>.<SPACE_DOMAIN><path>` on a space with a domain and to `http://127.0.0.1:<service.port><path>` on one without, so a public app writes `url: /` and is right on every machine; it needs a `service` with a `port`. See [router](router.md). An operator overrides either form per machine with `SPACE_APP_URL_<NAME>` in the workspace `.env` (the app name uppercased, `-` and `.` as `_`). |
@@ -102,6 +102,18 @@ i18n:
     widgets:
       recent: { title: 笔记 · 最近 }
 ```
+
+### Display names
+
+`name` is the identifier and never changes: layouts, peers, skills, tasks and data are keyed on it. `title` is only what people read, so it can be improved at any time. The plain `title` and `description` are English, because they are what a reader without a translation sees, what notifications are tagged with and what agents are told; every other language goes under `i18n:`.
+
+| Entry | Convention | Examples |
+| --- | --- | --- |
+| App `title` | A short English product name in Title Case, one to three words. An existing brand keeps its spelling. "AI" is left out unless it is the subject: every app here uses AI. | `Notes`, `Market Calendar`, `PhotoPlay`, `AI Usage` |
+| Agent `title` | Domain and role, unambiguous across the whole panel, where several apps each have an analyst or a curator. | `Notes Librarian`, `Stock Analyst`, `Graph Curator` |
+| Widget `title` | The app's title, ` · ` (space, middle dot U+00B7, space), then what the card shows, in Title Case. | `Notes · Recent`, `Todo · Up Next` |
+
+The library search reads the title and description in every language the manifest declares, and the id, so an app is found by its English name, its translated name or its `name` from any panel language ([i18n](i18n.md#search)).
 
 ### `service`
 
@@ -133,7 +145,7 @@ An agent is a chat identity: a runtime session started in the app's directory wi
 ```yaml
 agents:
   - name: assistant                # unique within the app; shown as my-app/assistant
-    title: Assistant
+    title: My App Assistant        # domain + role, see Display names
     description: Answers questions about this app's data and runs its maintenance.
     avatar: agents/assistant.svg   # default: the app icon
     runtime: claude                # optional: a runtime of the space (docs/runtimes.md); default: the space's choice
@@ -544,6 +556,7 @@ service:
 
 agents:
   - name: librarian
+    title: Notes Librarian
     description: Files new notes, answers questions from the archive.
     prompt: agents/librarian.md
     tools: [Read, Grep, Bash(bun *)]

@@ -127,7 +127,7 @@ The manifest lives in the repository. Change it there, commit, deploy, sync; nev
 
 | Change | Do | Then |
 | --- | --- | --- |
-| identity (`title`, `description`, `icon`, `url`, `repo`) | edit the top level | sync; tile appears only with `url` |
+| identity (`title`, `description`, `icon`, `url`, `repo`) | edit the top level; `title` and `description` in English, other languages under `i18n:`, names as in [Display names](../../docs/app-spec.md#display-names) (app `Notes`, agent `Notes Librarian`, widget `Notes · Recent`) | sync; tile appears only with `url` |
 | `service` | change command, port (check `GET /api/services` for clashes), health | reinstall the unit if the command or port changed; restart; sync |
 | add or change an agent | `agents/<name>.md` + `agents/<name>.svg` + the `agents:` entry (`name`, `title`, `description`, `prompt`, `tools`, `avatar`, optional `model`, `skills`) | sync; `GET /api/agents` lists it with its avatar; open one chat turn to prove the prompt and tool list |
 | add or change a widget | endpoint in the service + the `widgets:` entry (`source`, `link`, `size`, `refresh` ≥ 15s) | sync; `GET /api/widgets` shows its payload or its error |
