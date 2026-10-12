@@ -42,8 +42,7 @@ export class PackageInstaller {
     return this.readInstalled(operation);
   }
 
-  private async readInstalled(operation: InstallOperation): Promise<RuntimeApp> {
-    const dir = join(this.ws.apps, operation.app);
+  async readInstalled(operation: InstallOperation, dir = join(this.ws.apps, operation.app)): Promise<RuntimeApp> {
     if (!(await lstat(dir)).isDirectory()) throw new Error("installed app must be a real directory");
     const receiptPath = join(dir, RECEIPT);
     const stat = await lstat(receiptPath);

@@ -33,6 +33,7 @@ import { Connections } from "./space/packages/connections.ts";
 import { PackageLinks, createConnectionRoutes } from "./space/packages/links.ts";
 import { PackageGateway, createPackageOpenRoutes } from "./space/packages/gateway.ts";
 import { runPackageTask } from "./space/packages/tasks.ts";
+import { PackageLifecycle } from "./space/packages/lifecycle.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { guardBrowserWrites } from "./space/auth.ts";
@@ -70,6 +71,16 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     await packageRuntime.register(installed);
     await registerPackage?.(installed.dir);
   };
+  const packageLifecycle = new PackageLifecycle(packageInstaller, {
+    suspend: (app) => packageRuntime.suspend(app),
+    activate: activatePackage,
+    remove: async (app) => {
+      await packageRuntime.remove(app);
+      scheduler.forget(app); registry.remove(app); bus.forget(app);
+      await discover();
+    },
+  });
+  await packageLifecycle.recover();
   for (const operation of packageStore.list().filter((o) => o.state === "installed")) {
     await activatePackage(operation.app).catch((e) => console.error(`[packages] ${operation.app}: ${(e as Error).message}`));
   }
@@ -235,7 +246,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
 
   // What this machine registers for a manifest: boot and the sync routes go through the same step.
   const resolve = (manifest: Manifest) => manifest.spec === 2 ? manifest : applyEnvOverrides(manifest, env, { domain: config.router.domain });
-  const loadApp = async (dir: string): Promise<Manifest> => {
+  const loadApp = async (dir: string, changing = false): Promise<Manifest> => {
+    if (!changing && packageLifecycle.list().some((c) => c.app === basename(dir) && c.state === "pending")) throw new Error("package is changing version");
     const operation = packageStore.list().find((o) => o.app === basename(dir) && o.state === "installed");
     if (!operation) return loadManifest(dir);
     const installed = await packageInstaller.load(operation.app);
@@ -243,8 +255,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     await packageRuntime.register(installed);
     return installed.manifest;
   };
-  const syncDir = async (dir: string) => {
-    const manifest = resolve(await loadApp(dir));
+  const syncDir = async (dir: string, changing = false) => {
+    const manifest = resolve(await loadApp(dir, changing));
     const extra = await provision(manifest);
     scheduler.syncManifest(Scheduler.schedulable(manifest), extra);
   };
@@ -263,7 +275,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     }
     return dirs;
   };
-  registerPackage = async (dir) => { await syncDir(dir); await discover(); };
+  registerPackage = async (dir) => { await syncDir(dir, true); await discover(); };
   const skippedNames = new Set<string>();
   for (const dir of await discover()) {
     try {
@@ -384,7 +396,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) }),
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
-      ...createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, activate: activatePackage }),
+      ...createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage }),
       ...createConnectionRoutes({ links: packageLinks, token: config.apiToken }),
       ...createPackageOpenRoutes(packageGateway, config.apiToken),
       ...createRouterRoutes({ router }),
@@ -423,6 +435,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     console.log(`[space] drained in ${Date.now() - at}ms: ${runs.finished} run(s) finished, ${runs.aborted} aborted; ${calls.finished} model call(s) finished, ${calls.interrupted} interrupted; ${chats.finished} chat turn(s) finished, ${chats.interrupted} interrupted`);
     server.stop();
     await packageInstaller.drain();
+    await packageLifecycle.drain();
     await packageRuntime.close(config.drainMs);
     await bus.idle();
     await notify.idle();

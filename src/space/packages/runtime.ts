@@ -25,6 +25,7 @@ export class PackageRuntime {
   private readonly now: () => number;
   private readonly probe: NonNullable<RuntimeOptions["probe"]>;
   private closing = false;
+  private readonly suspended = new Set<string>();
   private readonly timer: ReturnType<typeof setInterval>;
 
   constructor(private readonly opts: RuntimeOptions) {
@@ -59,6 +60,7 @@ export class PackageRuntime {
 
   async acquire(app: string, startProcess = true): Promise<{ port?: number; release: () => void }> {
     if (this.closing) throw new Error("application runtime is shutting down");
+    if (this.suspended.has(app)) throw new Error(`${app} is changing version`);
     const s = this.apps.get(app);
     if (!s) throw new Error(`unknown package application: ${app}`);
     if (s.app.manifest.status !== "active") throw new Error(`${app} is ${s.app.manifest.status}`);
@@ -88,7 +90,9 @@ export class PackageRuntime {
         const stat = await lstat(join(s.app.dir, ...pieces.slice(0, i)));
         if (i < pieces.length ? !stat.isDirectory() : !stat.isFile()) return new Response("Not found", { status: 404 });
       }
-      return new Response(Bun.file(join(s.app.dir, relative)), { headers: { "x-content-type-options": "nosniff", "cache-control": "no-cache" } });
+      const file = Bun.file(join(s.app.dir, relative));
+      // Read while leased: a concurrent version switch must not change a lazy file body's pathname.
+      return new Response(await file.arrayBuffer(), { headers: { "content-type": file.type, "x-content-type-options": "nosniff", "cache-control": "no-cache" } });
     } finally { lease.release(); }
   }
 
@@ -96,7 +100,7 @@ export class PackageRuntime {
     if (this.closing) return;
     for (const s of this.apps.values()) {
       const launch = s.app.manifest.launch;
-      if (s.app.manifest.status !== "active" || launch?.kind !== "process" || s.starting || s.stopping) continue;
+      if (this.suspended.has(s.app.manifest.app) || s.app.manifest.status !== "active" || launch?.kind !== "process" || s.starting || s.stopping) continue;
       if (launch.mode === "on-demand" && s.child && !s.leases && this.now() - s.lastUsed >= launch.idleTimeoutMs) await this.stop(s);
       if (launch.mode === "background" && !s.child && this.now() >= s.retryAt) await this.ensure(s).catch(() => {});
     }
@@ -107,6 +111,16 @@ export class PackageRuntime {
     if (!s) return;
     if (s.leases) throw new Error(`${app} is still in use`);
     await this.stop(s); this.apps.delete(app);
+  }
+
+  async suspend(app: string): Promise<() => void> {
+    if (this.suspended.has(app)) throw new Error(`${app} is already changing version`);
+    const state = this.apps.get(app);
+    if (state?.leases) throw new Error(`${app} is still in use`);
+    this.suspended.add(app);
+    try { if (state) await this.stop(state); }
+    catch (e) { this.suspended.delete(app); throw e; }
+    return () => { this.suspended.delete(app); };
   }
 
   async close(graceMs = 10_000): Promise<void> {

@@ -2,11 +2,12 @@ import { isOperator } from "../auth.ts";
 import { DEFAULT_ARCHIVE_LIMIT } from "./archive.ts";
 import type { PackageInstaller } from "./install.ts";
 import type { PackageRuntime } from "./runtime.ts";
+import type { PackageLifecycle } from "./lifecycle.ts";
 
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
 
 /** Operator-only installation. Trust roots are host configuration, never supplied by an upload. */
-export function createPackageRoutes(opts: { installer: PackageInstaller; token: string; trustedKeys?: string[]; runtime?: PackageRuntime; activate?: (app: string) => Promise<void> }): Record<string, Record<string, Handler>> {
+export function createPackageRoutes(opts: { installer: PackageInstaller; token: string; trustedKeys?: string[]; runtime?: PackageRuntime; lifecycle?: PackageLifecycle; activate?: (app: string) => Promise<void> }): Record<string, Record<string, Handler>> {
   const json = (data: unknown, status = 200) => Response.json(data, { status });
   const denied = (req: Request) => !isOperator(req, opts.token);
   let uploads = 0;
@@ -35,10 +36,16 @@ export function createPackageRoutes(opts: { installer: PackageInstaller; token: 
               chunks.push(value);
             }
           } finally { reader.releaseLock(); }
-          const operation = await opts.installer.install(Buffer.concat(chunks, total), {
+          const options = {
             id: req.headers.get("idempotency-key") ?? undefined, trustedKeys: opts.trustedKeys,
             allowUnsigned: req.headers.get("x-space-allow-unsigned") === "true",
-          });
+          };
+          if (req.headers.get("x-space-upgrade") === "true") {
+            if (!opts.lifecycle) throw new Error("package lifecycle is unavailable");
+            const change = await opts.lifecycle.upgrade(Buffer.concat(chunks, total), options);
+            return json({ ok: change.state === "done", change }, change.state === "done" ? 200 : 409);
+          }
+          const operation = await opts.installer.install(Buffer.concat(chunks, total), options);
           if (operation.state === "installed" && opts.activate) {
             try { await opts.activate(operation.app); }
             catch (e) { return json({ ok: false, operation, activation: "failed", error: (e as Error).message }, 409); }
@@ -46,6 +53,31 @@ export function createPackageRoutes(opts: { installer: PackageInstaller; token: 
           return json({ ok: operation.state !== "failed", operation }, operation.state === "failed" ? 409 : operation.state === "installing" ? 202 : 200);
         } catch (e) { return json({ ok: false, error: (e as Error).message }, 400); }
         finally { uploads--; }
+      },
+    },
+    "/api/packages/changes": {
+      GET: (req) => denied(req) ? json({ ok: false, error: "unauthorized" }, 401) : json({ ok: true, changes: opts.lifecycle?.list() ?? [] }),
+    },
+    "/api/packages/apps/:app/rollback": {
+      POST: async (req) => {
+        if (denied(req)) return json({ ok: false, error: "unauthorized" }, 401);
+        try {
+          if (!opts.lifecycle) throw new Error("package lifecycle is unavailable");
+          const body = await req.json() as { operationId?: unknown };
+          if (typeof body.operationId !== "string") throw new Error("operationId of the retained version is required");
+          const change = await opts.lifecycle.rollback(req.params.app!, body.operationId, req.headers.get("idempotency-key") ?? undefined);
+          return json({ ok: change.state === "done", change }, change.state === "done" ? 200 : 409);
+        } catch (e) { return json({ ok: false, error: (e as Error).message }, 409); }
+      },
+    },
+    "/api/packages/apps/:app": {
+      DELETE: async (req) => {
+        if (denied(req)) return json({ ok: false, error: "unauthorized" }, 401);
+        try {
+          if (!opts.lifecycle) throw new Error("package lifecycle is unavailable");
+          const change = await opts.lifecycle.uninstall(req.params.app!, req.headers.get("idempotency-key") ?? undefined);
+          return json({ ok: change.state === "done", change, data: "retained" }, change.state === "done" ? 200 : 409);
+        } catch (e) { return json({ ok: false, error: (e as Error).message }, 409); }
       },
     },
     "/api/packages/operations/:id": {
