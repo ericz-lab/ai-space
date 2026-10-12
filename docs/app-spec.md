@@ -61,6 +61,8 @@ Runtime state never lives in the app directory. ai-space keeps it under `<worksp
 
 ## The manifest: `space.yaml`
 
+This is the active spec-1 contract. The separate [application package contract](app-packages.md) defines spec 2 and its implementation boundary; a legacy sync rejects spec 2 until package activation is supported.
+
 The manifest is a YAML mapping. Parsing is strict: an unknown top-level key, a wrong type or a bad value rejects the whole app, so nothing partially applies. `${VAR}` and `${VAR:-default}` placeholders in strings are resolved from `<workspace>/.env` and the process environment at sync time.
 
 ### Top level
