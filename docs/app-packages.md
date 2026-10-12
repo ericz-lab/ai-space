@@ -132,3 +132,19 @@ The host loads installed applications from its journal and receipt, checking has
 `PackageRuntime.acquire` shares a single startup across concurrent requests. Each caller releases its lease exactly once when the work ends. An idle process stops only after the last release and its declared idle interval. Background processes remain running and restart after crashes with bounded backoff. Health waits time out; failed starts terminate the child and release the caller's lease. Static serving permits only indexed regular files under the declared root and rejects links and path traversal. The app gateway must hold process leases through response streams and WebSocket lifetimes.
 
 Child environments receive provisioned app variables and PATH, not the operator's entire environment. Launch arguments are never evaluated by a shell. Logs append to `logs/<app>/package.log`. Linux uses `setsid` when available to stop the process group; on other hosts or without setsid only the direct process is terminated, matching the current runtime runner limitation. Packaged processes must terminate their own child work on SIGTERM. A forced stop follows a 10-second grace period. Dynamic loopback port selection is checked by startup health; a bind race surfaces as startup failure rather than granting a permanent port from the package.
+
+## Connected Space API
+
+The package connection protocol is separate from legacy `SPACE_PEER_*` snapshots and `SPACE_HUB_TOKEN`. Existing credentials do not silently acquire package access. Operator-only routes create and change connections:
+
+- `GET /api/connections`: this Space UUID and sanitized connection state.
+- `POST /api/connections`: `{ remoteSpaceId, direction, apps? }` for incoming connections, plus `{ url, tokenEnv }` for outgoing connections.
+- `PATCH /api/connections/:id`: `{ apps?, enabled? }`; apps always refer to applications owned by this machine.
+- `DELETE /api/connections/:id`: disable the connection and close its work.
+- `POST /api/connections/:id/rotate`: issue a new incoming token, returned once.
+
+First create an incoming connection on the Hub bound to the peer UUID, selecting which Hub app IDs it may use. The token is returned only on creation/rotation and stored as a hash. Put that token in the peer workspace environment, then create an outgoing connection there naming the Hub UUID, HTTPS origin and the token's environment-variable name. Plain HTTP is accepted only for a loopback endpoint. Outgoing connection credentials are never copied into connection catalogue responses or uploaded grant definitions. The server environment must contain the credential before it connects.
+
+The peer opens an authenticated WebSocket to `/api/connections/channel`; the Hub verifies the token and peer UUID, and the peer verifies the Hub UUID in the protocol handshake. The single connection carries requests in both directions, so authorized Hub access requires no inbound peer port. Both sides default to an empty local application grant. To allow Hub access, the peer sets its outgoing connection's `apps` list. Grants do not transit through the Hub to other peers, and application use never authorizes installation, a shell, or operator APIs. Grant changes, disable and rotation close affected connections and all in-flight streams before reconnecting.
+
+The channel supports at most 16 concurrent request streams, 32 KiB body chunks with consumption credit, bounded metadata frames and a 30-second response-header deadline. Response bodies stream until completion/cancellation; a physical disconnect aborts all active requests. Incoming sockets use the existing 25-second server ping. Outgoing connections retry while enabled. Protocol 1 currently exposes an authorized local catalogue and a gateway dispatch hook; complete application HTTP/WS handling is the gateway stage.
