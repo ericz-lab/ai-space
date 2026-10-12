@@ -25,6 +25,9 @@ import { createLogsRoutes } from "./space/logs/index.ts";
 import { UsageService, UsageStore, createUsageRoutes } from "./space/usage/index.ts";
 import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/services/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
+import { createPackageRoutes } from "./space/packages/api.ts";
+import { PackageStore } from "./space/packages/store.ts";
+import { PackageInstaller } from "./space/packages/install.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { guardBrowserWrites } from "./space/auth.ts";
@@ -49,6 +52,10 @@ export { parseNotifyArgs } from "./cli/notify.ts";
 
 export async function boot(ws: Workspace, config: Config, env: Record<string, string | undefined> = process.env) {
   const store = new Store(config.dbPath, { eventRetentionMs: config.eventRetentionMs });
+  const packageStore = new PackageStore(store.db);
+  const packageInstaller = new PackageInstaller(ws, packageStore);
+  await packageInstaller.recover();
+  const packageTrustKeys = await Promise.all(config.packageTrustKeys.map((path) => Bun.file(path).text()));
   const storage = await openStorage(ws, config);
   const backups = await openBackups(config);
   const taskDefaults = backupTaskDefaults(ws, config);
@@ -339,6 +346,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) }),
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
+      ...createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys }),
       ...createRouterRoutes({ router }),
       ...createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)) }),
       ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) }),
@@ -372,6 +380,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     const [runs, calls, chats] = await Promise.all([scheduler.drain(config.drainMs), model.drain(config.drainMs), agentRuns.shutdown(config.drainMs)]);
     console.log(`[space] drained in ${Date.now() - at}ms: ${runs.finished} run(s) finished, ${runs.aborted} aborted; ${calls.finished} model call(s) finished, ${calls.interrupted} interrupted; ${chats.finished} chat turn(s) finished, ${chats.interrupted} interrupted`);
     server.stop();
+    await packageInstaller.drain();
     await bus.idle();
     await notify.idle();
     store.close();
