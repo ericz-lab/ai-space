@@ -91,22 +91,43 @@ export function Tile({
       {!editing && !popHidden && showPop && <div className="pop">{children}</div>}
     </>
   );
+  const activate = () => {
+    setPopHidden(true);
+    if (!editing) onUse?.();
+    if (!editing && onOpen) onOpen();
+  };
   const common = {
     className: `tile${stale ? " stale" : ""}${className ? ` ${className}` : ""}`,
     ...(dragProps as object),
     onMouseLeave: () => setPopHidden(false),
-    onClick: () => {
-      setPopHidden(true);
-      if (!editing) onUse?.();
-      if (!editing && onOpen) onOpen();
-    },
+    onClick: activate,
   };
-  return asLink ? (
-    <a {...common} href={href} target="_blank" rel="noopener noreferrer">
+  if (asLink)
+    return (
+      <a {...common} href={href} target="_blank" rel="noopener noreferrer">
+        {inner}
+      </a>
+    );
+  // A tile that opens a window is a button: it holds the remove button and the pop-over's links, so
+  // it cannot be a <button> and takes the role, the tab stop and the keys instead. In edit mode a
+  // click does nothing, so only the remove button stays in the tab order.
+  const asButton = !editing && !!onOpen;
+  return (
+    <div
+      {...common}
+      {...(asButton && {
+        role: "button",
+        tabIndex: 0,
+        "aria-label": badge && badge.n > 0 ? `${name}, ${badge.title}` : name,
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          if (!e.repeat) activate();
+        },
+      })}
+    >
       {inner}
-    </a>
-  ) : (
-    <div {...common}>{inner}</div>
+    </div>
   );
 }
 

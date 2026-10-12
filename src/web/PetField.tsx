@@ -40,6 +40,7 @@ export default function PetField({ pet, onChange }: { pet: PetChoice | undefined
       <div className="setinput">
         <input
           list="petdex-pets"
+          aria-label={t("pet.label")}
           placeholder={t("pet.placeholder")}
           value={query}
           spellCheck={false}

@@ -82,7 +82,7 @@ export const DEFAULT_THEME: ThemeDefinition & { light: ResolvedTokens; dark: Res
   light: {
     background: "#f6f7fb",
     text: "#0e1116",
-    muted: "rgba(14, 17, 22, 0.55)",
+    muted: "rgba(14, 17, 22, 0.62)",
     surface: "rgba(255, 255, 255, 0.55)",
     surfaceStrong: "rgba(255, 255, 255, 0.78)",
     panel: "rgba(255, 255, 255, 0.94)",

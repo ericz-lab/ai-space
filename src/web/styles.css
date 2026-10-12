@@ -9,7 +9,7 @@
      preset and the operator's overrides inline on <html> (docs/panel.md#appearance). */
   --bg: #f6f7fb;
   --text: #0e1116;
-  --muted: rgba(14, 17, 22, 0.55);
+  --muted: rgba(14, 17, 22, 0.62);
   --glass: rgba(255, 255, 255, 0.55);
   --glass-strong: rgba(255, 255, 255, 0.78);
   --panel: rgba(255, 255, 255, 0.94);
@@ -30,6 +30,8 @@
   --radius-md: calc(var(--radius) * 8 / 9);
   --radius-sm: calc(var(--radius) * 7 / 9);
   --glass-filter: blur(var(--blur)) saturate(180%);
+  /* The status green as text: the token is bright enough for a dot, not for words (4.5:1). */
+  --success-text: color-mix(in srgb, var(--success) 50%, var(--text));
 }
 :root[data-theme="dark"] {
   /* A lifted dark: slate ground, brighter aurora, glass that reads as a surface rather than a hole. */
@@ -242,6 +244,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
   width: 100%; border: 1px solid var(--glass-border); background: var(--glass);
   border-radius: 9px; padding: 7px 28px 7px 10px; font-family: inherit; font-size: 13px; color: var(--text);
 }
+.setinput input::placeholder { color: var(--muted); opacity: 1; }
 .setinput input:focus { outline: 2px solid color-mix(in srgb, var(--link) 40%, transparent); }
 .setinput button {
   position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
@@ -847,14 +850,17 @@ a.widget-title:hover { color: var(--text); }
 .screen .empty p { margin-bottom: 16px; }
 
 /* Edges: a faint handle always, the button under the pointer. Touch screens swipe and
-   use the dock instead. */
+   use the dock instead. An edge is as wide as the page's gutter (the shell's side padding, 72 px
+   at most), so it never lies over a tile; its button may reach past it and takes no pointer events,
+   so a click there goes to what is under it. */
 .edge {
-  position: fixed; top: 0; bottom: 0; z-index: 24; width: 72px; border: none; padding: 0; margin: 0;
+  position: fixed; top: 0; bottom: 0; z-index: 24; border: none; padding: 0 10px; margin: 0;
+  width: clamp(24px, calc(max((100vw - 1240px) / 2, 0px) + 5vw), 72px);
   background: transparent; color: var(--text); font: inherit; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center;
 }
-.edge.left { left: 0; }
-.edge.right { right: 0; }
+.edge.left { left: 0; justify-content: flex-start; }
+.edge.right { right: 0; justify-content: flex-end; }
 .edge-handle {
   position: absolute; top: 50%; width: 4px; height: 44px; margin-top: -22px; border-radius: 4px;
   background: var(--muted); opacity: 0.22; transition: opacity 0.2s;
@@ -862,7 +868,7 @@ a.widget-title:hover { color: var(--text); }
 .edge.left .edge-handle { left: 6px; }
 .edge.right .edge-handle { right: 6px; }
 .edge-btn {
-  width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  flex: none; pointer-events: none; width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   font-size: 34px; line-height: 1; padding-bottom: 3px; background: var(--glass-strong); border: 1px solid var(--glass-border); box-shadow: var(--shadow);
   -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
   opacity: 0; transform: scale(0.8); transition: opacity 0.18s ease, transform 0.18s ease;
@@ -872,6 +878,14 @@ a.widget-title:hover { color: var(--text); }
 .edge:focus-visible { outline: none; }
 .edge:focus-visible .edge-btn { box-shadow: 0 0 0 3px var(--focus); }
 @media (hover: none) { .edge { display: none; } }
+/* A phone-width window with a mouse: the gutter is 20 px and a button would cover the first icon
+   of every row, so the handle alone shows the way and lights up under the pointer. */
+@media (max-width: 640px) {
+  .edge { width: 20px; padding: 0; }
+  .edge-btn { display: none; }
+  .edge:hover .edge-handle, .edge:focus-visible .edge-handle { opacity: 0.7; }
+  .edge:focus-visible .edge-handle { box-shadow: 0 0 0 3px var(--focus); }
+}
 
 /* The dock: library, home, one monitor per screen, search. With a mouse it rises into view when the
    pointer nears the bottom of the window (`shown`) or the keyboard focus enters it; touch screens
@@ -922,7 +936,7 @@ a.widget-title:hover { color: var(--text); }
   border: 1px solid var(--glass-border); background: var(--glass); color: var(--muted); cursor: pointer;
   border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; display: inline-flex; gap: 6px; align-items: center;
 }
-.lib-chip span { font-size: 11px; font-variant-numeric: tabular-nums; opacity: 0.8; }
+.lib-chip span { font-size: 11px; font-variant-numeric: tabular-nums; }
 .lib-chip.on { background: var(--text); color: var(--inverse); border-color: transparent; }
 .lib-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-left: auto; }
 .lib-tools .btn2 { padding: 6px 14px; font-size: 13px; }
@@ -949,10 +963,10 @@ a.widget-title:hover { color: var(--text); }
 .lib-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .lib-text b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lib-kind, .lib-on { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lib-on { color: var(--success); }
+.lib-on { color: var(--success-text); }
 .lib-act { flex: none; display: flex; gap: 6px; align-items: center; }
 .lib-act .btn2 { padding: 5px 14px; font-size: 13px; }
-:is(.lib-act, .widget-extra) .btn2.done { background: transparent; color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); opacity: 1; }
+:is(.lib-act, .widget-extra) .btn2.done { background: transparent; color: var(--success-text); border-color: color-mix(in srgb, var(--success) 40%, transparent); opacity: 1; }
 /* "Added" turns into "Remove" under the pointer; a click takes the entry off the target screen. */
 .btn2.done .undo, .btn2.done:hover .on, .btn2.done:focus-visible .on { display: none; }
 .btn2.done:hover .undo, .btn2.done:focus-visible .undo { display: inline; }
