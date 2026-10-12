@@ -3,6 +3,7 @@ import { parseArgs, need, noMore } from "./args.ts";
 import { type TaskView, confirm, listTasks, scheduleText, taskRef } from "./common.ts";
 import { deployVerb } from "./deploy.ts";
 import { newApp } from "./newapp.ts";
+import { inspectPackageVerb, packVerb } from "./package.ts";
 import { ago, bytes, until } from "./output.ts";
 import { ApiError, type Ctx, type Noun, UsageError } from "./types.ts";
 
@@ -235,6 +236,8 @@ export const appNoun: Noun = {
   name: "app",
   summary: "the apps of the workspace: list, show, sync, deploy, service, start/stop/restart, supervise, hide, uninstall, env, new",
   verbs: {
+    pack: { usage: "DIR --output FILE [--include PATH,...] [--target OS/ARCH] [--source-included] [--sign-key FILE]", summary: "create an offline application package from explicitly selected prepared files", run: packVerb },
+    "inspect-package": { usage: "FILE [--trusted-key FILE] [--check-host]", summary: "verify package contents and inspect its signature without executing code", run: inspectPackageVerb },
     ls: { usage: "[--panel]", summary: "every app (--panel: only what the panel shows)", run: ls },
     show: { usage: "APP", summary: "manifest, storage, backups and tasks of one app", run: show },
     sync: { usage: "[APP]", summary: "re-read one space.yaml, or every app directory", run: sync },

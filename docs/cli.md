@@ -60,6 +60,8 @@ Rules:
 | --- | --- | --- |
 | `space status` | health, app services with their health, tasks failing or overdue, last backup per app, model calls in flight, peers up or down; one screen | `/healthz`, `/api/services`, `/api/tasks`, `/api/backups`, `/api/model/status`, `/api/peers` |
 | `space app ls [--panel]` | every app: title, status, service health, url, hidden (`--panel`: only what the panel shows) | `GET /api/apps?all=1` |
+| `space app pack DIR --output FILE [--include PATH,...] [--target OS/ARCH] [--source-included] [--sign-key FILE]` | build a package from explicitly selected prepared files, without network or build hooks ([app-packages.md](app-packages.md)) | disk, works without ai-space |
+| `space app inspect-package FILE [--trusted-key FILE] [--check-host]` | verify every file and inspect signature/compatibility without executing code | disk, works without ai-space |
 | `space app show APP` | the manifest as synced, storage, tasks, agents, widgets, last backup | `GET /api/apps/:app`, `.../storage`, `.../backups` |
 | `space app sync [APP]` | re-read one `space.yaml` or every app directory | `POST /api/apps/sync`, `POST /api/apps/:app/sync` |
 | `space app deploy APP [--rev REV] [--git-dir DIR] [--no-restart]` | on the host: check out `REV`, run the manifest's `deploy` install, check and build commands, then sync and restart; a failure restores the previous tree and leaves the service running, exit 1 ([app-spec.md](app-spec.md#deploy)) | disk (`src/space/deploy/`), then `POST /api/apps/:app/sync`, `GET`/`POST /api/apps/:app/service` |

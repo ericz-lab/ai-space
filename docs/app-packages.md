@@ -6,7 +6,22 @@ Tracking: [issue #3](https://github.com/ericz-lab/ai-space/issues/3), Seoul Todo
 
 An application should install from a portable artifact and run locally without an internet connection when its features permit it. Installing it must not implicitly start a permanent service or share it with another machine. A peer can use applications granted by its Hub; the peer separately controls whether that Hub can discover and use its local applications.
 
-Implemented in the first stage: pure validation of the format-1 package index, spec-2 application manifest, compatibility requirements and installation identity. These functions neither execute files nor register applications. The running app registry still accepts **spec 1 only**. Pack/install commands, activation, grants and the gateway are subsequent stages, not available merely because a declaration validates.
+Implemented: format-1 index/spec-2 manifest validation, `space app pack` and `space app inspect-package`, bounded archive reading, file integrity and Ed25519 signature verification. These operations neither execute files nor register applications. The running app registry still accepts **spec 1 only**. Installation, activation, grants and the gateway are subsequent stages, not available merely because a declaration validates.
+
+## Build and inspect a package
+
+Build the application with its own checked-in Bun scripts first. Select prepared files/directories explicitly; the manifest is always included:
+
+```sh
+bun run space app pack ./prepared-app --include web,agents,skills --output ./notes-1.0.0.spaceapp
+bun run space app inspect-package ./notes-1.0.0.spaceapp --check-host --json
+```
+
+The packer makes no network/model calls and runs no build/install hooks. Output must be outside the source tree and must not already exist. Directories are traversed in sorted order; timestamps/ownership are normalized so identical inputs produce identical archives. Excluded files are reported. Symlinks (including dependency links) are rejected: bundle dependencies into prepared outputs first. An installation may rely on an already-installed compatible host Bun but must not fetch dependencies on install. Packing cannot prove arbitrary application code never uses the network; offline features require the acceptance tests below.
+
+Use `--target linux/arm64` (or another supported pair) for native artifacts and `--source-included` when shipping source. `any/any` is the default and rejects recognized native binary headers. Native launch entries must be executable. A concrete target is the publisher's declaration; cross-platform execution needs testing on that target.
+
+To sign, pass `--sign-key /path/to/ed25519-private.pem`; keep keys outside the staging tree. Inspect with `--trusted-key /path/to/publisher-public.pem`. Signature status is `unsigned`, `untrusted` (no matching independently supplied key), or `verified`; a wrong signature for a supplied trusted key fails inspection. Successful inspection alone is not an installation trust decision. The current reader/packer imposes a 128 MiB compressed and decompressed working limit, below the format ceiling, and rejects oversized input. Inspection verifies the entire payload without extracting it.
 
 ## One application declaration
 
@@ -52,7 +67,7 @@ Spec 2 rejects the legacy `service`, `url` and `deploy` fields: they could encod
 
 ## Artifact format 1
 
-The `.spaceapp` artifact is a gzip-compressed tar archive. The planned strict archive reader accepts regular files only: no links, devices or executable install hooks. It checks the entire index and archive before any activation. The outer files are:
+The `.spaceapp` artifact is a gzip-compressed USTAR archive. The strict archive reader accepts regular files only: no links, devices or extension headers. It checks the entire index and archive before any activation. The outer files are:
 
 ```text
 package.json          format, target, sourceIncluded, files
@@ -65,7 +80,7 @@ app/...               indexed payload files
 
 Targets are `any/any`, `linux/x64`, `linux/arm64`, `darwin/x64` or `darwin/arm64`. Portable means both OS and architecture are `any`; incompatible targets fail before execution. Paths are canonical relative POSIX paths using ASCII letters, numbers and `_@.+/-`, with no empty/dot/parent segments, backslashes, encoded separators or segments ending in a dot. Case-insensitive collisions and file/directory collisions are rejected on all hosts. This conservative initial policy makes a package mean the same thing on Linux and macOS; it can be versioned if broader names become necessary.
 
-Do not include credentials, `.env` (except `.env.example`), databases, logs or user data. Explicit file selection, built-in exclusions and review precede packing. An index checksum proves integrity, not publisher identity. The detached signature must cover the **exact bytes of package.json**, which bind all payload digests. Trust derives from a host-owned publisher-key allowlist; a public key supplied in the same package cannot grant itself trust. Missing/untrusted signatures require an explicit local trust decision; remote installation must not infer trust from upload permission. Implement signature verification and canonical envelope limits with the packer/reader, not a fake `trusted` manifest flag.
+Do not include credentials, `.env` (except `.env.example`), databases, logs or user data. Explicit file selection, built-in exclusions and review precede packing. An index checksum proves integrity, not publisher identity. The detached signature must cover the **exact bytes of package.json**, which bind all payload digests. Trust derives from a host-owned publisher-key allowlist; a public key supplied in the same package cannot grant itself trust. Missing/untrusted signatures require an explicit local trust decision; remote installation must not infer trust from upload permission. The signature envelope is `{ algorithm: "ed25519", keyId, signature }`, at most 4096 bytes. `keyId` is the lowercase SHA-256 digest of the DER SPKI public key; `signature` is the canonical base64 encoding of its 64-byte signature. There is no self-authorizing `trusted` manifest flag.
 
 ## Installation identity and ownership
 
