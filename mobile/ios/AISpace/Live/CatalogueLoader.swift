@@ -18,17 +18,25 @@ final class CatalogueLoader: ObservableObject {
     let api: SpaceAPI
     @Published private(set) var status: Status = .loading
     @Published private(set) var catalogue: Catalogue?
-    /// True while the catalogue on show is the saved one, not this launch's answer.
+    /// True while the catalogue on show is not the latest refresh's answer: the saved one of an
+    /// earlier launch, or this launch's while the Space has stopped answering since.
     @Published private(set) var isLastKnown = false
     @Published private(set) var isRefreshing = false
     var onCatalogue: (Catalogue) -> Void = { _ in }
 
     private let cache: CatalogueCache
+    /// Counts the sign-outs; see `forget()`.
+    private var session = 0
+    /// Reads one route of the Space; the API's own call unless a test supplies the answers.
+    private let fetch: @MainActor (String) async throws -> Data
 
-    init(connection: Connection, cache: CatalogueCache, cookies: @escaping @MainActor () async -> [HTTPCookie]) {
+    init(connection: Connection, cache: CatalogueCache, cookies: @escaping @MainActor () async -> [HTTPCookie],
+         fetch: (@MainActor (String) async throws -> Data)? = nil) {
         self.connection = connection
         self.cache = cache
-        api = SpaceAPI(base: connection.url, cookies: cookies)
+        let api = SpaceAPI(base: connection.url, cookies: cookies)
+        self.api = api
+        self.fetch = fetch ?? { try await api.data($0) }
         if let saved = cache.load(connection.id), let c = try? Catalogue.decode(saved) {
             catalogue = c
             isLastKnown = true
@@ -38,42 +46,51 @@ final class CatalogueLoader: ObservableObject {
     func refresh() async {
         guard !isRefreshing else { return }
         isRefreshing = true
-        defer { isRefreshing = false }
+        // An answer counts only for the session that asked: `forget()` moves on to the next one.
+        let session = self.session
+        let outcome: Status
         do {
-            async let apps = api.data("/api/apps")
-            async let agents = api.data("/api/agents")
-            async let widgets = api.data("/api/widgets")
+            async let apps = fetch("/api/apps")
+            async let agents = fetch("/api/agents")
+            async let widgets = fetch("/api/widgets")
             // A Space without peers, screens or a router still has a catalogue.
-            async let peers = try? api.data("/api/peers")
-            async let layout = try? api.data(SpaceCheck.path)
-            async let router = try? api.data("/api/router")
+            async let peers = try? fetch("/api/peers")
+            async let layout = try? fetch(SpaceCheck.path)
+            async let router = try? fetch("/api/router")
             let payload = CataloguePayload(apps: try await apps, agents: try await agents, widgets: try await widgets,
                                            peers: await peers, layout: await layout, router: await router, fetchedAt: Date())
             let fresh = try Catalogue.decode(payload)
+            guard session == self.session else { return }
             cache.save(payload, connection.id)
             catalogue = fresh
-            isLastKnown = false
-            status = .ok
-            onCatalogue(fresh)
+            outcome = .ok
         } catch SpaceAPIError.authenticationRequired {
-            status = .signInNeeded
+            outcome = .signInNeeded
         } catch SpaceAPIError.http(let code, let message) {
-            status = .incompatible("HTTP \(code) \(message)")
+            outcome = .incompatible("HTTP \(code) \(message)")
         } catch SpaceAPIError.invalidResponse {
-            status = .incompatible(String(localized: "not an ai-space response"))
+            outcome = .incompatible(String(localized: "not an ai-space response"))
         } catch CatalogueError.notASpace(let route) {
-            status = .incompatible(String(localized: "not an ai-space response") + " (\(route))")
+            outcome = .incompatible(String(localized: "not an ai-space response") + " (\(route))")
         } catch {
-            status = .unreachable(error.localizedDescription)
+            outcome = .unreachable(error.localizedDescription)
         }
+        guard session == self.session else { return }
+        isRefreshing = false
+        status = outcome
+        isLastKnown = outcome != .ok && catalogue != nil
+        if outcome == .ok, let catalogue { onCatalogue(catalogue) }
         #if DEBUG
         NSLog("ai-space: catalogue %@ %@ apps=%d agents=%d widgets=%d", connection.name, String(describing: status),
               catalogue?.apps.count ?? -1, catalogue?.agents.count ?? -1, catalogue?.widgets.count ?? -1)
         #endif
     }
 
-    /// Signing out forgets what the Space showed, not only the session.
+    /// Signing out forgets what the Space showed, not only the session. A refresh on its way
+    /// belongs to the session that ended: its answer is dropped, and it does not hold up the next one.
     func forget() {
+        session += 1
+        isRefreshing = false
         cache.remove(connection.id)
         catalogue = nil
         isLastKnown = false

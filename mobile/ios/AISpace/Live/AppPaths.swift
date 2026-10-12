@@ -26,6 +26,12 @@ enum AppPaths {
             .appendingPathComponent(bundleID, isDirectory: true)
     }
 
+    /// Files a page downloaded, on their way to the share sheet; emptied at launch.
+    static var downloads: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent("downloads", isDirectory: true)
+    }
+
     static var connections: URL { support.appendingPathComponent("connections.json") }
     static var favorites: URL { support.appendingPathComponent("favorites.json") }
 }

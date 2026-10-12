@@ -33,8 +33,8 @@ final class AppModel: ObservableObject {
     @Published var confirmingSignOut = false
     /// Set when the operator went to the panel to sign in, so a finished sign-in returns to Home.
     private var returnHomeAfterSignIn = false
-    /// A link that arrived before its Space's catalogue did.
-    private var pendingLink: DeepLink?
+    /// A link that arrived before the catalogue of the Space it was opened in did.
+    private var pendingLink: (link: DeepLink, connection: UUID)?
 
     /// Hands an address to the system browser; every way out of the app goes through here.
     var openInBrowser: (URL) -> Void = { UIApplication.shared.open($0) }
@@ -48,6 +48,8 @@ final class AppModel: ObservableObject {
     init() {
         store = ConnectionStore(fileURL: AppPaths.connections)
         favorites = FavoritesStore(fileURL: AppPaths.favorites)
+        // Downloads are handed to the share sheet and not kept: what an earlier launch left goes.
+        try? FileManager.default.removeItem(at: AppPaths.downloads)
         selectedID = store.defaultConnection?.id
         store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
         favorites.objectWillChange.sink { [weak self] in
@@ -76,9 +78,10 @@ final class AppModel: ObservableObject {
             self.favorites.seed(connection.id, pins: catalogue.homePins)
             self.icons[connection.id]?.retryFailed()
             self.publishQuickActions()
-            if let link = self.pendingLink {
+            if let pending = self.pendingLink, pending.connection == connection.id {
                 self.pendingLink = nil
-                self.handle(link)
+                // The operator may have moved to another Space while this one was loading.
+                if self.selected?.id == connection.id { self.handle(pending.link) }
             }
         }
         loaders[connection.id] = l
@@ -153,7 +156,11 @@ final class AppModel: ObservableObject {
         let loader = loaders[connection.id]
         loader?.forget()
         data.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {
-            Task { @MainActor in await loader?.refresh() }
+            Task { @MainActor in
+                // Again, for a refresh that started while the cookies were still there.
+                loader?.forget()
+                await loader?.refresh()
+            }
         }
         tab = .home
         objectWillChange.send()
@@ -231,11 +238,21 @@ final class AppModel: ObservableObject {
             tab = .panel
         case .open(let app):
             guard let catalogue = loaders[connection.id]?.catalogue ?? loader(for: connection).catalogue else {
-                pendingLink = link
+                pendingLink = (link, connection.id)
                 return
             }
             if let entry = catalogue.app(named: app) { open(entry) }
         }
+    }
+
+    /// A home-screen quick action opens the app of the Space it was made for, whichever Space is
+    /// on show; one for a Space that has been removed since does nothing.
+    func handle(_ action: QuickAction.Target) {
+        if let space = action.space {
+            guard store.connection(space) != nil else { return }
+            if selected?.id != space { select(space) }
+        }
+        handle(action.url)
     }
 
     private func publishQuickActions() {
@@ -246,7 +263,7 @@ final class AppModel: ObservableObject {
         UIApplication.shared.shortcutItems = QuickAction.items(favorites: favorites.keys(c.id), catalogue: catalogue).map { action in
             UIApplicationShortcutItem(type: QuickAction.type, localizedTitle: action.title, localizedSubtitle: action.subtitle,
                                       icon: UIApplicationShortcutIcon(systemImageName: "star"),
-                                      userInfo: ["url": action.url.absoluteString as NSString])
+                                      userInfo: action.userInfo(space: c.id).mapValues { $0 as NSString })
         }
     }
 }

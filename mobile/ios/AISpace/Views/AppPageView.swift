@@ -24,9 +24,7 @@ struct AppPageView: View {
         .background(Theme.ground.ignoresSafeArea())
         // The web view moves its own content clear of the keyboard, as Safari does.
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .sheet(isPresented: Binding(get: { session.downloaded != nil }, set: { if !$0 { session.downloaded = nil } })) {
-            if let file = session.downloaded { ShareSheet(items: [file]) }
-        }
+        .modifier(DownloadOutcome(session: session))
     }
 
     private var header: some View {

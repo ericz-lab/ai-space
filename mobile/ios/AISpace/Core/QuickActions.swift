@@ -21,6 +21,23 @@ struct QuickAction: Equatable {
             }
     }
 
+    /// What a shortcut item brings back: the link, and the Space whose favourite it opens. The
+    /// link alone names an app, and the Space on show after a cold start is the default one,
+    /// which need not be the one the items were made for.
+    struct Target: Equatable {
+        var url: URL
+        var space: UUID?
+    }
+
+    func userInfo(space: UUID) -> [String: String] {
+        ["url": url.absoluteString, "space": space.uuidString]
+    }
+
+    static func target(userInfo: [String: Any]?) -> Target? {
+        guard let text = userInfo?["url"] as? String, let url = URL(string: text) else { return nil }
+        return Target(url: url, space: (userInfo?["space"] as? String).flatMap(UUID.init(uuidString:)))
+    }
+
     static func link(app: String) -> URL? {
         var parts = URLComponents()
         parts.scheme = DeepLink.scheme

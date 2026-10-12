@@ -1,7 +1,8 @@
 import UIKit
 import WebKit
 
-/// Icons and avatars of one Space, fetched through its API with its session and kept in memory.
+/// Icons and avatars of one Space, fetched through its API with its session and kept in memory;
+/// an icon a manifest places on another site is fetched plainly, without the session.
 /// An emoji needs no loading (see `Icon.emoji`); SVG files, which UIKit cannot decode, are drawn
 /// once by an offscreen web view with scripts off.
 @MainActor
@@ -10,6 +11,17 @@ final class IconStore: ObservableObject {
     private var images: [String: UIImage] = [:]
     private var pending: Set<String> = []
     private var failed: Set<String> = []
+
+    /// For icons on other sites: no cookie goes out and none is kept.
+    private static let external: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false
+        config.httpCookieAcceptPolicy = .never
+        config.timeoutIntervalForRequest = 30
+        return URLSession(configuration: config)
+    }()
+    /// Twice what the Space accepts for an icon of its own (MAX_ICON_BYTES); a larger answer is not an icon.
+    private static let externalLimit = 1 << 20
 
     init(api: SpaceAPI) {
         self.api = api
@@ -35,9 +47,26 @@ final class IconStore: ObservableObject {
     }
 
     private func load(_ icon: String) async -> UIImage? {
-        guard let data = try? await api.data(icon), !data.isEmpty else { return nil }
+        guard let data = await data(icon), !data.isEmpty else { return nil }
         if Icon.isSVG(data) { return await SVGRasterizer.shared.image(svg: data) }
         return UIImage(data: data)
+    }
+}
+
+extension IconStore {
+    private func data(_ icon: String) async -> Data? {
+        switch IconSource(icon, space: api.base) {
+        case .space(let path):
+            return try? await api.data(path)
+        case .external(let url):
+            guard let (data, response) = try? await Self.external.data(from: url),
+                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  data.count <= Self.externalLimit
+            else { return nil }
+            return data
+        case nil:
+            return nil
+        }
     }
 }
 

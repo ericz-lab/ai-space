@@ -15,9 +15,9 @@ Status: phase 1, built and exercised on a Mac as a Mac Catalyst app. **It has no
 | Reachability | A dot per app from the Space's health probe (running, not answering), paused apps, and peers named as offline with the time of their last snapshot; their tiles are dimmed and say so. While the Space itself cannot be reached, the last catalogue stays on show, marked with its age, and the health dots are withdrawn. |
 | App pages | An app opens in a web view with the Space's session: back, forward, reload, share, open in Safari, swipe navigation, file and photo inputs, downloads to the share sheet, JavaScript dialogs titled with their origin. |
 | Other sites | Only the Space's hostnames load in the app (below). A link tapped to anywhere else, and a link app whose page is on another site, opens in Safari. |
-| Panel | The Space's web panel in a tab: chat with agents, inbox, tasks, settings, terminal. These are not rebuilt natively in this version; agents on Home open this tab. |
+| Panel | The Space's web panel in a tab: chat with agents, inbox, tasks, settings, terminal. These are not rebuilt natively in this version; agents on Home open this tab. A file the panel downloads (a theme export) goes to the share sheet, as on an app page. |
 | Links in | `aispace://open?app=<id or name>`, `aispace://inbox`, `aispace://chat`, `aispace://show`, the same links as the Mac client. A link only shows something; it never sends a message or changes the Space. |
-| Quick actions | The first four favourite apps appear on the app icon's long-press menu and open through the same links. |
+| Quick actions | The first four favourite apps of the Space on show appear on the app icon's long-press menu and open through the same links. Each carries its Space, so it opens that Space's app also when the app starts on another one. |
 
 ## Layout and the Mac client
 
@@ -36,7 +36,7 @@ mobile/ios/
     Web/                 WebSession (WKWebView and its delegates), WebContainer
     Views/               Home, tiles and widget cards, app page, panel, settings, connect, theme
     Resources/           the mark, the app icon, English and Chinese strings
-  AISpaceTests/          swift-testing tests of Core/
+  AISpaceTests/          swift-testing tests of Core/ and of CatalogueLoader, against scripted answers
   scripts/               test.sh, build.sh (swiftc only), icons.swift, sources.sh
 ```
 
@@ -86,7 +86,7 @@ What the app does about it:
 - **Sign-in happens in the web view.** A request that is redirected, or answered 401 or 403, means "sign in": Home shows a card, the Sign In button opens the panel tab, the access layer's pages load there (a bar names the host you are on), and when the panel is back and answers `GET /api/panel/layout` as ai-space does, the catalogue loads and Home returns. An app on its own hostname goes through the same redirect inside its page; with Access the team-domain cookie makes that silent.
 - **`ASWebAuthenticationSession` is deliberately not used.** It shares cookies with Safari, not with the app's web views, so a sign-in there would not reach the pages the app shows. Access has no token exchange a native client could use instead without a service token, which would be a long-lived secret on the phone.
 - **Nothing secret is stored by the app.** The session cookie lives in the Space's WebKit store inside the app's sandbox; saved Spaces and favourites are plain files with addresses and entry keys. There is nothing for the Keychain to hold in this version.
-- **Sign Out** (Settings) clears that Space's website data (cookies, storage, caches), the saved catalogue and the open pages. Removing a Space also deletes its data store.
+- **Sign Out** (Settings) clears that Space's website data (cookies, storage, caches), the saved catalogue and the open pages. Removing a Space also deletes its data store. A catalogue request still on its way when either happens is dropped when it answers.
 - **Expiry** shows as the same sign-in card, with the last catalogue still on show; the app never retries a write on its own.
 
 Confirmed on this machine against a stand-in access layer (redirect to a login on another origin, a callback that sets a cookie): the sign-in-needed state, the redirect staying in the view, the native calls succeeding with the web view's cookie right after, sign-out returning to sign-in-needed.
@@ -114,7 +114,7 @@ Camera and microphone prompts are offered to pages on the list only. Web content
 
 On macOS 27, Command Line Tools 27.0, Swift 6.4 (language mode 5), against a scratch Space run from source with a scratch workspace, a second scratch Space as its peer and three stand-in apps:
 
-- `scripts/test.sh`: 27 tests in 6 suites pass (catalogue decoding and tolerance, reach states, languages, search, host list, navigation rule, favourites, cache, quick actions).
+- `scripts/test.sh`: 38 tests in 8 suites pass (catalogue decoding and tolerance, reach states, languages, search, host list, navigation rule, favourites, cache, quick actions and the Space they carry, icon sources, and the catalogue loader with answers held back: signing out during a refresh, online to offline and back).
 - `scripts/build.sh`: debug and release Catalyst builds, no warnings.
 - Run as a Catalyst app, with window captures read back: first launch; Home with favourites seeded from the panel's home screen, apps, agents, a widget, health dots, an SVG avatar; Chinese titles and Chinese search; an app page; the panel tab; settings in Chinese; sign-in needed, signing in, signed in, signed out; an address that is not ai-space; an unreachable Space with and without a last catalogue; a peer going offline.
 - By log, with scripted clicks in the page: a link inside the app stays and enables Back; a link and a new window to another site are handed to the browser; a new window to another app of the Space loads in the view; a script redirect off the Space is treated as a sign-in; `aispace://open` finds an app by id and by bare name, and sends a link app to the browser.

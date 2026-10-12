@@ -13,15 +13,15 @@ struct AISpaceApp: App {
                 .tint(Theme.accent)
                 .onOpenURL { model.handle($0) }
                 .onReceive(NotificationCenter.default.publisher(for: .quickAction)) { note in
-                    if let url = note.object as? URL { model.handle(url) }
+                    if let target = note.object as? QuickAction.Target { model.handle(target) }
                 }
                 .onChange(of: phase) { _, now in
                     if now == .active { model.becameActive() }
                 }
                 .onAppear {
-                    if let url = AppDelegate.launchAction {
+                    if let target = AppDelegate.launchAction {
                         AppDelegate.launchAction = nil
-                        model.handle(url)
+                        model.handle(target)
                     }
                     #if DEBUG
                     DebugLaunch.apply(to: model)
@@ -36,14 +36,14 @@ extension Notification.Name {
 }
 
 /// Home-screen quick actions reach the app through the scene delegate; each carries an
-/// `aispace://` link, which goes the same way as a link from another app.
+/// `aispace://` link, which goes the same way as a link from another app, and the Space it is for.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     /// The action the app was launched with, picked up once the first view is there.
-    @MainActor static var launchAction: URL?
+    @MainActor static var launchAction: QuickAction.Target?
 
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
-        if let item = options.shortcutItem { Self.launchAction = SceneDelegate.url(of: item) }
+        if let item = options.shortcutItem { Self.launchAction = SceneDelegate.target(of: item) }
         let config = UISceneConfiguration(name: nil, sessionRole: session.role)
         config.delegateClass = SceneDelegate.self
         return config
@@ -53,9 +53,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 final class SceneDelegate: NSObject, UIWindowSceneDelegate {
     func windowScene(_ windowScene: UIWindowScene, performActionFor shortcutItem: UIApplicationShortcutItem,
                      completionHandler: @escaping (Bool) -> Void) {
-        let url = Self.url(of: shortcutItem)
-        if let url { NotificationCenter.default.post(name: .quickAction, object: url) }
-        completionHandler(url != nil)
+        let target = Self.target(of: shortcutItem)
+        if let target { NotificationCenter.default.post(name: .quickAction, object: target) }
+        completionHandler(target != nil)
     }
 
     #if targetEnvironment(macCatalyst)
@@ -68,8 +68,8 @@ final class SceneDelegate: NSObject, UIWindowSceneDelegate {
     }
     #endif
 
-    static func url(of item: UIApplicationShortcutItem) -> URL? {
-        guard item.type == QuickAction.type, let text = item.userInfo?["url"] as? String else { return nil }
-        return URL(string: text)
+    static func target(of item: UIApplicationShortcutItem) -> QuickAction.Target? {
+        guard item.type == QuickAction.type else { return nil }
+        return QuickAction.target(userInfo: item.userInfo)
     }
 }

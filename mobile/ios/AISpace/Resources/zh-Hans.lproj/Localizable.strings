@@ -62,6 +62,7 @@
 /* Pages */
 "Signing in at %@" = "正在 %@ 登录";
 "Cannot load this page" = "无法载入这个页面";
+"Download failed" = "下载失败";
 "Close" = "关闭";
 "Back" = "后退";
 "Forward" = "前进";

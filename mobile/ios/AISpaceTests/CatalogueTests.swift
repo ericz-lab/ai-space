@@ -177,4 +177,44 @@ struct QuickActionTests {
         #expect(DeepLink(items[1].url) == .open(app: "david/voice-studio"))
         #expect(DeepLink(QuickAction.link(app: "a b&c")!) == .open(app: "a b&c"))
     }
+
+    @Test func anActionNamesTheSpaceItWasMadeFor() throws {
+        let space = UUID()
+        let action = try #require(QuickAction.items(favorites: ["app:todo"], catalogue: Fixture.catalogue).first)
+        // Two Spaces may each have a "todo"; the shortcut item says which one it opens.
+        let info = action.userInfo(space: space)
+        #expect(QuickAction.target(userInfo: info) == QuickAction.Target(url: action.url, space: space))
+        // An item published before the Space was carried still opens, in the Space on show.
+        #expect(QuickAction.target(userInfo: ["url": "aispace://open?app=todo"]) == QuickAction.Target(url: action.url, space: nil))
+        #expect(QuickAction.target(userInfo: ["url": "aispace://open?app=todo", "space": "not a uuid"])?.space == nil)
+        #expect(QuickAction.target(userInfo: ["space": space.uuidString]) == nil)
+        #expect(QuickAction.target(userInfo: nil) == nil)
+    }
+}
+
+struct IconSourceTests {
+    let space = URL(string: "https://space.example.com/")!
+
+    @Test func theSpacesOwnIconsGoThroughItsSession() {
+        #expect(IconSource("/api/apps/todo/icon", space: space) == .space("/api/apps/todo/icon"))
+        #expect(IconSource("https://space.example.com/assistant.svg", space: space) == .space("https://space.example.com/assistant.svg"))
+        #expect(IconSource("HTTPS://SPACE.example.com:443/a.png", space: space) == .space("HTTPS://SPACE.example.com:443/a.png"))
+    }
+
+    @Test func anIconOnAnotherSiteIsNotTheSpaces() {
+        let cdn = "https://cdn.example.net/todo.png"
+        #expect(IconSource(cdn, space: space) == .external(URL(string: cdn)!))
+        // Another app's hostname, another port and a scheme-relative address are other origins too.
+        #expect(IconSource("https://todo.example.com/icon.png", space: space) == .external(URL(string: "https://todo.example.com/icon.png")!))
+        #expect(IconSource("https://space.example.com:8443/a.png", space: space) == .external(URL(string: "https://space.example.com:8443/a.png")!))
+        #expect(IconSource("//cdn.example.net/todo.png", space: space) == .external(URL(string: cdn)!))
+        #expect(IconSource("file:///etc/hosts", space: space) == nil)
+    }
+
+    /// Why the split exists: the Space's API reads a 200 from any other origin as "sign in".
+    @Test func theSpaceAPIRefusesAnAnswerFromAnotherOrigin() {
+        let cdn = URL(string: "https://cdn.example.net/todo.png")!
+        let ok = HTTPURLResponse(url: cdn, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        #expect(throws: SpaceAPIError.authenticationRequired) { try SpaceAPI.check(ok, data: Data(), expected: space) }
+    }
 }

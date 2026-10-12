@@ -38,6 +38,8 @@ final class WebSession: NSObject, ObservableObject {
     @Published private(set) var pageTitle = ""
     /// A finished download, waiting for the share sheet.
     @Published var downloaded: URL?
+    /// Why a download did not finish, waiting to be said.
+    @Published var downloadFailure: String?
 
     private var downloads: [ObjectIdentifier: URL] = [:]
     private var watchers: Set<AnyCancellable> = []
@@ -212,7 +214,7 @@ extension WebSession: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String,
                   completionHandler: @escaping (URL?) -> Void) {
         // A fresh directory per download keeps the server's file name without replacing anything.
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("downloads/\(UUID().uuidString)", isDirectory: true)
+        let dir = AppPaths.downloads.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let name = (suggestedFilename as NSString).lastPathComponent
         let url = dir.appendingPathComponent(name.isEmpty ? "download" : name)
@@ -228,6 +230,7 @@ extension WebSession: WKDownloadDelegate {
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         isLoading = false
         downloads.removeValue(forKey: ObjectIdentifier(download))
+        downloadFailure = error.localizedDescription
         NSLog("ai-space: download failed: \(error.localizedDescription)")
     }
 }

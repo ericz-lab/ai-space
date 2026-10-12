@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds and runs AISpaceTests (swift-testing) with swiftc for this Mac, from the Command Line
-# Tools or Xcode. The tests cover the Foundation-only code in AISpace/Core and the files shared
-# with the Mac client; none of it needs an iOS SDK or a simulator.
+# Tools or Xcode. The tests cover the Foundation-only code in AISpace/Core, the catalogue loader
+# and the files shared with the Mac client; none of it needs an iOS SDK or a simulator.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -22,7 +22,7 @@ xcrun --sdk macosx swiftc -parse-as-library -swift-version 5 -module-name AISpac
   -target "$(uname -m)-apple-macos14.0" \
   -F "$FW" -Xlinker -rpath -Xlinker "$FW" ${LIB:+-Xlinker -rpath -Xlinker "$LIB"} \
   ${PLUGINS:+-plugin-path "$PLUGINS"} \
-  $SHARED $(find AISpace/Core -name '*.swift' | sort) \
+  $SHARED $(find AISpace/Core -name '*.swift' | sort) AISpace/Live/CatalogueLoader.swift \
   $(find AISpaceTests -name '*.swift' | sort) scripts/TestMain.swift \
   -o "$OUT/AISpaceTests"
 exec "$OUT/AISpaceTests" "$@"

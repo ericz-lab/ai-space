@@ -25,6 +25,8 @@ struct PanelView: View {
                 .opacity(session.isLoading ? 1 : 0).frame(height: 2)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        // The panel downloads too (a theme export, an attachment).
+        .modifier(DownloadOutcome(session: session))
     }
 }
 
