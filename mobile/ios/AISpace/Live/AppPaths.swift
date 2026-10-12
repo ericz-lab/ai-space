@@ -1,0 +1,31 @@
+import Foundation
+
+/// Where the app keeps its own files: saved Spaces and favourites under Application Support,
+/// the last catalogue under Caches. Nothing here is a Space workspace.
+enum AppPaths {
+    static let bundleID = Bundle.main.bundleIdentifier ?? "dev.ai-space.ios"
+
+    static var support: URL {
+        #if DEBUG
+        if let dir = ProcessInfo.processInfo.environment["AISPACE_DATA_DIR"], !dir.isEmpty {
+            return URL(fileURLWithPath: dir, isDirectory: true)
+        }
+        #endif
+        // The bundle id keeps a Mac Catalyst build, which is not sandboxed, apart from the Mac client's files.
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(bundleID, isDirectory: true)
+    }
+
+    static var caches: URL {
+        #if DEBUG
+        if let dir = ProcessInfo.processInfo.environment["AISPACE_DATA_DIR"], !dir.isEmpty {
+            return URL(fileURLWithPath: dir, isDirectory: true).appendingPathComponent("caches", isDirectory: true)
+        }
+        #endif
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(bundleID, isDirectory: true)
+    }
+
+    static var connections: URL { support.appendingPathComponent("connections.json") }
+    static var favorites: URL { support.appendingPathComponent("favorites.json") }
+}

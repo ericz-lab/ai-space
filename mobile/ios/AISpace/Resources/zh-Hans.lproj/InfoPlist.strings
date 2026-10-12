@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "Space 里的页面可以拍摄照片或视频用于上传。";
+"NSMicrophoneUsageDescription" = "Space 里的页面可以录音，例如用于语音输入。";
+"NSPhotoLibraryAddUsageDescription" = "把 Space 里的图片保存到相册。";
