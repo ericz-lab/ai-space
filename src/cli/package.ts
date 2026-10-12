@@ -4,6 +4,7 @@ import { assertPackageCompatibility } from "../space/packages/manifest.ts";
 import { inspectPackage, packApplication, readPackageFile } from "../space/packages/pack.ts";
 import { need, noMore, parseArgs } from "./args.ts";
 import type { Ctx } from "./types.ts";
+import { confirm } from "./common.ts";
 
 export async function packVerb(ctx: Ctx, argv: string[]): Promise<number> {
   const { flags, positional } = parseArgs(argv, {
@@ -44,3 +45,43 @@ export async function inspectPackageVerb(ctx: Ctx, argv: string[]): Promise<numb
   else ctx.print.kv([["app", result.app], ["version", result.version], ["target", `${result.target.os}/${result.target.arch}`], ["files", result.files], ["signature", result.signature.status]]);
   return 0;
 }
+
+export const installPackageVerb = (upgrade = false) => async (ctx: Ctx, argv: string[]): Promise<number> => {
+  const { flags, positional } = parseArgs(argv, { "allow-unsigned": { kind: "bool" }, "operation-id": { kind: "value" } });
+  const file = resolve(ctx.io.cwd, need(positional, 0, "FILE")); noMore(positional, 1);
+  const bytes = await readPackageFile(file);
+  const id = String(flags["operation-id"] ?? crypto.randomUUID());
+  ctx.io.err(`operation: ${id} (reuse --operation-id if the response is interrupted)`);
+  const result = await (await ctx.client()).json("POST", "/api/packages", bytes, { binary: true, timeoutMs: 300_000, headers: {
+    "content-type": "application/octet-stream", "idempotency-key": id,
+    ...(flags["allow-unsigned"] ? { "x-space-allow-unsigned": "true" } : {}), ...(upgrade ? { "x-space-upgrade": "true" } : {}),
+  } });
+  ctx.print.data(result); return 0;
+};
+
+export async function packagesVerb(ctx: Ctx, argv: string[]): Promise<number> {
+  noMore(parseArgs(argv, {}).positional, 0);
+  ctx.print.data(await (await ctx.client()).get("/api/packages")); return 0;
+}
+
+export async function openPackageVerb(ctx: Ctx, argv: string[]): Promise<number> {
+  const { flags, positional } = parseArgs(argv, { "space-id": { kind: "value" }, connection: { kind: "value" } });
+  const app = need(positional, 0, "APP"); noMore(positional, 1);
+  const c = await ctx.client();
+  const spaceId = flags["space-id"] ?? (await c.get<{ spaceId: string }>("/api/packages")).spaceId;
+  const result = await c.post<{ url: string }>("/api/packages/open", { app, spaceId, ...(flags.connection ? { connectionId: flags.connection } : {}) });
+  if (ctx.flags.json) ctx.print.data(result); else ctx.print.line(result.url);
+  return 0;
+}
+
+export const packageChangeVerb = (kind: "rollback" | "remove") => async (ctx: Ctx, argv: string[]): Promise<number> => {
+  const { flags, positional } = parseArgs(argv, { yes: { kind: "bool" }, "operation-id": { kind: "value" } });
+  const app = need(positional, 0, "APP");
+  const operationId = kind === "rollback" ? need(positional, 1, "RETAINED_OPERATION_ID") : undefined;
+  noMore(positional, kind === "rollback" ? 2 : 1);
+  if (!await confirm(ctx, !!flags.yes, `${kind} package ${app}? User data will be retained.`)) return 1;
+  const id = String(flags["operation-id"] ?? crypto.randomUUID());
+  ctx.io.err(`operation: ${id}`);
+  ctx.print.data(await (await ctx.client()).json(kind === "rollback" ? "POST" : "DELETE", `/api/packages/apps/${encodeURIComponent(app)}${kind === "rollback" ? "/rollback" : ""}`, operationId ? { operationId } : undefined, { headers: { "idempotency-key": id }, timeoutMs: 120_000 }));
+  return 0;
+};

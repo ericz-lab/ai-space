@@ -42,6 +42,8 @@ export type RequestOptions = {
   timeoutMs?: number;
   /** Accept these statuses as answers instead of throwing. */
   accept?: number[];
+  headers?: Record<string, string>;
+  binary?: boolean;
 };
 
 export type SseEvent = { event: string; data: string };
@@ -67,8 +69,8 @@ export class Client {
     try {
       return await this.fetchImpl(url, {
         method,
-        headers: this.headers(opts, body !== undefined),
-        ...(body !== undefined ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}),
+        headers: { ...this.headers(opts, body !== undefined), ...opts.headers },
+        ...(body !== undefined ? { body: opts.binary ? body as BodyInit : typeof body === "string" ? body : JSON.stringify(body) } : {}),
         signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
       });
     } catch (e) {

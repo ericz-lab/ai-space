@@ -34,6 +34,7 @@ import { PackageLinks, createConnectionRoutes } from "./space/packages/links.ts"
 import { PackageGateway, createPackageOpenRoutes } from "./space/packages/gateway.ts";
 import { runPackageTask } from "./space/packages/tasks.ts";
 import { PackageLifecycle } from "./space/packages/lifecycle.ts";
+import { createPackagePanelRoutes } from "./space/packages/panel.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { guardBrowserWrites } from "./space/auth.ts";
@@ -89,7 +90,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const packageLinks = new PackageLinks(packageConnections, {
     env,
     handle: (_connection, meta, body, signal) => packageGateway.local(meta, body, signal),
-    apps: () => packageStore.list().filter((o) => o.state === "installed" && packageRuntime.get(o.app)).map((o) => ({ app: o.app, title: packageRuntime.get(o.app)!.manifest.title ?? o.app, version: o.version })),
+    apps: () => packageStore.list().filter((o) => o.state === "installed" && packageRuntime.get(o.app)).map((o) => ({ app: o.app, title: packageRuntime.get(o.app)!.manifest.title ?? o.app, version: o.version, page: !!packageRuntime.get(o.app)!.manifest.launch })),
   });
   packageGateway = new PackageGateway(packageRuntime, packageLinks, packageStore.spaceId);
   if (config.packagePort !== undefined) packageGateway.start(config.packagePort, config.packageBaseUrl);
@@ -236,7 +237,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     bus.syncApp(manifest.app, { events: manifest.events, provides: manifest.provides });
     const backup = backupTask(manifest.app, parseBackupSpec(manifest.backup), taskDefaults);
     if (backup && manifest.tasks.some((t) => t.name === BACKUP_TASK)) throw new Error(`task name "${BACKUP_TASK}" is reserved for ai-space's backup task; rename it, or set backup: false to bring your own`);
-    await registry.set(manifest);
+    await registry.set(manifest.spec === 2 && packageRuntime.get(manifest.app)?.manifest.launch ? { ...manifest, url: `/_space/apps/${encodeURIComponent(manifest.app)}` } : manifest);
     // After storage, so the unit's environment has the app's space.env. Never throws: a unit that
     // fails is recorded and shows on the Services list, the rest of the app still registers.
     if (manifest.spec !== 2) await supervisor.apply(manifest);
@@ -397,6 +398,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
       ...panelRoutes,
       ...createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage }),
+      ...createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks }),
       ...createConnectionRoutes({ links: packageLinks, token: config.apiToken }),
       ...createPackageOpenRoutes(packageGateway, config.apiToken),
       ...createRouterRoutes({ router }),

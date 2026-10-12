@@ -5,7 +5,7 @@ import { PackageChannel } from "./channel.ts";
 import { Connections, type Connection } from "./connections.ts";
 import { mapping } from "./contract.ts";
 
-export type SharedApp = { app: string; title: string; version: string };
+export type SharedApp = { app: string; title: string; version: string; page?: boolean };
 export type LinkHandler = (connection: Connection, meta: unknown, body: ReadableStream<Uint8Array>, signal: AbortSignal) => Promise<Response>;
 type Live = { channel?: PackageChannel; close: () => void };
 

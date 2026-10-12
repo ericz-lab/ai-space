@@ -52,7 +52,7 @@ async function browser(gateway: PackageGateway, target: Parameters<PackageGatewa
     return fetch(local, { ...init, redirect: "manual", headers: { host: url.host, ...Object.fromEntries(new Headers(init.headers)) } });
   };
   const response = await request(url.pathname + url.search);
-  expect(response.status).toBe(303);
+  expect(response.status).toBe(200);
   const cookie = response.headers.get("set-cookie")!.split(";", 1)[0]!;
   return { url, cookie, request: (path: string, init: RequestInit = {}) => request(path, { ...init, headers: { cookie, ...Object.fromEntries(new Headers(init.headers)) } }) };
 }

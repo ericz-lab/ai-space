@@ -116,7 +116,9 @@ export class PackageGateway {
       if (req.method !== "GET" || !ticket || ticket.expires <= Date.now() || ticket.entry.origin !== entry.origin) return new Response("Invalid or expired application ticket", { status: 403 });
       const session = randomBytes(32).toString("base64url");
       this.sessions.set(session, { entry, expires: Date.now() + 12 * 3600_000 });
-      return new Response(null, { status: 303, headers: { location: "/", "cache-control": "no-store", "referrer-policy": "no-referrer", "set-cookie": `${COOKIE}=${session}; HttpOnly; SameSite=Strict; Path=/${entry.origin.startsWith("https:") ? "; Secure" : ""}` } });
+      // Commit a document on the app origin before navigating: Strict cookies are omitted in
+      // a cross-site HTTP redirect chain, including a freshly issued cookie on its final hop.
+      return new Response('<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=/"><title>Opening application</title><a href="/">Open application</a>', { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'", "cache-control": "no-store", "referrer-policy": "no-referrer", "set-cookie": `${COOKIE}=${session}; HttpOnly; SameSite=Strict; Path=/${entry.origin.startsWith("https:") ? "; Secure" : ""}` } });
     }
     const values = (req.headers.get("cookie") ?? "").split(";").map((p) => p.trim()).filter((p) => p.startsWith(`${COOKIE}=`)).map((p) => p.slice(COOKIE.length + 1));
     const session = values.length === 1 ? this.sessions.get(values[0]!) : undefined;

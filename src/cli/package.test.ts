@@ -17,5 +17,19 @@ test("pack and inspect work without a running Space or network calls", async () 
     expect(inspected.calls).toHaveLength(0);
     expect(JSON.parse(inspected.out.join("\n"))).toMatchObject({ app: "task-app", signature: { status: "unsigned" } });
     expect((await runCli(["app", "pack", "app"], undefined, { cwd: dir })).code).toBe(2);
+    const installed = await runCli(["app", "install", "task.spaceapp", "--allow-unsigned", "--operation-id", "d620b707-7e26-42bc-86cd-aaeb32d47e6a"], undefined, { cwd: dir });
+    expect(installed.code).toBe(0);
+    expect(installed.calls[0]?.headers).toMatchObject({ "content-type": "application/octet-stream", "x-space-allow-unsigned": "true", "idempotency-key": "d620b707-7e26-42bc-86cd-aaeb32d47e6a", authorization: "Bearer op-token" });
+    expect(installed.calls[0]?.body).toBeInstanceOf(Uint8Array);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("connection grants only share named local apps and package removal requires confirmation", async () => {
+  const grant = await runCli(["connection", "grant", "connection-id", "--apps", ""]);
+  expect(grant.code).toBe(0); expect(grant.calls[0]?.body).toEqual({ apps: [] });
+  const denied = await runCli(["app", "remove-package", "demo"]);
+  expect(denied.calls).toHaveLength(0); expect(denied.code).not.toBe(0);
+  const remove = await runCli(["app", "remove-package", "demo", "--yes"]);
+  expect(remove.calls[0]?.url).toEndWith("/api/packages/apps/demo");
+  expect(remove.calls[0]?.method).toBe("DELETE");
 });
