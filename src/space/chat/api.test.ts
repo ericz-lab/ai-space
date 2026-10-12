@@ -90,12 +90,13 @@ describe("turns", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toStartWith("text/event-stream");
     const events = parseSse(await res.text());
-    expect(events.map((e) => e.event)).toEqual(["delta", "delta", "done"]);
-    const done = events[2]!.data;
+    expect(events.map((e) => e.event)).toEqual(["start", "delta", "delta", "done"]);
+    const done = events[3]!.data;
     expect(done.ok).toBe(true);
     expect(done.user).toMatchObject({ role: "user", content: "**第一问**\n第二行", attachments: [] });
+    expect(events[0]!.data).toMatchObject({ turn: { status: "running", userMessageId: done.user.id }, user: { id: done.user.id, content: "**第一问**\n第二行" } });
     expect(done.assistant.role).toBe("assistant");
-    expect(events.slice(0, 2).map((e) => e.data.text).join("")).toBe(done.assistant.content);
+    expect(events.slice(1, 3).map((e) => e.data.text).join("")).toBe(done.assistant.content);
     expect(done.assistant.content).toStartWith("answer to: # 笔记\n\n---\n\n[assistant]\n已读完。\n\n[user]\n**第一问**\n第二行 [args:");
     expect(done.assistant.content).toContain("--system-prompt Be brief.");
     expect(done.assistant).toMatchObject({ backend: "local", model: "haiku", costUsd: 0.0123 });
@@ -156,7 +157,165 @@ describe("turns", () => {
   });
 });
 
+describe("durable turns", () => {
+  const rid = (n: number) => `req-0000-${n}`;
+  const newThread = async () => ((await (await call("POST", "/api/chat/threads", { scope: "s" })).json()) as any).thread as { id: number };
+  /** Post a turn, read its stream until the first delta, then drop the connection like a closed tab. */
+  const postAndLeave = async (threadId: number, body: unknown) => {
+    const gone = new AbortController();
+    const res = await fetch(`${base}/api/chat/threads/${threadId}/turn`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer sat_notes" }, body: JSON.stringify(body), signal: gone.signal });
+    const reader = res.body!.getReader();
+    let text = "";
+    while (!text.includes("event: delta")) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += new TextDecoder().decode(value);
+    }
+    gone.abort();
+    await reader.read().catch(() => {});
+    return text;
+  };
+
+  test("with a request id the turn outlives its connection; the thread shows it running and a reader can come back to it", async () => {
+    const thread = await newThread();
+    process.env.FAKE_MODEL_MODE = "slow";
+    expect(await postAndLeave(thread.id, { message: "long", requestId: rid(1) })).toContain("event: start");
+    await Bun.sleep(100);
+    const mid = (await (await call("GET", `/api/chat/threads/${thread.id}`)).json()) as any;
+    expect(mid.running).toBe(true);
+    expect(mid.turn).toMatchObject({ status: "running", requestId: rid(1), userMessageId: mid.messages[0].id, text: "answer to:" });
+    expect(mid.messages.map((m: any) => m.role)).toEqual(["user"]);
+    // The text so far is in the turn's row too, which is what a restart would settle it with.
+    expect(store.runningTurns().map((r) => r.partial)).toEqual(["answer to:"]);
+
+    const again = parseSse(await (await call("GET", `/api/chat/threads/${thread.id}/turn`)).text());
+    expect(again.map((e) => e.event)).toEqual(["start", "delta", "delta", "done"]);
+    const done = again.at(-1)!.data;
+    expect(again.filter((e) => e.event === "delta").map((e) => e.data.text).join("")).toBe(done.assistant.content);
+    expect(done).toMatchObject({ ok: true, user: { content: "long" } });
+    expect(done.assistant.error).toBeUndefined();
+    expect(modelStore.get(done.call.id)).toMatchObject({ status: "ok" });
+    expect((await call("GET", `/api/chat/threads/${thread.id}/turn`)).status).toBe(404);
+    expect(((await (await call("GET", `/api/chat/threads/${thread.id}`)).json()) as any).running).toBe(false);
+  });
+
+  test("without a request id the turn still ends with its connection, stored as aborted", async () => {
+    const thread = await newThread();
+    process.env.FAKE_MODEL_MODE = "slow";
+    await postAndLeave(thread.id, { message: "long" });
+    for (let i = 0; i < 50 && service.isRunning(thread.id); i++) await Bun.sleep(20);
+    const [, answer] = store.listMessages(thread.id);
+    expect(answer).toMatchObject({ role: "assistant", error: "aborted", content: "answer to:" });
+    expect(answer!.state).toBeUndefined();
+  });
+
+  test("a repeated request id is the same turn: no second message, no second model call", async () => {
+    const thread = await newThread();
+    const body = { message: "once", requestId: rid(2) };
+    const a = (await (await call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, body)).json()) as any;
+    const b = (await (await call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, body)).json()) as any;
+    expect(b.user.id).toBe(a.user.id);
+    expect(b.assistant).toEqual(a.assistant);
+    const streamed = parseSse(await (await call("POST", `/api/chat/threads/${thread.id}/turn`, body)).text());
+    expect(streamed.map((e) => e.event)).toEqual(["start", "done"]);
+    expect(streamed[1]!.data.assistant.id).toBe(a.assistant.id);
+    expect(store.listMessages(thread.id).length).toBe(2);
+    expect(modelStore.list({ app: "notes" }).length).toBe(1);
+
+    // While it runs, a repeat joins the turn instead of being refused as a second one.
+    process.env.FAKE_MODEL_MODE = "slow";
+    const slow = { message: "twice", requestId: rid(3) };
+    const p = call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, slow);
+    await Bun.sleep(150);
+    const joining = call("POST", `/api/chat/threads/${thread.id}/turn`, slow);
+    expect((await call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, { message: "other", requestId: rid(4) })).status).toBe(409);
+    const joined = parseSse(await (await joining).text());
+    const original = (await (await p).json()) as any;
+    expect(joined.at(-1)!.data.assistant.id).toBe(original.assistant.id);
+    expect(joined.filter((e) => e.event === "delta").map((e) => e.data.text).join("")).toBe(original.assistant.content);
+    expect(store.listMessages(thread.id).length).toBe(4);
+    expect((await call("POST", `/api/chat/threads/${thread.id}/turn`, { message: "x", requestId: "short" })).status).toBe(400);
+  });
+
+  test("stop ends the answer as stopped, with what arrived; the pair is left out of the next replay", async () => {
+    const thread = await newThread();
+    process.env.FAKE_MODEL_MODE = "slow";
+    process.env.FAKE_MODEL_DELAY_MS = "5000";
+    try {
+      const res = await call("POST", `/api/chat/threads/${thread.id}/turn`, { message: "stop me", requestId: rid(5) });
+      const reader = res.body!.getReader();
+      let text = "";
+      const pump = (async () => {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          text += new TextDecoder().decode(value);
+        }
+      })();
+      for (let i = 0; i < 100 && !text.includes("event: delta"); i++) await Bun.sleep(20);
+      expect(await (await call("POST", `/api/chat/threads/${thread.id}/stop`)).json()).toEqual({ ok: true, stopped: true });
+      await pump;
+      const last = parseSse(text).at(-1)!;
+      expect(last.event).toBe("error");
+      expect(last.data).toMatchObject({ ok: false, error: "stopped", assistant: { state: "stopped", error: "stopped", content: "answer to:" } });
+      expect(await (await call("POST", `/api/chat/threads/${thread.id}/stop`)).json()).toEqual({ ok: true, stopped: false });
+      expect((await call("POST", `/api/chat/threads/${thread.id}/stop`, undefined, "sat_cal")).status).toBe(404);
+    } finally {
+      delete process.env.FAKE_MODEL_DELAY_MS;
+    }
+    delete process.env.FAKE_MODEL_MODE;
+    const next = (await (await call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, { message: "after" })).json()) as any;
+    expect(next.assistant.content).not.toContain("stop me");
+  });
+
+  test("a turn a restart cut is settled as interrupted with the text it had saved", async () => {
+    const thread = await newThread();
+    const user = store.addMessage(thread.id, { role: "user", content: "cut" });
+    const record = store.addTurn({ app: "notes", threadId: thread.id, userMessageId: user.id, requestId: rid(6) });
+    store.savePartial(record.id, "half an ans");
+    expect(service.settleInterrupted()).toBe(1);
+    expect(service.settleInterrupted()).toBe(0);
+    const detail = (await (await call("GET", `/api/chat/threads/${thread.id}`)).json()) as any;
+    expect(detail.running).toBe(false);
+    expect(detail.messages[1]).toMatchObject({ role: "assistant", content: "half an ans", state: "interrupted" });
+    expect(detail.messages[1].error).toStartWith("interrupted");
+    expect(store.getTurn(record.id)).toMatchObject({ status: "interrupted", assistantMessageId: detail.messages[1].id, partial: "" });
+    // The client that asked comes back with the same id and is told what happened, without a second run.
+    const back = (await (await call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, { message: "cut", requestId: rid(6) })).json()) as any;
+    expect(back).toMatchObject({ ok: false, assistant: { id: detail.messages[1].id, state: "interrupted" } });
+    expect(modelStore.list({ app: "notes" }).length).toBe(0);
+    const next = (await (await call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, { message: "after" })).json()) as any;
+    expect(next.assistant.content).not.toContain("[user]\ncut");
+  });
+
+  test("a turn in flight is not settled, and a thread's turns go with it", async () => {
+    const thread = await newThread();
+    process.env.FAKE_MODEL_MODE = "slow";
+    const p = call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, { message: "busy", requestId: rid(7) });
+    await Bun.sleep(150);
+    expect(service.settleInterrupted()).toBe(0);
+    expect(((await (await p).json()) as any).ok).toBe(true);
+    await call("DELETE", `/api/chat/threads/${thread.id}`);
+    expect(store.findTurn(thread.id, rid(7))).toBeUndefined();
+  });
+});
+
 describe("attachments", () => {
+  test("a person's message says how many earlier images its turn did not ship", async () => {
+    const { thread } = (await (await call("POST", "/api/chat/threads", { scope: "s" })).json()) as any;
+    const send = async (n: number) => {
+      const ids: number[] = [];
+      for (let i = 0; i < n; i++) ids.push(((await (await upload(thread.id, PNG, `p${i}.png`)).json()) as any).attachment.id);
+      return (await (await call("POST", `/api/chat/threads/${thread.id}/turn?stream=0`, { message: `${n} images`, attachments: ids })).json()) as any;
+    };
+    expect((await send(4)).user.omitted).toBeUndefined();
+    expect((await send(4)).user.omitted).toBeUndefined();
+    const third = await send(2);
+    expect(third.user.omitted).toBe(2);
+    const detail = (await (await call("GET", `/api/chat/threads/${thread.id}`)).json()) as any;
+    expect(detail.messages.filter((m: any) => m.role === "user").map((m: any) => m.omitted ?? 0)).toEqual([0, 0, 2]);
+  });
+
   test("upload, then a turn ships the file to the runtime and the message shows it", async () => {
     const { thread } = (await (await call("POST", "/api/chat/threads", { scope: "s" })).json()) as any;
     const up = await upload(thread.id, PNG);

@@ -154,6 +154,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   });
   const chatStore = new ChatStore(config.dbPath);
   const chat = new ChatService({ store: chatStore, model, defaultModel: (app, tag) => appModels.resolve(app, tag), fileDir: (app) => join(storage.appDataDir(app), "chat") });
+  // A chat turn the last process did not live to finish is closed here, with the text it had saved (docs/chat.md#turn).
+  chat.settleInterrupted();
   // The widget apps embed is bundled once at boot; SPACE_DEV=1 rebuilds it on every request.
   const widget = buildWidget({ dev: process.env.SPACE_DEV === "1" });
   // Agent tasks run on their runtime from the scheduler; their usage reaches the ledger from the run result.

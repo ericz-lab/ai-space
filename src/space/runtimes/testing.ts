@@ -3,7 +3,8 @@
  * stdin and answers with the CLI's result envelope. FAKE_MODEL_MODE picks the
  * behaviour: `ok` (default), `plain` (text without the envelope, like an older
  * CLI), `error` (an is_error envelope), `exit` (non-zero exit), `hang` (never
- * answers, for timeouts). The answer echoes the prompt and the arguments so a
+ * answers, for timeouts), `slow` (the first delta, a pause of FAKE_MODEL_DELAY_MS,
+ * then the rest: an answer a test can walk away from and come back to). The answer echoes the prompt and the arguments so a
  * test can check what reached the runtime. Asked for `stream-json`, it prints
  * an init line, the answer in two text deltas and the same result envelope last.
  * A prompt that ends with an "Attached files" block makes it report each file's
@@ -41,8 +42,9 @@ if (import.meta.main) {
     console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "fake" }));
     console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "hmm" } } }));
     console.log(delta(result.slice(0, 10)));
+    if (mode === "slow") await Bun.sleep(Number(process.env.FAKE_MODEL_DELAY_MS ?? 600));
     console.log(delta(result.slice(10)));
-  }
+  } else if (mode === "slow") await Bun.sleep(Number(process.env.FAKE_MODEL_DELAY_MS ?? 600));
   console.log(
     JSON.stringify({
       type: "result",

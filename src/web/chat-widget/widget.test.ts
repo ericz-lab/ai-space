@@ -22,6 +22,15 @@ describe("chat widget", () => {
     expect(w.css).toContain(".sc-model-menu");
   });
 
+  test("carries the turn states: the stop route, the request id, and both languages' words for stopped, interrupted and retry", async () => {
+    const w = await buildWidget()();
+    expect(w.js).toContain("/stop");
+    expect(w.js).toContain("requestId");
+    for (const word of ["正在停止…", "已停止", "重试", "Stopping…", "Interrupted: ai-space restarted", "Retry", "回到最新", "Jump to latest"]) expect(w.js).toContain(word);
+    expect(w.css).toContain(".sc-bottom");
+    expect(w.css).toContain(".sc-retry");
+  });
+
   test("markdown escapes first and renders the usual blocks", () => {
     expect(renderMd("# T\n\n- a <b>\n\n`x`")).toBe("<h2>T</h2><ul><li>a &lt;b&gt;</li></ul><p><code>x</code></p>");
     expect(renderMd("![p](/x/1.png)")).toContain('<img src="/x/1.png"');

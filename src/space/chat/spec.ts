@@ -1,5 +1,5 @@
 import { MAX_SYSTEM_CHARS, MAX_THINKING_TOKENS, MAX_TIMEOUT_MS, MODEL_PATTERN, TOOL_PATTERN } from "../model/types.ts";
-import { CHAT_TOOLS, DEFAULT_TIMEOUT_MS, MAX_ACK_CHARS, MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONTEXT_CHARS, MAX_MESSAGE_CHARS, MAX_TITLE_CHARS, SCOPE_PATTERN, type TurnInput } from "./types.ts";
+import { CHAT_TOOLS, DEFAULT_TIMEOUT_MS, MAX_ACK_CHARS, MAX_ATTACHMENTS_PER_MESSAGE, MAX_CONTEXT_CHARS, MAX_MESSAGE_CHARS, MAX_TITLE_CHARS, REQUEST_ID_PATTERN, SCOPE_PATTERN, type TurnInput } from "./types.ts";
 
 /** Validation of what comes over the API, strict like the model service's: an unknown shape is rejected with the reason. */
 
@@ -72,5 +72,14 @@ export function parseTurnInput(body: Record<string, unknown>): TurnInput {
     timeoutMs = Math.min(Math.round(body.timeoutMs), MAX_TIMEOUT_MS);
   }
 
-  return { message: body.message, attachments, tools, timeoutMs, ...(context ? { context } : {}), ...(model ? { model } : {}), ...(thinking !== undefined ? { thinking } : {}) };
+  let requestId: string | undefined;
+  if (body.requestId !== undefined) {
+    if (typeof body.requestId !== "string" || !REQUEST_ID_PATTERN.test(body.requestId)) throw new Error("requestId must be 8 to 80 letters, digits, . _ : -");
+    requestId = body.requestId;
+  }
+
+  return {
+    message: body.message, attachments, tools, timeoutMs,
+    ...(context ? { context } : {}), ...(model ? { model } : {}), ...(thinking !== undefined ? { thinking } : {}), ...(requestId ? { requestId } : {}),
+  };
 }
