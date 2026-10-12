@@ -12,7 +12,7 @@ import { PackageRuntime } from "./runtime.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const f of cleanups.splice(0).reverse()) await f(); });
-async function machine(label: string) {
+async function machine(label: string, publicBase?: string) {
   const dir = await mkdtemp(join(tmpdir(), "space-gateway-")); cleanups.push(() => rm(dir, { recursive: true, force: true }));
   const db = new Database(":memory:"); cleanups.push(() => db.close());
   const connections = new Connections(db, crypto.randomUUID());
@@ -40,7 +40,7 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: Number(process.env.PORT)
   const links = new PackageLinks(connections, { env, apps: () => [{ app: "notes", title: label, version: "1.0.0" }], handle: (_c, meta, body, signal) => gateway.local(meta, body, signal) });
   cleanups.push(() => links.close());
   gateway = new PackageGateway(runtime, links, connections.spaceId);
-  const port = gateway.start(0); cleanups.push(() => gateway.close());
+  const port = gateway.start(0, publicBase); cleanups.push(() => gateway.close());
   return { gateway, connections, links, runtime, port, env };
 }
 
@@ -81,6 +81,38 @@ test("a streaming response holds its runtime lease until cancellation", async ()
   await reader.cancel(); expect(m.runtime.status("notes")?.leases).toBe(0);
 });
 
+// Explicit integration lane: no Caddy download or system trust changes during normal unit tests.
+if (process.env.SPACE_TEST_CADDY) test("Caddy HTTPS edge preserves app hosts, secure sessions and WebSockets", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "space-caddy-test-")); cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+  const port = listener.port; listener.stop(true);
+  const m = await machine("edge", `https://apps.localhost:${port}`);
+  const key = join(dir, "key.pem"), cert = join(dir, "cert.pem"), config = join(dir, "Caddyfile");
+  const openssl = Bun.spawn(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=apps.localhost"], { stdout: "ignore", stderr: "ignore" });
+  expect(await openssl.exited).toBe(0);
+  await Bun.write(config, `{\n admin off\n auto_https off\n}\nhttps://:${port} {\n bind 127.0.0.1\n tls ${cert} ${key}\n reverse_proxy 127.0.0.1:${m.port}\n}\n`);
+  const child = Bun.spawn([process.env.SPACE_TEST_CADDY!, "run", "--config", config, "--adapter", "caddyfile"], { env: { PATH: process.env.PATH, HOME: dir, XDG_DATA_HOME: dir, XDG_CONFIG_HOME: dir }, stdout: "ignore", stderr: Bun.file(join(dir, "caddy.log")) });
+  cleanups.push(async () => { if (child.exitCode === null) child.kill("SIGTERM"); await child.exited; });
+  const opened = new URL((await m.gateway.open({ app: "notes", spaceId: m.connections.spaceId }, "/api/echo?note=1")).url);
+  const request = (path: string, headers: Record<string, string> = {}) => fetch(`https://127.0.0.1:${port}${path}`, { headers: { host: opened.host, ...headers }, tls: { rejectUnauthorized: false } });
+  let ready = false;
+  for (let i = 0; i < 100; i++) {
+    try { await (await request("/")).body?.cancel(); ready = true; break; } catch { await Bun.sleep(25); }
+  }
+  expect(ready).toBe(true);
+  const ticket = await request(opened.pathname + opened.search);
+  expect(ticket.status).toBe(200);
+  expect(await ticket.text()).toContain("/api/echo?note=1");
+  expect(ticket.headers.get("set-cookie")).toContain("Secure");
+  const cookie = ticket.headers.get("set-cookie")!.split(";", 1)[0]!;
+  expect(await (await request("/api/echo", { cookie })).json()).toMatchObject({ label: "edge" });
+  const socket = new WebSocket(`wss://127.0.0.1:${port}/socket`, { headers: { host: opened.host, origin: opened.origin, cookie }, tls: { rejectUnauthorized: false } } as unknown as string[]);
+  cleanups.push(() => socket.close());
+  await new Promise<void>((resolve, reject) => { socket.onopen = () => resolve(); socket.onerror = () => reject(new Error("edge socket failed")); });
+  const echo = new Promise<unknown>((resolve) => { socket.onmessage = (e) => resolve(e.data); });
+  socket.send("secure edge"); expect(await echo).toBe("secure edge");
+}, 10_000);
+
 test("remote HTTP and WebSocket work over the peer outbound channel and revoke immediately", async () => {
   const hub = await machine("hub"), peer = await machine("peer");
   const invite = hub.connections.create({ remoteSpaceId: peer.connections.spaceId, direction: "incoming", apps: ["notes"] });
@@ -89,7 +121,7 @@ test("remote HTTP and WebSocket work over the peer outbound channel and revoke i
   peer.env.LINK_TOKEN = invite.token;
   const outgoing = peer.connections.create({ remoteSpaceId: hub.connections.spaceId, direction: "outgoing", url: control.url.origin, tokenEnv: "LINK_TOKEN" }).connection;
   peer.links.refresh();
-  const connected = async () => { for (let i = 0; i < 100; i++) { if (peer.links.status()[0]?.connected && hub.links.status()[0]?.connected) return; await Bun.sleep(10); } throw new Error("offline"); };
+  const connected = async () => { for (let i = 0; i < 100; i++) { peer.links.refresh(); if (peer.links.status()[0]?.connected && hub.links.status()[0]?.connected) return; await Bun.sleep(10); } throw new Error("offline"); };
   await connected();
   const b = await browser(peer.gateway, { app: "notes", spaceId: hub.connections.spaceId, connectionId: outgoing.id });
   expect(await (await b.request("/api/echo", { method: "POST", headers: { origin: b.url.origin }, body: "remote" })).json()).toMatchObject({ label: "hub", body: "remote" });
@@ -108,4 +140,15 @@ test("remote HTTP and WebSocket work over the peer outbound channel and revoke i
   expect(hub.runtime.status("notes")?.leases).toBeGreaterThan(0);
   const closed = new Promise<void>((resolve) => { ws.onclose = () => resolve(); });
   hub.connections.update(invite.connection.id, { apps: [] }); await closed;
+  await connected();
+  expect((await b.request("/api/echo")).status).toBe(403);
+  peer.connections.update(outgoing.id, { apps: [] }); await connected();
+  expect((await reverse.request("/api/echo")).status).toBe(403);
+  const local = await browser(peer.gateway, { app: "notes", spaceId: peer.connections.spaceId });
+  expect(local.url.origin).not.toBe(b.url.origin);
+  hub.links.close(); control.stop(true);
+  for (let i = 0; i < 100 && peer.links.status()[0]?.connected; i++) await Bun.sleep(10);
+  expect(peer.links.status()[0]?.connected).toBe(false);
+  expect((await b.request("/api/echo")).status).toBe(502);
+  expect(await (await local.request("/api/echo")).json()).toMatchObject({ label: "peer" });
 });

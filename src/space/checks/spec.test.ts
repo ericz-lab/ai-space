@@ -2,6 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { parseManifest } from "../scheduler/manifest.ts";
 import { checkViews } from "../panel/api.ts";
 import { parseChecksSpec } from "./spec.ts";
+import { parsePackageManifest } from "../packages/manifest.ts";
+
+test("package checks publish a host adapter URL without a fixed service port", () => {
+  const m = parsePackageManifest(`spec: 2\nname: app\nversion: 1.0.0\nrequires: {spaceApi: 1, bun: 1.3.0}\noffline: {features: [Read], online: []}\nlaunch: {kind: process, runtime: bun, entry: app.ts, health: /healthz}\nchecks: [{name: today, http: {path: /status}, done: [{path: $.done, eq: true}]}]`);
+  const entry = { manifest: m, manifestOnly: false, registeredAt: 0 };
+  expect(checkViews(entry)).toEqual([]);
+  expect(checkViews(entry, (app, check) => `http://localhost/check/${app}/${check}`)).toMatchObject([{ url: "http://localhost/check/app/today", path: "/status" }]);
+});
 
 const check = (extra: Record<string, unknown> = {}) => ({ name: "today", http: { path: "/api/status" }, done: [{ path: "$.done", eq: true }], ...extra });
 

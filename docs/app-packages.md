@@ -6,7 +6,7 @@ Tracking: [issue #3](https://github.com/ericz-lab/ai-space/issues/3), Seoul Todo
 
 An application should install from a portable artifact and run locally without an internet connection when its features permit it. Installing it must not implicitly start a permanent service or share it with another machine. A peer can use applications granted by its Hub; the peer separately controls whether that Hub can discover and use its local applications.
 
-Implemented: format-1 index/spec-2 manifest validation, `space app pack` and `space app inspect-package`, bounded archive reading, file integrity and Ed25519 signature verification. The local installation API now stages and publishes verified files with a persistent operation journal. After file installation, the package runtime provisions storage and registers its lifecycle. Background processes start explicitly; on-demand processes wait for a lease, and static applications have no child process. The legacy app registry still accepts **spec 1 only**; package panel/task integration, grants and the gateway are subsequent stages.
+Implemented: format-1 index/spec-2 manifest validation, `space app pack` and `space app inspect-package`, bounded archive reading, file integrity and Ed25519 signature verification. The local installation API now stages and publishes verified files with a persistent operation journal. After file installation, the package runtime provisions storage and registers its lifecycle. Background processes start explicitly; on-demand processes wait for a lease, and static applications have no child process. Receipt-verified packages register their pages, tasks, agents and local service components. The panel/CLI manage installations and connections, and a separate gateway serves local and authorized remote apps. The raw legacy loader still accepts **spec 1 only** so source sync cannot bypass package validation.
 
 ## Build and inspect a package
 
@@ -111,7 +111,7 @@ The owning Space enforces grants on HTTP and streaming requests. A revoked grant
 
 Disconnecting from a remote Hub leaves local installed applications accessible through the local Space. Unreachable remote installations are shown as unavailable; never silently substitute another installation's data. A remotely installed app is not a local offline copy. Replication and conflict resolution are a separate feature.
 
-Spec-1 deployments remain unchanged until explicitly migrated. Migrate launch/host settings into spec-2 launch and host-owned installation settings, build the artifact, preserve data and switch deployment ownership. Never let a Git hook and a package installer mutate the same live directory. The legacy registry must reject spec 2 until activation and registration enforce these semantics. Pilot representative applications before a fleet migration; no production migration is implicit in this design.
+Spec-1 deployments remain unchanged until explicitly migrated. Migrate launch/host settings into spec-2 launch and host-owned installation settings, build the artifact, preserve data and switch deployment ownership. Never let a Git hook and a package installer mutate the same live directory. Raw spec-2 directories are rejected by the legacy loader; installed packages enter through their verified receipt. Pilot representative applications before a fleet migration; no production migration is implicit in this design.
 
 Delivery order is the Todo sequence: contract; pack; install; lifecycle; connection/grants; gateway; tasks/agents; upgrade/recovery; CLI/UI; migration; end-to-end validation. Each stage records implementation evidence and remaining limits. Offline installation/start/use, denied reverse access, revoked streams, failure recovery and absence of duplicate tasks are release acceptance criteria.
 
@@ -123,7 +123,7 @@ Delivery order is the Todo sequence: contract; pack; install; lifecycle; connect
 
 The installer validates the entire package and compatibility before reserving an operation. It checks disk capacity, writes only regular files to a private `run/packages/<operation-id>` staging directory, syncs file contents, creates a host-owned `.space-install.json` receipt and publishes to `apps/<app>`. The destination must be absent: existing directories and symlinks require an explicit migration/upgrade workflow. It never changes `data/<app>`. A successful result means files are installed, not that the application is running.
 
-The journal and Space UUID live in additive tables in `space.db`. At service startup, interrupted operations whose published files match their receipt are completed; missing or altered files produce a failed operation without executing code or deleting an existing app tree. An interruption during an empty destination reservation may leave that empty directory for operator inspection; recovery does not guess ownership and delete it. Shutdown drains in-progress installation work before closing the database. Power-loss durability of directory renames is not claimed by this initial file installer; upgrade/data recovery remains a later stage.
+The journal and Space UUID live in additive tables in `space.db`. At service startup, interrupted operations whose published files match their receipt are completed; missing or altered files produce a failed operation without executing code or deleting an existing app tree. An interruption during an empty destination reservation may leave that empty directory for operator inspection; recovery does not guess ownership and delete it. Shutdown drains in-progress installation work before closing the database. The upgrade journal and retained versions extend this recovery model as described below; neither path claims automatic restoration of application databases or every physical power-loss failure.
 
 ## Package process lifecycle
 
@@ -147,7 +147,7 @@ First create an incoming connection on the Hub bound to the peer UUID, selecting
 
 The peer opens an authenticated WebSocket to `/api/connections/channel`; the Hub verifies the token and peer UUID, and the peer verifies the Hub UUID in the protocol handshake. The single connection carries requests in both directions, so authorized Hub access requires no inbound peer port. Both sides default to an empty local application grant. To allow Hub access, the peer sets its outgoing connection's `apps` list. Grants do not transit through the Hub to other peers, and application use never authorizes installation, a shell, or operator APIs. Grant changes, disable and rotation close affected connections and all in-flight streams before reconnecting.
 
-The channel supports at most 16 concurrent request streams, 32 KiB body chunks with consumption credit, bounded metadata frames and a 30-second response-header deadline. Response bodies stream until completion/cancellation; a physical disconnect aborts all active requests. Incoming sockets use the existing 25-second server ping. Outgoing connections retry while enabled. Protocol 1 currently exposes an authorized local catalogue and a gateway dispatch hook; complete application HTTP/WS handling is the gateway stage.
+The channel supports at most 16 concurrent request streams, 32 KiB body chunks with consumption credit, bounded metadata frames and a 30-second response-header deadline. Response bodies stream until completion/cancellation; a physical disconnect aborts all active requests. Incoming sockets use the existing 25-second server ping. Outgoing connections retry while enabled. Protocol 1 exposes the authorized local catalogue and application HTTP/WebSocket transport through the gateway below.
 
 ## Application entry gateway
 
@@ -190,3 +190,5 @@ The upload UI saves its operation ID locally before sending the artifact, shows 
 ## Existing applications
 
 Follow [package-migration.md](package-migration.md) to build a release without changing a source deployment manifest, move secrets into the data directory, rehearse a cutover and retire the old deployment owner. The repeatable `package-pilot` command uses an isolated keep source checkout and synthetic data; it does not migrate a running fleet.
+
+Acceptance lanes and their limits are recorded in [package-validation.md](package-validation.md), including blocked-internet execution, Seoul Linux tests and the optional Caddy edge check.
