@@ -622,7 +622,10 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
             className={`dropzone${zoneHot ? " hot" : ""}`}
             onDragOver={(e) => {
               const d = dragRef.current;
-              if (d?.kind !== "tiles" || !d.group[d.index]?.startsWith("app:")) return;
+              if (d?.kind !== "tiles") return;
+              const over = d.group[d.index];
+              // An app a connected Space shares is installed there; this Space cannot uninstall it.
+              if (!over?.startsWith("app:") || appOf.get(parseKey(over)!.id)?.connection) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
               d.over = d.index;
@@ -635,7 +638,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               setZoneHot(false);
               const d = dragRef.current;
               const key = d?.group[d.index];
-              if (d?.kind === "tiles" && key?.startsWith("app:")) {
+              if (d?.kind === "tiles" && key?.startsWith("app:") && !appOf.get(parseKey(key)!.id)?.connection) {
                 d.over = d.index;
                 setUninstalling(appOf.get(parseKey(key)!.id) ?? null);
               }

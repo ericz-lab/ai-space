@@ -29,6 +29,8 @@ export type AppInfo = {
   /** The layout key: the name, or `<peer>/<name>` for an app on a peer. */
   id: string;
   name: string;
+  /** Set for a package another Space shares over a connection: opened here, managed only on that Space. */
+  connection?: string;
   peer?: string;
   /** The peer this entry comes from is not answering; the entry is its last known state. */
   stale?: boolean;

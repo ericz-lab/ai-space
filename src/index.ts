@@ -31,6 +31,7 @@ import { PackageInstaller } from "./space/packages/install.ts";
 import { PackageRuntime } from "./space/packages/runtime.ts";
 import { Connections } from "./space/packages/connections.ts";
 import { PackageLinks, createConnectionRoutes } from "./space/packages/links.ts";
+import { RemoteCatalogue } from "./space/packages/catalogue.ts";
 import { PackageGateway, createPackageOpenRoutes } from "./space/packages/gateway.ts";
 import { runPackageTask } from "./space/packages/tasks.ts";
 import { loadAppEnv } from "./space/scheduler/targets.ts";
@@ -97,12 +98,15 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   let packageGateway: PackageGateway;
   const packageLinks = new PackageLinks(packageConnections, {
     env,
+    name: config.name,
     handle: (_connection, meta, body, signal) => packageGateway.local(meta, body, signal),
     apps: () => packageStore.list().filter((o) => o.state === "installed" && packageRuntime.get(o.app)).map((o) => ({ app: o.app, title: packageRuntime.get(o.app)!.manifest.title ?? o.app, version: o.version, page: !!packageRuntime.get(o.app)!.manifest.launch })),
   });
   packageGateway = new PackageGateway(packageRuntime, packageLinks, packageStore.spaceId);
   if (config.packagePort !== undefined) packageGateway.start(config.packagePort, config.packageBaseUrl);
   packageLinks.refresh();
+  const packageCatalogue = new RemoteCatalogue(packageLinks);
+  setTimeout(() => void packageCatalogue.refresh(), 8000).unref();
   const backups = await openBackups(config);
   const taskDefaults = backupTaskDefaults(ws, config);
   const { channels, errors: channelErrors } = loadChannels(env);
@@ -324,6 +328,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   void router.sync();
 
   const panelRoutes = createPanelRoutes({
+    sharedApps: (hidden) => packageCatalogue.views(hidden),
     packageCheckUrl: (app, check) => `http://127.0.0.1:${config.port}/api/panel/packages/apps/${encodeURIComponent(app)}/checks/${encodeURIComponent(check)}`,
     ws,
     registry,
@@ -442,6 +447,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     peers.stop();
     terminal.stop();
     router.stop();
+    packageCatalogue.close();
     packageLinks.close();
     packageGateway.close();
     const at = Date.now();

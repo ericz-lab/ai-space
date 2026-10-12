@@ -19,6 +19,8 @@ const removed: string[] = [];
 const stopCalls: string[] = [];
 /** Task runs the fake scheduler reports as in flight, per app. */
 const running: Record<string, string[]> = {};
+/** Apps a connected Space shares, as the catalogue cache reports them; empty outside the test that fills it. */
+let shared: { id: string; url?: string }[] = [];
 
 // Loopback calls the panel makes (health, widget sources) are answered here.
 const fakeFetch = (async (input: string | URL | Request) => {
@@ -93,6 +95,8 @@ widgets:
         removed.push(app);
       },
       runningTasks: (app) => running[app] ?? [],
+      sharedApps: (hidden) =>
+        shared.map((a) => ({ ...a, name: a.id.split("/")[1]!, peer: "david", connection: "c1", stale: false, title: a.id, icon: "", status: "active" as const, manifestOnly: false, hidden: hidden.has(a.id), agents: [], widgets: [] })),
       stopService: async (app) => {
         stopCalls.push(app);
         return app === "stubborn" ? { ok: false, error: "exit 1: unit not found" } : { ok: true };
@@ -316,4 +320,22 @@ describe("panel api", () => {
     expect(registry.get("busy")).toBeUndefined();
     delete running.busy;
   });
+});
+
+test("GET /api/apps lists apps a connected Space shares, unless a local app has the id or they are hidden", async () => {
+  shared = [{ id: "david/voice-chat", url: "/_space/connections/c1/apps/voice-chat" }, { id: "david/nightly" }, { id: "notes", url: "/_space/connections/c1/apps/notes" }];
+  try {
+    const grid = (await call("/api/apps")).body.apps as Body[];
+    expect(grid.find((a) => a.id === "david/voice-chat")).toMatchObject({ peer: "david", connection: "c1", url: "/_space/connections/c1/apps/voice-chat" });
+    // No page, so nothing to open from the grid; the full list still has it.
+    expect(grid.some((a) => a.id === "david/nightly")).toBe(false);
+    expect(grid.filter((a) => a.id === "notes").map((a) => a.connection)).toEqual([undefined]);
+    expect(((await call("/api/apps?all=1")).body.apps as Body[]).some((a) => a.id === "david/nightly")).toBe(true);
+
+    await call("/api/panel/layout", jsonInit("PUT", { hidden: ["david/voice-chat"] }));
+    expect(((await call("/api/apps")).body.apps as Body[]).some((a) => a.id === "david/voice-chat")).toBe(false);
+  } finally {
+    shared = [];
+    await call("/api/panel/layout", jsonInit("PUT", { hidden: [] }));
+  }
 });
