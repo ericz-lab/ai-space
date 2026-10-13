@@ -37,10 +37,12 @@
 		9E9907ED26EFEEC01D8361BC /* SpaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998C0995C5D87D1292EA68F4 /* SpaceModels.swift */; };
 		A81AC08B8A69C37AB5134CF9 /* HubModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86860067FE78FD4AF25BF91D /* HubModelsTests.swift */; };
 		A849C14C24F01CC8BAB2725D /* Screens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A7EAB5E8CB19126F2F16F10 /* Screens.swift */; };
+		A921D9E802D9E50E38247A82 /* PageControlPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 397A09595025ECA45AAC4C68 /* PageControlPlacement.swift */; };
 		AD67C731330EC453DC6F239F /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 3E98F2815C0F7222F77A6E3C /* Localizable.strings */; };
 		B03FB3AB79CB9ADD20B0565E /* SpaceHostsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22D051924D3958435ABAACA8 /* SpaceHostsTests.swift */; };
 		B9205F1327ABB6B9AF14CB25 /* CatalogueSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EAF8E647838BCF9FFB1BC05 /* CatalogueSearch.swift */; };
 		B9BCE523559C42E776FA051D /* ScreenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD1716DAE4BD306F5AB2D2A7 /* ScreenStore.swift */; };
+		BB3549F0E00836E821F5114E /* PageControlPlacementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0696D76B50F9EA1BD1C35B /* PageControlPlacementTests.swift */; };
 		BD155D5AC1A4BF8B7AEAD136 /* BackdropStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 535EBD45C7F6E2E7ECFEBFF6 /* BackdropStore.swift */; };
 		C2A2CD15C1A6DACA89A40838 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F541D77409D779BE6A64FC4 /* ConnectView.swift */; };
 		C57C08D6B333E957DCA6FEB6 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBF0A76C75AB625B76B33DA8 /* AppModel.swift */; };
@@ -87,6 +89,7 @@
 		2C6E34B303A8C308CF5232A8 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		2C8BE41B3ECE574B83579DD9 /* SpaceSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceSettingsTests.swift; sourceTree = "<group>"; };
 		37F861A810C193866B860150 /* IconStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconStore.swift; sourceTree = "<group>"; };
+		397A09595025ECA45AAC4C68 /* PageControlPlacement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageControlPlacement.swift; sourceTree = "<group>"; };
 		4B7D69376B41451E1986F0EE /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		535EBD45C7F6E2E7ECFEBFF6 /* BackdropStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackdropStore.swift; sourceTree = "<group>"; };
 		55BC29D392510E7249B03C48 /* AppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPaths.swift; sourceTree = "<group>"; };
@@ -97,6 +100,7 @@
 		6EECE9FCE02BC74A49465299 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		6FF6907D6F9627801F2C4496 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		7E347D1A23E6D707E2C96C61 /* WebContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebContainer.swift; sourceTree = "<group>"; };
+		7F0696D76B50F9EA1BD1C35B /* PageControlPlacementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageControlPlacementTests.swift; sourceTree = "<group>"; };
 		86860067FE78FD4AF25BF91D /* HubModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubModelsTests.swift; sourceTree = "<group>"; };
 		8E3ABB46B74E65FFB2775D9C /* AppPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPageView.swift; sourceTree = "<group>"; };
 		998C0995C5D87D1292EA68F4 /* SpaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SpaceModels.swift; path = ../../desktop/macos/AISpace/Services/SpaceModels.swift; sourceTree = "<group>"; };
@@ -174,6 +178,7 @@
 				0014090DE8169303D45C5FAA /* CatalogueLoaderTests.swift */,
 				D1CBF3D3A0FCFDC2695A54E8 /* CatalogueTests.swift */,
 				86860067FE78FD4AF25BF91D /* HubModelsTests.swift */,
+				7F0696D76B50F9EA1BD1C35B /* PageControlPlacementTests.swift */,
 				9D7AA2AEBBD572FDDB1E7C28 /* ScreensTests.swift */,
 				22D051924D3958435ABAACA8 /* SpaceHostsTests.swift */,
 				2C8BE41B3ECE574B83579DD9 /* SpaceSettingsTests.swift */,
@@ -189,6 +194,7 @@
 				1EAF8E647838BCF9FFB1BC05 /* CatalogueSearch.swift */,
 				AF5E03C563359D77C61D320E /* HubModels.swift */,
 				B91AE60A88D32DD79BF40C5C /* IconSource.swift */,
+				397A09595025ECA45AAC4C68 /* PageControlPlacement.swift */,
 				E17D00589C93FCF76984A2E1 /* QuickActions.swift */,
 				0A7EAB5E8CB19126F2F16F10 /* Screens.swift */,
 				BD1716DAE4BD306F5AB2D2A7 /* ScreenStore.swift */,
@@ -384,6 +390,7 @@
 				F8F297B2B1D7CEFF0DB8CF9A /* IconSource.swift in Sources */,
 				E58D915CAF51481FB240313E /* IconStore.swift in Sources */,
 				F2899362FB12F68F4F063F07 /* NavigationPolicy.swift in Sources */,
+				A921D9E802D9E50E38247A82 /* PageControlPlacement.swift in Sources */,
 				C9AABB4CEE5832EB32C4856C /* PanelView.swift in Sources */,
 				6214CD03932110E16313DE4E /* QuickActions.swift in Sources */,
 				F1CDF6A5555E67857A776069 /* RootView.swift in Sources */,
@@ -412,6 +419,7 @@
 				E5187D92264A0E571100CC28 /* CatalogueLoaderTests.swift in Sources */,
 				6F95DAFBFA6D2699F9F7F936 /* CatalogueTests.swift in Sources */,
 				A81AC08B8A69C37AB5134CF9 /* HubModelsTests.swift in Sources */,
+				BB3549F0E00836E821F5114E /* PageControlPlacementTests.swift in Sources */,
 				EAFBD765BEA958CF872BD8E4 /* ScreensTests.swift in Sources */,
 				B03FB3AB79CB9ADD20B0565E /* SpaceHostsTests.swift in Sources */,
 				7398247974B91A51F45C0ADD /* SpaceSettingsTests.swift in Sources */,

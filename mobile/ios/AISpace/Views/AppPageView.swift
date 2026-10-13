@@ -20,6 +20,9 @@ struct AppPageView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @State private var menuOpen = false
+    @AppStorage("pageControlPlacement") private var storedPlacement = PageControlPlacement().stored
+    /// The button's centre while a finger is moving it.
+    @State private var dragCenter: CGPoint?
 
     private var controlsVisible: Bool { menuOpen || voiceOver || !session.controlsHidden || session.state.isFailure }
 
@@ -41,41 +44,41 @@ struct AppPageView: View {
         }
         .overlay {
             GeometryReader { geometry in
-                ZStack(alignment: .bottom) {
+                let size = geometry.size
+                let placement = PageControlPlacement(stored: storedPlacement)
+                let rest = placement.center(in: size)
+                let above = placement.menuAbove(in: size)
+                let room = placement.menuRoom(in: size)
+                let alignment = Alignment(horizontal: placement.side == .left ? .leading : .trailing,
+                                          vertical: above ? .bottom : .top)
+                ZStack {
                     if menuOpen {
                         Color.black.opacity(0.12).ignoresSafeArea()
                             .onTapGesture { menuOpen = false }
                             .accessibilityLabel(Text("Dismiss page controls"))
+                        menu
+                            .frame(maxWidth: 440)
+                            .frame(maxHeight: room.height, alignment: above ? .bottom : .top)
+                            .padding(.horizontal, PageControlPlacement.sideMargin)
+                            .padding(above ? .bottom : .top, room.inset)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+                            .transition(.move(edge: above ? .bottom : .top).combined(with: .opacity))
                     }
-                    VStack(spacing: 12) {
-                        if menuOpen {
-                            menu
-                                .frame(maxWidth: 440)
-                                .frame(maxHeight: max(120, geometry.size.height - 92), alignment: .bottom)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
-                        HStack {
-                            Button { model.returnToSpace() } label: {
-                                roundIcon("house")
-                            }
-                            .accessibilityLabel(Text("Return to Space"))
-                            Spacer()
-                            Button { menuOpen.toggle() } label: {
-                                roundIcon("ellipsis")
-                            }
-                            .accessibilityLabel(Text("Page controls"))
-                            .accessibilityValue(menuOpen ? Text("Expanded") : Text("Collapsed"))
-                        }
-                        .buttonStyle(.plain)
+                    roundIcon("ellipsis")
+                        .scaleEffect(dragCenter == nil ? 1 : 1.08)
+                        .onTapGesture { menuOpen.toggle() }
+                        .gesture(drag(from: rest, in: size))
+                        .accessibilityLabel(Text("Page controls"))
+                        .accessibilityValue(menuOpen ? Text("Expanded") : Text("Collapsed"))
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction(named: Text("Move to Other Side")) { storedPlacement = placement.opposite.stored }
+                        .position(dragCenter ?? rest)
+                        // A hidden button leaves over the edge it rests against.
+                        .offset(x: controlsVisible ? 0 : (placement.side == .left ? -96 : 96))
                         .opacity(controlsVisible ? 1 : 0)
-                        .offset(y: controlsVisible ? 0 : 76)
                         .allowsHitTesting(controlsVisible)
                         .accessibilityHidden(!controlsVisible)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 12)
                 }
-                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .bottom)
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: controlsVisible)
@@ -91,11 +94,30 @@ struct AppPageView: View {
         }
     }
 
+    /// The button follows the finger, then snaps to the nearer edge at the height it was let go.
+    private func drag(from rest: CGPoint, in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
+            .onChanged { value in
+                menuOpen = false
+                dragCenter = PageControlPlacement.clamped(
+                    CGPoint(x: rest.x + value.translation.width, y: rest.y + value.translation.height), in: size)
+            }
+            .onEnded { value in
+                // The predicted end lets a flick carry the button across the page.
+                let end = CGPoint(x: rest.x + value.predictedEndTranslation.width,
+                                  y: rest.y + value.predictedEndTranslation.height)
+                withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.78)) {
+                    storedPlacement = PageControlPlacement.settled(at: end, in: size).stored
+                    dragCenter = nil
+                }
+            }
+    }
+
     private func roundIcon(_ symbol: String) -> some View {
         Image(systemName: symbol)
             .font(.system(size: 22, weight: .semibold))
             .foregroundStyle(.primary)
-            .frame(width: 56, height: 56)
+            .frame(width: PageControlPlacement.diameter, height: PageControlPlacement.diameter)
             .background(.regularMaterial, in: Circle())
             .overlay(Circle().strokeBorder(.primary.opacity(0.12)))
             .shadow(color: .black.opacity(0.16), radius: 8, y: 3)
@@ -125,6 +147,7 @@ struct AppPageView: View {
                     }
                     .labelStyle(.iconOnly).font(.title2).frame(minHeight: 44)
                     Divider()
+                    Button { menuOpen = false; model.returnToSpace() } label: { Label("Return to Space", systemImage: "house").frame(maxWidth: .infinity, alignment: .leading) }
                     ShareLink(item: session.shareURL) { Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, alignment: .leading) }
                     Button { model.openInBrowser(session.shareURL); menuOpen = false } label: { Label("Open in Safari", systemImage: "safari").frame(maxWidth: .infinity, alignment: .leading) }
                     if let key = page.key, let connection = model.store.connection(page.connection) {
