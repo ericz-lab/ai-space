@@ -181,7 +181,7 @@ final class AppModel: ObservableObject {
     /// The artwork of the themes that have one, as this Space serves it.
     func backdrops(for connection: Connection) -> BackdropStore {
         if let s = backdrops[connection.id] { return s }
-        let s = BackdropStore(space: connection.url, dataStore: dataStore(connection.id))
+        let s = BackdropStore(space: connection.url, dataStore: dataStore(connection.id), directory: AppPaths.backdrops(connection.id))
         backdrops[connection.id] = s
         return s
     }
@@ -335,6 +335,7 @@ final class AppModel: ObservableObject {
         loaders[id] = nil
         settings[id] = nil
         backdrops[id] = nil
+        try? FileManager.default.removeItem(at: AppPaths.backdrops(id))
         chats = chats.filter { !$0.key.hasPrefix("\(id)|") }
         icons[id]?.clear()
         // A Space can be removed before its icon store has been opened in this launch.

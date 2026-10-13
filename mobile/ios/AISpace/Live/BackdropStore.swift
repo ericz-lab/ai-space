@@ -4,7 +4,8 @@ import WebKit
 /// The drawn artwork some of the panel's themes have behind the page (`/backdrops/<name>.html`,
 /// src/web/theme.ts), fetched from the Space with its session and drawn once to a bitmap by an
 /// offscreen web view: the artwork is static, and a picture scrolls better under the pages than
-/// a live document. Kept in memory per name, light or dark, and size.
+/// a live document. Kept in memory and on disk per name, light or dark, and size: a launch shows
+/// the bitmap of the one before at once, and draws the artwork again behind it in case it changed.
 @MainActor
 final class BackdropStore: NSObject, ObservableObject, WKNavigationDelegate {
     private struct Job {
@@ -16,15 +17,25 @@ final class BackdropStore: NSObject, ObservableObject, WKNavigationDelegate {
 
     private let space: URL
     private let dataStore: WKWebsiteDataStore
+    private let directory: URL
     private var images: [String: UIImage] = [:]
     private var failed: Set<String> = []
+    private var diskChecked: Set<String> = []
+    /// Read from disk and not drawn again in this launch yet.
+    private var stale: Set<String> = []
     private var waiting: Job?
     private var current: Job?
     private var webView: WKWebView?
 
-    init(space: URL, dataStore: WKWebsiteDataStore) {
+    init(space: URL, dataStore: WKWebsiteDataStore, directory: URL) {
         self.space = space
         self.dataStore = dataStore
+        self.directory = directory
+    }
+
+    /// The names are the presets' own (`ThemePreset.backdrop`), so the key is a safe file name.
+    private func file(_ key: String) -> URL {
+        directory.appendingPathComponent(key.replacingOccurrences(of: "|", with: "-") + ".heic")
     }
 
     /// The artwork at this size, or while it is being drawn the same artwork at another size; nil until there is any.
@@ -32,13 +43,17 @@ final class BackdropStore: NSObject, ObservableObject, WKNavigationDelegate {
         guard size.width > 50, size.height > 50 else { return nil }
         let prefix = "\(name)|\(dark)|"
         let key = prefix + "\(Int(size.width))x\(Int(size.height))"
-        if let hit = images[key] { return hit }
-        if current?.key != key, waiting?.key != key, !failed.contains(key) {
+        if images[key] == nil, diskChecked.insert(key).inserted, let saved = UIImage(contentsOfFile: file(key).path) {
+            images[key] = saved
+            stale.insert(key)
+        }
+        let hit = images[key]
+        if hit == nil || stale.contains(key), current?.key != key, waiting?.key != key, !failed.contains(key) {
             // Only the latest size asked for matters; not started from inside a view update.
             waiting = Job(key: key, name: name, dark: dark, size: size)
             DispatchQueue.main.async { [weak self] in self?.next() }
         }
-        return images.first { $0.key.hasPrefix(prefix) }?.value
+        return hit ?? images.first { $0.key.hasPrefix(prefix) }?.value
     }
 
     /// A failed drawing is tried again after a sign-in (the session may have been the reason).
@@ -79,7 +94,11 @@ final class BackdropStore: NSObject, ObservableObject, WKNavigationDelegate {
 
     private func finish(_ image: UIImage?) {
         if let job = current {
-            if let image { images[job.key] = image } else { failed.insert(job.key) }
+            if let image {
+                images[job.key] = image
+                stale.remove(job.key)
+                save(image, to: file(job.key))
+            } else { failed.insert(job.key) }
         }
         webView?.navigationDelegate = nil
         webView?.removeFromSuperview()
@@ -87,6 +106,16 @@ final class BackdropStore: NSObject, ObservableObject, WKNavigationDelegate {
         current = nil
         objectWillChange.send()
         next()
+    }
+
+    /// Encoding a screen of pixels takes long enough to drop frames; it happens off the main actor.
+    private func save(_ image: UIImage, to url: URL) {
+        Task.detached(priority: .utility) {
+            guard let data = image.heicData() else { return }
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            // The memory cache still works if the disk cache is unavailable.
+            try? data.write(to: url, options: .atomic)
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
