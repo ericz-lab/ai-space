@@ -5,7 +5,7 @@ struct AgentsPage: View {
     @ObservedObject var model: AppModel
     let connection: Connection
     @ObservedObject var loader: CatalogueLoader
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
 
     var body: some View {
         let agents = loader.catalogue?.agents ?? []
@@ -37,7 +37,7 @@ struct AgentsPage: View {
 struct ChatPage: View {
     let agent: CatalogueEntry
     @ObservedObject var store: ChatStore
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
 
     var body: some View {
         VStack(spacing: 0) {

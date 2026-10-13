@@ -10,7 +10,7 @@ struct HomeView: View {
     @ObservedObject var model: AppModel
     let connection: Connection
     @ObservedObject var loader: CatalogueLoader
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
     @ObservedObject var store: ScreenStore
     /// The screen to show, by id; nil for the library.
     var screenID: String?
@@ -240,7 +240,7 @@ struct ScreenEditor: View {
     @ObservedObject var model: AppModel
     let connection: Connection
     @ObservedObject var loader: CatalogueLoader
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
     @ObservedObject var store: ScreenStore
     let screen: String
 

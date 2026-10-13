@@ -28,7 +28,7 @@ struct HubCover: View {
     let connection: Connection
     let page: HubPage
     @ObservedObject var loader: CatalogueLoader
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
 
     var body: some View {
         NavigationStack {
@@ -220,7 +220,7 @@ extension TaskSchedule {
 
 struct TasksPage: View {
     @StateObject private var store: TasksStore
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
 
     init(api: SpaceAPI, icons: IconStore) {
         _store = StateObject(wrappedValue: TasksStore(api: api))

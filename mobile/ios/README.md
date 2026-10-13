@@ -150,6 +150,12 @@ Sign Out and removing a Space clear its icon cache. A download already in flight
 
 SVG icons and rendered theme backdrops keep their rendering web views at full opacity behind the app's content. Lowering a rendering view's alpha also fades its snapshot, making cached icons look empty. `SVGRasterizerTests` runs under Xcode on iOS and checks the resulting bitmap's color and opacity; the Foundation-only command does not run this WebKit test.
 
+Icon completions notify only the views displaying that icon, rather than invalidating the catalogue,
+all tiles, and Settings. Missing disk entries are checked once per store lifetime; repeated reads share
+an in-flight request. Cache invalidation still clears visible icons on sign-out. For device scrolling
+checks, use a Release build so Swift compiler optimizations are enabled; Simulator screenshots and
+unit tests do not establish real-device frame rates.
+
 ### Safe-area regression checks
 
 The launcher measures each page inside the system safe area and lets scrolling content draw behind the frosted status area. One shared backdrop extends behind the status bar, Home search area, Panel and Settings. A single stationary glass layer covers only the status safe area, outside the horizontal pager; it does not overlap the search capsule or move with adjacent pages. Search uses untinted regular glass to diffuse moving labels instead of magnifying them through clear glass. The search field and initial content positions respect the safe area; Home has no peer-status strip. There is no bottom dock or reserved dock space; horizontal swipes switch Home, Panel screens, and Settings. Insets come from the current view, not a device model or a fixed notch height.

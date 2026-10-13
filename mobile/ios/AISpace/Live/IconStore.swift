@@ -1,3 +1,4 @@
+import Combine
 import CryptoKit
 import UIKit
 import WebKit
@@ -7,12 +8,15 @@ import WebKit
 /// An emoji needs no loading (see `Icon.emoji`); SVG files, which UIKit cannot decode, are drawn
 /// once by an offscreen web view with scripts off.
 @MainActor
-final class IconStore: ObservableObject {
+final class IconStore {
+    /// Only views displaying the completed icon need to redraw; nil invalidates all on sign-out.
+    let updates = PassthroughSubject<String?, Never>()
     private let api: SpaceAPI
     private let directory: URL
     private let now: () -> Date
     private let loadImage: ((String) async -> UIImage?)?
     private var images: [String: UIImage] = [:]
+    private var diskChecked: Set<String> = []
     private var fetchedAt: [String: Date] = [:]
     private var generation = 0
     private static let maxAge: TimeInterval = 24 * 60 * 60
@@ -47,7 +51,7 @@ final class IconStore: ObservableObject {
 
     func image(_ icon: String?) -> UIImage? {
         guard let icon, Icon.isPath(icon) else { return nil }
-        if images[icon] == nil {
+        if images[icon] == nil, diskChecked.insert(icon).inserted {
             let url = file(icon)
             if let image = UIImage(contentsOfFile: url.path) {
                 images[icon] = image
@@ -78,7 +82,7 @@ final class IconStore: ObservableObject {
                     } catch { /* Memory caching still works if the disk cache is unavailable. */ }
                 }
             } else { failed.insert(icon) }
-            objectWillChange.send()
+            if image != nil { updates.send(icon) }
         }
         return cached
     }
@@ -86,16 +90,20 @@ final class IconStore: ObservableObject {
     func clear() {
         generation += 1
         images.removeAll()
+        diskChecked.removeAll()
         fetchedAt.removeAll()
         pending.removeAll()
         failed.removeAll()
         try? FileManager.default.removeItem(at: directory)
-        objectWillChange.send()
+        updates.send(nil)
     }
 
     /// A failed icon is tried again after a refresh (the session may have been the reason).
     func retryFailed() {
+        let retry = failed
         failed.removeAll()
+        // A retained icon view no longer redraws with the catalogue. Wake failed icons explicitly.
+        for icon in retry { updates.send(icon) }
     }
 
     private func load(_ icon: String) async -> UIImage? {

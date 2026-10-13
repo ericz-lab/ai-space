@@ -219,7 +219,7 @@ struct AppUsagePage: View {
 /// here is the panel's override: it saves at once and changes the Space.
 struct AppModelsPage: View {
     @StateObject private var store: AppModelsStore
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
 
     init(api: SpaceAPI, icons: IconStore) {
         _store = StateObject(wrappedValue: AppModelsStore(api: api))

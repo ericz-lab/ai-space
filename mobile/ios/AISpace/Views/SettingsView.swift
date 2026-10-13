@@ -7,7 +7,7 @@ struct SettingsView: View {
     let connection: Connection
     @ObservedObject var loader: CatalogueLoader
     @ObservedObject var settings: SettingsLoader
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
 
     var body: some View {
         List {

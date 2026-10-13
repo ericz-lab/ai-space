@@ -5,9 +5,10 @@ import SwiftUI
 struct EntryIcon: View {
     let icon: String?
     let fallback: String
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
     var size: CGFloat = 60
     var isRound = false
+    @State private var image: UIImage?
 
     var body: some View {
         let shape = isRound ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
@@ -16,7 +17,7 @@ struct EntryIcon: View {
                 Text(verbatim: emoji).font(.system(size: size * 0.52))
                     .frame(width: size, height: size)
                     .background(.regularMaterial, in: shape)
-            } else if let image = icons.image(icon) {
+            } else if let image {
                 Image(uiImage: image).resizable().scaledToFill().frame(width: size, height: size)
                     .clipShape(shape)
             } else {
@@ -27,12 +28,16 @@ struct EntryIcon: View {
         }
         .overlay(shape.stroke(Theme.hairline))
         .accessibilityHidden(true)
+        .task(id: icon) { image = icons.image(icon) }
+        .onReceive(icons.updates.filter { $0 == nil || $0 == icon }) { changed in
+            image = changed == nil ? nil : icons.image(icon)
+        }
     }
 }
 
 struct EntryTile: View {
     let entry: CatalogueEntry
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
     let peer: PeerStatus?
     let action: () -> Void
 
@@ -107,7 +112,7 @@ struct EntryTile: View {
 /// otherwise, as the Space last read them from the app. A widget drawn by the app itself (an embedded page) opens in the app's page instead.
 struct WidgetCard: View {
     let widget: CatalogWidget
-    @ObservedObject var icons: IconStore
+    let icons: IconStore
     /// Opens a row's link, or the widget's own page for nil.
     let open: (String?) -> Void
 

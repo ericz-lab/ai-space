@@ -345,6 +345,58 @@ struct IconCacheTests {
     }
 
     @Test(.timeLimit(.minutes(1)))
+    func iconUpdatesAreScopedAndRepeatedReadsShareOneRequest() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var waiting: CheckedContinuation<UIImage?, Never>?
+        var calls = 0
+        let store = IconStore(api: SpaceAPI(base: URL(string: "https://icons.example.com")!, cookies: { [] }),
+                              directory: directory, loadImage: { _ in
+            calls += 1
+            return await withCheckedContinuation { waiting = $0 }
+        })
+        var visibleUpdates = 0, unrelatedUpdates = 0
+        let visible = store.updates.filter { $0 == nil || $0 == "/one.svg" }.sink { _ in visibleUpdates += 1 }
+        let unrelated = store.updates.filter { $0 == nil || $0 == "/two.svg" }.sink { _ in unrelatedUpdates += 1 }
+        defer { visible.cancel(); unrelated.cancel() }
+        for _ in 0..<100 { #expect(store.image("/one.svg") == nil) }
+        try await settle { waiting != nil }
+        #expect(calls == 1)
+        waiting?.resume(returning: image(.red))
+        try await settle { visibleUpdates == 1 }
+        #expect(unrelatedUpdates == 0)
+        for _ in 0..<100 { #expect(store.image("/one.svg") != nil) }
+        #expect(calls == 1)
+        #expect(visibleUpdates == 1)
+        store.clear()
+        #expect(visibleUpdates == 2)
+        #expect(unrelatedUpdates == 1)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func refreshingRetriesAFailedVisibleIconWithoutRebuildingItsParent() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var calls = 0
+        let red = image(.red)
+        let store = IconStore(api: SpaceAPI(base: URL(string: "https://icons.example.com")!, cookies: { [] }),
+                              directory: directory, loadImage: { _ in
+            calls += 1
+            return calls == 1 ? nil : red
+        })
+        var displayed: UIImage?
+        let subscription = store.updates.filter { $0 == "/retry.svg" }.sink { _ in
+            displayed = store.image("/retry.svg")
+        }
+        defer { subscription.cancel() }
+        #expect(store.image("/retry.svg") == nil)
+        try await settle { calls == 1 }
+        store.retryFailed()
+        try await settle { displayed != nil }
+        #expect(calls == 2)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
     func signOutDropsAnInFlightImageAndItsDiskCache() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
