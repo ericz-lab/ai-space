@@ -160,6 +160,19 @@ Catalogue refresh decodes widget data off the main actor and queues cache encodi
 serial background queue. Sign-out drains queued writes before removing the cache. Unchanged
 status flags do not notify the launcher again, and the refresh guard is not view-observed.
 
+### Scrolling
+
+What made Home and the screens stutter on a device was what a widget card holds, not how many cards there are. Two rules follow:
+
+- A chart is one shape per colour (`Spark`, `ProgressBar`), never a view per bar or point.
+- The library's titles, grids and cards are rows of the page's one lazy stack, so a card is made when it is scrolled to. The pager's row is not lazy: a lazy one builds the page being swiped to in the middle of the swipe.
+
+`AISPACE_SCROLL_BENCH=<seconds>` in a debug build scrolls the page on show up and down and then swipes through the pages, and logs the frames the main thread delivered late; run it under Instruments' Animation Hitches for the render server's side. Measure on a device with compiler optimizations on (`-configuration Release SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG` keeps the launch switches).
+
+The card's glass (`Glass`: material, hairline, shadow cast by the whole card) is kept as designed. The shadow is the remaining cost: it makes the render server draw a card's texts and charts again off screen on every frame, which is why what a card holds has to stay light. Moving the shadow onto the material fill alone is not a way out: the material then stops blurring what is behind it.
+
+Checked on 2026-10-13 on an iPhone 15 Pro (iOS 26.6.1) against a Space with 42 apps, 16 agents and 27 widgets: the longest main-thread stall of the bench went from about 140 ms to about 45 ms scrolling Home, and from about 73 ms to about 21 ms swiping between pages. Before the change Animation Hitches showed about 14 ms of render and of GPU time per frame with some 260 offscreen passes; the same recording after the change is still to be made.
+
 ### Safe-area regression checks
 
 The launcher measures each page inside the system safe area and lets scrolling content draw behind the frosted status area. One shared backdrop extends behind the status bar, Home search area, Panel and Settings. A single stationary glass layer covers only the status safe area, outside the horizontal pager; it does not overlap the search capsule or move with adjacent pages. Search uses untinted regular glass to diffuse moving labels instead of magnifying them through clear glass. The search field and initial content positions respect the safe area; Home has no peer-status strip. There is no bottom dock or reserved dock space; horizontal swipes switch Home, Panel screens, and Settings. Insets come from the current view, not a device model or a fixed notch height.

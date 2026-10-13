@@ -139,7 +139,8 @@ struct BlockDelta: View {
 }
 
 /// A trend's points as a line or bars. A line breaks at a missing point rather than bridging it;
-/// a signed or bar trend is drawn from zero.
+/// a signed or bar trend is drawn from zero. Each part is one shape: a view per bar made a card
+/// with a chart many times heavier to lay out and to scroll than one without.
 struct Spark: View {
     let block: WidgetBlock
 
@@ -152,44 +153,18 @@ struct Spark: View {
             let fromZero = block.signed == true || block.style == "bar"
             let lo = fromZero ? min(0, values.min() ?? 0) : (values.min() ?? 0)
             let hi = fromZero ? max(0, values.max() ?? 0) : (values.max() ?? 0)
-            let span = hi - lo == 0 ? 1 : hi - lo
-            GeometryReader { geo in
-                let step = geo.size.width / CGFloat(max(points.count, 2))
-                let y: (Double) -> CGFloat = { geo.size.height - CGFloat(($0 - lo) / span) * geo.size.height }
-                if block.style == "bar" {
-                    ZStack(alignment: .topLeading) {
-                        if block.signed == true {
-                            Path { p in
-                                p.move(to: CGPoint(x: 0, y: y(0)))
-                                p.addLine(to: CGPoint(x: geo.size.width, y: y(0)))
-                            }
-                            .stroke(Theme.hairline, lineWidth: 1)
-                        }
-                        ForEach(Array(points.enumerated()), id: \.offset) { i, point in
-                            if let v = point.v {
-                                let top = min(y(v), y(0))
-                                Rectangle()
-                                    .fill(block.signed == true ? (v >= 0 ? Theme.success : Theme.danger) : Theme.accent)
-                                    .frame(width: max(step * 0.7, 1), height: max(abs(y(v) - y(0)), 1))
-                                    .offset(x: CGFloat(i) * step + step * 0.15, y: top)
-                            }
-                        }
+            let scale = SparkScale(points: points, lo: lo, span: hi - lo == 0 ? 1 : hi - lo)
+            Group {
+                if block.style != "bar" {
+                    SparkLine(scale: scale).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                } else if block.signed == true {
+                    ZStack {
+                        SparkBaseline(scale: scale).stroke(Theme.hairline, lineWidth: 1)
+                        SparkBars(scale: scale, positive: true).fill(Theme.success)
+                        SparkBars(scale: scale, positive: false).fill(Theme.danger)
                     }
-                    .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
                 } else {
-                    Path { p in
-                        var pen = false
-                        for (i, point) in points.enumerated() {
-                            guard let v = point.v else {
-                                pen = false
-                                continue
-                            }
-                            let at = CGPoint(x: CGFloat(i) * step + step / 2, y: y(v))
-                            if pen { p.addLine(to: at) } else { p.move(to: at) }
-                            pen = true
-                        }
-                    }
-                    .stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    SparkBars(scale: scale).fill(Theme.accent)
                 }
             }
             .accessibilityHidden(true)
@@ -197,19 +172,82 @@ struct Spark: View {
     }
 }
 
+/// Where a trend's points fall in the rectangle its chart is given.
+private struct SparkScale {
+    let points: [WidgetBlock.Point]
+    let lo: Double
+    let span: Double
+
+    func step(in rect: CGRect) -> CGFloat { rect.width / CGFloat(max(points.count, 2)) }
+    func y(_ v: Double, in rect: CGRect) -> CGFloat { rect.height - CGFloat((v - lo) / span) * rect.height }
+}
+
+private struct SparkBars: Shape {
+    let scale: SparkScale
+    /// The bars at or above zero, those below it, or all of them for nil.
+    var positive: Bool?
+
+    func path(in rect: CGRect) -> Path {
+        let step = scale.step(in: rect), zero = scale.y(0, in: rect)
+        var path = Path()
+        for (i, point) in scale.points.enumerated() {
+            guard let v = point.v, positive == nil || (v >= 0) == positive else { continue }
+            let y = scale.y(v, in: rect)
+            path.addRect(CGRect(x: CGFloat(i) * step + step * 0.15, y: min(y, zero), width: max(step * 0.7, 1), height: max(abs(y - zero), 1)))
+        }
+        return path
+    }
+}
+
+private struct SparkBaseline: Shape {
+    let scale: SparkScale
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: scale.y(0, in: rect)))
+        path.addLine(to: CGPoint(x: rect.width, y: scale.y(0, in: rect)))
+        return path
+    }
+}
+
+private struct SparkLine: Shape {
+    let scale: SparkScale
+
+    func path(in rect: CGRect) -> Path {
+        let step = scale.step(in: rect)
+        var path = Path()
+        var pen = false
+        for (i, point) in scale.points.enumerated() {
+            guard let v = point.v else {
+                pen = false
+                continue
+            }
+            let at = CGPoint(x: CGFloat(i) * step + step / 2, y: scale.y(v, in: rect))
+            if pen { path.addLine(to: at) } else { path.move(to: at) }
+            pen = true
+        }
+        return path
+    }
+}
+
 struct ProgressBar: View {
     let block: WidgetBlock
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Theme.hairline)
-                Capsule().fill(block.tone != nil && block.tone != .neutral ? block.tone!.color : Theme.accent)
-                    .frame(width: geo.size.width * block.fraction)
-            }
-        }
-        .frame(height: 6)
-        .accessibilityHidden(true)
+        Capsule().fill(Theme.hairline)
+            .overlay { ProgressFill(fraction: block.fraction).fill(block.tone != nil && block.tone != .neutral ? block.tone!.color : Theme.accent) }
+            .frame(height: 6)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The filled part of a progress bar: a capsule over the leading share of its track.
+private struct ProgressFill: Shape {
+    let fraction: Double
+
+    func path(in rect: CGRect) -> Path {
+        let width = rect.width * fraction
+        return Path(roundedRect: CGRect(x: 0, y: 0, width: width, height: rect.height), cornerRadius: min(width, rect.height) / 2)
     }
 }
 

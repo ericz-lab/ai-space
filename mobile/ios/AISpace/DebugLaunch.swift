@@ -9,6 +9,8 @@ import WebKit
 ///   AISPACE_CONNECT    add this Space on a first launch
 ///   AISPACE_TAB        home | panel | settings, or web for the Space's web panel over them
 ///   AISPACE_SCROLL_Y   scroll the visible native page to this offset for safe-area checks
+///   AISPACE_SCROLL_BENCH seconds to drive the visible page up and down, then the pager across,
+///                      logging the frames the main thread dropped (see ScrollBench)
 ///   AISPACE_SEARCH     the search text on Home
 ///   AISPACE_CHAT_SEND  with AISPACE_HUB=chat:<agent key>: this message is sent three seconds after launch
 ///   AISPACE_HUB        a page of the Space over the tabs: inbox | tasks | modelUsage | appUsage |
@@ -94,6 +96,9 @@ enum DebugLaunch {
                 }
             }
         }
+        if let seconds = env["AISPACE_SCROLL_BENCH"].flatMap(Double.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { ScrollBench.run(seconds: seconds) }
+        }
         if let path = env["AISPACE_SNAPSHOT"] {
             let delay = Double(env["AISPACE_SNAPSHOT_DELAY"] ?? "") ?? 5
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -161,6 +166,107 @@ enum DebugLaunch {
         for sub in view.subviews { out += webViews(in: sub) }
         // A presented controller's views live in the same window, under its transition view.
         return out
+    }
+}
+
+/// Scrolls the launcher by itself, as a finger would move it, so a profiler can be pointed at
+/// the device without anyone touching it: the visible page up and down for the first half of
+/// the time, then the pager from page to page. What it logs is the main thread's part only
+/// (a late display link); frames the render server drops show in Instruments' Animation Hitches.
+@MainActor
+final class ScrollBench: NSObject {
+    private static var running: ScrollBench?
+    /// Points per second of the vertical sweep, about a brisk flick.
+    private static let speed: CGFloat = 2400
+
+    private let seconds: Double
+    private var link: CADisplayLink?
+    private var started: CFTimeInterval = 0
+    private var last: CFTimeInterval = 0
+    private struct Tally {
+        var frames = 0, late = 0
+        var lateTime: CFTimeInterval = 0, worst: CFTimeInterval = 0
+    }
+    private var vertical = Tally(), paging = Tally()
+    private var direction: CGFloat = 1
+    private var nextPage: CFTimeInterval = 0
+    private var pageStep = 1
+    private weak var page: UIScrollView?
+
+    static func run(seconds: Double) {
+        guard running == nil else { return }
+        let bench = ScrollBench(seconds: seconds)
+        running = bench
+        bench.start()
+    }
+
+    private init(seconds: Double) { self.seconds = seconds }
+
+    private func start() {
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    private var window: UIWindow? {
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+        return windows.first(where: \.isKeyWindow) ?? windows.first
+    }
+
+    private func scrollViews(in view: UIView) -> [UIScrollView] {
+        ((view as? UIScrollView).map { [$0] } ?? []) + view.subviews.flatMap(scrollViews)
+    }
+
+    private func onShow(_ scroll: UIScrollView, in window: UIWindow) -> Bool {
+        scroll.bounds.height > 200 && window.bounds.contains(scroll.convert(CGPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: window))
+    }
+
+    private func count(_ gap: CFTimeInterval, expected: CFTimeInterval, in tally: inout Tally) {
+        tally.frames += 1
+        guard gap > expected * 1.5 else { return }
+        tally.late += 1
+        tally.lateTime += gap - expected
+        tally.worst = max(tally.worst, gap)
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        guard let window else { return }
+        let now = link.timestamp
+        if started == 0 { started = now; last = now; return }
+        let gap = now - last
+        last = now
+        // A frame that came more than half an interval late is one the main thread missed.
+        if now - started < seconds / 2 { count(gap, expected: link.duration, in: &vertical) } else { count(gap, expected: link.duration, in: &paging) }
+        let elapsed = now - started
+        if elapsed >= seconds { return finish(link) }
+        if elapsed < seconds / 2 {
+            // Looked up once: walking the window on every frame would be the bench's own cost.
+            if page == nil { page = scrollViews(in: window).first { $0.contentSize.height > $0.bounds.height + 100 && onShow($0, in: window) } }
+            guard let page else { return }
+            let top = -page.adjustedContentInset.top
+            let bottom = page.contentSize.height - page.bounds.height + page.adjustedContentInset.bottom
+            var y = page.contentOffset.y + direction * Self.speed * CGFloat(gap)
+            if y >= bottom { y = bottom; direction = -1 }
+            if y <= top { y = top; direction = 1 }
+            page.setContentOffset(CGPoint(x: page.contentOffset.x, y: y), animated: false)
+        } else if now >= nextPage {
+            guard let pager = scrollViews(in: window).first(where: { $0.contentSize.width > $0.bounds.width * 1.5 && onShow($0, in: window) }) else { return }
+            nextPage = now + 0.7
+            let width = pager.bounds.width
+            let count = Int((pager.contentSize.width / width).rounded())
+            var index = Int((pager.contentOffset.x / width).rounded()) + pageStep
+            if index >= count || index < 0 { pageStep = -pageStep; index += 2 * pageStep }
+            pager.setContentOffset(CGPoint(x: CGFloat(index) * width, y: pager.contentOffset.y), animated: true)
+        }
+    }
+
+    private func finish(_ link: CADisplayLink) {
+        link.invalidate()
+        for (name, tally) in [("vertical", vertical), ("paging", paging)] {
+            NSLog("ai-space: scroll bench %@ frames=%d late=%d lateMs=%.0f worstMs=%.1f", name, tally.frames, tally.late, tally.lateTime * 1000, tally.worst * 1000)
+        }
+        Self.running = nil
     }
 }
 #endif
