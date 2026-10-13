@@ -44,7 +44,9 @@ struct MainTabs: View {
         // scrolling content can pass behind the frosted status area.
         GeometryReader { viewport in
             ScrollView(.horizontal) {
-                LazyHStack(spacing: 0) {
+                // Not lazy: a lazy row makes the page being swiped to, with all its tiles and
+                // cards, in the middle of the swipe. Each page is lazy down its own length.
+                HStack(spacing: 0) {
                     HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens)
                         .frame(width: viewport.size.width, height: viewport.size.height)
                         .id(Pager.home)

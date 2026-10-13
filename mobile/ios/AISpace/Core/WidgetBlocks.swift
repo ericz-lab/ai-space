@@ -226,9 +226,15 @@ enum WidgetLayout {
 
 /// The API's instants: ISO 8601 in UTC, with or without fractional seconds (docs/time.md).
 enum ISO8601 {
+    /// Made once: a formatter costs far more to make than to use, and a card parses several instants.
+    private static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let whole = ISO8601DateFormatter()
+
     static func parse(_ text: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+        fractional.date(from: text) ?? whole.date(from: text)
     }
 }

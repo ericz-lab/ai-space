@@ -31,7 +31,7 @@ struct HomeView: View {
             }
         } else {
             ZStack {
-                page { if let catalogue = loader.catalogue { library(catalogue) } }
+                page(spacing: 12) { if let catalogue = loader.catalogue { library(catalogue) } }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 SearchField(model: model, focused: $searchFocused)
@@ -47,11 +47,11 @@ struct HomeView: View {
 
     // MARK: Pages
 
-    private func page<Content: View>(longPress: (() -> Void)? = nil, @ViewBuilder _ content: () -> Content) -> some View {
+    private func page<Content: View>(spacing: CGFloat = 22, longPress: (() -> Void)? = nil, @ViewBuilder _ content: () -> Content) -> some View {
         let content = content()
         return GeometryReader { geo in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
+                LazyVStack(alignment: .leading, spacing: spacing) {
                     StatusCard(model: model, connection: connection, loader: loader)
                     content
                 }
@@ -96,17 +96,26 @@ struct HomeView: View {
         }
     }
 
-    /// Everything the Space has, pinned or not.
+    /// Everything the Space has, pinned or not. The titles, grids and cards are the page's own
+    /// rows, not stacks of their own, so a widget card is made when it is scrolled to: all of
+    /// them made at once is what the page then carries on every frame of a scroll.
     @ViewBuilder private func library(_ catalogue: Catalogue) -> some View {
         let query = model.query
         let apps = CatalogueSearch.filter(catalogue.apps, query: query)
         let agents = CatalogueSearch.filter(catalogue.agents, query: query)
         let widgets = catalogue.widgets.filter { CatalogueSearch.matches(Catalogue.entry($0), query: query) }
 
-        if !apps.isEmpty { section("Apps") { grid(apps, catalogue, on: nil) } }
-        if !agents.isEmpty { section("Agents") { grid(agents, catalogue, on: nil) } }
+        if !apps.isEmpty {
+            heading("Apps", first: true)
+            grid(apps, catalogue, on: nil)
+        }
+        if !agents.isEmpty {
+            heading("Agents", first: apps.isEmpty)
+            grid(agents, catalogue, on: nil)
+        }
         if !widgets.isEmpty {
-            section("Widgets") { ForEach(widgets) { widgetCard($0, on: nil) } }
+            heading("Widgets", first: apps.isEmpty && agents.isEmpty)
+            ForEach(widgets) { widgetCard($0, on: nil) }
         }
         if apps.isEmpty && agents.isEmpty && widgets.isEmpty {
             if query.isEmpty {
@@ -118,12 +127,11 @@ struct HomeView: View {
         }
     }
 
-    private func section<Content: View>(_ title: LocalizedStringKey, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.title3.weight(.semibold)).foregroundStyle(Theme.text)
-                .accessibilityAddTraits(.isHeader)
-            content()
-        }
+    /// A section's title; after another section it stands further from it than from its own rows.
+    private func heading(_ title: LocalizedStringKey, first: Bool) -> some View {
+        Text(title).font(.title3.weight(.semibold)).foregroundStyle(Theme.text)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.top, first ? 0 : 10)
     }
 
     private func grid(_ entries: [CatalogueEntry], _ catalogue: Catalogue, on screen: String?) -> some View {
