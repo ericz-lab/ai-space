@@ -169,9 +169,9 @@ What made Home and the screens stutter on a device was what a widget card holds,
 
 `AISPACE_SCROLL_BENCH=<seconds>` in a debug build scrolls the page on show up and down and then swipes through the pages, and logs the frames the main thread delivered late; run it under Instruments' Animation Hitches for the render server's side. Measure on a device with compiler optimizations on (`-configuration Release SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG` keeps the launch switches).
 
-The card's glass (`Glass`: material, hairline, shadow cast by the whole card) is kept as designed. The shadow is the remaining cost: it makes the render server draw a card's texts and charts again off screen on every frame, which is why what a card holds has to stay light. Moving the shadow onto the material fill alone is not a way out: the material then stops blurring what is behind it.
+A card's shadow is a picture of its own behind the glass (`GlassShadow`), not `.shadow` on the card: cast by the whole card it makes the render server draw the card's texts and charts again off screen on every frame, and cast by the material fill alone it stops the material blurring what is behind it.
 
-Checked on 2026-10-13 on an iPhone 15 Pro (iOS 26.6.1) against a Space with 42 apps, 16 agents and 27 widgets: the longest main-thread stall of the bench went from about 140 ms to about 45 ms scrolling Home, and from about 73 ms to about 21 ms swiping between pages. Before the change Animation Hitches showed about 14 ms of render and of GPU time per frame with some 260 offscreen passes; the same recording after the change is still to be made.
+The measurements, the causes and what is still open are in [docs/dev/ios-scroll-performance.md](../../docs/dev/ios-scroll-performance.md).
 
 ### Safe-area regression checks
 
