@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnCollect } from "./process.ts";
+import { streamCodex } from "./codex-stream.ts";
 import { readCodexTranscript, SESSION_ID_RE } from "./transcripts.ts";
 import { ustar } from "./tar.ts";
 import { assertCompletionMode, type AgentRun, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type GeneratedImage, type ImageInput, type RuntimeAdapter, type Usage } from "./types.ts";
@@ -26,6 +27,7 @@ export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
     capabilities: { complete: true, agent: true, chat: true, image: true },
     async complete(input, signal, onDelta) {
       assertCompletionMode(input);
+      if (spec.streamCompletions && onDelta && !host && input.mode === "slim" && !input.tools.length && !input.files?.length) return streamCodex(bin, input, signal, onDelta);
       const unsupported = input.tools.filter((tool) => tool !== "WebSearch" && tool !== "WebFetch");
       if (unsupported.length) return { ok: false, error: `codex-cli completions support only WebSearch and WebFetch tool lists; unsupported: ${unsupported.join(", ")}`, backend };
       if (signal?.aborted) return { ok: false, error: "aborted", backend };

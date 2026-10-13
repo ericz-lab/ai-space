@@ -233,6 +233,8 @@ export type CodexCliSpec = {
   kind: "codex-cli";
   bin: string[];
   sshHost?: string;
+  /** Local, tool-free slim completions may use app-server text deltas. */
+  streamCompletions?: boolean;
 };
 
 export const MODEL_TIERS = ["basic", "junior", "intermediate", "advanced"] as const;
