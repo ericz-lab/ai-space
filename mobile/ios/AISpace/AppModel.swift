@@ -40,8 +40,9 @@ final class AppModel: ObservableObject {
     private let cache = CatalogueCache(directory: AppPaths.caches)
 
     @Published private(set) var selectedID: UUID?
-    /// The page on show: `Pager.home`, a screen's id, or `Pager.settings`.
-    @Published var pagerID = Pager.home {
+    /// The page on show: `Pager.home`, a screen's id, or `Pager.settings`. The app opens on the
+    /// first screen of the panel; the library is one swipe to its left.
+    @Published var pagerID = Screens.home {
         didSet { if pagerID != Pager.home, pagerID != Pager.settings, homePage != pagerID { homePage = pagerID } }
     }
     /// This phone's own display choices, kept in the app's defaults.
@@ -216,7 +217,7 @@ final class AppModel: ObservableObject {
         selectedID = id
         query = ""
         homePage = Screens.home
-        tab = .home
+        tab = .panel
         editingScreen = nil
         showingWebPanel = false
         hubPage = nil

@@ -64,6 +64,7 @@ enum DebugLaunch {
             model.hubPage = hub.hasPrefix("chat:") ? .chat(agent: String(hub.dropFirst(5))) : pages[hub]
         }
         switch env["AISPACE_TAB"] {
+        case "home": model.tab = .home
         case "panel": model.tab = .panel
         case "settings": model.tab = .settings
         case "web": model.openWebPanel()

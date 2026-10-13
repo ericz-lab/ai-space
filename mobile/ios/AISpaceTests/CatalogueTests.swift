@@ -432,6 +432,21 @@ struct AppBrowserTests {
         #expect(gesture.update(x: 0, y: 30) == false)
     }
 
+    @Test func opensOnTheFirstScreenOfThePanel() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ConnectionStore(fileURL: directory.appendingPathComponent("connections.json"))
+        _ = store.add(name: "First", url: URL(string: "https://first.example.com")!)
+        let second = store.add(name: "Second", url: URL(string: "https://second.example.com")!)
+        let model = AppModel(store: store, screens: ScreenStore(fileURL: directory.appendingPathComponent("screens.json")))
+        #expect(model.pagerID == Screens.home)
+        #expect(model.tab == .panel)
+        // Another Space starts on its first screen too, wherever this one was left.
+        model.tab = .settings
+        model.select(second.id)
+        #expect(model.pagerID == Screens.home)
+    }
+
     @Test(.timeLimit(.minutes(1))) func tabsRetainPagesAndStayIsolatedUntilExplicitlyClosed() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
