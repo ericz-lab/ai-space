@@ -135,6 +135,9 @@ struct SpaceBackdrop: View {
 }
 
 /// A glass surface as the panel draws its cards: translucent, hairline border, soft shadow.
+/// The shadow is a picture of its own behind the surface. Cast by the card with `.shadow`, it
+/// made the render server draw everything in the card again off screen on every frame of a
+/// scroll; cast by the material fill alone, the material stops blurring what is behind it.
 struct Glass: ViewModifier {
     var radius: CGFloat?
 
@@ -143,7 +146,28 @@ struct Glass: ViewModifier {
         content
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.hairline))
-            .shadow(color: Color(hex: 0x1F2687).opacity(0.08), radius: 16, y: 6)
+            .background { GlassShadow(radius: radius) }
+    }
+}
+
+/// The shadow of a rounded surface, drawn once for its size and then only moved.
+private struct GlassShadow: View {
+    let radius: CGFloat
+    private static let color = Color(hex: 0x1F2687).opacity(0.08)
+    private static let blur: CGFloat = 16
+    private static let drop: CGFloat = 6
+    /// How far past the surface the picture reaches, so the blur is not cut off.
+    private static let reach = blur * 2 + drop
+
+    var body: some View {
+        Canvas { context, size in
+            let surface = CGRect(origin: .zero, size: size).insetBy(dx: Self.reach, dy: Self.reach)
+            context.addFilter(.shadow(color: Self.color, radius: Self.blur, x: 0, y: Self.drop, options: .shadowOnly))
+            context.fill(Path(roundedRect: surface, cornerRadius: radius, style: .continuous), with: .color(.black))
+        }
+        .padding(-Self.reach)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
