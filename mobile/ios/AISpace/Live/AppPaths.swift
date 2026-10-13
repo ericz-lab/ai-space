@@ -36,6 +36,11 @@ enum AppPaths {
         caches.appendingPathComponent("icons", isDirectory: true).appendingPathComponent(connection.uuidString, isDirectory: true)
     }
 
+    /// The themes' artwork as it was last drawn for a Space (BackdropStore).
+    static func backdrops(_ connection: UUID) -> URL {
+        caches.appendingPathComponent("backdrops", isDirectory: true).appendingPathComponent(connection.uuidString, isDirectory: true)
+    }
+
     static var connections: URL { support.appendingPathComponent("connections.json") }
     static var screens: URL { support.appendingPathComponent("screens.json") }
 }
