@@ -46,6 +46,8 @@ export type CompleteInput = {
   maxTokens: number;
   /** Cap on thinking tokens; 0 turns thinking off; absent = the runtime's default. */
   thinking?: number;
+  /** Explicit per-request speed tier; currently supported by local Codex streaming only. */
+  serviceTier?: "priority" | "default";
   /**
    * Files the model may open (images the chat service stores). `name` is the
    * caller's short file name, unique inside the call and safe for a shell
@@ -233,6 +235,8 @@ export type CodexCliSpec = {
   kind: "codex-cli";
   bin: string[];
   sshHost?: string;
+  /** Local, tool-free slim completions may use app-server text deltas. */
+  streamCompletions?: boolean;
 };
 
 export const MODEL_TIERS = ["basic", "junior", "intermediate", "advanced"] as const;

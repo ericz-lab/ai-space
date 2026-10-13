@@ -164,6 +164,7 @@ export class ModelService {
     try {
       target = this.resolve(input.model);
       assertCompletionMode(input);
+      if (input.serviceTier !== undefined && target.runtime.kind !== "codex-cli") throw new Error("serviceTier requires a local Codex streaming runtime");
       if (input.mode === "full" && target.runtime.kind !== "codex-cli" && target.runtime.kind !== "claude-code") {
         throw new Error(`runtime ${target.runtime.name} does not support full completion mode`);
       }

@@ -91,14 +91,16 @@ function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>
     "claude-code": ["kind", "ssh", "bin", "chatArgs"],
     "anthropic-api": ["kind", "apiKeyEnv", "url"],
     "deepseek-harness": ["kind", "ssh", "bin", "home", "profile"],
-    "codex-cli": ["kind", "ssh", "bin"],
+    "codex-cli": ["kind", "ssh", "bin", "streamCompletions"],
   };
   for (const key of Object.keys(raw)) if (key !== "models" && !allowed[kind].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
   switch (kind) {
     case "codex-cli": {
+      if (raw.streamCompletions !== undefined && typeof raw.streamCompletions !== "boolean") throw new Error(`${ctx}: streamCompletions must be boolean`);
       const sshHost = optionalString(raw.ssh, `${ctx}: ssh`);
       if (sshHost && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);
-      return { name, kind, bin: command(raw.bin, `${ctx}: bin`), ...(sshHost ? { sshHost } : {}) };
+      if (sshHost && raw.streamCompletions) throw new Error(`${ctx}: streamCompletions requires a local runtime`);
+      return { name, kind, bin: command(raw.bin, `${ctx}: bin`), ...(sshHost ? { sshHost } : {}), ...(raw.streamCompletions !== undefined ? { streamCompletions: raw.streamCompletions as boolean } : {}) };
     }
     case "claude-code": {
       const sshHost = optionalString(raw.ssh, `${ctx}: ssh`);

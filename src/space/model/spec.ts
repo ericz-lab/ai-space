@@ -52,7 +52,9 @@ export function parseRunInput(body: Record<string, unknown>, defaults: { model?:
     thinking = Math.min(body.thinking, MAX_THINKING_TOKENS);
   }
 
-  return { prompt: body.prompt, system, model, tag, tools, timeoutMs, maxTokens, ...(mode !== undefined ? { mode } : {}), ...(thinking !== undefined ? { thinking } : {}) };
+  const serviceTier = body.serviceTier;
+  if (serviceTier !== undefined && serviceTier !== "priority" && serviceTier !== "default") throw new Error("serviceTier must be priority or default");
+  return { prompt: body.prompt, system, model, tag, tools, timeoutMs, maxTokens, ...(mode !== undefined ? { mode } : {}), ...(thinking !== undefined ? { thinking } : {}), ...(serviceTier !== undefined ? { serviceTier } : {}) };
 }
 
 /** `POST /api/model/image`: a prompt, optional system, model, tag and timeout; the images are parsed apart. */
