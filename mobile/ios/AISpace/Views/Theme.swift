@@ -187,6 +187,54 @@ struct Logo: View {
     }
 }
 
+/// The mark while the Space is being reached: its three circles and then its leaf dip in turn,
+/// a signal going round. Drawn as shapes from the logo's own geometry (docs/logo.svg, a 512
+/// square) so each part moves alone; still under Reduce Motion.
+struct ConnectingMark: View {
+    var size: CGFloat = 64
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let circles: [CGPoint] = [CGPoint(x: 159, y: 159), CGPoint(x: 159, y: 353), CGPoint(x: 353, y: 353)]
+    private static let leaf = CGRect(x: 269, y: 71, width: 174, height: 175)
+    private static let blue = Color(hex: 0x3F63CF)
+    private static let cyan = Color(hex: 0x2CC8DC)
+    /// One round, the time a part takes to dip and return, and the gap between two parts.
+    private static let period = 1.8, dip = 0.7, step = 0.2
+
+    var body: some View {
+        TimelineView(.animation(paused: reduceMotion)) { timeline in
+            let time = reduceMotion ? nil : timeline.date.timeIntervalSinceReferenceDate
+            let unit = size / 512
+            ZStack(alignment: .topLeading) {
+                ForEach(0..<3, id: \.self) { index in
+                    part(Circle().fill(Self.blue), in: CGRect(x: Self.circles[index].x - 97, y: Self.circles[index].y - 97, width: 194, height: 194),
+                         unit: unit, depth: Self.depth(index, at: time))
+                }
+                part(UnevenRoundedRectangle(topLeadingRadius: 71 * unit, bottomTrailingRadius: 71 * unit).fill(Self.cyan),
+                     in: Self.leaf, unit: unit, depth: Self.depth(3, at: time))
+            }
+            .frame(width: size, height: size, alignment: .topLeading)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func part(_ shape: some View, in rect: CGRect, unit: CGFloat, depth: Double) -> some View {
+        shape
+            .frame(width: rect.width * unit, height: rect.height * unit)
+            .scaleEffect(1 - 0.2 * depth)
+            .opacity(1 - 0.45 * depth)
+            .offset(x: rect.minX * unit, y: rect.minY * unit)
+    }
+
+    /// How far into its dip a part is, 0 at rest and 1 at the bottom.
+    static func depth(_ index: Int, at time: TimeInterval?) -> Double {
+        guard let time else { return 0 }
+        let local = (time - Double(index) * step).truncatingRemainder(dividingBy: period)
+        guard local >= 0, local < dip else { return 0 }
+        return sin(.pi * local / dip)
+    }
+}
+
 /// Fade the untinted blur into the page instead of ending at a visible status-bar seam.
 /// Attach once outside the pager, confined to the status safe area. Keeping it separate from
 /// the search capsule avoids overlapping refractive surfaces as pages move.

@@ -23,3 +23,8 @@ try png(mark, side: 256, to: "AISpace/Resources/Logo.png")
 // iOS rounds the icon itself and refuses transparency: the same mark on a full white square.
 try png(mark.replacingOccurrences(of: "</title>", with: "</title><rect width=\"512\" height=\"512\" fill=\"#FFFFFF\"/>"), side: 1024, opaque: true,
         to: "AISpace/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png")
+// The launch screen (Info.plist, UILaunchScreen) shows the mark at 96 points on the Aurora ground
+// (LaunchGround.colorset), where the first screen then draws it.
+for (scale, suffix) in [(1, ""), (2, "@2x"), (3, "@3x")] {
+    try png(mark, side: 96 * scale, to: "AISpace/Resources/Assets.xcassets/LaunchLogo.imageset/LaunchLogo\(suffix).png")
+}

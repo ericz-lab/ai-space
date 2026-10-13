@@ -319,11 +319,12 @@ struct StatusCard: View {
             EmptyView()
         case .loading:
             if loader.catalogue == nil {
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text("Connecting…").foregroundStyle(.secondary)
+                VStack(spacing: 14) {
+                    ConnectingMark()
+                    Text("Connecting…").font(.subheadline).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 40)
+                .accessibilityElement(children: .combine)
             }
         case .signInNeeded:
             card(icon: "person.badge.key", tint: Theme.accent, title: Text("Sign in to \(connection.url.host ?? connection.name)"),
