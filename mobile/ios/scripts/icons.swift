@@ -1,24 +1,25 @@
-// Draws the app icon and the in-app mark from the panel's own mark (src/web/public/favicon.svg).
+// Draws the app icon and the in-app mark from the ai-space logo (docs/logo.svg).
 // Run with `swift scripts/icons.swift` from mobile/ios after the mark changes; AppKit reads SVG.
 import AppKit
 
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-let mark = try String(contentsOf: root.appendingPathComponent("../../src/web/public/favicon.svg"), encoding: .utf8)
+let mark = try String(contentsOf: root.appendingPathComponent("../../docs/logo.svg"), encoding: .utf8)
 
 func png(_ svg: String, side: Int, opaque: Bool = false, to path: String) throws {
     guard let image = NSImage(data: Data(svg.utf8)) else { fatalError("cannot read the mark") }
-    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8, samplesPerPixel: opaque ? 3 : 4,
-                               hasAlpha: !opaque, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
-    rep.size = NSSize(width: side, height: side)
+    // A bitmap context has no 24-bit layout: an opaque image skips the alpha byte instead.
+    let alpha: CGImageAlphaInfo = opaque ? .noneSkipLast : .premultipliedLast
+    let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: alpha.rawValue)!
     NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
     image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
     NSGraphicsContext.restoreGraphicsState()
-    try rep.representation(using: .png, properties: [:])!.write(to: root.appendingPathComponent(path))
+    try NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!.write(to: root.appendingPathComponent(path))
 }
 
-// In the app, the mark as it is, rounded corners included.
+// In the app, the mark as it is, on a transparent ground.
 try png(mark, side: 256, to: "AISpace/Resources/Logo.png")
-// iOS rounds the icon itself and refuses transparency: the same mark on a full square.
-try png(mark.replacingOccurrences(of: "rx=\"14\" fill=\"url(#g)\"", with: "fill=\"url(#g)\""), side: 1024, opaque: true,
+// iOS rounds the icon itself and refuses transparency: the same mark on a full white square.
+try png(mark.replacingOccurrences(of: "</title>", with: "</title><rect width=\"512\" height=\"512\" fill=\"#FFFFFF\"/>"), side: 1024, opaque: true,
         to: "AISpace/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png")

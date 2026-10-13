@@ -151,7 +151,7 @@ extension View {
     func glass(radius: CGFloat? = nil) -> some View { modifier(Glass(radius: radius)) }
 }
 
-/// The ai-space mark (src/web/public/favicon.svg), shipped as a bitmap.
+/// The ai-space mark (docs/logo.svg), shipped as a bitmap.
 struct Logo: View {
     var size: CGFloat = 72
     /// A plain file in the bundle, so it needs no asset catalog to be found.
