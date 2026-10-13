@@ -29,12 +29,10 @@ struct HomeView: View {
                     }
                 }
             }
-            .modifier(LauncherHeaderBlur())
         } else {
             ZStack {
                 page { if let catalogue = loader.catalogue { library(catalogue) } }
             }
-            .modifier(LauncherHeaderBlur(depth: 28))
             .safeAreaInset(edge: .top, spacing: 0) {
                 SearchField(model: model, focused: $searchFocused)
                     .padding(.vertical, 12)

@@ -65,6 +65,8 @@ struct MainTabs: View {
             .scrollPosition(id: Binding<String?>(get: { model.pagerID }, set: { if let id = $0, id != model.pagerID { model.pagerID = id } }))
 
         }
+        // Keep one status effect outside the pager so adjacent pages never overlap their glass.
+        .modifier(LauncherHeaderBlur())
         // One continuous backdrop for Home, Panel and Settings, including the status bar.
         .background { SpaceBackdrop(store: model.backdrops(for: connection)) }
         .ignoresSafeArea(.keyboard, edges: .bottom)

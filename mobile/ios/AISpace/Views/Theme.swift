@@ -164,15 +164,14 @@ struct Logo: View {
 }
 
 /// Fade the untinted blur into the page instead of ending at a visible status-bar seam.
-/// Apply below the search control so the field itself is never part of the blurred content.
+/// Attach once outside the pager, confined to the status safe area. Keeping it separate from
+/// the search capsule avoids overlapping refractive surfaces as pages move.
 struct LauncherHeaderBlur: ViewModifier {
-    var depth: CGFloat = 28
-
     func body(content: Content) -> some View {
         content.overlay {
             GeometryReader { viewport in
                 glass
-                    .frame(height: viewport.safeAreaInsets.top + depth)
+                    .frame(height: viewport.safeAreaInsets.top)
                     .mask(LinearGradient(stops: [
                         .init(color: .black, location: 0),
                         .init(color: .black, location: 0.5),
@@ -200,11 +199,12 @@ struct LauncherHeaderBlur: ViewModifier {
     }
 }
 
-/// The launcher's floating controls share clear glass without a separate solid fill.
+/// Frost the search backdrop enough to keep moving labels from refracting into its text.
+/// No custom tint or solid fill is added.
 struct LauncherCapsuleGlass: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(.clear.tint(nil), in: Capsule())
+            content.glassEffect(.regular.tint(nil), in: Capsule())
         } else {
             content.background(.ultraThinMaterial, in: Capsule())
                 .overlay(Capsule().strokeBorder(Theme.hairline))
