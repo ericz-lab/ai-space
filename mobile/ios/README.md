@@ -51,7 +51,7 @@ mobile/ios/
 
 Eight Foundation-only files are compiled from the Mac client where they are, not copied: `Connection`, `ConnectionStore`, `SpaceCheck`, `SpaceAPI` (with its cookie rules), `SpaceModels`, `ChatStream`, `DesktopRules` (the `aispace://` links) and `NavigationPolicy`. `scripts/sources.sh` and `project.yml` list them. The phone adds its own rules on top (a host list instead of one origin) rather than changing them. If both clients are kept, the natural next step is to move those files to a neutral directory (`clients/shared/`) in one commit that touches both projects; that was left out here so the Mac branch stays untouched.
 
-The visual identity is the panel's: the mark is drawn from `src/web/public/favicon.svg` (`scripts/icons.swift`), and `Views/Theme.swift` carries the default "Aurora" tokens of `src/web/styles.css` (ground, the three glows, accent, radii, glass with a hairline).
+The visual identity is the panel's: the mark is the ai-space logo, drawn from `docs/logo.svg` (`scripts/icons.swift`), and `Views/Theme.swift` carries the default "Aurora" tokens of `src/web/styles.css` (ground, the three glows, accent, radii, glass with a hairline).
 
 ## Build and run
 

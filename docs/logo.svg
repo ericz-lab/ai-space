@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">AI Space</title>
+  <g fill="#3F63CF">
+    <circle cx="159" cy="159" r="97"/>
+    <circle cx="159" cy="353" r="97"/>
+    <circle cx="353" cy="353" r="97"/>
+  </g>
+  <path d="M 340 71 H 443 V 175 A 71 71 0 0 1 372 246 H 269 V 142 A 71 71 0 0 1 340 71 Z" fill="#2CC8DC"/>
+</svg>
