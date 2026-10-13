@@ -27,8 +27,7 @@ struct RootView: View {
 }
 
 /// The pages side by side, swiped through as on an iPhone's home screen: Home, each screen of
-/// the panel, Settings. The bar at the bottom names the three parts and jumps between them;
-/// while there are several screens, dots above it say which one is on show.
+/// the panel, Settings. Swipe horizontally to move between them; no dock covers the content.
 struct MainTabs: View {
     @ObservedObject var model: AppModel
     let connection: Connection
@@ -42,7 +41,7 @@ struct MainTabs: View {
         // is added or removed, and a navigation bar inside it does not survive.
         // Measure the safe viewport outside the scroll view. A horizontal scroll view resolves
         // safe areas into content margins; nested pages keep that layout size while their
-        // scrolling content can pass behind the frosted status area and floating dock.
+        // scrolling content can pass behind the frosted status area.
         GeometryReader { viewport in
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
@@ -66,8 +65,6 @@ struct MainTabs: View {
             .scrollPosition(id: Binding<String?>(get: { model.pagerID }, set: { if let id = $0, id != model.pagerID { model.pagerID = id } }))
 
         }
-        // Include the screen indicators in the reserved space, above the home indicator.
-        .safeAreaInset(edge: .bottom, spacing: 8) { TabBar(model: model, screens: all) }
         // One continuous backdrop for Home, Panel and Settings, including the status bar.
         .background { SpaceBackdrop(store: model.backdrops(for: connection)) }
         .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -111,53 +108,5 @@ struct MainTabs: View {
                     .preferredColorScheme(model.appearance == .system ? nil : (model.appearance == .dark ? .dark : .light))
             }
         }
-    }
-}
-
-/// The bar under the pages: Home, Panel, Settings, as the panel's dock floats over its screens.
-struct TabBar: View {
-    static let height: CGFloat = 58
-
-    @ObservedObject var model: AppModel
-    let screens: [PanelScreen]
-
-    var body: some View {
-        VStack(spacing: 8) {
-            if model.tab == .panel && screens.count > 1 {
-                HStack(spacing: 7) {
-                    ForEach(screens) { screen in
-                        Circle().fill(screen.id == model.pagerID ? Theme.text : Theme.text.opacity(0.3)).frame(width: 6, height: 6)
-                    }
-                }
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(.ultraThinMaterial, in: Capsule())
-                .accessibilityElement()
-                .accessibilityLabel(Text(verbatim: Screens.title(at: screens.firstIndex { $0.id == model.pagerID } ?? 0)))
-            }
-            HStack(spacing: 4) {
-                item(.home, "Home", "square.grid.2x2.fill")
-                item(.panel, "Panel", "rectangle.on.rectangle")
-                item(.settings, "Settings", "gearshape.fill")
-            }
-            .padding(5)
-            .frame(height: Self.height)
-            .modifier(LauncherCapsuleGlass())
-            .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
-        }
-        .padding(.bottom, 6)
-    }
-
-    private func item(_ tab: MainTab, _ title: LocalizedStringKey, _ symbol: String) -> some View {
-        let on = model.tab == tab
-        return Button { withAnimation { model.tab = tab } } label: {
-            Image(systemName: symbol).font(.system(size: 22, weight: .semibold))
-            .foregroundStyle(on ? Theme.accent : Theme.text)
-            .frame(width: 86, height: Self.height - 10)
-            .background(on ? AnyShapeStyle(Theme.accent.opacity(0.16)) : AnyShapeStyle(.clear), in: Capsule())
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(title))
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }

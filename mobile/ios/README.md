@@ -152,14 +152,14 @@ SVG icons and rendered theme backdrops keep their rendering web views at full op
 
 ### Safe-area regression checks
 
-The launcher measures each page inside the system safe area and lets scrolling content draw behind the frosted status area and floating dock. One shared backdrop extends behind the status bar, Home search area, Panel and Settings. The search field and initial content positions respect the safe area; Home has no peer-status strip. The bottom dock reserves its actual height, including the screen dots. Insets come from the current view, not a device model or a fixed notch height.
+The launcher measures each page inside the system safe area and lets scrolling content draw behind the frosted status area. One shared backdrop extends behind the status bar, Home search area, Panel and Settings. The search field and initial content positions respect the safe area; Home has no peer-status strip. There is no bottom dock or reserved dock space; horizontal swipes switch Home, Panel screens, and Settings. Insets come from the current view, not a device model or a fixed notch height.
 
 After changing the launcher layout, run these visual regression checks:
 
 - Home: the search field stays below the status bar, including while scrolling and pulling to refresh. The area around it uses the panel backdrop, with no solid header band or peer-status strip.
-- Panel: the first row starts below the cutout, and scrolling continues behind the frosted status area and dock.
-- Settings: Spaces is the first section below the status bar, followed by Display and the current Space's settings; the last row can scroll completely above the dock. Home and Settings have no separate title bar. Space switching and adding a Space are in Settings → Spaces.
-- With multiple screens, the dots and dock stay above the home indicator without covering the last row.
+- Panel: the first row starts below the cutout, and scrolling continues behind the frosted status area.
+- Settings: Spaces is the first section below the status bar, followed by Display and the current Space's settings; the last row can scroll above the home indicator. Home and Settings have no separate title bar. Space switching and adding a Space are in Settings → Spaces.
+- Swipe across Home, every Panel screen, and Settings; no bottom navigation obscures the last row.
 - Home, Panel and Settings share a continuous background in each theme; Settings keeps readable grouped rows over it.
 - Rotate both ways on a notch or Dynamic Island phone: initial content stays clear of the side cutout, and swiping still lands on a full page. Repeat in light and dark appearance.
 
@@ -212,9 +212,8 @@ For a repeatable scrolled layout screenshot, launch a debug build with `AISPACE_
 
 The status-bar safe area uses noninteractive, untinted clear glass on iOS 26 and later, with
 an ultra-thin material fallback on older systems. It has no additional background fill.
-The floating dock shows icons only; localized accessibility labels and selected-state traits remain.
+The bottom dock has been removed; pages remain accessible by horizontal swiping.
 
 The launcher header fades its clear blur through the search region, with no hard horizontal
-edge at the status bar. Search and the icon-only dock use matching clear glass capsules on
-iOS 26+. The idle search hint is centered; focusing it reveals the editable field, with the
+edge at the status bar. Search uses a clear glass capsule on iOS 26+. The idle search hint is centered; focusing it reveals the editable field, with the
 existing query, Clear action, and keyboard-dismissal behavior preserved.
