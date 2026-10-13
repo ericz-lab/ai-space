@@ -28,7 +28,8 @@ struct AppPageView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !session.showsSpacePage, let host = session.currentURL?.host {
+            // Named once its page is there to be read, not while its redirects pass.
+            if session.hasContent, !session.showsSpacePage, let host = session.currentURL?.host {
                 SignInBar(host: host)
             }
             ZStack {
@@ -39,6 +40,18 @@ struct AppPageView: View {
                     .ignoresSafeArea(.container, edges: .bottom)
                     .opacity(session.state.isFailure ? 0 : 1)
                 WebFailure(session: session)
+                if !session.hasContent, !session.state.isFailure {
+                    // Reaching the app, through its access layer when it has one, draws nothing
+                    // in the web view; the mark stands in until a page does.
+                    VStack(spacing: 14) {
+                        ConnectingMark()
+                        Text("Connecting…").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.ground.ignoresSafeArea())
+                    .accessibilityElement(children: .combine)
+                    .transition(.opacity)
+                }
             }
         }
         .overlay(alignment: .top) {
@@ -86,6 +99,7 @@ struct AppPageView: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: controlsVisible)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: menuOpen)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: session.hasContent)
         .background(Color(uiColor: session.pageBackground).ignoresSafeArea())
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .modifier(DownloadOutcome(session: session))

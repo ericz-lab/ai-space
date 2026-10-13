@@ -55,6 +55,10 @@ final class WebSession: NSObject, ObservableObject {
     }
 
     @Published private(set) var isLoading = false
+    /// Whether a page has been drawn since the session's own page was asked for: a Space page
+    /// once it starts to arrive, any other (an access layer's sign-in) once it is whole. Until
+    /// then the view is blank, through every redirect of a sign-in that needs no one.
+    @Published private(set) var hasContent = false
     @Published private(set) var progress: Double = 0
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
@@ -127,6 +131,7 @@ final class WebSession: NSObject, ObservableObject {
     func load() {
         started = true
         state = .connecting
+        hasContent = false
         webView.load(URLRequest(url: home))
     }
 
@@ -176,6 +181,7 @@ final class WebSession: NSObject, ObservableObject {
 
     private func fail(_ error: Error) {
         isLoading = false
+        hasContent = true
         if let s = SpaceCheck.classify(error: error) { state = s }
     }
 
@@ -227,8 +233,13 @@ extension WebSession: WKNavigationDelegate {
         showControls()
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if showsSpacePage { hasContent = true }
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isLoading = false
+        hasContent = true
         check()
     }
 
@@ -269,11 +280,13 @@ extension WebSession: WKDownloadDelegate {
 
     func downloadDidFinish(_ download: WKDownload) {
         isLoading = false
+        hasContent = true
         downloaded = downloads.removeValue(forKey: ObjectIdentifier(download))
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         isLoading = false
+        hasContent = true
         downloads.removeValue(forKey: ObjectIdentifier(download))
         downloadFailure = error.localizedDescription
         NSLog("ai-space: download failed: \(error.localizedDescription)")
