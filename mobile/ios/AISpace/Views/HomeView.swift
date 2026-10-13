@@ -29,13 +29,15 @@ struct HomeView: View {
                     }
                 }
             }
+            .modifier(LauncherHeaderBlur())
         } else {
             ZStack {
                 page { if let catalogue = loader.catalogue { library(catalogue) } }
             }
+            .modifier(LauncherHeaderBlur(depth: 28))
             .safeAreaInset(edge: .top, spacing: 0) {
                 SearchField(model: model, focused: $searchFocused)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 12)
             }
             .onChange(of: model.pagerID) { _, _ in searchFocused = false }
             .onChange(of: model.page?.id) { _, _ in searchFocused = false }
@@ -200,23 +202,37 @@ struct SearchField: View {
     @ObservedObject var model: AppModel
     var focused: FocusState<Bool>.Binding
 
+    private var idle: Bool { model.query.isEmpty && !focused.wrappedValue }
+
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField(text: $model.query, prompt: Text("Search apps, agents and widgets")) { Text("Search") }
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .opacity(idle ? 0 : 1)
+            TextField(text: $model.query, prompt: idle ? Text("") : Text("Search")) { Text("Search apps, agents and widgets") }
                 .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
                 .focused(focused)
                 .onSubmit { focused.wrappedValue = false }
             if !model.query.isEmpty {
-                Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("Clear"))
             }
         }
-        .padding(.horizontal, 12).frame(height: 38)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.hairline))
-        .padding(.horizontal, 16)
+        .font(.system(size: 19))
+        .foregroundStyle(Theme.text)
+        .padding(.horizontal, 18).frame(height: 48)
+        .overlay {
+            if idle {
+                Label("Search", systemImage: "magnifyingglass")
+                    .font(.system(size: 19)).foregroundStyle(Theme.text)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .contentShape(Capsule())
+        .onTapGesture { focused.wrappedValue = true }
+        .modifier(LauncherCapsuleGlass())
+        .padding(.horizontal, 24)
     }
 }
 

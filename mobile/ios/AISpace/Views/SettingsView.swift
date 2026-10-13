@@ -58,6 +58,7 @@ struct SettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .scrollClipDisabled()
+        .modifier(LauncherHeaderBlur())
         .refreshable {
             await loader.refresh()
             await settings.refresh()

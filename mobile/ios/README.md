@@ -213,3 +213,8 @@ For a repeatable scrolled layout screenshot, launch a debug build with `AISPACE_
 The status-bar safe area uses noninteractive, untinted clear glass on iOS 26 and later, with
 an ultra-thin material fallback on older systems. It has no additional background fill.
 The floating dock shows icons only; localized accessibility labels and selected-state traits remain.
+
+The launcher header fades its clear blur through the search region, with no hard horizontal
+edge at the status bar. Search and the icon-only dock use matching clear glass capsules on
+iOS 26+. The idle search hint is centered; focusing it reveals the editable field, with the
+existing query, Clear action, and keyboard-dismissal behavior preserved.

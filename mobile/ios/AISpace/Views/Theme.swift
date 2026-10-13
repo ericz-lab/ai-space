@@ -162,3 +162,52 @@ struct Logo: View {
             .accessibilityHidden(true)
     }
 }
+
+/// Fade the untinted blur into the page instead of ending at a visible status-bar seam.
+/// Apply below the search control so the field itself is never part of the blurred content.
+struct LauncherHeaderBlur: ViewModifier {
+    var depth: CGFloat = 28
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            GeometryReader { viewport in
+                glass
+                    .frame(height: viewport.safeAreaInsets.top + depth)
+                    .mask(LinearGradient(stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.5),
+                        .init(color: .clear, location: 1),
+                    ], startPoint: .top, endPoint: .bottom))
+                    .offset(y: -viewport.safeAreaInsets.top)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder private var glass: some View {
+        if #available(iOS 26.0, *) {
+            GeometryReader { bounds in
+                Color.clear
+                    .frame(width: bounds.size.width + 128, height: bounds.size.height + 128)
+                    .glassEffect(.clear.tint(nil), in: Rectangle())
+                    .offset(x: -64, y: -64)
+            }
+            .clipped()
+        } else {
+            Rectangle().fill(.ultraThinMaterial)
+        }
+    }
+}
+
+/// The launcher's floating controls share clear glass without a separate solid fill.
+struct LauncherCapsuleGlass: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.clear.tint(nil), in: Capsule())
+        } else {
+            content.background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.hairline))
+        }
+    }
+}
