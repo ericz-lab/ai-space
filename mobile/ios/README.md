@@ -152,16 +152,16 @@ SVG icons and rendered theme backdrops keep their rendering web views at full op
 
 ### Safe-area regression checks
 
-The launcher measures each page inside the system safe area and clips scrolling content to that viewport. One shared backdrop extends behind the status bar, Home search area, Panel and Settings. Search, tiles and settings stay inside the safe area; Home has no peer-status strip. The bottom dock reserves its actual height, including the screen dots. Insets come from the current view, not a device model or a fixed notch height.
+The launcher measures each page inside the system safe area and lets scrolling content draw behind the transparent status area and floating dock. One shared backdrop extends behind the status bar, Home search area, Panel and Settings. The search field and initial content positions respect the safe area; Home has no peer-status strip. The bottom dock reserves its actual height, including the screen dots. Insets come from the current view, not a device model or a fixed notch height.
 
 After changing the launcher layout, run these visual regression checks:
 
 - Home: the search field stays below the status bar, including while scrolling and pulling to refresh. The area around it uses the panel backdrop, with no solid header band or peer-status strip.
-- Panel: the first row starts below the cutout, and scrolling cannot draw tiles or widgets over the status bar.
+- Panel: the first row starts below the cutout, and scrolling continues behind the transparent status area and dock.
 - Settings: Spaces is the first section below the status bar, followed by Display and the current Space's settings; the last row can scroll completely above the dock. Home and Settings have no separate title bar. Space switching and adding a Space are in Settings → Spaces.
 - With multiple screens, the dots and dock stay above the home indicator without covering the last row.
 - Home, Panel and Settings share a continuous background in each theme; Settings keeps readable grouped rows over it.
-- Rotate both ways on a notch or Dynamic Island phone: page content stays clear of the side cutout, and swiping still lands on a full page. Repeat in light and dark appearance.
+- Rotate both ways on a notch or Dynamic Island phone: initial content stays clear of the side cutout, and swiping still lands on a full page. Repeat in light and dark appearance.
 
 Checked on 2026-10-13: Xcode 27 Simulator build and portrait screenshots of Home, Panel and Settings on iPhone 18 Pro / iOS 27, using an unreachable local Space to exercise its status card. The Foundation-only suite passed all 60 tests. Gesture, rotation and real-device checks of this change remain pending. The older iOS 18.4 Simulator could not launch this Xcode 27 build because its runtime lacks `libswiftWebKit.dylib`.
 
@@ -207,3 +207,5 @@ The Home search field dismisses its keyboard on submit, a tap in the catalogue, 
 or leaving Home/opening another page. Dismissing does not clear the query; the Clear button
 keeps the field available for continued typing. Check these gestures with both matching
 results and an empty result list on a phone.
+
+For a repeatable scrolled layout screenshot, launch a debug build with `AISPACE_SCROLL_Y=500`.

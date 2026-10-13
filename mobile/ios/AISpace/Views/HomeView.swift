@@ -67,6 +67,7 @@ struct HomeView: View {
                     }
                 }
             }
+            .scrollClipDisabled()
             .scrollDismissesKeyboard(.immediately)
             .contentShape(Rectangle())
             // Keep tile taps and scrolling intact while an outside tap ends the search edit.

@@ -41,8 +41,8 @@ struct MainTabs: View {
         // A paging scroll view, not a page-style TabView: that one loses its place when a screen
         // is added or removed, and a navigation bar inside it does not survive.
         // Measure the safe viewport outside the scroll view. A horizontal scroll view resolves
-        // safe areas into content margins; nested vertical pages must not size themselves from
-        // that container or paint into the status bar and landscape cutout while scrolling.
+        // safe areas into content margins; nested pages keep that layout size while their
+        // scrolling content can pass behind the transparent status area and floating dock.
         GeometryReader { viewport in
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
@@ -60,11 +60,11 @@ struct MainTabs: View {
                 }
                 .scrollTargetLayout()
             }
+            .scrollClipDisabled()
             .scrollTargetBehavior(.paging)
             .scrollIndicators(.hidden)
             .scrollPosition(id: Binding<String?>(get: { model.pagerID }, set: { if let id = $0, id != model.pagerID { model.pagerID = id } }))
         }
-        .clipped()
         // Include the screen indicators in the reserved space, above the home indicator.
         .safeAreaInset(edge: .bottom, spacing: 8) { TabBar(model: model, screens: all) }
         // One continuous backdrop for Home, Panel and Settings, including the status bar.

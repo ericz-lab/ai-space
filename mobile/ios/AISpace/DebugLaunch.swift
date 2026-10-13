@@ -8,6 +8,7 @@ import WebKit
 ///   AISPACE_DATA_DIR   keep saved Spaces and screens there instead of the app's own folders
 ///   AISPACE_CONNECT    add this Space on a first launch
 ///   AISPACE_TAB        home | panel | settings, or web for the Space's web panel over them
+///   AISPACE_SCROLL_Y   scroll the visible native page to this offset for safe-area checks
 ///   AISPACE_SEARCH     the search text on Home
 ///   AISPACE_CHAT_SEND  with AISPACE_HUB=chat:<agent key>: this message is sent three seconds after launch
 ///   AISPACE_HUB        a page of the Space over the tabs: inbox | tasks | modelUsage | appUsage |
@@ -85,6 +86,14 @@ enum DebugLaunch {
                 window.overrideUserInterfaceStyle = style == "dark" ? .dark : .light
             }
         }
+        if let offset = env["AISPACE_SCROLL_Y"].flatMap(Double.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+                for window in windows {
+                    scrollVisiblePage(in: window, window: window, offset: CGFloat(offset))
+                }
+            }
+        }
         if let path = env["AISPACE_SNAPSHOT"] {
             let delay = Double(env["AISPACE_SNAPSHOT_DELAY"] ?? "") ?? 5
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -94,6 +103,17 @@ enum DebugLaunch {
                 }
             }
         }
+    }
+
+    @MainActor private static func scrollVisiblePage(in view: UIView, window: UIWindow, offset: CGFloat) {
+        if let scroll = view as? UIScrollView,
+           scroll.contentSize.height > scroll.bounds.height + 100,
+           scroll.bounds.height > 200,
+           window.bounds.contains(scroll.convert(CGPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: window)) {
+            let maximum = scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom
+            scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: min(maximum, offset)), animated: false)
+        }
+        for child in view.subviews { scrollVisiblePage(in: child, window: window, offset: offset) }
     }
 
     /// The window as drawn, with each web view's own snapshot laid over its frame (a web view's

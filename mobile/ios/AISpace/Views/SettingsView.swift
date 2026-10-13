@@ -57,6 +57,7 @@ struct SettingsView: View {
             }
         }
         .scrollContentBackground(.hidden)
+        .scrollClipDisabled()
         .refreshable {
             await loader.refresh()
             await settings.refresh()
