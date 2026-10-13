@@ -75,6 +75,7 @@ struct AppPageView: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 12)
                 }
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .bottom)
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: controlsVisible)
