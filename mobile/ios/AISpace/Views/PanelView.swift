@@ -1,7 +1,38 @@
 import SwiftUI
 
-/// The Space's own web panel: chat with agents, the inbox, tasks and the Space's settings, as
-/// the browser has them. It is also where a sign-in to the Space's access layer happens.
+/// The Space's web panel over the tabs, with a way back: what the app does not draw itself yet.
+struct WebPanelView: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    @ObservedObject var session: WebSession
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button { model.showingWebPanel = false } label: {
+                    Image(systemName: "xmark").font(.body.weight(.semibold)).frame(width: 36, height: 36)
+                }
+                .accessibilityLabel(Text("Close"))
+                VStack(spacing: 1) {
+                    Text("Web Panel").font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Text(verbatim: session.currentURL?.host ?? connection.url.host ?? "").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+                Button { session.reload() } label: {
+                    Image(systemName: "arrow.clockwise").font(.body.weight(.medium)).frame(width: 36, height: 36)
+                }
+                .accessibilityLabel(Text("Reload"))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(.bar)
+            PanelView(model: model, connection: connection, session: session)
+        }
+        .background(Theme.ground.ignoresSafeArea())
+    }
+}
+
+/// The Space's own web panel: chat with agents, the inbox, tasks and the terminal, as the
+/// browser has them. It is also where a sign-in to the Space's access layer happens.
 struct PanelView: View {
     @ObservedObject var model: AppModel
     let connection: Connection

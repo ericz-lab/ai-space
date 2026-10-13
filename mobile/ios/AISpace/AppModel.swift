@@ -3,36 +3,81 @@ import SwiftUI
 import UIKit
 import WebKit
 
+/// Home is everything the Space has; Panel is this phone's screens; Settings is the Space's
+/// settings and the phone's own.
 enum MainTab: Hashable {
     case home, panel, settings
+}
+
+/// How the app is drawn on this phone, whatever the panel in a browser is set to.
+enum Appearance: String, CaseIterable {
+    case system, light, dark
+}
+
+/// The pages the app swipes through, left to right: Home, each screen, Settings. A screen's
+/// page is its id; these two are not screen ids (those are letters, digits, - and _ only).
+enum Pager {
+    static let home = "#home"
+    static let settings = "#settings"
 }
 
 /// An app's page on show over the tabs.
 struct OpenPage: Identifiable {
     let id = UUID()
-    /// The catalogue entry it was opened from, when there is one (for the favourite star).
+    /// The catalogue entry it was opened from, when there is one (for the pin to the home screen).
     let key: String?
     let title: String
     let connection: UUID
     let session: WebSession
 }
 
-/// The app's state: saved Spaces, the catalogue, web sessions and favourites of each, and what
-/// is on show. Leaving a Space keeps its sign-in; signing out or removing it discards it.
+/// The app's state: saved Spaces, the catalogue, web sessions and screens of each, and what is
+/// on show. Leaving a Space keeps its sign-in; signing out or removing it discards it. Leaving a Space keeps its sign-in; signing out or removing it discards it.
 @MainActor
 final class AppModel: ObservableObject {
     let store: ConnectionStore
-    let favorites: FavoritesStore
+    let screens: ScreenStore
     private let cache = CatalogueCache(directory: AppPaths.caches)
 
     @Published private(set) var selectedID: UUID?
-    @Published var tab: MainTab = .home
+    /// The page on show: `Pager.home`, a screen's id, or `Pager.settings`.
+    @Published var pagerID = Pager.home {
+        didSet { if pagerID != Pager.home, pagerID != Pager.settings, homePage != pagerID { homePage = pagerID } }
+    }
+    /// This phone's own display choices, kept in the app's defaults.
+    @Published var appearance = Appearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system {
+        didSet { UserDefaults.standard.set(appearance.rawValue, forKey: "appearance") }
+    }
+    /// The theme this phone is drawn in, by the id of one of the panel's presets.
+    @Published var themeID = UserDefaults.standard.string(forKey: "theme") ?? ThemePreset.aurora.id {
+        didSet {
+            UserDefaults.standard.set(themeID, forKey: "theme")
+            Theme.current = ThemePreset.named(themeID)
+        }
+    }
+    @Published var showsWidgets = !UserDefaults.standard.bool(forKey: "hidesWidgets") {
+        didSet { UserDefaults.standard.set(!showsWidgets, forKey: "hidesWidgets") }
+    }
+    /// The actions on the screens, asked for by a long press on a screen.
+    @Published var showingScreenMenu = false
     @Published var query = ""
+    /// The screen the Panel tab opens on: the one last shown.
+    @Published private(set) var homePage = Screens.home
+    /// The Space's web panel over the tabs: the sign-in, chat, the inbox, tasks and the terminal.
+    @Published var showingWebPanel = false
+    /// A page of the Space drawn by the app, over the tabs.
+    @Published var hubPage: HubPage?
+    /// The screen whose entries are being rearranged, in a sheet.
+    @Published var editingScreen: String?
+    @Published var confirmingDeleteScreen = false
+    @Published var confirmingResetScreens = false
     @Published var page: OpenPage?
+    /// Where the open page's handle rests; kept for the session so it stays where it was put.
+    let pageHandle = PageHandle()
     @Published var showingAdd = false
     @Published var confirmingSignOut = false
-    /// Set when the operator went to the panel to sign in, so a finished sign-in returns to Home.
-    private var returnHomeAfterSignIn = false
+    /// Set when the web panel was opened to sign in, so a finished sign-in closes it again.
+    private var closeWebPanelAfterSignIn = false
     /// A link that arrived before the catalogue of the Space it was opened in did.
     private var pendingLink: (link: DeepLink, connection: UUID)?
 
@@ -41,21 +86,37 @@ final class AppModel: ObservableObject {
 
     private var loaders: [UUID: CatalogueLoader] = [:]
     private var icons: [UUID: IconStore] = [:]
+    private var settings: [UUID: SettingsLoader] = [:]
+    private var chats: [String: ChatStore] = [:]
+    private var backdrops: [UUID: BackdropStore] = [:]
     private var panels: [UUID: WebSession] = [:]
     private var dataStores: [UUID: WKWebsiteDataStore] = [:]
     private var watchers: Set<AnyCancellable> = []
 
     init() {
         store = ConnectionStore(fileURL: AppPaths.connections)
-        favorites = FavoritesStore(fileURL: AppPaths.favorites)
+        Theme.current = ThemePreset.named(UserDefaults.standard.string(forKey: "theme") ?? "")
+        screens = ScreenStore(fileURL: AppPaths.screens)
         // Downloads are handed to the share sheet and not kept: what an earlier launch left goes.
         try? FileManager.default.removeItem(at: AppPaths.downloads)
         selectedID = store.defaultConnection?.id
         store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
-        favorites.objectWillChange.sink { [weak self] in
+        screens.objectWillChange.sink { [weak self] in
             self?.objectWillChange.send()
             DispatchQueue.main.async { self?.publishQuickActions() }
         }.store(in: &watchers)
+    }
+
+    /// The tab the page on show belongs to; choosing Panel returns to the screen last shown.
+    var tab: MainTab {
+        get { pagerID == Pager.home ? .home : (pagerID == Pager.settings ? .settings : .panel) }
+        set {
+            switch newValue {
+            case .home: pagerID = Pager.home
+            case .settings: pagerID = Pager.settings
+            case .panel: pagerID = selected.map { c in screens.screens(c.id).contains { $0.id == homePage } } == true ? homePage : Screens.home
+            }
+        }
     }
 
     // MARK: Spaces
@@ -75,8 +136,9 @@ final class AppModel: ObservableObject {
         let l = CatalogueLoader(connection: connection, cache: cache) { await cookieStore.allCookies() }
         l.onCatalogue = { [weak self] catalogue in
             guard let self else { return }
-            self.favorites.seed(connection.id, pins: catalogue.homePins)
+            self.screens.seed(connection.id, from: catalogue.panelScreens)
             self.icons[connection.id]?.retryFailed()
+            self.backdrops[connection.id]?.retryFailed()
             self.publishQuickActions()
             if let pending = self.pendingLink, pending.connection == connection.id {
                 self.pendingLink = nil
@@ -96,6 +158,30 @@ final class AppModel: ObservableObject {
         return icons[connection.id]!
     }
 
+    func settings(for connection: Connection) -> SettingsLoader {
+        if let s = settings[connection.id] { return s }
+        let s = SettingsLoader(api: loader(for: connection).api)
+        settings[connection.id] = s
+        return s
+    }
+
+    /// An agent's conversation, kept while the app runs so leaving the page does not lose it.
+    func chat(for connection: Connection, base: String) -> ChatStore {
+        let key = "\(connection.id)|\(base)"
+        if let s = chats[key] { return s }
+        let s = ChatStore(api: loader(for: connection).api, base: base)
+        chats[key] = s
+        return s
+    }
+
+    /// The artwork of the themes that have one, as this Space serves it.
+    func backdrops(for connection: Connection) -> BackdropStore {
+        if let s = backdrops[connection.id] { return s }
+        let s = BackdropStore(space: connection.url, dataStore: dataStore(connection.id))
+        backdrops[connection.id] = s
+        return s
+    }
+
     func hosts(for connection: Connection) -> SpaceHosts {
         SpaceHosts(space: connection.url, catalogue: loaders[connection.id]?.catalogue)
     }
@@ -111,9 +197,9 @@ final class AppModel: ObservableObject {
         s.onStateChange = { [weak self] state in
             guard let self, state == .ready, let loader = self.loaders[connection.id] else { return }
             if loader.status != .ok { Task { await loader.refresh() } }
-            if self.returnHomeAfterSignIn {
-                self.returnHomeAfterSignIn = false
-                self.tab = .home
+            if self.closeWebPanelAfterSignIn {
+                self.closeWebPanelAfterSignIn = false
+                self.showingWebPanel = false
             }
         }
         panels[connection.id] = s
@@ -124,8 +210,47 @@ final class AppModel: ObservableObject {
         guard store.connection(id) != nil else { return }
         selectedID = id
         query = ""
+        homePage = Screens.home
         tab = .home
+        editingScreen = nil
+        showingWebPanel = false
+        hubPage = nil
         publishQuickActions()
+    }
+
+    // MARK: Screens
+
+    /// Pins the entry to the screen, or takes it off when it is there. This phone's layout only.
+    func togglePin(_ key: String, screen: String, in connection: Connection) {
+        let pinned = screens.isPinned(key, screen: screen, connection.id)
+        screens.edit(connection.id) { pinned ? Screens.unpin($0, screen, key) : Screens.pin($0, screen, key) }
+    }
+
+    /// A new empty screen after the last one, shown at once.
+    func addScreen(in connection: Connection) {
+        guard let made = Screens.add(screens.screens(connection.id)) else { return }
+        screens.edit(connection.id) { _ in made.screens }
+        pagerID = made.id
+    }
+
+    func removeScreen(_ id: String, in connection: Connection) {
+        guard id != Screens.home else { return }
+        // The page before it comes up, as when a page of the home screen is removed.
+        let all = screens.screens(connection.id)
+        let before = all.firstIndex { $0.id == id }.map { all[max($0 - 1, 0)].id } ?? Screens.home
+        if homePage == id { homePage = before }
+        if pagerID == id { pagerID = before }
+        if editingScreen == id { editingScreen = nil }
+        screens.edit(connection.id) { Screens.remove($0, id) }
+    }
+
+    /// Throws this phone's layout away for the panel's as it is now.
+    func resetScreens(in connection: Connection) {
+        guard let catalogue = loaders[connection.id]?.catalogue else { return }
+        homePage = Screens.home
+        if tab == .panel { pagerID = Screens.home }
+        editingScreen = nil
+        screens.reset(connection.id, from: catalogue.panelScreens)
     }
 
     func add(name: String, url: URL) {
@@ -136,7 +261,7 @@ final class AppModel: ObservableObject {
 
     func remove(_ id: UUID) {
         discard(id)
-        favorites.forget(id)
+        screens.forget(id)
         store.remove(id)
         if selectedID == id { selectedID = store.defaultConnection?.id }
         // The store's files go once WebKit has let go of it.
@@ -147,7 +272,7 @@ final class AppModel: ObservableObject {
     }
 
     /// Ends the Space's session on this phone: cookies and every other piece of website data of
-    /// its store, the saved catalogue and the open pages. Favourites and the address stay.
+    /// its store, the saved catalogue and the open pages. The address and the screens stay.
     func signOut(_ connection: Connection) {
         let data = dataStore(connection.id)
         if page?.connection == connection.id { page = nil }
@@ -155,6 +280,8 @@ final class AppModel: ObservableObject {
         panels[connection.id] = nil
         let loader = loaders[connection.id]
         loader?.forget()
+        settings[connection.id]?.forget()
+        showingWebPanel = false
         data.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {
             Task { @MainActor in
                 // Again, for a refresh that started while the cookies were still there.
@@ -167,9 +294,30 @@ final class AppModel: ObservableObject {
     }
 
     func signIn() {
-        returnHomeAfterSignIn = true
-        tab = .panel
+        closeWebPanelAfterSignIn = true
+        openWebPanel()
+    }
+
+    /// Shows the Space's web panel over the tabs.
+    func openWebPanel() {
+        showingWebPanel = true
         if let c = selected { panel(for: c).recoverIfFailed() }
+    }
+
+    /// One cover at a time: the page on show leaves before the next comes up.
+    private func afterHub(_ next: @escaping () -> Void) {
+        guard hubPage != nil else { return next() }
+        hubPage = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { next() }
+    }
+
+    func webPanelFromHub() {
+        afterHub { [weak self] in self?.openWebPanel() }
+    }
+
+    /// A link on one of the Space's pages: the page closes and the address opens as any other.
+    func openFromHub(_ url: URL, title: String, in connection: Connection) {
+        afterHub { [weak self] in self?.open(url, title: title, in: connection) }
     }
 
     private func discard(_ id: UUID) {
@@ -178,6 +326,9 @@ final class AppModel: ObservableObject {
         panels[id] = nil
         loaders[id]?.forget()
         loaders[id] = nil
+        settings[id] = nil
+        backdrops[id] = nil
+        chats = chats.filter { !$0.key.hasPrefix("\(id)|") }
         icons[id] = nil
         dataStores[id] = nil
     }
@@ -195,8 +346,8 @@ final class AppModel: ObservableObject {
     func open(_ entry: CatalogueEntry) {
         guard let connection = selected else { return }
         guard let url = entry.pageURL(space: connection.url) else {
-            // Agents talk in the panel's chat in this version.
-            tab = .panel
+            // An agent has no page: it is talked to.
+            if entry.kind == .agent { hubPage = .chat(agent: entry.key) } else { openWebPanel() }
             return
         }
         open(url, title: entry.displayTitle(), key: entry.key, in: connection)
@@ -232,10 +383,19 @@ final class AppModel: ObservableObject {
         switch link {
         case .show:
             page = nil
+            showingWebPanel = false
             tab = .home
-        case .inbox, .chat:
+        case .inbox:
             page = nil
-            tab = .panel
+            showingWebPanel = false
+            hubPage = .inbox
+        case .chat(let agent, let text):
+            page = nil
+            showingWebPanel = false
+            let entry = agent.flatMap { id in loaders[connection.id]?.catalogue?.agents.first { $0.ref == id } }
+            // The text is put in the field, never sent: any web page can open a link.
+            if let entry, let text, let base = ChatRoute.base(ref: entry.ref, peer: entry.peer) { chat(for: connection, base: base).draft = text }
+            hubPage = .chat(agent: entry?.key)
         case .open(let app):
             guard let catalogue = loaders[connection.id]?.catalogue ?? loader(for: connection).catalogue else {
                 pendingLink = (link, connection.id)
@@ -260,7 +420,7 @@ final class AppModel: ObservableObject {
             UIApplication.shared.shortcutItems = []
             return
         }
-        UIApplication.shared.shortcutItems = QuickAction.items(favorites: favorites.keys(c.id), catalogue: catalogue).map { action in
+        UIApplication.shared.shortcutItems = QuickAction.items(pins: screens.screens(c.id).first?.items ?? [], catalogue: catalogue).map { action in
             UIApplicationShortcutItem(type: QuickAction.type, localizedTitle: action.title, localizedSubtitle: action.subtitle,
                                       icon: UIApplicationShortcutIcon(systemImageName: "star"),
                                       userInfo: action.userInfo(space: c.id).mapValues { $0 as NSString })

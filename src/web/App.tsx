@@ -69,6 +69,13 @@ function Backdrop() {
 }
 
 /** `onLang` changes the language of the whole page; the root (main.tsx) owns the value and provides it. */
+/**
+ * The iPhone client (mobile/ios) shows this page in its Panel tab and has its own screens, library
+ * and search in its Home tab, with its own tab bar at the bottom. There the page stays on the home
+ * screen and leaves the ways between screens out: no dock, no edges, no swipe and no hint.
+ */
+const IN_PHONE_APP = typeof navigator !== "undefined" && /\bAISpaceMobile\//.test(navigator.userAgent);
+
 export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const { lang, t } = useLang();
   const [apps, setApps] = useState<AppInfo[]>([]);
@@ -387,7 +394,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       // Escape in the library's empty search field leaves the library too.
       const emptySearch = e.target instanceof HTMLInputElement && e.target.classList.contains("lib-search") && !e.target.value;
       if (e.key === "Escape" && k.pos === -1 && !k.floating && (emptySearch || !typing(e.target))) return k.go(0);
-      if (k.floating || k.editing || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
+      if (IN_PHONE_APP || k.floating || k.editing || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
       if (e.key === "ArrowLeft") k.go(k.pos - 1);
       else if (e.key === "ArrowRight") k.go(k.pos + 1);
     };
@@ -395,7 +402,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     let start: { x: number; y: number } | null = null;
     const onStart = (e: TouchEvent) => {
       const touch = e.touches[0];
-      start = e.touches.length === 1 && touch && !keyState.current.floating && !keyState.current.editing && !typing(e.target) ? { x: touch.clientX, y: touch.clientY } : null;
+      start = !IN_PHONE_APP && e.touches.length === 1 && touch && !keyState.current.floating && !keyState.current.editing && !typing(e.target) ? { x: touch.clientX, y: touch.clientY } : null;
     };
     const onEnd = (e: TouchEvent) => {
       const touch = e.changedTouches[0];
@@ -727,7 +734,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
           </section>
         ) : null}
       </div>
-      {screens && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={() => openLibrary(HOME, true)} />}
+      {screens && !IN_PHONE_APP && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={() => openLibrary(HOME, true)} />}
       {!prefs.noPet && <Pet sheet={petSheet} onError={onPetError} />}
       {uninstalling && (
         <UninstallForm

@@ -6,6 +6,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+xcuserdata/
+*.xcuserstate
 
 # Env / secrets
 .env

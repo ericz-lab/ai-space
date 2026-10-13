@@ -2,22 +2,26 @@
 
 A native iOS client of a Space that already runs: a SwiftUI launcher over the Space's own catalogue, with the Space's pages in `WKWebView`. Nothing is installed or started on the server, and the app carries no token or deployment secret.
 
-Status: phase 1, built and exercised on a Mac as a Mac Catalyst app. **It has not been built for the iOS Simulator or a device yet**: the machine it was written on has the Command Line Tools only, which ship no iOS SDK and no Simulator. See [What has been checked](#what-has-been-checked).
+Status: built and exercised on a Mac as a Mac Catalyst app, and built with Xcode 27, development-signed, installed and launched on an iPhone 15 Pro running iOS 26.6.1. Device installation and launch are verified; the device interaction checks below and Simulator validation remain outstanding. See [What has been checked](#what-has-been-checked).
 
 ## What it does
 
 | Area | In this version |
 | --- | --- |
 | Spaces | Add a Space by the address of its panel, several if you have them, switch between them. HTTPS everywhere; plain HTTP only to loopback (a Space on the Mac that runs the Simulator). |
-| Home | Favorites, apps, agents and widgets from the Space's catalogue, keyed by the panel's own entry keys (`app:<id>`, `agent:<id>`, `widget:<id>`), titles in English or Chinese as the manifests provide, icons from the Space (emoji, bitmap or SVG). |
+| Pages | Home, each screen of the panel and Settings sit side by side and are swiped through, as on an iPhone's home screen: left of the first screen is Home, right of the last one is Settings. A bar at the bottom names the three parts and jumps between them; dots above it say which screen is on show while there are several. |
+| Home | The library, drawn natively: every app, agent and widget of the Space, with one search. An app's icon is a rounded square, an agent's a circle; only what is wrong is marked on a tile (not answering, paused, its machine offline). Entries are keyed by the panel's own entry keys (`app:<id>`, `agent:<id>`, `widget:<id>`), titles in English or Chinese as the manifests provide, icons from the Space (emoji, bitmap or SVG). |
+| Panel | The screens, drawn natively with nothing above them: the main screen, then your own. **Kept on the phone, per Space.** The first catalogue of a Space copies the panel's screens once (its built-in tiles left out); after that the phone's layout is its own and nothing is written to the Space, so a phone and a browser can be laid out differently. Touch and hold an entry on Home and choose Add to Panel (with several screens, which one); touch and hold one on a screen to take it off. Touch and hold the empty part of a screen for the screen's own actions: a new screen, a list to drag its entries into order or delete them, deleting it, and replacing the phone's layout with a fresh copy of the panel's. |
+| Widgets | A widget that sends blocks is drawn as the panel's state card: the first block large, the rest as rows, as many as the card's size holds (metric with its change, trend as a line or bars, progress, gauge with its zones, status). Other widgets show their list. |
 | Search | One search over the three kinds: every word must appear in the title, description or id, in any of the entry's languages, so `todo` and `待办` find the same app. |
-| Favorites | Kept on the phone per Space, seeded once from the panel's home screen. Star an app from its page, or long-press a tile. |
 | Reachability | A dot per app from the Space's health probe (running, not answering), paused apps, and peers named as offline with the time of their last snapshot; their tiles are dimmed and say so. While the Space itself cannot be reached, the last catalogue stays on show, marked with its age, and the health dots are withdrawn. |
-| App pages | An app opens in a web view with the Space's session: back, forward, reload, share, open in Safari, swipe navigation, file and photo inputs, downloads to the share sheet, JavaScript dialogs titled with their origin. |
+| App pages | An app opens edge to edge in a web view with the Space's session, with no bar of the app's around it. A small handle, which can be dragged to either side and any height, opens the page's controls: close, back, forward, reload, share, open in Safari, add to Panel. Swipe navigation, file and photo inputs, downloads to the share sheet, JavaScript dialogs titled with their origin. |
 | Other sites | Only the Space's hostnames load in the app (below). A link tapped to anywhere else, and a link app whose page is on another site, opens in Safari. |
-| Panel | The Space's web panel in a tab: chat with agents, inbox, tasks, settings, terminal. These are not rebuilt natively in this version; agents on Home open this tab. A file the panel downloads (a theme export) goes to the share sheet, as on an app page. |
-| Links in | `aispace://open?app=<id or name>`, `aispace://inbox`, `aispace://chat`, `aispace://show`, the same links as the Mac client. A link only shows something; it never sends a message or changes the Space. |
-| Quick actions | The first four favourite apps of the Space on show appear on the app icon's long-press menu and open through the same links. Each carries its Space, so it opens that Space's app also when the app starts on another one. |
+| Settings | The phone's own display choices (appearance, theme, widgets on the screens, the language through iOS Settings), which the panel keeps per browser too. The theme is one of the panel's presets: colours, glows and radius, and for the presets that have drawn artwork behind the panel (Orbit, Northern Lights, Paper Cut, Prism) that artwork, fetched from the Space (`/backdrops/<name>.html`) and drawn once to a picture behind the pages; until the Space has sent it, or signed out, the theme's ground colour shows. Then the Space's settings, read from the Space: status, the default model, the Space's pages (next row), peers, services with their health, backups with their state. Below them, what belongs to the phone: saved Spaces, the session, the app. The panel's hover details and desk pet are not here. |
+| The Space's pages | Drawn by the app from the Space's own routes, in a cover over the tabs with its own navigation, read each time a page opens and when it is pulled down (no timer). **Inbox**: the threads with the panel's four filters; opening one marks it read; done, reopen, unread, read all. **Chat**: the agents, and one agent's conversation: a turn is a run on the Space followed over its event stream (picked up again after a break, stopped with the stop button), earlier chats from the agent's sessions; the model and permission mode are the agent's defaults. **Scheduled tasks**: by app, with schedule, triggers, last and next run, the last 20 runs with their output, and the model of a task that takes one. **Model usage**: the four windows, totals, rows by app and tag and by model, lifetime figures with tokens by week, the last calls. **App usage**: windows and kinds, opens and time in use with a 30-day trend. **App models**: the model each app's calls run on and the panel's override for the app or a tag. **Events and calls**: the recent events with their data and deliveries, and the catalogue of capabilities and events. **Apps and connections**: installed packages, packages other Spaces share, and each connection with its switch and what this Space shares over it. Four things here change the Space, as the same controls on the panel do: a task's model, an app's model, a connection's switch and shares, and the inbox marks. Installing, rolling back or removing a package, making a connection, and the terminal stay in the web panel. |
+| Web panel | The Space's web page over the tabs, opened by a sign-in, by Terminal in Settings and from Apps and connections: the terminal, package installs, and whatever the app does not draw. The page leaves its own dock, edges, swipe and hint out there (by the `AISpaceMobile/` user agent; for a Space that does not do so yet, the app hides them with a style), since the Panel tab has the screens. A file the panel downloads (a theme export) goes to the share sheet, as on an app page. |
+| Links in | `aispace://open?app=<id or name>`, `aispace://inbox`, `aispace://chat`, `aispace://show`, the same links as the Mac client. `inbox` and `chat` open the native pages; a text in a chat link is put in the field, not sent. A link only shows something; it never sends a message or changes the Space. |
+| Quick actions | The first four apps of the home screen of the Space on show appear on the app icon's long-press menu and open through the same links. Each carries its Space, so it opens that Space's app also when the app starts on another one. |
 
 ## Layout and the Mac client
 
@@ -31,10 +35,15 @@ mobile/ios/
     AppModel.swift       saved Spaces, sessions, what is on show, link routing
     DebugLaunch.swift    launch switches of debug builds (screens without touching the device)
     Core/                Foundation only: catalogue decoding, search, the host list and navigation
-                         rule, favourites, the catalogue cache, quick actions
-    Live/                CatalogueLoader (the Space's routes), IconStore (icons, SVG drawing), paths
+                         rule, screens and their store, widget blocks, the Space's settings and the
+                         shapes of its pages (HubModels), the catalogue cache, quick actions
+    Live/                CatalogueLoader (the Space's routes), SettingsLoader, HubStores (one store
+                         per page of the Space, and the chat), IconStore (icons, SVG drawing),
+                         BackdropStore (a theme's artwork), paths
     Web/                 WebSession (WKWebView and its delegates), WebContainer
-    Views/               Home, tiles and widget cards, app page, panel, settings, connect, theme
+    Views/               Home (library, screens, screen bar and editor), tiles, widget cards and
+                         their blocks, app page, panel, settings, the Space's pages (Hub*Views,
+                         ChatView), connect, theme
     Resources/           the mark, the app icon, English and Chinese strings
   AISpaceTests/          swift-testing tests of Core/ and of CatalogueLoader, against scripted answers
   scripts/               test.sh, build.sh (swiftc only), icons.swift, sources.sh
@@ -54,7 +63,7 @@ bun run ios:build    # mobile/ios/build/AISpace.app, a Mac Catalyst build, ad-ho
 open mobile/ios/build/AISpace.app
 ```
 
-The Catalyst build is the same Swift, UIKit, SwiftUI and WebKit code as the iPhone build, compiled against the iOS frameworks that the macOS SDK carries, in a phone-sized window. It is how the screens below were checked. It is not a product: it drops the `aispace://` registration so it cannot take the Mac client's links.
+The Catalyst build is the same Swift, UIKit, SwiftUI and WebKit code as the iPhone build, compiled against the iOS frameworks that the macOS SDK carries, in a phone-sized window. It is how the screens below were checked. It is not a product: it drops the `aispace://` registration so it cannot take the Mac client's links. Its web views have no microphone or camera: WebKit leaves `navigator.mediaDevices`, `MediaStream`, `MediaRecorder` and `RTCPeerConnection` out of a Mac Catalyst app's pages (checked on a secure page, also with WebKit's own switches on), so a page's voice input reports that the browser cannot record. That is this build only; the iPhone build declares the usage strings and answers the capture prompt for the Space's pages, and has yet to be tried on a device.
 
 Two rules keep the sources compiling without Xcode, as in the Mac client: no `@State` (the macOS 27 Command Line Tools declare it as a macro whose plugin only Xcode ships; view state lives in small `ObservableObject`s), and `.strings` tables instead of a String Catalog.
 
@@ -71,7 +80,7 @@ xcrun simctl launch booted dev.ai-space.ios
 
 These commands have not been run: `xcodebuild` and `simctl` do not exist on the machine this was written on. Expect small fixes on the first Xcode build (the asset catalog and the test host are the parts only Xcode compiles). A Space on the same Mac is reachable from the Simulator at `http://127.0.0.1:8700`.
 
-A debug build reads launch switches from its environment, so screens can be reached and captured without touching the device (`SIMCTL_CHILD_AISPACE_TAB=panel xcrun simctl launch …`, or `open --env` for the Catalyst build). `AISpace/DebugLaunch.swift` lists them: connect to a Space, pick a tab, set the search text, open an `aispace://` link, write a PNG of the window and quit. None of it exists in a release build.
+A debug build reads launch switches from its environment, so screens can be reached and captured without touching the device (`SIMCTL_CHILD_AISPACE_TAB=panel xcrun simctl launch …`, or `open --env` for the Catalyst build). `AISpace/DebugLaunch.swift` lists them: connect to a Space, pick a tab, set the search text, open one of the Space's pages, send a chat message, open an `aispace://` link, write a PNG of the window and quit. None of it exists in a release build.
 
 ## Authentication
 
@@ -83,11 +92,12 @@ What the real access path is (docs/ingress.md, docs/router.md, docs/cloudflare.m
 What the app does about it:
 
 - **Each saved Space has its own WebKit data store** (`WKWebsiteDataStore(forIdentifier:)`), apart from Safari and from every other Space. The panel tab, every app page and the native catalogue calls use it: the native calls read the store's cookies for each request (`SpaceAPI`), so one sign-in in the web view serves all three. Nothing is copied out of Safari.
-- **Sign-in happens in the web view.** A request that is redirected, or answered 401 or 403, means "sign in": Home shows a card, the Sign In button opens the panel tab, the access layer's pages load there (a bar names the host you are on), and when the panel is back and answers `GET /api/panel/layout` as ai-space does, the catalogue loads and Home returns. An app on its own hostname goes through the same redirect inside its page; with Access the team-domain cookie makes that silent.
+- **Sign-in happens in the web view.** A request that is redirected, or answered 401 or 403, means "sign in": Home shows a card, the Sign In button opens the web panel over the tabs, the access layer's pages load there (a bar names the host you are on), and when the panel is back and answers `GET /api/panel/layout` as ai-space does, the catalogue loads and the web panel closes. An app on its own hostname goes through the same redirect inside its page; with Access the team-domain cookie makes that silent.
 - **`ASWebAuthenticationSession` is deliberately not used.** It shares cookies with Safari, not with the app's web views, so a sign-in there would not reach the pages the app shows. Access has no token exchange a native client could use instead without a service token, which would be a long-lived secret on the phone.
-- **Nothing secret is stored by the app.** The session cookie lives in the Space's WebKit store inside the app's sandbox; saved Spaces and favourites are plain files with addresses and entry keys. There is nothing for the Keychain to hold in this version.
+- **Nothing secret is stored by the app.** The session cookie lives in the Space's WebKit store inside the app's sandbox; saved Spaces and screens are plain files with addresses and entry keys. There is nothing for the Keychain to hold in this version.
 - **Sign Out** (Settings) clears that Space's website data (cookies, storage, caches), the saved catalogue and the open pages. Removing a Space also deletes its data store. A catalogue request still on its way when either happens is dropped when it answers.
 - **Expiry** shows as the same sign-in card, with the last catalogue still on show; the app never retries a write on its own.
+- **A write names its origin.** The two routes that set a model (`PATCH /api/panel/tasks/:id/model`, `/api/panel/apps/:app/model`) take a write from the panel's own origin only, so no other site's page can make one with the operator's cookie. `SpaceAPI` sends `Origin: <the Space>` on every request with a body: the app is a client of that origin holding its session, not a page of another site. The server rule is unchanged.
 
 Confirmed on this machine against a stand-in access layer (redirect to a login on another origin, a callback that sets a cookie): the sign-in-needed state, the redirect staying in the view, the native calls succeeding with the web view's cookie right after, sign-out returning to sign-in-needed.
 
@@ -114,30 +124,36 @@ Camera and microphone prompts are offered to pages on the list only. Web content
 
 On macOS 27, Command Line Tools 27.0, Swift 6.4 (language mode 5), against a scratch Space run from source with a scratch workspace, a second scratch Space as its peer and three stand-in apps:
 
-- `scripts/test.sh`: 38 tests in 8 suites pass (catalogue decoding and tolerance, reach states, languages, search, host list, navigation rule, favourites, cache, quick actions and the Space they carry, icon sources, and the catalogue loader with answers held back: signing out during a refresh, online to offline and back).
+- `scripts/test.sh`: 60 tests in 12 suites pass (the shapes of the Space's pages: tasks and their states, model and app usage, app models, events, packages, inbox, chat routes and figures; the Space's services, backups and default model, catalogue decoding and tolerance, reach states, languages, search, host list, navigation rule, screens and their store, widget blocks and number formats, cache, quick actions and the Space they carry, icon sources, and the catalogue loader with answers held back: signing out during a refresh, online to offline and back).
 - `scripts/build.sh`: debug and release Catalyst builds, no warnings.
-- Run as a Catalyst app, with window captures read back: first launch; Home with favourites seeded from the panel's home screen, apps, agents, a widget, health dots, an SVG avatar; Chinese titles and Chinese search; an app page; the panel tab; settings in Chinese; sign-in needed, signing in, signed in, signed out; an address that is not ai-space; an unreachable Space with and without a last catalogue; a peer going offline.
+- Run as a Catalyst app, with window captures read back: first launch; Home with the screens copied from the panel, the library, a second screen, widget state cards (gauge, bar trend, metric with its change), health dots, an SVG avatar; the Panel tab with the screens; Settings with a Space's peers, services and backups; the theme presets in light and dark; each of the Space's pages against a live Space (inbox, agents, tasks, model usage, app usage, events, apps and connections), and one chat turn sent and streamed back; the web panel over the tabs without the page's dock; Chinese titles and Chinese search; an app page; the panel tab; settings in Chinese; sign-in needed, signing in, signed in, signed out; an address that is not ai-space; an unreachable Space with and without a last catalogue; a peer going offline.
 - By log, with scripted clicks in the page: a link inside the app stays and enables Back; a link and a new window to another site are handed to the browser; a new window to another app of the Space loads in the view; a script redirect off the Space is treated as a sign-in; `aispace://open` finds an app by id and by bare name, and sends a link app to the browser.
 
-Not checked, because it needs the iOS SDK, a Simulator or a device: the `xcodebuild` build and the tests under Xcode, the asset-catalog app icon, safe areas and the tab bar on a real iPhone layout, the software keyboard over a page, the photo picker and camera for file inputs, downloads into the share sheet, home-screen quick actions, `aispace://` from another app, memory-pressure reloads, VoiceOver and Dynamic Type, and everything listed under Authentication.
+Not checked on a screen: the swipe between the pages, the long press on a screen and the menus it and the tiles bring up, and the sheet that rearranges a screen (gestures cannot be scripted, and what is presented over the window is not in the captures the debug build writes); their rules are tested, their drawing and feel are not.
+
+Not checked on the Space's pages, because a gesture cannot be scripted here: the pages one level in (a task with its runs, an event with its deliveries, an inbox thread, the capabilities list) and the controls that change the Space as taps (the app-model request itself was sent by hand with and without `Origin`, and undone; the inbox marks, a task's model and a connection's switches were not exercised).
+
+Device check on 2026-10-13: the Debug `xcodebuild` build, automatic development signing, installation and launch on an iPhone 15 Pro running iOS 26.6.1 passed with Xcode 27. First launch required trusting the development profile in the phone's Settings. The Foundation-only test command also passed all 60 tests.
+
+Not checked on a device: the tests under Xcode, the asset-catalog app icon's appearance, safe areas and the tab bar on a real iPhone layout, the software keyboard over a page, the photo picker and camera for file inputs, downloads into the share sheet, home-screen quick actions, `aispace://` from another app, memory-pressure reloads, VoiceOver and Dynamic Type, and everything listed under Authentication. The Simulator has not been exercised.
 
 ## What the platform could offer every client
 
-No server change was made or needed for this version; the app reads `GET /api/apps`, `/api/agents`, `/api/widgets`, `/api/peers`, `/api/panel/layout`, `/api/router` and the icon routes as they are. Things a phone runs into that are not a phone's business to solve alone:
+No server change was made or needed for this version; the app reads `GET /api/apps`, `/api/agents`, `/api/widgets`, `/api/peers`, `/api/panel/layout`, `/api/router`, the icon routes and the routes the panel's own windows read (`/api/inbox`, `/api/tasks`, `/api/model/usage`, `/api/model/calls`, `/api/usage`, `/api/model/apps`, `/api/events`, `/api/capabilities`, `/api/panel/package-catalogue`, `/api/panel/connections`, the agents' chat routes) as they are. Things a phone runs into that are not a phone's business to solve alone:
 
 - **A client session of the Space's own**, with a device list and revocation: today the only login is the access layer's cookie, and the only credential ai-space has is the operator token. This is what would make notifications, a share extension and background refresh possible, and it would serve the Mac client and any other client the same way.
 - **Push notifications** as a `notify` transport (APNs), next to the chat channels, with the inbox thread as the payload's target.
-- **Links into the panel**: an address that opens an agent's chat or an inbox thread (`/?chat=<app>/<agent>`), so a client can hand over to the web panel at the right place. Today agents on Home can only open the panel's first screen.
+- **Links into the panel**: an address that opens the terminal or the package settings, so a client can hand over to the web panel at the right place. Today those rows open the panel's first screen.
 - **A service identity route**: both clients recognise ai-space by the shape of `GET /api/panel/layout`. A small `GET /api/space` with a name and a version would be an honest check and tell a client what the server supports.
-- **Favourites that follow the workspace**: the panel's screens already do (`PUT /api/panel/layout { screens }`). The phone seeds from the home screen once and then keeps its own list; writing back is a product decision, not a missing route.
+- **A layout per device, kept by the Space**: the panel's screens follow the workspace (`PUT /api/panel/layout { screens }`) and are one layout for every browser. The phone copies them once and then keeps its own on the phone, by decision: devices are laid out differently. A named layout per client in the Space would let a phone's layout survive a reinstall.
 - **A bitmap variant of the icon routes** would spare each native client an SVG renderer; the phone draws SVG itself for now.
 
 ## Phases
 
-1. **This version**: connect, sign in through the web view, native launcher with search, favourites and honest states, app pages, the web panel, `aispace://` links and quick actions.
+1. **This version**: connect, sign in through the web view, native launcher with search, screens of its own and honest states, app pages, the Space's pages (inbox, chat, tasks, usage, app models, events, packages), the web panel, `aispace://` links and quick actions.
 2. **On a device**: the Xcode build, the checks listed above, then TestFlight for the owner's own phone.
-3. **Native inbox and chat**, reusing the Mac client's `SpaceAPI`, stream parser and inbox rules, which are already compiled into the app; notifications once the platform has a client session and a push transport.
+3. **Notifications** once the platform has a client session and a push transport; in chat, the model and permission pickers, attachments and restoring a run that was left running.
 4. **Share extension and quick add** (Todo, Notes): needs an app-side contract for "add this", which belongs in each app's manifest, and a session an extension can use.
 5. **Widgets and App Intents** on the home screen and in Shortcuts, from the Space's own widgets.
 
-A note for distribution: an app that is mostly web views risks App Store guideline 4.2. The native launcher, search, favourites, links and quick actions are the start of an answer; a personal build through TestFlight or direct install does not face that review at all.
+A note for distribution: an app that is mostly web views risks App Store guideline 4.2. The native launcher, search, screens, links and quick actions are the start of an answer; a personal build through TestFlight or direct install does not face that review at all.

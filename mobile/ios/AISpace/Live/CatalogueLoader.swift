@@ -72,6 +72,13 @@ final class CatalogueLoader: ObservableObject {
             outcome = .incompatible(String(localized: "not an ai-space response"))
         } catch CatalogueError.notASpace(let route) {
             outcome = .incompatible(String(localized: "not an ai-space response") + " (\(route))")
+        } catch where Task.isCancelled || (error as? URLError)?.code == .cancelled || error is CancellationError {
+            // The view that asked went away (a theme change makes the views again): nothing was
+            // learnt about the Space, so what is on show stays as it was.
+            guard session == self.session else { return }
+            isRefreshing = false
+            if status == .loading { Task { await refresh() } }
+            return
         } catch {
             outcome = .unreachable(error.localizedDescription)
         }

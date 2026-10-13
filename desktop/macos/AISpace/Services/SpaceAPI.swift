@@ -40,6 +40,11 @@ final class SpaceAPI {
         r.httpShouldHandleCookies = false
         if let header = Cookies.header(for: target, from: await cookies()) { r.setValue(header, forHTTPHeaderField: "Cookie") }
         if let json {
+            // A write names the origin it comes from, as the panel's page does: the routes that
+            // change the Space (src/space/auth.ts `sameOrigin`) take a write from the Space's own origin only.
+            if let origin = ConnectionRules.origin(of: target)?.absoluteString {
+                r.setValue(origin.hasSuffix("/") ? String(origin.dropLast()) : origin, forHTTPHeaderField: "Origin")
+            }
             r.setValue("application/json", forHTTPHeaderField: "Content-Type")
             r.httpBody = try? JSONSerialization.data(withJSONObject: json)
         }

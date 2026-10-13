@@ -21,6 +21,9 @@ struct Lossy<Element: Decodable>: Decodable {
     private struct Skipped: Decodable {}
 }
 
+extension Lossy: Equatable where Element: Equatable {}
+extension Lossy: Hashable where Element: Hashable {}
+
 struct CatalogApp: Decodable, Hashable {
     struct Service: Decodable, Hashable {
         var port: Int?
@@ -59,8 +62,14 @@ struct CatalogWidget: Decodable, Hashable, Identifiable {
     var icon: String?
     var link: String?
     var kind: String?
+    /// The card size the operator or the manifest chose: 1x1, 2x1, 1x2 or 2x2.
+    var size: String?
     var ok: Bool?
     var items: [Item]?
+    /// A state card instead of the list (Core/WidgetBlocks.swift); empty or absent means the list.
+    var blocks: Lossy<WidgetBlock>?
+    var asOf: String?
+    var staleAfterMs: Double?
     var error: String?
 }
 
@@ -101,7 +110,7 @@ enum Reach: Equatable {
 }
 
 /// One app, agent or widget, keyed the way the panel keys it (`app:<id>`, `agent:<id>`,
-/// `widget:<id>`, peer prefix included), so a favourite survives a title change.
+/// `widget:<id>`, peer prefix included), so a pin survives a title change.
 struct CatalogueEntry: Identifiable, Hashable {
     var kind: EntryKind
     /// The layout id: `<name>`, `<app>/<name>`, or the same behind `<peer>/`.
@@ -159,13 +168,21 @@ struct Catalogue: Equatable {
     var agents: [CatalogueEntry] = []
     var widgets: [CatalogWidget] = []
     var peers: [PeerStatus] = []
-    /// Entry keys pinned to the panel's home screen, in order; empty when the panel has no screens yet.
-    var homePins: [String] = []
+    /// The panel's screens, home first; nil while the Space has stored none (the panel seeds them on its first load).
+    var screens: [PanelScreen]?
     /// `SPACE_DOMAIN` when the Space routes app hostnames itself (docs/router.md).
     var domain: String?
     var fetchedAt = Date.distantPast
 
     var entries: [CatalogueEntry] { apps + agents + widgets.map(Self.entry) }
+
+    /// The panel's screens as a browser shows them: the stored ones, or the home screen it would seed.
+    var panelScreens: [PanelScreen] {
+        screens ?? Screens.seed(apps: apps.map(\.ref), agents: agents.map(\.ref), widgets: widgets.map(\.id))
+    }
+
+    /// Entry keys pinned to the panel's home screen, in order.
+    var homePins: [String] { panelScreens.first?.items ?? [] }
 
     func entry(_ key: String) -> CatalogueEntry? { entries.first { $0.key == key } }
 
@@ -181,8 +198,7 @@ struct Catalogue: Equatable {
     private struct WidgetsBody: Decodable { var widgets: Lossy<CatalogWidget> }
     private struct PeersBody: Decodable { var peers: Lossy<PeerStatus> }
     private struct LayoutBody: Decodable {
-        struct Layout: Decodable { var screens: Lossy<Screen>? }
-        struct Screen: Decodable { var id: String?; var items: [String]? }
+        struct Layout: Decodable { var screens: Lossy<PanelScreen>? }
         var layout: Layout
     }
     private struct RouterBody: Decodable { var domain: String? }
@@ -206,7 +222,7 @@ struct Catalogue: Equatable {
         out.agents = agentsBody.agents.elements.map { entry($0, offlinePeers: offline) }
         out.widgets = widgetsBody.widgets.elements
         if let data = payload.layout, let body = try? decoder.decode(LayoutBody.self, from: data) {
-            out.homePins = body.layout.screens?.elements.first?.items ?? []
+            out.screens = body.layout.screens?.elements
         }
         if let data = payload.router, let domain = (try? decoder.decode(RouterBody.self, from: data))?.domain, !domain.isEmpty {
             out.domain = domain.lowercased()

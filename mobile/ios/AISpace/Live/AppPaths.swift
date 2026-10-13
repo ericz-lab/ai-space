@@ -1,6 +1,6 @@
 import Foundation
 
-/// Where the app keeps its own files: saved Spaces and favourites under Application Support,
+/// Where the app keeps its own files: saved Spaces and screens under Application Support,
 /// the last catalogue under Caches. Nothing here is a Space workspace.
 enum AppPaths {
     static let bundleID = Bundle.main.bundleIdentifier ?? "dev.ai-space.ios"
@@ -33,5 +33,5 @@ enum AppPaths {
     }
 
     static var connections: URL { support.appendingPathComponent("connections.json") }
-    static var favorites: URL { support.appendingPathComponent("favorites.json") }
+    static var screens: URL { support.appendingPathComponent("screens.json") }
 }

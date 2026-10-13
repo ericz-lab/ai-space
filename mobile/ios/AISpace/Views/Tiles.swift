@@ -1,29 +1,31 @@
 import SwiftUI
 
 /// An icon or avatar from the Space: an emoji, a loaded image, or a symbol while it loads.
+/// An app's icon is a rounded square; an agent's avatar is a circle, as a person's is.
 struct EntryIcon: View {
     let icon: String?
     let fallback: String
     @ObservedObject var icons: IconStore
     var size: CGFloat = 60
+    var isRound = false
 
     var body: some View {
-        let radius = size * 0.26
+        let shape = isRound ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
         Group {
             if let emoji = Icon.emoji(icon) {
                 Text(verbatim: emoji).font(.system(size: size * 0.52))
                     .frame(width: size, height: size)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                    .background(.regularMaterial, in: shape)
             } else if let image = icons.image(icon) {
-                Image(uiImage: image).resizable().scaledToFit().frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                Image(uiImage: image).resizable().scaledToFill().frame(width: size, height: size)
+                    .clipShape(shape)
             } else {
                 Image(systemName: fallback).font(.system(size: size * 0.4)).foregroundStyle(.secondary)
                     .frame(width: size, height: size)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                    .background(.regularMaterial, in: shape)
             }
         }
-        .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.hairline))
+        .overlay(shape.stroke(Theme.hairline))
         .accessibilityHidden(true)
     }
 }
@@ -37,11 +39,13 @@ struct EntryTile: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                EntryIcon(icon: entry.icon, fallback: entry.kind == .agent ? "person.crop.circle" : "app", icons: icons)
+                EntryIcon(icon: entry.icon, fallback: entry.kind == .agent ? "person.fill" : "app", icons: icons, isRound: entry.kind == .agent)
                     .overlay(alignment: .topTrailing) { badge.offset(x: 4, y: -4) }
                     .opacity(dimmed ? 0.5 : 1)
                 Text(verbatim: entry.displayTitle())
                     .font(.caption.weight(.medium)).foregroundStyle(Theme.text)
+                    // Over drawn artwork a name gets an edge in the ground colour to stay readable.
+                    .shadow(color: Theme.current.backdrop == nil ? .clear : Theme.ground.opacity(0.9), radius: 2)
                     .multilineTextAlignment(.center).lineLimit(2)
                     .frame(maxWidth: .infinity)
                 if let note {
@@ -78,13 +82,13 @@ struct EntryTile: View {
         }
     }
 
+    /// Only what is wrong is marked: a tile without a badge is one that answers.
     @ViewBuilder private var badge: some View {
         switch entry.reach {
-        case .up: dot(Theme.success)
         case .down: dot(Theme.danger)
         case .peerOffline: symbol("wifi.slash")
         case .paused: symbol("pause.fill")
-        case .unknown, .link: EmptyView()
+        case .up, .unknown, .link: EmptyView()
         }
     }
 
@@ -99,12 +103,11 @@ struct EntryTile: View {
     }
 }
 
-/// A widget of the Space as a card: its latest rows as the Space last read them from the app.
-/// A widget drawn by the app itself (an embedded page) opens in the app's page instead.
+/// A widget of the Space as a card: its state card when the app sends blocks, its latest rows
+/// otherwise, as the Space last read them from the app. A widget drawn by the app itself (an embedded page) opens in the app's page instead.
 struct WidgetCard: View {
     let widget: CatalogWidget
     @ObservedObject var icons: IconStore
-    let isFavorite: Bool
     /// Opens a row's link, or the widget's own page for nil.
     let open: (String?) -> Void
 
@@ -116,7 +119,6 @@ struct WidgetCard: View {
                     Text(verbatim: Lang.pick(widget.title, widget.i18n, \.title)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
                     if let peer = widget.peer { Text(verbatim: peer).font(.caption).foregroundStyle(.secondary) }
                     Spacer(minLength: 0)
-                    if isFavorite { Image(systemName: "star.fill").font(.caption).foregroundStyle(Theme.warning).accessibilityLabel(Text("Favorite")) }
                     Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
@@ -136,6 +138,15 @@ struct WidgetCard: View {
                 .font(.footnote).foregroundStyle(.secondary)
         } else if widget.kind == "embed" {
             Text("Drawn by the app. Open it to see.").font(.footnote).foregroundStyle(.secondary)
+        } else if let blocks = widget.blocks?.elements, !blocks.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                WidgetBlocksView(blocks: blocks, size: widget.size, open: { open($0) })
+                if widget.stale == true {
+                    Text("Last known; its machine is offline.").font(.caption).foregroundStyle(.secondary)
+                } else if WidgetLayout.isOutdated(asOf: widget.asOf, staleAfterMs: widget.staleAfterMs), let date = widget.asOf.flatMap(Times.parse) {
+                    Text("Updated \(Times.ago(date))").font(.caption).foregroundStyle(.secondary)
+                }
+            }
         } else if let items = widget.items, !items.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(items.prefix(4).enumerated()), id: \.offset) { _, item in

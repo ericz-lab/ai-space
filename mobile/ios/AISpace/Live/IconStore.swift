@@ -103,6 +103,8 @@ final class SVGRasterizer: NSObject, WKNavigationDelegate {
         view.backgroundColor = .clear
         view.scrollView.backgroundColor = .clear
         view.scrollView.isScrollEnabled = false
+        // The view sits in the app's window, whose safe area would push the image down and out of the snapshot.
+        view.scrollView.contentInsetAdjustmentBehavior = .never
         view.isUserInteractionEnabled = false
         view.navigationDelegate = self
         return view

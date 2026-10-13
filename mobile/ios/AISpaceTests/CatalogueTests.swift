@@ -105,9 +105,15 @@ struct CatalogueTests {
     @Test func readsTheHomeScreenAndTheDomain() throws {
         let c = Fixture.catalogue
         #expect(c.homePins == ["app:todo", "builtin:inbox", "agent:space/assistant", "app:todo", "widget:todo/today", "app:gone"])
+        #expect(c.screens?.map(\.id) == ["home", "s2"])
+        #expect(c.screens?.last?.items == ["app:docs"])
         #expect(c.domain == "example.com")
         let bare = try Catalogue.decode(Fixture.payload(peers: nil, layout: "{\"ok\":true,\"layout\":{\"screens\":null}}", router: "{\"ok\":true,\"domain\":\"\"}"))
-        #expect(bare.homePins.isEmpty)
+        // A Space that has stored no screens yet shows the home screen its panel would seed.
+        #expect(bare.screens == nil)
+        #expect(bare.homePins.first == "app:docs")
+        #expect(bare.homePins.contains("builtin:inbox"))
+        #expect(bare.homePins.contains("widget:todo/today"))
         #expect(bare.domain == nil)
         #expect(bare.peers.isEmpty)
     }
@@ -167,9 +173,9 @@ struct CatalogueSearchTests {
 }
 
 struct QuickActionTests {
-    @Test func theFirstFavouriteAppsBecomeActions() {
+    @Test func theFirstAppsOfHomeBecomeActions() {
         let c = Fixture.catalogue
-        let items = QuickAction.items(favorites: ["agent:space/assistant", "app:todo", "app:gone", "app:david/voice-studio", "app:docs", "app:reader", "app:sleeper"], catalogue: c, lang: "zh")
+        let items = QuickAction.items(pins: ["agent:space/assistant", "app:todo", "app:gone", "app:david/voice-studio", "app:docs", "app:reader", "app:sleeper"], catalogue: c, lang: "zh")
         #expect(items.map(\.title) == ["待办", "语音工作室", "Bun 文档", "Reader"])
         #expect(items[1].subtitle == "david")
         #expect(items[1].url.absoluteString == "aispace://open?app=david/voice-studio")
@@ -180,7 +186,7 @@ struct QuickActionTests {
 
     @Test func anActionNamesTheSpaceItWasMadeFor() throws {
         let space = UUID()
-        let action = try #require(QuickAction.items(favorites: ["app:todo"], catalogue: Fixture.catalogue).first)
+        let action = try #require(QuickAction.items(pins: ["app:todo"], catalogue: Fixture.catalogue).first)
         // Two Spaces may each have a "todo"; the shortcut item says which one it opens.
         let info = action.userInfo(space: space)
         #expect(QuickAction.target(userInfo: info) == QuickAction.Target(url: action.url, space: space))

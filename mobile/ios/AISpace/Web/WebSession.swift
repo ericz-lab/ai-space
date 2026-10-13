@@ -54,6 +54,14 @@ final class WebSession: NSObject, ObservableObject {
         config.websiteDataStore = dataStore
         config.applicationNameForUserAgent = "AISpaceMobile/\(Bundle.main.shortVersion)"
         config.allowsInlineMediaPlayback = true
+        if home == nil {
+            // The panel page has its own ways between its screens (src/web/ScreenNav.tsx). The app
+            // has its own screens and tab bar, so they are left out. A newer Space leaves them out
+            // itself, by the user agent; this covers one that does not yet.
+            let css = ".dock,.edge,.screens-hint{display:none!important}"
+            let script = "const s=document.createElement('style');s.textContent='\(css)';document.documentElement.appendChild(s);"
+            config.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        }
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
         webView.navigationDelegate = self
