@@ -1,1 +1,9 @@
 /* English strings are the keys themselves; see zh-Hans.lproj for the translations. */
+
+/* App browser */
+"Return to Space" = "Return to Space";
+"Dismiss page controls" = "Dismiss page controls";
+"Expanded" = "Expanded";
+"Collapsed" = "Collapsed";
+"Close Tab" = "Close Tab";
+"Open Tabs" = "Open Tabs";

@@ -95,8 +95,8 @@ struct MainTabs: View {
                 ScreenEditor(model: model, connection: connection, loader: loader, icons: icons, store: screens, screen: id)
             }
         }
-        .fullScreenCover(item: $model.page) { page in
-            AppPageView(model: model, page: page, session: page.session, screens: model.screens, handle: model.pageHandle)
+        .fullScreenCover(isPresented: Binding(get: { model.page != nil }, set: { if !$0 { model.page = nil } })) {
+            AppBrowserView(model: model)
         }
         // A second cover needs a view of its own to hang from.
         .background {

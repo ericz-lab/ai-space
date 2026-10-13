@@ -30,6 +30,27 @@ final class WebSession: NSObject, ObservableObject {
             onStateChange?(state)
         }
     }
+    @Published private(set) var controlsHidden = false
+    private var controlGesture = BrowserControlGesture()
+
+    func showControls() {
+        controlsHidden = false
+        controlGesture = BrowserControlGesture()
+    }
+
+    @objc private func trackReadingGesture(_ gesture: UIPanGestureRecognizer) {
+        let translation = gesture.translation(in: webView)
+        switch gesture.state {
+        case .began:
+            controlGesture = BrowserControlGesture()
+        case .changed:
+            if let hidden = controlGesture.update(x: translation.x, y: translation.y) {
+                controlsHidden = hidden
+            }
+        default: break
+        }
+    }
+
     @Published private(set) var isLoading = false
     @Published private(set) var progress: Double = 0
     @Published private(set) var canGoBack = false
@@ -66,6 +87,13 @@ final class WebSession: NSObject, ObservableObject {
         super.init()
         webView.navigationDelegate = self
         webView.uiDelegate = self
+        // Observe vertical drags in the page, including nested scrolling regions, without
+        // cancelling WebKit's gestures, link taps, selection, or horizontal back swipes.
+        let readingGesture = UIPanGestureRecognizer(target: self, action: #selector(trackReadingGesture(_:)))
+        readingGesture.maximumNumberOfTouches = 1
+        readingGesture.cancelsTouchesInView = false
+        readingGesture.delegate = self
+        webView.addGestureRecognizer(readingGesture)
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = false
         webView.scrollView.keyboardDismissMode = .interactive
@@ -188,6 +216,7 @@ extension WebSession: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
+        showControls()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -350,4 +379,27 @@ final class WebCookieSession: NSObject, WKNavigationDelegate {
         finish()
         ready = false
     }
+}
+
+/// Direction reversal must travel far enough to avoid flickering on small finger movements.
+struct BrowserControlGesture {
+    private var previousY: CGFloat = 0
+    private var distance: CGFloat = 0
+
+    mutating func update(x: CGFloat, y: CGFloat) -> Bool? {
+        let delta = y - previousY
+        previousY = y
+        guard abs(y) > abs(x) else { distance = 0; return nil }
+        if delta * distance < 0 { distance = 0 }
+        distance += delta
+        guard abs(distance) >= 24 else { return nil }
+        let hidden = distance < 0
+        distance = 0
+        return hidden
+    }
+}
+
+extension WebSession: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
 }

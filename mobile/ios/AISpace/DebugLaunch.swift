@@ -18,6 +18,7 @@ import WebKit
 ///   AISPACE_SCREEN_MENU 1 opens the actions a long press on a screen brings up
 ///   AISPACE_SIGN_OUT   1 signs the selected Space out after the screen is up
 ///   AISPACE_LOG_EXTERNAL 1 logs the addresses that would go to Safari instead of opening them
+///   AISPACE_APP_MENU   1 expands the app browser menu for layout checks
 ///   AISPACE_PAGE_JS    a script to run in the open app page three seconds after launch
 ///   AISPACE_STYLE      light | dark, whatever the system uses
 ///   AISPACE_THEME      a theme's id, for this launch only

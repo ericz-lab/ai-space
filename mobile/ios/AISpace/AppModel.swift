@@ -72,8 +72,8 @@ final class AppModel: ObservableObject {
     @Published var confirmingDeleteScreen = false
     @Published var confirmingResetScreens = false
     @Published var page: OpenPage?
-    /// Where the open page's handle rests; kept for the session so it stays where it was put.
-    let pageHandle = PageHandle()
+    /// Retained web pages, isolated by Space; returning home does not close a tab.
+    @Published private(set) var appTabs: [OpenPage] = []
     @Published var showingAdd = false
     @Published var confirmingSignOut = false
     /// Set when the web panel was opened to sign in, so a finished sign-in closes it again.
@@ -93,15 +93,15 @@ final class AppModel: ObservableObject {
     private var cookieSessions: [UUID: WebCookieSession] = [:]
     private var watchers: Set<AnyCancellable> = []
 
-    init() {
-        store = ConnectionStore(fileURL: AppPaths.connections)
+    init(store: ConnectionStore? = nil, screens: ScreenStore? = nil) {
+        self.store = store ?? ConnectionStore(fileURL: AppPaths.connections)
         Theme.current = ThemePreset.named(UserDefaults.standard.string(forKey: "theme") ?? "")
-        screens = ScreenStore(fileURL: AppPaths.screens)
+        self.screens = screens ?? ScreenStore(fileURL: AppPaths.screens)
         // Downloads are handed to the share sheet and not kept: what an earlier launch left goes.
         try? FileManager.default.removeItem(at: AppPaths.downloads)
-        selectedID = store.defaultConnection?.id
-        store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
-        screens.objectWillChange.sink { [weak self] in
+        selectedID = self.store.defaultConnection?.id
+        self.store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
+        self.screens.objectWillChange.sink { [weak self] in
             self?.objectWillChange.send()
             DispatchQueue.main.async { self?.publishQuickActions() }
         }.store(in: &watchers)
@@ -212,6 +212,7 @@ final class AppModel: ObservableObject {
 
     func select(_ id: UUID) {
         guard store.connection(id) != nil else { return }
+        page = nil
         selectedID = id
         query = ""
         homePage = Screens.home
@@ -281,7 +282,7 @@ final class AppModel: ObservableObject {
         let data = dataStore(connection.id)
         icons[connection.id]?.clear()
         try? FileManager.default.removeItem(at: AppPaths.icons(connection.id))
-        if page?.connection == connection.id { page = nil }
+        discardTabs(for: connection.id)
         panels[connection.id]?.stop()
         panels[connection.id] = nil
         let loader = loaders[connection.id]
@@ -327,7 +328,7 @@ final class AppModel: ObservableObject {
     }
 
     private func discard(_ id: UUID) {
-        if page?.connection == id { page = nil }
+        discardTabs(for: id)
         panels[id]?.stop()
         panels[id] = nil
         loaders[id]?.forget()
@@ -368,6 +369,12 @@ final class AppModel: ObservableObject {
             openInBrowser(url)
             return
         }
+        if let existing = appTabs.first(where: {
+            $0.connection == connection.id && $0.key == key && $0.session.home == url
+        }) {
+            showTab(existing.id)
+            return
+        }
         let session = WebSession(space: connection.url, home: url, dataStore: dataStore(connection.id)) { [weak self] in
             self?.hosts(for: connection) ?? SpaceHosts(space: connection.url)
         }
@@ -377,7 +384,38 @@ final class AppModel: ObservableObject {
             guard state == .ready, let loader = self?.loaders[connection.id], loader.status != .ok else { return }
             Task { await loader.refresh() }
         }
-        page = OpenPage(key: key, title: title, connection: connection.id, session: session)
+        let opened = OpenPage(key: key, title: title, connection: connection.id, session: session)
+        appTabs.append(opened)
+        page = opened
+    }
+
+    func returnToSpace() {
+        page = nil
+        tab = .home
+    }
+
+    func showTab(_ id: UUID) {
+        guard let next = appTabs.first(where: { $0.id == id && $0.connection == selected?.id }) else { return }
+        next.session.showControls()
+        next.session.recoverIfFailed()
+        page = next
+    }
+
+    func closeTab(_ id: UUID) {
+        guard let index = appTabs.firstIndex(where: { $0.id == id }) else { return }
+        let closed = appTabs.remove(at: index)
+        closed.session.stop()
+        if page?.id == id {
+            let remaining = appTabs.filter { $0.connection == closed.connection }
+            page = remaining.last
+            page?.session.showControls()
+        }
+    }
+
+    private func discardTabs(for connection: UUID) {
+        if page?.connection == connection { page = nil }
+        appTabs.filter { $0.connection == connection }.forEach { $0.session.stop() }
+        appTabs.removeAll { $0.connection == connection }
     }
 
     func handle(_ url: URL) {

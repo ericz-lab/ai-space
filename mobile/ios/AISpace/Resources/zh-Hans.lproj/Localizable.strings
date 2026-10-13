@@ -287,3 +287,11 @@
 "Thinking (%@)…" = "思考中（%@）…";
 "Running %@…" = "正在运行 %@…";
 "due now" = "即将运行";
+
+/* App browser */
+"Return to Space" = "回到 Space";
+"Dismiss page controls" = "收起页面菜单";
+"Expanded" = "已展开";
+"Collapsed" = "已收起";
+"Close Tab" = "关闭标签页";
+"Open Tabs" = "已打开的应用";

@@ -364,4 +364,68 @@ struct IconCacheTests {
         #expect(reopened.image("/icon.svg") == nil)
     }
 }
+@MainActor
+struct AppBrowserTests {
+    @Test func verticalGesturesHaveThresholdsAndIgnoreHorizontalNavigation() {
+        var gesture = BrowserControlGesture()
+        #expect(gesture.update(x: 1, y: -10) == nil)
+        #expect(gesture.update(x: 2, y: -25) == true)
+        #expect(gesture.update(x: 2, y: -22) == nil)
+        #expect(gesture.update(x: 2, y: -23) == nil)
+        #expect(gesture.update(x: 1, y: 4) == false)
+        gesture = BrowserControlGesture()
+        #expect(gesture.update(x: 90, y: -30) == nil)
+        #expect(gesture.update(x: 150, y: -60) == nil)
+        gesture = BrowserControlGesture()
+        #expect(gesture.update(x: 0, y: 30) == false)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func tabsRetainPagesAndStayIsolatedUntilExplicitlyClosed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ConnectionStore(fileURL: directory.appendingPathComponent("connections.json"))
+        let first = store.add(name: "First", url: URL(string: "https://first.example.com")!)
+        let second = store.add(name: "Second", url: URL(string: "https://second.example.com")!)
+        let model = AppModel(store: store, screens: ScreenStore(fileURL: directory.appendingPathComponent("screens.json")))
+        defer {
+            WKWebsiteDataStore.remove(forIdentifier: first.id) { _ in }
+            WKWebsiteDataStore.remove(forIdentifier: second.id) { _ in }
+        }
+        let url = first.url.appendingPathComponent("reader")
+        model.open(url, title: "Reader", key: "reader", in: first)
+        let reader = try #require(model.page)
+        reader.session.webView.loadHTMLString("<body style='height:4000px'><input id='draft' value='unsent'></body>", baseURL: first.url)
+        for _ in 0..<100 {
+            if (try? await reader.session.webView.evaluateJavaScript("document.getElementById('draft').value")) as? String == "unsent" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        model.returnToSpace()
+        #expect(model.page == nil)
+        model.open(url, title: "Reader", key: "reader", in: first)
+        #expect(model.page?.id == reader.id)
+        #expect(model.page?.session === reader.session)
+        #expect(try await reader.session.webView.evaluateJavaScript("document.getElementById('draft').value") as? String == "unsent")
+        model.open(first.url.appendingPathComponent("notes"), title: "Notes", in: first)
+        let notes = try #require(model.page)
+        model.showTab(reader.id)
+        #expect(model.page?.id == reader.id)
+        model.closeTab(reader.id)
+        #expect(model.page?.id == notes.id)
+        model.select(second.id)
+        #expect(model.page == nil)
+        model.showTab(notes.id)
+        #expect(model.page == nil, "Another Space's tab must not be selectable")
+        model.open(second.url.appendingPathComponent("notes"), title: "Notes", in: second)
+        let other = try #require(model.page)
+        #expect(other.session.webView.configuration.websiteDataStore.identifier != notes.session.webView.configuration.websiteDataStore.identifier)
+        model.signOut(first)
+        #expect(model.appTabs.map(\.id) == [other.id])
+        model.closeTab(other.id)
+        #expect(model.page == nil && model.appTabs.isEmpty)
+        model.open(second.url.appendingPathComponent("notes"), title: "Notes", in: second)
+        #expect(model.page?.id != other.id, "An explicitly closed tab gets a new session")
+        model.remove(second.id)
+        #expect(model.appTabs.isEmpty && model.page == nil)
+    }
+}
 #endif
