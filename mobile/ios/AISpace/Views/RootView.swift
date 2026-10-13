@@ -34,6 +34,22 @@ struct MainTabs: View {
     let connection: Connection
     @ObservedObject var screens: ScreenStore
 
+    @ViewBuilder private var statusGlass: some View {
+        if #available(iOS 26.0, *) {
+            // Keep the glass edge highlights outside the status area; only its untinted
+            // interior is visible, without a framed panel around the system icons.
+            GeometryReader { bounds in
+                Color.clear
+                    .frame(width: bounds.size.width + 128, height: bounds.size.height + 128)
+                    .glassEffect(.clear.tint(nil), in: Rectangle())
+                    .offset(x: -64, y: -64)
+            }
+            .clipped()
+        } else {
+            Rectangle().fill(.ultraThinMaterial)
+        }
+    }
+
     var body: some View {
         let loader = model.loader(for: connection)
         let icons = model.icons(for: connection)
@@ -65,7 +81,7 @@ struct MainTabs: View {
             .scrollIndicators(.hidden)
             .scrollPosition(id: Binding<String?>(get: { model.pagerID }, set: { if let id = $0, id != model.pagerID { model.pagerID = id } }))
             .overlay(alignment: .top) {
-                Rectangle().fill(.regularMaterial)
+                statusGlass
                     .frame(height: viewport.safeAreaInsets.top)
                     .offset(y: -viewport.safeAreaInsets.top)
                     .allowsHitTesting(false)

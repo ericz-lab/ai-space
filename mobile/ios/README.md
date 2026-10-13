@@ -210,5 +210,6 @@ results and an empty result list on a phone.
 
 For a repeatable scrolled layout screenshot, launch a debug build with `AISPACE_SCROLL_Y=500`.
 
-The status-bar safe area has a noninteractive regular-material blur over the scrolling content.
+The status-bar safe area uses noninteractive, untinted clear glass on iOS 26 and later, with
+an ultra-thin material fallback on older systems. It has no additional background fill.
 The floating dock shows icons only; localized accessibility labels and selected-state traits remain.
