@@ -1,10 +1,18 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { streamCodex } from "./codex-stream.ts";
+import { createCodexCli } from "./codex-cli.ts";
 import { parseRuntimesYaml } from "./config.ts";
 import type { CompleteInput } from "./types.ts";
 const input: CompleteInput = { model: "fake", system: "custom system", prompt: "hi", tools: [], mode: "slim", tag: "test", timeoutMs: 2000, maxTokens: 100 };
 const bin = (mode: string) => [process.execPath, join(import.meta.dir, "testing-codex-stream.ts"), mode];
+
+test("omitted completion mode streams through the default slim adapter", async () => {
+  const runtime = createCodexCli({ name: "codex", kind: "codex-cli", bin: bin("ok"), streamCompletions: true });
+  const chunks: string[] = [];
+  expect(await runtime.complete({ ...input, mode: undefined }, undefined, text => chunks.push(text))).toMatchObject({ ok: true, text: "hello world" });
+  expect(chunks).toEqual(["hello ", "world"]);
+});
 
 test("app-server emits real deltas, isolates the thread and preserves usage", async () => {
   const chunks: string[] = []; let settled = false;

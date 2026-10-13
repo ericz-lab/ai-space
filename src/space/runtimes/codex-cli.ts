@@ -27,7 +27,7 @@ export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
     capabilities: { complete: true, agent: true, chat: true, image: true },
     async complete(input, signal, onDelta) {
       assertCompletionMode(input);
-      if (spec.streamCompletions && onDelta && !host && input.mode === "slim" && !input.tools.length && !input.files?.length) return streamCodex(bin, input, signal, onDelta);
+      if (spec.streamCompletions && onDelta && !host && input.mode !== "full" && !input.tools.length && !input.files?.length) return streamCodex(bin, input, signal, onDelta);
       const unsupported = input.tools.filter((tool) => tool !== "WebSearch" && tool !== "WebFetch");
       if (unsupported.length) return { ok: false, error: `codex-cli completions support only WebSearch and WebFetch tool lists; unsupported: ${unsupported.join(", ")}`, backend };
       if (signal?.aborted) return { ok: false, error: "aborted", backend };
