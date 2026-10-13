@@ -97,6 +97,24 @@ struct CatalogueLoaderTests {
         #expect(!l.isRefreshing)
     }
 
+    @Test func signingOutAfterRefreshDrainsTheQueuedCacheWrite() async {
+        let l = loader()
+        await l.refresh()
+        l.forget()
+        #expect(cache.load(connection.id) == nil)
+        #expect(loader().catalogue == nil)
+    }
+
+    @Test func queuedRefreshesPersistTheLatestPayload() async {
+        var first = CataloguePayload(apps: Data(Fixture.apps.utf8), agents: Data(Fixture.agents.utf8),
+                                     widgets: Data(Fixture.widgets.utf8), fetchedAt: Date(timeIntervalSince1970: 1))
+        cache.saveInBackground(first, connection.id)
+        first.fetchedAt = Date(timeIntervalSince1970: 2)
+        cache.saveInBackground(first, connection.id)
+        #expect(cache.load(connection.id) == first)
+        cache.remove(connection.id)
+    }
+
     @Test func aFailureThatArrivesAfterSigningOutIsDroppedToo() async {
         let l = loader()
         space.answer = .offline

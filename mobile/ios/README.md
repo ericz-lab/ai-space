@@ -156,6 +156,10 @@ an in-flight request. Cache invalidation still clears visible icons on sign-out.
 checks, use a Release build so Swift compiler optimizations are enabled; Simulator screenshots and
 unit tests do not establish real-device frame rates.
 
+Catalogue refresh decodes widget data off the main actor and queues cache encoding/writes on a
+serial background queue. Sign-out drains queued writes before removing the cache. Unchanged
+status flags do not notify the launcher again, and the refresh guard is not view-observed.
+
 ### Safe-area regression checks
 
 The launcher measures each page inside the system safe area and lets scrolling content draw behind the frosted status area. One shared backdrop extends behind the status bar, Home search area, Panel and Settings. A single stationary glass layer covers only the status safe area, outside the horizontal pager; it does not overlap the search capsule or move with adjacent pages. Search uses untinted regular glass to diffuse moving labels instead of magnifying them through clear glass. The search field and initial content positions respect the safe area; Home has no peer-status strip. There is no bottom dock or reserved dock space; horizontal swipes switch Home, Panel screens, and Settings. Insets come from the current view, not a device model or a fixed notch height.

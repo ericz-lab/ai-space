@@ -21,7 +21,7 @@ final class CatalogueLoader: ObservableObject {
     /// True while the catalogue on show is not the latest refresh's answer: the saved one of an
     /// earlier launch, or this launch's while the Space has stopped answering since.
     @Published private(set) var isLastKnown = false
-    @Published private(set) var isRefreshing = false
+    private(set) var isRefreshing = false
     var onCatalogue: (Catalogue) -> Void = { _ in }
 
     private let cache: CatalogueCache
@@ -59,9 +59,13 @@ final class CatalogueLoader: ObservableObject {
             async let router = try? fetch("/api/router")
             let payload = CataloguePayload(apps: try await apps, agents: try await agents, widgets: try await widgets,
                                            peers: await peers, layout: await layout, router: await router, fetchedAt: Date())
-            let fresh = try Catalogue.decode(payload)
+            // Parsing widget blocks can be substantial; do not inherit this loader's main actor.
+            let fresh = try await Task.detached(priority: .userInitiated) {
+                try Catalogue.decode(payload)
+            }.value
+            try Task.checkCancellation()
             guard session == self.session else { return }
-            cache.save(payload, connection.id)
+            cache.saveInBackground(payload, connection.id)
             catalogue = fresh
             outcome = .ok
         } catch SpaceAPIError.authenticationRequired {
@@ -84,8 +88,9 @@ final class CatalogueLoader: ObservableObject {
         }
         guard session == self.session else { return }
         isRefreshing = false
-        status = outcome
-        isLastKnown = outcome != .ok && catalogue != nil
+        if status != outcome { status = outcome }
+        let lastKnown = outcome != .ok && catalogue != nil
+        if isLastKnown != lastKnown { isLastKnown = lastKnown }
         if outcome == .ok, let catalogue { onCatalogue(catalogue) }
         #if DEBUG
         NSLog("ai-space: catalogue %@ %@ apps=%d agents=%d widgets=%d", connection.name, String(describing: status),
