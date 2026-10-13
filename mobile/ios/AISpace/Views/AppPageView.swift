@@ -33,7 +33,10 @@ struct AppPageView: View {
             }
             ZStack {
                 Color(uiColor: session.pageBackground)
+                // The page runs to the screen's bottom edge; WebKit keeps the end of the page
+                // and its fixed bars above the home indicator.
                 WebContainer(session: session)
+                    .ignoresSafeArea(.container, edges: .bottom)
                     .opacity(session.state.isFailure ? 0 : 1)
                 WebFailure(session: session)
             }
