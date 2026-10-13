@@ -13,6 +13,9 @@ await pumpLines(Bun.stdin.stream(), line => {
     send({ id: m.id, result: { thread: { id: "test-thread" } } });
   }
   if (m.method === "turn/start") {
+    if ((mode === "priority" && m.params.serviceTier !== "priority") || (mode === "ok" && "serviceTier" in m.params)) {
+      send({ id: m.id, error: { message: "unexpected service tier" } }); return;
+    }
     if (mode === "hang") return;
     if (mode === "tool") { send({ id: 99, method: "item/commandExecution/requestApproval", params: {} }); return; }
     send({ method: "item/agentMessage/delta", params: { threadId: "test-thread", delta: "hello " } });

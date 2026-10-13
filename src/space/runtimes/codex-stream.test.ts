@@ -3,9 +3,18 @@ import { join } from "node:path";
 import { streamCodex } from "./codex-stream.ts";
 import { createCodexCli } from "./codex-cli.ts";
 import { parseRuntimesYaml } from "./config.ts";
+import { parseRunInput } from "../model/spec.ts";
 import type { CompleteInput } from "./types.ts";
 const input: CompleteInput = { model: "fake", system: "custom system", prompt: "hi", tools: [], mode: "slim", tag: "test", timeoutMs: 2000, maxTokens: 100 };
 const bin = (mode: string) => [process.execPath, join(import.meta.dir, "testing-codex-stream.ts"), mode];
+
+test("priority is explicit per request and cannot silently fall back to exec", async () => {
+  const request = parseRunInput({ ...input, serviceTier: "priority" });
+  expect(await streamCodex(bin("priority"), request, undefined, () => {})).toMatchObject({ ok: true });
+  expect(() => parseRunInput({ ...input, serviceTier: "fast" })).toThrow("serviceTier");
+  const runtime = createCodexCli({ name: "codex", kind: "codex-cli", bin: bin("ok") });
+  expect(await runtime.complete(request, undefined, () => {})).toMatchObject({ ok: false });
+});
 
 test("omitted completion mode streams through the default slim adapter", async () => {
   const runtime = createCodexCli({ name: "codex", kind: "codex-cli", bin: bin("ok"), streamCompletions: true });

@@ -75,7 +75,7 @@ export async function streamCodex(bin: string[], input: CompleteInput, signal: A
             if (m.id === 2) {
               thread = m.result?.thread?.id;
               if (!thread) throw new Error("Missing Codex thread id");
-              send(3, "turn/start", { threadId: thread, input: [{ type: "text", text: input.prompt }], effort: "low" });
+              send(3, "turn/start", { threadId: thread, input: [{ type: "text", text: input.prompt }], effort: "low", ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}) });
             }
             if (p.threadId && p.threadId !== thread) continue;
             if (m.method === "item/started" && !["userMessage", "agentMessage", "reasoning"].includes(p.item?.type)) throw new Error("Unexpected tool item in isolated completion");
