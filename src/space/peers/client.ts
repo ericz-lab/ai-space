@@ -180,7 +180,8 @@ export class PeerClient {
     const ct = req.headers.get("content-type");
     if (ct) headers["content-type"] = ct;
     const init: RequestInit = { method: req.method, headers, signal: opts.timeoutMs ? AbortSignal.any([req.signal, AbortSignal.timeout(opts.timeoutMs)]) : req.signal };
-    if (req.method !== "GET" && req.method !== "HEAD") init.body = await req.text();
+    // Bytes, not text: a forwarded call may carry a recording or an image, and decoding one as UTF-8 destroys it.
+    if (req.method !== "GET" && req.method !== "HEAD") init.body = await req.arrayBuffer();
     const up = await this.fetch(this.config.url + path, init);
     // A chat turn's run id rides along, so the browser can reattach to it or stop it on the peer.
     const runId = up.headers.get("x-run-id");

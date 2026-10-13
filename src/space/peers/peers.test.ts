@@ -137,7 +137,12 @@ widgets:
     store: new BusStore(":memory:"),
     events: peerEvents,
     servicePort: (app) => (app === "media" ? 8731 : undefined),
-    fetch: async (url, init) => Response.json({ echo: new Headers(init.headers).get("x-space-caller"), url }),
+    // A binary body is answered with the bytes that arrived, so a test can tell whether they survived the way here.
+    fetch: async (url, init) => {
+      const headers = new Headers(init.headers);
+      const bytes = headers.get("content-type") === "application/octet-stream" && init.body instanceof ArrayBuffer ? [...new Uint8Array(init.body)] : undefined;
+      return Response.json({ echo: headers.get("x-space-caller"), url, ...(bytes ? { bytes } : {}) });
+    },
     log: () => {},
   });
   peerBus.syncApp("media", { events: { publishes: [{ name: "clip.added" }], consumes: [] }, provides: [{ name: "clip", method: "POST", path: "/api/clip", timeoutMs: 5000 }] });
@@ -503,6 +508,10 @@ describe("bus over peers", () => {
     expect(r.headers.get("x-space-call-peer")).toBe("david");
     expect(await r.json()).toEqual({ echo: "hub-box/space", url: "http://127.0.0.1:8731/api/clip" });
     expect((await fetch(`${hub}/api/call/david/media/clip`, { method: "POST" })).status).toBe(200);
+    // A body that is not text (a recording, an image) reaches the peer's app byte for byte.
+    const bytes = [0x1a, 0x45, 0xdf, 0xa3, 0x00, 0xff, 0xfe, 0x80, 0xc3, 0x28];
+    const binary = await fetch(`${hub}/api/call/media/clip`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: new Uint8Array(bytes) });
+    expect(((await binary.json()) as Body).bytes).toEqual(bytes);
     expect((await get(hub, "/api/call/nowhere/media/clip", { method: "POST" })).status).toBe(404);
     expect((await get(hub, "/api/call/media/nope", { method: "POST" })).status).toBe(404);
     expect((await get(peerBase, "/api/peer/call/media/clip", { method: "POST", headers: { authorization: "Bearer s3cret" } })).status).toBe(400);
