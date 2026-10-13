@@ -29,7 +29,7 @@ struct AppPageView: View {
                 SignInBar(host: host)
             }
             ZStack {
-                Theme.ground
+                Color(uiColor: session.pageBackground)
                 WebContainer(session: session)
                     .opacity(session.state.isFailure ? 0 : 1)
                 WebFailure(session: session)
@@ -80,7 +80,7 @@ struct AppPageView: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: controlsVisible)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: menuOpen)
-        .background(Theme.ground.ignoresSafeArea())
+        .background(Color(uiColor: session.pageBackground).ignoresSafeArea())
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .modifier(DownloadOutcome(session: session))
         .onAppear {

@@ -428,4 +428,41 @@ struct AppBrowserTests {
         #expect(model.appTabs.isEmpty && model.page == nil)
     }
 }
+@MainActor
+struct AppPageBackgroundTests {
+    @Test(.timeLimit(.minutes(1))) func followsPageCSSAndNavigationWithoutChangingTheWebsiteTheme() async throws {
+        let url = URL(string: "https://background.example.com")!
+        let session = WebSession(space: url, home: url, dataStore: .nonPersistent(), hosts: { SpaceHosts(space: url) })
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(session.webView)
+        session.webView.frame = controller.view.bounds
+        window.isHidden = false
+        defer { window.isHidden = true; session.webView.removeFromSuperview() }
+
+        func matches(_ color: UIColor, _ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> Bool {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            guard color.getRed(&r, green: &g, blue: &b, alpha: &a) else { return false }
+            return abs(r - red / 255) < 0.01 && abs(g - green / 255) < 0.01 && abs(b - blue / 255) < 0.01 && a > 0.99
+        }
+        func waitForColor(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) async throws {
+            for _ in 0..<150 {
+                if matches(session.pageBackground, red, green, blue) { return }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(matches(session.pageBackground, red, green, blue), "Native safe areas must match the rendered page background")
+        }
+
+        session.webView.loadHTMLString("<style>html,body{margin:0;min-height:100%;background:rgb(242,245,249)}</style><body>Light</body>", baseURL: url)
+        try await waitForColor(242, 245, 249)
+        let originalScheme = try await session.webView.evaluateJavaScript("matchMedia('(prefers-color-scheme: dark)').matches") as? Bool
+        _ = try await session.webView.evaluateJavaScript("document.documentElement.style.background='rgb(12,15,19)';document.body.style.background='rgb(12,15,19)'")
+        try await waitForColor(12, 15, 19)
+        #expect(try await session.webView.evaluateJavaScript("matchMedia('(prefers-color-scheme: dark)').matches") as? Bool == originalScheme)
+        session.webView.loadHTMLString("<style>html{background:rgb(210,230,240)}body{background:transparent}</style><body>Next page</body>", baseURL: url)
+        try await waitForColor(210, 230, 240)
+    }
+}
 #endif

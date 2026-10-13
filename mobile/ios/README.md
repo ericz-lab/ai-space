@@ -188,7 +188,7 @@ A note for distribution: an app that is mostly web views risks App Store guideli
 
 ### App browser checks
 
-The Simulator suite passes 66 tests. The expanded browser menu and bottom buttons were
+The Simulator suite passes 67 tests. The expanded browser menu and bottom buttons were
 visually checked on iPhone 16 Pro (iOS 27) against News Radar. The iOS tests cover retained WebView identity and form state after reopening, tab switching,
 closing and recreating a tab, Space isolation, sign-out/removal cleanup, and gesture thresholds.
 On a phone, open two apps and use More to switch between their tabs. Return Home and reopen
@@ -196,3 +196,14 @@ an app, then verify its scroll position and draft text remain. Swipe up to hide 
 buttons and down to reveal them, also inside nested scrolling lists. Check the expanded menu,
 landscape, keyboard, VoiceOver, and Reduce Motion. WebKit may reload a page under memory pressure;
 retaining a tab does not prevent iOS from reclaiming its web content process.
+
+App-page safe areas use WebKit's observed `underPageBackgroundColor`, derived from the
+page's HTML/body backgrounds. They follow CSS theme changes and navigation without changing
+`prefers-color-scheme`, injecting JavaScript, or moving content into the system safe areas.
+The Space launcher keeps its own theme. Background tests cover light and dark CSS changes,
+transparent bodies over an HTML background, and navigation to a differently colored page.
+
+The Home search field dismisses its keyboard on submit, a tap in the catalogue, a scroll,
+or leaving Home/opening another page. Dismissing does not clear the query; the Clear button
+keeps the field available for continued typing. Check these gestures with both matching
+results and an empty result list on a phone.

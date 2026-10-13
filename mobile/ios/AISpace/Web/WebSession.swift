@@ -30,6 +30,9 @@ final class WebSession: NSObject, ObservableObject {
             onStateChange?(state)
         }
     }
+    /// WebKit derives this from the page's HTML/body backgrounds and updates it when CSS
+    /// changes. Observe it without overriding it, so the website remains in charge.
+    @Published private(set) var pageBackground: UIColor = .systemBackground
     @Published private(set) var controlsHidden = false
     private var controlGesture = BrowserControlGesture()
 
@@ -97,8 +100,13 @@ final class WebSession: NSObject, ObservableObject {
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = false
         webView.scrollView.keyboardDismissMode = .interactive
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
+        // Leave app views opaque with WebKit's automatic background. A custom UIView
+        // background overrides the page-derived color, even when observing WebKit's value.
+        webView.isOpaque = home != nil
+        if home == nil { webView.backgroundColor = .clear }
+        webView.publisher(for: \.underPageBackgroundColor).sink { [weak self] color in
+            self?.pageBackground = color ?? .systemBackground
+        }.store(in: &watchers)
         #if DEBUG
         webView.isInspectable = true
         #endif

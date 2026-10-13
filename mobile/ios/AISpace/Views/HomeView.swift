@@ -14,6 +14,7 @@ struct HomeView: View {
     @ObservedObject var store: ScreenStore
     /// The screen to show, by id; nil for the library.
     var screenID: String?
+    @FocusState private var searchFocused: Bool
 
     private var screens: [PanelScreen] { store.screens(connection.id) }
 
@@ -33,9 +34,14 @@ struct HomeView: View {
                 page { if let catalogue = loader.catalogue { library(catalogue) } }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                SearchField(model: model)
+                SearchField(model: model, focused: $searchFocused)
                     .padding(.vertical, 8)
             }
+            .onChange(of: model.pagerID) { _, _ in searchFocused = false }
+            .onChange(of: model.page?.id) { _, _ in searchFocused = false }
+            .onChange(of: model.hubPage) { _, _ in searchFocused = false }
+            .onChange(of: model.showingWebPanel) { _, _ in searchFocused = false }
+            .onDisappear { searchFocused = false }
         }
     }
 
@@ -61,6 +67,10 @@ struct HomeView: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.immediately)
+            .contentShape(Rectangle())
+            // Keep tile taps and scrolling intact while an outside tap ends the search edit.
+            .simultaneousGesture(TapGesture().onEnded { searchFocused = false })
             .refreshable { await loader.refresh() }
         }
     }
@@ -187,12 +197,15 @@ struct HomeView: View {
 /// The library's search: one field over apps, agents and widgets.
 struct SearchField: View {
     @ObservedObject var model: AppModel
+    var focused: FocusState<Bool>.Binding
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
             TextField(text: $model.query, prompt: Text("Search apps, agents and widgets")) { Text("Search") }
                 .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
+                .focused(focused)
+                .onSubmit { focused.wrappedValue = false }
             if !model.query.isEmpty {
                 Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                     .buttonStyle(.plain)
