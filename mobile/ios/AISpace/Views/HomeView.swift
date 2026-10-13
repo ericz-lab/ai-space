@@ -33,12 +33,8 @@ struct HomeView: View {
                 page { if let catalogue = loader.catalogue { library(catalogue) } }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: 8) {
-                    PageHeader(model: model, connection: connection, title: Text(verbatim: connection.name))
-                    SearchField(model: model)
-                }
-                .padding(.bottom, 8)
-                .background(.bar)
+                SearchField(model: model)
+                    .padding(.vertical, 8)
             }
         }
     }
@@ -96,9 +92,6 @@ struct HomeView: View {
         let agents = CatalogueSearch.filter(catalogue.agents, query: query)
         let widgets = catalogue.widgets.filter { CatalogueSearch.matches(Catalogue.entry($0), query: query) }
 
-        if !catalogue.peers.isEmpty && query.isEmpty {
-            PeerStrip(peers: catalogue.peers)
-        }
         if !apps.isEmpty { section("Apps") { grid(apps, catalogue, on: nil) } }
         if !agents.isEmpty { section("Agents") { grid(agents, catalogue, on: nil) } }
         if !widgets.isEmpty {
@@ -191,27 +184,6 @@ struct HomeView: View {
 
 }
 
-/// The top of a page: its title and the menu of Spaces. The pages sit side by side in a pager,
-/// so each draws its own top instead of living in a navigation bar.
-struct PageHeader: View {
-    @ObservedObject var model: AppModel
-    let connection: Connection
-    let title: Text
-
-    var body: some View {
-        ZStack {
-            title.font(.headline).foregroundStyle(Theme.text).lineLimit(1).padding(.horizontal, 60)
-                .accessibilityAddTraits(.isHeader)
-            HStack {
-                Spacer()
-                SpaceMenu(model: model, connection: connection)
-                    .font(.body.weight(.medium)).frame(width: 40, height: 40)
-            }
-        }
-        .padding(.horizontal, 12).frame(height: 44)
-    }
-}
-
 /// The library's search: one field over apps, agents and widgets.
 struct SearchField: View {
     @ObservedObject var model: AppModel
@@ -231,26 +203,6 @@ struct SearchField: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Theme.hairline))
         .padding(.horizontal, 16)
-    }
-}
-
-/// The saved Spaces, to move between them, and a way to add one.
-struct SpaceMenu: View {
-    @ObservedObject var model: AppModel
-    let connection: Connection
-
-    var body: some View {
-        Menu {
-            ForEach(model.store.connections) { c in
-                Button { model.select(c.id) } label: {
-                    if c.id == connection.id { Label(c.name, systemImage: "checkmark") } else { Text(c.name) }
-                }
-            }
-            Divider()
-            Button { model.showingAdd = true } label: { Label("Add a Space", systemImage: "plus") }
-        } label: {
-            Image(systemName: "rectangle.stack").accessibilityLabel(Text("Switch Space"))
-        }
     }
 }
 
@@ -366,39 +318,6 @@ struct StatusCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glass()
-    }
-}
-
-/// The Space's peers: other machines whose apps this panel also shows. A peer that does not
-/// answer is named as such; its tiles below are its last snapshot.
-struct PeerStrip: View {
-    let peers: [PeerStatus]
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(peers) { peer in
-                    HStack(spacing: 6) {
-                        Circle().fill(peer.isOffline ? Color.secondary : Theme.success).frame(width: 8, height: 8)
-                        Text(verbatim: peer.name).font(.footnote.weight(.medium))
-                        if peer.isOffline {
-                            Text(Self.offlineText(peer)).font(.footnote).foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 7)
-                    .glass(radius: 100)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(peer.isOffline ? Text("\(peer.name), offline") : Text("\(peer.name), online"))
-                }
-            }
-            .padding(.vertical, 2)
-        }
-        .scrollClipDisabled()
-    }
-
-    static func offlineText(_ peer: PeerStatus) -> String {
-        guard let asOf = peer.asOf, let date = Times.parse(asOf) else { return String(localized: "offline") }
-        return String(localized: "offline, last seen \(date.formatted(.relative(presentation: .named)))")
     }
 }
 

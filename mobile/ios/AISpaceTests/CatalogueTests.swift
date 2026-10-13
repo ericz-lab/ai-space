@@ -224,3 +224,144 @@ struct IconSourceTests {
         #expect(throws: SpaceAPIError.authenticationRequired) { try SpaceAPI.check(ok, data: Data(), expected: space) }
     }
 }
+
+#if canImport(UIKit)
+import UIKit
+import WebKit
+
+struct SVGRasterizerTests {
+    @Test(.timeLimit(.minutes(1))) @MainActor
+    func snapshotPreservesArtworkOpacityAndColor() async throws {
+        let svg = Data("""
+        <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+          <rect width="96" height="96" fill="#ff0000"/>
+        </svg>
+        """.utf8)
+        let image = try #require(await SVGRasterizer.shared.image(svg: svg))
+        let cgImage = try #require(image.cgImage)
+        var pixels = [UInt8](repeating: 0, count: 96 * 96 * 4)
+        try pixels.withUnsafeMutableBytes { bytes in
+            let context = try #require(CGContext(data: bytes.baseAddress, width: 96, height: 96,
+                bitsPerComponent: 8, bytesPerRow: 96 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: 96, height: 96))
+        }
+        let center = (48 * 96 + 48) * 4
+        #expect(pixels[center] > 240, "The red artwork must keep its original intensity")
+        #expect(pixels[center + 1] < 15)
+        #expect(pixels[center + 2] < 15)
+        #expect(pixels[center + 3] > 240, "The renderer's hiding mechanism must not fade the bitmap")
+    }
+}
+struct WebCookieSessionTests {
+    @Test(.timeLimit(.minutes(1))) @MainActor
+    func concurrentReadsReuseTheProfileAndSignOutStaysSignedOut() async throws {
+        let id = UUID(), otherID = UUID()
+        defer {
+            WKWebsiteDataStore.remove(forIdentifier: id) { _ in }
+            WKWebsiteDataStore.remove(forIdentifier: otherID) { _ in }
+        }
+        let session = WebCookieSession(identifier: id)
+        async let first = session.cookies()
+        async let second = session.cookies()
+        let initial = await (first, second)
+        #expect(initial.0.isEmpty && initial.1.isEmpty)
+        #expect(session.dataStore.isPersistent)
+        #expect(session.dataStore.identifier == id)
+
+        let cookie = try #require(HTTPCookie(properties: [.domain: "session.example.com", .path: "/",
+            .name: "test-session", .value: "fixture", .secure: "TRUE", .expires: Date().addingTimeInterval(3600)]))
+        await session.dataStore.httpCookieStore.setCookie(cookie)
+        let reopened = WebCookieSession(identifier: id)
+        #expect(await reopened.cookies().contains { $0.name == cookie.name && $0.value == cookie.value })
+        let other = WebCookieSession(identifier: otherID)
+        #expect(await other.cookies().isEmpty)
+
+        await session.dataStore.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+        #expect(await reopened.cookies().isEmpty)
+    }
+}
+@MainActor
+struct IconCacheTests {
+    private func image(_ color: UIColor) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16)).image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+        }
+    }
+
+    private func pixels(_ image: UIImage?) -> [UInt8]? {
+        guard let image = image?.cgImage else { return nil }
+        var bytes = [UInt8](repeating: 0, count: 16 * 16 * 4)
+        bytes.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: 16, height: 16,
+                bitsPerComponent: 8, bytesPerRow: 16 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: 16, height: 16))
+        }
+        return bytes
+    }
+
+    private func settle(_ condition: () -> Bool) async throws {
+        for _ in 0..<200 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(condition(), "The pending icon request must finish")
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func relaunchUsesDiskAndStaleRefreshKeepsTheOldIcon() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let api = SpaceAPI(base: URL(string: "https://icons.example.com")!, cookies: { [] })
+        let red = image(.red), blue = image(.blue), icon = "/api/apps/test/icon"
+        let initial = Date()
+        let first = IconStore(api: api, directory: directory, now: { initial }, loadImage: { _ in red })
+        #expect(first.image(icon) == nil)
+        try await settle { first.image(icon) != nil }
+
+        var calls = 0
+        let reopened = IconStore(api: api, directory: directory, now: { initial }, loadImage: { _ in calls += 1; return nil })
+        #expect(pixels(reopened.image(icon)) == pixels(red))
+        await Task.yield()
+        #expect(calls == 0)
+
+        var replacement: UIImage?
+        let stale = IconStore(api: api, directory: directory, now: { initial.addingTimeInterval(2 * 86400) },
+                              loadImage: { _ in calls += 1; return replacement })
+        #expect(pixels(stale.image(icon)) == pixels(red))
+        try await settle { calls == 1 }
+        #expect(pixels(stale.image(icon)) == pixels(red))
+        replacement = blue
+        stale.retryFailed()
+        #expect(pixels(stale.image(icon)) == pixels(red))
+        try await settle { pixels(stale.image(icon)) == pixels(blue) }
+        #expect(calls == 2)
+
+        let anotherOrigin = IconStore(api: SpaceAPI(base: URL(string: "https://other.example.com")!, cookies: { [] }),
+                                      directory: directory, loadImage: { _ in nil })
+        #expect(anotherOrigin.image(icon) == nil)
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func signOutDropsAnInFlightImageAndItsDiskCache() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var waiting: CheckedContinuation<UIImage?, Never>?
+        let api = SpaceAPI(base: URL(string: "https://icons.example.com")!, cookies: { [] })
+        let store = IconStore(api: api, directory: directory, loadImage: { _ in
+            await withCheckedContinuation { waiting = $0 }
+        })
+        _ = store.image("/icon.svg")
+        try await settle { waiting != nil }
+        store.clear()
+        waiting?.resume(returning: image(.red))
+        // Let the suspended request complete after the cache's generation changes.
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        let reopened = IconStore(api: api, directory: directory, loadImage: { _ in nil })
+        #expect(reopened.image("/icon.svg") == nil)
+    }
+}
+#endif

@@ -69,7 +69,9 @@ final class BackdropStore: NSObject, ObservableObject, WKNavigationDelegate {
         view.isUserInteractionEnabled = false
         view.navigationDelegate = self
         // A web view outside a window may never paint; it sits behind the app's content, unseen.
-        view.alpha = 0.01
+        // WKWebView snapshots include the view's alpha. Hide it behind the content,
+        // not by fading it, or the cached bitmap becomes almost transparent too.
+        view.alpha = 1
         window.insertSubview(view, at: 0)
         webView = view
         view.load(URLRequest(url: url))

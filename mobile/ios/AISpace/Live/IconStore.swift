@@ -1,14 +1,21 @@
+import CryptoKit
 import UIKit
 import WebKit
 
-/// Icons and avatars of one Space, fetched through its API with its session and kept in memory;
+/// Icons and avatars of one Space, fetched through its API with its session and cached in memory and on disk;
 /// an icon a manifest places on another site is fetched plainly, without the session.
 /// An emoji needs no loading (see `Icon.emoji`); SVG files, which UIKit cannot decode, are drawn
 /// once by an offscreen web view with scripts off.
 @MainActor
 final class IconStore: ObservableObject {
     private let api: SpaceAPI
+    private let directory: URL
+    private let now: () -> Date
+    private let loadImage: ((String) async -> UIImage?)?
     private var images: [String: UIImage] = [:]
+    private var fetchedAt: [String: Date] = [:]
+    private var generation = 0
+    private static let maxAge: TimeInterval = 24 * 60 * 60
     private var pending: Set<String> = []
     private var failed: Set<String> = []
 
@@ -23,22 +30,67 @@ final class IconStore: ObservableObject {
     /// Twice what the Space accepts for an icon of its own (MAX_ICON_BYTES); a larger answer is not an icon.
     private static let externalLimit = 1 << 20
 
-    init(api: SpaceAPI) {
+    init(api: SpaceAPI, directory: URL, now: @escaping () -> Date = Date.init,
+         loadImage: ((String) async -> UIImage?)? = nil) {
         self.api = api
+        self.directory = directory
+        self.now = now
+        self.loadImage = loadImage
+    }
+
+    private func file(_ icon: String) -> URL {
+        // Include the origin even when a saved Space's address changes. Neither URLs with
+        // credentials nor arbitrary path components become filenames.
+        let digest = SHA256.hash(data: Data((api.base.absoluteString + "\n" + icon).utf8))
+        return directory.appendingPathComponent(digest.map { String(format: "%02x", $0) }.joined() + ".png")
     }
 
     func image(_ icon: String?) -> UIImage? {
         guard let icon, Icon.isPath(icon) else { return nil }
-        if let hit = images[icon] { return hit }
-        guard !pending.contains(icon), !failed.contains(icon) else { return nil }
+        if images[icon] == nil {
+            let url = file(icon)
+            if let image = UIImage(contentsOfFile: url.path) {
+                images[icon] = image
+                fetchedAt[icon] = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
+            }
+        }
+        let cached = images[icon]
+        if cached != nil, let at = fetchedAt[icon], now().timeIntervalSince(at) < Self.maxAge { return cached }
+        guard !pending.contains(icon), !failed.contains(icon) else { return cached }
         pending.insert(icon)
+        let generation = self.generation
         Task {
-            let image = await load(icon)
+            let image: UIImage?
+            if let loadImage { image = await loadImage(icon) } else { image = await load(icon) }
+            // A request begun before sign-out must not repopulate its cache afterward.
+            guard generation == self.generation else { return }
             pending.remove(icon)
-            if let image { images[icon] = image } else { failed.insert(icon) }
+            if let image {
+                images[icon] = image
+                let at = now()
+                fetchedAt[icon] = at
+                if let png = image.pngData() {
+                    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let url = file(icon)
+                    do {
+                        try png.write(to: url, options: .atomic)
+                        try FileManager.default.setAttributes([.modificationDate: at], ofItemAtPath: url.path)
+                    } catch { /* Memory caching still works if the disk cache is unavailable. */ }
+                }
+            } else { failed.insert(icon) }
             objectWillChange.send()
         }
-        return nil
+        return cached
+    }
+
+    func clear() {
+        generation += 1
+        images.removeAll()
+        fetchedAt.removeAll()
+        pending.removeAll()
+        failed.removeAll()
+        try? FileManager.default.removeItem(at: directory)
+        objectWillChange.send()
     }
 
     /// A failed icon is tried again after a refresh (the session may have been the reason).
@@ -137,7 +189,9 @@ final class SVGRasterizer: NSObject, WKNavigationDelegate {
         guard webView.window == nil,
               let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).flatMap(\.windows).first
         else { return }
-        webView.alpha = 0.01
+        // WKWebView snapshots include the view's alpha. Hide it behind the content,
+        // not by fading it, or the cached bitmap becomes almost transparent too.
+        webView.alpha = 1
         window.insertSubview(webView, at: 0)
     }
 

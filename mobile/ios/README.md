@@ -2,7 +2,7 @@
 
 A native iOS client of a Space that already runs: a SwiftUI launcher over the Space's own catalogue, with the Space's pages in `WKWebView`. Nothing is installed or started on the server, and the app carries no token or deployment secret.
 
-Status: built and exercised on a Mac as a Mac Catalyst app, and built with Xcode 27, development-signed, installed and launched on an iPhone 15 Pro running iOS 26.6.1. Device installation and launch are verified; the device interaction checks below and Simulator validation remain outstanding. See [What has been checked](#what-has-been-checked).
+Status: built and exercised on a Mac as a Mac Catalyst app, and built with Xcode 27, development-signed, installed and launched on an iPhone 15 Pro running iOS 26.6.1. Device installation and launch are verified; the launcher has also been visually checked in the Simulator. The device interaction checks below remain outstanding. See [What has been checked](#what-has-been-checked).
 
 ## What it does
 
@@ -10,7 +10,7 @@ Status: built and exercised on a Mac as a Mac Catalyst app, and built with Xcode
 | --- | --- |
 | Spaces | Add a Space by the address of its panel, several if you have them, switch between them. HTTPS everywhere; plain HTTP only to loopback (a Space on the Mac that runs the Simulator). |
 | Pages | Home, each screen of the panel and Settings sit side by side and are swiped through, as on an iPhone's home screen: left of the first screen is Home, right of the last one is Settings. A bar at the bottom names the three parts and jumps between them; dots above it say which screen is on show while there are several. |
-| Home | The library, drawn natively: every app, agent and widget of the Space, with one search. An app's icon is a rounded square, an agent's a circle; only what is wrong is marked on a tile (not answering, paused, its machine offline). Entries are keyed by the panel's own entry keys (`app:<id>`, `agent:<id>`, `widget:<id>`), titles in English or Chinese as the manifests provide, icons from the Space (emoji, bitmap or SVG). |
+| Home | The library, drawn natively: every app, agent and widget of the Space, with one search. An app's icon is a rounded square, an agent's a circle; only what is wrong is marked on a tile (not answering, paused, its machine offline). Entries are keyed by the panel's own entry keys (`app:<id>`, `agent:<id>`, `widget:<id>`), titles in English or Chinese as the manifests provide, icons from the Space (emoji, bitmap or SVG). Downloaded icons and rendered SVGs are cached locally per saved Space, so reopening the app can display them immediately. |
 | Panel | The screens, drawn natively with nothing above them: the main screen, then your own. **Kept on the phone, per Space.** The first catalogue of a Space copies the panel's screens once (its built-in tiles left out); after that the phone's layout is its own and nothing is written to the Space, so a phone and a browser can be laid out differently. Touch and hold an entry on Home and choose Add to Panel (with several screens, which one); touch and hold one on a screen to take it off. Touch and hold the empty part of a screen for the screen's own actions: a new screen, a list to drag its entries into order or delete them, deleting it, and replacing the phone's layout with a fresh copy of the panel's. |
 | Widgets | A widget that sends blocks is drawn as the panel's state card: the first block large, the rest as rows, as many as the card's size holds (metric with its change, trend as a line or bars, progress, gauge with its zones, status). Other widgets show their list. |
 | Search | One search over the three kinds: every word must appear in the title, description or id, in any of the entry's languages, so `todo` and `待办` find the same app. |
@@ -78,7 +78,7 @@ xcrun simctl install booted <DerivedData>/Build/Products/Debug-iphonesimulator/A
 xcrun simctl launch booted dev.ai-space.ios
 ```
 
-These commands have not been run: `xcodebuild` and `simctl` do not exist on the machine this was written on. Expect small fixes on the first Xcode build (the asset catalog and the test host are the parts only Xcode compiles). A Space on the same Mac is reachable from the Simulator at `http://127.0.0.1:8700`.
+The Simulator build and launch were checked with Xcode 27 and the iOS 27 runtime. On a Mac whose default developer directory is the Command Line Tools, prefix Xcode commands with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. A Space on the same Mac is reachable from the Simulator at `http://127.0.0.1:8700`.
 
 A debug build reads launch switches from its environment, so screens can be reached and captured without touching the device (`SIMCTL_CHILD_AISPACE_TAB=panel xcrun simctl launch …`, or `open --env` for the Catalyst build). `AISpace/DebugLaunch.swift` lists them: connect to a Space, pick a tab, set the search text, open one of the Space's pages, send a chat message, open an `aispace://` link, write a PNG of the window and quit. None of it exists in a release build.
 
@@ -91,11 +91,11 @@ What the real access path is (docs/ingress.md, docs/router.md, docs/cloudflare.m
 
 What the app does about it:
 
-- **Each saved Space has its own WebKit data store** (`WKWebsiteDataStore(forIdentifier:)`), apart from Safari and from every other Space. The panel tab, every app page and the native catalogue calls use it: the native calls read the store's cookies for each request (`SpaceAPI`), so one sign-in in the web view serves all three. Nothing is copied out of Safari.
+- **Each saved Space has its own WebKit data store** (`WKWebsiteDataStore(forIdentifier:)`), apart from Safari and from every other Space. The panel tab, every app page and the native catalogue calls use it: the native calls read the store's cookies for each request (`SpaceAPI`), so one sign-in in the web view serves all three. On a cold launch, `WebCookieSession` first loads a local blank page to initialize the persistent profile, then releases the waiting native requests. Reading the cookie store before that initialization can return an empty jar even when valid cookies are on disk. This does not contact the identity provider or extend any cookie expiry. Nothing is copied out of Safari.
 - **Sign-in happens in the web view.** A request that is redirected, or answered 401 or 403, means "sign in": Home shows a card, the Sign In button opens the web panel over the tabs, the access layer's pages load there (a bar names the host you are on), and when the panel is back and answers `GET /api/panel/layout` as ai-space does, the catalogue loads and the web panel closes. An app on its own hostname goes through the same redirect inside its page; with Access the team-domain cookie makes that silent.
 - **`ASWebAuthenticationSession` is deliberately not used.** It shares cookies with Safari, not with the app's web views, so a sign-in there would not reach the pages the app shows. Access has no token exchange a native client could use instead without a service token, which would be a long-lived secret on the phone.
 - **Nothing secret is stored by the app.** The session cookie lives in the Space's WebKit store inside the app's sandbox; saved Spaces and screens are plain files with addresses and entry keys. There is nothing for the Keychain to hold in this version.
-- **Sign Out** (Settings) clears that Space's website data (cookies, storage, caches), the saved catalogue and the open pages. Removing a Space also deletes its data store. A catalogue request still on its way when either happens is dropped when it answers.
+- **Sign Out** (Settings) clears that Space's website data (cookies, storage, caches), the saved catalogue, local icon cache and the open pages. Removing a Space also deletes its data store. A catalogue request still on its way when either happens is dropped when it answers.
 - **Expiry** shows as the same sign-in card, with the last catalogue still on show; the app never retries a write on its own.
 - **A write names its origin.** The two routes that set a model (`PATCH /api/panel/tasks/:id/model`, `/api/panel/apps/:app/model`) take a write from the panel's own origin only, so no other site's page can make one with the operator's cookie. `SpaceAPI` sends `Origin: <the Space>` on every request with a body: the app is a client of that origin holding its session, not a page of another site. The server rule is unchanged.
 
@@ -105,9 +105,10 @@ To confirm on a real iPhone, in this order:
 
 1. The Access login completes inside `WKWebView`. One-time PIN by e-mail should; **Google as identity provider refuses embedded web views** (`disallowed_useragent`), and then the choice is another login method on the Access policy or a platform-side client session (below).
 2. The `CF_Authorization` cookie is readable from the store by the native calls (it is `HttpOnly`, which the cookie store API does return).
-3. An app on `*.<domain>` opens without a second prompt.
-4. The panel's chat stream (SSE) and terminal (WebSocket) hold through the tunnel on cellular, and what happens to them when the app is backgrounded.
-5. The 24 hour session: a daily sign-in on a phone is tiresome. Access's session length is the owner's setting, not the app's.
+3. Force-quit and reopen the app while the Access session is valid: Home loads without a login prompt. Repeat after backgrounding. Sign Out must still require a new login; another saved Space must remain isolated.
+4. An app on `*.<domain>` opens without a second prompt.
+5. The panel's chat stream (SSE) and terminal (WebSocket) hold through the tunnel on cellular, and what happens to them when the app is backgrounded.
+6. The 24 hour session: a daily sign-in on a phone is tiresome. Access's session length is the owner's setting, not the app's.
 
 ## The host list
 
@@ -135,7 +136,34 @@ Not checked on the Space's pages, because a gesture cannot be scripted here: the
 
 Device check on 2026-10-13: the Debug `xcodebuild` build, automatic development signing, installation and launch on an iPhone 15 Pro running iOS 26.6.1 passed with Xcode 27. First launch required trusting the development profile in the phone's Settings. The Foundation-only test command also passed all 60 tests.
 
-Not checked on a device: the tests under Xcode, the asset-catalog app icon's appearance, safe areas and the tab bar on a real iPhone layout, the software keyboard over a page, the photo picker and camera for file inputs, downloads into the share sheet, home-screen quick actions, `aispace://` from another app, memory-pressure reloads, VoiceOver and Dynamic Type, and everything listed under Authentication. The Simulator has not been exercised.
+Not checked on a device: the tests under Xcode, the asset-catalog app icon's appearance, safe areas and the tab bar on a real iPhone layout, the software keyboard over a page, the photo picker and camera for file inputs, downloads into the share sheet, home-screen quick actions, `aispace://` from another app, memory-pressure reloads, VoiceOver and Dynamic Type, and everything listed under Authentication. Simulator checks are recorded below; they do not replace device validation.
+
+Cold-start session check on 2026-10-13: an iPhone 15 Pro returned zero cookies before profile initialization, producing login redirects despite valid cookies on disk. With initialization awaited, the same saved profile returned its cookies and the catalogue loaded with HTTP 200 without signing in again. The Xcode Simulator suite passed 62 tests, including concurrent cookie reads, reopening a profile, profile isolation and clearing the session on sign-out.
+
+### Icon cache
+
+`IconStore` keeps decoded images in memory and PNGs under the app's Caches directory, separated by saved Space. File keys hash the Space origin and icon URL. Cached images appear immediately after relaunch; after 24 hours, a requested icon refreshes in the background while its previous image stays visible. A failed refresh retains that image and retries after the catalogue is refreshed. An icon URL change loads a new entry. iOS may reclaim these cache files when space is needed.
+
+Sign Out and removing a Space clear its icon cache. A download already in flight cannot write it back after clearing. Simulator regression tests cover reopening the cache without downloading, stale refresh success and failure, origin isolation and clearing during a pending request.
+
+### SVG rendering regression
+
+SVG icons and rendered theme backdrops keep their rendering web views at full opacity behind the app's content. Lowering a rendering view's alpha also fades its snapshot, making cached icons look empty. `SVGRasterizerTests` runs under Xcode on iOS and checks the resulting bitmap's color and opacity; the Foundation-only command does not run this WebKit test.
+
+### Safe-area regression checks
+
+The launcher measures each page inside the system safe area and clips scrolling content to that viewport. One shared backdrop extends behind the status bar, Home search area, Panel and Settings. Search, tiles and settings stay inside the safe area; Home has no peer-status strip. The bottom dock reserves its actual height, including the screen dots. Insets come from the current view, not a device model or a fixed notch height.
+
+After changing the launcher layout, run these visual regression checks:
+
+- Home: the search field stays below the status bar, including while scrolling and pulling to refresh. The area around it uses the panel backdrop, with no solid header band or peer-status strip.
+- Panel: the first row starts below the cutout, and scrolling cannot draw tiles or widgets over the status bar.
+- Settings: Spaces is the first section below the status bar, followed by Display and the current Space's settings; the last row can scroll completely above the dock. Home and Settings have no separate title bar. Space switching and adding a Space are in Settings → Spaces.
+- With multiple screens, the dots and dock stay above the home indicator without covering the last row.
+- Home, Panel and Settings share a continuous background in each theme; Settings keeps readable grouped rows over it.
+- Rotate both ways on a notch or Dynamic Island phone: page content stays clear of the side cutout, and swiping still lands on a full page. Repeat in light and dark appearance.
+
+Checked on 2026-10-13: Xcode 27 Simulator build and portrait screenshots of Home, Panel and Settings on iPhone 18 Pro / iOS 27, using an unreachable local Space to exercise its status card. The Foundation-only suite passed all 60 tests. Gesture, rotation and real-device checks of this change remain pending. The older iOS 18.4 Simulator could not launch this Xcode 27 build because its runtime lacks `libswiftWebKit.dylib`.
 
 ## What the platform could offer every client
 

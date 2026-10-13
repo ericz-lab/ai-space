@@ -10,59 +10,58 @@ struct SettingsView: View {
     @ObservedObject var icons: IconStore
 
     var body: some View {
-        VStack(spacing: 0) {
-            PageHeader(model: model, connection: connection, title: Text("Settings")).background(.bar)
-            List {
-                display
-                space
-                Section {
-                    ForEach(model.store.connections) { c in
-                        Button { model.select(c.id) } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(verbatim: c.name).foregroundStyle(Theme.text)
-                                    Text(verbatim: c.url.absoluteString).font(.footnote).foregroundStyle(Color.secondary).lineLimit(1)
-                                }
-                                Spacer()
-                                if c.id == connection.id { Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityLabel(Text("Selected")) }
+        List {
+            Section {
+                ForEach(model.store.connections) { c in
+                    Button { model.select(c.id) } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(verbatim: c.name).foregroundStyle(Theme.text)
+                                Text(verbatim: c.url.absoluteString).font(.footnote).foregroundStyle(Color.secondary).lineLimit(1)
                             }
-                        }
-                        .swipeActions {
-                            Button(role: .destructive) { model.remove(c.id) } label: { Label("Remove", systemImage: "trash") }
+                            Spacer()
+                            if c.id == connection.id { Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityLabel(Text("Selected")) }
                         }
                     }
-                    Button { model.showingAdd = true } label: { Label("Add a Space", systemImage: "plus") }
-                } header: {
-                    Text("Spaces")
-                } footer: {
-                    Text("Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
+                    .swipeActions {
+                        Button(role: .destructive) { model.remove(c.id) } label: { Label("Remove", systemImage: "trash") }
+                    }
                 }
-
-                Section {
-                    Button(role: .destructive) { model.confirmingSignOut = true } label: { Text("Sign Out") }
-                        .confirmationDialog(Text("Sign out of \(connection.name)?"), isPresented: $model.confirmingSignOut, titleVisibility: .visible) {
-                            Button("Sign Out", role: .destructive) { model.signOut(connection) }
-                        } message: {
-                            Text("This clears the Space's cookies and saved pages from this iPhone.")
-                        }
-                } header: {
-                    Text("Session")
-                } footer: {
-                    Text("The sign-in belongs to whatever stands in front of your Space (for example Cloudflare Access). The app stores no password or token; the session lives in this Space's own web data, apart from Safari.")
-                }
-
-                Section {
-                    LabeledContent("Version") { Text(verbatim: Bundle.main.shortVersion) }
-                } header: {
-                    Text("About")
-                }
+                Button { model.showingAdd = true } label: { Label("Add a Space", systemImage: "plus") }
+            } header: {
+                Text("Spaces")
+            } footer: {
+                Text("Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
             }
-            .refreshable {
-                await loader.refresh()
-                await settings.refresh()
+
+            display
+            space
+
+            Section {
+                Button(role: .destructive) { model.confirmingSignOut = true } label: { Text("Sign Out") }
+                    .confirmationDialog(Text("Sign out of \(connection.name)?"), isPresented: $model.confirmingSignOut, titleVisibility: .visible) {
+                        Button("Sign Out", role: .destructive) { model.signOut(connection) }
+                    } message: {
+                        Text("This clears the Space's cookies and saved pages from this iPhone.")
+                    }
+            } header: {
+                Text("Session")
+            } footer: {
+                Text("The sign-in belongs to whatever stands in front of your Space (for example Cloudflare Access). The app stores no password or token; the session lives in this Space's own web data, apart from Safari.")
             }
-            .task(id: loader.status) { await settings.refresh() }
+
+            Section {
+                LabeledContent("Version") { Text(verbatim: Bundle.main.shortVersion) }
+            } header: {
+                Text("About")
+            }
         }
+        .scrollContentBackground(.hidden)
+        .refreshable {
+            await loader.refresh()
+            await settings.refresh()
+        }
+        .task(id: loader.status) { await settings.refresh() }
     }
 
     // MARK: This iPhone's display

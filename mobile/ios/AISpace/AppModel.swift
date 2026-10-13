@@ -90,7 +90,7 @@ final class AppModel: ObservableObject {
     private var chats: [String: ChatStore] = [:]
     private var backdrops: [UUID: BackdropStore] = [:]
     private var panels: [UUID: WebSession] = [:]
-    private var dataStores: [UUID: WKWebsiteDataStore] = [:]
+    private var cookieSessions: [UUID: WebCookieSession] = [:]
     private var watchers: Set<AnyCancellable> = []
 
     init() {
@@ -124,16 +124,20 @@ final class AppModel: ObservableObject {
     var selected: Connection? { selectedID.flatMap(store.connection) ?? store.defaultConnection }
 
     func dataStore(_ id: UUID) -> WKWebsiteDataStore {
-        if let s = dataStores[id] { return s }
-        let s = WKWebsiteDataStore(forIdentifier: id)
-        dataStores[id] = s
-        return s
+        cookieSession(id).dataStore
+    }
+
+    private func cookieSession(_ id: UUID) -> WebCookieSession {
+        if let session = cookieSessions[id] { return session }
+        let session = WebCookieSession(identifier: id)
+        cookieSessions[id] = session
+        return session
     }
 
     func loader(for connection: Connection) -> CatalogueLoader {
         if let l = loaders[connection.id], l.connection.url == connection.url { return l }
-        let cookieStore = dataStore(connection.id).httpCookieStore
-        let l = CatalogueLoader(connection: connection, cache: cache) { await cookieStore.allCookies() }
+        let cookieSession = cookieSession(connection.id)
+        let l = CatalogueLoader(connection: connection, cache: cache) { await cookieSession.cookies() }
         l.onCatalogue = { [weak self] catalogue in
             guard let self else { return }
             self.screens.seed(connection.id, from: catalogue.panelScreens)
@@ -147,7 +151,7 @@ final class AppModel: ObservableObject {
             }
         }
         loaders[connection.id] = l
-        icons[connection.id] = IconStore(api: l.api)
+        icons[connection.id] = IconStore(api: l.api, directory: AppPaths.icons(connection.id))
         Task { await l.refresh() }
         return l
     }
@@ -275,6 +279,8 @@ final class AppModel: ObservableObject {
     /// its store, the saved catalogue and the open pages. The address and the screens stay.
     func signOut(_ connection: Connection) {
         let data = dataStore(connection.id)
+        icons[connection.id]?.clear()
+        try? FileManager.default.removeItem(at: AppPaths.icons(connection.id))
         if page?.connection == connection.id { page = nil }
         panels[connection.id]?.stop()
         panels[connection.id] = nil
@@ -329,8 +335,11 @@ final class AppModel: ObservableObject {
         settings[id] = nil
         backdrops[id] = nil
         chats = chats.filter { !$0.key.hasPrefix("\(id)|") }
+        icons[id]?.clear()
+        // A Space can be removed before its icon store has been opened in this launch.
+        try? FileManager.default.removeItem(at: AppPaths.icons(id))
         icons[id] = nil
-        dataStores[id] = nil
+        cookieSessions[id] = nil
     }
 
     /// The phone came back to the app: failed pages try again and the catalogue catches up.

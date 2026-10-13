@@ -40,30 +40,35 @@ struct MainTabs: View {
         let all = screens.screens(connection.id)
         // A paging scroll view, not a page-style TabView: that one loses its place when a screen
         // is added or removed, and a navigation bar inside it does not survive.
-        ScrollView(.horizontal) {
-            LazyHStack(spacing: 0) {
-                HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens)
-                    .containerRelativeFrame([.horizontal, .vertical])
-                    .id(Pager.home)
-                ForEach(all) { screen in
-                    HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens, screenID: screen.id)
-                        .containerRelativeFrame([.horizontal, .vertical])
-                        .id(screen.id)
+        // Measure the safe viewport outside the scroll view. A horizontal scroll view resolves
+        // safe areas into content margins; nested vertical pages must not size themselves from
+        // that container or paint into the status bar and landscape cutout while scrolling.
+        GeometryReader { viewport in
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens)
+                        .frame(width: viewport.size.width, height: viewport.size.height)
+                        .id(Pager.home)
+                    ForEach(all) { screen in
+                        HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens, screenID: screen.id)
+                            .frame(width: viewport.size.width, height: viewport.size.height)
+                            .id(screen.id)
+                    }
+                    SettingsView(model: model, connection: connection, loader: loader, settings: model.settings(for: connection), icons: icons)
+                        .frame(width: viewport.size.width, height: viewport.size.height)
+                        .id(Pager.settings)
                 }
-                SettingsView(model: model, connection: connection, loader: loader, settings: model.settings(for: connection), icons: icons)
-                    .containerRelativeFrame([.horizontal, .vertical])
-                    .id(Pager.settings)
+                .scrollTargetLayout()
             }
-            .scrollTargetLayout()
+            .scrollTargetBehavior(.paging)
+            .scrollIndicators(.hidden)
+            .scrollPosition(id: Binding<String?>(get: { model.pagerID }, set: { if let id = $0, id != model.pagerID { model.pagerID = id } }))
         }
-        .scrollTargetBehavior(.paging)
-        .scrollIndicators(.hidden)
-        .scrollPosition(id: Binding<String?>(get: { model.pagerID }, set: { if let id = $0, id != model.pagerID { model.pagerID = id } }))
-        // Room for the bar, as a tab bar leaves it.
-        .safeAreaPadding(.bottom, TabBar.height + 8)
-        // One backdrop behind every page: the pages slide over it, as the panel's screens do.
+        .clipped()
+        // Include the screen indicators in the reserved space, above the home indicator.
+        .safeAreaInset(edge: .bottom, spacing: 8) { TabBar(model: model, screens: all) }
+        // One continuous backdrop for Home, Panel and Settings, including the status bar.
         .background { SpaceBackdrop(store: model.backdrops(for: connection)) }
-        .overlay(alignment: .bottom) { TabBar(model: model, screens: all) }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .confirmationDialog(Text(verbatim: Screens.title(at: all.firstIndex { $0.id == model.homePage } ?? 0)), isPresented: $model.showingScreenMenu, titleVisibility: .visible) {
             Button("New Screen") { withAnimation { model.addScreen(in: connection) } }

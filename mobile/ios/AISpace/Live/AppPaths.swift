@@ -32,6 +32,10 @@ enum AppPaths {
             .appendingPathComponent("downloads", isDirectory: true)
     }
 
+    static func icons(_ connection: UUID) -> URL {
+        caches.appendingPathComponent("icons", isDirectory: true).appendingPathComponent(connection.uuidString, isDirectory: true)
+    }
+
     static var connections: URL { support.appendingPathComponent("connections.json") }
     static var screens: URL { support.appendingPathComponent("screens.json") }
 }
