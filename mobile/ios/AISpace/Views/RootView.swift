@@ -42,7 +42,7 @@ struct MainTabs: View {
         // is added or removed, and a navigation bar inside it does not survive.
         // Measure the safe viewport outside the scroll view. A horizontal scroll view resolves
         // safe areas into content margins; nested pages keep that layout size while their
-        // scrolling content can pass behind the transparent status area and floating dock.
+        // scrolling content can pass behind the frosted status area and floating dock.
         GeometryReader { viewport in
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
@@ -64,6 +64,13 @@ struct MainTabs: View {
             .scrollTargetBehavior(.paging)
             .scrollIndicators(.hidden)
             .scrollPosition(id: Binding<String?>(get: { model.pagerID }, set: { if let id = $0, id != model.pagerID { model.pagerID = id } }))
+            .overlay(alignment: .top) {
+                Rectangle().fill(.regularMaterial)
+                    .frame(height: viewport.safeAreaInsets.top)
+                    .offset(y: -viewport.safeAreaInsets.top)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
         }
         // Include the screen indicators in the reserved space, above the home indicator.
         .safeAreaInset(edge: .bottom, spacing: 8) { TabBar(model: model, screens: all) }
@@ -150,16 +157,14 @@ struct TabBar: View {
     private func item(_ tab: MainTab, _ title: LocalizedStringKey, _ symbol: String) -> some View {
         let on = model.tab == tab
         return Button { withAnimation { model.tab = tab } } label: {
-            VStack(spacing: 2) {
-                Image(systemName: symbol).font(.system(size: 18, weight: .semibold))
-                Text(title).font(.caption2.weight(.semibold))
-            }
+            Image(systemName: symbol).font(.system(size: 22, weight: .semibold))
             .foregroundStyle(on ? Theme.accent : Theme.text)
             .frame(width: 86, height: Self.height - 10)
             .background(on ? AnyShapeStyle(Theme.accent.opacity(0.16)) : AnyShapeStyle(.clear), in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Text(title))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
