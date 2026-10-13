@@ -86,6 +86,7 @@ An app is read and changed in its source checkout, never in a deployed copy. Thi
 - `CLAUDE.md` - Bun usage conventions.
 - `.githooks/` - `pre-push` runs `bun run check`; enable it once per clone with `bun run hooks`.
 - `deploy/` - `ai-space.service` (user-level systemd unit), `install.sh` (installs the unit on a machine), `post-receive` (bare-repo hook for git-push deploys).
+- `deploy/feishu-oidc/` - Cloudflare Access's Feishu authorization-code bridge, isolated from the Space runtime: Worker, Bun tests, and deployment/rollback script. Setup and boundaries in `docs/cloudflare.md#feishu-login`.
 - `.env.example` - configuration template for `~/.ai-space/.env`.
 - `.gitignore` - global ignore rules.
 

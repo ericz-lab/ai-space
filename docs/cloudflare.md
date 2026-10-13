@@ -75,3 +75,94 @@ Nothing has to change on a machine whose tunnel runs: the dashboard-made tunnel,
 - No `wrangler`, no `cf`, no `~/.cloudflared` directory; nothing on the machine calls Wrangler.
 
 A system unit made by `cloudflared service install` carries the token on its `ExecStart` line in `/etc/systemd/system/cloudflared.service`, which is world-readable. Moving the token into an `EnvironmentFile` with mode 600 (as the user unit of install.md does) closes that; it is an operator change on the machine and was not made from here.
+
+## Feishu login
+
+Feishu's legacy OAuth authorization and token endpoints are not a complete OIDC
+provider. In particular, `/suite/passport/oauth/certs` returns 404. Pointing
+Access's generic OIDC connector directly at these endpoints allows the login
+page to open but cannot supply a verifiable identity token (issue #11).
+
+`deploy/feishu-oidc/worker.ts` is a narrow bridge for Access's confidential
+authorization-code flow. Its `/authorize` redirects to Feishu's current
+`accounts.feishu.cn/open-apis/authen/v1/authorize` endpoint with the Access
+callback and state unchanged. It translates OIDC scopes into the actual
+`contact:user.base:readonly contact:user.email:readonly` permissions; the app
+must have both user-token scopes published. `/token`
+accepts client authentication by HTTP Basic or form fields, exchanges the code
+at `/open-apis/authen/v2/oauth/token` using JSON, and reads the authenticated
+`/open-apis/authen/v1/user_info` response's `data` object. The old Passport
+`/userinfo` endpoint is deprecated and may omit the required email even when
+the app has the user-token email scope. Only then does the bridge sign
+an RS256 identity token, with the original client ID as audience and a five-minute
+lifetime. `/jwks` exposes only the public signing key. JWT `iat` and `exp` use
+the protocol's epoch seconds; internal clocks use epoch milliseconds.
+
+Only one configured client ID and exact callback are accepted. The bridge does
+not store identities, client secrets or upstream tokens. Feishu validates the
+client secret and consumes the code; Access owns state/CSRF validation. Tokens
+and user profiles are never logged. A missing or explicitly unverified email
+fails closed: the bridge does not invent an email or relax Access policies.
+There is no refresh flow or userinfo API for downstream clients. Nonce, PKCE,
+implicit and other OIDC flows are rejected, not silently weakened. This bridge
+is specifically for the observed Access flow, not a general-purpose OIDC IdP.
+
+Deploy it separately from Space. No Space restart or new package dependency is
+needed. Use an account with Workers deployment and Access identity-provider
+permissions, with either `CLOUDFLARE_API_TOKEN` or `CF_AUTH_FILE` pointing to the
+authenticated cf-cli profile (run `cf auth whoami` first to refresh its session).
+Set these environment variables on the deploying machine:
+
+```sh
+export CLOUDFLARE_ACCOUNT_ID=<account-id>
+export OIDC_WORKER_NAME=space-feishu-oidc
+export OIDC_ISSUER=https://space-feishu-oidc.<account-subdomain>.workers.dev
+export FEISHU_CLIENT_ID=<existing-feishu-app-id>
+export FEISHU_REDIRECT_URI=https://<team>.cloudflareaccess.com/cdn-cgi/access/callback
+export OIDC_PROVIDER_ID=<existing-feishu-provider-id>
+export OIDC_KEY_FILE=<private-directory>/signing.jwk
+export OIDC_BACKUP_FILE=<private-directory>/provider-before.json
+```
+
+Keep the issuer outside any Access-protected domain to avoid a login dependency
+loop. The deployment creates the signing key once in a mode-0600 file, then
+uploads it as a Worker secret. Preserve this file for subsequent deployments;
+do not rotate keys on every deploy or commit it. Back it up through the
+operator's secrets process. `OIDC_BUNDLE` can point to a Worker bundle made by
+`bun build deploy/feishu-oidc/worker.ts --target browser --outfile <path>` when
+the authenticated deployment machine differs from the source checkout.
+
+```sh
+bun test deploy/feishu-oidc/worker.test.ts
+bun run typecheck
+bun run feishu:deploy
+bun run feishu:verify
+bun run feishu:activate
+```
+
+Verify checks the public key and refusal of anonymous token requests. Activation
+first saves the current provider to a new backup file, then changes only its
+authorization, token and certificate URLs. The write-only client secret is
+omitted, so Access retains its existing value. The Feishu-side callback and
+application configuration remain unchanged. Keep email OTP and all existing
+application policies. Complete a real Feishu login after activation; unit tests
+and anonymous probes cannot validate the user's Feishu grants or email.
+
+If login fails, run `bun run feishu:logs` to watch sanitized status and stage
+diagnostics for 60 seconds while reproducing the login. It never prints request
+headers, query strings or upstream response bodies. The Worker's fixed
+`feishu_oidc_failure` stage `client_secret_required` identifies missing Access credentials,
+`feishu_token_rejected` a rejected upstream exchange, and
+`feishu_email_missing_or_unverified` an unusable identity email. Never print
+authorization codes or provider response bodies. Restore the previous provider
+URLs with `bun run feishu:rollback` using the same environment and backup file.
+`bun run feishu:history` retrieves the last hour's sanitized diagnostics. Identity
+diagnostics report only whether an email exists, has valid syntax, and is marked
+verified; they never contain the address or the profile itself.
+
+If the email remains empty after granting the published scopes, inspect the
+member's **Work email** in Feishu's organization admin console. An empty member
+field can produce an empty API email even after successful consent. Ask the
+operator for the member's real login email before changing that field, then
+repeat authorization and verify the Access result. Do not infer an address from
+the member's name or substitute an address from the Access allowlist.
