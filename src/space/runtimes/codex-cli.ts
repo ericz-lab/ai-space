@@ -337,7 +337,8 @@ function codexChat(bin: string[], turn: ChatTurn, cb: ChatCallbacks): { kill: ()
         },
       });
       const parsed = parseCodexOutput(result.stdout);
-      const error = result.aborted ? "aborted" : result.code !== 0 ? (result.stderr.trim() || `runtime exited with ${result.code}`).slice(-800) : parsed.error ?? null;
+      // Codex reports a failed turn (a 429 after its retries, an expired login) on stdout, not stderr.
+      const error = result.aborted ? "aborted" : result.code !== 0 ? (result.stderr.trim() || parsed.error || `runtime exited with ${result.code}`).slice(-800) : parsed.error ?? null;
       if (!error) emit({ type: "result", session_id: sid, is_error: false });
       cb.onFinish(error);
     } catch (e) {

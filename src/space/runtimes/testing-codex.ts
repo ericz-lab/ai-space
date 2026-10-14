@@ -7,6 +7,10 @@ if (import.meta.main) {
   const prompt = await new Response(Bun.stdin.stream()).text();
   if (mode === "hang") await Bun.sleep(60_000);
   if (mode === "exit") { console.error("CLI crash"); process.exit(3); }
+  if (mode === "failexit") {
+    console.log(JSON.stringify({ type: "turn.failed", error: { message: "exceeded retry limit, last status: 429 Too Many Requests" } }));
+    process.exit(1);
+  }
   if (mode === "malformed") { console.log("not JSON"); process.exit(0); }
   if (mode === "error") {
     console.log(JSON.stringify({ type: "turn.failed", error: { message: "OAuth session expired" } }));

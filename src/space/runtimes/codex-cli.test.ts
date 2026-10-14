@@ -184,6 +184,11 @@ describe("Codex chat", () => {
     for (const mode of ["exit", "malformed", "error", "partial", "hang"]) expect((await run(mode)).error).toBeTruthy();
     expect((await run("ok", { allowedTools: ["Read"] })).error).toContain("allow-lists");
   });
+
+  test("reports the failure Codex printed on stdout when it exits non-zero", async () => {
+    expect((await run("failexit")).error).toBe("exceeded retry limit, last status: 429 Too Many Requests");
+    expect((await run("exit")).error).toBe("CLI crash");
+  });
 });
 
 test("Codex transcript restores user text and assistant tools only for the matching workspace", async () => {
