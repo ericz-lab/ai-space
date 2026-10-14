@@ -4,7 +4,7 @@ import SwiftUI
 /// composer. Return sends, Shift-Return starts a new line, Stop ends the turn on the server.
 struct ChatView: View {
     @ObservedObject var chat: ChatController
-    let live: SpaceLive?
+    let icons: IconStore?
     let compact: Bool
     @FocusState private var focused: Bool
 
@@ -14,7 +14,7 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         if chat.messages.isEmpty {
-                            EmptyChat(agent: chat.agent, live: live)
+                            EmptyChat(agent: chat.agent, icons: icons)
                         }
                         ForEach(chat.messages) { MessageRow(message: $0) }
                         if let error = chat.error {
@@ -53,23 +53,40 @@ struct ChatView: View {
         .toolbar {
             if !compact {
                 ToolbarItem {
+                    Menu {
+                        if chat.sessions.isEmpty { Text("No earlier chats") }
+                        ForEach(chat.sessions.prefix(20)) { session in
+                            Button { Task { await chat.open(session) } } label: {
+                                Text(verbatim: session.title.flatMap { $0.isEmpty ? nil : String($0.prefix(60)) } ?? session.sid)
+                            }
+                        }
+                    } label: {
+                        Label("Earlier chats", systemImage: "clock.arrow.circlepath")
+                    }
+                    .disabled(chat.busy)
+                    .help("Earlier chats")
+                }
+                ToolbarItem {
                     Button { chat.newConversation() } label: { Label("New Conversation", systemImage: "square.and.pencil") }
                         .disabled(chat.busy)
+                        .help("New Conversation")
                 }
             }
         }
         .onAppear { focused = true }
+        .task { if !compact { await chat.loadSessions() } }
+        .task(id: chat.busy) { if !compact, !chat.busy { await chat.loadSessions() } }
     }
 }
 
 private struct EmptyChat: View {
     let agent: AgentInfo
-    let live: SpaceLive?
+    let icons: IconStore?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                if let live { Avatar(live: live, path: agent.avatar, fallback: "person.crop.circle").frame(width: 32, height: 32) }
+                if let icons { EntryIcon(icon: agent.avatar, fallback: "person.fill", icons: icons, size: 32, isRound: true) }
                 Text(agent.displayTitle).font(.title3.bold())
             }
             if let d = agent.description { Text(Lang.pick(d, agent.i18n, \.description)).foregroundStyle(.secondary) }

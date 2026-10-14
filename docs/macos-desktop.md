@@ -208,16 +208,20 @@ desktop/macos/
   project.yml            XcodeGen spec; AISpace.xcodeproj is generated from it
   AISpace/
     AISpaceApp.swift     app, main window (close hides it), menu bar, menus, Services, aispace:// links
-    AppModel.swift       connections, web sessions, conversations, link routing
+    AppModel.swift       connections, catalogue, screens, web sessions, conversations, link routing
     Services/            Foundation only: connection rules and store, SpaceCheck, SpaceAPI and
                          cookies, the run stream parser and reply builder, inbox and link rules
     Desktop/             SpaceLive (polled data), ChatController, QuickChat, AppWindows (moved-out tabs),
-                         Notifier, HotKey, Preferences
-    Web/                 PanelSession (WKWebView and its delegates), NavigationPolicy
-    Views/               sidebar, chat, inbox, menu bar, status screens, settings
-    Resources/           icon, English and Chinese strings
-  AISpaceTests/          swift-testing tests of the Foundation-only code in Services/ and Web/
-  scripts/               build.sh and test.sh (swiftc only)
+                         IconStore, Notifier, HotKey, Preferences
+    Web/                 PanelSession (WKWebView and its delegates), NavigationPolicy, the cookie
+                         session, the theme's drawn backdrop
+    Views/               launcher, tiles, Settings page, the Space's pages, terminal, chat, menu bar,
+                         status screens, theme tokens, settings window
+    Resources/           icon, mark, English and Chinese strings
+  AISpaceTests/          swift-testing tests of the Foundation-only code in Services/ and Web/ and
+                         of the iPhone client's shared Core files
+  scripts/               build.sh and test.sh (swiftc only), sources.sh (the shared iPhone files),
+                         fetch-deps.sh (SwiftTerm for the Xcode project), icons.swift
 ```
 
 Add `src/web/desktop.ts` only when a real bridge consumer exists. Keep backend identity and managed lifecycle changes in the relevant Space modules. Add reproducible desktop build and test entry points to `package.json` that invoke Apple tools on macOS; existing Bun commands continue to work without Xcode on servers.
@@ -264,15 +268,17 @@ The first build was a panel in a window: a browser that could only open ai-space
 
 | Native | What it does | Space routes it uses |
 | --- | --- | --- |
-| Main window | A sidebar of the selected Space: Home (the panel), Inbox, Agents, Apps; no address bar, reload or browser toolbar | `/api/apps`, `/api/agents` |
+| Main window | The iPhone client's layout (mobile/ios/README.md): pages side by side, moved through with a sideways trackpad swipe, the page dots in the toolbar or ⌥⌘← and ⌥⌘→. Home is the library of every app, agent and widget with one search (⌘F); then the screens, copied from the panel once and kept on this Mac (right-click for Add to Panel, New Screen, Edit, Copy the Panel's Layout, Delete); then Settings (the saved Spaces, this Mac's appearance, theme and widgets, the Space's status, default model, pages, peers, services and backups, Sign Out). An app, a page of the Space or the web panel comes up over the launcher with Back to Space (⇧⌘H) in the toolbar; the window opens on the first screen | `/api/apps`, `/api/agents`, `/api/widgets`, `/api/peers`, the panel layout, `/api/router`, the settings routes |
+| Space pages | Inbox, chat (with earlier conversations), scheduled tasks, model and app usage, app models, events, packages and a terminal (SwiftTerm), drawn natively from the same files the iPhone client uses | the routes of each page, docs/terminal.md |
 | Agent chat | Native conversations, shared by the main window and Quick Chat; a dropped stream reattaches after the last event; Stop ends the run | `POST /api/agents/:app/:agent/chat`, `/runs/:id/events?after=`, `/runs/:id/stop`, `/api/agents/runs` |
 | Quick Chat | A floating panel over any app on a global shortcut (⌥Space by default, Carbon hot key, no Accessibility permission) | as above |
-| App tabs and windows | An app opens as a tab of the main window, listed in the sidebar; the operator can move any tab into its own window and back (⌥⌘T, toolbar or context menu) without reloading it; links to an app's origin from the panel, the inbox or a notification open in its tab or its window | `/api/apps` (`url`) |
+| App tabs and windows | An app opens as a tab of the main window, over the launcher, listed under Open Tabs in the toolbar, with back, forward, reload, share, Open in Browser and Add to Panel; the mark stands in for the page until it has drawn; the operator can move any tab into its own window and back (⌥⌘T, toolbar or context menu) without reloading it; links to an app's origin from the panel, the inbox or a notification open in its tab or its window | `/api/apps` (`url`) |
 | Inbox | Native list with read and done; new unread threads become Mac notifications with Mark as Read and Done; the unread count is the Dock badge | `/api/inbox?filter=open`, `/api/inbox/mark` |
 | Menu bar | Per connection: agents working, unread messages, app shortcuts, Quick Chat | all of the above |
+| Dock menu | The first apps and agents of the first screen, as the iPhone's home-screen quick actions | none |
 | Mac integration | Services > Ask ai-space puts selected text into Quick Chat; `aispace://chat?agent=<app>/<agent>&text=…`, `aispace://open?app=<name>` and `aispace://inbox` for Shortcuts and other apps | none |
 
-How the native calls authenticate: the operator signs in once on the Home page, inside the window. Native requests then carry that connection's WebKit cookies (for Cloudflare Access, `CF_Authorization`), never Safari's, and no operator token. Redirects are not followed: a redirect, 401 or 403 means "sign in on Home", which the sidebar and menu bar show. The panel routes accept these writes because a request without `Origin` or `Sec-Fetch-Site` is not a browser page (`src/space/auth.ts`).
+How the native calls authenticate: the operator signs in once in the web panel, inside the window (the launcher's Sign In card opens it and comes back once the sign-in is done). Native requests then carry that connection's WebKit cookies (for Cloudflare Access, `CF_Authorization`), never Safari's, and no operator token. Redirects are not followed: a redirect, 401 or 403 means "sign in", which the launcher and menu bar show. The panel routes accept these writes because a request without `Origin` or `Sec-Fetch-Site` is not a browser page (`src/space/auth.ts`).
 
 Safety rules the native layer keeps:
 
@@ -281,6 +287,8 @@ Safety rules the native layer keeps:
 - The first look at a connection's inbox only records it, so connecting does not flood the screen; later notifications are new or changed unread threads.
 - A background refresh every 30 seconds keeps the menu bar and notifications current while the window is hidden; the app opts out of App Nap for it but still lets the Mac sleep.
 
+Shared with the iPhone client: the Mac compiles the iPhone client's Foundation-only `Core/` files (catalogue, search, screens and their store, widget blocks, the Space's settings and page shapes, terminal routes) and the `Live/` loaders and page stores from `mobile/ios/AISpace/`, where they live, as the iPhone compiles the Mac's `Services/`; `scripts/sources.sh` and `project.yml` list them. The views are the Mac's own, ported from the iPhone's with AppKit in place of UIKit. Its own files: Application Support/ai-space/`screens.json` next to `connections.json`, the last catalogue and the icons under the app's Caches folder. What the iPhone has and the Mac does not need: the draggable page button and the glass status bar (the toolbar carries the page dots), home-screen quick actions (the Dock menu), and drawing the backdrop once to a picture for scrolling (a Mac window is resized, so the backdrop page itself sits behind).
+
 Not done, and why:
 
 - The Mac as a resource agents can use (its files, calendar, screen) needs its own trust design: what an agent on a server may ask of this Mac, how each request is approved, and how that stays narrower than a remote shell. It is the next design task, not part of this client.
@@ -288,5 +296,7 @@ Not done, and why:
 - Checks on the menu bar: `/api/checks` lists definitions whose state each app serves at its own URL; reading them all belongs in the Space, not in the client.
 
 Also still open for the stage 0 gate: completing the Cloudflare Access sign-in inside WKWebView, Chinese input, the terminal WebSocket, uploads and themes, each checked by hand on the oldest and current supported macOS.
+
+The launcher layout was checked on macOS 27 against the Seoul Hub (42 apps, 16 agents, 27 widgets): the first screen with its tiles and widget cards, the library with search, a timed-out refresh shown as the last-known card, Settings with services, peers, backups and the default model, the inbox and the agents list, each written by the debug build's `AISPACE_SNAPSHOT` hook.
 
 Checked on macOS 27 against a scratch Space: the panel reports ready; the sidebar lists the Space's agent; an inbox message posted with `POST /api/notify` is picked up by the next refresh; a chat turn streams from start to "thinking" to the reply and ends cleanly through the native client. The Seoul Hub behind Cloudflare Access reports sign-in needed until the operator signs in on Home; after signing in there, the native views load its 39 apps, 16 agents and inbox with that session, and an app opened by link loads as a tab on its own Access-protected host.

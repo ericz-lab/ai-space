@@ -109,6 +109,13 @@ struct AppPageView: View {
     var body: some View {
         ZStack(alignment: .top) {
             PanelWebView(session: session)
+            // The mark stands in for the page until the page has something to show.
+            if !session.hasContent, !session.state.isFailure, session.state != .authenticationRequired {
+                Connecting().background(Theme.ground)
+            }
+            if session.isLoading, session.hasContent, session.progress < 1 {
+                ProgressView(value: session.progress).progressViewStyle(.linear).tint(Theme.accent).frame(height: 2)
+            }
             switch session.state {
             case .unreachable(let detail):
                 FailureView(session: session, title: "Cannot reach this app", detail: detail)

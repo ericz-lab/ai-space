@@ -21,6 +21,8 @@ final class ChatController: ObservableObject {
     @Published private(set) var busy = false
     @Published var draft = ""
     @Published private(set) var error: String?
+    /// The agent's stored conversations, newest first, to pick one up again.
+    @Published private(set) var sessions: [ChatSessionInfo] = []
 
     private var sessionID: String?
     private var runID: String?
@@ -49,6 +51,26 @@ final class ChatController: ObservableObject {
     func stop() {
         guard let runID else { task?.cancel(); return }
         Task { try? await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/stop", json: [:]) }
+    }
+
+    func loadSessions() async {
+        guard let data = try? await api.data("\(agent.base)/sessions") else { return }
+        sessions = (try? Hub.rows(ChatSessionInfo.self, "sessions", from: data)) ?? []
+    }
+
+    /// Shows a stored conversation; the next message continues it.
+    func open(_ session: ChatSessionInfo) async {
+        guard !busy else { return }
+        do {
+            let stored = try Hub.rows(ChatStored.self, "messages", from: try await api.data("\(agent.base)/sessions/\(SpacePath.escape(session.sid))"))
+            messages = stored.compactMap { m in
+                (m.text ?? "").isEmpty ? nil : ChatMessage(role: m.role == "user" ? .user : .agent, text: m.text ?? "")
+            }
+            sessionID = session.sid
+            error = nil
+        } catch {
+            self.error = HubStore.message(error)
+        }
     }
 
     func newConversation() {

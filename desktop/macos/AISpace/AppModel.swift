@@ -21,13 +21,50 @@ struct AgentRef: Hashable {
     }
 }
 
-/// What the main window shows for the selected connection.
+/// What the main window shows for the selected connection: the launcher (Home, the screens,
+/// Settings, side by side), or something over it, as the iPhone client puts its covers.
 enum Destination: Hashable {
-    case panel
-    case inbox
-    case agent(String)
+    case launcher
+    /// A page of the Space drawn by the app.
+    case hub(HubPage)
     /// An app open as a tab of the main window, by app id.
     case app(String)
+    /// The Space's web panel: the sign-in, package installs and what the app does not draw.
+    case panel
+}
+
+/// The pages the launcher moves through, left to right: Home, each screen, Settings. A screen's
+/// page is its id; these two are not screen ids (those are letters, digits, - and _ only).
+enum Pager {
+    static let home = "#home"
+    static let settings = "#settings"
+}
+
+/// The page on show in the launcher, as an object of its own, so a page change re-renders the
+/// pager and its indicator and not every view that observes the model.
+@MainActor
+final class PagerPosition: ObservableObject {
+    @Published var id = Screens.home
+}
+
+/// Where the app keeps its own files: saved Spaces and screens under Application Support (as
+/// ConnectionStore does), the last catalogue and the icons under Caches.
+enum DesktopPaths {
+    static var support: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ai-space", isDirectory: true)
+    }
+
+    static var caches: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "dev.ai-space.desktop", isDirectory: true)
+    }
+
+    static var screens: URL { support.appendingPathComponent("screens.json") }
+
+    static func icons(_ connection: UUID) -> URL {
+        caches.appendingPathComponent("icons", isDirectory: true).appendingPathComponent(connection.uuidString, isDirectory: true)
+    }
 }
 
 /// An app open in the main window: its page lives as long as the tab, wherever the tab goes.
@@ -38,17 +75,43 @@ struct AppTab: Identifiable {
     var id: String { app.id }
 }
 
-/// The app's state: saved connections, the live data of each, panel pages, conversations and
-/// app windows. Leaving a connection keeps everything of it; removing or changing it discards it.
+/// The app's state: saved connections, the catalogue, live data and screens of each, panel
+/// pages, conversations and app windows. Leaving a connection keeps everything of it; signing
+/// out, removing or changing it discards it.
 @MainActor
 final class AppModel: ObservableObject {
     let store: ConnectionStore
+    let screens: ScreenStore
     let prefs = Preferences.shared
     let appWindows = AppWindows()
     let notifier = Notifier()
+    private let cache = CatalogueCache(directory: DesktopPaths.caches)
 
     @Published private(set) var selectedID: UUID?
-    @Published var destination: Destination = .panel
+    @Published var destination: Destination = .launcher
+    /// Where the launcher stands, observed by the pager and its indicator (PagerPosition).
+    let pager = PagerPosition()
+    /// The page on show: `Pager.home`, a screen's id, or `Pager.settings`. The window opens on the
+    /// first screen; the library is one page to its left.
+    var pagerID: String {
+        get { pager.id }
+        set {
+            pager.id = newValue
+            if newValue != Pager.home, newValue != Pager.settings { homePage = newValue }
+        }
+    }
+    /// The screen last shown, for the screen actions and for coming back to the screens.
+    private(set) var homePage = Screens.home
+    @Published var query = ""
+    /// Asks the library's search field for the keyboard (⌘F).
+    let focusSearch = PassthroughSubject<Void, Never>()
+    /// The screen whose entries are being rearranged, in a sheet.
+    @Published var editingScreen: String?
+    @Published var confirmingDeleteScreen = false
+    @Published var confirmingResetScreens = false
+    @Published var confirmingSignOut = false
+    /// Set when the web panel was opened to sign in, so a finished sign-in returns to the launcher.
+    private var closeWebPanelAfterSignIn = false
     @Published private(set) var lives: [UUID: SpaceLive] = [:]
     @Published private(set) var quickChatAgentRef: AgentRef?
     /// Apps open as tabs of the main window, per connection, in the order they were opened.
@@ -59,14 +122,25 @@ final class AppModel: ObservableObject {
     var quickChat: (() -> Void)?
 
     private var sessions: [UUID: PanelSession] = [:]
-    private var dataStores: [UUID: WKWebsiteDataStore] = [:]
+    private var cookieSessions: [UUID: WebCookieSession] = [:]
+    private var loaders: [UUID: CatalogueLoader] = [:]
+    private var iconStores: [UUID: IconStore] = [:]
+    private var settingsLoaders: [UUID: SettingsLoader] = [:]
+    private var terminals: [UUID: TerminalStore] = [:]
     private var chats: [AgentRef: ChatController] = [:]
     private var watchers: Set<AnyCancellable> = []
     private var wake: NSObjectProtocol?
 
-    init(store: ConnectionStore) {
+    init(store: ConnectionStore, screens: ScreenStore? = nil) {
         self.store = store
+        let screens = screens ?? ScreenStore(fileURL: DesktopPaths.screens)
+        self.screens = screens
         selectedID = store.defaultConnection?.id
+        screens.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
+        // A swipe moves the pager without the model; the screen it lands on is the one last shown.
+        pager.$id.sink { [weak self] id in
+            if id != Pager.home, id != Pager.settings { self?.homePage = id }
+        }.store(in: &watchers)
         quickChatAgentRef = prefs.quickChatAgent.flatMap(AgentRef.init(key:))
         appWindows.onChange = { [weak self] in self?.objectWillChange.send() }
         appWindows.onMoveBack = { [weak self] app, connection, session in
@@ -85,6 +159,7 @@ final class AppModel: ObservableObject {
             MainActor.assumeIsolated {
                 self?.sessions.values.forEach { $0.recoverIfFailed() }
                 self?.lives.values.forEach { live in Task { await live.refresh() } }
+                self?.loaders.values.forEach { loader in Task { await loader.refresh() } }
             }
         }
     }
@@ -96,10 +171,61 @@ final class AppModel: ObservableObject {
     var selectedLive: SpaceLive? { selectedID.flatMap { lives[$0] } }
 
     func dataStore(_ id: UUID) -> WKWebsiteDataStore {
-        if let s = dataStores[id] { return s }
-        let s = WKWebsiteDataStore(forIdentifier: id)
-        dataStores[id] = s
+        cookieSession(id).dataStore
+    }
+
+    private func cookieSession(_ id: UUID) -> WebCookieSession {
+        if let s = cookieSessions[id] { return s }
+        let s = WebCookieSession(identifier: id)
+        cookieSessions[id] = s
         return s
+    }
+
+    /// The Space's catalogue (apps, agents, widgets, peers, the panel's screens), as the iPhone reads it.
+    func loader(for connection: Connection) -> CatalogueLoader {
+        if let l = loaders[connection.id], l.connection.url == connection.url { return l }
+        let cookies = cookieSession(connection.id)
+        let l = CatalogueLoader(connection: connection, cache: cache) { await cookies.cookies() }
+        l.onCatalogue = { [weak self] catalogue in
+            guard let self else { return }
+            screens.seed(connection.id, from: catalogue.panelScreens)
+            iconStores[connection.id]?.retryFailed()
+        }
+        loaders[connection.id] = l
+        iconStores[connection.id] = IconStore(api: l.api, directory: DesktopPaths.icons(connection.id))
+        DispatchQueue.main.async { Task { await l.refresh() } }
+        return l
+    }
+
+    func icons(for connection: Connection) -> IconStore {
+        if let s = iconStores[connection.id], loaders[connection.id]?.connection.url == connection.url { return s }
+        _ = loader(for: connection)
+        return iconStores[connection.id]!
+    }
+
+    func icons(_ id: UUID) -> IconStore? { store.connection(id).map(icons(for:)) }
+
+    func settings(for connection: Connection) -> SettingsLoader {
+        if let s = settingsLoaders[connection.id] { return s }
+        let s = SettingsLoader(api: loader(for: connection).api)
+        settingsLoaders[connection.id] = s
+        return s
+    }
+
+    /// The Space's shells open on this Mac, kept while the app runs as the chats are.
+    func terminal(for connection: Connection) -> TerminalStore {
+        if let s = terminals[connection.id] { return s }
+        let s = TerminalStore(api: loader(for: connection).api)
+        s.openLink = { NSWorkspace.shared.open($0) }
+        terminals[connection.id] = s
+        return s
+    }
+
+    /// Reads the catalogue again; failed icons are tried once more after it.
+    func refreshCatalogue() {
+        guard let c = selected else { return }
+        let l = loader(for: c)
+        Task { await l.refresh() }
     }
 
     func session(for connection: Connection) -> PanelSession {
@@ -108,8 +234,12 @@ final class AppModel: ObservableObject {
         s.openLink = { [weak self] url in self?.openLink(url, from: connection) }
         // Signing in on the panel is what lets the native views in: refresh them right away.
         s.onStateChange = { [weak self] state in
-            if state == .ready, let live = self?.lives[connection.id], live.status != .ok {
-                Task { await live.refresh(catalogue: true) }
+            guard let self, state == .ready else { return }
+            if let live = lives[connection.id], live.status != .ok { Task { await live.refresh(catalogue: true) } }
+            if let loader = loaders[connection.id], loader.status != .ok { Task { await loader.refresh() } }
+            if closeWebPanelAfterSignIn, selectedID == connection.id, destination == .panel {
+                closeWebPanelAfterSignIn = false
+                destination = .launcher
             }
         }
         sessions[connection.id] = s
@@ -121,13 +251,19 @@ final class AppModel: ObservableObject {
     func select(_ id: UUID) {
         guard store.connection(id) != nil, id != selectedID else { return }
         selectedID = id
-        destination = .panel
+        query = ""
+        editingScreen = nil
+        homePage = Screens.home
+        pagerID = Screens.home
+        destination = .launcher
     }
 
     func add(name: String, url: URL) {
         let c = store.add(name: name, url: url)
         selectedID = c.id
-        destination = .panel
+        homePage = Screens.home
+        pagerID = Screens.home
+        destination = .launcher
     }
 
     /// A changed URL starts a fresh page; the old one's unsent drafts are gone, which the form says.
@@ -141,7 +277,14 @@ final class AppModel: ObservableObject {
     /// Forgets the connection on this Mac. The Space itself, its agents and its data are untouched.
     func remove(_ id: UUID, clearSignIn: Bool) async {
         discard(id)
-        dataStores[id] = nil
+        loaders[id]?.forget()
+        loaders[id] = nil
+        iconStores[id]?.clear()
+        try? FileManager.default.removeItem(at: DesktopPaths.icons(id))
+        iconStores[id] = nil
+        settingsLoaders[id] = nil
+        cookieSessions[id] = nil
+        screens.forget(id)
         SpaceLive.forget(id)
         store.remove(id)
         if selectedID == id { selectedID = store.defaultConnection?.id }
@@ -158,8 +301,40 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Ends the Space's session on this Mac: cookies and every other piece of website data of its
+    /// store, the saved catalogue, icons and open pages. The address and the screens stay.
+    func signOut(_ connection: Connection) {
+        let id = connection.id
+        iconStores[id]?.clear()
+        terminals[id]?.closeAll()
+        sessions[id]?.webView.stopLoading()
+        sessions[id] = nil
+        tabs[id]?.forEach { $0.session.webView.stopLoading() }
+        tabs[id] = nil
+        appWindows.close(connection: id)
+        chats = chats.filter { $0.key.connection != id }
+        let loader = loaders[id]
+        loader?.forget()
+        settingsLoaders[id]?.forget()
+        if selectedID == id {
+            destination = .launcher
+            pagerID = Pager.home
+        }
+        dataStore(id).removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) { [weak self] in
+            Task { @MainActor in
+                // Again, for a refresh that started while the cookies were still there.
+                loader?.forget()
+                await loader?.refresh()
+                await self?.lives[id]?.refresh(catalogue: true)
+            }
+        }
+        objectWillChange.send()
+    }
+
     private func discard(_ id: UUID) {
         sessions[id] = nil
+        terminals[id]?.closeAll()
+        terminals[id] = nil
         tabs[id]?.forEach { $0.session.webView.stopLoading() }
         tabs[id] = nil
         appWindows.close(connection: id)
@@ -177,8 +352,8 @@ final class AppModel: ObservableObject {
         }
         for c in list where lives[c.id]?.connection.url != c.url {
             lives[c.id]?.stop()
-            let cookieStore = dataStore(c.id).httpCookieStore
-            let live = SpaceLive(connection: c) { await cookieStore.allCookies() }
+            let cookies = cookieSession(c.id)
+            let live = SpaceLive(connection: c) { await cookies.cookies() }
             live.onNewInbox = { [weak self] items in
                 guard let self else { return }
                 notifier.post(items, from: c, showName: store.connections.count > 1)
@@ -197,14 +372,151 @@ final class AppModel: ObservableObject {
 
     // MARK: Main window
 
+    /// Reloads what is on show: the app's page, the web panel, or the launcher's catalogue.
     func reload() {
         guard let c = selected else { return }
-        session(for: c).reload()
+        switch destination {
+        case .app(let id): tab(id, connection: c.id)?.session.reload()
+        case .panel: session(for: c).reload()
+        case .launcher: refreshCatalogue()
+        case .hub: NotificationCenter.default.post(name: .reloadHubPage, object: nil)
+        }
         if let live = lives[c.id] { Task { await live.refresh(catalogue: true) } }
     }
 
     func openInBrowser() {
-        if let c = selected { NSWorkspace.shared.open(session(for: c).browserURL) }
+        guard let c = selected else { return }
+        if case .app(let id) = destination, let url = tab(id, connection: c.id)?.session.webView.url {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.open(session(for: c).browserURL)
+        }
+    }
+
+    /// Back to the launcher, on the page it was on; apps stay open as tabs.
+    func returnToSpace() {
+        destination = .launcher
+    }
+
+    /// Shows the Space's web panel over the launcher.
+    func openWebPanel() {
+        destination = .panel
+        if let c = selected { session(for: c).recoverIfFailed() }
+    }
+
+    func signIn() {
+        closeWebPanelAfterSignIn = true
+        openWebPanel()
+    }
+
+    func webPanelFromHub() { openWebPanel() }
+
+    /// A link on one of the Space's pages: it opens as any other address does.
+    func openFromHub(_ url: URL, title: String, in connection: Connection) {
+        openLink(url, from: connection)
+    }
+
+    /// Moves the launcher one page left or right (⌘← and ⌘→, or a swipe).
+    func movePage(by step: Int) {
+        guard let c = selected else { return }
+        if destination != .launcher { destination = .launcher }
+        let ids = [Pager.home] + screens.screens(c.id).map(\.id) + [Pager.settings]
+        let i = ids.firstIndex(of: pagerID) ?? 1
+        pagerID = ids[max(0, min(ids.count - 1, i + step))]
+    }
+
+    func search() {
+        showPage(Pager.home)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.focusSearch.send() }
+    }
+
+    func showPage(_ id: String) {
+        pagerID = id
+        destination = .launcher
+    }
+
+    /// The screens, at the one last shown.
+    func showScreens() {
+        let ids = selected.map { c in screens.screens(c.id).map(\.id) } ?? []
+        showPage(ids.contains(homePage) ? homePage : Screens.home)
+    }
+
+    // MARK: Screens
+
+    /// Pins the entry to the screen, or takes it off when it is there. This Mac's layout only.
+    func togglePin(_ key: String, screen: String, in connection: Connection) {
+        let pinned = screens.isPinned(key, screen: screen, connection.id)
+        screens.edit(connection.id) { pinned ? Screens.unpin($0, screen, key) : Screens.pin($0, screen, key) }
+    }
+
+    /// A new empty screen after the last one, shown at once.
+    func addScreen(in connection: Connection) {
+        guard let made = Screens.add(screens.screens(connection.id)) else { return }
+        screens.edit(connection.id) { _ in made.screens }
+        pagerID = made.id
+    }
+
+    func removeScreen(_ id: String, in connection: Connection) {
+        guard id != Screens.home else { return }
+        let all = screens.screens(connection.id)
+        let before = all.firstIndex { $0.id == id }.map { all[max($0 - 1, 0)].id } ?? Screens.home
+        if homePage == id { homePage = before }
+        if pagerID == id { pagerID = before }
+        if editingScreen == id { editingScreen = nil }
+        screens.edit(connection.id) { Screens.remove($0, id) }
+    }
+
+    /// Throws this Mac's layout away for the panel's as it is now.
+    func resetScreens(in connection: Connection) {
+        guard let catalogue = loaders[connection.id]?.catalogue else { return }
+        homePage = Screens.home
+        if pagerID != Pager.home, pagerID != Pager.settings { pagerID = Screens.home }
+        editingScreen = nil
+        screens.reset(connection.id, from: catalogue.panelScreens)
+    }
+
+    /// The screen the screen actions are about: the one on show, else the one last shown.
+    var actionScreen: String { homePage }
+
+    // MARK: Opening entries
+
+    /// An entry of the library or a screen: an app opens as a tab, an agent as its conversation,
+    /// a widget at its link.
+    func open(_ entry: CatalogueEntry) {
+        guard let c = selected else { return }
+        switch entry.kind {
+        case .agent:
+            destination = .hub(.chat(agent: entry.ref))
+        case .app:
+            guard let url = entry.pageURL(space: c.url) else { return openWebPanel() }
+            // A plain link to another site is the browser's; an app of the Space is a tab.
+            if entry.reach == .link, !isSpace(url, c) {
+                NSWorkspace.shared.open(url)
+                return
+            }
+            let app = lives[c.id]?.apps.first { $0.id == entry.ref }
+                ?? AppInfo(id: entry.ref, name: entry.ref.split(separator: "/").last.map(String.init) ?? entry.ref, peer: entry.peer,
+                           stale: nil, title: entry.title, description: entry.detail, i18n: entry.i18n, icon: entry.icon,
+                           url: entry.link, status: nil, hidden: nil)
+            openApp(app, connection: c, url: url)
+        case .widget:
+            guard let url = entry.pageURL(space: c.url) else { return openWebPanel() }
+            openLink(url, from: c)
+        }
+    }
+
+    /// The Space's own origin, or an app host under the domain its router serves.
+    func isSpace(_ url: URL, _ connection: Connection) -> Bool {
+        if ConnectionRules.sameOrigin(url, connection.url) { return true }
+        guard let host = url.host?.lowercased(), let domain = loaders[connection.id]?.catalogue?.domain else { return false }
+        return host == domain || host.hasSuffix("." + domain)
+    }
+
+    /// The first apps and agents of the first screen, for the Dock menu.
+    func dockEntries() -> [CatalogueEntry] {
+        guard let c = selected, let catalogue = loaders[c.id]?.catalogue else { return [] }
+        let pins = screens.screens(c.id).first?.items ?? []
+        return Array(pins.compactMap { catalogue.entry($0) }.filter { $0.kind != .widget }.prefix(8))
     }
 
     func showMainWindow(connection: UUID? = nil, _ destination: Destination? = nil) {
@@ -257,7 +569,7 @@ final class AppModel: ObservableObject {
         guard let i = tabs[connection]?.firstIndex(where: { $0.app.id == app }), let tab = tabs[connection]?.remove(at: i) else { return nil }
         if selectedID == connection, destination == .app(app) {
             let rest = tabs[connection] ?? []
-            destination = rest.isEmpty ? .panel : .app(rest[min(i, rest.count - 1)].app.id)
+            destination = rest.isEmpty ? .launcher : .app(rest[min(i, rest.count - 1)].app.id)
         }
         return tab
     }
@@ -282,7 +594,7 @@ final class AppModel: ObservableObject {
         if let url, let target = URL(string: url, relativeTo: c.url)?.absoluteURL {
             openLink(target, from: c)
         } else {
-            showMainWindow(connection: id, .inbox)
+            showMainWindow(connection: id, .hub(.inbox))
         }
     }
 
@@ -324,6 +636,6 @@ final class AppModel: ObservableObject {
 
     func openQuickChatInMainWindow() {
         guard let ref = quickChatResolvedRef else { return }
-        showMainWindow(connection: ref.connection, .agent(ref.agent))
+        showMainWindow(connection: ref.connection, .hub(.chat(agent: ref.agent)))
     }
 }

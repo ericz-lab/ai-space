@@ -1,4 +1,5 @@
-# XcodeGen spec for AISpace.xcodeproj; run `bun run desktop:xcode` after adding or moving files.
+# XcodeGen spec for AISpace.xcodeproj; run `bun run desktop:xcode` after adding or moving files
+# (it fetches SwiftTerm first).
 # scripts/build.sh and scripts/test.sh build the same sources with swiftc and need no Xcode.
 name: AISpace
 options:
@@ -12,12 +13,59 @@ settings:
     MARKETING_VERSION: 0.1.0
     CURRENT_PROJECT_VERSION: 1
 targets:
+  # The terminal emulator behind the Terminal page, from the sources scripts/fetch-deps.sh fetches
+  # at the release the iPhone client pins (mobile/ios/scripts/swiftterm.sh says why not a package).
+  SwiftTerm:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: build/deps/SwiftTerm/Sources/SwiftTerm
+        excludes: ["**/*.metal", "**/*.md", "Documentation.docc"]
+    settings:
+      base:
+        PRODUCT_NAME: SwiftTerm
+        SWIFT_SUPPRESS_WARNINGS: YES
+        SKIP_INSTALL: YES
   AISpace:
     type: application
     platform: macOS
     sources:
       - path: AISpace
         excludes: [Info.plist, Resources/AppIcon.svg]
+      # The iPhone client's Foundation-only code, compiled from where it lives
+      # (scripts/sources.sh lists the same files).
+      - path: ../../mobile/ios/AISpace/Core/Catalogue.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/CatalogueCache.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/CatalogueSearch.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/HubModels.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/IconSource.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/Screens.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/ScreenStore.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/SpaceSettings.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/TerminalModels.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/WidgetBlocks.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/CatalogueLoader.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/SettingsLoader.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/HubStores.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/TerminalSession.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/TerminalStore.swift
+        group: Shared
+    dependencies:
+      - target: SwiftTerm
     settings:
       base:
         PRODUCT_NAME: AISpace

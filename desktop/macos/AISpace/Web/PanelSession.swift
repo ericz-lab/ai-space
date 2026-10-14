@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import WebKit
 
 /// One web view and its state: a connection's panel, or one app's page in its own window.
@@ -27,7 +28,18 @@ final class PanelSession: NSObject, ObservableObject {
         }
     }
     @Published private(set) var isLoading = false
+    /// Whether a page has been drawn since the session's own page was asked for: a page of its
+    /// origin once it starts to arrive, any other (an access layer's sign-in) once it is whole.
+    /// Until then the view is blank, through every redirect of a sign-in that needs no one, and
+    /// the mark stands in for it.
+    @Published private(set) var hasContent = false
+    @Published private(set) var progress: Double = 0
+    @Published private(set) var canGoBack = false
+    @Published private(set) var canGoForward = false
+    @Published private(set) var currentURL: URL?
+    @Published private(set) var pageTitle = ""
     private var downloads: [ObjectIdentifier: URL] = [:]
+    private var watchers: Set<AnyCancellable> = []
 
     init(connection: Connection, dataStore: WKWebsiteDataStore, home: URL? = nil) {
         self.connection = connection
@@ -38,6 +50,13 @@ final class PanelSession: NSObject, ObservableObject {
         config.websiteDataStore = dataStore
         config.applicationNameForUserAgent = "AISpaceDesktop/\(Bundle.main.shortVersion)"
         config.preferences.isElementFullscreenEnabled = true
+        if home == nil {
+            // The panel page has its own ways between its screens (src/web/ScreenNav.tsx). The app
+            // draws the screens itself, so they are left out here, as the iPhone client does.
+            let css = ".dock,.edge,.screens-hint{display:none!important}"
+            let script = "const s=document.createElement('style');s.textContent='\(css)';document.documentElement.appendChild(s);"
+            config.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        }
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
         webView.navigationDelegate = self
@@ -47,11 +66,22 @@ final class PanelSession: NSObject, ObservableObject {
         #if DEBUG
         webView.isInspectable = true
         #endif
+        webView.publisher(for: \.canGoBack).sink { [weak self] v in self?.canGoBack = v }.store(in: &watchers)
+        webView.publisher(for: \.canGoForward).sink { [weak self] v in self?.canGoForward = v }.store(in: &watchers)
+        webView.publisher(for: \.url).sink { [weak self] v in self?.currentURL = v }.store(in: &watchers)
+        webView.publisher(for: \.title).sink { [weak self] v in self?.pageTitle = v ?? "" }.store(in: &watchers)
+        webView.publisher(for: \.estimatedProgress).sink { [weak self] v in self?.progress = v }.store(in: &watchers)
     }
 
     func load() {
         state = .connecting
+        hasContent = false
         webView.load(URLRequest(url: home))
+    }
+
+    func stop() {
+        webView.stopLoading()
+        isLoading = false
     }
 
     /// Reloads the current page; after a failure, starts again from the connection's URL.
@@ -94,6 +124,7 @@ final class PanelSession: NSObject, ObservableObject {
 
     private func fail(_ error: Error) {
         isLoading = false
+        hasContent = true
         if let s = SpaceCheck.classify(error: error) { state = s }
     }
 }
@@ -130,8 +161,13 @@ extension PanelSession: WKNavigationDelegate {
         isLoading = true
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if showsConnectionPage { hasContent = true }
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isLoading = false
+        hasContent = true
         check()
     }
 
@@ -167,6 +203,8 @@ extension PanelSession: WKDownloadDelegate {
     }
 
     func downloadDidFinish(_ download: WKDownload) {
+        isLoading = false
+        hasContent = true
         Downloads.announce(downloads.removeValue(forKey: ObjectIdentifier(download)))
     }
 

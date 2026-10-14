@@ -1,176 +1,92 @@
 import SwiftUI
 
-/// The main window: a sidebar of the selected Space (panel, inbox, agents, apps) and the chosen
-/// item beside it. Agents and the inbox are native; an app opens as a tab here and can be moved
-/// into its own window.
+/// The main window, laid out as the iPhone client: the launcher (Home, the screens, Settings)
+/// fills it, and an app, a page of the Space or the web panel comes up over it, with a way back
+/// in the toolbar. The launcher stays alive underneath, on the page it was on.
 struct MainView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var store: ConnectionStore
+    @ObservedObject var prefs = Preferences.shared
 
     var body: some View {
         Group {
             if let connection = model.selected {
-                NavigationSplitView {
-                    Sidebar(model: model, connection: connection)
-                        .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
-                } detail: {
-                    Detail(model: model, connection: connection)
-                }
+                SpaceWindow(model: model, connection: connection, loader: model.loader(for: connection),
+                            icons: model.icons(for: connection), screens: model.screens)
+                    .id(connection.id)
             } else {
                 FirstLaunchView(model: model)
             }
         }
-        .frame(minWidth: 820, minHeight: 520)
+        // A theme changes tokens every view reads; the views are made again in it.
+        .id(prefs.themeID)
+        .tint(Theme.accent)
+        .frame(minWidth: 820, minHeight: 540)
     }
 }
 
-struct Detail: View {
+/// One Space in the window: the launcher and whatever is over it.
+struct SpaceWindow: View {
     @ObservedObject var model: AppModel
     let connection: Connection
+    @ObservedObject var loader: CatalogueLoader
+    let icons: IconStore
+    @ObservedObject var screens: ScreenStore
 
     var body: some View {
-        switch model.destination {
-        case .panel:
-            SessionView(session: model.session(for: connection))
-                .id(connection.id)
-                .ignoresSafeArea(.container, edges: .top)
-        case .inbox:
-            if let live = model.lives[connection.id] { InboxView(model: model, live: live) }
-        case .agent(let id):
-            let ref = AgentRef(connection: connection.id, agent: id)
-            if let live = model.lives[connection.id], let chat = model.chat(ref) {
-                ChatView(chat: chat, live: live, compact: false)
-                    .id(ref)
-                    .navigationTitle(chat.agent.displayTitle)
-            } else {
-                ContentUnavailableView("Agent not available", systemImage: "person.crop.circle.badge.questionmark",
-                                       description: Text("Sign in on the panel or check the connection."))
-            }
-        case .app(let id):
-            if let tab = model.tab(id, connection: connection.id) {
-                AppPageView(session: tab.session)
-                    .id(tab.session.home)
-                    .navigationTitle(tab.app.displayTitle)
-                    .toolbar {
-                        ToolbarItem {
-                            Button { model.moveToWindow(id, connection: connection.id) } label: {
-                                Label("Open in New Window", systemImage: "macwindow.badge.plus")
-                            }
-                            .help("Open in New Window (⌥⌘T)")
-                        }
-                        ToolbarItem {
-                            Button { model.closeTab(id, connection: connection.id) } label: { Label("Close", systemImage: "xmark") }
-                                .help("Close")
-                        }
-                    }
-            } else {
-                ContentUnavailableView("This app is not open", systemImage: "app.dashed")
+        let onLauncher = model.destination == .launcher
+        ZStack {
+            LauncherView(model: model, connection: connection, loader: loader, icons: icons, screens: screens)
+                .opacity(onLauncher ? 1 : 0)
+                .allowsHitTesting(onLauncher)
+                .accessibilityHidden(!onLauncher)
+            switch model.destination {
+            case .launcher:
+                EmptyView()
+            case .hub(let page):
+                HubContainer(model: model, connection: connection, page: page, loader: loader, icons: icons)
+            case .app(let id):
+                if let tab = model.tab(id, connection: connection.id) {
+                    AppTabView(model: model, connection: connection, tab: tab, session: tab.session, screens: screens)
+                        .id(tab.session.home)
+                } else {
+                    ContentUnavailableView("This app is not open", systemImage: "app.dashed")
+                }
+            case .panel:
+                PanelPage(model: model, session: model.session(for: connection))
             }
         }
+        .toolbar {
+            if onLauncher {
+                ToolbarItem(placement: .navigation) { ConnectionSwitcher(model: model, connection: connection, loader: loader) }
+                ToolbarItem(placement: .principal) {
+                    PageIndicator(position: model.pager, screens: screens.screens(connection.id)) { id in
+                        withAnimation(.easeInOut(duration: 0.3)) { model.showPage(id) }
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) { OpenTabsMenu(model: model, connection: connection) }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        ScreenActions(model: model, connection: connection, loader: loader, store: screens)
+                        Divider()
+                        Button("Reload") { model.refreshCatalogue() }
+                        Button("Web Panel") { model.openWebPanel() }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
+                    .help("Screens and More")
+                }
+            }
+        }
+        .navigationTitle(Text(verbatim: connection.name))
     }
 }
 
-struct Sidebar: View {
+/// The Space switcher and its state, at the leading edge of the launcher's toolbar.
+struct ConnectionSwitcher: View {
     @ObservedObject var model: AppModel
     let connection: Connection
-
-    var body: some View {
-        let live = model.lives[connection.id]
-        List(selection: Binding(get: { model.destination }, set: { choose($0) })) {
-            Section {
-                Label("Home", systemImage: "square.grid.2x2").tag(Destination.panel)
-                HStack {
-                    Label("Inbox", systemImage: "tray")
-                    Spacer()
-                    if let n = live?.summary.unread, n > 0 { Text("\(n)").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-                }
-                .tag(Destination.inbox)
-            }
-            if let live {
-                if !live.agents.isEmpty {
-                    Section("Agents") {
-                        ForEach(live.agents) { agent in
-                            HStack(spacing: 8) {
-                                Avatar(live: live, path: agent.avatar, fallback: "person.crop.circle").frame(width: 20, height: 20)
-                                Text(agent.displayTitle).lineLimit(1)
-                                Spacer()
-                                if live.running.contains(where: { $0.agent == "\(agent.app)/\(agent.name)" }) {
-                                    ProgressView().controlSize(.mini).help("Working")
-                                }
-                                if let peer = agent.peer { Text(peer).font(.caption2).foregroundStyle(.tertiary) }
-                            }
-                            .tag(Destination.agent(agent.id))
-                        }
-                    }
-                }
-                if !live.apps.isEmpty {
-                    Section("Apps") {
-                        ForEach(live.apps) { app in
-                            AppRow(model: model, live: live, app: app, connection: connection)
-                                .tag(Destination.app(app.id))
-                        }
-                    }
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .top) { ConnectionHeader(model: model, connection: connection, live: live) }
-    }
-
-    /// Choosing an app opens it as a tab; an app already in its own window comes forward instead.
-    private func choose(_ d: Destination?) {
-        guard let d else { return }
-        if case .app(let id) = d {
-            guard let app = model.lives[connection.id]?.apps.first(where: { $0.id == id }) else { return }
-            model.openApp(app, connection: connection)
-        } else {
-            model.destination = d
-        }
-    }
-}
-
-/// An app in the sidebar: open as a tab (with a close button), in its own window, or closed.
-private struct AppRow: View {
-    @ObservedObject var model: AppModel
-    let live: SpaceLive
-    let app: AppInfo
-    let connection: Connection
-
-    var body: some View {
-        let open = model.tab(app.id, connection: connection.id) != nil
-        let windowed = model.appWindows.isOpen(app.id, connection: connection.id)
-        HStack(spacing: 8) {
-            Avatar(live: live, path: app.icon, fallback: "app").frame(width: 20, height: 20)
-            Text(app.displayTitle).lineLimit(1)
-            Spacer()
-            if let peer = app.peer { Text(peer).font(.caption2).foregroundStyle(.tertiary) }
-            if windowed {
-                Image(systemName: "macwindow").font(.caption).foregroundStyle(.secondary).help("In its own window")
-            } else if open {
-                Button { model.closeTab(app.id, connection: connection.id) } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.borderless).foregroundStyle(.secondary).help("Close")
-            }
-        }
-        .contextMenu {
-            if windowed {
-                Button("Show Window") { model.openApp(app, connection: connection) }
-            } else {
-                Button("Open") { model.openApp(app, connection: connection) }
-                Button("Open in New Window") {
-                    if !open { model.openApp(app, connection: connection) }
-                    model.moveToWindow(app.id, connection: connection.id)
-                }
-                if open { Button("Close") { model.closeTab(app.id, connection: connection.id) } }
-            }
-        }
-    }
-}
-
-/// The connection switcher and its state, at the top of the sidebar.
-struct ConnectionHeader: View {
-    @ObservedObject var model: AppModel
-    let connection: Connection
-    let live: SpaceLive?
+    @ObservedObject var loader: CatalogueLoader
 
     var body: some View {
         Menu {
@@ -182,59 +98,136 @@ struct ConnectionHeader: View {
             Divider()
             SettingsLink { Text("Edit Connections…") }
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 Circle().fill(statusColor).frame(width: 8, height: 8)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(connection.name).font(.headline).lineLimit(1)
-                    Text(statusText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer()
-                Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(.secondary)
+                Text(verbatim: connection.name).font(.headline)
             }
-            .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 4)
+        .help(statusText)
     }
 
     private var statusColor: Color {
-        switch live?.status {
-        case .ok: return .green
-        case .signInNeeded: return .orange
-        case .offline: return .red
-        default: return .gray
+        switch loader.status {
+        case .ok: return Theme.success
+        case .signInNeeded: return Theme.warning
+        case .unreachable, .incompatible: return Theme.danger
+        case .loading: return .gray
         }
     }
 
-    private var statusText: LocalizedStringKey {
-        switch live?.status {
-        case .ok:
-            let n = live?.running.count ?? 0
-            return n > 0 ? "\(n) agents working" : "Connected"
-        case .signInNeeded: return "Sign in on Home"
-        case .offline: return "Offline"
-        default: return "Connecting…"
+    private var statusText: String {
+        switch loader.status {
+        case .ok: return String(localized: "Connected")
+        case .loading: return String(localized: "Connecting…")
+        case .signInNeeded: return String(localized: "Signed out")
+        case .unreachable: return String(localized: "Cannot reach this Space")
+        case .incompatible: return String(localized: "Not an ai-space panel")
         }
     }
 }
 
-/// An icon or avatar from the Space: an image path, an emoji, or a symbol while it loads.
-struct Avatar: View {
-    @ObservedObject var live: SpaceLive
-    let path: String?
-    let fallback: String
+/// The apps open as tabs of this window, to go back to one; shown only when there are some.
+struct OpenTabsMenu: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
 
     var body: some View {
-        if let image = live.image(path) {
-            Image(nsImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 5))
-        } else if let path, !path.isEmpty, !path.hasPrefix("/"), !path.hasPrefix("http") {
-            Text(path).font(.system(size: 14)).frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            Image(systemName: fallback).resizable().scaledToFit().foregroundStyle(.secondary)
+        let tabs = model.tabs[connection.id] ?? []
+        if !tabs.isEmpty {
+            Menu {
+                ForEach(tabs) { tab in
+                    Button(tab.app.displayTitle) { model.destination = .app(tab.app.id) }
+                }
+                Divider()
+                Button("Close All") { tabs.forEach { model.closeTab($0.app.id, connection: connection.id) } }
+            } label: {
+                Label("Open Tabs", systemImage: "square.on.square")
+            }
+            .help("Open Tabs")
         }
+    }
+}
+
+/// An app open as a tab: its page, with the way back to the Space and the page's controls above it.
+struct AppTabView: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    let tab: AppTab
+    @ObservedObject var session: PanelSession
+    @ObservedObject var screens: ScreenStore
+
+    var body: some View {
+        AppPageView(session: session)
+            .navigationTitle(Text(verbatim: session.pageTitle.isEmpty ? tab.app.displayTitle : session.pageTitle))
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button { model.returnToSpace() } label: { Label("Back to Space", systemImage: "square.grid.2x2") }
+                        .help("Back to Space (⇧⌘H)")
+                }
+                ToolbarItemGroup(placement: .navigation) {
+                    Button { session.webView.goBack() } label: { Label("Back", systemImage: "chevron.left") }
+                        .disabled(!session.canGoBack).help("Back")
+                    Button { session.webView.goForward() } label: { Label("Forward", systemImage: "chevron.right") }
+                        .disabled(!session.canGoForward).help("Forward")
+                    Button { session.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                        .help("Reload")
+                }
+                ToolbarItem(placement: .primaryAction) { OpenTabsMenu(model: model, connection: connection) }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if let url = session.currentURL ?? session.webView.url {
+                        ShareLink(item: url) { Label("Share", systemImage: "square.and.arrow.up") }
+                            .help("Share")
+                        Button { NSWorkspace.shared.open(url) } label: { Label("Open in Browser", systemImage: "safari") }
+                            .help("Open in Browser")
+                    }
+                    pinMenu
+                    Button { model.moveToWindow(tab.app.id, connection: connection.id) } label: {
+                        Label("Open in New Window", systemImage: "macwindow.badge.plus")
+                    }
+                    .help("Open in New Window (⌥⌘T)")
+                    Button { model.closeTab(tab.app.id, connection: connection.id) } label: { Label("Close", systemImage: "xmark") }
+                        .help("Close")
+                }
+            }
+    }
+
+    /// Adds the app to a screen of this Mac, or takes it off.
+    private var pinMenu: some View {
+        let key = "app:\(tab.app.id)"
+        let all = screens.screens(connection.id)
+        return Menu {
+            ForEach(Array(all.enumerated()), id: \.element.id) { index, s in
+                Toggle(isOn: Binding(get: { s.items.contains(key) }, set: { _ in model.togglePin(key, screen: s.id, in: connection) })) {
+                    Text(verbatim: Screens.title(at: index))
+                }
+            }
+        } label: {
+            Label("Add to Panel", systemImage: all.contains { $0.items.contains(key) } ? "pin.fill" : "pin")
+        }
+        .help("Add to Panel")
+    }
+}
+
+/// The Space's web panel over the launcher, for what the app does not draw (and the sign-in).
+struct PanelPage: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var session: PanelSession
+
+    var body: some View {
+        SessionView(session: session)
+            .navigationTitle(Text("Web Panel"))
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button { model.returnToSpace() } label: { Label("Back to Space", systemImage: "square.grid.2x2") }
+                        .help("Back to Space (⇧⌘H)")
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { session.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                        .help("Reload")
+                    Button { NSWorkspace.shared.open(session.browserURL) } label: { Label("Open in Browser", systemImage: "safari") }
+                        .help("Open in Browser")
+                }
+            }
     }
 }
 
@@ -246,8 +239,8 @@ struct SessionView: View {
         ZStack(alignment: .top) {
             PanelWebView(session: session)
             switch session.state {
-            case .connecting where session.webView.url == nil:
-                ProgressView("Connecting…").padding(40)
+            case .connecting where !session.hasContent:
+                Connecting().background(Theme.ground)
             case .authenticationRequired:
                 SignInBanner(session: session)
             case .unreachable(let detail):
@@ -314,7 +307,7 @@ struct FirstLaunchView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 96, height: 96)
+            Logo(size: 96)
             Text("Connect to a Space").font(.largeTitle)
             Text("Open an ai-space that is already running, on this Mac or on a server. Nothing is installed or started.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)

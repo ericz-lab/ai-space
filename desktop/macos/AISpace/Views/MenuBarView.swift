@@ -54,7 +54,7 @@ private struct ConnectionSummary: View {
                         Label("\(live.running.count) working", systemImage: "gearshape.2").font(.caption).foregroundStyle(.secondary)
                     }
                 case .signInNeeded:
-                    Button("Sign In") { model.showMainWindow(connection: connection.id, .panel) }.font(.caption)
+                    Button("Sign In") { model.showMainWindow(connection: connection.id); model.signIn() }.font(.caption)
                 case .offline:
                     Text("Offline").font(.caption).foregroundStyle(.red)
                 case .unknown:
@@ -63,7 +63,7 @@ private struct ConnectionSummary: View {
             }
             ForEach(live.running.prefix(3)) { run in
                 Button {
-                    model.showMainWindow(connection: connection.id, .agent(agentID(run)))
+                    model.showMainWindow(connection: connection.id, .hub(.chat(agent: agentID(run))))
                 } label: {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
@@ -82,14 +82,14 @@ private struct ConnectionSummary: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                Button("Inbox (\(live.summary.unread) unread)") { model.showMainWindow(connection: connection.id, .inbox) }
+                Button("Inbox (\(live.summary.unread) unread)") { model.showMainWindow(connection: connection.id, .hub(.inbox)) }
                     .font(.caption)
             }
             if !live.apps.isEmpty {
                 LazyVGrid(columns: Array(repeating: GridItem(.fixed(44), spacing: 8), count: 6), spacing: 8) {
                     ForEach(live.apps.prefix(12)) { app in
                         Button { model.openApp(app, connection: connection) } label: {
-                            Avatar(live: live, path: app.icon, fallback: "app").frame(width: 30, height: 30)
+                            EntryIcon(icon: app.icon, fallback: "app", icons: model.icons(for: connection), size: 30)
                         }
                         .help(app.displayTitle)
                     }

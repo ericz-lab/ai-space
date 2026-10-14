@@ -97,7 +97,7 @@ struct QuickChatView: View {
             .padding(.bottom, 8)
             Divider()
             if let chat = model.quickChatController {
-                ChatView(chat: chat, live: model.quickChatLive, compact: true)
+                ChatView(chat: chat, icons: model.quickChatResolvedRef.flatMap { model.icons($0.connection) }, compact: true)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "bubble.left.and.text.bubble.right").font(.system(size: 30)).foregroundStyle(.secondary)
@@ -131,7 +131,9 @@ struct AgentPicker: View {
         } label: {
             HStack(spacing: 8) {
                 if let ref = model.quickChatResolvedRef, let live = model.lives[ref.connection], let agent = live.agent(ref.agent) {
-                    Avatar(live: live, path: agent.avatar, fallback: "person.crop.circle").frame(width: 22, height: 22)
+                    if let icons = model.icons(ref.connection) {
+                        EntryIcon(icon: agent.avatar, fallback: "person.fill", icons: icons, size: 22, isRound: true)
+                    }
                     Text(agent.displayTitle).font(.headline)
                 } else {
                     Text("Choose an Agent").font(.headline)

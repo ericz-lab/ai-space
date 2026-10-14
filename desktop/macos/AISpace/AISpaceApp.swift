@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var activity: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.appearance = Preferences.shared.appearance.nsAppearance
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1280, height: 820),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -77,6 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep], reason: "Watching the Space inbox")
 
         showWindow()
+        #if DEBUG
+        DebugSnapshot.schedule(window: window, model: model)
+        #endif
     }
 
     func showWindow() {
@@ -102,16 +106,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             switch DeepLink(url) {
             case .chat(let agent, let text): quickChat.show(agent: agent, text: text)
             case .open(let app):
-                if let c = model.selected ?? model.store.defaultConnection, let info = model.lives[c.id]?.app(named: app) {
+                if let c = model.selected ?? model.store.defaultConnection, let entry = model.loader(for: c).catalogue?.app(named: app) {
+                    model.open(entry)
+                    model.showMainWindow()
+                } else if let c = model.selected ?? model.store.defaultConnection, let info = model.lives[c.id]?.app(named: app) {
                     model.openApp(info, connection: c)
                 } else {
                     model.showMainWindow()
                 }
-            case .inbox: model.showMainWindow(.inbox)
-            case .show: model.showMainWindow()
+            case .inbox: model.showMainWindow(.hub(.inbox))
+            case .show: model.showMainWindow(.launcher)
             case nil: break
             }
         }
+    }
+}
+
+extension AppDelegate {
+    /// The Dock menu: the first apps and agents of the first screen, as the iPhone's quick actions.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let entries = model.dockEntries()
+        guard !entries.isEmpty else { return nil }
+        let menu = NSMenu()
+        for entry in entries {
+            let item = NSMenuItem(title: entry.displayTitle(), action: #selector(openDockEntry(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = entry.key
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func openDockEntry(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String, let entry = model.dockEntries().first(where: { $0.key == key }) else { return }
+        model.open(entry)
+        showWindow()
     }
 }
 
@@ -139,11 +168,36 @@ struct SpaceCommands: Commands {
             Button("Quick Chat") { model.quickChat?() }
                 .keyboardShortcut("k")
         }
+        CommandGroup(after: .textEditing) {
+            Button("Search Apps, Agents and Widgets") { model.search(); showWindow() }
+                .keyboardShortcut("f")
+                .disabled(model.selected == nil || model.destination != .launcher)
+        }
         CommandMenu("Space") {
-            Button("Home") { model.showMainWindow(.panel) }
+            Button("Back to Space") { model.showMainWindow(.launcher) }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
-            Button("Inbox") { model.showMainWindow(.inbox) }
+            Button("Home") { model.showPage(Pager.home); showWindow() }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+            Button("Screens") { model.showScreens(); showWindow() }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            Button("Settings of the Space") { model.showPage(Pager.settings); showWindow() }
+                .keyboardShortcut(",", modifiers: [.command, .shift])
+            Button("Previous Page") { withAnimation(.easeInOut(duration: 0.3)) { model.movePage(by: -1) } }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                .disabled(model.selected == nil)
+            Button("Next Page") { withAnimation(.easeInOut(duration: 0.3)) { model.movePage(by: 1) } }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                .disabled(model.selected == nil)
+            Divider()
+            Button("Inbox") { model.showMainWindow(.hub(.inbox)) }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+            Button("Chat") { model.showMainWindow(.hub(.chat(agent: nil))) }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+            Button("Terminal") { model.showMainWindow(.hub(.terminal)) }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+            Button("Web Panel") { model.openWebPanel(); showWindow() }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                .disabled(model.selected == nil)
             Button("Move App Between Tab and Window") { model.toggleAppPlacement() }
                 .keyboardShortcut("t", modifiers: [.command, .option])
             Divider()
@@ -174,3 +228,34 @@ struct SpaceCommands: Commands {
         }
     }
 }
+
+#if DEBUG
+/// For checking the layout without screen recording: `AISPACE_SNAPSHOT=<dir>` writes a PNG of the
+/// main window for each page named in `AISPACE_PAGES` (`#home`, a screen id, `#settings`,
+/// `hub:inbox`, `hub:chat`, `panel`), a few seconds apart. Debug builds only.
+@MainActor
+enum DebugSnapshot {
+    static func schedule(window: NSWindow, model: AppModel) {
+        let env = ProcessInfo.processInfo.environment
+        guard let dir = env["AISPACE_SNAPSHOT"], !dir.isEmpty else { return }
+        let pages = (env["AISPACE_PAGES"] ?? "home").split(separator: ",").map(String.init)
+        for (i, page) in pages.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6 + Double(i) * 4) {
+                switch page {
+                case "panel": model.openWebPanel()
+                case "hub:inbox": model.destination = .hub(.inbox)
+                case "hub:chat": model.destination = .hub(.chat(agent: nil))
+                case "hub:terminal": model.destination = .hub(.terminal)
+                default: model.showPage(page)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 9 + Double(i) * 4) {
+                guard let view = window.contentView?.superview, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                let name = page.replacingOccurrences(of: "#", with: "").replacingOccurrences(of: ":", with: "-")
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(i)-\(name).png"))
+            }
+        }
+    }
+}
+#endif

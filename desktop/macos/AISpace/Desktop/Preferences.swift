@@ -1,5 +1,5 @@
+import AppKit
 import Carbon.HIToolbox
-import Foundation
 
 /// Desktop settings, in the app's own user defaults.
 @MainActor
@@ -41,11 +41,30 @@ final class Preferences: ObservableObject {
     @Published var quickChat: Shortcut { didSet { defaults.set(quickChat.rawValue, forKey: "quickChat") } }
     /// The agent Quick Chat last talked to, as `<connection id> <agent id>`.
     @Published var quickChatAgent: String? { didSet { defaults.set(quickChatAgent, forKey: "quickChatAgent") } }
+    /// How this Mac draws the app and which of the panel's themes, whatever a browser is set to.
+    @Published var appearance: Appearance {
+        didSet {
+            defaults.set(appearance.rawValue, forKey: "appearance")
+            NSApp.appearance = appearance.nsAppearance
+        }
+    }
+    @Published var themeID: String {
+        didSet {
+            defaults.set(themeID, forKey: "theme")
+            Theme.current = ThemePreset.named(themeID)
+        }
+    }
+    /// Widget cards on the screens; they stay pinned and stay in the library when off.
+    @Published var showsWidgets: Bool { didSet { defaults.set(!showsWidgets, forKey: "hidesWidgets") } }
 
     private init() {
         menuBar = defaults.object(forKey: "menuBar") as? Bool ?? true
         notifications = defaults.object(forKey: "notifications") as? Bool ?? true
         quickChat = Shortcut(rawValue: defaults.string(forKey: "quickChat") ?? "") ?? .optionSpace
         quickChatAgent = defaults.string(forKey: "quickChatAgent")
+        appearance = Appearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
+        themeID = defaults.string(forKey: "theme") ?? ThemePreset.aurora.id
+        showsWidgets = !defaults.bool(forKey: "hidesWidgets")
+        Theme.current = ThemePreset.named(themeID)
     }
 }

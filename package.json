@@ -28,7 +28,7 @@
     "feishu:rollback": "bun deploy/feishu-oidc/deploy.ts rollback",
     "desktop:build": "desktop/macos/scripts/build.sh",
     "desktop:test": "desktop/macos/scripts/test.sh",
-    "desktop:xcode": "xcodegen generate --spec desktop/macos/project.yml",
+    "desktop:xcode": "desktop/macos/scripts/fetch-deps.sh && xcodegen generate --spec desktop/macos/project.yml",
     "ios:build": "mobile/ios/scripts/build.sh",
     "ios:test": "mobile/ios/scripts/test.sh",
     "ios:xcode": "mobile/ios/scripts/swiftterm.sh && xcodegen generate --spec mobile/ios/project.yml"

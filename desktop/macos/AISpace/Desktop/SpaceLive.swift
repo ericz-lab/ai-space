@@ -29,8 +29,6 @@ final class SpaceLive: ObservableObject {
     private var seen: InboxSeen
     private var loop: Task<Void, Never>?
     private var catalogueAt: Date?
-    private var images: [String: NSImage] = [:]
-    private var loadingImages: Set<String> = []
     private var refreshing = false
 
     init(connection: Connection, cookies: @escaping @MainActor () async -> [HTTPCookie]) {
@@ -101,22 +99,6 @@ final class SpaceLive: ObservableObject {
     func agent(_ id: String) -> AgentInfo? { agents.first { $0.id == id } }
 
     func app(named name: String) -> AppInfo? { apps.first { $0.name == name || $0.id == name } }
-
-    /// An icon or avatar: an emoji is returned as text; a path loads once through the API.
-    func image(_ path: String?) -> NSImage? {
-        guard let path, path.hasPrefix("/") || path.hasPrefix("http") else { return nil }
-        if let cached = images[path] { return cached }
-        if !loadingImages.contains(path) {
-            loadingImages.insert(path)
-            Task {
-                if let data = try? await api.data(path), let image = NSImage(data: data) {
-                    images[path] = image
-                    objectWillChange.send()
-                }
-            }
-        }
-        return nil
-    }
 
     private static func loadSeen(_ id: UUID) -> InboxSeen {
         guard let data = UserDefaults.standard.data(forKey: "inboxSeen.\(id.uuidString)"),
