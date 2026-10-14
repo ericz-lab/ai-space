@@ -71,7 +71,7 @@ The panel sends opens with `navigator.sendBeacon`, so an open is never held up a
 
 ## Panel
 
-- **Settings → App usage**: a window like Model usage. It has a time window (7d, 30d, 90d, all) and a kind filter. Cards show total opens, total time and the most used entry. Below them is a ranking with opens, time, time per session, last use and a 30-day sparkline (time when measured, else opens).
+- **Settings → App usage**: a window like Model usage. It has a time window (7d, 30d, 90d, all) and a kind filter. Cards show total opens, total time and the most used entry. Below them is a ranking with opens, time, time per session, last use and a sparkline for the selected window (time when measured, else opens). The selected date range and its first recorded activity are shown in UTC. If all records fall within seven days, 7d, 30d, 90d and all legitimately have identical totals. Rolling windows include partial UTC days at both ends; all starts on the earliest returned activity day. All rows share that date axis, and long histories are grouped into at most 90 bars. Filter changes clear the previous results while loading, and responses from an earlier selection cannot overwrite the current one.
 - **Library**: a "Most used" order, by the last 30 days' time and then opens. Entries that were never used keep their default order. The choice is kept per browser.
 - **Hover details** of app, agent and built-in tiles: "Last 30 days: N opens · time · last use".
 

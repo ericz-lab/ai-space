@@ -1,35 +1,27 @@
 import { useEffect, useState } from "react";
+import { activityBars, activityRange, type UsageWindow } from "./activity-range.ts";
 import { dateTime, fmtDuration, getJson, relTime, type UsageKind, type UsageRow } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
 
 // App usage window (a floating panel, docs/usage.md): how often each app, agent and panel window
 // was opened and for how long, read-only, in the Model usage window's style.
-// - Reads `GET /api/usage?window=…&kind=…` when opened and every 60 s while open; the 30-day
-//   sparkline reads the 30-day window whatever the chosen one.
+// - Reads the selected window on open, on filter changes and every 60 s.
 // - Rows by time in use, then opens. An app without the heartbeat script has no time: a dash.
 
 const WINDOWS = ["7d", "30d", "90d", "all"] as const;
-type Win = (typeof WINDOWS)[number];
+type Win = UsageWindow;
 const KINDS: { value: UsageKind | "all"; label: Key }[] = [
   { value: "all", label: "activity.kindAll" },
   { value: "app", label: "activity.kindApp" },
   { value: "agent", label: "activity.kindAgent" },
   { value: "builtin", label: "activity.kindBuiltin" },
 ];
-const DAY = 86400_000;
-
-/** The last 30 UTC days as bars: time in use when the entry measures it, else opens. */
-function Spark({ row }: { row: UsageRow | undefined }) {
-  const byDay = new Map((row?.daily ?? []).map((d) => [d.day, d]));
-  const timed = row?.activeMs !== null && row?.activeMs !== undefined;
-  const today = Date.now();
-  const values = Array.from({ length: 30 }, (_, i) => {
-    const d = byDay.get(new Date(today - (29 - i) * DAY).toISOString().slice(0, 10));
-    return d ? (timed ? d.activeMs : d.opens) : 0;
-  });
+/** Every row uses the same UTC range and bucket widths. */
+function Spark({ row, range }: { row: UsageRow; range: ReturnType<typeof activityRange> }) {
+  const values = activityBars(row, range);
   const max = Math.max(1, ...values);
   return (
-    <svg className="act-spark" viewBox="0 0 90 20" preserveAspectRatio="none" aria-hidden="true">
+    <svg className="act-spark" viewBox={`0 0 ${values.length * 3} 20`} preserveAspectRatio="none" aria-hidden="true">
       {values.map((v, i) => (v > 0 ? <rect key={i} x={i * 3} y={20 - Math.max(1.5, (v / max) * 20)} width="2" height={Math.max(1.5, (v / max) * 20)} rx="0.5" /> : <rect key={i} className="zero" x={i * 3} y="19" width="2" height="1" />))}
     </svg>
   );
@@ -40,23 +32,31 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
   const [window, setWindow] = useState<Win>("30d");
   const [kind, setKind] = useState<UsageKind | "all">("all");
   const [rows, setRows] = useState<UsageRow[] | null>(null);
-  const [month, setMonth] = useState<UsageRow[]>([]);
+  const [loadedAt, setLoadedAt] = useState(Date.now);
   const [err, setErr] = useState("");
 
   useEffect(() => {
     if (!open) return;
+    let active = true;
+    let request = 0;
+    setRows(null);
+    setErr("");
     const q = kind === "all" ? "" : `&kind=${kind}`;
-    const load = () =>
-      Promise.all([getJson<{ usage: UsageRow[] }>(`/api/usage?window=${window}${q}`), window === "30d" ? null : getJson<{ usage: UsageRow[] }>(`/api/usage?window=30d${q}`)])
-        .then(([w, m]) => {
-          setRows(w.usage);
-          setMonth((m ?? w).usage);
-          setErr("");
-        })
-        .catch((e) => setErr(String((e as Error).message || e)));
-    load();
+    const load = async () => {
+      const current = ++request;
+      try {
+        const result = await getJson<{ usage: UsageRow[] }>(`/api/usage?window=${window}${q}`);
+        if (!active || current !== request) return;
+        setRows(result.usage);
+        setLoadedAt(Date.now());
+        setErr("");
+      } catch (e) {
+        if (active && current === request) setErr(String((e as Error).message || e));
+      }
+    };
+    void load();
     const timer = setInterval(load, 60_000);
-    return () => clearInterval(timer);
+    return () => { active = false; clearInterval(timer); };
   }, [open, window, kind]);
 
   useEffect(() => {
@@ -69,7 +69,9 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
   const opens = rows?.reduce((n, r) => n + r.opens, 0) ?? 0;
   const timeMs = rows?.reduce((n, r) => n + (r.activeMs ?? 0), 0) ?? 0;
   const top = rows?.[0];
-  const monthOf = new Map(month.map((r) => [`${r.kind}:${r.key}`, r]));
+  const range = activityRange(rows ?? [], window, loadedAt);
+  const utcDate = (at: number) => new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", { timeZone: "UTC", year: "numeric", month: "short", day: "numeric" }).format(at);
+  const windowLabel = window === "all" ? t("activity.all") : t("activity.days", { days: Number.parseInt(window) });
   const dash = "—";
 
   return (
@@ -84,7 +86,7 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
           <b>{t("activity.title")}</b>
           <span className="usage-windows">
             {WINDOWS.map((w) => (
-              <button key={w} className={`usage-win${w === window ? " on" : ""}`} onClick={() => setWindow(w)}>
+              <button key={w} className={`usage-win${w === window ? " on" : ""}`} aria-pressed={w === window} onClick={() => { if (w !== window) { setRows(null); setWindow(w); } }}>
                 {w === "all" ? t("activity.all") : w}
               </button>
             ))}
@@ -104,6 +106,10 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
           </div>
           {err && <p className="task-note">{t("common.unavailable", { error: err })}</p>}
           {rows === null && !err && <p className="task-note">{t("common.loading")}</p>}
+          {rows && <p className="task-note" role="status">
+            {t("activity.range", { window: windowLabel, start: utcDate(range.start), end: utcDate(range.end) })}
+            {range.first && <> {t("activity.first", { date: utcDate(Date.parse(range.first + "T00:00:00Z")) })}</>}
+          </p>}
           {rows && (
             <div className="usage-cards act-cards">
               <div className="usage-card">
@@ -134,7 +140,7 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
                       <th>{t("activity.time")}</th>
                       <th>{t("activity.avg")}</th>
                       <th>{t("activity.last")}</th>
-                      <th>{t("activity.trend")}</th>
+                      <th>{t("activity.trend", { window: windowLabel })}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -146,7 +152,7 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
                         <td>{r.activeMs !== null && r.sessions ? fmtDuration(r.activeMs / r.sessions, lang) : dash}</td>
                         <td title={r.lastAt ? dateTime(r.lastAt, lang) : undefined}>{r.lastAt ? relTime(r.lastAt, lang) : dash}</td>
                         <td>
-                          <Spark row={monthOf.get(`${r.kind}:${r.key}`)} />
+                          <Spark row={r} range={range} />
                         </td>
                       </tr>
                     ))}
