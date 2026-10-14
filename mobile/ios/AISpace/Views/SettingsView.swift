@@ -122,7 +122,7 @@ struct SettingsView: View {
         }
     }
 
-    /// The Space's own pages, drawn by the app from the Space's routes; the terminal alone is the web panel's.
+    /// The Space's own pages, drawn by the app from the Space's routes.
     private var more: some View {
         Section {
             pageRow("Inbox", "tray", .inbox)
@@ -133,16 +133,16 @@ struct SettingsView: View {
             pageRow("App models", "cpu", .appModels)
             pageRow("Events and calls", "bolt.horizontal", .events)
             pageRow("Apps and connections", "shippingbox", .packages)
-            pageRow("Terminal", "terminal", nil)
+            pageRow("Terminal", "terminal", .terminal)
         } header: {
             Text("Space")
         } footer: {
-            Text("Read from the Space each time a page opens. The terminal opens in the Space's web panel.")
+            Text("Read from the Space each time a page opens.")
         }
     }
 
-    private func pageRow(_ title: LocalizedStringKey, _ symbol: String, _ page: HubPage?) -> some View {
-        Button { if let page { model.hubPage = page } else { model.openWebPanel() } } label: {
+    private func pageRow(_ title: LocalizedStringKey, _ symbol: String, _ page: HubPage) -> some View {
+        Button { model.hubPage = page } label: {
             HStack {
                 Label(title, systemImage: symbol).foregroundStyle(Theme.text)
                 Spacer()

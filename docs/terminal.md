@@ -104,6 +104,10 @@ What the terminal does not do: it does not run as another user, does not confine
 - **Terminal**: xterm.js with the fit addon; the shell is resized whenever the pane is. Light and dark themes follow the panel's.
 - A footer line says where the shell runs and what is recorded.
 
+## Native clients
+
+The iPhone client draws the terminal itself (mobile/ios/README.md): SwiftTerm in place of xterm.js, over the same routes and frames. It is not a browser, so it sends what a same-origin page would: the access layer's cookie from its own web session and the Space's origin as `Origin`, on the ticket request and on the socket. Nothing on the server is particular to it.
+
 ## Routes
 
 | Route | Purpose |

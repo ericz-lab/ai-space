@@ -14,6 +14,19 @@ settings:
     MARKETING_VERSION: 0.1.0
     CURRENT_PROJECT_VERSION: 1
 targets:
+  # The terminal emulator behind the Terminal page, from the sources scripts/swiftterm.sh fetches
+  # at its pinned release (`bun run ios:xcode` runs it first; that script says why not a package).
+  SwiftTerm:
+    type: library.static
+    platform: iOS
+    sources:
+      - path: build/deps/SwiftTerm/Sources/SwiftTerm
+        excludes: ["**/*.metal", "**/*.md", "Documentation.docc"]
+    settings:
+      base:
+        PRODUCT_NAME: SwiftTerm
+        SWIFT_SUPPRESS_WARNINGS: YES
+        SKIP_INSTALL: YES
   AISpace:
     type: application
     platform: iOS
@@ -38,6 +51,8 @@ targets:
         group: Shared
       - path: ../../desktop/macos/AISpace/Web/NavigationPolicy.swift
         group: Shared
+    dependencies:
+      - target: SwiftTerm
     settings:
       base:
         PRODUCT_NAME: AISpace

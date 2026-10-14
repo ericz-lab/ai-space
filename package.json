@@ -31,7 +31,7 @@
     "desktop:xcode": "xcodegen generate --spec desktop/macos/project.yml",
     "ios:build": "mobile/ios/scripts/build.sh",
     "ios:test": "mobile/ios/scripts/test.sh",
-    "ios:xcode": "xcodegen generate --spec mobile/ios/project.yml"
+    "ios:xcode": "mobile/ios/scripts/swiftterm.sh && xcodegen generate --spec mobile/ios/project.yml"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

@@ -79,7 +79,7 @@ final class AppModel: ObservableObject {
     /// The screen the Panel tab opens on: the one last shown. Not published, as the page on
     /// show is not: it changes with every swipe, and the views read it only when acted on.
     private(set) var homePage = Screens.home
-    /// The Space's web panel over the tabs: the sign-in, chat, the inbox, tasks and the terminal.
+    /// The Space's web panel over the tabs: the sign-in, package installs and what the app does not draw.
     @Published var showingWebPanel = false
     /// A page of the Space drawn by the app, over the tabs.
     @Published var hubPage: HubPage?
@@ -104,6 +104,7 @@ final class AppModel: ObservableObject {
     private var icons: [UUID: IconStore] = [:]
     private var settings: [UUID: SettingsLoader] = [:]
     private var chats: [String: ChatStore] = [:]
+    private var terminals: [UUID: TerminalStore] = [:]
     private var backdrops: [UUID: BackdropStore] = [:]
     private var panels: [UUID: WebSession] = [:]
     private var cookieSessions: [UUID: WebCookieSession] = [:]
@@ -191,6 +192,15 @@ final class AppModel: ObservableObject {
         if let s = chats[key] { return s }
         let s = ChatStore(api: loader(for: connection).api, base: base)
         chats[key] = s
+        return s
+    }
+
+    /// The Space's shells open on this phone, kept while the app runs as the chats are.
+    func terminal(for connection: Connection) -> TerminalStore {
+        if let s = terminals[connection.id] { return s }
+        let s = TerminalStore(api: loader(for: connection).api)
+        s.openLink = { [weak self] in self?.openInBrowser($0) }
+        terminals[connection.id] = s
         return s
     }
 
@@ -299,6 +309,7 @@ final class AppModel: ObservableObject {
         icons[connection.id]?.clear()
         try? FileManager.default.removeItem(at: AppPaths.icons(connection.id))
         discardTabs(for: connection.id)
+        terminals[connection.id]?.closeAll()
         panels[connection.id]?.stop()
         panels[connection.id] = nil
         let loader = loaders[connection.id]
@@ -353,6 +364,8 @@ final class AppModel: ObservableObject {
         backdrops[id] = nil
         try? FileManager.default.removeItem(at: AppPaths.backdrops(id))
         chats = chats.filter { !$0.key.hasPrefix("\(id)|") }
+        terminals[id]?.closeAll()
+        terminals[id] = nil
         icons[id]?.clear()
         // A Space can be removed before its icon store has been opened in this launch.
         try? FileManager.default.removeItem(at: AppPaths.icons(id))

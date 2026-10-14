@@ -147,7 +147,7 @@
 "App models" = "应用模型";
 "Events and calls" = "事件与调用";
 "Space" = "Space";
-"Read from the Space each time a page opens. The terminal opens in the Space's web panel." = "每次打开页面时从 Space 读取。终端在 Space 的网页面板中打开。";
+"Read from the Space each time a page opens." = "每次打开页面时从 Space 读取。";
 "Inbox" = "收件箱";
 "Chat" = "对话";
 "Terminal" = "终端";
@@ -296,3 +296,31 @@
 "Collapsed" = "已收起";
 "Close Tab" = "关闭标签页";
 "Open Tabs" = "已打开的应用";
+
+/* Terminal */
+"Recent sessions" = "最近的会话";
+"New session" = "新建会话";
+"End session" = "结束会话";
+"Terminal passphrase" = "终端口令";
+"Passphrase" = "口令";
+"Open" = "打开";
+"%@ asks for its passphrase before a shell opens. It is kept in memory only." = "%@ 在打开 shell 前需要口令。口令只保存在内存中。";
+"Open a shell on" = "在这台机器上打开 shell";
+"No machine of this Space offers a terminal. It is off until SPACE_TERMINAL_ENABLED=1 is set in a machine's workspace .env." = "这个 Space 没有机器提供终端。在机器的工作区 .env 中设置 SPACE_TERMINAL_ENABLED=1 后才会开启。";
+"The shell runs on that machine as the Space's own user. A session ends when its connection does, and the phone drops it in the background: run tmux inside for work that must outlive it. The Space records when a session ran, never what was typed or shown." = "shell 以 Space 自己的用户身份在那台机器上运行。连接断开会话就结束，手机切到后台时连接会断：需要长时间运行的工作请在里面使用 tmux。Space 只记录会话的运行时间，不记录输入和输出。";
+"on" = "已开启";
+"open" = "进行中";
+"connecting" = "正在连接";
+"closed" = "已关闭";
+"exit %lld" = "退出码 %lld";
+"ended by a signal" = "被信号终止";
+"client left" = "客户端离开";
+"idle" = "空闲超时";
+"ended by the operator" = "由操作者结束";
+"ai-space restarted" = "ai-space 已重启";
+"shell exited with code %lld" = "shell 已退出，退出码 %lld";
+"shell ended by a signal" = "shell 被信号终止";
+"closed: no input for the idle limit" = "已关闭：空闲超时，期间没有输入";
+"closed from another panel" = "已从另一个面板关闭";
+"closed: ai-space stopped" = "已关闭：ai-space 已停止";
+"connection lost" = "连接已断开";

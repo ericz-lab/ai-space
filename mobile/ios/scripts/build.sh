@@ -14,13 +14,17 @@ CONFIG=${CONFIG:-debug}
 APP=build/AISpace.app
 case "$CONFIG" in
   debug) FLAGS="-Onone -g -DDEBUG" ;;
-  release) FLAGS="-O" ;;
+  release) FLAGS="-O -Xlinker -dead_strip" ;;
   *) echo "CONFIG must be debug or release" >&2; exit 2 ;;
 esac
 
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 IOS="$SDK/System/iOSSupport"
 [ -d "$IOS/System/Library/Frameworks/UIKit.framework" ] || { echo "this macOS SDK has no Mac Catalyst support" >&2; exit 1; }
+
+. scripts/swiftterm.sh
+swiftterm_fetch
+swiftterm_build
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -29,6 +33,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 xcrun swiftc $FLAGS -parse-as-library -swift-version 5 -module-name AISpace \
   -target "$(uname -m)-apple-ios17.0-macabi" -sdk "$SDK" \
   -Fsystem "$IOS/System/Library/Frameworks" -I "$IOS/usr/lib/swift" -L "$IOS/usr/lib/swift" -L "$IOS/usr/lib" \
+  -I "$SWIFTTERM_DIR" "$SWIFTTERM_DIR/SwiftTerm.o" \
   $SHARED $(find AISpace -name '*.swift' | sort) \
   -o "$APP/Contents/MacOS/AISpace"
 

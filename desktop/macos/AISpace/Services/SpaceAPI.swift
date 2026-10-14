@@ -68,6 +68,30 @@ final class SpaceAPI {
         return data
     }
 
+    /// A write's bare answer, for a route whose 401 is its own and not the access layer's (the
+    /// terminal's passphrase). A redirect off the Space is still a sign-in.
+    func answer(_ method: String, _ path: String, json: [String: Any], headers: [String: String] = [:]) async throws -> (status: Int, data: Data) {
+        var r = await request(method, path, json: json)
+        for (name, value) in headers { r.setValue(value, forHTTPHeaderField: name) }
+        let (data, response) = try await session.data(for: r)
+        guard let http = response as? HTTPURLResponse else { throw SpaceAPIError.invalidResponse }
+        if let final = http.url, !ConnectionRules.sameOrigin(final, base) { throw SpaceAPIError.authenticationRequired }
+        return (http.statusCode, data)
+    }
+
+    /// A socket to the Space, with the session's cookies and the Space's origin as the panel's
+    /// page would send them. The caller resumes it.
+    func socket(_ url: URL) async -> URLSessionWebSocketTask {
+        var r = URLRequest(url: url)
+        r.httpShouldHandleCookies = false
+        // The request timeout counts silence, and a shell at its prompt is silent.
+        r.timeoutInterval = 7 * 24 * 3600
+        if let header = Cookies.header(for: self.url(url.path), from: await cookies()) { r.setValue(header, forHTTPHeaderField: "Cookie") }
+        let origin = base.absoluteString
+        r.setValue(origin.hasSuffix("/") ? String(origin.dropLast()) : origin, forHTTPHeaderField: "Origin")
+        return session.webSocketTask(with: r)
+    }
+
     /// Bytes of an icon or avatar.
     func data(_ path: String) async throws -> Data {
         let (data, response) = try await session.data(for: await request("GET", path, accept: "*/*"))

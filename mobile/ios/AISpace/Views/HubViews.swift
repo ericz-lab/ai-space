@@ -3,7 +3,7 @@ import SwiftUI
 /// A page of the Space drawn by the app from the Space's own routes, over the tabs: what the
 /// web panel keeps under Settings, the inbox and the chat.
 enum HubPage: Identifiable, Hashable {
-    case inbox, tasks, modelUsage, appUsage, appModels, events, packages
+    case inbox, tasks, modelUsage, appUsage, appModels, events, packages, terminal
     /// The agents to talk to, or one agent's conversation by its catalogue key.
     case chat(agent: String?)
 
@@ -16,6 +16,7 @@ enum HubPage: Identifiable, Hashable {
         case .appModels: return "appModels"
         case .events: return "events"
         case .packages: return "packages"
+        case .terminal: return "terminal"
         case .chat(let agent): return "chat:\(agent ?? "")"
         }
     }
@@ -54,6 +55,7 @@ struct HubCover: View {
         case .appModels: AppModelsPage(api: api, icons: icons)
         case .events: EventsPage(api: api)
         case .packages: PackagesPage(model: model, connection: connection, api: api)
+        case .terminal: TerminalPage(store: model.terminal(for: connection))
         case .chat(let key):
             if let agent = loader.catalogue?.agents.first(where: { $0.key == key }), let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) {
                 ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons)

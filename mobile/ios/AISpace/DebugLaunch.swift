@@ -16,7 +16,10 @@ import WebKit
 ///   AISPACE_SEARCH     the search text on Home
 ///   AISPACE_CHAT_SEND  with AISPACE_HUB=chat:<agent key>: this message is sent three seconds after launch
 ///   AISPACE_HUB        a page of the Space over the tabs: inbox | tasks | modelUsage | appUsage |
-///                      appModels | events | packages | chat, or chat:<agent key> for one agent
+///                      appModels | events | packages | terminal | chat, or chat:<agent key> for one agent
+///   AISPACE_TERMINAL_RUN with AISPACE_HUB=terminal: a shell opens on the Space's own machine three seconds
+///                      after launch (on the peer AISPACE_TERMINAL_PEER names, when set) and this line
+///                      is typed into it two seconds later
 ///   AISPACE_OPEN_URL   an aispace:// link, handled as if another app had opened it
 ///   AISPACE_SCREEN     the screen on show on the Panel tab, by id
 ///   AISPACE_EDIT_SCREEN 1 opens the sheet that rearranges that screen
@@ -60,9 +63,24 @@ enum DebugLaunch {
                 chat.send()
             }
         }
+        if let line = env["AISPACE_TERMINAL_RUN"], env["AISPACE_HUB"] == "terminal" {
+            // The machines come with the page's first read; a first launch can take a few seconds to get there.
+            func open(tries: Int) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + (tries == 0 ? 3 : 1)) {
+                    guard let c = model.selected,
+                          let machine = model.terminal(for: c).machines.first(where: { $0.peer == env["AISPACE_TERMINAL_PEER"] }) else {
+                        return tries < 10 ? open(tries: tries + 1) : NSLog("ai-space: no such terminal machine")
+                    }
+                    let terminal = model.terminal(for: c)
+                    terminal.open(on: machine)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { terminal.currentTab?.type(line) }
+                }
+            }
+            open(tries: 0)
+        }
         if let hub = env["AISPACE_HUB"] {
             let pages: [String: HubPage] = ["inbox": .inbox, "tasks": .tasks, "modelUsage": .modelUsage, "appUsage": .appUsage,
-                                            "appModels": .appModels, "events": .events, "packages": .packages, "chat": .chat(agent: nil)]
+                                            "appModels": .appModels, "events": .events, "packages": .packages, "terminal": .terminal, "chat": .chat(agent: nil)]
             model.hubPage = hub.hasPrefix("chat:") ? .chat(agent: String(hub.dropFirst(5))) : pages[hub]
         }
         switch env["AISPACE_TAB"] {
