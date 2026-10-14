@@ -2,53 +2,43 @@ import SwiftUI
 
 /// A native conversation with one agent: messages, the activity of the running turn, and the
 /// composer. Return sends, Shift-Return starts a new line, Stop ends the turn on the server.
+/// Drawn as the iPhone's chat page: the agent's replies on the solid surface, the person's in the
+/// accent, the field rounded at the bottom; a failed turn shows its reason in the thread with a
+/// retry, and the field keeps whatever is being written.
 struct ChatView: View {
     @ObservedObject var chat: ChatController
     let icons: IconStore?
     let compact: Bool
     @FocusState private var focused: Bool
 
+    /// About 72 characters of body text (docs/design-guidelines.md, chat panel).
+    private static let column: CGFloat = 680
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
+                    LazyVStack(alignment: .leading, spacing: 12) {
                         if chat.messages.isEmpty {
-                            EmptyChat(agent: chat.agent, icons: icons)
+                            ChatIntro(agent: chat.agent, icons: compact ? nil : icons, keys: compact)
                         }
-                        ForEach(chat.messages) { MessageRow(message: $0) }
+                        ForEach(chat.messages) { message in
+                            MessageRow(message: message, retry: message.id == chat.messages.last?.id && chat.retryableMessage != nil ? { chat.retry() } : nil)
+                        }
                         if let error = chat.error {
-                            Label(error, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.orange)
+                            // An earlier chat that would not open; a failed turn shows in its own reply.
+                            Label(error, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(Theme.danger)
                         }
                         Color.clear.frame(height: 1).id("end")
                     }
-                    .padding(compact ? 14 : 20)
-                    .frame(maxWidth: compact ? .infinity : 820, alignment: .leading)
+                    .padding(.horizontal, compact ? 14 : 20)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: Self.column, alignment: .leading)
                     .frame(maxWidth: .infinity)
                 }
                 .onChange(of: chat.messages) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
             }
-            Divider()
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("Message \(chat.agent.displayTitle)", text: $chat.draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...8)
-                    .focused($focused)
-                    .onKeyPress(.return, phases: .down) { press in
-                        if press.modifiers.contains(.shift) { return .ignored }
-                        chat.send()
-                        return .handled
-                    }
-                if chat.busy {
-                    Button { chat.stop() } label: { Image(systemName: "stop.circle.fill").font(.title2) }
-                        .buttonStyle(.borderless).help("Stop")
-                } else {
-                    Button { chat.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.title2) }
-                        .buttonStyle(.borderless).help("Send")
-                        .disabled(chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            .padding(12)
+            composer
         }
         .toolbar {
             if !compact {
@@ -77,26 +67,78 @@ struct ChatView: View {
         .task { if !compact { await chat.loadSessions() } }
         .task(id: chat.busy) { if !compact, !chat.busy { await chat.loadSessions() } }
     }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField("Message \(chat.agent.displayTitle)", text: $chat.draft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1...8)
+                .focused($focused)
+                .focusEffectDisabled()
+                .onKeyPress(.return, phases: .down) { press in
+                    if press.modifiers.contains(.shift) { return .ignored }
+                    chat.send()
+                    return .handled
+                }
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                // Circular corners: a continuous curve wider than half a one-line field draws spurs.
+                .background(Theme.solid, in: RoundedRectangle(cornerRadius: 14, style: .circular))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .circular).strokeBorder(focused ? Theme.accent.opacity(0.6) : Theme.hairline))
+            if chat.busy {
+                Button { chat.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 26)) }
+                    .buttonStyle(.borderless).foregroundStyle(Theme.danger)
+                    .help("Stop").accessibilityLabel(Text("Stop"))
+            } else {
+                let empty = chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                Button { chat.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 26)) }
+                    .buttonStyle(.borderless).foregroundStyle(empty ? Color.secondary : Theme.accent)
+                    .help("Send").accessibilityLabel(Text("Send"))
+                    .disabled(empty)
+            }
+        }
+        .padding(.horizontal, compact ? 12 : 16).padding(.vertical, 10)
+        .frame(maxWidth: Self.column + 32)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+    }
 }
 
-private struct EmptyChat: View {
+/// The agent before the first message: a small avatar beside its name and what it does, not a
+/// banner, so the thread starts high. Quick Chat names the agent in its own header and passes no
+/// icons, which leaves only the description.
+private struct ChatIntro: View {
     let agent: AgentInfo
     let icons: IconStore?
+    /// Quick Chat lists its keys, since it is reached from the keyboard and left with Esc.
+    var keys = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                if let icons { EntryIcon(icon: agent.avatar, fallback: "person.fill", icons: icons, size: 32, isRound: true) }
-                Text(agent.displayTitle).font(.title3.bold())
+        HStack(alignment: .top, spacing: 12) {
+            if let icons { EntryIcon(icon: agent.avatar, fallback: "person.fill", icons: icons, size: 36, isRound: true) }
+            VStack(alignment: .leading, spacing: 3) {
+                if icons != nil { Text(agent.displayTitle).font(.headline).foregroundStyle(Theme.text) }
+                if let d = agent.description {
+                    Text(Lang.pick(d, agent.i18n, \.description)).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if keys {
+                    Text("Return sends · Shift-Return starts a new line · ⌘J picks another agent · Esc closes")
+                        .font(.caption).foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                }
             }
-            if let d = agent.description { Text(Lang.pick(d, agent.i18n, \.description)).foregroundStyle(.secondary) }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct MessageRow: View {
     let message: ChatMessage
+    /// Present on the last reply when it failed and its message can go again.
+    let retry: (() -> Void)?
 
     var body: some View {
         switch message.role {
@@ -105,17 +147,32 @@ private struct MessageRow: View {
                 Spacer(minLength: 60)
                 Text(message.text)
                     .textSelection(.enabled)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         case .agent:
+            VStack(alignment: .leading, spacing: 8) {
+                if !message.tools.isEmpty || !message.text.isEmpty || message.activity != nil {
+                    reply
+                }
+                if let failure = message.failure {
+                    FailureCard(failure: failure, retry: retry)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var reply: some View {
+        HStack {
             VStack(alignment: .leading, spacing: 6) {
                 if !message.tools.isEmpty {
-                    Text(message.tools.joined(separator: " · "))
+                    Text(message.tools.suffix(6).joined(separator: " · "))
                         .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2)
                 }
                 if !message.text.isEmpty {
-                    Text(Self.markdown(message.text)).textSelection(.enabled)
+                    Text(Self.markdown(message.text)).textSelection(.enabled).foregroundStyle(Theme.text)
                 }
                 if let activity = message.activity {
                     HStack(spacing: 6) {
@@ -124,7 +181,10 @@ private struct MessageRow: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Theme.solid, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline))
+            Spacer(minLength: 24)
         }
     }
 
@@ -138,6 +198,50 @@ private struct MessageRow: View {
         case .reconnecting: return String(localized: "Reconnecting…")
         case .thinking(let model): return model.isEmpty ? String(localized: "Thinking…") : String(localized: "Thinking with \(model)…")
         case .running(let tool): return String(localized: "Running \(tool)…")
+        }
+    }
+}
+
+/// A turn that did not come back: what happened in words, the Space's own text under it, and
+/// Try Again when sending the message once more may work.
+struct FailureCard: View {
+    let failure: ChatFailure
+    let retry: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(Self.title(failure.kind)).font(.callout.weight(.semibold)).foregroundStyle(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !failure.detail.isEmpty, failure.detail != Self.title(failure.kind) {
+                    Text(verbatim: failure.detail).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .textSelection(.enabled).lineLimit(6)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let retry, failure.retryable {
+                    Button(action: retry) { Label("Try Again", systemImage: "arrow.clockwise") }
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(Theme.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.danger.opacity(0.3)))
+        .accessibilityElement(children: .contain)
+    }
+
+    static func title(_ kind: ChatFailure.Kind) -> String {
+        switch kind {
+        case .busy: return String(localized: "The model service is busy or over its limit. Wait a moment and try again.")
+        case .signedOut: return String(localized: "The agent's runtime is not signed in on the Space.")
+        case .timedOut: return String(localized: "The reply took too long and was stopped.")
+        case .exited(let code): return String(localized: "The agent's runtime stopped without a reply (exit code \(Int(code))).")
+        case .unavailable: return String(localized: "The agent's runtime could not start on the Space.")
+        case .connection: return String(localized: "The reply could not be reached.")
+        case .other: return String(localized: "The agent could not reply.")
         }
     }
 }
