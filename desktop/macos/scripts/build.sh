@@ -49,5 +49,7 @@ cp AISpace/Info.plist "$APP/Contents/Info.plist"
 cp AISpace/Resources/AppIcon.icns AISpace/Resources/Logo.png "$APP/Contents/Resources/"
 cp -R AISpace/Resources/*.lproj "$APP/Contents/Resources/"
 
-codesign --force --options runtime --timestamp=none --sign "${SIGN_IDENTITY:--}" "$APP"
+# The hardened runtime refuses the microphone unless the entitlement asks for it, so voice input
+# in a page would fail without a word (AISpace.entitlements).
+codesign --force --options runtime --timestamp=none --entitlements AISpace/AISpace.entitlements --sign "${SIGN_IDENTITY:--}" "$APP"
 echo "built $(pwd)/$APP ($CONFIG)"

@@ -138,6 +138,8 @@ Only add a bridge for a concrete feature. Apple's [WKScriptMessageHandler](https
 
 Later examples include a user-initiated folder picker, revealing an approved local path and asking for native notification permission. A picked Mac path is meaningful only to a local workspace; remote file access requires the existing upload or remote workflow. No generic read-file, run-command, fetch-with-credentials or execute-script bridge is planned.
 
+Voice input in a page (`getUserMedia`) needs three things the client declares: `NSMicrophoneUsageDescription` in `Info.plist`, the `com.apple.security.device.audio-input` entitlement (`AISpace/AISpace.entitlements`; the hardened runtime refuses the microphone without it, silently), and the web view's media capture decision (`MediaCapturePolicy`): the microphone for a page and frame of the session's own origin or the connection's, nothing for other sites, never the camera. macOS asks the operator once for the app (System Settings › Privacy & Security › Microphone). An ad-hoc signed build gets a new identity on each build, so macOS may ask again after a rebuild.
+
 Keep web functionality usable without the bridge through feature detection. Reuse web English and Chinese translations; add native strings in a String Catalog. Native date displays and future scheduling controls must follow [time.md](time.md), including explicit display zones and the existing API's declared timestamp format.
 
 ## Window and background behavior
