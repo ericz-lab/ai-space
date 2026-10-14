@@ -32,8 +32,6 @@ struct MainTabs: View {
     @ObservedObject var model: AppModel
     let connection: Connection
     @ObservedObject var screens: ScreenStore
-    /// Whether the pager has been moved to the page on show since it was made.
-    @State private var settled = false
 
     var body: some View {
         let loader = model.loader(for: connection)
@@ -45,38 +43,23 @@ struct MainTabs: View {
         // safe areas into content margins; nested pages keep that layout size while their
         // scrolling content can pass behind the frosted status area.
         GeometryReader { viewport in
-            ScrollViewReader { pager in
-                ScrollView(.horizontal) {
-                    // Not lazy: a lazy row makes the page being swiped to, with all its tiles and
-                    // cards, in the middle of the swipe. Each page is lazy down its own length.
-                    HStack(spacing: 0) {
-                        HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens)
+            PagerScroll(position: model.pager) {
+                // Not lazy: a lazy row makes the page being swiped to, with all its tiles and
+                // cards, in the middle of the swipe. Each page is lazy down its own length.
+                HStack(spacing: 0) {
+                    HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens)
+                        .frame(width: viewport.size.width, height: viewport.size.height)
+                        .id(Pager.home)
+                    ForEach(all) { screen in
+                        HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens, screenID: screen.id)
                             .frame(width: viewport.size.width, height: viewport.size.height)
-                            .id(Pager.home)
-                        ForEach(all) { screen in
-                            HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens, screenID: screen.id)
-                                .frame(width: viewport.size.width, height: viewport.size.height)
-                                .id(screen.id)
-                        }
-                        SettingsView(model: model, connection: connection, loader: loader, settings: model.settings(for: connection), icons: icons)
-                            .frame(width: viewport.size.width, height: viewport.size.height)
-                            .id(Pager.settings)
+                            .id(screen.id)
                     }
-                    .scrollTargetLayout()
+                    SettingsView(model: model, connection: connection, loader: loader, settings: model.settings(for: connection), icons: icons)
+                        .frame(width: viewport.size.width, height: viewport.size.height)
+                        .id(Pager.settings)
                 }
-                .scrollClipDisabled()
-                .scrollTargetBehavior(.paging)
-                .scrollIndicators(.hidden)
-                .scrollPosition(id: Binding<String?>(get: { model.pagerID }, set: { id in
-                    // A new pager lies on its leftmost page and says so before it has been moved
-                    // to the page on show; that report is not a swipe.
-                    guard settled else { settled = id == model.pagerID; return }
-                    if let id, id != model.pagerID { model.pagerID = id }
-                }))
-                .onAppear {
-                    pager.scrollTo(model.pagerID, anchor: .leading)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { settled = true }
-                }
+                .scrollTargetLayout()
             }
         }
         // Keep one status effect outside the pager so adjacent pages never overlap their glass.
@@ -123,6 +106,34 @@ struct MainTabs: View {
                 HubCover(model: model, connection: connection, page: page, loader: loader, icons: icons)
                     .preferredColorScheme(model.appearance == .system ? nil : (model.appearance == .dark ? .dark : .light))
             }
+        }
+    }
+}
+
+/// The paging scroll view, the one view that follows the page on show. A swipe changes the
+/// position here only; the pages, made by MainTabs, are not evaluated again for it.
+private struct PagerScroll<Pages: View>: View {
+    @ObservedObject var position: PagerPosition
+    @ViewBuilder let pages: Pages
+    /// Whether the pager has been moved to the page on show since it was made.
+    @State private var settled = false
+
+    var body: some View {
+        ScrollViewReader { pager in
+            ScrollView(.horizontal) { pages }
+                .scrollClipDisabled()
+                .scrollTargetBehavior(.paging)
+                .scrollIndicators(.hidden)
+                .scrollPosition(id: Binding<String?>(get: { position.id }, set: { id in
+                    // A new pager lies on its leftmost page and says so before it has been moved
+                    // to the page on show; that report is not a swipe.
+                    guard settled else { settled = id == position.id; return }
+                    if let id, id != position.id { position.id = id }
+                }))
+                .onAppear {
+                    pager.scrollTo(position.id, anchor: .leading)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { settled = true }
+                }
         }
     }
 }

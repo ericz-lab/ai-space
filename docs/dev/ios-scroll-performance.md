@@ -1,6 +1,6 @@
 # iOS launcher scroll performance
 
-Why Home and the screens of the iPhone client (`mobile/ios/`) dropped frames while scrolling, what was changed, and how to measure it again. Written after the work of 2026-10-13 and 2026-10-14 (PR #14 and the card shadow change that followed).
+Why Home and the screens of the iPhone client (`mobile/ios/`) dropped frames while scrolling, what was changed, and how to measure it again. Written after the work of 2026-10-13 and 2026-10-14 (PR #14 and the card shadow change that followed); the horizontal swipe between pages was taken up later on 2026-10-14 (see [Swiping between pages](#swiping-between-pages)).
 
 ## The symptom
 
@@ -86,11 +86,69 @@ The `hitches`, `hitches-renders` (with `offscreen-passes`), `hitches-gpu` and `h
 
 Two things the bench's own numbers cannot be trusted for: it counts main-thread lateness only, and during the animated page swipes the display link reports a 120 Hz interval while frames arrive at 60 Hz, so the count of late frames in the paging half is inflated; read the longest stall there, not the count.
 
+## Swiping between pages
+
+After the changes above, scrolling a page up and down felt smooth, but swiping sideways between Home, the screens and Settings still stuttered, by hand more over app icons than over widget cards. Same phone, same Space, in a theme with glows (the layer audit found the glow layers, not drawn artwork).
+
+### What was measured
+
+The scripted bench on the build before these changes, paging half:
+
+| | Per frame |
+| --- | --- |
+| Render time | about 5.3 ms, 11 to 15 ms on the first frames of each swipe |
+| GPU time | about 5.1 ms |
+| Offscreen passes | about 44 |
+| Longest main-thread update | 12 ms on a screen, 37 ms when the swipe starts from Home |
+
+The bench ran at 60 Hz throughout (see below), where none of this shows as a hitch; at the 120 Hz a finger gets, a frame has 8.3 ms and the first frames of every swipe miss it.
+
+A layer audit of the window (`AISPACE_LAYERS=1`, below) found no layer of its own per app tile: no mask, no blur, no shadow. What it found on every page were the theme's glows: three circles under a 70-point blur, one layer the size of the screen with a filter, drawn again by the render server on every frame anything over it moves. The flat Simple theme, which has no glows, halved the GPU time and the offscreen passes in the same bench.
+
+### Causes
+
+1. **A live blur under every page.** `Backdrop` blurred its glows on each frame. Nothing about them changes while scrolling.
+2. **Every page evaluated again in mid-swipe.** `pagerID` was a published property of `AppModel`, which every page observes, so the moment the page under the finger changed, Home, each screen and Settings were all evaluated again, Home with its whole library.
+
+### Changes
+
+| Change | Where | Looks different? |
+| --- | --- | --- |
+| The glows are flattened into one picture with `.drawingGroup()`, drawn again only when the size or the colour scheme changes | `Views/Theme.swift` | No |
+| The page on show is its own object (`PagerPosition`), observed by the paging scroll view alone (`PagerScroll`); `homePage` is no longer published | `AppModel.swift`, `Views/RootView.swift`, `Views/HomeView.swift` | No |
+| A layer audit for debug builds, `AISPACE_LAYERS=1` | `DebugLaunch.swift` | No |
+
+Tried and taken back, because the bench showed no change in offscreen passes or frame times: clipping icons by a concrete shape instead of `AnyShape`, a tint instead of `.regularMaterial` under emoji and placeholder icons, and flattening the tile titles' text shadow with `.drawingGroup()`. Of the items left open above, the material under icons, the title shadow and the `AnyShape` clip are therefore measured and not worth changing.
+
+### Results
+
+Scripted bench on the library page, before and after:
+
+| | Before | After |
+| --- | --- | --- |
+| GPU time per frame, scrolling / paging | 5.5 / 5.0 ms | 3.1 / 2.4 ms |
+| Offscreen passes per frame, scrolling / paging | 51 / 44 | 31 / 24 |
+| Render time per frame, paging | about 5.0 ms | about 5.4 ms (no change) |
+| Longest main-thread update, paging | 37 ms | 32 ms |
+| By hand | stutters sideways, most over app icons | reported fixed |
+
+### Rules that follow
+
+- A blur over content that does not change is drawn once (`.drawingGroup()`, or a `Canvas`), not left live under a scroll.
+- State that changes during a gesture lives in an object only the view that follows the gesture observes, not in the model every page observes.
+
+### Measuring a sideways swipe
+
+- The bench cannot run above 60 Hz: `Info.plist` has no `CADisableMinimumFrameDurationOnPhone`, so its display link, and with it every frame it drives, is capped at 60 Hz on an iPhone. Read its render and GPU times against 8.3 ms, not against what it reports as hitches.
+- A finger is the only 120 Hz source. XCUITest could swipe with real touches, but its runner needs a provisioning profile of its own, and this Mac's Xcode has no account signed in; the only profile is the app's.
+- `xctrace record --launch` sometimes leaves the app on a black screen, with no frames after launch; this happened with and without the bench. Check the frame count before reading a recording, and run it again.
+- `xctrace record --attach` did not find the running app by its name (`AISpace` or `ai-space`) or by its process id. `--all-processes` works, but 40 seconds made a 939 MB trace that took about six minutes to save; keep such a recording short.
+- `AISPACE_LAYERS=1` logs the layers on show that need a pass of their own, five seconds after launch; read them with `xcrun devicectl device process launch --console`. It shows which layers to look at; it does not measure them.
+
 ## Still open
 
-- Each emoji or placeholder icon has a `.regularMaterial` background, a live blur per tile.
-- In a theme with drawn artwork (Orbit, Northern Lights, Paper Cut, Prism) each tile title has a text shadow, an offscreen pass per title.
-- The status area and the search field use the system glass effect.
-- `EntryIcon` clips through a type-erased `AnyShape`, which may cost a mask per icon where a plain corner radius would do.
-
-None of these was measured on its own. Take them one at a time with a recording before and after.
+- On the first swipe onto a page, the main thread spent about one second in SwiftUI's lazy layout (`LazySubviewPlacements`, `lengthAndSpacing`), with an update of 25 to 30 ms every 100 ms. Which view causes it was not found.
+- The render server still takes 5 to 6.7 ms a frame, close to the 8.3 ms of a 120 Hz frame. The remaining offscreen passes come mostly from widget cards (secondary-style text over material, drawn with a filter) and the system glass of the status area and the search field.
+- An icon's image is read from disk and decoded on the main thread the first time its tile is made (`IconStore.image`). It costs on the first showing only, not on later swipes.
+- Whether a paging swipe settles at 120 Hz without `CADisableMinimumFrameDurationOnPhone` is not established.
+- The status area and the search field use the system glass effect; not measured on its own.

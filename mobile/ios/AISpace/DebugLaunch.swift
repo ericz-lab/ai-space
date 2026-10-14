@@ -11,6 +11,8 @@ import WebKit
 ///   AISPACE_SCROLL_Y   scroll the visible native page to this offset for safe-area checks
 ///   AISPACE_SCROLL_BENCH seconds to drive the visible page up and down, then the pager across,
 ///                      logging the frames the main thread dropped (see ScrollBench)
+///   AISPACE_LAYERS     1 logs, five seconds after launch, the layers on show that the render
+///                      server draws off screen first (see LayerAudit)
 ///   AISPACE_SEARCH     the search text on Home
 ///   AISPACE_CHAT_SEND  with AISPACE_HUB=chat:<agent key>: this message is sent three seconds after launch
 ///   AISPACE_HUB        a page of the Space over the tabs: inbox | tasks | modelUsage | appUsage |
@@ -100,6 +102,9 @@ enum DebugLaunch {
         if let seconds = env["AISPACE_SCROLL_BENCH"].flatMap(Double.init) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { ScrollBench.run(seconds: seconds) }
         }
+        if env["AISPACE_LAYERS"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { LayerAudit.log() }
+        }
         if let path = env["AISPACE_SNAPSHOT"] {
             let delay = Double(env["AISPACE_SNAPSHOT_DELAY"] ?? "") ?? 5
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -167,6 +172,45 @@ enum DebugLaunch {
         for sub in view.subviews { out += webViews(in: sub) }
         // A presented controller's views live in the same window, under its transition view.
         return out
+    }
+}
+
+/// Counts the layers inside the window's bounds that cost the render server a pass of their own
+/// on every frame they move: a shadow without a path, a mask, a filter, a backdrop, a group
+/// drawn at an opacity. The count per kind, with the classes behind it, tells what to look at
+/// before a recording does.
+@MainActor
+enum LayerAudit {
+    static func log() {
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+        guard let window = windows.first(where: \.isKeyWindow) ?? windows.first else { return }
+        var total = 0
+        var tally: [String: Int] = [:]
+        walk(window.layer, in: window, total: &total, tally: &tally)
+        NSLog("ai-space: layers on show %d", total)
+        for (kind, count) in tally.sorted(by: { $0.value > $1.value }) { NSLog("ai-space: layers %d %@", count, kind) }
+    }
+
+    private static func walk(_ layer: CALayer, in window: UIWindow, total: inout Int, tally: inout [String: Int]) {
+        guard !layer.isHidden, layer.opacity > 0 else { return }
+        let frame = layer.convert(layer.bounds, to: window.layer)
+        if frame.intersects(window.bounds) || layer.bounds.isEmpty {
+            total += 1
+            let name = String(describing: type(of: layer))
+            let size = "\(Int(layer.bounds.width))x\(Int(layer.bounds.height))"
+            var kinds: [String] = []
+            if layer.shadowOpacity > 0, layer.shadowPath == nil { kinds.append("shadow without a path") }
+            if layer.mask != nil { kinds.append("mask") }
+            if !(layer.filters ?? []).isEmpty { kinds.append("filters") }
+            if layer.compositingFilter != nil { kinds.append("compositing filter") }
+            if name.contains("Backdrop") { kinds.append("backdrop") }
+            if layer.opacity < 1, layer.allowsGroupOpacity, !(layer.sublayers ?? []).isEmpty { kinds.append("group opacity") }
+            if layer.masksToBounds, layer.cornerRadius > 0, !(layer.sublayers ?? []).isEmpty { kinds.append("rounded clip of sublayers") }
+            if layer.shouldRasterize { kinds.append("rasterized") }
+            for kind in kinds { tally["\(kind): \(name) \(size)", default: 0] += 1 }
+        }
+        for child in layer.sublayers ?? [] { walk(child, in: window, total: &total, tally: &tally) }
+        if let mask = layer.mask { walk(mask, in: window, total: &total, tally: &tally) }
     }
 }
 

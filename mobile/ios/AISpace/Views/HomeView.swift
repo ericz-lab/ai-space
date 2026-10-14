@@ -37,7 +37,7 @@ struct HomeView: View {
                 SearchField(model: model, focused: $searchFocused)
                     .padding(.vertical, 12)
             }
-            .onChange(of: model.pagerID) { _, _ in searchFocused = false }
+            .onReceive(model.pager.$id.removeDuplicates().dropFirst()) { _ in searchFocused = false }
             .onChange(of: model.page?.id) { _, _ in searchFocused = false }
             .onChange(of: model.hubPage) { _, _ in searchFocused = false }
             .onChange(of: model.showingWebPanel) { _, _ in searchFocused = false }

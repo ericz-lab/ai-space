@@ -21,6 +21,14 @@ enum Pager {
     static let settings = "#settings"
 }
 
+/// The page on show in the pager, as an object of its own. A published property of AppModel
+/// would make every view that observes the model, each page of the pager among them, evaluate
+/// again in the middle of a swipe, when the page under the finger changes.
+@MainActor
+final class PagerPosition: ObservableObject {
+    @Published var id = Screens.home
+}
+
 /// An app's page on show over the tabs.
 struct OpenPage: Identifiable {
     let id = UUID()
@@ -40,10 +48,16 @@ final class AppModel: ObservableObject {
     private let cache = CatalogueCache(directory: AppPaths.caches)
 
     @Published private(set) var selectedID: UUID?
+    /// Where the pager stands, observed by the pager alone (PagerPosition).
+    let pager = PagerPosition()
     /// The page on show: `Pager.home`, a screen's id, or `Pager.settings`. The app opens on the
     /// first screen of the panel; the library is one swipe to its left.
-    @Published var pagerID = Screens.home {
-        didSet { if pagerID != Pager.home, pagerID != Pager.settings, homePage != pagerID { homePage = pagerID } }
+    var pagerID: String {
+        get { pager.id }
+        set {
+            pager.id = newValue
+            if newValue != Pager.home, newValue != Pager.settings { homePage = newValue }
+        }
     }
     /// This phone's own display choices, kept in the app's defaults.
     @Published var appearance = Appearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "") ?? .system {
@@ -62,8 +76,9 @@ final class AppModel: ObservableObject {
     /// The actions on the screens, asked for by a long press on a screen.
     @Published var showingScreenMenu = false
     @Published var query = ""
-    /// The screen the Panel tab opens on: the one last shown.
-    @Published private(set) var homePage = Screens.home
+    /// The screen the Panel tab opens on: the one last shown. Not published, as the page on
+    /// show is not: it changes with every swipe, and the views read it only when acted on.
+    private(set) var homePage = Screens.home
     /// The Space's web panel over the tabs: the sign-in, chat, the inbox, tasks and the terminal.
     @Published var showingWebPanel = false
     /// A page of the Space drawn by the app, over the tabs.

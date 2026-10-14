@@ -104,6 +104,9 @@ struct Backdrop: View {
             .blur(radius: 70)
             .opacity(0.9)
             .background(Theme.ground)
+            // One picture, drawn when the size or the scheme changes. A live blur this wide is
+            // drawn again by the render server on every frame anything over it moves.
+            .drawingGroup()
         }
         .ignoresSafeArea()
     }
