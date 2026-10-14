@@ -8,6 +8,8 @@ struct ChatMessage: Identifiable, Equatable {
     var tools: [String] = []
     var activity: ChatActivity?
     var live = false
+    /// Why the turn failed, shown in the thread under what the agent wrote, with a retry.
+    var failure: ChatFailure?
 }
 
 /// One native conversation with an agent, shared by the main window and Quick Chat. Each turn is
@@ -45,6 +47,20 @@ final class ChatController: ObservableObject {
         guard !text.isEmpty, !busy else { return }
         draft = ""
         messages.append(ChatMessage(role: .user, text: text))
+        start(source: .new(text))
+    }
+
+    /// The message of the last turn when that turn failed: what Try Again sends once more.
+    var retryableMessage: String? {
+        guard !busy, let last = messages.last, last.role == .agent, last.failure != nil,
+              let prompt = messages.dropLast().last, prompt.role == .user else { return nil }
+        return prompt.text
+    }
+
+    /// Sends the failed turn's message again in place of the failed reply; the draft is untouched.
+    func retry() {
+        guard let text = retryableMessage else { return }
+        messages.removeLast()
         start(source: .new(text))
     }
 
@@ -118,15 +134,15 @@ final class ChatController: ObservableObject {
                         update(index, reply)
                     }
                 } catch SpaceAPIError.authenticationRequired {
-                    error = String(localized: "Sign in on the panel first, then try again.")
+                    fail(index, ChatFailure(kind: .connection, detail: String(localized: "Sign in on the panel first, then try again.")))
                     break
                 } catch {
                     // A turn that never got a run cannot be reattached; one that did is resumed.
-                    if runID == nil { self.error = error.localizedDescription; break }
+                    if runID == nil { fail(index, ChatFailure(kind: .connection, detail: error.localizedDescription)); break }
                 }
                 if reply.finished || Task.isCancelled { break }
                 failures += 1
-                if failures > 20 { error = String(localized: "The connection to the agent was lost."); break }
+                if failures > 20 { fail(index, ChatFailure(kind: .connection, detail: String(localized: "The connection to the agent was lost."))); break }
                 reply.activity = .reconnecting
                 update(index, reply)
                 try? await Task.sleep(for: .seconds(min(10, failures * 2)))
@@ -142,10 +158,18 @@ final class ChatController: ObservableObject {
 
     private func update(_ index: Int, _ reply: ChatReply) {
         guard messages.indices.contains(index) else { return }
-        var text = reply.text
+        // A failure is drawn as its own card, so the text keeps only what the agent wrote.
+        var text = reply.failure == nil ? reply.text : reply.body
         if reply.stopped { text += (text.isEmpty ? "" : "\n\n") + String(localized: "(stopped)") }
         messages[index].text = text
         messages[index].tools = reply.tools
         messages[index].activity = reply.activity
+        if let failure = reply.failure { messages[index].failure = ChatFailure(failure) }
+    }
+
+    private func fail(_ index: Int, _ failure: ChatFailure) {
+        guard messages.indices.contains(index) else { return }
+        messages[index].activity = nil
+        messages[index].failure = failure
     }
 }

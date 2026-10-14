@@ -77,11 +77,23 @@
 "(stopped)" = "（已停止）";
 "Sign in on the panel first, then try again." = "请先在面板上登录，再试一次。";
 "The connection to the agent was lost." = "与智能体的连接已断开。";
+"Try Again" = "重试";
+"The model service is busy or over its limit. Wait a moment and try again." = "模型服务繁忙或已达到用量限制。请稍等片刻再试。";
+"The agent's runtime is not signed in on the Space." = "智能体的运行时尚未在 Space 上登录。";
+"The reply took too long and was stopped." = "回复耗时过长，已被停止。";
+"The agent's runtime stopped without a reply (exit code %lld)." = "智能体的运行时未给出回复就退出了（退出码 %lld）。";
+"The agent's runtime could not start on the Space." = "智能体的运行时无法在 Space 上启动。";
+"The reply could not be reached." = "无法取得回复。";
+"The agent could not reply." = "智能体未能回复。";
 
 /* Quick Chat */
 "Quick Chat" = "快速对话";
 "Choose an Agent" = "选择智能体";
-"Open in Main Window" = "在主窗口中打开";
+"Open in Main Window (⌘O)" = "在主窗口中打开（⌘O）";
+"New Conversation (⌘N)" = "新对话（⌘N）";
+"Choose an Agent (⌘J)" = "选择智能体（⌘J）";
+"Close (Esc)" = "关闭（Esc）";
+"Return sends · Shift-Return starts a new line · ⌘J picks another agent · Esc closes" = "Return 发送 · Shift-Return 换行 · ⌘J 换一个智能体 · Esc 关闭";
 "Add a connection first." = "请先添加一个连接。";
 "No agents yet. Sign in on the panel or check the connection." = "还没有智能体。请在面板上登录，或检查连接。";
 
