@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Aurora's ground (src/web/styles.css), as the iOS LaunchGround colour set. -->
+    <color name="launch_ground">#F6F7FB</color>
+</resources>

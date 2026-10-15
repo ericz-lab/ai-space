@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Before Android 12: the mark at 96dp on the Aurora ground, where the first screen then draws it. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/launch_ground" />
+    <item android:drawable="@drawable/ic_logo" android:gravity="center" android:width="96dp" android:height="96dp" />
+</layer-list>

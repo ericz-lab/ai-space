@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home (the library and its search), the screens, tiles, widget cards and the screen editor. -->
+<resources>
+    <string name="home_search">Search</string>
+    <string name="home_search_label">Search apps, agents and widgets</string>
+    <string name="home_clear">Clear</string>
+    <string name="home_apps">Apps</string>
+    <string name="home_agents">Agents</string>
+    <string name="home_widgets">Widgets</string>
+    <string name="home_apps_and_agents">Apps and Agents</string>
+    <string name="home_nothing_here">Nothing here yet</string>
+    <string name="home_nothing_here_detail">This Space has no apps with a page. Add one on the panel.</string>
+    <string name="home_no_results">No Results for “%1$s”</string>
+    <string name="home_no_results_detail">Check the spelling or try a new search.</string>
+    <string name="home_screen_main">Main</string>
+    <string name="home_screen_n">Screen %1$d</string>
+    <string name="home_screen_empty">Nothing on this screen yet</string>
+    <string name="home_screen_empty_detail">Touch and hold an app, agent or widget on Home and choose Add to Panel. Touch and hold here for the screen\'s own actions.</string>
+    <string name="home_open_home">Open Home</string>
+    <string name="home_remove_from_screen">Remove from This Screen</string>
+    <string name="home_add_to_panel">Add to Panel</string>
+    <string name="home_remove_from_panel">Remove from Panel</string>
+    <string name="home_open_in_browser">Open in Browser</string>
+    <string name="home_copy_link">Copy Link</string>
+    <string name="home_done">Done</string>
+    <string name="home_remove">Remove</string>
+    <string name="home_move_up">Move Up</string>
+    <string name="home_move_down">Move Down</string>
+    <string name="home_screen_editor_footer">Screens on this phone are its own. Changes here are not sent to the panel.</string>
+
+    <!-- Status -->
+    <string name="home_connecting">Connecting…</string>
+    <string name="home_sign_in_to">Sign in to %1$s</string>
+    <string name="home_sign_in_detail">Your Space is behind a sign-in. It opens over the pages and is kept for this Space only.</string>
+    <string name="home_sign_in">Sign In</string>
+    <string name="home_unreachable">Cannot reach this Space</string>
+    <string name="home_incompatible">This address is not an ai-space panel</string>
+    <string name="home_retry">Retry</string>
+    <string name="home_last_known">Below is what this Space had %1$s. It may have changed.</string>
+
+    <!-- Tiles -->
+    <string name="home_offline">offline</string>
+    <string name="home_peer_offline">%1$s offline</string>
+    <string name="home_not_answering">not answering</string>
+    <string name="home_paused">paused</string>
+    <string name="home_running">running</string>
+
+    <!-- Widgets -->
+    <string name="home_widget_embed">Drawn by the app. Open it to see.</string>
+    <string name="home_widget_last_known">Last known; its machine is offline.</string>
+    <string name="home_widget_nothing">Nothing to show.</string>
+    <string name="home_widget_updated">Updated %1$s</string>
+    <string name="home_no_data">No data</string>
+    <string name="home_no_history">No history yet</string>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The terminal's accessory keys above the keyboard (package dev.aispace.android.terminal). -->
+    <string name="terminal_key_left">Left arrow</string>
+    <string name="terminal_key_right">Right arrow</string>
+    <string name="terminal_key_up">Up arrow</string>
+    <string name="terminal_key_down">Down arrow</string>
+    <string name="terminal_key_hide_keyboard">Hide keyboard</string>
+    <string name="terminal_key_ctrl">Control, applies to the next key</string>
+    <string name="terminal_key_alt">Alt, applies to the next key</string>
+</resources>
