@@ -31,8 +31,11 @@ class SettingsLoader(private val api: SpaceApi, @Suppress("unused") private val 
     private val saveErrorState = MutableStateFlow<String?>(null)
     val saveError: StateFlow<String?> = saveErrorState.asStateFlow()
 
+    private var generation = 0
+
     suspend fun refresh() {
         if (loadingState.value) return
+        val generation = this.generation
         loadingState.value = true
         try {
             val (s, b, m) = coroutineScope {
@@ -41,10 +44,11 @@ class SettingsLoader(private val api: SpaceApi, @Suppress("unused") private val 
                 val models = async { text("/api/model/preferences") }
                 Triple(services.await(), backups.await(), models.await())
             }
+            if (generation != this.generation) return
             // No route answered (signed out, offline): what was shown is no longer known.
             settingsState.value = if (s == null && b == null && m == null) null else SpaceSettings.decode(s, b, m)
         } finally {
-            loadingState.value = false
+            if (generation == this.generation) loadingState.value = false
         }
     }
 
@@ -62,9 +66,11 @@ class SettingsLoader(private val api: SpaceApi, @Suppress("unused") private val 
      */
     suspend fun setDefaultModel(value: String?) {
         if (savingState.value) return
+        val generation = this.generation
         savingState.value = true
         try {
             val answer = api.send("PUT", "/api/model/preferences", JSONObject().put("defaultModel", value ?: JSONObject.NULL))
+            if (generation != this.generation) return
             Json.obj(answer)?.let { ModelPreferences.from(it) }?.let { fresh ->
                 settingsState.value = settingsState.value?.copy(models = fresh)
             }
@@ -72,15 +78,20 @@ class SettingsLoader(private val api: SpaceApi, @Suppress("unused") private val 
         } catch (e: CancellationException) {
             throw e
         } catch (e: SpaceApiError.Http) {
+            if (generation != this.generation) return
             saveErrorState.value = "HTTP ${e.code} ${e.msg}"
         } catch (e: Exception) {
+            if (generation != this.generation) return
             saveErrorState.value = e.localizedMessage ?: e.toString()
         } finally {
-            savingState.value = false
+            if (generation == this.generation) savingState.value = false
         }
     }
 
     fun forget() {
+        generation += 1
+        loadingState.value = false
+        savingState.value = false
         saveErrorState.value = null
         settingsState.value = null
     }

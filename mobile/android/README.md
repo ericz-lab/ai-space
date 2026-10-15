@@ -2,7 +2,7 @@
 
 A native Android client of a Space that already runs, ported from the iPhone client (`mobile/ios/`, whose README is the specification this follows): a Compose launcher over the Space's own catalogue, the Space's pages drawn natively, a native terminal, and app pages and the web panel in `WebView`. Nothing is installed or started on the server, and the app carries no token or deployment secret.
 
-Status: builds with Gradle, 120 JVM tests pass, and runs on an Android 16 emulator (API 36) against a scratch Space and against a real Space behind Cloudflare Access. See [What was checked](#what-was-checked).
+Status: builds with Gradle, 133 JVM tests pass, and runs on an Android 16 emulator (API 36) against a scratch Space and against a real Space behind Cloudflare Access. See [What was checked](#what-was-checked).
 
 ## What it does
 
@@ -72,3 +72,14 @@ On the emulator (Pixel 7, API 36), by screenshots from the debug launch switches
 - Against a real Space behind Cloudflare Access: signing in through Access in the web panel; the catalogue, icons and widget cards over native calls with the profile's cookie; the same after a force-stop (the cookie survives the process); an app on another subdomain opening signed in; the terminal socket through Access to a peer's shell; the chat agents, their earlier chats and a long Markdown answer; swiping between screens, a long press on an app, landscape.
 
 Not checked yet: sending a chat turn and its stream; signing out and in again; dragging the More button; TalkBack; downloads and file inputs; Google as an identity provider inside WebView (refused in an embedded view on iOS); a phone without WebView's multi-profile feature.
+
+### Async regression checks
+
+JVM tests cover response-body reads staying off the caller thread and cancellation closing an
+in-flight call; settings refreshes and saves arriving after sign-out; history selections racing
+with a new chat; clearing local chat data and subscriptions; and resuming a chat after a temporary
+503 without submitting its message again. Reconnects use the last event ID with up to five attempts
+and exponential backoff; authentication failures require signing in again. Sending is disabled
+while the selected history loads. Signing out clears the phone's conversations and drafts but does
+not stop an agent run already executing on the Space. These checks do not replace device testing
+of the sign-out and sign-in UI or WebView cookie clearing.

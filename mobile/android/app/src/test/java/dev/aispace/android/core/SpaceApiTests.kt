@@ -2,6 +2,21 @@ package dev.aispace.android.core
 
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import okhttp3.OkHttpClient
+import okhttp3.Response
+import okhttp3.ResponseBody
+import okhttp3.Protocol
+import okhttp3.EventListener
+import okhttp3.Call
+import okio.Buffer
+import okio.ForwardingSource
+import okio.buffer
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicReference
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.json.JSONObject
@@ -38,6 +53,45 @@ class SpaceApiTests {
         null
     } catch (e: SpaceApiError) {
         e
+    }
+
+    @Test fun responseBodiesAreReadOffTheCallerThread() = runBlocking {
+        val caller = Thread.currentThread()
+        val reader = AtomicReference<Thread>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val source = object : ForwardingSource(Buffer().writeUtf8("answer")) {
+                override fun read(sink: Buffer, byteCount: Long): Long {
+                    reader.set(Thread.currentThread())
+                    return super.read(sink, byteCount)
+                }
+            }.buffer()
+            val body = object : ResponseBody() {
+                override fun contentType() = null
+                override fun contentLength() = 6L
+                override fun source() = source
+            }
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(200).message("OK").body(body).build()
+        }.build()
+        assertEquals("answer", SpaceApi(base, CookieSource.none, client).text("/api/apps"))
+        assertTrue(reader.get() != null && reader.get() !== caller)
+    }
+
+    @Test fun cancellationClosesACallWhileItsBodyIsStillArriving() = runBlocking {
+        val headers = CompletableDeferred<Unit>()
+        val failed = CompletableDeferred<Unit>()
+        val client = OkHttpClient.Builder().eventListener(object : EventListener() {
+            override fun responseHeadersEnd(call: Call, response: Response) { headers.complete(Unit) }
+            override fun callFailed(call: Call, ioe: IOException) { failed.complete(Unit) }
+        }).build()
+        server.enqueue(MockResponse().setBody("slow answer").setBodyDelay(2, TimeUnit.SECONDS))
+        val pending = launch { SpaceApi(base, CookieSource.none, client).text("/api/apps") }
+        withTimeout(1500) {
+            headers.await()
+            pending.cancelAndJoin()
+            failed.await()
+        }
+        assertTrue(pending.isCancelled)
     }
 
     @Test fun aRedirectIsASignInAndIsNotFollowed() = runBlocking {

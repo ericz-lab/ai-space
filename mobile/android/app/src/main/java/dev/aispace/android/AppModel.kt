@@ -384,6 +384,7 @@ class AppModel(private val context: Context) {
      */
     fun signOut(connection: Connection) {
         val profile = profile(connection.id)
+        forgetChats(connection.id)
         icons[connection.id]?.clear()
         AppPaths.icons(connection.id).deleteRecursively()
         discardTabs(connection.id)
@@ -397,6 +398,7 @@ class AppModel(private val context: Context) {
             profile.clear()
             // Again, for a refresh that started while the cookies were still there.
             loader?.forget()
+            settings[connection.id]?.forget()
             loader?.refresh()
         }
         tab = MainTab.Home
@@ -428,6 +430,10 @@ class AppModel(private val context: Context) {
     /** A link on one of the Space's pages: the page closes and the address opens as any other. */
     fun openFromHub(url: URI, title: String, connection: Connection) = afterHub { open(url, title, null, connection) }
 
+    private fun forgetChats(id: UUID) {
+        chats.keys.filter { it.startsWith("$id|") }.forEach { chats.remove(it)?.cancel() }
+    }
+
     private fun discard(id: UUID) {
         discardTabs(id)
         panels.remove(id)?.stop()
@@ -435,7 +441,7 @@ class AppModel(private val context: Context) {
         settings.remove(id)
         backdrops.remove(id)
         AppPaths.backdrops(id).deleteRecursively()
-        chats.keys.filter { it.startsWith("$id|") }.forEach { chats.remove(it)?.cancel() }
+        forgetChats(id)
         terminals.remove(id)?.closeAll()
         icons[id]?.clear()
         // A Space can be removed before its icon store has been opened in this launch.

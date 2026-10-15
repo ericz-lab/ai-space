@@ -221,7 +221,7 @@ internal fun ChatPage(agent: CatalogueEntry, store: ChatStore, icons: IconImages
                         Icon(Icons.Filled.StopCircle, contentDescription = stringResource(R.string.chat_stop), tint = ThemeTokens.danger, modifier = Modifier.size(32.dp))
                     }
                 } else {
-                    val canSend = draft.trim().isNotEmpty()
+                    val canSend = store.canSend
                     IconButton(onClick = { store.send() }, enabled = canSend) {
                         Icon(
                             Icons.Filled.ArrowCircleUp,

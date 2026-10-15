@@ -218,16 +218,12 @@ class SpaceApi(
      */
     suspend fun events(method: String, path: String, json: JSONObject? = null): EventStream {
         val call = streamClient.newCall(request(method, path, json, accept = "text/event-stream"))
-        val response = open(call)
-        try {
+        val response = open(call) { response ->
             if (response.code !in 200..299) {
                 val body = response.peekBody(4096).bytes()
                 check(response.code, response.request.url.toUri(), body, base)
             }
             check(response.code, response.request.url.toUri(), ByteArray(0), base)
-        } catch (e: Throwable) {
-            response.close()
-            throw e
         }
         val runId = response.header("x-run-id")
         val messages = callbackFlow {
@@ -278,13 +274,8 @@ class SpaceApi(
 
     private class Fetched(val status: Int, val finalUrl: URI?, val body: ByteArray)
 
-    private suspend fun fetch(client: OkHttpClient, request: Request): Fetched {
-        val response = open(client.newCall(request))
-        return response.use { Fetched(it.code, it.request.url.toUri(), it.body?.bytes() ?: ByteArray(0)) }
-    }
-
-    /** Runs a call; cancelling the coroutine cancels the call. The caller closes the response. */
-    private suspend fun open(call: Call): Response = suspendCancellableCoroutine { cont ->
+    private suspend fun fetch(client: OkHttpClient, request: Request): Fetched = suspendCancellableCoroutine { cont ->
+        val call = client.newCall(request)
         cont.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -292,7 +283,37 @@ class SpaceApi(
             }
 
             override fun onResponse(call: Call, response: Response) {
-                if (cont.isActive) cont.resume(response) else response.close()
+                // Consume and close on OkHttp's worker, including slow bodies. Cancellation stays
+                // attached to the call until the complete answer has been read.
+                try {
+                    val fetched = response.use {
+                        Fetched(it.code, it.request.url.toUri(), it.body?.bytes() ?: ByteArray(0))
+                    }
+                    if (cont.isActive) cont.resume(fetched)
+                } catch (e: Exception) {
+                    if (cont.isActive) cont.resumeWithException(e)
+                }
+            }
+        })
+    }
+
+    /** Runs a call; cancelling the coroutine cancels the call. The caller closes the response. */
+    private suspend fun open(call: Call, validate: (Response) -> Unit): Response = suspendCancellableCoroutine { cont ->
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (cont.isActive) cont.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    // Error bodies can be slow too; validate on the worker before handing off.
+                    validate(response)
+                    cont.resume(response) { _, value, _ -> value.close() }
+                } catch (e: Exception) {
+                    response.close()
+                    if (cont.isActive) cont.resumeWithException(e)
+                }
             }
         })
     }
