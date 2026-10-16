@@ -73,15 +73,17 @@ struct HomeView: View {
                     // The empty part of a screen takes the long press; a tile or a card keeps its own.
                     // The tap before it is what lets the scroll view keep scrolling under the gesture.
                     if let longPress {
-                        Color.clear.contentShape(Rectangle()).onTapGesture {}.onLongPressGesture(minimumDuration: 0.45, perform: longPress)
+                        Color.clear.contentShape(Rectangle())
+                            .onTapGesture { searchFocused = false }
+                            .onLongPressGesture(minimumDuration: 0.45, perform: longPress)
+                    } else {
+                        Color.clear.contentShape(Rectangle()).onTapGesture { searchFocused = false }
                     }
                 }
             }
             .scrollClipDisabled()
             .scrollDismissesKeyboard(.immediately)
             .contentShape(Rectangle())
-            // Keep tile taps and scrolling intact while an outside tap ends the search edit.
-            .simultaneousGesture(TapGesture().onEnded { searchFocused = false })
             .refreshable { await loader.refresh() }
         }
     }
