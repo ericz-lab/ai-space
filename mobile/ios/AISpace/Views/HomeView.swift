@@ -229,7 +229,7 @@ struct SearchField: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .opacity(idle ? 0 : 1)
-            TextField(text: $model.query, prompt: idle ? Text("") : Text("Search")) { Text("Search apps, agents and widgets") }
+            TextField(text: $model.query, prompt: idle ? Text("") : Text("Apps / Agents / Widgets")) { Text("Apps / Agents / Widgets") }
                 .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
                 .focused(focused)
                 .onSubmit { focused.wrappedValue = false }
@@ -244,7 +244,7 @@ struct SearchField: View {
         .padding(.horizontal, 18).frame(height: 48)
         .overlay {
             if idle {
-                Label("Search", systemImage: "magnifyingglass")
+                Label("Apps / Agents / Widgets", systemImage: "magnifyingglass")
                     .font(.system(size: 19)).foregroundStyle(Theme.text)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
