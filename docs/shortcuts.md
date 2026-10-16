@@ -178,7 +178,10 @@ This recognizes `查今天金融新闻`, `金融新闻`, `帮我看看今天的�
 Chinese labels and an optional trailing 的); other named slots capture text.
 Captures classify the intent only: they do not replace, summarize or rewrite the
 user's message. Multiple capture splits of the same intent produce one candidate.
-Agent matches take precedence over API action patterns and keywords; direct
+The resolver applies precedence on the server: a matching agent makes `intents`
+an empty array, even when that agent is unavailable. Clients render the returned
+candidates and use the server's `ambiguous` flag; they do not select between competing
+agent and API results. Agent matches take precedence over API action patterns and keywords; direct
 arithmetic and currency conversion retain their existing precedence.
 
 The initial scope is a local app agent, named `app/agent`, with 1–4 app-owned

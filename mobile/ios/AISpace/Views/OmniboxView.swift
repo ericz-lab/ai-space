@@ -43,21 +43,21 @@ struct OmniboxView: View {
                 Button { showingHistory = true } label: { Label("Recent Actions", systemImage: "clock.arrow.circlepath") }
             } else {
                 if resolution?.ambiguous == true { Text("Choose an action").font(.subheadline).foregroundStyle(.secondary) }
-                if let agents = resolution?.agentIntents, !agents.isEmpty {
-                    ForEach(agents) { intent in
-                        Button { ask(intent) } label: {
-                            row(intent.title, detail: intent.reason, icon: "sparkles")
-                        }.disabled(!intent.available)
-                    }
-                } else {
-                    ForEach(strong) { intent in actionRow(intent) }
+                // The server returns mutually exclusive agent/action candidates.
+                ForEach(resolution?.agentIntents ?? []) { intent in
+                    Button { ask(intent) } label: {
+                        row(intent.title, detail: intent.reason, icon: "sparkles")
+                    }.disabled(!intent.available)
+                }
+                ForEach(strong) { intent in actionRow(intent) }
+                if resolution?.agentIntents.isEmpty != false {
                     ForEach(entries) { entry in
                         Button { openEntry(entry) } label: {
                             row(entry.displayTitle(), detail: entry.peer, icon: entry.kind == .agent ? "person.crop.circle" : "square.grid.2x2")
                         }
                     }
-                    ForEach(loose) { intent in actionRow(intent) }
                 }
+                ForEach(loose) { intent in actionRow(intent) }
                 if store.resolving { ProgressView().controlSize(.small).accessibilityLabel(Text("Searching…")) }
                 Button { ask(nil) } label: { Label("Ask Space Assistant", systemImage: "sparkles").frame(maxWidth: .infinity, alignment: .leading) }
                     .padding(12).glass()

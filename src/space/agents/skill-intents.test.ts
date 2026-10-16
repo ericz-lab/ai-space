@@ -35,16 +35,23 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
   await registry.set(await loadManifest(dir));
   const actions: Action[] = [{ id: "todo/create", app: "todo", builtin: false, title: "Todo", keywords: ["todo"], effect: "write", result: "receipt", available: true,
     inputs: [{ name: "title", label: "Title", type: "text", query: true, required: true }, { name: "date", label: "Date", type: "date" }, { name: "time", label: "Time", type: "time" }] }];
+  actions.push({ id: "finance-news-feed/news", app: "finance-news-feed", builtin: false, title: "Financial news", keywords: ["金融新闻"],
+    patterns: ["[查[{period}]]金融新闻"], effect: "read", result: "list", available: true, inputs: [{ name: "period", label: "Period", type: "period", default: "today" }] });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createAgentRoutes({ ws, registry, layout: new LayoutStore(db), sessions, runs, runtimes: claudeOnly(["bun", cli]), shortcuts: store, actionCatalogue: () => actions }) });
   const post = (path: string, body: unknown) => fetch(new URL(path, server.url), { method: "POST", body: JSON.stringify(body) });
-  const config = { id: "financial-news", title: "Financial news", agent: "news/curator", skills: ["curate-news"], patterns: ["查{period}金融新闻"] };
+  const config = { id: "financial-news", title: "Financial news", agent: "news/curator", skills: ["curate-news"], patterns: ["[查[{period}]]金融新闻"] };
   try {
     expect((await post("/api/shortcuts/agent-intents", config)).status).toBe(200);
     const catalogue = await (await fetch(new URL("/api/shortcuts/agent-intents", server.url))).json();
     expect(catalogue.intents[0]).toMatchObject({ id: config.id, available: true });
     expect(runs.list()).toHaveLength(0);
     const resolve = async (text: string) => (await post("/api/shortcuts/resolve", { text, timezone: "Asia/Seoul" })).json();
-    expect(await resolve("查今天金融新闻")).toMatchObject({ agentIntents: [{ id: config.id, available: true }], ambiguous: false });
+    for (const text of ["金融新闻", "查今天金融新闻"]) {
+      const result = await resolve(text);
+      expect(result.intents).toEqual([]);
+      expect(result.agentIntents).toHaveLength(1);
+      expect(result).toMatchObject({ agentIntents: [{ id: config.id, available: true }], ambiguous: false });
+    }
     expect(await resolve("todo 明天 15:00 提交报告")).toMatchObject({ intents: [{ kind: "action", action: { id: "todo/create", effect: "write" }, args: { title: "提交报告", date: "tomorrow", time: "15:00" } }], agentIntents: [] });
     expect(await resolve("2+3*4")).toMatchObject({ intents: [{ kind: "calc", expression: "2+3*4" }], agentIntents: [] });
     expect(await resolve("unmatched request")).toMatchObject({ intents: [], agentIntents: [], ambiguous: false });
@@ -53,13 +60,21 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
       expect((await post("/api/shortcuts/resolve", body)).status).toBe(400);
     }
     store.setAgentIntent({ ...config, id: "second", enabled: true });
-    expect(await resolve("查今天金融新闻")).toMatchObject({ ambiguous: true });
+    expect(await resolve("查今天金融新闻")).toMatchObject({ intents: [], ambiguous: true });
     store.setAgentIntent({ ...config, id: "second", enabled: false });
     // A configured but now unavailable skill remains a visible, disabled match.
     store.setAgentIntent({ ...config, id: "missing-skill", skills: ["missing"], enabled: true });
     const unavailable = await resolve("查今天金融新闻");
     expect(unavailable.agentIntents.find((i: { id: string }) => i.id === "missing-skill")).toMatchObject({ available: false });
+    expect(unavailable.intents).toEqual([]);
+    store.setAgentIntent({ ...config, enabled: false });
+    const onlyUnavailable = await resolve("金融新闻");
+    expect(onlyUnavailable.intents).toEqual([]);
+    expect(onlyUnavailable.agentIntents).toHaveLength(1);
+    expect(onlyUnavailable.agentIntents[0].available).toBe(false);
     store.setAgentIntent({ ...config, id: "missing-skill", skills: ["missing"], enabled: false });
+    expect(await resolve("金融新闻")).toMatchObject({ agentIntents: [], intents: [{ action: { id: "finance-news-feed/news" } }] });
+    store.setAgentIntent({ ...config, enabled: true });
     expect(runs.list()).toHaveLength(0);
     expect(store.listRuns()).toHaveLength(0);
     for (const body of [{ ...config, skills: ["missing"] }, { ...config, skills: ["../secret"] }, { ...config, agent: "news/missing" }]) {

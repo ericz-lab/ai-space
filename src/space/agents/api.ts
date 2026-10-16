@@ -245,7 +245,10 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const definitions = (opts.shortcuts?.agentIntents() ?? []).map((i) => ({ ...i, available: true }));
         const matched = found.some((i) => i.kind === "calc" || i.kind === "convert") ? [] : matchAgentIntents(body.text, definitions);
         const agents = await availableIntents(matched);
-        return json({ ok: true, intents: found, agentIntents: agents, ambiguous: agents.length ? agents.length > 1 : found.some((i) => i.kind === "action" && i.ambiguous) });
+        // Resolve precedence here, including unavailable agents: clients must never receive
+        // an ordinary action as an implicit fallback for a matching skill intent.
+        const selected = agents.length ? [] : found;
+        return json({ ok: true, intents: selected, agentIntents: agents, ambiguous: agents.length ? agents.length > 1 : selected.some((i) => i.kind === "action" && i.ambiguous) });
       }),
     },
     "/api/shortcuts/agent-intents": {

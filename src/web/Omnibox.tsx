@@ -40,7 +40,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   const [focused, setFocused] = useState(false);
   const [sel, setSel] = useState(0);
   const field = useRef<HTMLTextAreaElement>(null);
-  const [resolution, setResolution] = useState<{ query: string; intents: Intent[]; agentIntents: AgentIntentView[] } | null>(null);
+  const [resolution, setResolution] = useState<{ query: string; intents: Intent[]; agentIntents: AgentIntentView[]; ambiguous: boolean } | null>(null);
   const agentStarting = useRef(false);
   const [agentError, setAgentError] = useState("");
   const [resolving, setResolving] = useState(false);
@@ -72,7 +72,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     setResolving(!!q.trim());
     if (!q.trim()) return;
     const timer = setTimeout(() => {
-      sendJson<{ intents: Intent[]; agentIntents: AgentIntentView[] }>("POST", "/api/shortcuts/resolve", { text: q, timezone: browserZone() })
+      sendJson<{ intents: Intent[]; agentIntents: AgentIntentView[]; ambiguous: boolean }>("POST", "/api/shortcuts/resolve", { text: q, timezone: browserZone() })
         .then((r) => { if (active) { setResolution({ query: q, ...r }); setResolving(false); } })
         .catch((e) => { if (active) { setAgentError(String(e.message || e)); setResolving(false); } });
     }, 180);
@@ -88,7 +88,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     return [...first.map((intent): Row => ({ type: "intent", intent })), ...results.map((entry): Row => ({ type: "entry", entry })), ...loose.map((intent): Row => ({ type: "intent", intent })), { type: "ask" }];
   }, [found, results, agentMatches]);
   const askIndex = rows.length - 1;
-  const ambiguous = agentMatches.length ? agentMatches.length > 1 : found.some((i) => i.kind === "action" && i.ambiguous);
+  const ambiguous = resolution?.query === q && resolution.ambiguous;
   const direct = agentMatches.length > 0 || found.length > 0 && (found[0]!.kind !== "action" || found[0]!.strong);
   // A new query highlights the row Enter would pick.
   useEffect(() => setSel(ambiguous ? -1 : direct ? 0 : opensByDefault(q, results[0]) ? 0 : askIndex), [q, rows]);
