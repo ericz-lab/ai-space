@@ -10,6 +10,7 @@ struct ChatView: View {
     let icons: IconStore?
     let compact: Bool
     @FocusState private var focused: Bool
+    @StateObject private var voice = VoiceInput()
 
     /// About 72 characters of body text (docs/design-guidelines.md, chat panel).
     private static let column: CGFloat = 680
@@ -84,6 +85,10 @@ struct ChatView: View {
                 // Circular corners: a continuous curve wider than half a one-line field draws spurs.
                 .background(Theme.solid, in: RoundedRectangle(cornerRadius: 14, style: .circular))
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .circular).strokeBorder(focused ? Theme.accent.opacity(0.6) : Theme.hairline))
+            VoiceButton(voice: voice, api: chat.api) { text in
+                chat.draft = appendingTranscript(text, to: chat.draft)
+                focused = true
+            }
             if chat.busy {
                 Button { chat.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 26)) }
                     .buttonStyle(.borderless).foregroundStyle(Theme.danger)
@@ -97,6 +102,12 @@ struct ChatView: View {
             }
         }
         .padding(.horizontal, compact ? 12 : 16).padding(.vertical, 10)
+        .overlay(alignment: .topLeading) {
+            if let error = voice.error {
+                Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger)
+                    .padding(.horizontal, compact ? 14 : 18).offset(y: -18)
+            }
+        }
         .frame(maxWidth: Self.column + 32)
         .frame(maxWidth: .infinity)
         .background(.bar)

@@ -114,7 +114,8 @@ struct LauncherPage: View {
         } else {
             page(spacing: 14, menu: false) { if let catalogue = loader.catalogue { library(catalogue) } }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    SearchField(model: model).padding(.top, 14).padding(.bottom, 6)
+                    OmniboxField(model: model, best: bestMatch, api: model.lives[connection.id]?.api)
+                        .padding(.top, 14).padding(.bottom, 6)
                 }
         }
     }
@@ -165,12 +166,19 @@ struct LauncherPage: View {
         }
     }
 
-    /// Everything the Space has, pinned or not.
+    /// What Return in the Home box opens when it does not ask: the best name over the whole library.
+    private var bestMatch: CatalogueEntry? {
+        guard let catalogue = loader.catalogue, !model.query.isEmpty else { return nil }
+        return OmniboxRules.rank(model.query, catalogue.apps + catalogue.agents + catalogue.widgets.map(Catalogue.entry)).first
+    }
+
+    /// Everything the Space has, pinned or not; while the box holds a query, what matches it, best names first.
     @ViewBuilder private func library(_ catalogue: Catalogue) -> some View {
-        let query = model.query
-        let apps = CatalogueSearch.filter(catalogue.apps, query: query)
-        let agents = CatalogueSearch.filter(catalogue.agents, query: query)
-        let widgets = catalogue.widgets.filter { CatalogueSearch.matches(Catalogue.entry($0), query: query) }
+        let query = model.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apps = query.isEmpty ? catalogue.apps : OmniboxRules.rank(query, catalogue.apps)
+        let agents = query.isEmpty ? catalogue.agents : OmniboxRules.rank(query, catalogue.agents)
+        let widgets = query.isEmpty ? catalogue.widgets : OmniboxRules.rank(query, catalogue.widgets.map(Catalogue.entry))
+            .compactMap { e in catalogue.widgets.first { Catalogue.entry($0).key == e.key } }
 
         if !apps.isEmpty {
             heading("Apps", first: true)
@@ -298,34 +306,100 @@ struct ScreenActions: View {
     }
 }
 
-/// The library's search: one field over apps, agents and widgets. ⌘F comes here.
-struct SearchField: View {
+/// The Home command box (docs/panel.md#omnibox): what is typed filters the library below, best
+/// names first, and Return either opens the best match (when its name holds the whole query) or
+/// hands the text to Space Assistant as a new conversation; ⌘Return always asks, Shift-Return
+/// breaks the line. The microphone fills the field from speech. ⌘F comes here.
+struct OmniboxField: View {
     @ObservedObject var model: AppModel
+    let best: CatalogueEntry?
+    let api: SpaceAPI?
     @FocusState private var focused: Bool
+    @StateObject private var voice = VoiceInput()
+
+    private var text: String { model.query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var opens: Bool { OmniboxRules.opensByDefault(text, best) }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Search apps, agents and widgets", text: $model.query)
-                .textFieldStyle(.plain)
-                .focused($focused)
-                .onExitCommand { model.query = ""; focused = false }
-            if !model.query.isEmpty {
-                Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("Clear"))
+        VStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "sparkle").foregroundStyle(Theme.accent)
+                TextField(voice.state == .recording ? "Listening… click the microphone to stop" : "Search apps, or tell Space Assistant what to do",
+                          text: $model.query, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...4)
+                    .focused($focused)
+                    .onKeyPress(.return, phases: .down) { press in
+                        if press.modifiers.contains(.shift) { return .ignored }
+                        submit(ask: press.modifiers.contains(.command))
+                        return .handled
+                    }
+                    .onExitCommand { model.query = ""; focused = false }
+                if !model.query.isEmpty {
+                    Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text("Clear"))
+                }
+                VoiceButton(voice: voice, api: api, size: 22) { heard in
+                    model.query = appendingTranscript(heard, to: model.query)
+                    focused = true
+                }
+            }
+            .font(.system(size: 16))
+            .foregroundStyle(Theme.text)
+            .padding(.horizontal, 18).padding(.vertical, 10)
+            .frame(minHeight: 44)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(focused ? Theme.accent.opacity(0.6) : Theme.hairline))
+            .contentShape(Rectangle())
+            .onTapGesture { focused = true }
+
+            if let error = voice.error {
+                Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger)
+            } else if !text.isEmpty {
+                HStack(spacing: 8) {
+                    if let best {
+                        choice(isDefault: opens, key: "↵") { model.open(best); model.query = "" } label: {
+                            Text("Open \(best.displayTitle())")
+                        }
+                    }
+                    choice(isDefault: !opens, key: opens ? "⌘↵" : "↵") { model.ask(text) } label: {
+                        Text("Ask Space Assistant")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
             }
         }
-        .font(.system(size: 16))
-        .foregroundStyle(Theme.text)
-        .padding(.horizontal, 18).frame(height: 40)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.hairline))
-        .contentShape(Capsule())
-        .onTapGesture { focused = true }
-        .frame(maxWidth: 560)
+        .frame(maxWidth: 640)
         .padding(.horizontal, 32)
         .onReceive(model.focusSearch) { focused = true }
+    }
+
+    private func submit(ask: Bool) {
+        guard !text.isEmpty else { return }
+        if !ask, opens, let best {
+            model.open(best)
+            model.query = ""
+        } else {
+            model.ask(text)
+        }
+    }
+
+    /// One of the two things Return can do; the one it does now is filled.
+    private func choice(isDefault: Bool, key: String, action: @escaping () -> Void, @ViewBuilder label: () -> Text) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                label().lineLimit(1)
+                Text(verbatim: key).foregroundStyle(isDefault ? AnyShapeStyle(Color.white.opacity(0.8)) : AnyShapeStyle(.tertiary))
+            }
+            .font(.callout)
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .foregroundStyle(isDefault ? AnyShapeStyle(Color.white) : AnyShapeStyle(Theme.text))
+            .background(isDefault ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.thinMaterial), in: Capsule())
+            .overlay(Capsule().strokeBorder(isDefault ? Color.clear : Theme.hairline))
+        }
+        .buttonStyle(.plain)
     }
 }
 

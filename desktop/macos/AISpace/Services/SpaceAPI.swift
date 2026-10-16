@@ -68,6 +68,24 @@ final class SpaceAPI {
         return data
     }
 
+    /// A file posted as the multipart field `field`, from the Space's own origin as the panel's page
+    /// would send it (voice input: `POST /api/voice/transcribe`).
+    func upload(_ path: String, field: String, filename: String, mimeType: String, data file: Data, timeout: TimeInterval = 300) async throws -> Data {
+        var r = await request("POST", path)
+        r.timeoutInterval = timeout
+        let boundary = "aispace-\(UUID().uuidString)"
+        r.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        let origin = base.absoluteString
+        r.setValue(origin.hasSuffix("/") ? String(origin.dropLast()) : origin, forHTTPHeaderField: "Origin")
+        var body = Data()
+        body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(field)\"; filename=\"\(filename)\"\r\nContent-Type: \(mimeType)\r\n\r\n".utf8))
+        body.append(file)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        let (data, response) = try await session.upload(for: r, from: body)
+        try Self.check(response, data: data, expected: base)
+        return data
+    }
+
     /// A write's bare answer, for a route whose 401 is its own and not the access layer's (the
     /// terminal's passphrase). A redirect off the Space is still a sign-in.
     func answer(_ method: String, _ path: String, json: [String: Any], headers: [String: String] = [:]) async throws -> (status: Int, data: Data) {
