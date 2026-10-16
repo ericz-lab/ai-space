@@ -424,7 +424,7 @@ final class AppModel: ObservableObject {
             Task { await loader.refresh() }
         }
         let opened = OpenPage(key: key, title: title, connection: connection.id, session: session, originPage: pagerID)
-        appTabs.append(opened)
+        appTabs.insert(opened, at: 0)
         page = opened
     }
 
@@ -438,7 +438,12 @@ final class AppModel: ObservableObject {
     }
 
     func showTab(_ id: UUID) {
-        guard let next = appTabs.first(where: { $0.id == id && $0.connection == selected?.id }) else { return }
+        guard let index = appTabs.firstIndex(where: { $0.id == id && $0.connection == selected?.id }) else { return }
+        let next = appTabs[index]
+        if index != 0 {
+            appTabs.remove(at: index)
+            appTabs.insert(next, at: 0)
+        }
         next.session.showControls()
         next.session.recoverIfFailed()
         page = next
@@ -450,7 +455,7 @@ final class AppModel: ObservableObject {
         closed.session.stop()
         if page?.id == id {
             let remaining = appTabs.filter { $0.connection == closed.connection }
-            page = remaining.last
+            page = remaining.first
             page?.session.showControls()
         }
     }

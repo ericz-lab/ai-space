@@ -191,7 +191,11 @@ struct AppPageView: View {
                             HStack(spacing: 0) {
                                 Button { menuOpen = false; model.showTab(tab.id) } label: {
                                     Label { Text(verbatim: tab.title).lineLimit(1) } icon: {
-                                        Image(systemName: tab.id == page.id ? "checkmark.circle.fill" : "globe")
+                                        if let connection = model.store.connection(tab.connection) {
+                                            AppTabIcon(tab: tab, loader: model.loader(for: connection), icons: model.icons(for: connection))
+                                        } else {
+                                            Image(systemName: "globe")
+                                        }
                                     }
                                     .padding(.leading, 12).padding(.trailing, 8).frame(minHeight: 44)
                                 }
@@ -214,5 +218,18 @@ struct AppPageView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
         .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.primary.opacity(0.12)))
         .shadow(color: .black.opacity(0.15), radius: 18, y: 4)
+    }
+}
+
+/// Resolve the logo from the tab's own Space and follow catalogue and icon refreshes.
+private struct AppTabIcon: View {
+    let tab: OpenPage
+    @ObservedObject var loader: CatalogueLoader
+    let icons: IconStore
+
+    var body: some View {
+        let entry = tab.key.flatMap { loader.catalogue?.entry($0) }
+        EntryIcon(icon: entry?.icon, fallback: "globe", icons: icons, size: 24,
+                  isRound: entry?.kind == .agent)
     }
 }
