@@ -22,7 +22,7 @@ xcrun --sdk macosx swiftc -parse-as-library -swift-version 5 -module-name AISpac
   -target "$(uname -m)-apple-macos14.0" \
   -F "$FW" -Xlinker -rpath -Xlinker "$FW" ${LIB:+-Xlinker -rpath -Xlinker "$LIB"} \
   ${PLUGINS:+-plugin-path "$PLUGINS"} \
-  $SHARED $(find AISpace/Core -name '*.swift' | sort) AISpace/Live/CatalogueLoader.swift \
+  $SHARED $(find AISpace/Core -name '*.swift' | sort) AISpace/Live/CatalogueLoader.swift AISpace/Live/HubStores.swift AISpace/Live/OmniboxStore.swift \
   $(find AISpaceTests -name '*.swift' | sort) scripts/TestMain.swift \
   -o "$OUT/AISpaceTests"
 exec "$OUT/AISpaceTests" "$@"

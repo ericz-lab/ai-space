@@ -125,9 +125,9 @@ invalid syntax or inputs return 400. Like other panel routes, browser writes are
 subject to the same-origin guard. The response and `GET /api/shortcuts/actions`
 include `patterns` (provider defaults) and `customPatterns` (local additions).
 Custom patterns survive restart and are scoped to the action and peer; removing
-an app does not retarget its patterns to another provider. Reload the page after
-an API update, or refocus the command box after its one-minute catalogue cache
-expires. No action runs when patterns are saved.
+an app does not retarget its patterns to another provider. After an API update,
+the command box resolves the next query against current definitions. No action
+runs when patterns are saved.
 
 Arithmetic and currency syntax keep priority. A complete sentence pattern comes
 next, followed by the existing keyword/name rules if no pattern matches.
@@ -185,8 +185,8 @@ The initial scope is a local app agent, named `app/agent`, with 1–4 app-owned
 skills under `skills/<name>/SKILL.md`; peer routing and shared-skill aliases are
 not supported here. Each definition has 1–16 patterns; at most 128 definitions
 are stored per Space. Set `enabled: false` to disable one, including when its app
-has been removed. Invalid updates preserve the previous configuration. Reload
-the page or refocus after the command box's one-minute catalogue cache expires.
+has been removed. Invalid updates preserve the previous configuration. Change
+the query to resolve it against the updated definitions.
 
 The client submits `{ message, intentId, timezone }` to the selected agent's
 existing chat route. The server resolves the stored intent, checks its target,
@@ -225,6 +225,7 @@ The panel's routes, like `/api/voice`: no token, browser writes held to the pane
 
 | Route | |
 | --- | --- |
+| `POST /api/shortcuts/resolve` | `{ text, timezone }` → `{ intents, agentIntents, ambiguous }`; deterministic resolution only, never executes. Text is bounded to 4000 characters; timezone is a required valid IANA name. |
 | `GET /api/shortcuts/actions` | The catalogue: built-ins, app actions here and on peers, unfilled slots, each with `available` / `reason`. |
 | `POST /api/shortcuts/patterns` | `{ action, peer?, patterns }` → updated catalogue; backend-managed custom sentence patterns. |
 | `POST /api/shortcuts/runs` | `{ action, peer?, args, timezone, requestId }` → `{ run, duplicate }` (201, or 200 for a repeat). |
@@ -237,13 +238,13 @@ The panel's routes, like `/api/voice`: no token, browser writes held to the pane
 
 ### Phase 1 Core execution in universal search and Shortcuts (implemented)
 
-The catalogue and executor, the six templates with their providers, the command box's action rows, argument forms and result cards, the Shortcuts window with recent runs, reconnectable runs. AI summaries (an action that calls the model after submission) are not in phase 1: model-assisted actions start with phase 2's parameter filling. Native clients (macOS, iPhone) do not show the Shortcuts tile or the action rows yet.
+The catalogue and executor, the six templates with their providers, the command box's action rows, argument forms and result cards, the Shortcuts window with recent runs, reconnectable runs. AI summaries (an action that calls the model after submission) are not in phase 1: model-assisted actions start with phase 2's parameter filling. The iPhone Home search shows native action rows, forms, result cards and Recent Actions. macOS does not show action rows yet.
 
 ### Phase 2 Personalization and native access
 
 Add saved defaults, editing, favorites, ordering, save-from-search, screen pinning,
-and recent-action ranking. Bring the shared search and action experience to macOS
-and iPhone. Add model-assisted parameter filling for complex natural language,
+and recent-action ranking. Extend the iPhone's shared search and action experience
+to macOS. Add model-assisted parameter filling for complex natural language,
 with editable previews and explicit handling of ambiguity. Avoid conflicts with
 the Mac client's existing Quick Chat shortcut when selecting a keyboard entry.
 
@@ -272,3 +273,13 @@ General workflow graphs, arbitrary scripts, and a new scheduling engine are outs
 the initial scope. Establish the single-action experience before composition.
 
 General workflow graphs, arbitrary scripts, and a new scheduling engine are outside the initial scope.
+
+## Native search and shared resolution
+
+The web command box and iPhone call `POST /api/shortcuts/resolve` after a short typing pause. `src/space/shortcuts/resolve.ts` owns keyword, currency, sentence-pattern and calendar-input parsing; `ranking.ts` owns name scoring. The route is assembled with the agent routes so skill availability uses the same app-owned skill validation as chat. Resolution does not call a model, preview a provider, create a run, or send a message. Agent candidates take precedence over ordinary actions; arithmetic and currency conversions take precedence over agents. Multiple interpretations require an explicit selection.
+
+The response contains the existing intent union (`calc` with `expression`; `convert` or `action` with an action descriptor and `args`), available or unavailable `agentIntents`, and `ambiguous`. Input labels and translations remain in the action descriptor. Clients keep catalogue search local, ignore superseded responses, and use the existing preview/run/chat endpoints only after resolution. A request must supply the device/browser IANA timezone; calendar dates and local times remain strings, and execution validates and resolves them in that zone.
+
+The iPhone uses the shared Mac `OmniboxRules` for catalogue ranking. Native forms support text, number, date, time, period, choice and task inputs. Selecting a complete read action runs it; writes and task runs require Create/Run. An uncertain transport failure preserves the exact submission body and request ID. Accepted runs continue on the Space; Recent Actions reloads their status after the sheet or app closes. List, receipt, value and task results render natively. Skill-agent selection opens a fresh native chat with the original sentence, `intentId` and timezone; an already-running chat is left intact.
+
+The microphone records at most 90 seconds and uses `POST /api/voice/transcribe`. Leaving the search cancels capture; a late transcript cannot fill a different Space's input. Transcription fills the field without submitting. Catalogue matching still works if the resolver cannot be reached; command errors are shown and an explicit Ask Space Assistant remains available.

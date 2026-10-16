@@ -15,6 +15,8 @@ struct HomeView: View {
     /// The screen to show, by id; nil for the library.
     var screenID: String?
     @FocusState private var searchFocused: Bool
+    @State private var searchSubmit = 0
+    @State private var searchVoiceBusy = false
 
     private var screens: [PanelScreen] { store.screens(connection.id) }
 
@@ -31,10 +33,15 @@ struct HomeView: View {
             }
         } else {
             ZStack {
-                page(spacing: 12) { if let catalogue = loader.catalogue { library(catalogue) } }
+                page(spacing: 12) {
+                    OmniboxView(model: model, connection: connection, loader: loader, store: model.omnibox(for: connection), submit: searchSubmit)
+                        .id(connection.id)
+                        .disabled(searchVoiceBusy)
+                    if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let catalogue = loader.catalogue { library(catalogue) }
+                }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                SearchField(model: model, focused: $searchFocused)
+                SearchField(model: model, api: loader.api, voiceBusy: $searchVoiceBusy, focused: $searchFocused, submit: { searchSubmit += 1 })
                     .padding(.vertical, 12)
             }
             .onReceive(model.pager.$id.removeDuplicates().dropFirst()) { _ in searchFocused = false }
@@ -206,7 +213,11 @@ struct HomeView: View {
 /// The library's search: one field over apps, agents and widgets.
 struct SearchField: View {
     @ObservedObject var model: AppModel
+    let api: SpaceAPI
+    @StateObject private var voice = OmniboxVoice()
+    @Binding var voiceBusy: Bool
     var focused: FocusState<Bool>.Binding
+    let submit: () -> Void
 
     private var idle: Bool { model.query.isEmpty && !focused.wrappedValue }
 
@@ -217,7 +228,18 @@ struct SearchField: View {
             TextField(text: $model.query, prompt: idle ? Text("") : Text("Search")) { Text("Search apps, agents and widgets") }
                 .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
                 .focused(focused)
-                .onSubmit { focused.wrappedValue = false }
+                .onSubmit { if !voice.busy { submit() } }
+                .disabled(voice.busy)
+            if voice.available {
+                Button { voice.toggle(api: api) { text in
+                    model.query = [model.query, text].filter { !$0.isEmpty }.joined(separator: " ")
+                    focused.wrappedValue = true
+                } } label: {
+                    if voice.transcribing { ProgressView().controlSize(.small) }
+                    else { Image(systemName: voice.recording ? "stop.circle.fill" : "mic.fill") }
+                }.disabled(voice.transcribing)
+                    .accessibilityLabel(Text(voice.recording ? "Stop Recording" : "Voice Input"))
+            }
             if !model.query.isEmpty {
                 Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain)
@@ -239,6 +261,12 @@ struct SearchField: View {
         .onTapGesture { focused.wrappedValue = true }
         .modifier(LauncherCapsuleGlass())
         .padding(.horizontal, 24)
+        .task(id: api.base) { await voice.check(api) }
+        .onChange(of: voice.busy) { _, busy in voiceBusy = busy }
+        .onDisappear { voice.cancel(); voiceBusy = false }
+        .alert("Voice Input", isPresented: Binding(get: { voice.error != nil }, set: { if !$0 { voice.error = nil } })) {
+            Button("OK") { voice.error = nil }
+        } message: { Text(verbatim: voice.error ?? "") }
     }
 }
 

@@ -353,7 +353,7 @@ final class ChatStore: ObservableObject {
         }
     }
 
-    func send() {
+    func send(intentID: String? = nil, timezone: String? = nil) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isRunning else { return }
         draft = ""
@@ -364,16 +364,17 @@ final class ChatStore: ObservableObject {
         isRunning = true
         runID = nil
         turn = Task { [weak self] in
-            await self?.follow(text, into: index)
+            await self?.follow(text, into: index, intentID: intentID, timezone: timezone)
         }
     }
 
-    private func follow(_ text: String, into index: Int) async {
+    private func follow(_ text: String, into index: Int, intentID: String?, timezone: String?) async {
         var reply = ChatReply()
         var lastSeq = 0
         var tries = 0
         var body: [String: Any] = ["message": text]
         if let sessionID { body["sessionId"] = sessionID }
+        if let intentID { body["intentId"] = intentID; body["timezone"] = timezone ?? TimeZone.current.identifier }
         func show() {
             guard bubbles.indices.contains(index) else { return }
             bubbles[index].text = reply.stopped ? [reply.text, String(localized: "Stopped.")].filter { !$0.isEmpty }.joined(separator: "\n\n") : reply.text

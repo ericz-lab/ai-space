@@ -1,4 +1,4 @@
-import { matchAgentIntents, type AgentIntentView } from "../space/shortcuts/agent-intents.ts";
+import type { AgentIntentView } from "../space/shortcuts/agent-intents.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalcError, evaluate, format } from "../space/shortcuts/calc.ts";
 import ActionRunner, { ValueCard } from "./ActionRunner.tsx";
@@ -7,7 +7,7 @@ import { useLang } from "./i18n.ts";
 import type { Entry } from "./Library.tsx";
 import { opensByDefault, rank } from "./omnibox.ts";
 import { parseKey } from "./screens.ts";
-import { type Action, type Intent, type RunResult, type RunView, actionText, browserZone, complete, intents } from "./shortcuts.ts";
+import { type Intent, type RunResult, type RunView, actionText, browserZone, complete } from "./shortcuts.ts";
 import { LiveVoice, type VoiceState } from "./voice.ts";
 import { Icon } from "./Tiles.tsx";
 
@@ -40,23 +40,19 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   const [focused, setFocused] = useState(false);
   const [sel, setSel] = useState(0);
   const field = useRef<HTMLTextAreaElement>(null);
-  const [actions, setActions] = useState<Action[]>([]);
+  const [resolution, setResolution] = useState<{ query: string; intents: Intent[]; agentIntents: AgentIntentView[] } | null>(null);
   const agentStarting = useRef(false);
   const [agentError, setAgentError] = useState("");
-  const [agentIntents, setAgentIntents] = useState<AgentIntentView[]>([]);
+  const [resolving, setResolving] = useState(false);
   const [panel, setPanel] = useState<{ intent: Intent; autoRun: boolean } | null>(null);
   const [running, setRunning] = useState(0);
   // Enter in the field while an action is open submits it, like its button.
   const [submitTick, setSubmitTick] = useState(0);
   const loadedAt = useRef(0);
-  // The catalogue and the runs still going, when the box takes the focus (at most once a minute).
+  // Runs still going, refreshed when the box takes focus (at most once a minute).
   const refresh = () => {
     if (Date.now() - loadedAt.current < 60_000) return;
     loadedAt.current = Date.now();
-    getJson<{ actions: Action[] }>("/api/shortcuts/actions")
-      .then((d) => setActions(d.actions))
-      .catch(() => {});
-    getJson<{ intents: AgentIntentView[] }>("/api/shortcuts/agent-intents").then((d) => setAgentIntents(d.intents)).catch(() => {});
     getJson<{ runs: RunView[] }>("/api/shortcuts/runs?limit=20")
       .then((d) => setRunning(d.runs.filter((r) => r.status === "running").length))
       .catch(() => {});
@@ -70,8 +66,20 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   }, [focusSignal]);
 
   const results = useMemo(() => rank(q, entries), [q, entries]);
-  const found = useMemo(() => intents(q, actions, browserZone()), [q, actions]);
-  const agentMatches = useMemo(() => found.some((i) => i.kind === "calc" || i.kind === "convert") ? [] : matchAgentIntents(q, agentIntents), [q, agentIntents, found]);
+  useEffect(() => {
+    let active = true;
+    setResolution(null);
+    setResolving(!!q.trim());
+    if (!q.trim()) return;
+    const timer = setTimeout(() => {
+      sendJson<{ intents: Intent[]; agentIntents: AgentIntentView[] }>("POST", "/api/shortcuts/resolve", { text: q, timezone: browserZone() })
+        .then((r) => { if (active) { setResolution({ query: q, ...r }); setResolving(false); } })
+        .catch((e) => { if (active) { setAgentError(String(e.message || e)); setResolving(false); } });
+    }, 180);
+    return () => { active = false; clearTimeout(timer); };
+  }, [q]);
+  const found = useMemo(() => resolution?.query === q ? resolution.intents : [], [resolution, q]);
+  const agentMatches = useMemo(() => resolution?.query === q ? resolution.agentIntents : [], [resolution, q]);
   // Direct results and an action named at the start come first; loose matches after the entries.
   const rows = useMemo<Row[]>(() => {
     const first = found.filter((i) => i.kind !== "action" || i.strong);
@@ -141,7 +149,8 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
       e.preventDefault();
       if (e.metaKey || e.ctrlKey) ask();
       else if (panel) setSubmitTick((n) => n + 1);
-      else if (q.trim()) act(sel);
+      else if (q.trim() && resolution?.query === q) act(sel);
+      else if (!resolving && rows[sel]?.type === "entry") act(sel);
     } else if (e.key === "ArrowDown" && q) {
       e.preventDefault();
       setSel((i) => Math.min(askIndex, i + 1));
@@ -200,7 +209,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
           className="omni-field"
           value={q}
           readOnly={voiceBusy}
-          aria-busy={voiceBusy}
+          aria-busy={voiceBusy || resolving}
           placeholder={voice === "connecting" ? t("omni.connecting") : voice === "recording" ? t("omni.recording") : voice === "transcribing" ? t("omni.transcribing") : t("omni.placeholder")}
           aria-label={t("omni.label")}
           aria-expanded={showList}
@@ -223,6 +232,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
           </button>
         )}
       </div>
+      {resolving && showList && <p className="sc-sub" role="status">{t("omni.resolving")}</p>}
       {agentError && <p className="omni-error" role="alert">{agentError}</p>}
       {voiceError && <p className="omni-error">{voiceError}</p>}
       {showList && ambiguous && <p className="sc-sub" role="status">{t("sc.pattern.choose")}</p>}

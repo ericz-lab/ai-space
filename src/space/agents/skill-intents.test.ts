@@ -7,6 +7,7 @@ import { AppRegistry } from "../panel/registry.ts";
 import { LayoutStore } from "../panel/layout.ts";
 import { claudeOnly } from "../runtimes/registry.ts";
 import { loadManifest } from "../scheduler/manifest.ts";
+import type { Action } from "../shortcuts/types.ts";
 import { ShortcutStore } from "../shortcuts/store.ts";
 import { workspacePaths } from "../workspace.ts";
 import { createAgentRoutes } from "./api.ts";
@@ -32,7 +33,9 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
   const runs = new RunRegistry(db);
   const registry = new AppRegistry();
   await registry.set(await loadManifest(dir));
-  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createAgentRoutes({ ws, registry, layout: new LayoutStore(db), sessions, runs, runtimes: claudeOnly(["bun", cli]), shortcuts: store }) });
+  const actions: Action[] = [{ id: "todo/create", app: "todo", builtin: false, title: "Todo", keywords: ["todo"], effect: "write", result: "receipt", available: true,
+    inputs: [{ name: "title", label: "Title", type: "text", query: true, required: true }, { name: "date", label: "Date", type: "date" }, { name: "time", label: "Time", type: "time" }] }];
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createAgentRoutes({ ws, registry, layout: new LayoutStore(db), sessions, runs, runtimes: claudeOnly(["bun", cli]), shortcuts: store, actionCatalogue: () => actions }) });
   const post = (path: string, body: unknown) => fetch(new URL(path, server.url), { method: "POST", body: JSON.stringify(body) });
   const config = { id: "financial-news", title: "Financial news", agent: "news/curator", skills: ["curate-news"], patterns: ["查{period}金融新闻"] };
   try {
@@ -40,6 +43,25 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
     const catalogue = await (await fetch(new URL("/api/shortcuts/agent-intents", server.url))).json();
     expect(catalogue.intents[0]).toMatchObject({ id: config.id, available: true });
     expect(runs.list()).toHaveLength(0);
+    const resolve = async (text: string) => (await post("/api/shortcuts/resolve", { text, timezone: "Asia/Seoul" })).json();
+    expect(await resolve("查今天金融新闻")).toMatchObject({ agentIntents: [{ id: config.id, available: true }], ambiguous: false });
+    expect(await resolve("todo 明天 15:00 提交报告")).toMatchObject({ intents: [{ kind: "action", action: { id: "todo/create", effect: "write" }, args: { title: "提交报告", date: "tomorrow", time: "15:00" } }], agentIntents: [] });
+    expect(await resolve("2+3*4")).toMatchObject({ intents: [{ kind: "calc", expression: "2+3*4" }], agentIntents: [] });
+    expect(await resolve("unmatched request")).toMatchObject({ intents: [], agentIntents: [], ambiguous: false });
+    expect(await resolve("  ")).toMatchObject({ intents: [], agentIntents: [] });
+    for (const body of [{ text: "todo" }, { text: "todo", timezone: "bad/zone" }, { text: 4, timezone: "UTC" }, { text: "x".repeat(4001), timezone: "UTC" }]) {
+      expect((await post("/api/shortcuts/resolve", body)).status).toBe(400);
+    }
+    store.setAgentIntent({ ...config, id: "second", enabled: true });
+    expect(await resolve("查今天金融新闻")).toMatchObject({ ambiguous: true });
+    store.setAgentIntent({ ...config, id: "second", enabled: false });
+    // A configured but now unavailable skill remains a visible, disabled match.
+    store.setAgentIntent({ ...config, id: "missing-skill", skills: ["missing"], enabled: true });
+    const unavailable = await resolve("查今天金融新闻");
+    expect(unavailable.agentIntents.find((i: { id: string }) => i.id === "missing-skill")).toMatchObject({ available: false });
+    store.setAgentIntent({ ...config, id: "missing-skill", skills: ["missing"], enabled: false });
+    expect(runs.list()).toHaveLength(0);
+    expect(store.listRuns()).toHaveLength(0);
     for (const body of [{ ...config, skills: ["missing"] }, { ...config, skills: ["../secret"] }, { ...config, agent: "news/missing" }]) {
       expect((await post("/api/shortcuts/agent-intents", body)).ok).toBe(false);
       expect(store.agentIntents()[0]?.skills).toEqual(["curate-news"]);

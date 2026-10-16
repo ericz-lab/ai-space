@@ -50,7 +50,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Pages of your Space can take a photo or video to upload.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Pages of your Space can record audio, for example for voice input.</string>
+	<string>Use the microphone for voice input in search and pages of your Space.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save an image from your Space to your photo library.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -1,4 +1,6 @@
-import { parseAgentIntent, type AgentIntentView } from "../shortcuts/agent-intents.ts";
+import { intents } from "../shortcuts/resolve.ts";
+import type { Action } from "../shortcuts/types.ts";
+import { matchAgentIntents, parseAgentIntent, type AgentIntentView } from "../shortcuts/agent-intents.ts";
 import type { ShortcutStore } from "../shortcuts/store.ts";
 import { isTimezone } from "../shortcuts/time.ts";
 import { skillContext } from "./skill-context.ts";
@@ -41,6 +43,7 @@ import { readTranscript } from "./transcript.ts";
 export type AgentsApiOptions = {
   ws: Workspace;
   shortcuts?: ShortcutStore;
+  actionCatalogue?: () => Action[];
   registry: AppRegistry;
   layout: LayoutStore;
   sessions: SessionStore;
@@ -222,17 +225,32 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     return skillContext(agent.appDir, skills);
   };
 
+  const availableIntents = async (definitions = opts.shortcuts?.agentIntents() ?? []): Promise<AgentIntentView[]> => {
+    return Promise.all(definitions.map(async (intent) => {
+      try {
+        await intentContext(intent.agent, intent.skills);
+        return { ...intent, available: true };
+      } catch (e) { return { ...intent, available: false, reason: (e as Error).message }; }
+    }));
+  };
+
   return {
+    "/api/shortcuts/resolve": {
+      POST: wrap(async (req) => {
+        const body = await req.json().catch(() => null);
+        if (!body || typeof body.text !== "string" || body.text.length > 4000 || typeof body.timezone !== "string" || !isTimezone(body.timezone)) {
+          return error(400, "Expected text (at most 4000 characters) and an IANA timezone");
+        }
+        const found = intents(body.text, opts.actionCatalogue?.() ?? [], body.timezone);
+        const definitions = (opts.shortcuts?.agentIntents() ?? []).map((i) => ({ ...i, available: true }));
+        const matched = found.some((i) => i.kind === "calc" || i.kind === "convert") ? [] : matchAgentIntents(body.text, definitions);
+        const agents = await availableIntents(matched);
+        return json({ ok: true, intents: found, agentIntents: agents, ambiguous: agents.length ? agents.length > 1 : found.some((i) => i.kind === "action" && i.ambiguous) });
+      }),
+    },
     "/api/shortcuts/agent-intents": {
       GET: wrap(async () => {
-        const intents: AgentIntentView[] = [];
-        for (const intent of opts.shortcuts?.agentIntents() ?? []) {
-          try {
-            await intentContext(intent.agent, intent.skills);
-            intents.push({ ...intent, available: true });
-          } catch (e) { intents.push({ ...intent, available: false, reason: (e as Error).message }); }
-        }
-        return json({ ok: true, intents });
+        return json({ ok: true, intents: await availableIntents() });
       }),
       POST: wrap(async (req) => {
         if (!opts.shortcuts) return error(503, "Agent intent storage is unavailable");

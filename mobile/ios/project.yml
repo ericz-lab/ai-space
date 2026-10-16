@@ -45,6 +45,8 @@ targets:
         group: Shared
       - path: ../../desktop/macos/AISpace/Services/SpaceModels.swift
         group: Shared
+      - path: ../../desktop/macos/AISpace/Services/OmniboxRules.swift
+        group: Shared
       - path: ../../desktop/macos/AISpace/Services/ChatStream.swift
         group: Shared
       - path: ../../desktop/macos/AISpace/Services/DesktopRules.swift

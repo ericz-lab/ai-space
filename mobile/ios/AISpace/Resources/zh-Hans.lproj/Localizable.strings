@@ -324,3 +324,27 @@
 "closed from another panel" = "已从另一个面板关闭";
 "closed: ai-space stopped" = "已关闭：ai-space 已停止";
 "connection lost" = "连接已断开";
+
+/* Universal search */
+"Recent Actions" = "最近操作";
+"Choose an action" = "请选择一个操作";
+"Searching…" = "搜索中…";
+"Ask Space Assistant" = "询问空间助手";
+"This agent is still replying. Open its chat to continue." = "此智能体仍在回复，请打开它的对话继续。";
+"Result" = "结果";
+"Create" = "创建";
+"Run" = "运行";
+"Show Result" = "显示结果";
+"Choose…" = "请选择…";
+"Choose Date" = "选择日期";
+"Choose Time" = "选择时间";
+"Use today, this-week, or YYYY-MM-DD..YYYY-MM-DD" = "可输入 today、this-week 或 YYYY-MM-DD..YYYY-MM-DD";
+"Completed" = "已完成";
+"Running…" = "运行中…";
+"Outcome unknown; check the app before trying again." = "结果未知，请先在应用中检查，再决定是否重试。";
+"Failed" = "失败";
+"Cached result" = "缓存结果";
+"Stop Recording" = "停止录音";
+"Voice Input" = "语音输入";
+"Allow microphone access in Settings to use voice input." = "请在设置中允许麦克风访问，以使用语音输入。";
+"Could not record audio." = "无法录制音频。";

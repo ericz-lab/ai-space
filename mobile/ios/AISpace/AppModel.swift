@@ -112,6 +112,7 @@ final class AppModel: ObservableObject {
     private var loaders: [UUID: CatalogueLoader] = [:]
     private var icons: [UUID: IconStore] = [:]
     private var settings: [UUID: SettingsLoader] = [:]
+    private var omniboxes: [UUID: OmniboxStore] = [:]
     private var chats: [String: ChatStore] = [:]
     private var terminals: [UUID: TerminalStore] = [:]
     private var backdrops: [UUID: BackdropStore] = [:]
@@ -193,6 +194,13 @@ final class AppModel: ObservableObject {
         let s = SettingsLoader(api: loader(for: connection).api)
         settings[connection.id] = s
         return s
+    }
+
+    func omnibox(for connection: Connection) -> OmniboxStore {
+        if let store = omniboxes[connection.id] { return store }
+        let store = OmniboxStore(api: loader(for: connection).api)
+        omniboxes[connection.id] = store
+        return store
     }
 
     /// An agent's conversation, kept while the app runs so leaving the page does not lose it.
@@ -314,6 +322,8 @@ final class AppModel: ObservableObject {
     /// Ends the Space's session on this phone: cookies and every other piece of website data of
     /// its store, the saved catalogue and the open pages. The address and the screens stay.
     func signOut(_ connection: Connection) {
+        omniboxes[connection.id]?.clear()
+        query = ""
         let data = dataStore(connection.id)
         icons[connection.id]?.clear()
         try? FileManager.default.removeItem(at: AppPaths.icons(connection.id))
@@ -372,6 +382,7 @@ final class AppModel: ObservableObject {
         settings[id] = nil
         backdrops[id] = nil
         try? FileManager.default.removeItem(at: AppPaths.backdrops(id))
+        omniboxes.removeValue(forKey: id)
         chats = chats.filter { !$0.key.hasPrefix("\(id)|") }
         terminals[id]?.closeAll()
         terminals[id] = nil
