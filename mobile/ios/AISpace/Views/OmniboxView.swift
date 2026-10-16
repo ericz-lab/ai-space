@@ -9,7 +9,6 @@ struct OmniboxView: View {
     @ObservedObject var store: OmniboxStore
     let submit: Int
     @State private var selection: ShortcutIntent?
-    @State private var showingHistory = false
     @State private var chatError: String?
     @State private var pendingLink: String?
 
@@ -39,9 +38,7 @@ struct OmniboxView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button { showingHistory = true } label: { Label("Recent Actions", systemImage: "clock.arrow.circlepath") }
-            } else {
+            if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 if resolution?.ambiguous == true { Text("Choose an action").font(.subheadline).foregroundStyle(.secondary) }
                 // The server returns mutually exclusive agent/action candidates.
                 ForEach(resolution?.agentIntents ?? []) { intent in
@@ -73,7 +70,6 @@ struct OmniboxView: View {
                 ShortcutActionSheet(api: store.api, action: action, args: intent.args ?? [:], open: open)
             }
         }
-        .sheet(isPresented: $showingHistory, onDismiss: openPendingLink) { ShortcutHistory(store: store, open: open) }
     }
 
     private func row(_ title: String, detail: String?, icon: String) -> some View {
@@ -131,9 +127,9 @@ struct OmniboxView: View {
         open(link)
     }
     private func open(_ link: String) {
-        if selection != nil || showingHistory {
+        if selection != nil {
             pendingLink = link
-            selection = nil; showingHistory = false
+            selection = nil
             return
         }
         guard let url = URL(string: link, relativeTo: connection.url)?.absoluteURL, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
@@ -256,35 +252,5 @@ struct ShortcutResultView: View {
             if let at = result.asOf.flatMap(Times.parse) { Text(at, style: .relative).font(.caption).foregroundStyle(.secondary) }
             if result.stale == true { Text("Cached result").font(.caption).foregroundStyle(.secondary) }
         }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct ShortcutHistory: View {
-    @ObservedObject var store: OmniboxStore
-    @Environment(\.dismiss) private var dismiss
-    let open: (String) -> Void
-    var body: some View {
-        NavigationStack {
-            List {
-                if let error = store.error { Text(verbatim: error).foregroundStyle(Theme.danger) }
-                ForEach(store.runs) { run in
-                    Section {
-                        Text(LocalizedStringKey(run.status == "ok" ? "Completed" : run.status == "running" ? "Running…" : run.status == "unknown" ? "Outcome unknown; check the app before trying again." : "Failed"))
-                        if let result = run.result { ShortcutResultView(result: result, open: open) }
-                        if let error = run.error { Text(verbatim: error).foregroundStyle(Theme.danger) }
-                    } header: { Text(verbatim: run.title) }
-                }
-            }
-            .navigationTitle("Recent Actions")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .refreshable { await store.refreshRuns() }
-            .task {
-                repeat {
-                    await store.refreshRuns()
-                    guard store.runs.contains(where: { $0.status == "running" }) else { return }
-                    do { try await Task.sleep(nanoseconds: 1_500_000_000) } catch { return }
-                } while !Task.isCancelled
-            }
-        }
     }
 }
