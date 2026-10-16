@@ -1,12 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#d97706"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbbf24"/>
+      <stop offset=".5" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#ea580c"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset="1" stop-color="#fff7ed"/>
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="14" fill="url(#bg)"/>
-  <rect x="1" y="1" width="62" height="62" rx="13" fill="none" stroke="#fff" stroke-opacity=".12"/>
-  <!-- A lightning bolt over a command line: one step to an action. -->
-  <path d="M35 10 L19 35 L30 35 L27 54 L45 27 L34 27 Z" fill="#fff" fill-opacity=".95" stroke-linejoin="round"/>
-  <path d="M14 50 L22 50" stroke="#fde68a" stroke-width="3" stroke-linecap="round"/>
+  <rect x="1" y="1" width="62" height="62" rx="13" fill="none" stroke="#fff" stroke-opacity=".2"/>
+  <!-- Stacked action cards with a lightning bolt for quick execution. -->
+  <rect x="13" y="18" width="34" height="34" rx="9" fill="#9a3412" fill-opacity=".16" transform="rotate(-12 30 35)"/>
+  <rect x="13" y="16" width="34" height="34" rx="9" fill="#fef3c7" fill-opacity=".6" transform="rotate(-12 30 33)"/>
+  <rect x="19" y="13" width="32" height="38" rx="9" fill="#9a3412" fill-opacity=".15"/>
+  <rect x="19" y="11" width="32" height="38" rx="9" fill="url(#card)"/>
+  <path d="M37 18 26 32h8l-2 11 12-16h-8z" fill="#ea580c" stroke="#ea580c" stroke-width="1.5" stroke-linejoin="round"/>
 </svg>
