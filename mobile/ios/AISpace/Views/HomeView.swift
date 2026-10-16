@@ -29,21 +29,7 @@ struct HomeView: View {
                 page(longPress: { model.showingScreenMenu = true }) {
                     if screenID == screens.first?.id {
                         OmniboxField(query: $commandText, api: loader.api, voiceBusy: $searchVoiceBusy, focused: $searchFocused, submit: { searchSubmit += 1 })
-                            .overlay(alignment: .top) {
-                                OmniboxView(model: model, query: $commandText, connection: connection, loader: loader, store: model.omnibox(for: connection), submit: searchSubmit)
-                                    .id(connection.id)
-                                    .disabled(searchVoiceBusy)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .background {
-                                        if !commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                            RoundedRectangle(cornerRadius: 24)
-                                                .fill(.regularMaterial)
-                                                .shadow(color: .black.opacity(0.2), radius: 12, y: 6)
-                                        }
-                                    }
-                                    .offset(y: 60)
-                            }
-                            .zIndex(1)
+                            .anchorPreference(key: OmniboxFieldBounds.self, value: .bounds) { $0 }
                     }
                     if let catalogue = loader.catalogue, let screen = screens.first(where: { $0.id == screenID }) {
                         self.screen(screen, catalogue)
@@ -80,6 +66,18 @@ struct HomeView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 24)
+                // Universal search results float under the field over everything else on the page,
+                // so they neither push the tiles down nor sit beneath them.
+                .overlayPreferenceValue(OmniboxFieldBounds.self) { field in
+                    GeometryReader { proxy in
+                        if let field {
+                            let bounds = proxy[field]
+                            omniboxResults
+                                .frame(width: bounds.width)
+                                .offset(x: bounds.minX, y: bounds.maxY + 8)
+                        }
+                    }
+                }
                 .frame(minHeight: geo.size.height, alignment: .top)
                 .background {
                     // The empty part of a screen takes the long press; a tile or a card keeps its own.
@@ -98,6 +96,27 @@ struct HomeView: View {
             .contentShape(Rectangle())
             .refreshable { await loader.refresh() }
         }
+    }
+
+    private var omniboxResults: some View {
+        let showing = !commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return OmniboxView(model: model, query: $commandText, connection: connection, loader: loader, store: model.omnibox(for: connection), submit: searchSubmit)
+            .id(connection.id)
+            .disabled(searchVoiceBusy)
+            .foregroundStyle(Theme.text)
+            .padding(showing ? 8 : 0)
+            .background {
+                // The frame is see-through; each result carries its own solid surface, so the
+                // tiles show around the results without washing out their text.
+                if showing {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Theme.hairline))
+                        .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
+                }
+            }
+            // The field carries 8 pt of its own on each side; line the results up with its capsule.
+            .padding(.horizontal, 8)
     }
 
     /// One screen: its tiles in one grid, its widget cards below, in the screen's order. A key
@@ -264,6 +283,12 @@ struct SearchField: View {
         .modifier(LauncherCapsuleGlass())
         .padding(.horizontal, 24)
     }
+}
+
+/// Where the universal search field sits on its page, for the results drawn over the page.
+private struct OmniboxFieldBounds: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>?
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = value ?? nextValue() }
 }
 
 /// The first Panel's command field: actions, agents and voice input.

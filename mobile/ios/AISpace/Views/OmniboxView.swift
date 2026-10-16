@@ -37,9 +37,9 @@ struct OmniboxView: View {
     private var loose: [ShortcutIntent] { Array((resolution?.intents.filter { $0.kind == "action" && $0.strong != true } ?? []).prefix(3)) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 6) {
             if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                if resolution?.ambiguous == true { Text("Choose an action").font(.subheadline).foregroundStyle(.secondary) }
+                if resolution?.ambiguous == true { Text("Choose an action").font(.subheadline).foregroundStyle(Theme.text.opacity(0.7)) }
                 // The server returns mutually exclusive agent/action candidates.
                 ForEach(resolution?.agentIntents ?? []) { intent in
                     Button { ask(intent) } label: {
@@ -55,11 +55,11 @@ struct OmniboxView: View {
                     }
                 }
                 ForEach(loose) { intent in actionRow(intent) }
-                if store.resolving { ProgressView().controlSize(.small).accessibilityLabel(Text("Searching…")) }
+                if store.resolving { ProgressView().controlSize(.small).padding(12).accessibilityLabel(Text("Searching…")) }
                 Button { ask(nil) } label: { Label("Ask Space Assistant", systemImage: "sparkles").frame(maxWidth: .infinity, alignment: .leading) }
-                    .padding(12).glass()
-                if let error = store.error { Text(verbatim: error).foregroundStyle(Theme.danger).font(.footnote) }
-                if let chatError { Text(verbatim: chatError).foregroundStyle(Theme.danger).font(.footnote) }
+                    .padding(12).background(Theme.solid, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                if let error = store.error { Text(verbatim: error).foregroundStyle(Theme.danger).font(.footnote).padding(.horizontal, 12) }
+                if let chatError { Text(verbatim: chatError).foregroundStyle(Theme.danger).font(.footnote).padding(.horizontal, 12) }
             }
         }
         .buttonStyle(.plain)
@@ -77,10 +77,10 @@ struct OmniboxView: View {
             Image(systemName: icon).foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 4) {
                 Text(verbatim: title)
-                if let detail, !detail.isEmpty { Text(verbatim: detail).font(.caption).foregroundStyle(.secondary) }
+                if let detail, !detail.isEmpty { Text(verbatim: detail).font(.caption).foregroundStyle(Theme.text.opacity(0.7)) }
             }
             Spacer(minLength: 0)
-        }.padding(12).frame(maxWidth: .infinity, alignment: .leading).glass()
+        }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Theme.solid, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
     @ViewBuilder private func actionRow(_ intent: ShortcutIntent) -> some View {
         Button {
@@ -88,7 +88,7 @@ struct OmniboxView: View {
             else { selection = intent }
         } label: {
             if (intent.kind == "calc" || intent.kind == "convert"), let preview = store.preview {
-                ShortcutResultView(result: preview, open: open).padding(12).glass()
+                ShortcutResultView(result: preview, open: open).padding(12).background(Theme.solid, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
                 row(intent.action?.displayTitle ?? intent.expression ?? "", detail: intent.action?.reason ?? intent.action?.peer,
                     icon: intent.kind == "calc" ? "equal" : intent.action?.effect == "write" ? "plus.circle" : "bolt.circle")
