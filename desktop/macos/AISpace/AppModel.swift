@@ -425,8 +425,9 @@ final class AppModel: ObservableObject {
         pagerID = ids[max(0, min(ids.count - 1, i + step))]
     }
 
+    /// ⌘F: the command box on the first screen, where the window opens.
     func search() {
-        showPage(Pager.home)
+        showPage(Screens.home)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.focusSearch.send() }
     }
 

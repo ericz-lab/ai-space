@@ -105,7 +105,20 @@ struct LauncherPage: View {
     private let cards = [GridItem(.adaptive(minimum: 300, maximum: 520), spacing: 16, alignment: .top)]
 
     var body: some View {
-        if let screenID {
+        if let screenID, screenID == Screens.home {
+            // The first screen, where the window opens, carries the command box too; while it
+            // holds a query the page shows what matches instead of the screen.
+            page(spacing: model.query.isEmpty ? 22 : 14, menu: model.query.isEmpty) {
+                if let catalogue = loader.catalogue {
+                    if !model.query.isEmpty {
+                        library(catalogue)
+                    } else if let screen = screens.first(where: { $0.id == screenID }) {
+                        self.screen(screen, catalogue)
+                    }
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) { omnibox(on: Screens.home) }
+        } else if let screenID {
             page(menu: true) {
                 if let catalogue = loader.catalogue, let screen = screens.first(where: { $0.id == screenID }) {
                     self.screen(screen, catalogue)
@@ -113,10 +126,7 @@ struct LauncherPage: View {
             }
         } else {
             page(spacing: 14, menu: false) { if let catalogue = loader.catalogue { library(catalogue) } }
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    OmniboxField(model: model, best: bestMatch, api: model.lives[connection.id]?.api)
-                        .padding(.top, 14).padding(.bottom, 6)
-                }
+                .safeAreaInset(edge: .top, spacing: 0) { omnibox(on: Pager.home) }
         }
     }
 
@@ -164,6 +174,11 @@ struct LauncherPage: View {
             }
             .padding(.top, 40)
         }
+    }
+
+    private func omnibox(on page: String) -> some View {
+        OmniboxField(model: model, page: page, best: bestMatch, api: model.lives[connection.id]?.api)
+            .padding(.top, 14).padding(.bottom, 6)
     }
 
     /// What Return in the Home box opens when it does not ask: the best name over the whole library.
@@ -306,12 +321,14 @@ struct ScreenActions: View {
     }
 }
 
-/// The Home command box (docs/panel.md#omnibox): what is typed filters the library below, best
+/// The command box on the first screen and on Home (docs/panel.md#omnibox): what is typed filters the library below, best
 /// names first, and Return either opens the best match (when its name holds the whole query) or
 /// hands the text to Space Assistant as a new conversation; ⌘Return always asks, Shift-Return
 /// breaks the line. The microphone fills the field from speech. ⌘F comes here.
 struct OmniboxField: View {
     @ObservedObject var model: AppModel
+    /// The pager page this field is on: ⌘F focuses the one on show.
+    let page: String
     let best: CatalogueEntry?
     let api: SpaceAPI?
     @FocusState private var focused: Bool
@@ -373,7 +390,7 @@ struct OmniboxField: View {
         }
         .frame(maxWidth: 640)
         .padding(.horizontal, 32)
-        .onReceive(model.focusSearch) { focused = true }
+        .onReceive(model.focusSearch) { if model.pagerID == page { focused = true } }
     }
 
     private func submit(ask: Bool) {

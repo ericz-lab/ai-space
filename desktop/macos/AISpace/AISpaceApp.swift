@@ -232,7 +232,7 @@ struct SpaceCommands: Commands {
 #if DEBUG
 /// For checking the layout without screen recording: `AISPACE_SNAPSHOT=<dir>` writes a PNG of the
 /// main window for each page named in `AISPACE_PAGES` (`#home`, a screen id, `#settings`,
-/// `hub:inbox`, `hub:chat`, `panel`, `query:<text>` typed into Home's box, `ask:<text>` asked of
+/// `hub:inbox`, `hub:chat`, `panel`, `query:<text>` typed into the first screen's box, `ask:<text>` asked of
 /// Space Assistant), a few seconds apart. Debug builds only.
 @MainActor
 enum DebugSnapshot {
@@ -248,7 +248,7 @@ enum DebugSnapshot {
                 case "hub:chat": model.destination = .hub(.chat(agent: nil))
                 case "hub:terminal": model.destination = .hub(.terminal)
                 case let p where p.hasPrefix("query:"):
-                    model.showPage(Pager.home)
+                    model.showPage(Screens.home)
                     model.query = String(p.dropFirst(6))
                 case let p where p.hasPrefix("ask:"): model.ask(String(p.dropFirst(4)))
                 default: model.showPage(page)
