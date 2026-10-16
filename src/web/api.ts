@@ -22,7 +22,7 @@ export type AgentInfo = {
 };
 
 /** Icons of the panel's own tiles; `/api/apps` returns the active icon pack's over these. */
-export const BUILTIN_ICONS = { inbox: "/inbox.svg", terminal: "/terminal.svg", settings: "/settings.svg" };
+export const BUILTIN_ICONS = { inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" };
 export type BuiltinIcons = typeof BUILTIN_ICONS;
 
 export type AppInfo = {

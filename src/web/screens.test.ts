@@ -7,7 +7,7 @@ describe("screens", () => {
     const apps = Array.from({ length: 10 }, (_, i) => `a${i}`);
     const [home] = seedScreens(apps, ["x/one", "y/two"], ["w/1"]);
     expect(home?.id).toBe(HOME);
-    expect(home?.items).toEqual([...apps.slice(0, 8).map((a) => `app:${a}`), "builtin:inbox", "builtin:terminal", "builtin:settings", "agent:x/one", "agent:y/two", "widget:w/1"]);
+    expect(home?.items).toEqual([...apps.slice(0, 8).map((a) => `app:${a}`), "builtin:inbox", "builtin:shortcuts", "builtin:terminal", "builtin:settings", "agent:x/one", "agent:y/two", "widget:w/1"]);
   });
 
   test("pin adds once, unpin removes only from that screen", () => {

@@ -108,9 +108,9 @@ describe("icon packs", () => {
     expect((await call("/api/apps")).body.apps.find((a: Body) => a.name === "docs").icon).toBe("📚");
     expect((await notes("?icons=manifest")).icon).toBe("/api/apps/notes/icon");
     // The panel's own tiles are covered by space/<name>.
-    expect((await call("/api/apps")).body.builtins).toEqual({ inbox: "/inbox.svg", terminal: "/terminal.svg", settings: "/settings.svg" });
+    expect((await call("/api/apps")).body.builtins).toEqual({ inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" });
     const gear = (await put("/api/panel/icons/clean/app?id=space/settings", SVG, "image/svg+xml")).body.icon.url;
-    expect((await call("/api/apps")).body.builtins).toEqual({ inbox: "/inbox.svg", terminal: "/terminal.svg", settings: gear });
+    expect((await call("/api/apps")).body.builtins).toEqual({ inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: gear });
     expect((await call("/api/panel/icons/clean/app?id=space/settings", { method: "DELETE" })).status).toBe(200);
 
     const file = await fetch(base + n.icon);

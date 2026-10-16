@@ -11,7 +11,7 @@ export type { Screen };
 export type EntryKind = "app" | "agent" | "widget" | "builtin";
 export const HOME = "home";
 /** The panel's own tiles, in the order the library and a seeded home screen show them. */
-export const BUILTINS = ["inbox", "terminal", "settings"] as const;
+export const BUILTINS = ["inbox", "shortcuts", "terminal", "settings"] as const;
 export type Builtin = (typeof BUILTINS)[number];
 
 /** The widget sizes a card can take; the server's list is `WIDGET_SIZES` in scheduler/manifest.ts, kept out of the page's bundle. */

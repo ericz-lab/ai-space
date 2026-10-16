@@ -92,7 +92,7 @@ ai-space identifies the caller from the token, checks that `insight` provides `r
 
 Errors the bus itself answers: 401 no valid token, 404 unknown app or capability, 403 the caller is not in `callers`, 503 the provider has no service port, 504 no answer within the capability's timeout, 502 unreachable or an answer cut off mid-body (recorded as a failed call either way), 413 a body over 4 MB.
 
-A provider only has to trust requests that come from loopback and carry `x-space-caller`; it no longer hands out push tokens. The operator token calls as `space`.
+A provider only has to trust requests that come from loopback and carry `x-space-caller`; it no longer hands out push tokens. The operator token calls as `space`. A capability with an `action:` block is also run by the operator from the command box and the Shortcuts panel, as `space` ([shortcuts.md](shortcuts.md)); `callers`, when set, must include `space` for that.
 
 ## Catalogue
 
