@@ -447,33 +447,39 @@ struct AppBrowserTests {
         #expect(model.pagerID == Screens.home)
     }
 
-    @Test func returnToSpaceShowsTheLastAppScreen() throws {
+    @Test func tabsReturnToTheirOwnOpeningPage() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = ConnectionStore(fileURL: directory.appendingPathComponent("connections.json"))
         let connection = store.add(name: "Space", url: URL(string: "https://space.example.com")!)
+        defer { WKWebsiteDataStore.remove(forIdentifier: connection.id) { _ in } }
         let screens = ScreenStore(fileURL: directory.appendingPathComponent("screens.json"))
         let model = AppModel(store: store, screens: screens)
-        model.pager.id = Pager.home
-        model.returnToSpace()
-        #expect(model.pagerID == Screens.home)
-        #expect(model.tab == .panel)
-
         model.addScreen(in: connection)
         let second = model.pagerID
-        #expect(second != Screens.home)
-        model.pagerID = Screens.home
-        // Swipes write to PagerPosition directly, without AppModel's pagerID setter.
-        model.pager.id = Screens.home
-        model.pager.id = second
-        model.pager.id = Pager.home
+        var tabs: [(UUID, String)] = []
+        for origin in [Pager.home, Screens.home, second, Pager.settings] {
+            // Swipes update the pager directly.
+            model.pager.id = origin
+            model.open(connection.url.appendingPathComponent("app-\(tabs.count)"), title: "App", in: connection)
+            tabs.append((try #require(model.page).id, origin))
+            model.returnToSpace()
+            #expect(model.pagerID == origin)
+            #expect(model.page == nil)
+        }
+        // Switching retained tabs restores each tab's origin, not the latest Panel screen.
+        for (id, origin) in tabs {
+            model.showTab(id)
+            model.returnToSpace()
+            #expect(model.pagerID == origin)
+        }
+        model.pagerID = second
+        model.open(connection.url.appendingPathComponent("app-0"), title: "App", in: connection)
+        #expect(model.page?.id == tabs[0].0)
         model.returnToSpace()
-        #expect(model.pagerID == second)
-        model.pager.id = Pager.settings
-        model.returnToSpace()
-        #expect(model.pagerID == second)
-
+        #expect(model.pagerID == Pager.home)
         screens.edit(connection.id) { Screens.remove($0, second) }
+        model.showTab(tabs[2].0)
         model.returnToSpace()
         #expect(model.pagerID == Screens.home)
     }

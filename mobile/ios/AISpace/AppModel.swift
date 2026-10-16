@@ -42,6 +42,8 @@ struct OpenPage: Identifiable {
     let title: String
     let connection: UUID
     let session: WebSession
+    /// The launcher page from which this tab was created.
+    let originPage: String
 }
 
 /// The app's state: saved Spaces, the catalogue, web sessions and screens of each, and what is
@@ -421,13 +423,17 @@ final class AppModel: ObservableObject {
             guard state == .ready, let loader = self?.loaders[connection.id], loader.status != .ok else { return }
             Task { await loader.refresh() }
         }
-        let opened = OpenPage(key: key, title: title, connection: connection.id, session: session)
+        let opened = OpenPage(key: key, title: title, connection: connection.id, session: session, originPage: pagerID)
         appTabs.append(opened)
         page = opened
     }
 
     func returnToSpace() {
-        tab = .panel
+        if let page {
+            let origin = page.originPage
+            pagerID = origin == Pager.home || origin == Pager.settings || screens.screens(page.connection).contains { $0.id == origin }
+                ? origin : Screens.home
+        }
         page = nil
     }
 
