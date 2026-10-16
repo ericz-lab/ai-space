@@ -29,9 +29,21 @@ struct HomeView: View {
                 page(longPress: { model.showingScreenMenu = true }) {
                     if screenID == screens.first?.id {
                         OmniboxField(query: $commandText, api: loader.api, voiceBusy: $searchVoiceBusy, focused: $searchFocused, submit: { searchSubmit += 1 })
-                        OmniboxView(model: model, query: $commandText, connection: connection, loader: loader, store: model.omnibox(for: connection), submit: searchSubmit)
-                            .id(connection.id)
-                            .disabled(searchVoiceBusy)
+                            .overlay(alignment: .top) {
+                                OmniboxView(model: model, query: $commandText, connection: connection, loader: loader, store: model.omnibox(for: connection), submit: searchSubmit)
+                                    .id(connection.id)
+                                    .disabled(searchVoiceBusy)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .background {
+                                        if !commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                            RoundedRectangle(cornerRadius: 24)
+                                                .fill(.regularMaterial)
+                                                .shadow(color: .black.opacity(0.2), radius: 12, y: 6)
+                                        }
+                                    }
+                                    .offset(y: 60)
+                            }
+                            .zIndex(1)
                     }
                     if let catalogue = loader.catalogue, let screen = screens.first(where: { $0.id == screenID }) {
                         self.screen(screen, catalogue)
