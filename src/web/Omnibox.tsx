@@ -7,13 +7,14 @@ import type { Entry } from "./Library.tsx";
 import { opensByDefault, rank } from "./omnibox.ts";
 import { parseKey } from "./screens.ts";
 import { type Action, type Intent, type RunResult, type RunView, actionText, browserZone, complete, intents } from "./shortcuts.ts";
+import { LiveVoice, type VoiceState } from "./voice.ts";
 import { Icon } from "./Tiles.tsx";
 
 // The home screen's command box (docs/panel.md#omnibox): one field that finds an app, agent, widget
 // or built-in tile by name, and hands anything else to Space Assistant as a new conversation. Enter
 // acts on the highlighted row: the first match when its name holds what was typed, the "ask" row
-// otherwise; ⌘/Ctrl+Enter always asks. The microphone records a clip and puts its transcript into
-// the field (POST /api/voice/transcribe, voice-studio through the bus); it never sends by itself.
+// otherwise; ⌘/Ctrl+Enter always asks. The microphone streams audio to voice-studio and updates
+// the field with provisional and final text; it never sends by itself.
 //
 // It also runs actions (docs/shortcuts.md): arithmetic shows its value as it is typed, "100 USD to
 // CNY" converts with the rates provider's quote, and an action's keyword ("新闻", "todo …") or a
@@ -21,16 +22,8 @@ import { Icon } from "./Tiles.tsx";
 // with its inputs filled runs at once, a write or a task waits for Create / Run. The result stays
 // in the box; a run keeps going when the box closes and is listed in the Shortcuts window.
 
-/** A clip is cut here, well under the bus's 4 MB body limit at speech bitrates. */
-const MAX_RECORD_MS = 90_000;
-
-type Voice = "off" | "idle" | "recording" | "transcribing";
-
 /** The last focus signal acted on; the box remounts each time the home screen is shown. */
 let takenSignal = 0;
-
-/** The first container this browser records in: WebKit has only MP4, the others WebM. */
-const recordingType = () => ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) ?? "";
 
 /** Live conversions, by arguments: the rates are quoted once a minute at most from here. */
 const previews = new Map<string, { at: number; result: RunResult | { error: string } }>();
@@ -102,6 +95,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     reset();
   };
   const ask = () => {
+    if (recorder.current) return;
     const text = q.trim();
     if (!text) return;
     onAsk(text);
@@ -119,6 +113,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     setPanel({ intent, autoRun: intent.kind === "convert" || (intent.action.effect === "read" && complete(intent.action, intent.args)) });
   };
   const act = (i: number) => {
+    if (recorder.current) return;
     const row = rows[i];
     if (!row || row.type === "ask") ask();
     else if (row.type === "entry") open(row.entry);
@@ -126,6 +121,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   };
 
   const onKey = (e: React.KeyboardEvent) => {
+    if (recorder.current) { if (e.key === "Escape") recorder.current.stop(); if (e.key === "Enter") e.preventDefault(); return; }
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -153,65 +149,31 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
   }, [q]);
 
-  // Voice: offered only when a transcriber answers on this space or one of its peers.
-  const [voice, setVoice] = useState<Voice>("off");
+  const [voice, setVoice] = useState<VoiceState | "off">("off");
   const [voiceError, setVoiceError] = useState("");
-  const recorder = useRef<{ rec: MediaRecorder; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const recorder = useRef<LiveVoice | null>(null);
+  const voiceBusy = voice !== "off" && voice !== "idle";
   useEffect(() => {
-    if (!recordingType() || !navigator.mediaDevices?.getUserMedia) return;
+    let active = true;
+    if (typeof AudioWorkletNode === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
     getJson<{ transcribe?: boolean }>("/api/voice")
-      .then((d) => d.transcribe && setVoice("idle"))
+      .then((d) => { if (active && d.transcribe) setVoice("idle"); })
       .catch(() => {});
-    return () => recorder.current?.rec.stream.getTracks().forEach((tr) => tr.stop());
+    return () => { active = false; recorder.current?.dispose(); recorder.current = null; };
   }, []);
-  const transcribe = async (clip: Blob) => {
-    setVoice("transcribing");
-    try {
-      const form = new FormData();
-      form.append("file", new File([clip], clip.type.includes("mp4") ? "voice.m4a" : "voice.webm", { type: clip.type }));
-      const r = await fetch("/api/voice/transcribe", { method: "POST", body: form });
-      const j = (await r.json().catch(() => ({}))) as { text?: string; error?: string; detail?: string };
-      if (!r.ok) throw new Error(j.error || j.detail || `HTTP ${r.status}`);
-      const text = (j.text ?? "").trim();
-      if (text) setQ((cur) => (cur.trim() ? `${cur.trimEnd()} ${text}` : text));
-      field.current?.focus();
-    } catch (e) {
-      setVoiceError(t("omni.voiceFailed", { error: (e as Error).message }));
-    } finally {
-      setVoice("idle");
-    }
-  };
-  const toggleVoice = async () => {
-    setVoiceError("");
-    if (voice === "recording") {
-      recorder.current?.rec.stop();
-      return;
-    }
+  const toggleVoice = () => {
+    if (recorder.current) { recorder.current.stop(); return; }
     if (voice !== "idle") return;
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      setVoiceError(t("omni.micDenied"));
-      return;
-    }
-    const rec = new MediaRecorder(stream, { mimeType: recordingType() });
-    const chunks: Blob[] = [];
-    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-    rec.onstop = () => {
-      clearTimeout(recorder.current?.timer);
-      recorder.current = null;
-      stream.getTracks().forEach((tr) => tr.stop());
-      const clip = new Blob(chunks, { type: rec.mimeType });
-      if (clip.size) void transcribe(clip);
-      else setVoice("idle");
-    };
-    rec.start();
-    recorder.current = { rec, timer: setTimeout(() => rec.state === "recording" && rec.stop(), MAX_RECORD_MS) };
-    setVoice("recording");
+    setVoiceError("");
+    const session = new LiveVoice(q, setQ, (state) => {
+      setVoice(state);
+      if (state === "idle") { recorder.current = null; field.current?.focus(); }
+    }, (error) => setVoiceError(t("omni.voiceFailed", { error })));
+    recorder.current = session;
+    void session.start();
   };
 
-  const showList = focused && q.trim().length > 0 && !panel;
+  const showList = !voiceBusy && focused && q.trim().length > 0 && !panel;
   return (
     <div className={`omni${showList ? " open" : ""}`}>
       <div className="omni-bar">
@@ -223,7 +185,9 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
           rows={1}
           className="omni-field"
           value={q}
-          placeholder={voice === "recording" ? t("omni.recording") : voice === "transcribing" ? t("omni.transcribing") : t("omni.placeholder")}
+          readOnly={voiceBusy}
+          aria-busy={voiceBusy}
+          placeholder={voice === "connecting" ? t("omni.connecting") : voice === "recording" ? t("omni.recording") : voice === "transcribing" ? t("omni.transcribing") : t("omni.placeholder")}
           aria-label={t("omni.label")}
           aria-expanded={showList}
           aria-controls="omni-list"
@@ -238,8 +202,10 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
           onBlur={() => setTimeout(() => setFocused(false), 150)}
         />
         {voice !== "off" && (
-          <button className={`omni-mic ${voice}`} title={voice === "recording" ? t("omni.stop") : t("omni.voice")} aria-label={voice === "recording" ? t("omni.stop") : t("omni.voice")} disabled={voice === "transcribing"} onClick={toggleVoice}>
-            {voice === "transcribing" ? "…" : voice === "recording" ? "■" : "🎙"}
+          <button className={`omni-mic ${voice}`} title={(voice === "recording" || voice === "connecting") ? t("omni.stop") : t("omni.voice")} aria-label={(voice === "recording" || voice === "connecting") ? t("omni.stop") : t("omni.voice")} disabled={voice === "transcribing"} onClick={toggleVoice}>
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              {voice === "transcribing" ? <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="30 14" className="omni-spinner" /> : voice === "recording" || voice === "connecting" ? <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" /> : <g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3M9 21h6" /></g>}
+            </svg>
           </button>
         )}
       </div>
