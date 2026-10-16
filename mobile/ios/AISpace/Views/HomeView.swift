@@ -28,18 +28,13 @@ struct HomeView: View {
             if let screenID {
                 page(longPress: { model.showingScreenMenu = true }) {
                     if screenID == screens.first?.id {
+                        OmniboxField(query: $commandText, api: loader.api, voiceBusy: $searchVoiceBusy, focused: $searchFocused, submit: { searchSubmit += 1 })
                         OmniboxView(model: model, query: $commandText, connection: connection, loader: loader, store: model.omnibox(for: connection), submit: searchSubmit)
                             .id(connection.id)
                             .disabled(searchVoiceBusy)
                     }
                     if let catalogue = loader.catalogue, let screen = screens.first(where: { $0.id == screenID }) {
                         self.screen(screen, catalogue)
-                    }
-                }
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    if screenID == screens.first?.id {
-                        OmniboxField(query: $commandText, api: loader.api, voiceBusy: $searchVoiceBusy, focused: $searchFocused, submit: { searchSubmit += 1 })
-                            .padding(.vertical, 12)
                     }
                 }
             } else {
@@ -262,6 +257,7 @@ struct OmniboxField: View {
     @Binding var query: String
     let api: SpaceAPI
     @StateObject private var voice = OmniboxVoice()
+    @Environment(\.scenePhase) private var scenePhase
     @Binding var voiceBusy: Bool
     var focused: FocusState<Bool>.Binding
     let submit: () -> Void
@@ -277,20 +273,21 @@ struct OmniboxField: View {
                 .focused(focused)
                 .onSubmit { if !voice.busy { submit() } }
                 .disabled(voice.busy)
-            if voice.available {
-                Button { voice.toggle(api: api) { text in
-                    query = [query, text].filter { !$0.isEmpty }.joined(separator: " ")
+            Group {
+                Button { voice.toggle(api: api, prefix: query) { text in
+                    query = text
                     focused.wrappedValue = true
                 } } label: {
                     if voice.transcribing { ProgressView().controlSize(.small) }
-                    else { Image(systemName: voice.recording ? "stop.circle.fill" : "mic.fill") }
+                    else { Image(systemName: voice.recording || voice.starting ? "stop.circle.fill" : "mic.fill") }
                 }.disabled(voice.transcribing)
-                    .accessibilityLabel(Text(voice.recording ? "Stop Recording" : "Voice Input"))
+                    .accessibilityLabel(Text(voice.recording || voice.starting ? "Stop Recording" : "Voice Input"))
             }
             if !query.isEmpty {
                 Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("Clear"))
+                    .disabled(voice.busy)
             }
         }
         .font(.system(size: 19))
@@ -308,7 +305,8 @@ struct OmniboxField: View {
         .onTapGesture { focused.wrappedValue = true }
         .modifier(LauncherCapsuleGlass())
         .padding(.horizontal, 24)
-        .task(id: api.base) { await voice.check(api) }
+        .onChange(of: api.base) { _, _ in voice.cancel() }
+        .onChange(of: scenePhase) { _, phase in if phase == .background { voice.cancel() } }
         .onChange(of: voice.busy) { _, busy in voiceBusy = busy }
         .onDisappear { voice.cancel(); voiceBusy = false }
         .alert("Voice Input", isPresented: Binding(get: { voice.error != nil }, set: { if !$0 { voice.error = nil } })) {

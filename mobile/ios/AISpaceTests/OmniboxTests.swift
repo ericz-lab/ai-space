@@ -141,3 +141,28 @@ struct OmniboxStoreTests {
         #expect(store.error == nil)
     }
 }
+
+@Test func voiceTranscriptReplacesPartialsAndCommitsFinalCorrections() {
+    var transcript = VoiceTranscript(prefix: "Existing text ")
+    #expect(transcript.update(id: 0, text: "hel", final: false) == "Existing text hel")
+    #expect(transcript.update(id: 0, text: "hello", final: false) == "Existing text hello")
+    #expect(transcript.update(id: 0, text: "Hello.", final: true) == "Existing text Hello.")
+    #expect(transcript.update(id: 0, text: "stale", final: false) == "Existing text Hello.")
+    #expect(transcript.update(id: 1, text: "noise", final: false) == "Existing text Hello. noise")
+    #expect(transcript.update(id: 1, text: "", final: true) == "Existing text Hello.")
+    #expect(transcript.update(id: 3, text: "Last", final: true) == "Existing text Hello. Last")
+    #expect(transcript.update(id: 2, text: "Next", final: true) == "Existing text Hello. Next Last")
+}
+
+@Test func voicePCMFramesKeepOrderAndFlushTail() {
+    var frames = VoicePCMFrames()
+    let first = Data(repeating: 1, count: 2800)
+    let second = Data(repeating: 2, count: 4000)
+    #expect(frames.append(first).isEmpty)
+    let emitted = frames.append(second)
+    #expect(emitted.map(\.count) == [3200, 3200])
+    let tail = frames.finish()!
+    #expect(tail.count == 400)
+    #expect(emitted.reduce(Data(), +) + tail == first + second)
+    #expect(frames.finish() == nil)
+}

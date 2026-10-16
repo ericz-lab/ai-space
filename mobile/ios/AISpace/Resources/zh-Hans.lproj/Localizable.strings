@@ -354,3 +354,9 @@
 "Search, run an action or ask an agent" = "搜索、执行操作或询问智能体";
 
 "Apps / Agents / Widgets" = "Apps / Agents / Widgets";
+
+"Voice transcription failed." = "语音转写失败。";
+
+"Voice connection is too slow." = "语音连接速度过慢。";
+
+"Voice connection timed out." = "语音连接超时。";

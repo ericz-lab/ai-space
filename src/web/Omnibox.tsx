@@ -177,12 +177,9 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   const recorder = useRef<LiveVoice | null>(null);
   const voiceBusy = voice !== "off" && voice !== "idle";
   useEffect(() => {
-    let active = true;
     if (typeof AudioWorkletNode === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
-    getJson<{ transcribe?: boolean }>("/api/voice")
-      .then((d) => { if (active && d.transcribe) setVoice("idle"); })
-      .catch(() => {});
-    return () => { active = false; recorder.current?.dispose(); recorder.current = null; };
+    setVoice("idle");
+    return () => { recorder.current?.dispose(); recorder.current = null; };
   }, []);
   const toggleVoice = () => {
     if (recorder.current) { recorder.current.stop(); return; }

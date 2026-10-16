@@ -38,3 +38,9 @@
 "Search, run an action or ask an agent" = "Search, run an action or ask an agent";
 
 "Apps / Agents / Widgets" = "Apps / Agents / Widgets";
+
+"Voice transcription failed." = "Voice transcription failed.";
+
+"Voice connection is too slow." = "Voice connection is too slow.";
+
+"Voice connection timed out." = "Voice connection timed out.";

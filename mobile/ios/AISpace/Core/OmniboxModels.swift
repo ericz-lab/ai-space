@@ -116,3 +116,35 @@ struct ShortcutRun: Decodable, Identifiable {
     var error: String?
     var createdAt: String
 }
+
+/// Provisional text replaces its segment; final events commit even an empty correction.
+struct VoiceTranscript {
+    let prefix: String
+    private var segments: [Int: (text: String, final: Bool)] = [:]
+    init(prefix: String) { self.prefix = prefix }
+    mutating func update(id: Int, text: String, final: Bool) -> String {
+        if segments[id]?.final != true { segments[id] = (text, final) }
+        return ([prefix] + segments.keys.sorted().compactMap { segments[$0]?.text })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+}
+
+/// The realtime service accepts at most 100 ms (3,200 bytes) of PCM per message.
+struct VoicePCMFrames {
+    private var pending = Data()
+    mutating func append(_ data: Data) -> [Data] {
+        pending.append(data)
+        var frames: [Data] = []
+        while pending.count >= 3200 {
+            frames.append(Data(pending.prefix(3200)))
+            pending.removeFirst(3200)
+        }
+        return frames
+    }
+    mutating func finish() -> Data? {
+        guard !pending.isEmpty else { return nil }
+        defer { pending = Data() }
+        return pending
+    }
+}
