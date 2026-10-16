@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getJson, recordOpen } from "./api.ts";
+import { CalcError, evaluate, format } from "../space/shortcuts/calc.ts";
+import ActionRunner, { ValueCard } from "./ActionRunner.tsx";
+import { getJson, recordOpen, sendJson } from "./api.ts";
 import { useLang } from "./i18n.ts";
 import type { Entry } from "./Library.tsx";
 import { opensByDefault, rank } from "./omnibox.ts";
 import { parseKey } from "./screens.ts";
+import { type Action, type Intent, type RunResult, type RunView, actionText, browserZone, complete, intents } from "./shortcuts.ts";
 import { Icon } from "./Tiles.tsx";
 
 // The home screen's command box (docs/panel.md#omnibox): one field that finds an app, agent, widget
@@ -11,6 +14,12 @@ import { Icon } from "./Tiles.tsx";
 // acts on the highlighted row: the first match when its name holds what was typed, the "ask" row
 // otherwise; ⌘/Ctrl+Enter always asks. The microphone records a clip and puts its transcript into
 // the field (POST /api/voice/transcribe, voice-studio through the bus); it never sends by itself.
+//
+// It also runs actions (docs/shortcuts.md): arithmetic shows its value as it is typed, "100 USD to
+// CNY" converts with the rates provider's quote, and an action's keyword ("新闻", "todo …") or a
+// task's name offers that action. Enter on an action row opens its form under the field: a read
+// with its inputs filled runs at once, a write or a task waits for Create / Run. The result stays
+// in the box; a run keeps going when the box closes and is listed in the Shortcuts window.
 
 /** A clip is cut here, well under the bus's 4 MB body limit at speech bitrates. */
 const MAX_RECORD_MS = 90_000;
@@ -23,12 +32,38 @@ let takenSignal = 0;
 /** The first container this browser records in: WebKit has only MP4, the others WebM. */
 const recordingType = () => ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((t) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t)) ?? "";
 
-export default function Omnibox({ entries, onOpen, onAsk, focusSignal }: { entries: Entry[]; onOpen: (key: string) => void; onAsk: (text: string) => void; focusSignal: number }) {
-  const { t } = useLang();
+/** Live conversions, by arguments: the rates are quoted once a minute at most from here. */
+const previews = new Map<string, { at: number; result: RunResult | { error: string } }>();
+const PREVIEW_TTL_MS = 60_000;
+/** A row of the list: something to run, an entry to open, or the question for the assistant. */
+type Row = { type: "intent"; intent: Intent } | { type: "entry"; entry: Entry } | { type: "ask" };
+/** How many loose action matches (names, tasks) follow the library's entries. */
+const LOOSE = 3;
+
+export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenShortcuts, onOpenTasks }: { entries: Entry[]; onOpen: (key: string) => void; onAsk: (text: string) => void; focusSignal: number; onOpenShortcuts: () => void; onOpenTasks: () => void }) {
+  const { lang, t } = useLang();
   const [q, setQ] = useState("");
   const [focused, setFocused] = useState(false);
   const [sel, setSel] = useState(0);
   const field = useRef<HTMLTextAreaElement>(null);
+  const [actions, setActions] = useState<Action[]>([]);
+  const [panel, setPanel] = useState<{ intent: Intent; autoRun: boolean } | null>(null);
+  const [running, setRunning] = useState(0);
+  // Enter in the field while an action is open submits it, like its button.
+  const [submitTick, setSubmitTick] = useState(0);
+  const loadedAt = useRef(0);
+  // The catalogue and the runs still going, when the box takes the focus (at most once a minute).
+  const refresh = () => {
+    if (Date.now() - loadedAt.current < 60_000) return;
+    loadedAt.current = Date.now();
+    getJson<{ actions: Action[] }>("/api/shortcuts/actions")
+      .then((d) => setActions(d.actions))
+      .catch(() => {});
+    getJson<{ runs: RunView[] }>("/api/shortcuts/runs?limit=20")
+      .then((d) => setRunning(d.runs.filter((r) => r.status === "running").length))
+      .catch(() => {});
+  };
+  useEffect(refresh, []);
   // A signal is taken once: coming back to the home screen later does not focus the field again.
   useEffect(() => {
     if (focusSignal === takenSignal) return;
@@ -37,9 +72,19 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal }: { entri
   }, [focusSignal]);
 
   const results = useMemo(() => rank(q, entries), [q, entries]);
-  const askIndex = results.length;
+  const found = useMemo(() => intents(q, actions, browserZone()), [q, actions]);
+  // Direct results and an action named at the start come first; loose matches after the entries.
+  const rows = useMemo<Row[]>(() => {
+    const first = found.filter((i) => i.kind !== "action" || i.strong);
+    const loose = found.filter((i) => i.kind === "action" && !i.strong).slice(0, LOOSE);
+    return [...first.map((intent): Row => ({ type: "intent", intent })), ...results.map((entry): Row => ({ type: "entry", entry })), ...loose.map((intent): Row => ({ type: "intent", intent })), { type: "ask" }];
+  }, [found, results]);
+  const askIndex = rows.length - 1;
+  const direct = found.length > 0 && (found[0]!.kind !== "action" || found[0]!.strong);
   // A new query highlights the row Enter would pick.
-  useEffect(() => setSel(opensByDefault(q, results[0]) ? 0 : askIndex), [q, results, askIndex]);
+  useEffect(() => setSel(direct ? 0 : opensByDefault(q, results[0]) ? 0 : askIndex), [q, rows]);
+  // Typing again leaves the action that was opened.
+  useEffect(() => setPanel(null), [q]);
 
   const reset = () => {
     setQ("");
@@ -62,13 +107,30 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal }: { entri
     onAsk(text);
     reset();
   };
-  const act = (i: number) => (i < results.length ? open(results[i]!) : ask());
+  const runIntent = (intent: Intent) => {
+    if (intent.kind === "calc") {
+      try {
+        void navigator.clipboard?.writeText(format(evaluate(intent.expression)));
+      } catch {
+        // an expression that does not evaluate has nothing to copy
+      }
+      return;
+    }
+    setPanel({ intent, autoRun: intent.kind === "convert" || (intent.action.effect === "read" && complete(intent.action, intent.args)) });
+  };
+  const act = (i: number) => {
+    const row = rows[i];
+    if (!row || row.type === "ask") ask();
+    else if (row.type === "entry") open(row.entry);
+    else runIntent(row.intent);
+  };
 
   const onKey = (e: React.KeyboardEvent) => {
-    if (e.nativeEvent.isComposing) return;
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (e.metaKey || e.ctrlKey) ask();
+      else if (panel) setSubmitTick((n) => n + 1);
       else if (q.trim()) act(sel);
     } else if (e.key === "ArrowDown" && q) {
       e.preventDefault();
@@ -78,7 +140,8 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal }: { entri
       setSel((i) => Math.max(0, i - 1));
     } else if (e.key === "Escape") {
       e.stopPropagation();
-      if (q) setQ("");
+      if (panel) setPanel(null);
+      else if (q) setQ("");
       else field.current?.blur();
     }
   };
@@ -148,7 +211,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal }: { entri
     setVoice("recording");
   };
 
-  const showList = focused && q.trim().length > 0;
+  const showList = focused && q.trim().length > 0 && !panel;
   return (
     <div className={`omni${showList ? " open" : ""}`}>
       <div className="omni-bar">
@@ -167,7 +230,10 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal }: { entri
           role="combobox"
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={onKey}
-          onFocus={() => setFocused(true)}
+          onFocus={() => {
+            setFocused(true);
+            refresh();
+          }}
           // A click on a row lands before the blur hides the list.
           onBlur={() => setTimeout(() => setFocused(false), 150)}
         />
@@ -180,19 +246,24 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal }: { entri
       {voiceError && <p className="omni-error">{voiceError}</p>}
       {showList && (
         <ul className="omni-list" id="omni-list" role="listbox">
-          {results.map((e, i) => (
-            <li key={e.key} role="option" aria-selected={i === sel} className={i === sel ? "on" : ""} onMouseEnter={() => setSel(i)} onMouseDown={(ev) => ev.preventDefault()} onClick={() => act(i)}>
-              <span className="omni-icon">
-                <Icon icon={e.icon} fallback={e.fallback} />
-              </span>
-              <span className="omni-title">{e.title}</span>
-              <span className="omni-kind">
-                {e.kindLabel}
-                {e.peer ? ` · ${e.peer}` : ""}
-              </span>
-              {i === sel && <kbd>↵</kbd>}
-            </li>
-          ))}
+          {rows.map((row, i) => {
+            if (row.type === "ask") return null;
+            if (row.type === "intent") return <IntentRow key={row.intent.key} intent={row.intent} on={i === sel} onHover={() => setSel(i)} onPick={() => act(i)} />;
+            const e = row.entry;
+            return (
+              <li key={e.key} role="option" aria-selected={i === sel} className={i === sel ? "on" : ""} onMouseEnter={() => setSel(i)} onMouseDown={(ev) => ev.preventDefault()} onClick={() => act(i)}>
+                <span className="omni-icon">
+                  <Icon icon={e.icon} fallback={e.fallback} />
+                </span>
+                <span className="omni-title">{e.title}</span>
+                <span className="omni-kind">
+                  {e.kindLabel}
+                  {e.peer ? ` · ${e.peer}` : ""}
+                </span>
+                {i === sel && <kbd>↵</kbd>}
+              </li>
+            );
+          })}
           <li role="option" aria-selected={sel === askIndex} className={`omni-ask${sel === askIndex ? " on" : ""}`} onMouseEnter={() => setSel(askIndex)} onMouseDown={(ev) => ev.preventDefault()} onClick={ask}>
             <span className="omni-icon">
               <img src="/assistant.svg" alt="" />
@@ -204,6 +275,88 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal }: { entri
           </li>
         </ul>
       )}
+      {panel && (
+        <div className="omni-panel" role="region" aria-label={panel.intent.kind === "calc" ? t("omni.result") : actionText(panel.intent.action, lang).title}>
+          <div className="omni-panel-head">
+            <b>{panel.intent.kind === "calc" ? t("omni.result") : actionText(panel.intent.action, lang).title}</b>
+            <button className="chat-hbtn" title={t("omni.back")} onClick={() => (setPanel(null), field.current?.focus())}>
+              ✕
+            </button>
+          </div>
+          {panel.intent.kind !== "calc" && <ActionRunner action={panel.intent.action} args={panel.intent.args} autoRun={panel.autoRun} submitSignal={submitTick} onOpenTasks={onOpenTasks} compact />}
+        </div>
+      )}
+      {focused && !q.trim() && running > 0 && (
+        <button className="omni-running" onMouseDown={(ev) => ev.preventDefault()} onClick={onOpenShortcuts}>
+          {t("omni.running", { n: running })} · {t("sc.title")}
+        </button>
+      )}
     </div>
+  );
+}
+
+/** One action row: the value right away for arithmetic, the quoted conversion, or what Enter opens. */
+function IntentRow({ intent, on, onHover, onPick }: { intent: Intent; on: boolean; onHover: () => void; onPick: () => void }) {
+  const { lang, t } = useLang();
+  const [preview, setPreview] = useState<RunResult | { error: string } | null>(null);
+  const convertKey = intent.kind === "convert" ? JSON.stringify(intent.args) : "";
+  // Conversions are quoted after a short pause in typing, and reused for a minute.
+  useEffect(() => {
+    if (intent.kind !== "convert") return;
+    const hit = previews.get(convertKey);
+    if (hit && Date.now() - hit.at < PREVIEW_TTL_MS) {
+      setPreview(hit.result);
+      return;
+    }
+    setPreview(null);
+    const timer = setTimeout(() => {
+      sendJson<{ result: RunResult }>("POST", "/api/shortcuts/preview", { action: intent.action.id, args: intent.args, timezone: browserZone() })
+        .then((d) => d.result)
+        .catch((e): { error: string } => ({ error: String((e as Error).message || e) }))
+        .then((r) => {
+          previews.set(convertKey, { at: Date.now(), result: r });
+          setPreview(r);
+        });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [convertKey]);
+
+  let title: React.ReactNode;
+  let kind: string;
+  if (intent.kind === "calc") {
+    let value: string;
+    try {
+      value = format(evaluate(intent.expression));
+    } catch (e) {
+      value = e instanceof CalcError ? e.message : String(e);
+    }
+    title = <span className="omni-value">= {value}</span>;
+    kind = on ? t("omni.copyHint") : t("omni.result");
+  } else if (intent.kind === "convert") {
+    title = preview && "kind" in preview && preview.kind === "value" ? <ValueCard result={preview} /> : preview && "error" in preview ? <span className="omni-error-inline">{preview.error}</span> : <span className="omni-value">…</span>;
+    kind = t("omni.convert");
+  } else {
+    const text = actionText(intent.action, lang);
+    const option = intent.action.id === "space/run-task" ? intent.action.inputs[0]?.options?.find((o) => o.value === intent.args.task)?.label : undefined;
+    const arg = intent.action.inputs.find((i) => i.query);
+    const filled = arg && typeof intent.args[arg.name] === "string" ? (intent.args[arg.name] as string) : "";
+    title = (
+      <>
+        {option ? `${text.title}: ${option}` : text.title}
+        {filled && <em> · {filled}</em>}
+        {!intent.action.available && <span className="omni-kind"> · {intent.action.reason}</span>}
+      </>
+    );
+    kind = intent.action.id === "space/run-task" ? t("omni.runTask") : `${t("omni.action")}${intent.action.peer ? ` · ${intent.action.peer}` : ""}`;
+  }
+  return (
+    <li role="option" aria-selected={on} className={`omni-intent${on ? " on" : ""}`} onMouseEnter={onHover} onMouseDown={(ev) => ev.preventDefault()} onClick={onPick}>
+      <span className="omni-icon omni-glyph-icon" aria-hidden="true">
+        {intent.kind === "calc" ? "＝" : intent.kind === "convert" ? "¤" : intent.action.effect === "write" ? "＋" : intent.action.effect === "run" ? "▶" : "⌕"}
+      </span>
+      <span className="omni-title">{title}</span>
+      <span className="omni-kind">{kind}</span>
+      {on && <kbd>↵</kbd>}
+    </li>
   );
 }

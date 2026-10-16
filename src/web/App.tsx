@@ -12,8 +12,9 @@ import Events from "./Events.tsx";
 import Inbox from "./Inbox.tsx";
 import Library, { libraryEntries } from "./Library.tsx";
 import Omnibox from "./Omnibox.tsx";
+import Shortcuts from "./Shortcuts.tsx";
 import ScreenNav from "./ScreenNav.tsx";
-import { type Builtin, HOME, type Screen, addScreen, entryKey, move, parseKey, pin, removeScreen, seedScreens, unpin } from "./screens.ts";
+import { BUILTINS, type Builtin, HOME, type Screen, addScreen, entryKey, move, parseKey, pin, removeScreen, seedScreens, unpin } from "./screens.ts";
 import { BUILTIN_ICONS, fmtDuration, getJson, recordOpen, relTime, repoUrl, sendJson, type AgentInfo, type AppInfo, type BuiltinIcons, type InboxSummary, type UsageKind, type UsageRow, type WidgetInfo } from "./api.ts";
 import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
 import PetField from "./PetField.tsx";
@@ -37,7 +38,7 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetChoice };
 
 /** Floating panels over the page; one at a time. */
-type Panel = "settings" | "chat" | "tasks" | "usage" | "activity" | "appModels" | "events" | "terminal" | "inbox";
+type Panel = "settings" | "chat" | "tasks" | "usage" | "activity" | "appModels" | "events" | "terminal" | "inbox" | "shortcuts";
 
 /**
  * What is behind the page: the three glow blobs, or the preset's backdrop (theme.ts) framed from
@@ -136,6 +137,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const openSettings = () => setPanel("settings");
   const openTerminal = () => setPanel("terminal");
   const openInbox = () => setPanel("inbox");
+  const openShortcuts = () => setPanel("shortcuts");
+  const openTasks = () => setPanel("tasks");
   const openChat = (a: AgentInfo) => {
     setChatAgent(a);
     setPanel("chat");
@@ -492,14 +495,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     if (e?.kind === "agent") {
       const a = agents.find((x) => x.id === e.id);
       if (a) openChat(a);
-    } else if (e?.kind === "builtin") setPanel(e.id === "settings" ? "settings" : e.id === "inbox" ? "inbox" : "terminal");
+    } else if (e?.kind === "builtin") setPanel(e.id === "settings" ? "settings" : e.id === "inbox" ? "inbox" : e.id === "shortcuts" ? "shortcuts" : "terminal");
   };
 
   // One screen: its tiles (apps, agents, the panel's own) in a grid, then its widget cards. A key
   // whose entry is gone (uninstalled, a peer that left) is skipped and stays in the layout.
   const builtinTile = (b: Builtin, key: string, onRemove: () => void, drag: DragProps) => {
-    const open = b === "inbox" ? openInbox : b === "terminal" ? openTerminal : openSettings;
-    const text = b === "inbox" ? { title: t("inbox.title"), blurb: t("inbox.blurb"), fallback: "📥" } : b === "terminal" ? { title: t("term.title"), blurb: t("term.blurb"), fallback: "⌨️" } : { title: t("settings.title"), blurb: t("settings.blurb"), fallback: "⚙️" };
+    const open = b === "inbox" ? openInbox : b === "shortcuts" ? openShortcuts : b === "terminal" ? openTerminal : openSettings;
+    const text = b === "inbox" ? { title: t("inbox.title"), blurb: t("inbox.blurb"), fallback: "📥" } : b === "shortcuts" ? { title: t("sc.title"), blurb: t("sc.blurb"), fallback: "⚡" } : b === "terminal" ? { title: t("term.title"), blurb: t("term.blurb"), fallback: "⌨️" } : { title: t("settings.title"), blurb: t("settings.blurb"), fallback: "⚙️" };
     return (
       <Tile
         key={key}
@@ -608,7 +611,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       if (e.kind === "app") return appOf.has(e.id);
       if (e.kind === "agent") return agentOf.has(e.id);
       if (e.kind === "widget") return widgetOf.has(e.id) && !prefs.noWidget;
-      return (["inbox", "terminal", "settings"] as string[]).includes(e.id);
+      return (BUILTINS as readonly string[]).includes(e.id);
     };
     const tiles = s.items.filter((k) => exists(k) && !k.startsWith("widget:"));
     const cards = s.items.filter((k) => exists(k) && k.startsWith("widget:"));
@@ -697,7 +700,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
 
   /** An entry's title for the App usage window; a key whose entry is gone shows as itself. */
   const nameOf = (kind: UsageKind, key: string) => {
-    if (kind === "builtin") return key === "inbox" ? t("inbox.title") : key === "terminal" ? t("term.title") : key === "settings" ? t("settings.title") : key;
+    if (kind === "builtin") return key === "inbox" ? t("inbox.title") : key === "shortcuts" ? t("sc.title") : key === "terminal" ? t("term.title") : key === "settings" ? t("settings.title") : key;
     const found = kind === "app" ? apps.find((a) => a.id === key) : agents.find((a) => a.id === key);
     return found ? localized(lang, found).title : key;
   };
@@ -747,7 +750,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 </button>
               </div>
             )}
-            {screen.id === HOME && !editing && <Omnibox entries={entries} onOpen={openEntry} onAsk={askAssistant} focusSignal={omniFocus} />}
+            {screen.id === HOME && !editing && <Omnibox entries={entries} onOpen={openEntry} onAsk={askAssistant} focusSignal={omniFocus} onOpenShortcuts={openShortcuts} onOpenTasks={openTasks} />}
             {renderScreen(screen)}
           </section>
         ) : null}
@@ -854,6 +857,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Events open={panel === "events"} onClose={close} onBack={openSettings} />
       <Terminal open={panel === "terminal"} onClose={close} />
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
+      <Shortcuts open={panel === "shortcuts"} onClose={close} onOpenTasks={openTasks} />
       <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} ask={ask} />
     </>
   );

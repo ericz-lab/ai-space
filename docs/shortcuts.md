@@ -1,0 +1,144 @@
+# Shortcuts and universal search
+
+Status: phase 1 is implemented (Web). Phases 2 and 3 below are still a plan.
+
+Frequent operations run straight from the home screen's command box ([panel.md](panel.md#omnibox)) and from the built-in Shortcuts window: calculate, convert currencies, query financial news and calendars, create todos and run scheduler tasks, without opening each app. Every entry point shares one action catalogue, one validation, one executor and one set of result cards.
+
+## User experience
+
+| Typed in the command box | What happens |
+| --- | --- |
+| `128 * 3 + 56` | `= 440` under the field at once; Enter copies it. No server call. |
+| `100 USD to CNY`, `100美元换人民币`, `$100 in eur` | The conversion with the rate, its source and quote time (a cached quote says so); Enter opens the full card. |
+| `新闻`, `新闻 美联储`, `news fed` | Enter shows today's important financial news with source, link and publication time; text after the keyword is the topic. |
+| `日历 本周`, `calendar next week` | The calendar of that period; financial and personal entries can be filtered apart. |
+| `待办 明天下午3点 写周报` | A todo form with title, date (shown resolved, e.g. 2026-10-17), time, time zone and destination; Create (or Enter again) adds it. |
+| A task's name, e.g. `daily-report` | "Run task" with that task; Run starts it and the card follows its status, output and run number. |
+| Anything else | The library's entries and "Ask Space Assistant", as before. |
+
+Direct results (arithmetic, a conversion) and an action named at the start of the text, or whose name the text equals or starts, rank first and take Enter; looser name matches follow the library's entries. Reads with their required inputs filled run on Enter; writes wait for Create, tasks for Run: one clear button, no second confirmation. Arrow keys move the highlight, Escape closes an open form, then clears, then leaves. Enter that ends an IME composition never submits. Relative words in the text are read deterministically (今天/明天/后天, today/tomorrow, 本周/下周/本月, `15:00`, `3点`, `下午3点`, `3pm`, `YYYY-MM-DD`); nothing calls a model.
+
+The Shortcuts window (a built-in tile, `builtin:shortcuts`) lists the catalogue with a search, opens any action's form, and lists recent runs with their status and result. A run executes on the server: closing the box or the window does not stop it, and the window (or the "N running" hint in the empty, focused box) shows it again.
+
+## Model
+
+- **Action**: id (`space/<name>` for a built-in, `<app>/<capability>` for an app's), optional `peer`, title and description with translations, keywords, `effect` (`read`, `write`, or `run` for the task runner), `result` kind, typed `inputs`, `available` and the `reason` when not.
+- **Run**: the request id of one submission, the action, the arguments as typed and as resolved, the time zone, status (`running`, `ok`, `error`, `unknown`), the result or error, attempts, the bus call id, and for a task run the task and the start of its run. Runs live in `space.db` (`shortcut_runs`, newest 500 kept).
+- **Templates**: six phase-1 slots: `calc`, `convert`, `run-task` (built in), `news`, `calendar`, `todo` (filled by app actions that name them with `template:`). A slot no provider fills is listed, unavailable, with the dependency it misses; a missing provider is a configuration state, never an empty result.
+
+Saved shortcuts with default arguments, favorites and pinning are phase 2; phase 1 has the catalogue and the runs.
+
+## App actions
+
+A capability opts in with an `action:` block under `provides:` ([app-spec.md](app-spec.md#events-and-provides)); the rest of the capability is unchanged and other apps can still call it. Parsing is strict.
+
+```yaml
+provides:
+  create:
+    description: Add one task from an action form.
+    http: { method: POST, path: /api/capabilities/create }
+    timeout: 30s
+    action:
+      title: Create todo
+      description: Add a task to the todo list.
+      keywords: [todo, task]
+      template: todo            # news | calendar | todo; the result kind must match (list, list, receipt)
+      effect: write             # read (default) | write
+      idempotent: true          # write only: a repeated idempotencyKey answers the first result
+      result: receipt           # list | receipt | value
+      inputs:
+        - { name: title, type: text, label: Title, required: true, query: true }
+        - { name: dueDate, type: date, label: Date }
+        - { name: dueTime, type: time, label: Time }
+        - { name: source, type: choice, label: Calendar, default: all, options: [{ value: all, label: All }, financial] }
+      i18n:
+        zh: { title: 新建待办, keywords: [待办], inputs: { title: 标题 }, options: { all: 全部 } }
+```
+
+Input types: `text`, `number` (`min`, `max`), `date` (`YYYY-MM-DD`, or `today`, `tomorrow`, `yesterday`), `time` (`HH:MM`, needs a date input with a value), `period` (`today`, `tomorrow`, `this-week`, `next-week`, `this-month`, `last-7-days`, or `YYYY-MM-DD..YYYY-MM-DD`), `choice` (`options`). `query: true` marks the one text input the command box fills with the text after the keyword. Input names cannot be `timezone`, `now` or `idempotencyKey`. When `callers` is set it must include `space`.
+
+What the provider receives (a POST through the bus as caller `space`): the validated arguments with dates resolved (a `period` becomes `{ from, to }`, inclusive dates), plus `timezone` (the operator's IANA zone), `now` (the run's instant) and, for a write, `idempotencyKey`. What it answers, `{ ok: true, ... }`:
+
+| `result` | Body | Card |
+| --- | --- | --- |
+| `list` | `items: [{ title, url?, source?, at? (instant with Z/offset), date?, time?, timezone?, tag?, detail? }]`, `asOf?`, `total?` | Rows with time, link, source; a wall clock from another zone is labelled with it. |
+| `receipt` | `items: [{ id, title, url?, detail? }]` (at least one) | "Created" with links to the new items. |
+| `value` | `value`, `text?`, `unit?`, `detail?`, `source?`, `asOf?`, `stale?` | One big value with Copy. |
+
+Space keeps at most 100 items, drops links that are not http(s) and instants without a zone, and treats `ok: false`, a non-2xx status or a missing shape as a failed run with the provider's words.
+
+Providers on this space today:
+
+| Slot | Capability | Notes |
+| --- | --- | --- |
+| news | `finance-news-feed/news` | Stored news of the period in the operator's day, AI importance ≥ 2 unless "all", optional market and topic. Read-only, never fetches. |
+| calendar | `ai-calendar/events` | `source`: financial (macro, central banks, earnings, exchange closures) or personal (metrics, custom entries). Times are the calendar's wall clock (`CAL_TZ`, Beijing) and say so. |
+| todo | `ai-todo/create` | Idempotent; a time in another zone is moved to the list's `TODO_TZ` wall clock; the receipt shows the stored due and links the todo. |
+| rates (for `convert`) | `fx-desk/rates` | Every currency open.er-api.com quotes, USD-based, with the quote time and `stale` when the upstream failed. |
+
+## Built-ins
+
+- **Calculator** (`space/calc`, `src/space/shortcuts/calc.ts`, shared with the page): numbers (decimals, `1,234.5` grouping, full-width digits), `+ - * / × ÷`, `^` or `**` (right-associative; `-2^2` is −4), postfix `%` (÷100), parentheses. A recursive-descent parser, never `eval`. Results are rounded to 12 significant digits and shown with up to 10 decimals; division by zero and non-finite results are errors. The box treats text as arithmetic only when it parses and holds an operator.
+- **Convert** (`space/convert`): amount, from, to (ISO codes; the box also reads 美元, 人民币, 港币, 欧元, 日元, 韩元, 英镑, $, ¥, €, £, ₩ …). Rates come from the rates capability (default `fx-desk/rates`, here or on one peer) and are reused for ten minutes; the cross rate is `to/from` against the base. The value is rounded to the target currency's minor units (2 for CNY, 0 for JPY and KRW). The card shows the rate, source, quote time and a stale mark. The box's live preview is cached a minute per input.
+- **Run task** (`space/run-task`): starts a scheduler task now (`Scheduler.runNow`, so a task already running is refused, not started twice) and reads its status from the scheduler's run record: running until the run that started then is recorded, then its status, error and output.
+
+## Runs and execution rules
+
+- **Validation** happens on the server for every entry point: unknown inputs, missing required ones, bad numbers, dates (checked component by component), times, choices and zones are 400s before anything runs. A run of any app action, and of any action with date, time or period inputs, needs `timezone`; the server never uses its own zone ([time.md](time.md)). A wall clock that a clock change skips is refused.
+- **Duplicates**: each submission carries a `requestId`; a second POST with it answers the first run (`duplicate: true`) and runs nothing. A finished write's form hides Create until "New" is pressed.
+- **Uncertain writes**: a write whose call timed out or whose answer was cut off after it went out is `unknown`, not `error` ("may have been created"). Retry is offered only when the provider is `idempotent`, and resends the same `idempotencyKey`, so the provider answers its first result if the write happened; otherwise the card says to check the app. A refused connection is a certain failure.
+- **Background**: the POST answers when the run ends or after 8 seconds (status `running`); the page polls the run. Shutdown waits for runs in flight.
+- **Peers**: an action on a peer carries `peer` in the catalogue and in the run, and is called on that peer only (`/api/peer/call/...`); a failure is reported, never retried on another machine.
+
+## API
+
+The panel's routes, like `/api/voice`: no token, browser writes held to the panel's origin (`guardBrowserWrites`); runs call as `space`.
+
+| Route | |
+| --- | --- |
+| `GET /api/shortcuts/actions` | The catalogue: built-ins, app actions here and on peers, unfilled slots, each with `available` / `reason`. |
+| `POST /api/shortcuts/runs` | `{ action, peer?, args, timezone, requestId }` → `{ run, duplicate }` (201, or 200 for a repeat). |
+| `GET /api/shortcuts/runs?limit` | Recent runs, newest first. |
+| `GET /api/shortcuts/runs/:id` | One run; a task run's status is read from the scheduler. |
+| `POST /api/shortcuts/runs/:id/retry` | A failed run again; an `unknown` write only for an idempotent provider. |
+| `POST /api/shortcuts/preview` | `{ action, args, timezone }` → `{ result }` for a read, not recorded (the box's live conversion). |
+
+## Delivery phases
+
+### Phase 1 Core execution in universal search and Shortcuts (implemented)
+
+The catalogue and executor, the six templates with their providers, the command box's action rows, argument forms and result cards, the Shortcuts window with recent runs, reconnectable runs. AI summaries (an action that calls the model after submission) are not in phase 1: model-assisted actions start with phase 2's parameter filling. Native clients (macOS, iPhone) do not show the Shortcuts tile or the action rows yet.
+
+### Phase 2 Personalization and native access
+
+Add saved defaults, editing, favorites, ordering, save-from-search, screen pinning,
+and recent-action ranking. Bring the shared search and action experience to macOS
+and iPhone. Add model-assisted parameter filling for complex natural language,
+with editable previews and explicit handling of ambiguity. Avoid conflicts with
+the Mac client's existing Quick Chat shortcut when selecting a keyboard entry.
+
+Acceptance:
+
+- A configured search action can be saved, found by name, edited, and pinned.
+- Web, macOS, and iPhone use the same action definitions and execution records.
+- Native clients display the supported structured result types.
+- Natural-language parsing cannot silently choose an ambiguous write target or time.
+
+### Phase 3 Composition and automation
+
+Add ordered multi-step shortcuts, typed output-to-input mapping, and explicit
+step failure/retry policies. Example: query news, summarize it, and save the summary.
+Integrate recurring execution through the existing scheduler and optional completion
+notifications through the inbox. Persist timezone and arguments for headless runs.
+
+Acceptance:
+
+- Users can inspect each step's inputs, outputs, and execution status.
+- Partial success remains visible and retries do not repeat completed writes blindly.
+- Scheduled shortcuts use the existing scheduler with explicit timezone semantics.
+- User-enabled notifications link to the resulting run or artifact.
+
+General workflow graphs, arbitrary scripts, and a new scheduling engine are outside
+the initial scope. Establish the single-action experience before composition.
+
+General workflow graphs, arbitrary scripts, and a new scheduling engine are outside the initial scope.

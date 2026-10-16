@@ -1,4 +1,5 @@
 import type { SpaceEvent } from "../scheduler/types.ts";
+import type { ActionSpec } from "../shortcuts/types.ts";
 
 /**
  * Bus data model: what apps declare (`events:` and `provides:` in space.yaml),
@@ -43,6 +44,8 @@ export type Capability = {
   timeoutMs: number;
   /** Apps allowed to call it; undefined = every app on this space. */
   callers?: string[];
+  /** Offered to the operator as an action in the command box and the Shortcuts panel (docs/shortcuts.md). */
+  action?: ActionSpec;
 };
 
 export type DeliveryKind = "http" | "stream";

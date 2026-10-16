@@ -40,6 +40,7 @@ import { createPackagePanelRoutes } from "./space/packages/panel.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { guardBrowserWrites } from "./space/auth.ts";
+import { ShortcutStore, Shortcuts, createShortcutRoutes } from "./space/shortcuts/index.ts";
 
 /**
  * ai-space entry point.
@@ -209,6 +210,24 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
   });
   const remote = { name: config.name, capabilities: () => peers.capabilities(), providerOf: (app: string, cap?: string) => peers.providerOf(app, cap), get: (name: string) => peers.get(name) };
+  // Shortcuts (docs/shortcuts.md): the actions the command box and the Shortcuts panel run, as the operator.
+  const shortcutStore = new ShortcutStore(config.dbPath);
+  const shortcuts = new Shortcuts({
+    store: shortcutStore,
+    bus,
+    scheduler: { runNow: (id) => scheduler.runNow(id), getTask: (id) => store.getTask(id), listTasks: () => store.listTasks(), listRuns: (id, limit) => store.listRuns(id, limit) },
+    running: (app) => Boolean(registry.get(app)?.manifest.service?.port || packageRuntime.get(app)),
+    peers: {
+      capabilities: () => peers.capabilities(),
+      call: async (peer, app, capability, body) => {
+        const client = peers.get(peer);
+        if (!client) throw new Error(`unknown peer: ${peer}`);
+        const res = await client.forward(new Request("http://peer/", { method: "POST", headers: { "content-type": "application/json" }, body }), `/api/peer/call/${encodeURIComponent(app)}/${encodeURIComponent(capability)}`, { headers: { "x-space-caller": `${config.name}/space`, accept: "application/json" } });
+        return { status: res.status, body: await res.text() };
+      },
+    },
+    log: (m) => console.log(`[shortcuts] ${m}`),
+  });
   // The proxy's configuration follows the registry (docs/router.md); a failed write never stops a sync.
   const router = new Router({
     config: config.router,
@@ -401,6 +420,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         appForToken: (t) => storage.appForToken(t),
       }),
       ...createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t), remote, consumers }),
+      ...createShortcutRoutes({ shortcuts }),
       ...createStorageRoutes({ storage, token: config.apiToken }),
       ...createBackupRoutes({
         store: backups.store,
@@ -465,8 +485,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     await packageRuntime.close(config.drainMs);
     await bus.idle();
     await notify.idle();
+    await shortcuts.idle();
     store.close();
     busStore.close();
+    shortcutStore.close();
     notifyStore.close();
     modelStore.close();
     chatStore.close();

@@ -319,7 +319,18 @@ provides:
     http: { method: POST, path: /api/research }
     timeout: 2m
     callers: [portfolio]                             # default: every app on this space
+  create:
+    http: { method: POST, path: /api/capabilities/create }
+    action:                                          # optional: offered in the command box and the Shortcuts panel
+      title: Create todo
+      template: todo                                 # news | calendar | todo
+      effect: write                                  # read | write
+      idempotent: true
+      result: receipt                                # list | receipt | value
+      inputs: [{ name: title, type: text, label: Title, required: true, query: true }]
 ```
+
+An `action:` block makes the capability something the operator runs directly; its inputs, results and rules are in [shortcuts.md](shortcuts.md#app-actions).
 
 http deliveries and calls reach the app's declared `service` on loopback; the app trusts `x-space-event-id` / `x-space-caller` from there and dedupes deliveries on the event id (at-least-once).
 

@@ -168,7 +168,7 @@ export class IconPacks {
 export type Overrides = Record<IconKind, Map<string, string>>;
 
 /** The panel's own tiles, by name: their default icons and the pack ids that cover them (`space/<name>`). */
-export const BUILTIN_ICONS = { inbox: "/inbox.svg", terminal: "/terminal.svg", settings: "/settings.svg" } as const;
+export const BUILTIN_ICONS = { inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" } as const;
 export type BuiltinIcons = Record<keyof typeof BUILTIN_ICONS, string>;
 
 export function builtinIcons(o: Overrides): BuiltinIcons {

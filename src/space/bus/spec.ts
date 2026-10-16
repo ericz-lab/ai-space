@@ -1,3 +1,4 @@
+import { parseActionSpec } from "../shortcuts/spec.ts";
 import { assertEventName, assertTriggerEvent, parseTriggers } from "../scheduler/events.ts";
 import { parseDuration } from "../scheduler/schedule.ts";
 import type { EventTrigger } from "../scheduler/types.ts";
@@ -24,6 +25,7 @@ import { type Capability, DEFAULT_CALL_TIMEOUT_MS, type EventConsumption, type E
  *     http: { method: POST, path: /api/research }
  *     timeout: 2m
  *     callers: [portfolio]                       # default: every app on this space
+ *     action: { ... }                            # optional: offered in the command box (shortcuts/spec.ts)
  * ```
  *
  * Parsing is strict, like the rest of the manifest: an unknown key or a bad value rejects the app.
@@ -113,8 +115,8 @@ export function parseProvidesSpec(raw: unknown, ctx = "provides"): Capability[] 
   return Object.entries(raw).map(([name, item]) => {
     const where = `${ctx}.${name}`;
     if (!NAME_RE.test(name)) throw new Error(`${ctx}: "${name}" is not a capability name (letters, digits, dots, dashes, underscores)`);
-    if (!isRecord(item)) throw new Error(`${where} must be a mapping with http / description / timeout / callers`);
-    for (const key of Object.keys(item)) if (!["description", "http", "timeout", "callers"].includes(key)) throw new Error(`${where} has unknown key "${key}"`);
+    if (!isRecord(item)) throw new Error(`${where} must be a mapping with http / description / timeout / callers / action`);
+    for (const key of Object.keys(item)) if (!["description", "http", "timeout", "callers", "action"].includes(key)) throw new Error(`${where} has unknown key "${key}"`);
     if (item.http === undefined) throw new Error(`${where}: http is required`);
     const { method, path } = parseHttp(item.http, `${where}.http`);
     const description = optionalString(item.description, `${where}.description`);
@@ -125,7 +127,10 @@ export function parseProvidesSpec(raw: unknown, ctx = "provides"): Capability[] 
       if (!Array.isArray(item.callers) || !item.callers.length || !item.callers.every((x) => typeof x === "string" && APP_RE.test(x))) throw new Error(`${where}: callers must be a non-empty list of app names`);
       callers = [...new Set(item.callers as string[])];
     }
-    return { name, ...(description !== undefined ? { description } : {}), method, path, timeoutMs, ...(callers ? { callers } : {}) };
+    // A user-facing action (docs/shortcuts.md#app-actions); the operator runs it, so `callers` must let `space` in.
+    const action = item.action === undefined ? undefined : parseActionSpec(item.action, `${where}.action`);
+    if (action && callers && !callers.includes("space")) throw new Error(`${where}: an action is called as space; add space to callers`);
+    return { name, ...(description !== undefined ? { description } : {}), method, path, timeoutMs, ...(callers ? { callers } : {}), ...(action ? { action } : {}) };
   });
 }
 
