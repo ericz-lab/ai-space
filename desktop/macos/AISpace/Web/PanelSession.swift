@@ -225,6 +225,22 @@ extension PanelSession: WKUIDelegate {
         return nil
     }
 
+    /// Voice input on the session's own pages (MediaCapturePolicy). Without this WebKit asks on
+    /// every call, and the answer never reaches pages that record in short turns.
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo,
+                 type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        let kind: MediaCaptureKind
+        switch type {
+        case .microphone: kind = .microphone
+        case .camera: kind = .camera
+        default: kind = .cameraAndMicrophone
+        }
+        func url(_ o: WKSecurityOrigin) -> URL? { MediaCapturePolicy.url(scheme: o.protocol, host: o.host, port: o.port) }
+        let decision = MediaCapturePolicy.decide(kind, page: url(origin), frame: url(frame.securityOrigin),
+                                                 home: home, connection: connection.url)
+        decisionHandler(decision == .grant ? .grant : .deny)
+    }
+
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo,
                  completionHandler: @escaping ([URL]?) -> Void) {
         let panel = NSOpenPanel()

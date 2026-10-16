@@ -51,3 +51,41 @@ enum NavigationPolicy {
         return .allow
     }
 }
+
+/// What a page asks to capture, free of WebKit types (WKMediaCaptureType).
+enum MediaCaptureKind: Equatable {
+    case microphone
+    case camera
+    case cameraAndMicrophone
+}
+
+enum MediaCaptureDecision: Equatable {
+    case grant
+    case deny
+}
+
+/// Microphone for the pages this app opened, so their voice input works (getUserMedia); macOS
+/// still asks the operator once for the app itself. The page and the frame asking must both be
+/// of the session's own origin or the connection's: an embedded or redirected-to site gets
+/// nothing. The camera is never granted: the app declares no camera use (Info.plist).
+enum MediaCapturePolicy {
+    static func decide(_ kind: MediaCaptureKind, page: URL?, frame: URL?, home: URL, connection: URL) -> MediaCaptureDecision {
+        guard kind == .microphone, let page, let frame else { return .deny }
+        func own(_ url: URL) -> Bool {
+            let scheme = url.scheme?.lowercased() ?? ""
+            guard scheme == "http" || scheme == "https" else { return false }
+            return ConnectionRules.sameOrigin(url, home) || ConnectionRules.sameOrigin(url, connection)
+        }
+        return own(page) && own(frame) ? .grant : .deny
+    }
+
+    /// A WebKit security origin's parts as a URL; port 0 means the scheme's default.
+    static func url(scheme: String, host: String, port: Int) -> URL? {
+        var parts = URLComponents()
+        parts.scheme = scheme
+        parts.host = host
+        if port != 0 { parts.port = port }
+        parts.path = "/"
+        return parts.url
+    }
+}

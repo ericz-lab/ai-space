@@ -54,12 +54,19 @@ struct ChatReply: Equatable {
     var tools: [String] = []
     var activity: ChatActivity? = .starting
     var note: String?
+    /// The run's own error as the Space reported it, apart from the reply text, so a client can
+    /// show it as a failure of the turn rather than as words of the agent.
+    var failure: String?
     var stopped = false
     var finished = false
     private var seenTools: Set<String> = []
 
+    /// What the agent wrote, without any note.
+    var body: String {
+        finishedText + (streaming.isEmpty ? "" : (finishedText.isEmpty ? "" : "\n\n") + streaming)
+    }
+
     var text: String {
-        let body = finishedText + (streaming.isEmpty ? "" : (finishedText.isEmpty ? "" : "\n\n") + streaming)
         guard let note else { return body }
         return body.isEmpty ? note : body + "\n\n" + note
     }
@@ -104,7 +111,9 @@ struct ChatReply: Equatable {
             if ev["status"] as? String == "stopped" {
                 stopped = true
             } else {
-                note = "⚠️ " + String(describing: ev["error"] ?? "error")
+                let error = String(describing: ev["error"] ?? "error")
+                failure = error
+                note = "⚠️ " + error
             }
         case "done":
             finished = true
@@ -112,5 +121,69 @@ struct ChatReply: Equatable {
         default:
             break
         }
+    }
+}
+
+/// A failed chat turn told in words a person can act on. The Space hands on what the runtime
+/// said, which may be a status line from the model service ("429 Too Many Requests") or, when the
+/// runtime said nothing, only its exit code ("runtime exited with 1"); the raw text stays as the
+/// detail.
+struct ChatFailure: Equatable {
+    enum Kind: Equatable {
+        /// The model service turned the request down for now: rate or usage limit, overload.
+        case busy
+        /// The runtime on the Space is not signed in to its model service.
+        case signedOut
+        case timedOut
+        /// The runtime stopped with this exit code and said nothing more.
+        case exited(Int32)
+        /// The runtime could not be started at all.
+        case unavailable
+        /// The stream from the Space broke before the run said how it ended.
+        case connection
+        case other
+    }
+
+    var kind: Kind
+    var detail: String
+
+    init(kind: Kind, detail: String) {
+        self.kind = kind
+        self.detail = detail
+    }
+
+    init(_ raw: String) {
+        let detail = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.detail = detail
+        let text = detail.lowercased()
+        func has(_ words: String...) -> Bool { words.contains { text.contains($0) } }
+        if has("429", "too many requests", "rate limit", "rate_limit", "usage limit", "quota", "overloaded", "529", "capacity") {
+            kind = .busy
+        } else if has("not logged in", "log in", "login", "please run /login", "unauthorized", "401", "invalid api key", "authentication") {
+            kind = .signedOut
+        } else if has("timed out", "timeout") {
+            kind = .timedOut
+        } else if let code = Self.exitCode(text) {
+            kind = .exited(code)
+        } else if has("could not run", "not found", "enoent", "no such file") {
+            kind = .unavailable
+        } else {
+            kind = .other
+        }
+    }
+
+    /// Whether sending the same message again may well work: the cause passes by itself.
+    var retryable: Bool {
+        switch kind {
+        case .busy, .timedOut, .exited, .connection, .other: return true
+        case .signedOut, .unavailable: return false
+        }
+    }
+
+    /// The code of a bare `runtime exited with N`, the Space's words when the runtime said nothing.
+    private static func exitCode(_ text: String) -> Int32? {
+        guard let range = text.range(of: "exited with ") else { return nil }
+        let digits = text[range.upperBound...].prefix { $0.isNumber || $0 == "-" }
+        return Int32(digits)
     }
 }
