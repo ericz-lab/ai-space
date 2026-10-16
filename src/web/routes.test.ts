@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { BUILTIN_ICONS } from "./api.ts";
 import { createWebRoutes } from "./routes.ts";
 
 test("backdrop documents revalidate while other public assets keep their cache lifetime", async () => {
@@ -17,5 +18,17 @@ test("backdrop documents revalidate while other public assets keep their cache l
     expect(icon.headers.get("cache-control")).toBe("public, max-age=86400");
   } finally {
     await server.stop(true);
+  }
+});
+
+test("every built-in icon has a public route that serves its SVG", async () => {
+  const routes = createWebRoutes();
+  for (const path of Object.values(BUILTIN_ICONS)) {
+    const handler = routes[path];
+    expect(typeof handler).toBe("function");
+    if (typeof handler !== "function") throw new Error(`Missing icon route: ${path}`);
+    const response = handler();
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("<svg");
   }
 });
