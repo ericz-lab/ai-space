@@ -26,7 +26,12 @@ enum Pager {
 /// again in the middle of a swipe, when the page under the finger changes.
 @MainActor
 final class PagerPosition: ObservableObject {
-    @Published var id = Screens.home
+    @Published var id = Screens.home {
+        didSet {
+            if id != Pager.home, id != Pager.settings { lastScreenID = id }
+        }
+    }
+    var lastScreenID = Screens.home
 }
 
 /// An app's page on show over the tabs.
@@ -56,7 +61,6 @@ final class AppModel: ObservableObject {
         get { pager.id }
         set {
             pager.id = newValue
-            if newValue != Pager.home, newValue != Pager.settings { homePage = newValue }
         }
     }
     /// This phone's own display choices, kept in the app's defaults.
@@ -78,7 +82,10 @@ final class AppModel: ObservableObject {
     @Published var query = ""
     /// The screen the Panel tab opens on: the one last shown. Not published, as the page on
     /// show is not: it changes with every swipe, and the views read it only when acted on.
-    private(set) var homePage = Screens.home
+    private(set) var homePage: String {
+        get { pager.lastScreenID }
+        set { pager.lastScreenID = newValue }
+    }
     /// The Space's web panel over the tabs: the sign-in, package installs and what the app does not draw.
     @Published var showingWebPanel = false
     /// A page of the Space drawn by the app, over the tabs.
@@ -420,8 +427,8 @@ final class AppModel: ObservableObject {
     }
 
     func returnToSpace() {
+        tab = .panel
         page = nil
-        tab = .home
     }
 
     func showTab(_ id: UUID) {

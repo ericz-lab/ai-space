@@ -447,6 +447,37 @@ struct AppBrowserTests {
         #expect(model.pagerID == Screens.home)
     }
 
+    @Test func returnToSpaceShowsTheLastAppScreen() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ConnectionStore(fileURL: directory.appendingPathComponent("connections.json"))
+        let connection = store.add(name: "Space", url: URL(string: "https://space.example.com")!)
+        let screens = ScreenStore(fileURL: directory.appendingPathComponent("screens.json"))
+        let model = AppModel(store: store, screens: screens)
+        model.pager.id = Pager.home
+        model.returnToSpace()
+        #expect(model.pagerID == Screens.home)
+        #expect(model.tab == .panel)
+
+        model.addScreen(in: connection)
+        let second = model.pagerID
+        #expect(second != Screens.home)
+        model.pagerID = Screens.home
+        // Swipes write to PagerPosition directly, without AppModel's pagerID setter.
+        model.pager.id = Screens.home
+        model.pager.id = second
+        model.pager.id = Pager.home
+        model.returnToSpace()
+        #expect(model.pagerID == second)
+        model.pager.id = Pager.settings
+        model.returnToSpace()
+        #expect(model.pagerID == second)
+
+        screens.edit(connection.id) { Screens.remove($0, second) }
+        model.returnToSpace()
+        #expect(model.pagerID == Screens.home)
+    }
+
     @Test(.timeLimit(.minutes(1))) func tabsRetainPagesAndStayIsolatedUntilExplicitlyClosed() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -467,6 +498,7 @@ struct AppBrowserTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         model.returnToSpace()
+        #expect(model.tab == .panel)
         #expect(model.page == nil)
         model.open(url, title: "Reader", key: "reader", in: first)
         #expect(model.page?.id == reader.id)
