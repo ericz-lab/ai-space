@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AddForm, UninstallForm } from "./AppForms.tsx";
 import ModelPreference from "./ModelPreference.tsx";
-import Chat from "./Chat.tsx";
+import Chat, { type Ask } from "./Chat.tsx";
 import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
@@ -10,7 +10,8 @@ import Activity from "./Activity.tsx";
 import AppModels from "./AppModels.tsx";
 import Events from "./Events.tsx";
 import Inbox from "./Inbox.tsx";
-import Library from "./Library.tsx";
+import Library, { libraryEntries } from "./Library.tsx";
+import Omnibox from "./Omnibox.tsx";
 import ScreenNav from "./ScreenNav.tsx";
 import { type Builtin, HOME, type Screen, addScreen, entryKey, move, parseKey, pin, removeScreen, seedScreens, unpin } from "./screens.ts";
 import { BUILTIN_ICONS, fmtDuration, getJson, recordOpen, relTime, repoUrl, sendJson, type AgentInfo, type AppInfo, type BuiltinIcons, type InboxSummary, type UsageKind, type UsageRow, type WidgetInfo } from "./api.ts";
@@ -139,6 +140,16 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     setChatAgent(a);
     setPanel("chat");
   };
+  // The home screen's box hands a question to Space Assistant (docs/panel.md#omnibox).
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const askAssistant = (text: string) => {
+    const assistant = agents.find((a) => a.app === "space" && !a.peer);
+    if (assistant) setChatAgent(assistant);
+    else setChatAgent((cur) => (cur.app === "space" && !cur.peer ? cur : { id: "space/assistant", app: "space", name: "assistant", title: "Space Assistant", i18n: { zh: { title: "空间助手" } }, avatar: "/assistant.svg", appIcon: "✨", runtime: "claude" }));
+    setAsk((cur) => ({ id: (cur?.id ?? 0) + 1, text }));
+    setPanel("chat");
+  };
+  const [omniFocus, setOmniFocus] = useState(0);
 
   // The app list answers at once with the health the server has cached; a service it has not
   // probed yet comes back "unknown", so the list is asked once more after the probes had their
@@ -377,18 +388,22 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     if (screen) updateScreens((cur) => unpin(cur, screen.id, key));
   };
 
-  // Keys: ⌘K / Ctrl+K opens the library's search from anywhere; ← and → move between screens and
+  // Keys: ⌘K / Ctrl+K goes home and focuses the box there; ← and → move between screens and
   // Escape leaves the library, while nothing floats over the page and no field has the focus.
   const floating = panel !== null || adding !== null || uninstalling !== null;
-  const keyState = useRef({ pos, floating, editing, go, openLibrary });
-  keyState.current = { pos, floating, editing, go, openLibrary };
+  const focusOmnibox = () => {
+    go(0);
+    setOmniFocus((n) => n + 1);
+  };
+  const keyState = useRef({ pos, floating, editing, go, focusOmnibox });
+  keyState.current = { pos, floating, editing, go, focusOmnibox };
   useEffect(() => {
     const typing = (el: EventTarget | null) => el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
     const onKey = (e: KeyboardEvent) => {
       const k = keyState.current;
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        if (!k.floating) k.openLibrary(HOME, true);
+        if (!k.floating) k.focusOmnibox();
         return;
       }
       // Escape in the library's empty search field leaves the library too.
@@ -468,6 +483,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
           "data-drop": dragOver?.kind === kind && dragOver.index === i ? (i < (dragRef.current?.index ?? -1) ? "before" : "after") : undefined,
         }
       : undefined;
+
+  const entries = useMemo(() => libraryEntries({ apps, agents, widgets: prefs.noWidget ? [] : widgets, builtins }, lang, t), [apps, agents, widgets, builtins, prefs.noWidget, lang, t]);
 
   /** Opens an agent's chat or one of the panel's own windows, from the library. */
   const openEntry = (key: string) => {
@@ -730,6 +747,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 </button>
               </div>
             )}
+            {screen.id === HOME && !editing && <Omnibox entries={entries} onOpen={openEntry} onAsk={askAssistant} focusSignal={omniFocus} />}
             {renderScreen(screen)}
           </section>
         ) : null}
@@ -836,7 +854,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Events open={panel === "events"} onClose={close} onBack={openSettings} />
       <Terminal open={panel === "terminal"} onClose={close} />
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
-      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} />
+      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} ask={ask} />
     </>
   );
 }

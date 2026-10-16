@@ -20,6 +20,9 @@ import { OPERATOR as SPACE_OPERATOR, bearer, identify as identifyCaller, isOpera
  *                                           that is not here but on exactly one peer is reached through that peer
  *   POST /api/call/:peer/:app/:capability   the same, naming the peer
  *   GET  /api/calls?app&caller&limit        call history, newest first
+ *   GET  /api/voice                         { transcribe: boolean }: whether a speech-to-text capability is reachable
+ *   POST /api/voice/transcribe              multipart `file` (+ `language`, `context`), forwarded as the operator to the
+ *                                           transcriber capability (voice-studio/transcribe, here or on one peer)
  *   GET  /api/consumers                     external consumers (operator token)
  *   POST /api/consumers                     { name, subscriptions, calls } create one; the credential is in the answer, once
  *   GET  /api/consumers/:name               one consumer (operator token)
@@ -30,6 +33,9 @@ import { OPERATOR as SPACE_OPERATOR, bearer, identify as identifyCaller, isOpera
  * is accepted too and then calls as `space`. An external consumer's credential is accepted
  * by `stream` and `ack` for its own deliveries and by `call` for the capabilities on its list,
  * and by nothing else. Reads are open like the rest of the API.
+ *
+ * `/api/voice/*` are the panel's: like the agent chat they take no token (a browser write is
+ * held to the panel's own origin by `guardBrowserWrites`), and they call as the operator.
  */
 
 export type BusApiOptions = {
@@ -46,7 +52,11 @@ export type BusApiOptions = {
   remote?: RemoteBus;
   /** External consumers (docs/events.md#external-consumers); without it their routes answer 404. */
   consumers?: Consumers;
+  /** The capability voice input is transcribed by; default `voice-studio/transcribe` (docs/panel.md#omnibox). */
+  transcriber?: { app: string; capability: string };
 };
+
+export const TRANSCRIBER = { app: "voice-studio", capability: "transcribe" };
 
 /** What the bus routes need from the peer hub; `name` is this space's own name, prefixed onto forwarded callers. */
 export type RemoteBus = {
@@ -139,7 +149,27 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
     return new Response(res.body, { status: res.status, headers });
   };
 
+  // Where the transcriber is: this space, exactly one peer, or nowhere (several peers is nowhere too).
+  const transcriber = opts.transcriber ?? TRANSCRIBER;
+  const transcriberAt = (): "local" | RemotePeer | undefined => {
+    if (bus.capability(transcriber.app, transcriber.capability)) return "local";
+    const where = opts.remote?.providerOf(transcriber.app, transcriber.capability);
+    return where && "peer" in where ? where.peer : undefined;
+  };
+
   return {
+    "/api/voice": {
+      GET: () => json({ ok: true, transcribe: transcriberAt() !== undefined }),
+    },
+
+    "/api/voice/transcribe": {
+      POST: (req) => {
+        const at = transcriberAt();
+        if (!at) return error(503, `no ${transcriber.app}/${transcriber.capability} on this space or its peers`);
+        return at === "local" ? callLocal(req, OPERATOR, transcriber.app, transcriber.capability) : callRemote(req, OPERATOR, at, transcriber.app, transcriber.capability);
+      },
+    },
+
     "/api/events/stream": {
       GET: async (req) => {
         const app = await identify(req);

@@ -84,6 +84,45 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 /* A tile is wider than its 64 px icon (the name needs the room), so the grid is pulled out by the
    difference on both sides, and the columns spread over the width: the first icon's left edge and
    the last column's right edge line up with the widget cards and the page's other content. */
+/* The home screen's command box (Omnibox.tsx): search and ask in one field, its list floats over the tiles. */
+.omni { position: relative; z-index: 5; max-width: 640px; margin: 0 auto 44px; }
+.omni-bar {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 10px 10px 18px;
+  background: var(--glass); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border); border-radius: 26px; box-shadow: var(--shadow);
+}
+.omni-bar:focus-within { outline: 2px solid color-mix(in srgb, var(--link) 40%, transparent); }
+.omni.open .omni-bar { border-radius: 26px 26px 0 0; }
+.omni-glyph { color: var(--accent); font-size: 18px; line-height: 32px; }
+.omni-field {
+  flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--text);
+  font: inherit; font-size: 16px; line-height: 22px; padding: 5px 0; max-height: 132px;
+}
+.omni-field::placeholder { color: var(--muted); }
+.omni-mic {
+  flex: none; width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer; font-size: 15px;
+  background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text);
+}
+.omni-mic.recording { background: var(--danger); color: #fff; animation: omni-pulse 1.2s ease-in-out infinite; }
+.omni-mic:disabled { cursor: progress; opacity: 0.6; }
+@keyframes omni-pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--danger) 30%, transparent); } }
+.omni-error { margin: 8px 18px 0; font-size: 13px; color: var(--danger); }
+.omni-list {
+  position: absolute; left: 0; right: 0; top: 100%; margin: 0; padding: 6px; list-style: none;
+  background: var(--glass-strong); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-border); border-top: 1px solid var(--hairline); border-radius: 0 0 22px 22px; box-shadow: var(--shadow);
+}
+.omni-list li { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 14px; cursor: pointer; }
+.omni-list li.on { background: color-mix(in srgb, var(--link) 14%, transparent); }
+.omni-icon { flex: none; width: 28px; height: 28px; display: grid; place-items: center; font-size: 20px; }
+.omni-icon img { width: 28px; height: 28px; border-radius: 8px; object-fit: cover; }
+.omni-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.omni-title em { font-style: normal; color: var(--muted); }
+.omni-kind { flex: none; font-size: 12px; color: var(--muted); }
+.omni-list kbd { flex: none; font: inherit; font-size: 12px; color: var(--muted); }
+.omni-ask { border-top: 1px solid var(--hairline); margin-top: 4px; }
+.omni-list li.omni-ask:first-child { border-top: 0; margin-top: 0; }
+@media (max-width: 600px) { .omni { margin-bottom: 28px; } }
 .launcher { display: grid; grid-template-columns: repeat(auto-fill, 96px); justify-content: space-between; gap: 28px 20px; margin-inline: -16px; }
 .tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; }
 .tile-icon {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isImgIcon, recordOpen, type AgentInfo, type AppInfo, type BuiltinIcons, type UsageRow, type WidgetInfo } from "./api.ts";
-import { type Key, localized, searchKeyText, searchText, useLang, withLang } from "./i18n.ts";
+import { type Key, type Lang, localized, searchKeyText, searchText, useLang, withLang } from "./i18n.ts";
 import { BUILTINS, type Builtin, WIDGET_SIZES, type EntryKind, type Screen, entryKey, matches, parseKey } from "./screens.ts";
 import { Icon, Widget } from "./Tiles.tsx";
 
@@ -24,8 +24,35 @@ const BUILTIN_TEXT: Record<Builtin, { title: Key; blurb: Key; fallback: string }
   settings: { title: "settings.title", blurb: "settings.blurb", fallback: "⚙️" },
 };
 
-/** `text` is what the search reads besides the peer: the title and description in every language, and the id. */
-type Entry = { key: string; kind: EntryKind; widget?: WidgetInfo; icon: string; fallback: string; title: string; text: string; kindLabel: string; peer?: string; href?: string; size?: string };
+/**
+ * `text` is what the search reads besides the peer: the title and description in every language, and
+ * the id; `names` the titles in every language and the id, which the home screen's box ranks by.
+ */
+export type Entry = { key: string; kind: EntryKind; widget?: WidgetInfo; icon: string; fallback: string; title: string; names: string[]; text: string; kindLabel: string; peer?: string; href?: string; size?: string };
+
+const titles = (x: { title: string; i18n?: Record<string, { title?: string } | undefined> }) => [x.title, ...Object.values(x.i18n ?? {}).map((e) => e?.title)].filter((n): n is string => !!n);
+
+/** Every app, built-in tile, agent and widget, in that order: the library's cards and the box's candidates. */
+export function libraryEntries(lists: { apps: AppInfo[]; agents: AgentInfo[]; widgets: WidgetInfo[]; builtins: BuiltinIcons }, lang: Lang, t: (key: Key) => string): Entry[] {
+  const out: Entry[] = [];
+  for (const a of lists.apps) {
+    const shown = localized(lang, a);
+    out.push({ key: entryKey("app", a.id), kind: "app", icon: a.icon, fallback: "📦", title: shown.title, names: [...titles(a), a.id], text: [searchText(a), a.id].join(" "), kindLabel: t("library.kindApp"), peer: a.peer, href: a.url ? withLang(a.url, lang) : undefined });
+  }
+  for (const b of BUILTINS) {
+    const x = BUILTIN_TEXT[b];
+    out.push({ key: entryKey("builtin", b), kind: "builtin", icon: lists.builtins[b], fallback: x.fallback, title: t(x.title), names: [...searchKeyText(x.title).split(" "), b], text: [searchKeyText(x.title, x.blurb), b].join(" "), kindLabel: t("status.builtIn") });
+  }
+  for (const a of lists.agents) {
+    const shown = localized(lang, a);
+    out.push({ key: entryKey("agent", a.id), kind: "agent", icon: a.avatar, fallback: "🦾", title: shown.title, names: [...titles(a), a.id], text: [searchText(a), a.id].join(" "), kindLabel: t("library.kindAgent"), peer: a.peer });
+  }
+  for (const w of lists.widgets) {
+    const shown = localized(lang, w);
+    out.push({ key: entryKey("widget", w.id), kind: "widget", widget: w, icon: w.icon, fallback: "📦", title: shown.title, names: [...titles(w), w.id], text: [searchText(w), w.id].join(" "), kindLabel: t("library.kindWidget"), peer: w.peer, href: w.link ? withLang(w.link, lang) : undefined, size: w.size });
+  }
+  return out;
+}
 
 export default function Library({
   apps,
@@ -104,26 +131,7 @@ export default function Library({
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const entries = useMemo<Entry[]>(() => {
-    const out: Entry[] = [];
-    for (const a of apps) {
-      const shown = localized(lang, a);
-      out.push({ key: entryKey("app", a.id), kind: "app", icon: a.icon, fallback: "📦", title: shown.title, text: [searchText(a), a.id].join(" "), kindLabel: t("library.kindApp"), peer: a.peer, href: a.url ? withLang(a.url, lang) : undefined });
-    }
-    for (const b of BUILTINS) {
-      const x = BUILTIN_TEXT[b];
-      out.push({ key: entryKey("builtin", b), kind: "builtin", icon: builtins[b], fallback: x.fallback, title: t(x.title), text: [searchKeyText(x.title, x.blurb), b].join(" "), kindLabel: t("status.builtIn") });
-    }
-    for (const a of agents) {
-      const shown = localized(lang, a);
-      out.push({ key: entryKey("agent", a.id), kind: "agent", icon: a.avatar, fallback: "🦾", title: shown.title, text: [searchText(a), a.id].join(" "), kindLabel: t("library.kindAgent"), peer: a.peer });
-    }
-    for (const w of widgets) {
-      const shown = localized(lang, w);
-      out.push({ key: entryKey("widget", w.id), kind: "widget", widget: w, icon: w.icon, fallback: "📦", title: shown.title, text: [searchText(w), w.id].join(" "), kindLabel: t("library.kindWidget"), peer: w.peer, href: w.link ? withLang(w.link, lang) : undefined, size: w.size });
-    }
-    return out;
-  }, [apps, agents, widgets, builtins, lang, t]);
+  const entries = useMemo(() => libraryEntries({ apps, agents, widgets, builtins }, lang, t), [apps, agents, widgets, builtins, lang, t]);
 
   const kindOf = (e: Entry): Filter => (e.kind === "builtin" ? "app" : e.kind);
   const counts = useMemo(() => {
