@@ -73,9 +73,10 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     return [...first.map((intent): Row => ({ type: "intent", intent })), ...results.map((entry): Row => ({ type: "entry", entry })), ...loose.map((intent): Row => ({ type: "intent", intent })), { type: "ask" }];
   }, [found, results]);
   const askIndex = rows.length - 1;
+  const ambiguous = found.some((i) => i.kind === "action" && i.ambiguous);
   const direct = found.length > 0 && (found[0]!.kind !== "action" || found[0]!.strong);
   // A new query highlights the row Enter would pick.
-  useEffect(() => setSel(direct ? 0 : opensByDefault(q, results[0]) ? 0 : askIndex), [q, rows]);
+  useEffect(() => setSel(ambiguous ? -1 : direct ? 0 : opensByDefault(q, results[0]) ? 0 : askIndex), [q, rows]);
   // Typing again leaves the action that was opened.
   useEffect(() => setPanel(null), [q]);
 
@@ -113,7 +114,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     setPanel({ intent, autoRun: intent.kind === "convert" || (intent.action.effect === "read" && complete(intent.action, intent.args)) });
   };
   const act = (i: number) => {
-    if (recorder.current) return;
+    if (recorder.current || i < 0) return;
     const row = rows[i];
     if (!row || row.type === "ask") ask();
     else if (row.type === "entry") open(row.entry);
@@ -210,6 +211,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
         )}
       </div>
       {voiceError && <p className="omni-error">{voiceError}</p>}
+      {showList && ambiguous && <p className="sc-sub" role="status">{t("sc.pattern.choose")}</p>}
       {showList && (
         <ul className="omni-list" id="omni-list" role="listbox">
           {rows.map((row, i) => {
@@ -309,7 +311,7 @@ function IntentRow({ intent, on, onHover, onPick }: { intent: Intent; on: boolea
     title = (
       <>
         {option ? `${text.title}: ${option}` : text.title}
-        {filled && <em> · {filled}</em>}
+        {intent.pattern ? <em> · {Object.entries(intent.args).map(([name, value]) => `${text.input(intent.action.inputs.find((i) => i.name === name)!)}: ${value}`).join(" · ")}</em> : filled && <em> · {filled}</em>}
         {!intent.action.available && <span className="omni-kind"> · {intent.action.reason}</span>}
       </>
     );

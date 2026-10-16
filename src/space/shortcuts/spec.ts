@@ -1,3 +1,4 @@
+import { validatePatterns } from "./pattern.ts";
 import { type ActionI18n, type ActionInput, type ActionOption, type ActionSpec, EFFECTS, type Effect, INPUT_TYPES, type InputType, PERIODS, RELATIVE_DATES, RESULT_KINDS, type ResultKind, TEMPLATES, TEMPLATE_RESULTS, type Template } from "./types.ts";
 
 /**
@@ -26,7 +27,7 @@ import { type ActionI18n, type ActionInput, type ActionOption, type ActionSpec, 
  * Parsing is strict like the rest of the manifest: an unknown key or a bad value rejects the app.
  */
 
-const ACTION_KEYS = ["title", "description", "keywords", "template", "effect", "idempotent", "result", "inputs", "i18n"];
+const ACTION_KEYS = ["title", "description", "keywords", "patterns", "template", "effect", "idempotent", "result", "inputs", "i18n"];
 const INPUT_KEYS = ["name", "type", "label", "required", "default", "options", "min", "max", "query"];
 const NAME_RE = /^[a-z][a-zA-Z0-9_]*$/;
 const LANG_RE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
@@ -59,6 +60,7 @@ export function parseActionSpec(raw: unknown, ctx: string): ActionSpec {
     title,
     ...(description ? { description } : {}),
     keywords,
+    ...(raw.patterns !== undefined ? { patterns: validatePatterns(raw.patterns, inputs.map((i) => i.name)) } : {}),
     effect: effect as Effect,
     result,
     ...(template ? { template } : {}),

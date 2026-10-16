@@ -1,3 +1,4 @@
+import { validatePatterns } from "./pattern.ts";
 import { randomUUID } from "node:crypto";
 import type { AppCapabilities, CallRequest, CallResult } from "../bus/bus.ts";
 import type { Capability } from "../bus/types.ts";
@@ -107,7 +108,17 @@ export class Shortcuts {
     for (const a of this.opts.peers?.capabilities() ?? []) add(a, a.peer);
     // The slots nobody fills yet: shown so the operator sees what is missing.
     for (const t of TEMPLATES) if (!filled.has(t)) out.push(missingTemplate(t));
-    return out;
+    const saved = this.store.patterns();
+    return out.map((a) => ({ ...a, customPatterns: saved.find((p) => p.action === a.id && p.peer === (a.peer ?? ""))?.patterns ?? [] }));
+  }
+
+  setPatterns(id: string, peer: string | undefined, raw: unknown): void {
+    const action = this.find(id, peer);
+    if (!action) throw new ShortcutError(404, `unknown action: ${id}`);
+    let patterns: string[];
+    try { patterns = validatePatterns(raw, action.inputs.map((i) => i.name)); }
+    catch (e) { throw new ShortcutError(400, (e as Error).message); }
+    this.store.setPatterns(id, peer ?? "", patterns);
   }
 
   private builtins(): Action[] {

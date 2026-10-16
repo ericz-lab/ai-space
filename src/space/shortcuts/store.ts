@@ -2,13 +2,20 @@ import { Database } from "bun:sqlite";
 import { type Effect, MAX_RUNS, type Run, type RunResult, type RunStatus } from "./types.ts";
 
 /**
- * SQLite persistence for shortcut runs, in ai-space's own database. A run row holds everything the
+ * SQLite persistence for shortcut runs and per-action custom patterns in Space's database.
+ * Patterns are keyed by action and peer and survive provider removal. A run row holds everything the
  * page needs to show it again after the panel was closed: arguments as typed and as resolved, the
  * timezone, the status and the result. Same migration rule as the other stores: add nullable
  * columns to ADDED_COLUMNS, never rewrite tables. Only the newest MAX_RUNS rows are kept.
  */
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS shortcut_patterns (
+  action TEXT NOT NULL,
+  peer TEXT NOT NULL,
+  patterns TEXT NOT NULL,
+  PRIMARY KEY (action, peer)
+);
 CREATE TABLE IF NOT EXISTS shortcut_runs (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
   request_id       TEXT NOT NULL UNIQUE,
@@ -71,6 +78,15 @@ export class ShortcutStore {
       const cols = this.db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all();
       if (!cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
     }
+  }
+
+  patterns(): { action: string; peer: string; patterns: string[] }[] {
+    return this.db.query<{ action: string; peer: string; patterns: string }, []>("SELECT * FROM shortcut_patterns").all().map((r) => ({ ...r, patterns: JSON.parse(r.patterns) as string[] }));
+  }
+
+  setPatterns(action: string, peer: string, patterns: string[]): void {
+    if (!patterns.length) this.db.query("DELETE FROM shortcut_patterns WHERE action = ? AND peer = ?").run(action, peer);
+    else this.db.query("INSERT INTO shortcut_patterns (action, peer, patterns) VALUES (?, ?, ?) ON CONFLICT(action, peer) DO UPDATE SET patterns = excluded.patterns").run(action, peer, JSON.stringify(patterns));
   }
 
   close(): void {

@@ -62,6 +62,8 @@ export type ActionSpec = {
   title: string;
   description?: string;
   keywords: string[];
+  /** Full-sentence templates: alternatives, optional phrases and {input} captures. */
+  patterns?: string[];
   effect: Effect;
   /** An app action answers list, receipt or value; the built-in task runner answers a task card. */
   result: ResultKind | "task";
@@ -84,6 +86,8 @@ export type Action = ActionSpec & {
   /** False when it cannot run now; `reason` says what is missing. */
   available: boolean;
   reason?: string;
+  /** Operator patterns on this Space, added to the provider's patterns. */
+  customPatterns?: string[];
 };
 
 export type RunStatus = "running" | "ok" | "error" | "unknown";

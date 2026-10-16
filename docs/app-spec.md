@@ -330,6 +330,8 @@ provides:
       inputs: [{ name: title, type: text, label: Title, required: true, query: true }]
 ```
 
+An optional `action.patterns` list defines full-sentence search templates with alternatives, optional phrases and named input slots; custom additions can also be stored through the Shortcuts API without changing the manifest. See [sentence patterns](shortcuts.md#sentence-patterns).
+
 An `action:` block makes the capability something the operator runs directly; its inputs, results and rules are in [shortcuts.md](shortcuts.md#app-actions).
 
 http deliveries and calls reach the app's declared `service` on loopback; the app trusts `x-space-event-id` / `x-space-caller` from there and dedupes deliveries on the event id (at-least-once).

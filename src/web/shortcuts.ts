@@ -1,5 +1,6 @@
+import { compilePattern, matchPattern, type PatternMachine } from "../space/shortcuts/pattern.ts";
 import { isExpression } from "../space/shortcuts/calc.ts";
-import { addDays, dateIn, isDate } from "../space/shortcuts/time.ts";
+import { addDays, dateIn, isDate, isTime, resolveDate, resolvePeriod } from "../space/shortcuts/time.ts";
 import type { Action, ActionInput, RunResult } from "../space/shortcuts/types.ts";
 import type { Lang } from "./i18n.ts";
 import { SCORE, score } from "./omnibox.ts";
@@ -159,7 +160,7 @@ export function extractWhen(text: string, inputs: ActionInput[], tz: string, now
 export type Intent =
   | { kind: "calc"; key: string; expression: string }
   | { kind: "convert"; key: string; action: Action; args: { amount: number; from: string; to: string } }
-  | { kind: "action"; key: string; action: Action; args: Record<string, unknown>; strong: boolean };
+  | { kind: "action"; key: string; action: Action; args: Record<string, unknown>; strong: boolean; pattern?: string; ambiguous?: boolean };
 
 /**
  * What the typed text can run, best first: arithmetic and a conversion are direct results; an
@@ -175,6 +176,9 @@ export function intents(query: string, actions: Action[], tz: string, now = Date
   const convert = actions.find((a) => a.id === "space/convert" && a.builtin);
   if (conv && convert) out.push({ kind: "convert", key: "convert", action: convert, args: conv });
   if (out.length) return out;
+
+  const patterns = patternIntents(q, actions, tz, now);
+  if (patterns.length) return patterns;
 
   const lower = q.toLocaleLowerCase();
   const strong: Intent[] = [];
@@ -227,4 +231,71 @@ export function complete(a: Action, args: Record<string, unknown>): boolean {
 /** A fresh id for one submission; the server answers a repeat with the first run. */
 export function requestId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const patternCache = new Map<string, PatternMachine | null>();
+function compiled(source: string): PatternMachine | null {
+  if (patternCache.has(source)) return patternCache.get(source)!;
+  let machine: PatternMachine | null = null;
+  try { machine = compilePattern(source); } catch { /* A stale peer's invalid pattern cannot break search. */ }
+  if (patternCache.size >= 256) patternCache.delete(patternCache.keys().next().value!);
+  patternCache.set(source, machine);
+  return machine;
+}
+
+/** Slots use the action's existing input types; normalized values remain editable. */
+export function captureInput(a: Action, name: string, text: string, tz: string, now = Date.now()): string | number | undefined {
+  const input = a.inputs.find((i) => i.name === name);
+  if (!input) return undefined;
+  if (input.type === "text") return text;
+  if (input.type === "number") {
+    if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(text)) return undefined;
+    const n = Number(text);
+    return Number.isFinite(n) && (input.min === undefined || n >= input.min) && (input.max === undefined || n <= input.max) ? n : undefined;
+  }
+  if (input.type === "choice" || input.type === "task") {
+    const options = input.options?.filter((o) => [o.value, o.label, ...Object.values(a.i18n ?? {}).map((t) => t.options?.[o.value])].some((v) => v?.toLowerCase() === text.toLowerCase())) ?? [];
+    return options.length === 1 ? options[0]!.value : undefined;
+  }
+  if (input.type === "time") {
+    if (isTime(text)) return text;
+    const extracted = extractWhen(text, [{ name: "__date", type: "date", label: "Date" }, input], tz, now);
+    return !extracted.text ? extracted.args[name] : undefined;
+  }
+  const extracted = extractWhen(text, [input], tz, now);
+  const value = !extracted.text ? extracted.args[name] ?? text : text;
+  try {
+    if (input.type === "date") resolveDate(value, tz, now);
+    else resolvePeriod(value, tz, now);
+    return value;
+  } catch { return undefined; }
+}
+
+function patternIntents(query: string, actions: Action[], tz: string, now: number): Intent[] {
+  const found = new Map<string, Extract<Intent, { kind: "action" }>>();
+  const budget = { remaining: 100_000 };
+  for (const a of actions) {
+    const sources = [...new Set([...(a.patterns ?? []), ...(a.customPatterns ?? [])])].slice(0, 32);
+    for (const source of sources) {
+      const machine = compiled(source);
+      if (!machine) continue;
+      const result = matchPattern(machine, query, (name, value) => captureInput(a, name, value, tz, now), budget);
+      if (result.limited) return [];
+      for (const captures of result.matches) {
+        const queryInput = a.inputs.find((i) => i.query);
+        const queryText = queryInput && captures[queryInput.name];
+        const defaults = fill(a, typeof queryText === "string" ? queryText : "", tz, now);
+        const explicit = { ...captures };
+        // Keep the existing date extraction for the action's query slot. Explicit
+        // typed slots take precedence; ordinary text slots retain their full text.
+        if (queryInput && typeof queryText === "string") delete explicit[queryInput.name];
+        const args = { ...defaults, ...explicit };
+        const key = `${actionKey(a)}:pattern:${JSON.stringify(Object.entries(args).sort(([x], [y]) => x.localeCompare(y)))}`;
+        found.set(key, { kind: "action", key, action: a, args, strong: true, pattern: source });
+      }
+    }
+  }
+  const matches = [...found.values()];
+  if (matches.length > 1) for (const match of matches) match.ambiguous = true;
+  return matches;
 }

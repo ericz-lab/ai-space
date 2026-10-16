@@ -7,6 +7,7 @@ import type { Run } from "./types.ts";
  * operator (`space` in the bus's call history).
  *
  *   GET  /api/shortcuts/actions            the catalogue: built-ins, app actions here and on peers, unfilled slots
+ *   POST /api/shortcuts/patterns           { action, peer?, patterns } replaces backend-managed custom patterns
  *   POST /api/shortcuts/runs               { action, peer?, args, timezone, requestId } start a run; answers it when
  *                                          it ends or after a few seconds (status running), 201, or 200 with
  *                                          `duplicate: true` for a request id seen before
@@ -48,6 +49,14 @@ export function createShortcutRoutes(opts: { shortcuts: Shortcuts }): Routes {
   return {
     "/api/shortcuts/actions": {
       GET: safe(() => json({ ok: true, actions: shortcuts.catalogue() })),
+    },
+    "/api/shortcuts/patterns": {
+      POST: safe(async (req) => {
+        const raw = await req.json().catch(() => null);
+        if (!raw || typeof raw.action !== "string" || (raw.peer !== undefined && typeof raw.peer !== "string")) throw new ShortcutError(400, "body must be { action, peer?, patterns }");
+        shortcuts.setPatterns(raw.action, raw.peer, raw.patterns);
+        return json({ ok: true, actions: shortcuts.catalogue() });
+      }),
     },
     "/api/shortcuts/runs": {
       GET: safe((req) => {

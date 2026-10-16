@@ -285,3 +285,31 @@ test("results keep only safe links and real instants", () => {
   const r = normalize("list", { items: [{ title: "a", url: "javascript:alert(1)", at: "2026-10-01T09:00:00" }, { title: "b", date: "2026-02-30", time: "25:00" }] }, "app");
   expect(r).toEqual({ kind: "list", items: [{ title: "a" }, { title: "b" }] });
 });
+
+test("pattern API validates before saving, exposes the catalogue and does not execute actions", async () => {
+  const h = harness(() => ok({}));
+  try {
+    const routes = createShortcutRoutes({ shortcuts: h.shortcuts });
+    const save = async (body: unknown) => routes["/api/shortcuts/patterns"]!.POST!(Object.assign(new Request("http://space/api/shortcuts/patterns", { method: "POST", body: JSON.stringify(body) }), { params: {} }));
+    expect((await save({ action: "feed/news", patterns: ["[帮我]查金融新闻[ {q}]"] })).status).toBe(200);
+    expect(h.shortcuts.find("feed/news")?.customPatterns).toEqual(["[帮我]查金融新闻[ {q}]"]);
+    for (const patterns of [["查{unknown}"], ["[unclosed"], ["{q}"], "news", [12]]) {
+      expect((await save({ action: "feed/news", patterns })).status).toBe(400);
+      expect(h.shortcuts.find("feed/news")?.customPatterns).toEqual(["[帮我]查金融新闻[ {q}]"]);
+    }
+    expect((await save({ action: "missing/news", patterns: ["news"] })).status).toBe(404);
+    expect((await save({ action: "feed/news", peer: "other", patterns: ["news"] })).status).toBe(404);
+    expect((await save({ action: "feed/news", peer: 12, patterns: [] })).status).toBe(400);
+    expect((await save({ action: "feed/news", patterns: [] })).status).toBe(200);
+    expect(h.shortcuts.find("feed/news")?.customPatterns).toEqual([]);
+    expect(h.seen).toEqual([]);
+    expect(h.store.listRuns()).toEqual([]);
+  } finally { h.close(); }
+});
+
+test("manifest patterns validate slots and preserve backwards compatibility", () => {
+  const action = { title: "News", result: "list", inputs: [{ name: "q", type: "text", label: "Topic" }] };
+  expect(parseProvidesSpec({ news: { http: { path: "/news" }, action: { ...action, patterns: ["金融新闻[ {q}]"] } } })[0]!.action?.patterns).toEqual(["金融新闻[ {q}]"]);
+  expect(parseProvidesSpec({ news: { http: { path: "/news" }, action } })[0]!.action?.patterns).toBeUndefined();
+  expect(() => parseProvidesSpec({ news: { http: { path: "/news" }, action: { ...action, patterns: ["news{other}"] } } })).toThrow(/Unknown input/);
+});

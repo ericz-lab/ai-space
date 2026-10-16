@@ -1,6 +1,6 @@
 # Shortcuts and universal search
 
-Status: phase 1 is implemented (Web). Phases 2 and 3 below are still a plan.
+Status: phase 1 and backend-configured sentence patterns are implemented (Web). Phases 2 and 3 below are still a plan.
 
 Frequent operations run straight from the home screen's command box ([panel.md](panel.md#omnibox)) and from the built-in Shortcuts window: calculate, convert currencies, query financial news and calendars, create todos and run scheduler tasks, without opening each app. Every entry point shares one action catalogue, one validation, one executor and one set of result cards.
 
@@ -76,6 +76,76 @@ Providers on this space today:
 | todo | `ai-todo/create` | Idempotent; a time in another zone is moved to the list's `TODO_TZ` wall clock; the receipt shows the stored due and links the todo. |
 | rates (for `convert`) | `fx-desk/rates` | Every currency open.er-api.com quotes, USD-based, with the quote time and `stale` when the upstream failed. |
 
+## Sentence patterns
+
+Pattern matching is a small tagged finite-state machine inspired by
+`interpreter/pattern_machine`: literal transitions, optional/alternative branches,
+and named slots. It runs locally without a model. It does not port the Python
+implementation, its data files, NER, or DFA minimization.
+
+App authors can declare `action.patterns` next to `keywords`:
+
+```yaml
+patterns:
+  - "[帮我][查|查询|看看|看一下][{period}[的]](金融新闻|财经新闻|新闻)[ {q}]"
+  - "[please ](news|financial news)[ about {q}]"
+```
+
+- Literal text matches case-insensitively. Whitespace is collapsed to a single
+  space and outer whitespace is trimmed; spaces inside patterns still matter.
+- `(a|b)` selects an alternative. `[text]` is optional; `[a|b]` is an optional
+  alternative. Groups may nest up to four levels.
+- `{inputName}` captures a nonempty value into a declared action input. Number,
+  date, time, period, and choice/task inputs must recognize the entire captured
+  value. Choice labels in all declared languages are accepted when unambiguous.
+  Dates remain relative until execution in the browser's zone. A query text slot
+  also uses the existing date extraction; explicit typed slots take precedence.
+- Escape a special character with a backslash. Regex, scripts, unnamed wildcards,
+  empty alternatives, repeated slot names, and slot-only catch-all patterns are
+  unsupported. Every accepting path must include non-whitespace literal text.
+
+Examples: `金融新闻`, `帮我看看今天的金融新闻`, `查本周财经新闻 美联储`,
+`金融新闻 本周 美联储`, and `please financial news about Fed`.
+
+Custom patterns are managed in the backend only; there is no pattern editor in
+any client. `POST /api/shortcuts/patterns` replaces one action's custom list:
+
+```json
+{
+  "action": "finance-news-feed/news",
+  "patterns": ["[帮我]看看金融新闻[ {q}]", "查{period}的财经新闻[ {q}]"]
+}
+```
+
+Include `peer` to target that peer's action. Omit it for a local action. The
+server validates the syntax and slot names against the current catalogue before
+saving in `shortcut_patterns` in `space.db`; invalid updates leave the previous
+list intact. An empty list removes custom patterns. Unknown targets return 404,
+invalid syntax or inputs return 400. Like other panel routes, browser writes are
+subject to the same-origin guard. The response and `GET /api/shortcuts/actions`
+include `patterns` (provider defaults) and `customPatterns` (local additions).
+Custom patterns survive restart and are scoped to the action and peer; removing
+an app does not retarget its patterns to another provider. Reload the page after
+an API update, or refocus the command box after its one-minute catalogue cache
+expires. No action runs when patterns are saved.
+
+Arithmetic and currency syntax keep priority. A complete sentence pattern comes
+next, followed by the existing keyword/name rules if no pattern matches.
+Equivalent action/argument matches collapse into one candidate. Distinct matches,
+including different peers or different captures, remain visible with parameters;
+none is selected automatically. Use the arrow keys or click to choose one. Reads
+run on selection/Enter as before; writes and tasks still require submission in
+the editable form, and all arguments remain subject to server validation.
+
+Limits: 16 provider and 16 custom patterns per action, 256 characters and 512
+states per pattern, four named slots, 512 input characters, 4,096 active/queued
+configurations, 50,000 matching operations per pattern and 100,000 across the
+catalogue. At most eight distinct capture sets per pattern are retained. Hitting
+any matching bound discards the pattern pass, leaving keyword/name matching
+available; partial results never decide an action. Compiled patterns are cached
+in a bounded cache. This is a deliberately small syntax, not a general natural
+language interpreter.
+
 ## Built-ins
 
 - **Calculator** (`space/calc`, `src/space/shortcuts/calc.ts`, shared with the page): numbers (decimals, `1,234.5` grouping, full-width digits), `+ - * / × ÷`, `^` or `**` (right-associative; `-2^2` is −4), postfix `%` (÷100), parentheses. A recursive-descent parser, never `eval`. Results are rounded to 12 significant digits and shown with up to 10 decimals; division by zero and non-finite results are errors. The box treats text as arithmetic only when it parses and holds an operator.
@@ -97,6 +167,7 @@ The panel's routes, like `/api/voice`: no token, browser writes held to the pane
 | Route | |
 | --- | --- |
 | `GET /api/shortcuts/actions` | The catalogue: built-ins, app actions here and on peers, unfilled slots, each with `available` / `reason`. |
+| `POST /api/shortcuts/patterns` | `{ action, peer?, patterns }` → updated catalogue; backend-managed custom sentence patterns. |
 | `POST /api/shortcuts/runs` | `{ action, peer?, args, timezone, requestId }` → `{ run, duplicate }` (201, or 200 for a repeat). |
 | `GET /api/shortcuts/runs?limit` | Recent runs, newest first. |
 | `GET /api/shortcuts/runs/:id` | One run; a task run's status is read from the scheduler. |
