@@ -169,7 +169,10 @@ async function stopRun(a: Active): Promise<void> {
   await fetch(`${a.base}/runs/${encodeURIComponent(a.runId)}/stop`, { method: "POST" }).catch(() => {});
 }
 
-export default function Chat({ open, agent, agents = [], onClose, onSwitch }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void }) {
+/** A question from the home screen's box; a new `id` sends `text` once. */
+export type Ask = { id: number; text: string };
+
+export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void; ask?: Ask | null }) {
   const { lang, t } = useLang();
   // Status lines are written into the message state while a turn streams, so they read `t` through a
   // ref: a language change mid-turn applies from the next status on.
@@ -500,6 +503,20 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch }: { 
     runner(key).queue.push(queuedChatTurn(agent, text, modelRef.current, baseChoice(key), permRef.current));
     drain(key, base);
   };
+  // A question from the box starts a new conversation, unless the current one is still working:
+  // then it waits in that conversation's queue rather than stopping what runs.
+  const askedRef = useRef(0);
+  useEffect(() => {
+    if (!ask || ask.id === askedRef.current) return;
+    askedRef.current = ask.id;
+    if (!runner(key).running) {
+      patch(key, (v) => ({ ...v, msgs: [], sid: null }));
+      setHist(null);
+    }
+    setStick(true);
+    send(ask.text);
+  }, [ask]);
+
   const submit = () => {
     const text = input.trim();
     if (!text) return;

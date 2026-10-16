@@ -209,3 +209,59 @@ describe("bus api", () => {
     });
   });
 });
+
+describe("voice routes", () => {
+  /** A space whose transcriber is `at`: provided by a local app, by a peer, or by nobody. */
+  const serveVoice = (at: "local" | "peer" | "none") => {
+    const asr = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: async (req) => {
+        const form = await req.formData();
+        const file = form.get("file") as File;
+        return Response.json({ text: `heard ${await file.text()}`, caller: req.headers.get("x-space-caller") });
+      },
+    });
+    const store = new BusStore(":memory:");
+    const voiceBus = new Bus({ store, events: new Store(":memory:"), servicePort: (name) => (name === "voice-studio" ? asr.port : undefined), log: () => {} });
+    if (at === "local") voiceBus.syncApp("voice-studio", { events: { publishes: [], consumes: [] }, provides: [{ name: "transcribe", method: "POST", path: "/api/asr", timeoutMs: 5000 }] });
+    const transcriber = at === "peer" ? { app: "thesis", capability: "summarize" } : undefined;
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createBusRoutes({ bus: voiceBus, store, events: new Store(":memory:"), token: "op", remote, ...(transcriber ? { transcriber } : {}) }) });
+    const url = `http://127.0.0.1:${server.port}`;
+    return { url, store, stop: () => (server.stop(true), asr.stop(true)) };
+  };
+  const audio = () => {
+    const form = new FormData();
+    form.append("file", new File(["hello"], "voice.webm", { type: "audio/webm" }));
+    return form;
+  };
+
+  test("the panel transcribes without a token through the local voice-studio, as the operator", async () => {
+    const s = serveVoice("local");
+    try {
+      expect(await fetch(`${s.url}/api/voice`).then((r) => r.json())).toEqual({ ok: true, transcribe: true });
+      const r = await fetch(`${s.url}/api/voice/transcribe`, { method: "POST", body: audio() });
+      expect(r.status).toBe(200);
+      expect(await r.json()).toEqual({ text: "heard hello", caller: "space" });
+      expect(s.store.listCalls({}).map((c) => [c.caller, c.app, c.capability, c.status])).toEqual([["space", "voice-studio", "transcribe", 200]]);
+    } finally {
+      s.stop();
+    }
+  });
+
+  test("a transcriber on one peer is reached through it; none at all answers 503", async () => {
+    const p = serveVoice("peer");
+    const n = serveVoice("none");
+    try {
+      expect(await fetch(`${p.url}/api/voice`).then((r) => r.json())).toEqual({ ok: true, transcribe: true });
+      const r = await fetch(`${p.url}/api/voice/transcribe`, { method: "POST", body: audio() });
+      expect(await r.json()).toEqual({ from: "dailie" });
+      expect(forwarded.pop()).toMatchObject({ path: "/api/peer/call/thesis/summarize", caller: "seoul/space" });
+      expect(await fetch(`${n.url}/api/voice`).then((r) => r.json())).toEqual({ ok: true, transcribe: false });
+      expect((await fetch(`${n.url}/api/voice/transcribe`, { method: "POST", body: audio() })).status).toBe(503);
+    } finally {
+      p.stop();
+      n.stop();
+    }
+  });
+});
