@@ -5,6 +5,18 @@ import Testing
 #endif
 
 struct DesktopRulesTests {
+    @Test func openTabShortcutsRespectLimitAndSelection() {
+        #expect(OpenTabLayout.visible([], selected: nil).isEmpty)
+        #expect(OpenTabLayout.visible(["a"], selected: "a") == ["a"])
+        let ids = ["a", "b", "c", "d", "e", "f", "g"]
+        #expect(OpenTabLayout.visible(Array(ids.prefix(5)), selected: "e") == Array(ids.prefix(5)))
+        #expect(OpenTabLayout.visible(ids, selected: nil) == Array(ids.prefix(5)))
+        #expect(OpenTabLayout.visible(ids, selected: "g") == ["a", "b", "c", "d", "g"])
+        // Closing the selected page fills the fifth slot from the remaining open pages.
+        #expect(OpenTabLayout.visible(Array(ids.dropLast()), selected: "g") == Array(ids.prefix(5)))
+        #expect(OpenTabLayout.visible([], selected: "closed").isEmpty)
+    }
+
     func item(_ thread: String, _ lastAt: String, unread: Bool = true, done: Bool = false) -> InboxItem {
         InboxItem(thread: thread, app: "todo", level: "info", title: nil, text: "x", url: nil, count: 1, lastAt: lastAt, unread: unread, done: done)
     }

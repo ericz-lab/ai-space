@@ -22,14 +22,14 @@ func png(_ svg: String, side: Int, to url: URL) throws {
 try png(mark, side: 256, to: resources.appendingPathComponent("Logo.png"))
 
 // A Mac icon draws its own shape: the mark on a white rounded square on Apple's 1024 grid
-// (an 824 square, 100 in from each edge).
+// (an 824 square, 100 in from each edge), the mark filling about two thirds of it.
 let body = mark.replacingOccurrences(of: #"<svg[^>]*>"#, with: "", options: .regularExpression)
     .replacingOccurrences(of: "</svg>", with: "")
     .replacingOccurrences(of: #"<title[^<]*</title>"#, with: "", options: .regularExpression)
 let icon = """
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <rect x="100" y="100" width="824" height="824" rx="185" fill="#FFFFFF"/>
-  <g transform="translate(232 232) scale(1.09375)">\(body)</g>
+  <g transform="translate(144 144) scale(1.4375)">\(body)</g>
 </svg>
 """
 try icon.write(to: resources.appendingPathComponent("AppIcon.svg"), atomically: true, encoding: .utf8)

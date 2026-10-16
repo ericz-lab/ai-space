@@ -66,3 +66,14 @@ enum DeepLink: Equatable {
         }
     }
 }
+
+/// Keep the active app visible without moving the other shortcuts out of opening order.
+enum OpenTabLayout {
+    static func visible(_ ids: [String], selected: String?) -> [String] {
+        var result = Array(ids.prefix(5))
+        if let selected, ids.contains(selected), !result.contains(selected) {
+            result[result.count - 1] = selected
+        }
+        return result
+    }
+}

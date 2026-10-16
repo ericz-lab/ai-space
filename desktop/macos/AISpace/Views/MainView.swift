@@ -47,7 +47,7 @@ struct SpaceWindow: View {
                 HubContainer(model: model, connection: connection, page: page, loader: loader, icons: icons)
             case .app(let id):
                 if let tab = model.tab(id, connection: connection.id) {
-                    AppTabView(model: model, connection: connection, tab: tab, session: tab.session, screens: screens)
+                    AppTabView(model: model, connection: connection, tab: tab, session: tab.session)
                         .id(tab.session.home)
                 } else {
                     ContentUnavailableView("This app is not open", systemImage: "app.dashed")
@@ -64,7 +64,13 @@ struct SpaceWindow: View {
                         withAnimation(.easeInOut(duration: 0.3)) { model.showPage(id) }
                     }
                 }
-                ToolbarItem(placement: .primaryAction) { OpenTabsMenu(model: model, connection: connection) }
+                if #available(macOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .primaryAction)
+                }
+                ToolbarItem(placement: .primaryAction) { OpenTabsBar(model: model, connection: connection) }
+                if #available(macOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .primaryAction)
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         ScreenActions(model: model, connection: connection, loader: loader, store: screens)
@@ -126,25 +132,54 @@ struct ConnectionSwitcher: View {
     }
 }
 
-/// The apps open as tabs of this window, to go back to one; shown only when there are some.
-struct OpenTabsMenu: View {
+/// Up to five open apps, with the remaining pages in the overflow menu.
+struct OpenTabsBar: View {
     @ObservedObject var model: AppModel
     let connection: Connection
 
     var body: some View {
         let tabs = model.tabs[connection.id] ?? []
-        if !tabs.isEmpty {
-            Menu {
-                ForEach(tabs) { tab in
-                    Button(tab.app.displayTitle) { model.destination = .app(tab.app.id) }
+        let selected = selectedApp
+        let visible = OpenTabLayout.visible(tabs.map(\.id), selected: selected)
+        let overflow = tabs.filter { !visible.contains($0.id) }
+        HStack(spacing: 4) {
+            ForEach(tabs.filter { visible.contains($0.id) }) { tab in
+                Button { model.destination = .app(tab.id) } label: {
+                    EntryIcon(icon: tab.app.icon, fallback: "app", icons: model.icons(for: connection), size: 22)
+                        .padding(4)
+                        .background(selected == tab.id ? Color.primary.opacity(0.10) : .clear,
+                                    in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8)
+                            .stroke(selected == tab.id ? Color.primary.opacity(0.22) : .clear, lineWidth: 1))
                 }
-                Divider()
-                Button("Close All") { tabs.forEach { model.closeTab($0.app.id, connection: connection.id) } }
-            } label: {
-                Label("Open Tabs", systemImage: "square.on.square")
+                .buttonStyle(.plain)
+                .help(tab.app.displayTitle)
+                .accessibilityLabel(Text(verbatim: tab.app.displayTitle))
+                .accessibilityAddTraits(selected == tab.id ? .isSelected : [])
+                .contextMenu {
+                    Button("Close") { model.closeTab(tab.id, connection: connection.id) }
+                    Button("Close All") { tabs.forEach { model.closeTab($0.id, connection: connection.id) } }
+                }
             }
-            .help("Open Tabs")
+            if !overflow.isEmpty {
+                Menu {
+                    ForEach(overflow) { tab in
+                        Button(tab.app.displayTitle) { model.destination = .app(tab.id) }
+                    }
+                    Divider()
+                    Button("Close All") { tabs.forEach { model.closeTab($0.id, connection: connection.id) } }
+                } label: {
+                    Label("Open Tabs", systemImage: "chevron.down")
+                }
+                .menuIndicator(.hidden)
+                .help("Open Tabs")
+            }
         }
+    }
+
+    private var selectedApp: String? {
+        if case .app(let id) = model.destination { return id }
+        return nil
     }
 }
 
@@ -154,7 +189,6 @@ struct AppTabView: View {
     let connection: Connection
     let tab: AppTab
     @ObservedObject var session: PanelSession
-    @ObservedObject var screens: ScreenStore
 
     var body: some View {
         AppPageView(session: session)
@@ -172,15 +206,18 @@ struct AppTabView: View {
                     Button { session.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
                         .help("Reload")
                 }
-                ToolbarItem(placement: .primaryAction) { OpenTabsMenu(model: model, connection: connection) }
+                if #available(macOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .primaryAction)
+                }
+                ToolbarItem(placement: .primaryAction) { OpenTabsBar(model: model, connection: connection) }
+                if #available(macOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .primaryAction)
+                }
                 ToolbarItemGroup(placement: .primaryAction) {
                     if let url = session.currentURL ?? session.webView.url {
-                        ShareLink(item: url) { Label("Share", systemImage: "square.and.arrow.up") }
-                            .help("Share")
                         Button { NSWorkspace.shared.open(url) } label: { Label("Open in Browser", systemImage: "safari") }
                             .help("Open in Browser")
                     }
-                    pinMenu
                     Button { model.moveToWindow(tab.app.id, connection: connection.id) } label: {
                         Label("Open in New Window", systemImage: "macwindow.badge.plus")
                     }
@@ -191,21 +228,6 @@ struct AppTabView: View {
             }
     }
 
-    /// Adds the app to a screen of this Mac, or takes it off.
-    private var pinMenu: some View {
-        let key = "app:\(tab.app.id)"
-        let all = screens.screens(connection.id)
-        return Menu {
-            ForEach(Array(all.enumerated()), id: \.element.id) { index, s in
-                Toggle(isOn: Binding(get: { s.items.contains(key) }, set: { _ in model.togglePin(key, screen: s.id, in: connection) })) {
-                    Text(verbatim: Screens.title(at: index))
-                }
-            }
-        } label: {
-            Label("Add to Panel", systemImage: all.contains { $0.items.contains(key) } ? "pin.fill" : "pin")
-        }
-        .help("Add to Panel")
-    }
 }
 
 /// The Space's web panel over the launcher, for what the app does not draw (and the sign-in).
