@@ -1,3 +1,7 @@
+import { parseAgentIntent, type AgentIntentView } from "../shortcuts/agent-intents.ts";
+import type { ShortcutStore } from "../shortcuts/store.ts";
+import { isTimezone } from "../shortcuts/time.ts";
+import { skillContext } from "./skill-context.ts";
 import { Database } from "bun:sqlite";
 import { realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -36,6 +40,7 @@ import { readTranscript } from "./transcript.ts";
 
 export type AgentsApiOptions = {
   ws: Workspace;
+  shortcuts?: ShortcutStore;
   registry: AppRegistry;
   layout: LayoutStore;
   sessions: SessionStore;
@@ -111,6 +116,7 @@ type ResolvedAgent = {
   runtime?: string;
   model?: string;
   cwd: string;
+  appDir?: string;
   systemPrompt?: string;
   tools: string[];
   app: string;
@@ -197,6 +203,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     if (!entry || !a) throw new NotFound(`unknown agent: ${app}/${name}`);
     return {
       id: `${app}/${name}`,
+      appDir: entry.manifest.dir,
       ...(a.runtime ? { runtime: a.runtime } : {}),
       ...(a.model ? { model: a.model } : {}),
       // The real path: the runtime files its transcripts under the directory it actually runs in,
@@ -208,7 +215,34 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     };
   };
 
+  const intentContext = async (agentId: string, skills: string[]) => {
+    const [app, name] = agentId.split("/");
+    const agent = await resolveAgent(app!, name!);
+    if (!agent.appDir) throw new Error("Skill intents require an app agent");
+    return skillContext(agent.appDir, skills);
+  };
+
   return {
+    "/api/shortcuts/agent-intents": {
+      GET: wrap(async () => {
+        const intents: AgentIntentView[] = [];
+        for (const intent of opts.shortcuts?.agentIntents() ?? []) {
+          try {
+            await intentContext(intent.agent, intent.skills);
+            intents.push({ ...intent, available: true });
+          } catch (e) { intents.push({ ...intent, available: false, reason: (e as Error).message }); }
+        }
+        return json({ ok: true, intents });
+      }),
+      POST: wrap(async (req) => {
+        if (!opts.shortcuts) return error(503, "Agent intent storage is unavailable");
+        const intent = parseAgentIntent(await req.json());
+        // Disabling a removed agent's routing must remain possible.
+        if (intent.enabled) await intentContext(intent.agent, intent.skills);
+        opts.shortcuts.setAgentIntent(intent);
+        return json({ ok: true, intent });
+      }),
+    },
     "/api/agents": {
       GET: async (req) => {
         const lay = layout.read();
@@ -237,6 +271,19 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         if (!message) return error(400, "message is required");
         if (message.length > MAX_MESSAGE) return error(400, `message is longer than ${MAX_MESSAGE} characters`);
         const sessionId = typeof body.sessionId === "string" && SESSION_ID_RE.test(body.sessionId) ? body.sessionId : undefined;
+        let skillIntent = sessionId ? sessions.intentContext(agent.id, sessionId) : null;
+        if (body.intentId !== undefined) {
+          if (typeof body.intentId !== "string") return error(400, "intentId must be a string");
+          if (typeof body.timezone !== "string" || !isTimezone(body.timezone)) return error(400, "Agent intent requires an IANA timezone");
+          skillIntent = { id: body.intentId, timezone: body.timezone };
+        }
+        if (skillIntent) {
+          const intent = opts.shortcuts?.agentIntents().find((i) => i.id === skillIntent.id);
+          if (!intent || !intent.enabled) return error(404, "Unknown or disabled agent intent");
+          if (intent.agent !== agent.id) return error(400, "Intent belongs to a different agent");
+          const context = await intentContext(intent.agent, intent.skills);
+          agent.systemPrompt = [agent.systemPrompt, `User timezone: ${skillIntent.timezone}. Request time: ${new Date().toISOString()}. Interpret relative dates in the user's timezone.`, context].filter(Boolean).join("\n\n");
+        }
         if (body.model !== undefined && (typeof body.model !== "string" || !MODEL_RE.test(body.model))) return error(400, "invalid model");
         const reqModel = typeof body.model === "string" && MODEL_RE.test(body.model) ? body.model : undefined;
         const isBase = agent.id === `${SPACE_APP}/${SPACE_AGENT}`;
@@ -271,7 +318,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
             model,
             // The manifest's tool list is Claude Code's syntax; other runtimes bound the agent by the permission mode's sandbox.
             turn: { message, sessionId, model, permissionMode, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
-            onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model),
+            onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model, skillIntent ?? undefined),
           });
           if (release) runs.subscribe(run.id, run.lastSeq, { onEvent() {}, onEnd: release });
         } catch (e) {

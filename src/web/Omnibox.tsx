@@ -1,3 +1,4 @@
+import { matchAgentIntents, type AgentIntentView } from "../space/shortcuts/agent-intents.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalcError, evaluate, format } from "../space/shortcuts/calc.ts";
 import ActionRunner, { ValueCard } from "./ActionRunner.tsx";
@@ -29,17 +30,20 @@ let takenSignal = 0;
 const previews = new Map<string, { at: number; result: RunResult | { error: string } }>();
 const PREVIEW_TTL_MS = 60_000;
 /** A row of the list: something to run, an entry to open, or the question for the assistant. */
-type Row = { type: "intent"; intent: Intent } | { type: "entry"; entry: Entry } | { type: "ask" };
+type Row = { type: "agentIntent"; intent: AgentIntentView } | { type: "intent"; intent: Intent } | { type: "entry"; entry: Entry } | { type: "ask" };
 /** How many loose action matches (names, tasks) follow the library's entries. */
 const LOOSE = 3;
 
-export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenShortcuts, onOpenTasks }: { entries: Entry[]; onOpen: (key: string) => void; onAsk: (text: string) => void; focusSignal: number; onOpenShortcuts: () => void; onOpenTasks: () => void }) {
+export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenShortcuts, onOpenTasks, onAgentIntent }: { entries: Entry[]; onOpen: (key: string) => void; onAsk: (text: string) => void; focusSignal: number; onOpenShortcuts: () => void; onOpenTasks: () => void; onAgentIntent: (intent: AgentIntentView, text: string) => Promise<void> }) {
   const { lang, t } = useLang();
   const [q, setQ] = useState("");
   const [focused, setFocused] = useState(false);
   const [sel, setSel] = useState(0);
   const field = useRef<HTMLTextAreaElement>(null);
   const [actions, setActions] = useState<Action[]>([]);
+  const agentStarting = useRef(false);
+  const [agentError, setAgentError] = useState("");
+  const [agentIntents, setAgentIntents] = useState<AgentIntentView[]>([]);
   const [panel, setPanel] = useState<{ intent: Intent; autoRun: boolean } | null>(null);
   const [running, setRunning] = useState(0);
   // Enter in the field while an action is open submits it, like its button.
@@ -52,6 +56,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     getJson<{ actions: Action[] }>("/api/shortcuts/actions")
       .then((d) => setActions(d.actions))
       .catch(() => {});
+    getJson<{ intents: AgentIntentView[] }>("/api/shortcuts/agent-intents").then((d) => setAgentIntents(d.intents)).catch(() => {});
     getJson<{ runs: RunView[] }>("/api/shortcuts/runs?limit=20")
       .then((d) => setRunning(d.runs.filter((r) => r.status === "running").length))
       .catch(() => {});
@@ -66,19 +71,21 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
 
   const results = useMemo(() => rank(q, entries), [q, entries]);
   const found = useMemo(() => intents(q, actions, browserZone()), [q, actions]);
+  const agentMatches = useMemo(() => found.some((i) => i.kind === "calc" || i.kind === "convert") ? [] : matchAgentIntents(q, agentIntents), [q, agentIntents, found]);
   // Direct results and an action named at the start come first; loose matches after the entries.
   const rows = useMemo<Row[]>(() => {
     const first = found.filter((i) => i.kind !== "action" || i.strong);
     const loose = found.filter((i) => i.kind === "action" && !i.strong).slice(0, LOOSE);
+    if (agentMatches.length) return [...agentMatches.map((intent): Row => ({ type: "agentIntent", intent })), { type: "ask" }];
     return [...first.map((intent): Row => ({ type: "intent", intent })), ...results.map((entry): Row => ({ type: "entry", entry })), ...loose.map((intent): Row => ({ type: "intent", intent })), { type: "ask" }];
-  }, [found, results]);
+  }, [found, results, agentMatches]);
   const askIndex = rows.length - 1;
-  const ambiguous = found.some((i) => i.kind === "action" && i.ambiguous);
-  const direct = found.length > 0 && (found[0]!.kind !== "action" || found[0]!.strong);
+  const ambiguous = agentMatches.length ? agentMatches.length > 1 : found.some((i) => i.kind === "action" && i.ambiguous);
+  const direct = agentMatches.length > 0 || found.length > 0 && (found[0]!.kind !== "action" || found[0]!.strong);
   // A new query highlights the row Enter would pick.
   useEffect(() => setSel(ambiguous ? -1 : direct ? 0 : opensByDefault(q, results[0]) ? 0 : askIndex), [q, rows]);
   // Typing again leaves the action that was opened.
-  useEffect(() => setPanel(null), [q]);
+  useEffect(() => { setPanel(null); setAgentError(""); }, [q]);
 
   const reset = () => {
     setQ("");
@@ -114,9 +121,15 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     setPanel({ intent, autoRun: intent.kind === "convert" || (intent.action.effect === "read" && complete(intent.action, intent.args)) });
   };
   const act = (i: number) => {
-    if (recorder.current || i < 0) return;
+    if (recorder.current || agentStarting.current || i < 0) return;
     const row = rows[i];
     if (!row || row.type === "ask") ask();
+    else if (row.type === "agentIntent") {
+      if (!row.intent.available) return;
+      agentStarting.current = true;
+      setAgentError("");
+      void onAgentIntent(row.intent, q).then(reset).catch((e) => setAgentError((e as Error).message)).finally(() => { agentStarting.current = false; });
+    }
     else if (row.type === "entry") open(row.entry);
     else runIntent(row.intent);
   };
@@ -210,12 +223,21 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
           </button>
         )}
       </div>
+      {agentError && <p className="omni-error" role="alert">{agentError}</p>}
       {voiceError && <p className="omni-error">{voiceError}</p>}
       {showList && ambiguous && <p className="sc-sub" role="status">{t("sc.pattern.choose")}</p>}
       {showList && (
         <ul className="omni-list" id="omni-list" role="listbox">
           {rows.map((row, i) => {
             if (row.type === "ask") return null;
+            if (row.type === "agentIntent") return (
+              <li key={`agent-intent:${row.intent.id}`} role="option" aria-selected={i === sel} aria-disabled={!row.intent.available} className={i === sel ? "on" : ""} onMouseEnter={() => setSel(i)} onMouseDown={(ev) => ev.preventDefault()} onClick={() => act(i)}>
+                <span className="omni-icon" aria-hidden="true">✦</span>
+                <span className="omni-title">{row.intent.title}{!row.intent.available && <em> · {row.intent.reason}</em>}</span>
+                <span className="omni-kind">{t("omni.skillAgent")}</span>
+                {i === sel && row.intent.available && <kbd>↵</kbd>}
+              </li>
+            );
             if (row.type === "intent") return <IntentRow key={row.intent.key} intent={row.intent} on={i === sel} onHover={() => setSel(i)} onPick={() => act(i)} />;
             const e = row.entry;
             return (

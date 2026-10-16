@@ -1,3 +1,4 @@
+import type { AgentIntent } from "./agent-intents.ts";
 import { Database } from "bun:sqlite";
 import { type Effect, MAX_RUNS, type Run, type RunResult, type RunStatus } from "./types.ts";
 
@@ -10,6 +11,10 @@ import { type Effect, MAX_RUNS, type Run, type RunResult, type RunStatus } from 
  */
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS shortcut_agent_intents (
+  id TEXT PRIMARY KEY,
+  definition TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS shortcut_patterns (
   action TEXT NOT NULL,
   peer TEXT NOT NULL,
@@ -78,6 +83,16 @@ export class ShortcutStore {
       const cols = this.db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all();
       if (!cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
     }
+  }
+
+  agentIntents(): AgentIntent[] {
+    return this.db.query<{ definition: string }, []>("SELECT definition FROM shortcut_agent_intents ORDER BY id").all().map((r) => JSON.parse(r.definition) as AgentIntent);
+  }
+
+  setAgentIntent(intent: AgentIntent): void {
+    const exists = this.db.query("SELECT id FROM shortcut_agent_intents WHERE id = ?").get(intent.id);
+    if (!exists && this.agentIntents().length >= 128) throw new Error("At most 128 agent intents per Space");
+    this.db.query("INSERT INTO shortcut_agent_intents (id, definition) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET definition = excluded.definition").run(intent.id, JSON.stringify(intent));
   }
 
   patterns(): { action: string; peer: string; patterns: string[] }[] {

@@ -24,3 +24,9 @@ test("an app agent with runtime/tier options sends its own pick; one of an older
   expect(queuedChatTurn({ app: "todo", name: "planner", modelOptions: options }, "hi", "haiku", "", "").model).toBeUndefined();
   expect(queuedChatTurn({ app: "todo", name: "planner" }, "hi", "haiku", "codex/intermediate", "").model).toBe("haiku");
 });
+
+test("agent intent turns retain the original sentence and routing context without changing permissions", () => {
+  const text = "查今天金融新闻";
+  const turn = queuedChatTurn({ app: "whymove", name: "curator" }, text, "", "", "plan", { intentId: "financial-news", timezone: "Asia/Seoul" });
+  expect(turn).toEqual({ message: text, intentId: "financial-news", timezone: "Asia/Seoul", permissionMode: "plan", model: undefined });
+});

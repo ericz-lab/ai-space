@@ -1,6 +1,6 @@
 # Shortcuts and universal search
 
-Status: phase 1 and backend-configured sentence patterns are implemented (Web). Phases 2 and 3 below are still a plan.
+Status: phase 1, backend-configured sentence patterns, and skill-equipped agent intent routing are implemented (Web). Phases 2 and 3 below are still a plan.
 
 Frequent operations run straight from the home screen's command box ([panel.md](panel.md#omnibox)) and from the built-in Shortcuts window: calculate, convert currencies, query financial news and calendars, create todos and run scheduler tasks, without opening each app. Every entry point shares one action catalogue, one validation, one executor and one set of result cards.
 
@@ -145,6 +145,65 @@ any matching bound discards the pattern pass, leaving keyword/name matching
 available; partial results never decide an action. Compiled patterns are cached
 in a bounded cache. This is a deliberately small syntax, not a general natural
 language interpreter.
+
+## Skill-equipped agent intents
+
+Sentence recognition can route the original request to an agent rather than a
+fixed app capability. These are separate from read/write API actions. The command
+box lists matching agent intents below the input; selecting a row opens that
+agent's existing chat and submits the original sentence once. Typing does not
+start a model call. Results stream in the agent conversation, with the existing
+history, background execution, reconnect and stop controls. Multiple matching
+intents require a choice. A matching unavailable agent stays unavailable; the
+command box does not silently replace it with an API query or another agent.
+
+Routes are configured only in the backend and stored in `shortcut_agent_intents`
+in `space.db`. There is no configuration UI. Use
+`GET /api/shortcuts/agent-intents` to read definitions and availability;
+`POST /api/shortcuts/agent-intents` creates or replaces a definition by id:
+
+```json
+{
+  "id": "financial-news",
+  "title": "金融新闻",
+  "agent": "whymove/curator",
+  "skills": ["curate-news"],
+  "patterns": ["[帮我][查|查询|看看|看一下][{period}](金融新闻|财经新闻|新闻)[ {topic}]"],
+  "enabled": true
+}
+```
+
+This recognizes `查今天金融新闻`, `金融新闻`, `帮我看看今天的金融新闻`, and
+`查本周财经新闻 美联储`. `{period}` accepts known relative periods (including
+Chinese labels and an optional trailing 的); other named slots capture text.
+Captures classify the intent only: they do not replace, summarize or rewrite the
+user's message. Multiple capture splits of the same intent produce one candidate.
+Agent matches take precedence over API action patterns and keywords; direct
+arithmetic and currency conversion retain their existing precedence.
+
+The initial scope is a local app agent, named `app/agent`, with 1–4 app-owned
+skills under `skills/<name>/SKILL.md`; peer routing and shared-skill aliases are
+not supported here. Each definition has 1–16 patterns; at most 128 definitions
+are stored per Space. Set `enabled: false` to disable one, including when its app
+has been removed. Invalid updates preserve the previous configuration. Reload
+the page or refocus after the command box's one-minute catalogue cache expires.
+
+The client submits `{ message, intentId, timezone }` to the selected agent's
+existing chat route. The server resolves the stored intent, checks its target,
+and loads the canonical skill file contents into the turn's system context.
+It rejects missing skills, paths outside the app (including symlinks), a skill
+larger than 64 KiB, or total skill content over 128 KiB. Skills do not grant extra
+permissions. A request to query news is not permission to create or publish an
+article, even if the skill also describes those workflows. The browser's IANA
+zone and request instant accompany relative dates. The selected intent and zone
+are retained with the chat session, including runtime session-id rotation, so
+follow-up turns reload the same skills. A disabled/missing or retargeted intent
+fails explicitly on resume.
+
+In the financial-news configuration, `whymove/curator` loads `curate-news` and
+handles the whole request. `finance-news-feed/news` remains a standalone read API
+action for callers that explicitly choose it; it is not the handler for a matching
+financial-news agent intent.
 
 ## Built-ins
 

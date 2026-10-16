@@ -1,3 +1,4 @@
+import type { AgentIntentView } from "../space/shortcuts/agent-intents.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddForm, UninstallForm } from "./AppForms.tsx";
 import ModelPreference from "./ModelPreference.tsx";
@@ -150,6 +151,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     if (assistant) setChatAgent(assistant);
     else setChatAgent((cur) => (cur.app === "space" && !cur.peer ? cur : { id: "space/assistant", app: "space", name: "assistant", title: "Space Assistant", i18n: { zh: { title: "空间助手" } }, avatar: "/assistant.svg", appIcon: "✨", runtime: "claude" }));
     setAsk((cur) => ({ id: (cur?.id ?? 0) + 1, text }));
+    setPanel("chat");
+  };
+  const askSkillAgent = async (intent: AgentIntentView, text: string) => {
+    const target = agents.find((a) => a.id === intent.agent && !a.peer)
+      ?? (await getJson<{ agents: AgentInfo[] }>("/api/agents")).agents.find((a) => a.id === intent.agent && !a.peer);
+    if (!target) throw new Error(t("omni.agentUnavailable"));
+    setChatAgent(target);
+    setAsk((cur) => ({ id: (cur?.id ?? 0) + 1, text, intentId: intent.id }));
     setPanel("chat");
   };
   const [omniFocus, setOmniFocus] = useState(0);
@@ -750,7 +759,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 </button>
               </div>
             )}
-            {screen.id === HOME && !editing && <Omnibox entries={entries} onOpen={openEntry} onAsk={askAssistant} focusSignal={omniFocus} onOpenShortcuts={openShortcuts} onOpenTasks={openTasks} />}
+            {screen.id === HOME && !editing && <Omnibox entries={entries} onOpen={openEntry} onAsk={askAssistant} focusSignal={omniFocus} onOpenShortcuts={openShortcuts} onOpenTasks={openTasks} onAgentIntent={askSkillAgent} />}
             {renderScreen(screen)}
           </section>
         ) : null}

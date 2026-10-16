@@ -1,3 +1,4 @@
+import { browserZone } from "./shortcuts.ts";
 import { useEffect, useRef, useState } from "react";
 import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun } from "./api.ts";
 import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
@@ -170,7 +171,7 @@ async function stopRun(a: Active): Promise<void> {
 }
 
 /** A question from the home screen's box; a new `id` sends `text` once. */
-export type Ask = { id: number; text: string };
+export type Ask = { id: number; text: string; intentId?: string };
 
 export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void; ask?: Ask | null }) {
   const { lang, t } = useLang();
@@ -498,9 +499,9 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
     void restoreRuns(agents);
   }, [agents]);
 
-  const send = (text: string) => {
+  const send = (text: string, intentId?: string) => {
     patch(key, (v) => ({ ...v, agent: agent || v.agent, msgs: [...v.msgs, { role: "user", text }] }));
-    runner(key).queue.push(queuedChatTurn(agent, text, modelRef.current, baseChoice(key), permRef.current));
+    runner(key).queue.push(queuedChatTurn(agent, text, modelRef.current, baseChoice(key), permRef.current, intentId ? { intentId, timezone: browserZone() } : undefined));
     drain(key, base);
   };
   // A question from the box starts a new conversation, unless the current one is still working:
@@ -514,7 +515,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
       setHist(null);
     }
     setStick(true);
-    send(ask.text);
+    send(ask.text, ask.intentId);
   }, [ask]);
 
   const submit = () => {
