@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings: this phone's Spaces and display, the Space's settings, the session and the app. -->
+<resources>
+    <string name="settings_spaces">Spaces</string>
+    <string name="settings_selected">Selected</string>
+    <string name="settings_more">More</string>
+    <string name="settings_remove">Remove</string>
+    <string name="settings_add_space">Add a Space</string>
+    <string name="settings_spaces_footer">Removing a Space here forgets its address, sign-in and screens on this phone. Nothing changes on the server.</string>
+
+    <string name="settings_display">Display</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_system">System</string>
+    <string name="settings_light">Light</string>
+    <string name="settings_dark">Dark</string>
+    <string name="settings_widgets">Widgets</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_display_footer">These belong to this phone, as the same choices on the panel belong to each browser. The theme is one of the panel\'s. The language follows the app\'s language in the system settings, or the phone\'s.</string>
+
+    <string name="settings_status">Status</string>
+    <string name="settings_services">Services</string>
+    <string name="settings_peers">Peers</string>
+    <string name="settings_backups">Backups</string>
+    <string name="settings_loading">Loading…</string>
+    <string name="settings_connected">Connected</string>
+    <string name="settings_connecting">Connecting…</string>
+    <string name="settings_signed_out">Signed out</string>
+    <string name="settings_unreachable">Cannot reach this Space</string>
+    <string name="settings_incompatible">Not an ai-space panel</string>
+
+    <string name="settings_models">Models</string>
+    <string name="settings_default_model">Default model</string>
+    <string name="settings_environment_defaults">Environment defaults</string>
+    <string name="settings_not_saved">The change was not saved: %1$s</string>
+    <string name="settings_models_footer">Shared by app requests and new Space Assistant chats. Changing it here changes the Space, for every device.</string>
+    <string name="settings_models_defaults">Apps: %1$s · Space Assistant: %2$s</string>
+
+    <string name="settings_space">Space</string>
+    <string name="settings_pages_footer">Read from the Space each time a page opens.</string>
+    <string name="settings_inbox">Inbox</string>
+    <string name="settings_chat">Chat</string>
+    <string name="settings_tasks">Scheduled tasks</string>
+    <string name="settings_model_usage">Model usage</string>
+    <string name="settings_app_usage">App usage</string>
+    <string name="settings_app_models">App models</string>
+    <string name="settings_events">Events and calls</string>
+    <string name="settings_packages">Apps and connections</string>
+    <string name="settings_terminal">Terminal</string>
+
+    <string name="settings_online">online</string>
+    <string name="settings_offline">offline</string>
+    <string name="settings_running">running</string>
+    <string name="settings_not_answering">not answering</string>
+    <string name="settings_paused">paused</string>
+    <string name="settings_unknown">unknown</string>
+    <string name="settings_backup_ok">ok</string>
+    <string name="settings_backup_stale">out of date</string>
+    <string name="settings_backup_failed">failed</string>
+    <string name="settings_backup_retired">retired</string>
+    <string name="settings_backup_none">none yet</string>
+    <plurals name="settings_count_apps">
+        <item quantity="one">%d app</item>
+        <item quantity="other">%d apps</item>
+    </plurals>
+    <plurals name="settings_count_agents">
+        <item quantity="one">%d agent</item>
+        <item quantity="other">%d agents</item>
+    </plurals>
+    <plurals name="settings_count_widgets">
+        <item quantity="one">%d widget</item>
+        <item quantity="other">%d widgets</item>
+    </plurals>
+    <plurals name="settings_count_snapshots">
+        <item quantity="one">%d snapshot</item>
+        <item quantity="other">%d snapshots</item>
+    </plurals>
+
+    <string name="settings_session">Session</string>
+    <string name="settings_open_web_panel">Open Web Panel</string>
+    <string name="settings_sign_out">Sign Out</string>
+    <string name="settings_sign_out_title">Sign out of %1$s?</string>
+    <string name="settings_sign_out_detail">This clears the Space\'s cookies and saved pages from this phone.</string>
+    <string name="settings_cancel">Cancel</string>
+    <string name="settings_session_footer">The sign-in belongs to whatever stands in front of your Space (for example Cloudflare Access). The app stores no password or token; the session lives in this Space\'s own web data, apart from your browser.</string>
+
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+</resources>

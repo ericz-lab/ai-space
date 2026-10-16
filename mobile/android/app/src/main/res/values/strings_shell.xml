@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The shell: connecting, the pager's screen menu, app pages, the web panel. Chinese in values-zh. -->
+<resources>
+    <string name="shell_ok">OK</string>
+    <string name="shell_cancel">Cancel</string>
+    <string name="shell_close">Close</string>
+    <string name="shell_retry">Retry</string>
+    <string name="shell_not_ai_space_response">not an ai-space response</string>
+
+    <string name="shell_connect_title">Connect to a Space</string>
+    <string name="shell_connect_intro">Enter the address you open your ai-space panel at. Sign-in, when your Space asks for one, happens after connecting.</string>
+    <string name="shell_connect_address_label">Panel address</string>
+    <string name="shell_connect_name_hint">Name (optional)</string>
+    <string name="shell_connect_button">Connect</string>
+    <string name="shell_connect_local">Use a Space on this computer (%1$s)</string>
+    <string name="shell_error_empty">Enter the panel\'s address.</string>
+    <string name="shell_error_invalid">This is not a valid address.</string>
+    <string name="shell_error_scheme">The address must start with https://.</string>
+    <string name="shell_error_credentials">Leave user names and passwords out of the address; sign in after connecting.</string>
+    <string name="shell_error_insecure">A Space on another machine must use https://.</string>
+    <string name="shell_error_saved">This Space is already saved.</string>
+
+    <string name="shell_screen_main">Main</string>
+    <string name="shell_screen_n">Screen %1$d</string>
+    <string name="shell_new_screen">New Screen</string>
+    <string name="shell_edit_screen">Edit This Screen</string>
+    <string name="shell_copy_layout">Copy the Panel\'s Layout</string>
+    <string name="shell_delete_screen">Delete Screen</string>
+    <string name="shell_delete_screen_title">Delete this screen?</string>
+    <string name="shell_delete_screen_message">Its apps, agents and widgets stay in the library.</string>
+    <string name="shell_replace_title">Replace this phone\'s screens?</string>
+    <string name="shell_replace">Replace</string>
+    <string name="shell_replace_message">The screens on this phone become a copy of the panel\'s as it is now. The panel does not change.</string>
+
+    <string name="shell_connecting">Connecting…</string>
+    <string name="shell_signing_in_at">Signing in at %1$s</string>
+    <string name="shell_cannot_load">Cannot load this page</string>
+    <string name="shell_not_panel">This address is not an ai-space panel</string>
+    <string name="shell_download_failed">Download failed</string>
+    <string name="shell_back">Back</string>
+    <string name="shell_forward">Forward</string>
+    <string name="shell_stop">Stop</string>
+    <string name="shell_reload">Reload</string>
+    <string name="shell_return_to_space">Return to Space</string>
+    <string name="shell_share">Share</string>
+    <string name="shell_open_in_browser">Open in Browser</string>
+    <string name="shell_add_to_panel">Add to Panel</string>
+    <string name="shell_remove_from_panel">Remove from Panel</string>
+    <string name="shell_close_tab">Close Tab</string>
+    <string name="shell_close_tab_named">Close Tab: %1$s</string>
+    <string name="shell_open_tabs">Open Tabs</string>
+    <string name="shell_page_controls">Page controls</string>
+    <string name="shell_expanded">Expanded</string>
+    <string name="shell_collapsed">Collapsed</string>
+    <string name="shell_move_other_side">Move to Other Side</string>
+    <string name="shell_dismiss_page_controls">Dismiss page controls</string>
+    <string name="shell_web_panel">Web Panel</string>
+</resources>

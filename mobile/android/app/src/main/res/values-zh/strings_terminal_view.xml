@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="terminal_key_left">左方向键</string>
+    <string name="terminal_key_right">右方向键</string>
+    <string name="terminal_key_up">上方向键</string>
+    <string name="terminal_key_down">下方向键</string>
+    <string name="terminal_key_hide_keyboard">收起键盘</string>
+    <string name="terminal_key_ctrl">Control，作用于下一个键</string>
+    <string name="terminal_key_alt">Alt，作用于下一个键</string>
+</resources>

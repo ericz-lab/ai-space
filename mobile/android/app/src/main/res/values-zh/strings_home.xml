@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_search">搜索</string>
+    <string name="home_search_label">搜索应用、智能体和小组件</string>
+    <string name="home_clear">清除</string>
+    <string name="home_apps">应用</string>
+    <string name="home_agents">智能体</string>
+    <string name="home_widgets">小组件</string>
+    <string name="home_apps_and_agents">应用和智能体</string>
+    <string name="home_nothing_here">这里还没有内容</string>
+    <string name="home_nothing_here_detail">这个 Space 还没有带页面的应用，可以在面板里添加。</string>
+    <string name="home_no_results">没有“%1$s”的结果</string>
+    <string name="home_no_results_detail">请检查拼写或尝试新的搜索。</string>
+    <string name="home_screen_main">主屏</string>
+    <string name="home_screen_n">屏幕 %1$d</string>
+    <string name="home_screen_empty">这个屏幕上还没有内容</string>
+    <string name="home_screen_empty_detail">在主页里长按应用、智能体或小组件，选择“添加到面板”。在这里长按可以新建、编辑或删除屏幕。</string>
+    <string name="home_open_home">打开主页</string>
+    <string name="home_remove_from_screen">从这个屏幕移除</string>
+    <string name="home_add_to_panel">添加到面板</string>
+    <string name="home_remove_from_panel">从面板移除</string>
+    <string name="home_open_in_browser">在浏览器中打开</string>
+    <string name="home_copy_link">拷贝链接</string>
+    <string name="home_done">完成</string>
+    <string name="home_remove">移除</string>
+    <string name="home_move_up">上移</string>
+    <string name="home_move_down">下移</string>
+    <string name="home_screen_editor_footer">这台手机上的屏幕布局只属于这台设备，在这里的修改不会同步到面板。</string>
+
+    <string name="home_connecting">正在连接…</string>
+    <string name="home_sign_in_to">登录 %1$s</string>
+    <string name="home_sign_in_detail">你的 Space 需要登录。登录页会在页面上方打开，登录状态只用于这个 Space。</string>
+    <string name="home_sign_in">登录</string>
+    <string name="home_unreachable">无法连接到这个 Space</string>
+    <string name="home_incompatible">这个地址不是 ai-space 面板</string>
+    <string name="home_retry">重试</string>
+    <string name="home_last_known">下面是这个 Space 在%1$s的内容，现在可能已经变化。</string>
+
+    <string name="home_offline">离线</string>
+    <string name="home_peer_offline">%1$s 离线</string>
+    <string name="home_not_answering">未响应</string>
+    <string name="home_paused">已暂停</string>
+    <string name="home_running">运行中</string>
+
+    <string name="home_widget_embed">由应用自己绘制，打开后查看。</string>
+    <string name="home_widget_last_known">这是最后一次的内容，所在机器已离线。</string>
+    <string name="home_widget_nothing">暂无内容。</string>
+    <string name="home_widget_updated">更新于 %1$s</string>
+    <string name="home_no_data">无数据</string>
+    <string name="home_no_history">还没有历史数据</string>
+</resources>

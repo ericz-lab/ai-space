@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_spaces">Space</string>
+    <string name="settings_selected">已选中</string>
+    <string name="settings_more">更多</string>
+    <string name="settings_remove">移除</string>
+    <string name="settings_add_space">添加 Space</string>
+    <string name="settings_spaces_footer">在这里移除 Space，只会让这台手机忘记它的地址、登录状态和屏幕布局，服务器上不会有任何变化。</string>
+
+    <string name="settings_display">显示</string>
+    <string name="settings_appearance">外观</string>
+    <string name="settings_system">跟随系统</string>
+    <string name="settings_light">浅色</string>
+    <string name="settings_dark">深色</string>
+    <string name="settings_widgets">小组件</string>
+    <string name="settings_language">语言</string>
+    <string name="settings_display_footer">这些选项只属于这台手机，就像面板上的同类选项只属于各自的浏览器。主题取自面板的主题。语言跟随系统设置里这个应用的语言，或手机的语言。</string>
+
+    <string name="settings_status">状态</string>
+    <string name="settings_services">服务</string>
+    <string name="settings_peers">对等节点</string>
+    <string name="settings_backups">备份</string>
+    <string name="settings_loading">正在加载…</string>
+    <string name="settings_connected">已连接</string>
+    <string name="settings_connecting">正在连接…</string>
+    <string name="settings_signed_out">未登录</string>
+    <string name="settings_unreachable">无法连接到这个 Space</string>
+    <string name="settings_incompatible">不是 ai-space 面板</string>
+
+    <string name="settings_models">模型</string>
+    <string name="settings_default_model">默认模型</string>
+    <string name="settings_environment_defaults">使用环境配置</string>
+    <string name="settings_not_saved">修改没有保存：%1$s</string>
+    <string name="settings_models_footer">应用调用和空间助手的新对话共用。在这里修改会改变 Space 本身，对所有设备生效。</string>
+    <string name="settings_models_defaults">应用：%1$s · 空间助手：%2$s</string>
+
+    <string name="settings_space">Space</string>
+    <string name="settings_pages_footer">每次打开页面时从 Space 读取。</string>
+    <string name="settings_inbox">收件箱</string>
+    <string name="settings_chat">对话</string>
+    <string name="settings_tasks">定时任务</string>
+    <string name="settings_model_usage">模型用量</string>
+    <string name="settings_app_usage">应用用量</string>
+    <string name="settings_app_models">应用模型</string>
+    <string name="settings_events">事件与调用</string>
+    <string name="settings_packages">应用与连接</string>
+    <string name="settings_terminal">终端</string>
+
+    <string name="settings_online">在线</string>
+    <string name="settings_offline">离线</string>
+    <string name="settings_running">运行中</string>
+    <string name="settings_not_answering">未响应</string>
+    <string name="settings_paused">已暂停</string>
+    <string name="settings_unknown">未知</string>
+    <string name="settings_backup_ok">正常</string>
+    <string name="settings_backup_stale">已过期</string>
+    <string name="settings_backup_failed">失败</string>
+    <string name="settings_backup_retired">已停用</string>
+    <string name="settings_backup_none">还没有</string>
+    <plurals name="settings_count_apps">
+        <item quantity="other">%d 个应用</item>
+    </plurals>
+    <plurals name="settings_count_agents">
+        <item quantity="other">%d 个智能体</item>
+    </plurals>
+    <plurals name="settings_count_widgets">
+        <item quantity="other">%d 个小组件</item>
+    </plurals>
+    <plurals name="settings_count_snapshots">
+        <item quantity="other">%d 个快照</item>
+    </plurals>
+
+    <string name="settings_session">会话</string>
+    <string name="settings_open_web_panel">打开网页面板</string>
+    <string name="settings_sign_out">退出登录</string>
+    <string name="settings_sign_out_title">要退出 %1$s 吗？</string>
+    <string name="settings_sign_out_detail">这会清除这台手机上该 Space 的 Cookie 和已保存的页面数据。</string>
+    <string name="settings_cancel">取消</string>
+    <string name="settings_session_footer">登录由 Space 前面的访问层（例如 Cloudflare Access）负责。本应用不保存密码或令牌，会话只存在于这个 Space 自己的网页数据中，与浏览器相互独立。</string>
+
+    <string name="settings_about">关于</string>
+    <string name="settings_version">版本</string>
+</resources>
