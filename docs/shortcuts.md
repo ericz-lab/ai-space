@@ -286,3 +286,10 @@ The response contains the existing intent union (`calc` with `expression`; `conv
 The iPhone places universal search at the top of its first Panel; Home retains ordinary catalogue filtering. The command box scrolls with Panel 1. The two inputs are independent. The iPhone uses the shared Mac `OmniboxRules` for catalogue ranking. Native forms support text, number, date, time, period, choice and task inputs. Selecting a complete read action runs it; writes and task runs require Create/Run. An uncertain transport failure preserves the exact submission body and request ID. Accepted runs continue on the Space after the sheet or app closes. List, receipt, value and task results render natively. Skill-agent selection opens a fresh native chat with the original sentence, `intentId` and timezone; an already-running chat is left intact.
 
 The iPhone and web microphones stream at most 90 seconds of mono 16 kHz PCM over `/api/voice/realtime`. Partial transcripts replace their current segment in the search field; final events commit that segment. The microphone button appears immediately without waiting for a capability request; connection failures are shown on use. Leaving the search cancels capture; a late transcript cannot fill a different Space's input. Transcription fills the field without submitting. Catalogue matching still works if the resolver cannot be reached; command errors are shown and an explicit Ask Space Assistant remains available.
+
+
+Agent intent patterns may opt into a short trailing-text tolerance with `[{suffix2}]`.
+The optional slot accepts one or two Unicode code points (including punctuation);
+three or more are rejected. For example, `金融新闻[{suffix2}]` matches `金融新闻`,
+`金融新闻。` and `金融新闻一下`. This affects routing only: the agent still receives
+the original sentence. Existing patterns without this slot retain exact matching.

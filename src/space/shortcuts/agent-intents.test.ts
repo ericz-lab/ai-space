@@ -23,3 +23,14 @@ test("backend intent validation rejects unsafe names and malformed patterns", ()
     expect(() => parseAgentIntent({ ...news, ...patch })).toThrow();
   }
 });
+
+
+test("optional suffix2 accepts at most two arbitrary Unicode characters without widening other routes", () => {
+  const tolerant = { ...news, available: true, patterns: ["[帮我][查|查询|看看|看一下][{period}]金融新闻[{suffix2}]"] };
+  for (const text of ["金融新闻", "金融新闻。", "金融新闻一下", "今天的金融新闻？！", "金融新闻😀😀"]) {
+    expect(matchAgentIntents(text, [tolerant])).toEqual([tolerant]);
+  }
+  for (const text of ["金融新闻一二三", "金融新闻😀😀😀", "不要查金融新闻。", "财经新闻。", "天气。"])
+    expect(matchAgentIntents(text, [tolerant])).toEqual([]);
+  expect(matchAgentIntents("金融新闻。", [{ ...news, available: true }])).toEqual([]);
+});

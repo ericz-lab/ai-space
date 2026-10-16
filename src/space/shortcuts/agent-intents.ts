@@ -34,6 +34,8 @@ const PERIOD_LABELS: Record<string, string> = {
   "this month": "this-month", 最近七天: "last-7-days", 最近7天: "last-7-days",
 };
 function capture(name: string, text: string): string | undefined {
+  // Opt-in tolerance for short trailing text, counted as Unicode code points.
+  if (name === "suffix2") return Array.from(text).length <= 2 ? text : undefined;
   if (name !== "period") return text;
   const word = text.toLowerCase().replace(/的$/, "");
   return PERIOD_LABELS[word] ?? ((PERIODS as readonly string[]).includes(word) ? word : undefined);

@@ -39,14 +39,14 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
     patterns: ["[查[{period}]]金融新闻"], effect: "read", result: "list", available: true, inputs: [{ name: "period", label: "Period", type: "period", default: "today" }] });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createAgentRoutes({ ws, registry, layout: new LayoutStore(db), sessions, runs, runtimes: claudeOnly(["bun", cli]), shortcuts: store, actionCatalogue: () => actions }) });
   const post = (path: string, body: unknown) => fetch(new URL(path, server.url), { method: "POST", body: JSON.stringify(body) });
-  const config = { id: "financial-news", title: "Financial news", agent: "news/curator", skills: ["curate-news"], patterns: ["[查[{period}]]金融新闻"] };
+  const config = { id: "financial-news", title: "Financial news", agent: "news/curator", skills: ["curate-news"], patterns: ["[查[{period}]]金融新闻[{suffix2}]"] };
   try {
     expect((await post("/api/shortcuts/agent-intents", config)).status).toBe(200);
     const catalogue = await (await fetch(new URL("/api/shortcuts/agent-intents", server.url))).json();
     expect(catalogue.intents[0]).toMatchObject({ id: config.id, available: true });
     expect(runs.list()).toHaveLength(0);
     const resolve = async (text: string) => (await post("/api/shortcuts/resolve", { text, timezone: "Asia/Seoul" })).json();
-    for (const text of ["金融新闻", "查今天金融新闻"]) {
+    for (const text of ["金融新闻", "查今天金融新闻", "金融新闻。", "金融新闻一下", "查今天金融新闻？！"]) {
       const result = await resolve(text);
       expect(result.intents).toEqual([]);
       expect(result.agentIntents).toHaveLength(1);
