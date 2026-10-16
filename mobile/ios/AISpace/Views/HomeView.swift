@@ -306,7 +306,8 @@ struct OmniboxField: View {
         .contentShape(Capsule())
         .onTapGesture { focused.wrappedValue = true }
         .modifier(LauncherCapsuleGlass())
-        .padding(.horizontal, 24)
+        // The scrolling panel already supplies 16 pt; match Home's total 24 pt margin.
+        .padding(.horizontal, 8)
         .onChange(of: api.base) { _, _ in voice.cancel() }
         .onChange(of: scenePhase) { _, phase in if phase == .background { voice.cancel() } }
         .onChange(of: voice.busy) { _, busy in voiceBusy = busy }
