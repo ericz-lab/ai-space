@@ -3,6 +3,7 @@ import SwiftUI
 /// Native command results. Catalogue matching is immediate; structured commands use the shared resolver.
 struct OmniboxView: View {
     @ObservedObject var model: AppModel
+    @Binding var query: String
     let connection: Connection
     @ObservedObject var loader: CatalogueLoader
     @ObservedObject var store: OmniboxStore
@@ -12,7 +13,6 @@ struct OmniboxView: View {
     @State private var chatError: String?
     @State private var pendingLink: String?
 
-    private var query: String { model.query }
     private var resolution: ShortcutResolution? { store.resolvedText == query ? store.resolution : nil }
     private var entries: [CatalogueEntry] {
         guard let c = loader.catalogue else { return [] }
@@ -32,7 +32,7 @@ struct OmniboxView: View {
     private func openEntry(_ entry: CatalogueEntry) {
         if let builtin = builtinPages.first(where: { "builtin/" + $0.0 == entry.ref }) { model.hubPage = builtin.3 }
         else { model.open(entry) }
-        model.query = ""
+        query = ""
     }
     private var strong: [ShortcutIntent] { resolution?.intents.filter { $0.kind != "action" || $0.strong == true } ?? [] }
     private var loose: [ShortcutIntent] { Array((resolution?.intents.filter { $0.kind == "action" && $0.strong != true } ?? []).prefix(3)) }
@@ -123,7 +123,7 @@ struct OmniboxView: View {
         chat.draft = query
         chat.send(intentID: intent?.id, timezone: TimeZone.current.identifier)
         model.hubPage = .chat(agent: "agent:\(agent)")
-        model.query = ""
+        query = ""
     }
     private func openPendingLink() {
         guard let link = pendingLink else { return }

@@ -348,3 +348,7 @@
 "Voice Input" = "语音输入";
 "Allow microphone access in Settings to use voice input." = "请在设置中允许麦克风访问，以使用语音输入。";
 "Could not record audio." = "无法录制音频。";
+
+/* Panel command box */
+"Universal Search" = "万能搜索";
+"Search, run an action or ask an agent" = "搜索、执行操作或询问智能体";

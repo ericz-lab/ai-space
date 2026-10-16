@@ -32,3 +32,7 @@
 "Voice Input" = "Voice Input";
 "Allow microphone access in Settings to use voice input." = "Allow microphone access in Settings to use voice input.";
 "Could not record audio." = "Could not record audio.";
+
+/* Panel command box */
+"Universal Search" = "Universal Search";
+"Search, run an action or ask an agent" = "Search, run an action or ask an agent";

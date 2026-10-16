@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The launcher, in the two parts the panel has (docs/panel.md#screens). Without a screen it is
 /// the Home page: the library of every app, agent and widget of the Space, with one search.
-/// With one it is that screen, a page of its own between Home and Settings, with nothing above
-/// it: a swipe moves between the pages and a long press on the screen brings up its actions.
+/// With one it is that screen, a page of its own between Home and Settings. Panel 1 has
+/// the command box at its top: a swipe moves between the pages and a long press on the screen brings up its actions.
 /// The screens are this phone's (ScreenStore): copied from the panel once, then changed here
 /// without touching the Space.
 struct HomeView: View {
@@ -15,6 +15,7 @@ struct HomeView: View {
     /// The screen to show, by id; nil for the library.
     var screenID: String?
     @FocusState private var searchFocused: Bool
+    @State private var commandText = ""
     @State private var searchSubmit = 0
     @State private var searchVoiceBusy = false
 
@@ -23,33 +24,40 @@ struct HomeView: View {
     private let columns = [GridItem(.adaptive(minimum: 76, maximum: 110), spacing: 12, alignment: .top)]
 
     var body: some View {
-        if let screenID {
-            ZStack {
+        Group {
+            if let screenID {
                 page(longPress: { model.showingScreenMenu = true }) {
+                    if screenID == screens.first?.id {
+                        OmniboxView(model: model, query: $commandText, connection: connection, loader: loader, store: model.omnibox(for: connection), submit: searchSubmit)
+                            .id(connection.id)
+                            .disabled(searchVoiceBusy)
+                    }
                     if let catalogue = loader.catalogue, let screen = screens.first(where: { $0.id == screenID }) {
                         self.screen(screen, catalogue)
                     }
                 }
-            }
-        } else {
-            ZStack {
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if screenID == screens.first?.id {
+                        OmniboxField(query: $commandText, api: loader.api, voiceBusy: $searchVoiceBusy, focused: $searchFocused, submit: { searchSubmit += 1 })
+                            .padding(.vertical, 12)
+                    }
+                }
+            } else {
                 page(spacing: 12) {
-                    OmniboxView(model: model, connection: connection, loader: loader, store: model.omnibox(for: connection), submit: searchSubmit)
-                        .id(connection.id)
-                        .disabled(searchVoiceBusy)
-                    if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let catalogue = loader.catalogue { library(catalogue) }
+                    if let catalogue = loader.catalogue { library(catalogue) }
+                }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    SearchField(model: model, focused: $searchFocused)
+                        .padding(.vertical, 12)
                 }
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                SearchField(model: model, api: loader.api, voiceBusy: $searchVoiceBusy, focused: $searchFocused, submit: { searchSubmit += 1 })
-                    .padding(.vertical, 12)
-            }
-            .onReceive(model.pager.$id.removeDuplicates().dropFirst()) { _ in searchFocused = false }
-            .onChange(of: model.page?.id) { _, _ in searchFocused = false }
-            .onChange(of: model.hubPage) { _, _ in searchFocused = false }
-            .onChange(of: model.showingWebPanel) { _, _ in searchFocused = false }
-            .onDisappear { searchFocused = false }
         }
+        .onReceive(model.pager.$id.removeDuplicates().dropFirst()) { _ in searchFocused = false }
+        .onChange(of: model.page?.id) { _, _ in searchFocused = false }
+        .onChange(of: model.hubPage) { _, _ in searchFocused = false }
+        .onChange(of: model.showingWebPanel) { _, _ in searchFocused = false }
+        .onChange(of: connection.id) { _, _ in commandText = "" }
+        .onDisappear { searchFocused = false }
     }
 
     // MARK: Pages
@@ -213,11 +221,7 @@ struct HomeView: View {
 /// The library's search: one field over apps, agents and widgets.
 struct SearchField: View {
     @ObservedObject var model: AppModel
-    let api: SpaceAPI
-    @StateObject private var voice = OmniboxVoice()
-    @Binding var voiceBusy: Bool
     var focused: FocusState<Bool>.Binding
-    let submit: () -> Void
 
     private var idle: Bool { model.query.isEmpty && !focused.wrappedValue }
 
@@ -228,18 +232,7 @@ struct SearchField: View {
             TextField(text: $model.query, prompt: idle ? Text("") : Text("Search")) { Text("Search apps, agents and widgets") }
                 .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
                 .focused(focused)
-                .onSubmit { if !voice.busy { submit() } }
-                .disabled(voice.busy)
-            if voice.available {
-                Button { voice.toggle(api: api) { text in
-                    model.query = [model.query, text].filter { !$0.isEmpty }.joined(separator: " ")
-                    focused.wrappedValue = true
-                } } label: {
-                    if voice.transcribing { ProgressView().controlSize(.small) }
-                    else { Image(systemName: voice.recording ? "stop.circle.fill" : "mic.fill") }
-                }.disabled(voice.transcribing)
-                    .accessibilityLabel(Text(voice.recording ? "Stop Recording" : "Voice Input"))
-            }
+                .onSubmit { focused.wrappedValue = false }
             if !model.query.isEmpty {
                 Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain)
@@ -252,6 +245,60 @@ struct SearchField: View {
         .overlay {
             if idle {
                 Label("Search", systemImage: "magnifyingglass")
+                    .font(.system(size: 19)).foregroundStyle(Theme.text)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .contentShape(Capsule())
+        .onTapGesture { focused.wrappedValue = true }
+        .modifier(LauncherCapsuleGlass())
+        .padding(.horizontal, 24)
+    }
+}
+
+/// The first Panel's command field: actions, agents and voice input.
+struct OmniboxField: View {
+    @Binding var query: String
+    let api: SpaceAPI
+    @StateObject private var voice = OmniboxVoice()
+    @Binding var voiceBusy: Bool
+    var focused: FocusState<Bool>.Binding
+    let submit: () -> Void
+
+    private var idle: Bool { query.isEmpty && !focused.wrappedValue }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .opacity(idle ? 0 : 1)
+            TextField(text: $query, prompt: idle ? Text("") : Text("Universal Search")) { Text("Search, run an action or ask an agent") }
+                .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
+                .focused(focused)
+                .onSubmit { if !voice.busy { submit() } }
+                .disabled(voice.busy)
+            if voice.available {
+                Button { voice.toggle(api: api) { text in
+                    query = [query, text].filter { !$0.isEmpty }.joined(separator: " ")
+                    focused.wrappedValue = true
+                } } label: {
+                    if voice.transcribing { ProgressView().controlSize(.small) }
+                    else { Image(systemName: voice.recording ? "stop.circle.fill" : "mic.fill") }
+                }.disabled(voice.transcribing)
+                    .accessibilityLabel(Text(voice.recording ? "Stop Recording" : "Voice Input"))
+            }
+            if !query.isEmpty {
+                Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("Clear"))
+            }
+        }
+        .font(.system(size: 19))
+        .foregroundStyle(Theme.text)
+        .padding(.horizontal, 18).frame(height: 48)
+        .overlay {
+            if idle {
+                Label("Universal Search", systemImage: "magnifyingglass")
                     .font(.system(size: 19)).foregroundStyle(Theme.text)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
