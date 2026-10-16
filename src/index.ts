@@ -1,3 +1,4 @@
+import { createVoiceRoutes, voiceTarget } from "./space/bus/voice.ts";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
@@ -419,6 +420,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         },
         appForToken: (t) => storage.appForToken(t),
       }),
+      ...createVoiceRoutes(() => voiceTarget(bus, remote, (app) => registry.get(app)?.manifest.service?.port)),
       ...createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t), remote, consumers }),
       ...createShortcutRoutes({ shortcuts }),
       ...createStorageRoutes({ storage, token: config.apiToken }),

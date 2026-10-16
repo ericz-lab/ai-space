@@ -100,6 +100,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 }
 .omni-field::placeholder { color: var(--muted); }
 .omni-mic {
+  display: grid; place-items: center;
   flex: none; width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer; font-size: 15px;
   background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text);
 }
@@ -1092,3 +1093,6 @@ a.widget-title:hover { color: var(--text); }
 .package-settings button:disabled { opacity: .55; cursor: default; }
 .package-settings a { color: var(--link); }
 .package-card { border-bottom-color: var(--hairline); }
+
+.omni-spinner { transform-origin: center; animation: omni-spin 1s linear infinite; }
+@keyframes omni-spin { to { transform: rotate(360deg); } }
