@@ -18,7 +18,7 @@ struct ChatMessage: Identifiable, Equatable {
 @MainActor
 final class ChatController: ObservableObject {
     let agent: AgentInfo
-    private let api: SpaceAPI
+    let api: SpaceAPI
     @Published private(set) var messages: [ChatMessage] = []
     @Published private(set) var busy = false
     @Published var draft = ""

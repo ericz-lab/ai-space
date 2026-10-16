@@ -425,8 +425,9 @@ final class AppModel: ObservableObject {
         pagerID = ids[max(0, min(ids.count - 1, i + step))]
     }
 
+    /// ⌘F: the command box on the first screen, where the window opens.
     func search() {
-        showPage(Pager.home)
+        showPage(Screens.home)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.focusSearch.send() }
     }
 
@@ -632,6 +633,23 @@ final class AppModel: ObservableObject {
         guard let ref else { return }
         quickChatAgentRef = ref
         prefs.quickChatAgent = ref.key
+    }
+
+    /// The Home box's question for Space Assistant (docs/panel.md#omnibox): a new conversation on
+    /// the selected Space, shown in the main window. While the assistant still answers, the
+    /// question waits in the field for Return instead of stopping that turn.
+    func ask(_ text: String) {
+        guard let c = selected, let agent = lives[c.id]?.agents.first(where: { $0.app == "space" && $0.peer == nil }),
+              let chat = chat(AgentRef(connection: c.id, agent: agent.id)) else { return }
+        query = ""
+        if chat.busy {
+            chat.draft = chat.draft.isEmpty ? text : chat.draft + "\n\n" + text
+        } else {
+            chat.newConversation()
+            chat.draft = text
+            chat.send()
+        }
+        destination = .hub(.chat(agent: agent.id))
     }
 
     func openQuickChatInMainWindow() {

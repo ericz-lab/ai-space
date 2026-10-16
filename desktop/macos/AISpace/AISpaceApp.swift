@@ -232,7 +232,8 @@ struct SpaceCommands: Commands {
 #if DEBUG
 /// For checking the layout without screen recording: `AISPACE_SNAPSHOT=<dir>` writes a PNG of the
 /// main window for each page named in `AISPACE_PAGES` (`#home`, a screen id, `#settings`,
-/// `hub:inbox`, `hub:chat`, `panel`), a few seconds apart. Debug builds only.
+/// `hub:inbox`, `hub:chat`, `panel`, `query:<text>` typed into the first screen's box, `ask:<text>` asked of
+/// Space Assistant), a few seconds apart. Debug builds only.
 @MainActor
 enum DebugSnapshot {
     static func schedule(window: NSWindow, model: AppModel) {
@@ -246,13 +247,18 @@ enum DebugSnapshot {
                 case "hub:inbox": model.destination = .hub(.inbox)
                 case "hub:chat": model.destination = .hub(.chat(agent: nil))
                 case "hub:terminal": model.destination = .hub(.terminal)
+                case let p where p.hasPrefix("query:"):
+                    model.showPage(Screens.home)
+                    model.query = String(p.dropFirst(6))
+                case let p where p.hasPrefix("ask:"): model.ask(String(p.dropFirst(4)))
                 default: model.showPage(page)
                 }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 9 + Double(i) * 4) {
                 guard let view = window.contentView?.superview, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
                 view.cacheDisplay(in: view.bounds, to: rep)
-                let name = page.replacingOccurrences(of: "#", with: "").replacingOccurrences(of: ":", with: "-")
+                let typed = page.hasPrefix("query:") || page.hasPrefix("ask:")
+                let name = typed ? String(page.prefix { $0 != ":" }) : page.replacingOccurrences(of: "#", with: "").replacingOccurrences(of: ":", with: "-")
                 try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(i)-\(name).png"))
             }
         }

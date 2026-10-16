@@ -249,7 +249,6 @@
 "Scheduled tasks" = "定时任务";
 "Screen %lld" = "屏幕 %lld";
 "Screens" = "屏幕";
-"Search apps, agents and widgets" = "搜索应用、智能体和小组件";
 "Select which local apps this connection may access. Nothing is shared by default. Turning sharing off closes active remote requests." = "选择此连接可访问的本机应用。默认不共享；关闭共享会断开现有远程请求。";
 "Selected" = "已选中";
 "Services" = "服务";
@@ -383,3 +382,13 @@
 "These belong to this Mac, as the same choices on the panel belong to each browser. The language follows the app's language in System Settings." = "这些设置只属于这台 Mac，就像面板上的同类选项只属于各个浏览器。语言跟随“系统设置”中为本应用选择的语言。";
 "This clears the Space's cookies and saved pages from this Mac." = "这会清除这台 Mac 上该 Space 的 Cookie 和已保存的页面。";
 "Your Space is behind a sign-in. It opens in the web panel and is kept for this Space only." = "你的 Space 需要登录。登录会在网页面板中打开，只对这个 Space 生效。";
+"Search apps, or tell Space Assistant what to do" = "搜索应用，或直接告诉空间助手要做什么";
+"Listening… click the microphone to stop" = "正在听… 再点一下麦克风结束";
+"Open %@" = "打开 %@";
+"Ask Space Assistant" = "交给空间助手";
+"Voice Input" = "语音输入";
+"Stop Recording" = "停止录音";
+"Transcribing…" = "正在转写…";
+"Voice input failed: %@" = "语音输入失败：%@";
+"Could not record: %@" = "无法录音：%@";
+"AI Space may not use the microphone. Allow it in System Settings → Privacy & Security → Microphone." = "AI Space 没有麦克风权限。请在“系统设置 → 隐私与安全性 → 麦克风”中允许。";
