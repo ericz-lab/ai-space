@@ -143,6 +143,10 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.deviceUsage.refresh()
         }.store(in: &watchers)
+        NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification).sink { [weak self] _ in
+            // Resolve after AppKit has chosen the next key window (which may be none).
+            DispatchQueue.main.async { self?.deviceUsage.refresh() }
+        }.store(in: &watchers)
         selectedID = store.defaultConnection?.id
         screens.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
         // A swipe moves the pager without the model; the screen it lands on is the one last shown.
