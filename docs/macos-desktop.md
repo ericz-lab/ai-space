@@ -294,7 +294,7 @@ Shared with the iPhone client: the Mac compiles the iPhone client's Foundation-o
 Not done, and why:
 
 - The Mac as a resource agents can use (its files, calendar, screen) needs its own trust design: what an agent on a server may ask of this Mac, how each request is approved, and how that stays narrower than a remote shell. It is the next design task, not part of this client.
-- A Share extension and App Intents need Xcode to build (an extension target and the App Intents metadata processor); the Services entry and `aispace://` links cover the same uses until then.
+- App Intents remain unimplemented. The image Share extension is built with Xcode (see below).
 - Checks on the menu bar: `/api/checks` lists definitions whose state each app serves at its own URL; reading them all belongs in the Space, not in the client.
 
 Also still open for the stage 0 gate: completing the Cloudflare Access sign-in inside WKWebView, Chinese input, the terminal WebSocket, uploads and themes, each checked by hand on the oldest and current supported macOS.
@@ -302,3 +302,21 @@ Also still open for the stage 0 gate: completing the Cloudflare Access sign-in i
 The launcher layout was checked on macOS 27 against the Seoul Hub (42 apps, 16 agents, 27 widgets): the first screen with its tiles and widget cards, the library with search, a timed-out refresh shown as the last-known card, Settings with services, peers, backups and the default model, the inbox and the agents list, each written by the debug build's `AISPACE_SNAPSHOT` hook.
 
 Checked on macOS 27 against a scratch Space: the panel reports ready; the sidebar lists the Space's agent; an inbox message posted with `POST /api/notify` is picked up by the next refresh; a chat turn streams from start to "thinking" to the reply and ends cleanly through the native client. The Seoul Hub behind Cloudflare Access reports sign-in needed until the operator signs in on Home; after signing in there, the native views load its 39 apps, 16 agents and inbox with that session, and an app opened by link loads as a tab on its own Access-protected host.
+
+## Picture sharing
+
+The signed Xcode build embeds a macOS Share extension. Share one image from Finder, Preview or the screenshot preview to **ai-space**, choose a saved Space and a destination app, optionally add a note, then save. If the extension is absent from the share menu, enable it in macOS sharing-extension settings. Open the main app once and sign in to the Space before using the extension.
+
+The main app also offers **Space → Share Picture…**, **Paste Picture**, and **Pending Shares**. The editor, target discovery (`GET /api/capture`), image upload (`POST /api/capture/image?to=…`), bounded image decoding and persistent retry state are shared with iOS. The Mac extension also accepts secure `NSImage` archives supplied by AppKit, rasterizing them to at most 2048 pixels per side before encoding. Files are limited to 40 MiB before decoding, then converted if necessary to fit the capture endpoint. The Mac editor has a fixed header with Cancel (Esc), outside the scrolling content, because a system extension host does not provide the iPhone navigation toolbar. Cancel ends the extension request and retains already received pictures; a successful save removes the picture, and Done closes the share session. The system owns the share window above its source app; the extension does not raise its window level. Once an upload starts, retries retain its ID, destination and note to prevent duplicate saves. Delete pending pictures explicitly when they are no longer needed.
+
+Xcode builds use `$(TeamIdentifierPrefix)dev.ai-space.desktop.capture` for App Group drafts and addresses, and `$(AppIdentifierPrefix)dev.ai-space.desktop.share` for device-only Data Protection Keychain sessions. Only cookies matching the capture endpoint are exported, scoped to the saved connection and URL, refreshed when WebKit cookies change and revoked on sign-out/removal. The extension has App Sandbox and outgoing-network entitlements. No credentials are written to the App Group files.
+
+Build with the same Apple development team for the app and extension:
+
+```bash
+DEVELOPMENT_TEAM=YOUR_TEAM_ID bun run desktop:share:build
+```
+
+The output is `desktop/macos/build/share/Build/Products/Release/AISpace.app`. The ordinary `desktop:build` remains ad-hoc signed, supports the in-app import menu, and has no Share extension. Its drafts live in `Application Support/ai-space/PendingShares`; signed builds use the App Group instead. These stores are separate; finish pending imports in the build that received them before switching builds.
+
+Validation: signed macOS build and 52 Xcode tests passed, including shared Keychain isolation/revocation, frozen-payload retries, unavailable destinations, stale responses and bounded previews. The Foundation-only Mac suite passed 46 tests. The system registered and enabled `dev.ai-space.desktop.share`. A native sharing-service smoke test received an AppKit `NSImage` archive, persisted the image and loaded the authenticated destination list; it did not upload a fixture into a user app. The iOS regression suite passed 113 Simulator tests and 97 Foundation-only tests.

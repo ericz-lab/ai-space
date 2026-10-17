@@ -1,1 +1,32 @@
 /* English strings are the keys themselves; see zh-Hans.lproj for the translations. */
+
+"Sharing is not configured in this build." = "Sharing is not configured in this build.";
+"The shared sign-in could not be read or updated. Open ai-space and sign in again." = "The shared sign-in could not be read or updated. Open ai-space and sign in again.";
+"Open ai-space and add a Space first. Your picture stays in Pending Shares." = "Open ai-space and add a Space first. Your picture stays in Pending Shares.";
+"This Space has no apps that accept pictures." = "This Space has no apps that accept pictures.";
+"The original destination is unavailable. Retry when it is available again." = "The original destination is unavailable. Retry when it is available again.";
+"Open ai-space and sign in again, then retry from Pending Shares. Your picture is kept on this device." = "Open ai-space and sign in again, then retry from Pending Shares. Your picture is kept on this device.";
+"Shared picture" = "Shared picture";
+"No destination" = "No destination";
+"Add a note (optional)" = "Add a note (optional)";
+"Retries keep the same picture and destination to avoid duplicate saves." = "Retries keep the same picture and destination to avoid duplicate saves.";
+"Retry Save" = "Retry Save";
+"Loading destinations…" = "Loading destinations…";
+"Reload Destinations" = "Reload Destinations";
+"Pending Shares" = "Pending Shares";
+"No pending shares." = "No pending shares.";
+"Delete this pending picture?" = "Delete this pending picture?";
+"Share one picture at a time." = "Share one picture at a time.";
+"This picture was changed in another window. Reopen it from Pending Shares." = "This picture was changed in another window. Reopen it from Pending Shares.";
+"Loading picture…" = "Loading picture…";
+"Save to" = "Save to";
+"Saved" = "Saved";
+"Delete" = "Delete";
+"Save or delete a pending picture before sharing another one." = "Save or delete a pending picture before sharing another one.";
+"The Space returned an unreadable response. Your picture is still pending." = "The Space returned an unreadable response. Your picture is still pending.";
+"Share Picture…" = "Share Picture…";
+"Paste Picture" = "Paste Picture";
+"Copy one picture first." = "Copy one picture first.";
+"Unsaved pictures stay on this Mac in Space → Pending Shares." = "Unsaved pictures stay on this Mac in Space → Pending Shares.";
+
+"Cancel" = "Cancel";

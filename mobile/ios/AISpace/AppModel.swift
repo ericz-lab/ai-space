@@ -120,6 +120,20 @@ final class AppModel: ObservableObject {
     private var backdrops: [UUID: BackdropStore] = [:]
     private var panels: [UUID: WebSession] = [:]
     private var cookieSessions: [UUID: WebCookieSession] = [:]
+    private var shareSignedOut = Set<UUID>()
+    @Published var sharedCapture: SharedCaptureModel?
+
+    /// Publish addresses separately from the device-only Keychain session.
+    func prepareSharing() async {
+        #if !targetEnvironment(macCatalyst)
+        do { try ShareAccess.store().publish(store.connections) }
+        catch { NSLog("ai-space: share setup: %@", error.localizedDescription) }
+        for connection in store.connections where !shareSignedOut.contains(connection.id) {
+            _ = await cookieSession(connection.id).cookies()
+        }
+        #endif
+    }
+
     private var watchers: Set<AnyCancellable> = []
     /// A screenshot taken in the app, offered to the Space's Spark.
     let screenshots = ScreenshotCapture()
@@ -201,6 +215,13 @@ final class AppModel: ObservableObject {
     private func cookieSession(_ id: UUID) -> WebCookieSession {
         if let session = cookieSessions[id] { return session }
         let session = WebCookieSession(identifier: id)
+        #if !targetEnvironment(macCatalyst)
+        session.onCookies = { [weak self] cookies in
+            guard let self, !self.shareSignedOut.contains(id), let connection = self.store.connection(id) else { return }
+            do { try ShareAccess.publish(cookies, for: connection) }
+            catch { NSLog("ai-space: share session: %@", error.localizedDescription) }
+        }
+        #endif
         cookieSessions[id] = session
         return session
     }
@@ -285,8 +306,10 @@ final class AppModel: ObservableObject {
         }
         s.openExternally = { [weak self] in self?.openInBrowser($0) }
         // Signing in on the panel is what lets the native catalogue in: refresh it right away.
-        s.onStateChange = { [weak self] state in
-            guard let self, state == .ready, let loader = self.loaders[connection.id] else { return }
+        s.onStateChange = { [weak self, weak s] state in
+            guard let self, let s, self.panels[connection.id] === s, state == .ready, let loader = self.loaders[connection.id] else { return }
+            self.shareSignedOut.remove(connection.id)
+            Task { await self.prepareSharing() }
             if loader.status != .ok { Task { await loader.refresh() } }
             if self.closeWebPanelAfterSignIn {
                 self.closeWebPanelAfterSignIn = false
@@ -349,12 +372,17 @@ final class AppModel: ObservableObject {
         let c = store.add(name: name, url: url)
         showingAdd = false
         select(c.id)
+        Task { await prepareSharing() }
     }
 
     func remove(_ id: UUID) {
+        shareSignedOut.insert(id)
+        cookieSessions[id]?.invalidateSharedCookies()
+        if let connection = store.connection(id) { try? ShareAccess.clear(connection) }
         discard(id)
         screens.forget(id)
         store.remove(id)
+        try? ShareAccess.store().publish(store.connections)
         if selectedID == id { selectedID = store.defaultConnection?.id }
         // The store's files go once WebKit has let go of it.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -366,6 +394,9 @@ final class AppModel: ObservableObject {
     /// Ends the Space's session on this phone: cookies and every other piece of website data of
     /// its store, the saved catalogue and the open pages. The address and the screens stay.
     func signOut(_ connection: Connection) {
+        shareSignedOut.insert(connection.id)
+        cookieSessions[connection.id]?.invalidateSharedCookies()
+        try? ShareAccess.clear(connection)
         omniboxes[connection.id]?.clear()
         query = ""
         let data = dataStore(connection.id)
@@ -439,6 +470,7 @@ final class AppModel: ObservableObject {
 
     /// The phone came back to the app: failed pages try again and the catalogue catches up.
     func becameActive() {
+        Task { await prepareSharing() }
         screenshots.recheck()
         guard let c = selected else { return }
         panels[c.id]?.recoverIfFailed()

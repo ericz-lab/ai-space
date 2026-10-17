@@ -32,7 +32,7 @@ targets:
     platform: iOS
     sources:
       - path: AISpace
-        excludes: [Info.plist]
+        excludes: [Info.plist, AISpace.entitlements]
       # Foundation-only code shared with the Mac client, compiled from where it lives
       # (scripts/sources.sh lists the same files).
       - path: ../../desktop/macos/AISpace/Services/Connection.swift
@@ -55,6 +55,8 @@ targets:
         group: Shared
     dependencies:
       - target: SwiftTerm
+      - target: ShareExtension
+        embed: true
     settings:
       base:
         PRODUCT_NAME: AISpace
@@ -64,9 +66,46 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
+        CODE_SIGN_ENTITLEMENTS: AISpace/AISpace.entitlements
         CODE_SIGN_STYLE: Automatic
         # Set your team to run on a device; the Simulator needs none.
         DEVELOPMENT_TEAM: ""
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareExtension
+        excludes: [Info.plist, ShareExtension.entitlements]
+      - path: AISpace/Core/ScreenshotRules.swift
+      - path: AISpace/Core/SharedCaptureStore.swift
+      - path: AISpace/Live/CapturePicture.swift
+      - path: AISpace/Live/ShareAccess.swift
+      - path: AISpace/Live/SharedCaptureModel.swift
+      - path: AISpace/Views/SharedCaptureView.swift
+      - path: AISpace/Resources
+        includes: ["**/*.strings"]
+        buildPhase: resources
+      - path: ../../desktop/macos/AISpace/Services/Connection.swift
+        group: Shared
+      - path: ../../desktop/macos/AISpace/Services/SpaceAPI.swift
+        group: Shared
+      - path: ../../desktop/macos/AISpace/Services/SpaceModels.swift
+        group: Shared
+      - path: ../../desktop/macos/AISpace/Services/SpaceCheck.swift
+        group: Shared
+      - path: ../../desktop/macos/AISpace/Services/ChatStream.swift
+        group: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ai-space.ios.share
+        INFOPLIST_FILE: ShareExtension/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
   AISpaceTests:
     type: bundle.unit-test
     platform: iOS

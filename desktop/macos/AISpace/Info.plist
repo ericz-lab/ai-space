@@ -68,9 +68,12 @@
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- Plain HTTP only to this Mac's loopback; every remote Space is HTTPS. -->
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>ShareAppGroup</key>
+	<string>$(TeamIdentifierPrefix)dev.ai-space.desktop.capture</string>
+	<key>ShareKeychainGroup</key>
+	<string>$(AppIdentifierPrefix)dev.ai-space.desktop.share</string>
 </dict>
 </plist>

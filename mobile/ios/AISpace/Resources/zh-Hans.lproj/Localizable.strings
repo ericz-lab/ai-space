@@ -410,3 +410,30 @@
 "Save to Spark" = "存到灵光一闪";
 
 "Save to %@" = "存到%@";
+
+/* System image sharing */
+"Sharing is not configured in this build." = "此安装包未配置系统分享。";
+"The shared sign-in could not be read or updated. Open ai-space and sign in again." = "无法读取或更新分享登录状态，请打开 ai-space 重新登录。";
+"Open ai-space and add a Space first. Your picture stays in Pending Shares." = "请先打开 ai-space 添加空间，图片会保留在“待保存分享”中。";
+"This Space has no apps that accept pictures." = "此空间没有可接收图片的应用。";
+"The original destination is unavailable. Retry when it is available again." = "原保存目标暂不可用，请恢复后重试。";
+"Open ai-space and sign in again, then retry from Pending Shares. Your picture is kept on this device." = "请打开 ai-space 重新登录，再从“待保存分享”重试。图片已保留在本机。";
+"Shared picture" = "分享的图片";
+"No destination" = "暂无保存目标";
+"Add a note (optional)" = "补充说明（可选）";
+"Retries keep the same picture and destination to avoid duplicate saves." = "重试将使用相同的图片和保存目标，避免重复保存。";
+"Retry Save" = "重试保存";
+"Unsaved pictures stay on this device in ai-space → Settings → Pending Shares." = "未保存的图片保留在本机，可在 ai-space → 设置 → 待保存分享中继续。";
+"Loading destinations…" = "正在加载保存目标…";
+"Reload Destinations" = "重新加载保存目标";
+"Pending Shares" = "待保存分享";
+"No pending shares." = "没有待保存的分享。";
+"Delete this pending picture?" = "删除这张待保存的图片？";
+"Share one picture at a time." = "请一次分享一张图片。";
+"This picture was changed in another window. Reopen it from Pending Shares." = "此图片已在另一个窗口中更改，请从“待保存分享”重新打开。";
+"Loading picture…" = "正在读取图片…";
+"Save to" = "保存到";
+"Saved" = "已保存";
+"Delete" = "删除";
+"Save or delete a pending picture before sharing another one." = "请先保存或删除一张待保存的图片，再分享新图片。";
+"The Space returned an unreadable response. Your picture is still pending." = "无法读取空间的响应，图片仍在待保存列表中。";

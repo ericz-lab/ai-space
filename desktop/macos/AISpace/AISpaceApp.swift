@@ -181,6 +181,10 @@ struct SpaceCommands: Commands {
                 .disabled(model.selected == nil || model.destination != .launcher)
         }
         CommandMenu("Space") {
+            Button("Share Picture…") { model.pictureSharing.choose() }
+            Button("Paste Picture") { model.pictureSharing.paste() }
+            Button("Pending Shares") { model.pictureSharing.show() }
+            Divider()
             Button("Back to Space") { model.showMainWindow(.launcher) }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
             Button("Home") { model.showPage(Pager.home); showWindow() }

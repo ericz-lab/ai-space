@@ -31,7 +31,8 @@ targets:
     platform: macOS
     sources:
       - path: AISpace
-        excludes: [Info.plist, AISpace.entitlements, Resources/AppIcon.svg]
+        excludes: [Info.plist, AISpace.entitlements, AISpaceShare.entitlements, Resources/AppIcon.svg]
+      - path: ShareExtension/MacSharedPicture.swift
       # The iPhone client's Foundation-only code, compiled from where it lives
       # (scripts/sources.sh lists the same files).
       - path: ../../mobile/ios/AISpace/Core/Catalogue.swift
@@ -64,7 +65,21 @@ targets:
         group: Shared
       - path: ../../mobile/ios/AISpace/Live/TerminalStore.swift
         group: Shared
+      - path: ../../mobile/ios/AISpace/Core/ScreenshotRules.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/SharedCaptureStore.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/CapturePicture.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/ShareAccess.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/SharedCaptureModel.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Views/SharedCaptureView.swift
+        group: Shared
     dependencies:
+      - target: ShareExtension
+        embed: true
       - target: SwiftTerm
     settings:
       base:
@@ -73,12 +88,50 @@ targets:
         INFOPLIST_FILE: AISpace/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_HARDENED_RUNTIME: YES
-        CODE_SIGN_ENTITLEMENTS: AISpace/AISpace.entitlements
+        CODE_SIGN_ENTITLEMENTS: AISpace/AISpaceShare.entitlements
         CODE_SIGN_STYLE: Automatic
+  ShareExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: ShareExtension
+        excludes: [Info.plist, ShareExtension.entitlements]
+      - path: ../../mobile/ios/AISpace/Core/ScreenshotRules.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/SharedCaptureStore.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/CapturePicture.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/ShareAccess.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/SharedCaptureModel.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Views/SharedCaptureView.swift
+        group: Shared
+      - path: AISpace/Services/Connection.swift
+      - path: AISpace/Services/SpaceAPI.swift
+      - path: AISpace/Services/SpaceModels.swift
+      - path: AISpace/Services/SpaceCheck.swift
+      - path: AISpace/Services/ChatStream.swift
+      - path: AISpace/Resources
+        includes: ["**/*.strings"]
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ai-space.desktop.share
+        INFOPLIST_FILE: ShareExtension/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
+        CODE_SIGN_STYLE: Automatic
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
   AISpaceTests:
     type: bundle.unit-test
     platform: macOS
-    sources: [AISpaceTests]
+    sources:
+      - path: AISpaceTests
+      - path: ../../mobile/ios/AISpaceTests/SharedCaptureStoreTests.swift
+      - path: ../../mobile/ios/AISpaceTests/SharedCaptureModelTests.swift
     dependencies:
       - target: AISpace
     settings:

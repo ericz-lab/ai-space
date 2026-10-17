@@ -202,22 +202,8 @@ final class ScreenshotCapture: ObservableObject {
         }
     }
 
-    /// The bytes as they are when they are a PNG or JPEG within the limit; otherwise JPEG,
-    /// scaled down until it fits.
     static func picture(from data: Data) -> Picture? {
-        guard let image = UIImage(data: data) else { return nil }
-        if let kind = ScreenshotRules.sendable(data) { return Picture(data: data, kind: kind, preview: image) }
-        var scale: CGFloat = 1
-        for _ in 0..<8 {
-            let size = CGSize(width: (image.size.width * scale).rounded(), height: (image.size.height * scale).rounded())
-            let format = UIGraphicsImageRendererFormat.default()
-            format.scale = image.scale
-            let drawn = scale == 1 ? image : UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
-            if let jpeg = drawn.jpegData(compressionQuality: 0.85), jpeg.count <= ScreenshotRules.maxBytes {
-                return Picture(data: jpeg, kind: .jpeg, preview: image)
-            }
-            scale *= 0.8
-        }
-        return nil
+        guard let prepared = CapturePicture.prepare(data) else { return nil }
+        return Picture(data: prepared.data, kind: prepared.kind, preview: prepared.preview)
     }
 }

@@ -80,5 +80,7 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>ShareKeychainGroup</key>
+	<string>$(AppIdentifierPrefix)dev.ai-space.ios.share</string>
 </dict>
 </plist>

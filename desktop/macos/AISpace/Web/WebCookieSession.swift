@@ -6,7 +6,16 @@ import WebKit
 /// waits for a blank local page to load in the store, as the iPhone client does. This contacts
 /// nothing and extends no cookie.
 @MainActor
-final class WebCookieSession: NSObject, WKNavigationDelegate {
+final class WebCookieSession: NSObject, WKNavigationDelegate, WKHTTPCookieStoreObserver {
+    var onCookies: (([HTTPCookie]) -> Void)?
+    private var cookieGeneration = 0
+
+    func invalidateSharedCookies() { cookieGeneration += 1 }
+
+    func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+        cookieGeneration += 1
+        Task { _ = await cookies() }
+    }
     let dataStore: WKWebsiteDataStore
     private let bootstrap: WKWebView
     private var ready = false
@@ -20,16 +29,20 @@ final class WebCookieSession: NSObject, WKNavigationDelegate {
         bootstrap = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         bootstrap.navigationDelegate = self
+        dataStore.httpCookieStore.add(self)
     }
 
     func cookies() async -> [HTTPCookie] {
+        let generation = cookieGeneration
         if !ready {
             await withCheckedContinuation { continuation in
                 waiting.append(continuation)
                 if waiting.count == 1 { bootstrap.loadHTMLString("<!doctype html><title></title>", baseURL: nil) }
             }
         }
-        return await dataStore.httpCookieStore.allCookies()
+        let cookies = await dataStore.httpCookieStore.allCookies()
+        if generation == cookieGeneration { onCookies?(cookies) }
+        return cookies
     }
 
     private func finish() {

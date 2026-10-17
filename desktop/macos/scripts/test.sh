@@ -23,6 +23,6 @@ xcrun swiftc -parse-as-library -swift-version 5 -module-name AISpaceTests \
   -F "$FW" -Xlinker -rpath -Xlinker "$FW" ${LIB:+-Xlinker -rpath -Xlinker "$LIB"} \
   ${PLUGINS:+-plugin-path "$PLUGINS"} \
   $(find AISpace/Services -name '*.swift' | sort) AISpace/Web/NavigationPolicy.swift $SHARED_CORE \
-  $(find AISpaceTests -name '*.swift' | sort) scripts/TestMain.swift \
+  $(find AISpaceTests -name '*.swift' | sort) ../../mobile/ios/AISpaceTests/SharedCaptureStoreTests.swift scripts/TestMain.swift \
   -o "$OUT/AISpaceTests"
 exec "$OUT/AISpaceTests" "$@"

@@ -1,5 +1,8 @@
 import Foundation
 import Testing
+#if canImport(AISpace)
+@testable import AISpace
+#endif
 
 @Suite struct ScreenshotRulesTests {
     @Test func picturesAreSentAsTheyAreOnlyWhenPNGOrJPEGWithinTheLimit() {

@@ -12,3 +12,8 @@ $IOS_DIR/Live/TerminalSession.swift $IOS_DIR/Live/TerminalStore.swift"
 SHARED_CORE="$IOS_DIR/Core/Catalogue.swift $IOS_DIR/Core/CatalogueCache.swift $IOS_DIR/Core/CatalogueSearch.swift \
 $IOS_DIR/Core/HubModels.swift $IOS_DIR/Core/IconSource.swift $IOS_DIR/Core/Screens.swift $IOS_DIR/Core/ScreenStore.swift \
 $IOS_DIR/Core/SpaceSettings.swift $IOS_DIR/Core/TerminalModels.swift $IOS_DIR/Core/WidgetBlocks.swift"
+
+SHARED="$SHARED $IOS_DIR/Core/ScreenshotRules.swift $IOS_DIR/Core/SharedCaptureStore.swift $IOS_DIR/Live/CapturePicture.swift $IOS_DIR/Live/ShareAccess.swift $IOS_DIR/Live/SharedCaptureModel.swift $IOS_DIR/Views/SharedCaptureView.swift"
+SHARED_CORE="$SHARED_CORE $IOS_DIR/Core/ScreenshotRules.swift $IOS_DIR/Core/SharedCaptureStore.swift"
+
+SHARED="$SHARED ShareExtension/MacSharedPicture.swift"

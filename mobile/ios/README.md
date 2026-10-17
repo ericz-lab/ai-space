@@ -104,7 +104,7 @@ What the app does about it:
 - **Each saved Space has its own WebKit data store** (`WKWebsiteDataStore(forIdentifier:)`), apart from Safari and from every other Space. The panel tab, every app page and the native catalogue calls use it: the native calls read the store's cookies for each request (`SpaceAPI`), so one sign-in in the web view serves all three. On a cold launch, `WebCookieSession` first loads a local blank page to initialize the persistent profile, then releases the waiting native requests. Reading the cookie store before that initialization can return an empty jar even when valid cookies are on disk. This does not contact the identity provider or extend any cookie expiry. Nothing is copied out of Safari.
 - **Sign-in happens in the web view.** A request that is redirected, or answered 401 or 403, means "sign in": Home shows a card, the Sign In button opens the web panel over the tabs, the access layer's pages load there (a bar names the host you are on), and when the panel is back and answers `GET /api/panel/layout` as ai-space does, the catalogue loads and the web panel closes. An app on its own hostname goes through the same redirect inside its page; with Access the team-domain cookie makes that silent.
 - **`ASWebAuthenticationSession` is deliberately not used.** It shares cookies with Safari, not with the app's web views, so a sign-in there would not reach the pages the app shows. Access has no token exchange a native client could use instead without a service token, which would be a long-lived secret on the phone.
-- **Nothing secret is stored by the app.** The session cookie lives in the Space's WebKit store inside the app's sandbox; saved Spaces and screens are plain files with addresses and entry keys. There is nothing for the Keychain to hold in this version.
+- **No password or operator token is stored by the app.** WebKit owns each Space's login. Cookies matching the capture endpoint are also copied into a device-only shared Keychain group for the Share Extension, isolated by saved Space ID and origin. They are never written to the App Group files. Sign-out and removal clear the shared session, and in-flight cookie reads cannot restore it.
 - **Sign Out** (Settings) clears that Space's website data (cookies, storage, caches), the saved catalogue, local icon cache and the open pages. Removing a Space also deletes its data store. A catalogue request still on its way when either happens is dropped when it answers.
 - **Expiry** shows as the same sign-in card, with the last catalogue still on show; the app never retries a write on its own.
 - **A write names its origin.** The two routes that set a model (`PATCH /api/panel/tasks/:id/model`, `/api/panel/apps/:app/model`) take a write from the panel's own origin only, so no other site's page can make one with the operator's cookie. `SpaceAPI` sends `Origin: <the Space>` on every request with a body: the app is a client of that origin holding its session, not a page of another site. The server rule is unchanged.
@@ -203,7 +203,7 @@ Checked on 2026-10-13: Xcode 27 Simulator build and portrait screenshots of Home
 
 No server change was made or needed for this version; the app reads `GET /api/apps`, `/api/agents`, `/api/widgets`, `/api/peers`, `/api/panel/layout`, `/api/router`, the icon routes and the routes the panel's own windows read (`/api/inbox`, `/api/tasks`, `/api/model/usage`, `/api/model/calls`, `/api/usage`, `/api/model/apps`, `/api/events`, `/api/capabilities`, `/api/panel/package-catalogue`, `/api/panel/connections`, the agents' chat routes) as they are. Things a phone runs into that are not a phone's business to solve alone:
 
-- **A client session of the Space's own**, with a device list and revocation: today the only login is the access layer's cookie, and the only credential ai-space has is the operator token. This is what would make notifications, a share extension and background refresh possible, and it would serve the Mac client and any other client the same way.
+- **A client session of the Space's own**, with a device list and revocation: today the only login is the access layer's cookie, and the only credential ai-space has is the operator token. This would support notifications and background refresh, and replace the Share Extension's access-layer cookie sharing, and it would serve the Mac client and any other client the same way.
 - **Push notifications** as a `notify` transport (APNs), next to the chat channels, with the inbox thread as the payload's target.
 - **Links into the panel**: an address that opens the package settings, so a client can hand over to the web panel at the right place. Today that row opens the panel's first screen.
 - **A service identity route**: both clients recognise ai-space by the shape of `GET /api/panel/layout`. A small `GET /api/space` with a name and a version would be an honest check and tell a client what the server supports.
@@ -215,7 +215,7 @@ No server change was made or needed for this version; the app reads `GET /api/ap
 1. **This version**: connect, sign in through the web view, native launcher with search, screens of its own and honest states, app pages, the Space's pages (inbox, chat, tasks, usage, app models, events, packages, the terminal), the web panel, `aispace://` links and quick actions.
 2. **On a device**: the Xcode build, the checks listed above, then TestFlight for the owner's own phone.
 3. **Notifications** once the platform has a client session and a push transport; in chat, the model and permission pickers, attachments and restoring a run that was left running.
-4. **Share extension and quick add** (Todo, Notes): needs an app-side contract for "add this", which belongs in each app's manifest, and a session an extension can use.
+4. **System image sharing**: implemented through the Share Extension and app-declared capture targets (see below). Other shared content types and quick add remain future work.
 5. **Widgets and App Intents** on the home screen and in Shortcuts, from the Space's own widgets.
 
 A note for distribution: an app that is mostly web views risks App Store guideline 4.2. The native launcher, search, screens, links and quick actions are the start of an answer; a personal build through TestFlight or direct install does not face that review at all.
@@ -253,3 +253,58 @@ The bottom dock has been removed; pages remain accessible by horizontal swiping.
 The launcher header fades its clear blur through the search region, with no hard horizontal
 edge at the status bar. Search uses an untinted regular glass capsule on iOS 26+. The idle search hint is centered; focusing it reveals the editable field, with the
 existing query, Clear action, and keyboard-dismissal behavior preserved.
+
+
+## System image sharing
+
+Screenshot in another app → system Share → **ai-space** → preview, choose a saved Space and
+an app that accepts images → **Save**. The extension uses the same `GET /api/capture` target
+list and `POST /api/capture/image?to=…` upload as foreground screenshots, including peer apps.
+It does not launch the containing app, read the photo library, or save without a tap.
+Open ai-space once after installing this version so it can publish the saved Spaces and sessions.
+
+Closing the sheet before saving keeps the picture in **Settings → Pending Shares**. Network
+or sign-in failures keep it too. Sign in inside ai-space, then reopen Pending Shares to retry.
+Each picture keeps its upload ID, target and text after its first save attempt, including across
+process restarts, so a lost response can be retried against the same app without a second item.
+The editor cannot change an attempted payload; it can explicitly delete it. Successful saves
+remove the local draft. Pending pictures are local, excluded from backup, and never silently
+expired. Removing a Space removes its shared login/address but keeps its unsaved pictures.
+
+The receiver accepts one image per share and up to twelve pending pictures. Incoming files are
+limited to 40 MiB. PNG/JPEG bytes under the existing capture upload limit are preserved; other
+formats or larger images are converted to JPEG with a bounded resolution. Previews are decoded
+at bounded sizes for the extension's memory budget. Text is capped at 4,000 characters.
+
+### Signing the extension
+
+Both `AISpace` and `ShareExtension` need the same development team. The bundle IDs are
+`dev.ai-space.ios` and `dev.ai-space.ios.share`. Enable App Groups for both identifiers, assign
+`group.dev.ai-space.ios` to both, and regenerate their profiles. The targets also share the
+Keychain access group `$(AppIdentifierPrefix)dev.ai-space.ios.share`. Do not replace the team
+prefix with an unprefixed string. `bun run ios:xcode` generates and embeds the extension.
+The ad-hoc Catalyst build does not package the extension or have these sharing entitlements.
+
+With the developer account signed in to Xcode:
+
+```bash
+xcodebuild -project mobile/ios/AISpace.xcodeproj -scheme AISpace \
+  -configuration Release -destination 'generic/platform=iOS' \
+  DEVELOPMENT_TEAM=<your-team-id> -allowProvisioningUpdates build
+```
+
+Tests cover shared Keychain isolation/clearing, bounded image decoding, persistent retry identity, destination freezing, independent pending files,
+stale-editor conflicts, target-switch response ordering, unavailable targets and failed-upload
+retry. Device acceptance still requires sharing a screenshot from Photos or the system screenshot
+preview, saving to both Spark and Notes, and checking session expiry/sign-out and an offline retry.
+
+Validation of this change on 2026-10-17: 97 Foundation tests, 113 signed Simulator tests,
+the main app and embedded extension Simulator build, and the Catalyst build passed. The
+platform check passed 999 Bun tests and TypeScript checking. Catalyst still reports the two
+existing weak-capture warnings in `OmniboxVoice.swift`. After refreshing the Xcode account
+credentials and registering the shared App Group for both targets, the Release device build
+passed and was installed and launched on the connected iPhone 15 Pro. Both profiles include
+`group.dev.ai-space.ios`, and the embedded extension includes English and Chinese resources.
+This verifies installation and launch, not real-device share-sheet acceptance. Keychain tests
+require Simulator signing with the configured team (do not disable code signing when running
+that suite).

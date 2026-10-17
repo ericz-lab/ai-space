@@ -125,6 +125,19 @@ final class AppModel: ObservableObject {
     var showWindow: () -> Void = {}
     var quickChat: (() -> Void)?
 
+    lazy var pictureSharing = PictureSharing(app: self)
+    private var shareSignedOut = Set<UUID>()
+
+    func prepareSharing() async {
+        // Ad-hoc CLI builds use in-app import without cross-process credentials.
+        guard let shared = try? ShareAccess.store() else { return }
+        do { try shared.publish(store.connections) }
+        catch { NSLog("ai-space: share setup: %@", error.localizedDescription) }
+        for connection in store.connections where !shareSignedOut.contains(connection.id) {
+            _ = await cookieSession(connection.id).cookies()
+        }
+    }
+
     private var sessions: [UUID: PanelSession] = [:]
     private var cookieSessions: [UUID: WebCookieSession] = [:]
     private var loaders: [UUID: CatalogueLoader] = [:]
@@ -208,6 +221,12 @@ final class AppModel: ObservableObject {
     private func cookieSession(_ id: UUID) -> WebCookieSession {
         if let s = cookieSessions[id] { return s }
         let s = WebCookieSession(identifier: id)
+        s.onCookies = { [weak self] cookies in
+            guard let self, !self.shareSignedOut.contains(id), let connection = self.store.connection(id),
+                  (try? ShareAccess.store()) != nil else { return }
+            do { try ShareAccess.publish(cookies, for: connection) }
+            catch { NSLog("ai-space: share session: %@", error.localizedDescription) }
+        }
         cookieSessions[id] = s
         return s
     }
@@ -264,8 +283,10 @@ final class AppModel: ObservableObject {
         let s = PanelSession(connection: connection, dataStore: dataStore(connection.id))
         s.openLink = { [weak self] url in self?.openLink(url, from: connection) }
         // Signing in on the panel is what lets the native views in: refresh them right away.
-        s.onStateChange = { [weak self] state in
-            guard let self, state == .ready else { return }
+        s.onStateChange = { [weak self, weak s] state in
+            guard let self, state == .ready, self.sessions[connection.id] === s else { return }
+            self.shareSignedOut.remove(connection.id)
+            Task { await self.prepareSharing() }
             if let live = lives[connection.id], live.status != .ok { Task { await live.refresh(catalogue: true) } }
             if let loader = loaders[connection.id], loader.status != .ok { Task { await loader.refresh() } }
             if closeWebPanelAfterSignIn, selectedID == connection.id, destination == .panel {
@@ -300,6 +321,10 @@ final class AppModel: ObservableObject {
     /// A changed URL starts a fresh page; the old one's unsent drafts are gone, which the form says.
     func update(_ id: UUID, name: String, url: URL) {
         let changed = store.connection(id)?.url != url
+        if changed, let previous = store.connection(id) {
+            cookieSessions[id]?.invalidateSharedCookies()
+            try? ShareAccess.clear(previous)
+        }
         store.update(id, name: name, url: url)
         if changed { discard(id) }
         objectWillChange.send()
@@ -307,6 +332,9 @@ final class AppModel: ObservableObject {
 
     /// Forgets the connection on this Mac. The Space itself, its agents and its data are untouched.
     func remove(_ id: UUID, clearSignIn: Bool) async {
+        shareSignedOut.insert(id)
+        cookieSessions[id]?.invalidateSharedCookies()
+        if let connection = store.connection(id) { try? ShareAccess.clear(connection) }
         discard(id)
         loaders[id]?.forget()
         loaders[id] = nil
@@ -335,6 +363,9 @@ final class AppModel: ObservableObject {
     /// Ends the Space's session on this Mac: cookies and every other piece of website data of its
     /// store, the saved catalogue, icons and open pages. The address and the screens stay.
     func signOut(_ connection: Connection) {
+        shareSignedOut.insert(connection.id)
+        cookieSessions[connection.id]?.invalidateSharedCookies()
+        try? ShareAccess.clear(connection)
         let id = connection.id
         iconStores[id]?.clear()
         terminals[id]?.closeAll()
@@ -376,6 +407,7 @@ final class AppModel: ObservableObject {
     }
 
     private func syncLives(_ list: [Connection]) {
+        Task { await prepareSharing() }
         let ids = Set(list.map(\.id))
         for (id, live) in lives where !ids.contains(id) {
             live.stop()

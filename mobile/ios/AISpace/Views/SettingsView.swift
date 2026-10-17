@@ -34,6 +34,18 @@ struct SettingsView: View {
                 Text("Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
             }
 
+            #if !targetEnvironment(macCatalyst)
+            Section {
+                Button {
+                    Task {
+                        await model.prepareSharing()
+                        model.sharedCapture = SharedCaptureModel()
+                    }
+                } label: { Label("Pending Shares", systemImage: "square.and.arrow.down") }
+            }
+
+            #endif
+
             display
             space
 
@@ -55,6 +67,9 @@ struct SettingsView: View {
             } header: {
                 Text("About")
             }
+        }
+        .sheet(isPresented: Binding(get: { model.sharedCapture != nil }, set: { if !$0 { model.sharedCapture = nil } })) {
+            if let sharedCapture = model.sharedCapture { SharedCaptureView(model: sharedCapture) { model.sharedCapture = nil } }
         }
         .scrollContentBackground(.hidden)
         .scrollClipDisabled()
