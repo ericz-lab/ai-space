@@ -35,6 +35,9 @@ registerProcessor("space-voice", Capture);
 
 export type VoiceState = "connecting" | "recording" | "transcribing" | "idle";
 
+/** What is said while the model loads (about 15 s cold) is held, up to this much; recording stops there. */
+export const HELD_MAX_BYTES = 50 * 16000 * 2;
+
 /** One cancellable session; no callbacks or microphone tracks survive disposal. */
 export class LiveVoice {
   private socket?: WebSocket;
@@ -45,7 +48,11 @@ export class LiveVoice {
   private timer?: ReturnType<typeof setTimeout>;
   private disposed = false;
   private stopping = false;
+  private audioDone = false;
   private ready = false;
+  private held: ArrayBuffer[] = [];
+  private heldBytes = 0;
+  private flushedBytes = 0;
   private transcript: VoiceTranscript;
   constructor(prefix: string, private onText: (text: string) => void, private onState: (state: VoiceState) => void, private onError: (error: string) => void) {
     this.transcript = new VoiceTranscript(prefix);
@@ -75,20 +82,28 @@ export class LiveVoice {
     this.disposed = true;
     clearTimeout(this.timer);
     this.releaseAudio();
+    this.held = [];
     this.socket?.close();
   }
   private finish() {
     this.dispose();
     this.onState("idle");
   }
+  /** A frame to the service; the held burst after ready may fill the socket's buffer once. */
+  private send(frame: ArrayBuffer) {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    if (socket.bufferedAmount > 512_000 + this.flushedBytes) this.fail("Voice connection is too slow");
+    else socket.send(frame);
+  }
   stop() {
     if (this.disposed || this.stopping) return;
-    if (!this.ready) { this.finish(); return; }
+    if (!this.node) { this.finish(); return; }
     this.stopping = true;
     this.onState("transcribing");
     this.deadline(70_000);
     // Flush the worklet's last short frame before sending stop on the socket.
-    this.node?.port.postMessage("stop");
+    this.node.port.postMessage("stop");
   }
   async start() {
     this.onState("connecting");
@@ -108,17 +123,27 @@ export class LiveVoice {
       node.onprocessorerror = () => this.fail("Microphone processing failed");
       const source = this.source = context.createMediaStreamSource(stream);
       stream.getAudioTracks().forEach((track) => { track.onended = () => this.fail("Microphone disconnected"); });
+      // Record at once; until the service is ready the frames are held, then sent first.
+      node.port.onmessage = ({ data }) => {
+        if (this.disposed) return;
+        if (data === "stopped") {
+          this.releaseAudio();
+          this.audioDone = true;
+          if (this.ready) this.socket?.send(JSON.stringify({ type: "stop" }));
+          else if (!this.heldBytes) this.finish();
+        } else if (!this.ready) {
+          this.held.push(data);
+          this.heldBytes += data.byteLength;
+          if (this.heldBytes >= HELD_MAX_BYTES) this.stop();
+        } else this.send(data);
+      };
+      source.connect(node); node.connect(context.destination);
+      this.onState("recording");
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => this.stop(), 90_000);
       const url = new URL("/api/voice/realtime", location.href);
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const socket = this.socket = new WebSocket(url);
-      node.port.onmessage = ({ data }) => {
-        if (this.disposed || socket.readyState !== WebSocket.OPEN) return;
-        if (data === "stopped") {
-          this.releaseAudio();
-          socket.send(JSON.stringify({ type: "stop" }));
-        } else if (socket.bufferedAmount > 512_000) this.fail("Voice connection is too slow");
-        else socket.send(data);
-      };
       socket.onopen = () => socket.send(JSON.stringify({ type: "start", format: "pcm_s16le", sample_rate: 16000, channels: 1, language: "" }));
       socket.onmessage = ({ data }) => {
         if (this.disposed) return;
@@ -126,10 +151,11 @@ export class LiveVoice {
           const event = JSON.parse(data);
           if (event.type === "ready" && !this.ready) {
             this.ready = true;
-            clearTimeout(this.timer);
-            this.timer = setTimeout(() => this.stop(), 90_000);
-            source.connect(node); node.connect(context.destination);
-            this.onState("recording");
+            this.flushedBytes = this.heldBytes;
+            for (const frame of this.held) this.send(frame);
+            this.held = [];
+            this.heldBytes = 0;
+            if (this.audioDone) socket.send(JSON.stringify({ type: "stop" }));
           } else if ((event.type === "partial" || event.type === "final") && Number.isInteger(event.segment_id) && typeof event.text === "string") {
             this.onText(this.transcript.update(event.segment_id, event.text, event.type === "final"));
           } else if (event.type === "done") this.finish();

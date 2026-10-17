@@ -68,3 +68,58 @@ test("disposing during microphone permission releases a late stream without upda
     else Reflect.deleteProperty(globalThis, "navigator");
   }
 });
+
+test("speech before the transcriber is ready is held and sent first, then stop", async () => {
+  const { LiveVoice } = await import("./voice.ts");
+  const keys = ["AudioContext", "AudioWorkletNode", "WebSocket", "navigator", "location"] as const;
+  const originals = keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+  let worklet!: { port: { onmessage?: (e: { data: ArrayBuffer | string }) => void; postMessage(data: string): void } };
+  const sent: (number | string)[] = [];
+  let socket!: { onopen(): void; onmessage(e: { data: string }): void };
+  const states: string[] = [];
+  const node = { connect() {}, disconnect() {} };
+  Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: class {
+    state = "running"; sampleRate = 16000; destination = node;
+    audioWorklet = { addModule: () => Promise.resolve() };
+    resume() { return Promise.resolve(); }
+    close() { this.state = "closed"; return Promise.resolve(); }
+    createMediaStreamSource() { return node; }
+  } });
+  Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: class {
+    connect() {} disconnect() {}
+    port = { postMessage: (data: string) => { if (data === "stop") { this.port.onmessage?.({ data: new ArrayBuffer(640) }); this.port.onmessage?.({ data: "stopped" }); } } } as typeof worklet.port;
+    constructor() { worklet = this; }
+  } });
+  Object.defineProperty(globalThis, "WebSocket", { configurable: true, value: class {
+    static OPEN = 1;
+    readyState = 1; bufferedAmount = 0;
+    onopen = () => {}; onmessage = (_: { data: string }) => {}; onerror = () => {}; onclose = () => {};
+    constructor() { socket = this; }
+    send(data: string | ArrayBuffer) { sent.push(typeof data === "string" ? JSON.parse(data).type : data.byteLength); }
+    close() { this.readyState = 3; }
+  } });
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: () => Promise.resolve({ getTracks: () => [], getAudioTracks: () => [] }) } } });
+  Object.defineProperty(globalThis, "location", { configurable: true, value: { href: "https://space.test/", protocol: "https:" } });
+  const session = new LiveVoice("", () => {}, (state) => states.push(state), (error) => { throw new Error(error); });
+  try {
+    await session.start();
+    expect(states).toEqual(["connecting", "recording"]);
+    const frame = () => worklet.port.onmessage!({ data: new ArrayBuffer(3200) });
+    frame(); frame();
+    socket.onopen();
+    frame();
+    session.stop();
+    expect(states.at(-1)).toBe("transcribing");
+    expect(sent).toEqual(["start"]);
+    socket.onmessage({ data: JSON.stringify({ type: "ready" }) });
+    expect(sent).toEqual(["start", 3200, 3200, 3200, 640, "stop"]);
+    socket.onmessage({ data: JSON.stringify({ type: "done" }) });
+    expect(states.at(-1)).toBe("idle");
+  } finally {
+    session.dispose();
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
+});
