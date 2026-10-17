@@ -11,6 +11,8 @@ import WebKit
 ///   AISPACE_SCROLL_Y   scroll the visible native page to this offset for safe-area checks
 ///   AISPACE_SCROLL_BENCH seconds to drive the visible page up and down, then the pager across,
 ///                      logging the frames the main thread dropped (see ScrollBench)
+///                      and the times the page moved by itself under it
+///   AISPACE_SCROLL_SPEED points per second of the bench's vertical sweep (default 2400)
 ///   AISPACE_LAYERS     1 logs, five seconds after launch, the layers on show that the render
 ///                      server draws off screen first (see LayerAudit)
 ///   AISPACE_SEARCH     the search text on Home
@@ -239,8 +241,8 @@ enum LayerAudit {
 @MainActor
 final class ScrollBench: NSObject {
     private static var running: ScrollBench?
-    /// Points per second of the vertical sweep, about a brisk flick.
-    private static let speed: CGFloat = 2400
+    /// Points per second of the vertical sweep, about a brisk flick; AISPACE_SCROLL_SPEED sets another.
+    private static let speed = ProcessInfo.processInfo.environment["AISPACE_SCROLL_SPEED"].flatMap(Double.init).map { CGFloat($0) } ?? 2400
 
     private let seconds: Double
     private var link: CADisplayLink?
@@ -255,6 +257,10 @@ final class ScrollBench: NSObject {
     private var nextPage: CFTimeInterval = 0
     private var pageStep = 1
     private weak var page: UIScrollView?
+    /// The offset the bench last set. Found elsewhere on the next frame, it is SwiftUI moving the
+    /// content by itself: a lazy row came back at another height than the one it stood in for.
+    private var placed: CGFloat?
+    private var jumps = 0, worstJump: CGFloat = 0
 
     static func run(seconds: Double) {
         guard running == nil else { return }
@@ -307,12 +313,18 @@ final class ScrollBench: NSObject {
             // Looked up once: walking the window on every frame would be the bench's own cost.
             if page == nil { page = scrollViews(in: window).first { $0.contentSize.height > $0.bounds.height + 100 && onShow($0, in: window) } }
             guard let page else { return }
+            if let placed, abs(page.contentOffset.y - placed) > 0.5 {
+                jumps += 1
+                worstJump = max(worstJump, abs(page.contentOffset.y - placed))
+                NSLog("ai-space: scroll bench jump at y=%.0f by %.1f h=%.0f top=%.0f", placed, page.contentOffset.y - placed, page.contentSize.height, page.adjustedContentInset.top)
+            }
             let top = -page.adjustedContentInset.top
             let bottom = page.contentSize.height - page.bounds.height + page.adjustedContentInset.bottom
             var y = page.contentOffset.y + direction * Self.speed * CGFloat(gap)
             if y >= bottom { y = bottom; direction = -1 }
             if y <= top { y = top; direction = 1 }
             page.setContentOffset(CGPoint(x: page.contentOffset.x, y: y), animated: false)
+            placed = page.contentOffset.y
         } else if now >= nextPage {
             guard let pager = scrollViews(in: window).first(where: { $0.contentSize.width > $0.bounds.width * 1.5 && onShow($0, in: window) }) else { return }
             nextPage = now + 0.7
@@ -329,6 +341,7 @@ final class ScrollBench: NSObject {
         for (name, tally) in [("vertical", vertical), ("paging", paging)] {
             NSLog("ai-space: scroll bench %@ frames=%d late=%d lateMs=%.0f worstMs=%.1f", name, tally.frames, tally.late, tally.lateTime * 1000, tally.worst * 1000)
         }
+        NSLog("ai-space: scroll bench jumps=%d worstJump=%.1f", jumps, worstJump)
         Self.running = nil
     }
 }

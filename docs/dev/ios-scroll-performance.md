@@ -47,6 +47,7 @@ The decisive test was by hand: with the content of the widget cards left out and
 - Do not put `.shadow` on a container with content. Give the shadow its own layer whose outline is known.
 - Do not move the shadow onto the material fill (`shape.fill(.regularMaterial).shadow(...)`): the shadow puts the material in an offscreen group, where it no longer blurs what is behind it. This was tried and it lost the frosted glass.
 - A row of a lazy stack is made whole. Anything that should be lazy must be a direct row of it, not a child of a `VStack` inside one.
+- No row of a lazy stack is taller than the screen, and every row has an id of its own (see [The page jumping while scrolling](#the-page-jumping-while-scrolling)).
 - A paged row whose pages are heavy should keep its pages; laziness belongs inside each page.
 - Formatters are made once, not per call.
 
@@ -144,6 +145,35 @@ Scripted bench on the library page, before and after:
 - `xctrace record --launch` sometimes leaves the app on a black screen, with no frames after launch; this happened with and without the bench. Check the frame count before reading a recording, and run it again.
 - `xctrace record --attach` did not find the running app by its name (`AISpace` or `ai-space`) or by its process id. `--all-processes` works, but 40 seconds made a 939 MB trace that took about six minutes to save; keep such a recording short.
 - `AISPACE_LAYERS=1` logs the layers on show that need a pass of their own, five seconds after launch; read them with `xcrun devicectl device process launch --console`. It shows which layers to look at; it does not measure them.
+
+## The page jumping while scrolling
+
+Reported on 2026-10-16 (ai-todo #169, with a screen recording): scrolling Home slowly up past the end of the apps, the page shook. In the recording the apps come into view over a few frames, then the page snaps back down to the Agents title in one frame, again and again while the finger moves.
+
+### Cause
+
+Each grid of tiles was one row of the page's `LazyVStack`. With 44 apps, that row was about 1,100 points tall, more than a screen. The stack drops a row that leaves the screen and stands in for it with an estimate; when the row comes back it is measured again, the estimate was wrong, and the stack moves the content to keep what is on show in place. Right at the edge of the grid that happened on every frame or two. On the phone, the stack's own idea of the page's height swung between 21,639, 10,230 and 8,688 points during one sweep.
+
+Splitting the grid into rows needs a stable id per row. The first attempt used the index of the row's first tile, which the Apps and the Agents grids share; with two rows of one stack under the same id, the page jumped once on the first scroll down.
+
+### Change
+
+| Change | Where | Looks different? |
+| --- | --- | --- |
+| A grid of tiles is a row of the stack per row of tiles, with the column count an adaptive grid would choose, fixed for every row; each row is known by its first tile | `Views/HomeView.swift` | No |
+| The bench logs every frame where the page moved by itself under it (`jump at y=… by …`, with the content height) and their count; `AISPACE_SCROLL_SPEED` slows the sweep | `DebugLaunch.swift` | No |
+
+### Results
+
+`AISPACE_SCROLL_BENCH=50` on Home, the same Space (44 apps, 16 agents, 28 widgets):
+
+| | Before | After |
+| --- | --- | --- |
+| Simulator, 1500 pt/s | 6 jumps, up to 250 pt, on every pass at the grid's end | none in three runs |
+| Simulator, 400 pt/s | | none |
+| iPhone 15 Pro, 1500 pt/s | jumps up to 1,140 pt, content height swinging by 13,000 pt | none after the catalogue arrived, at 1500 and 400 pt/s |
+
+Jumps logged before the catalogue has arrived are the page filling in, not this; read the content height in the line.
 
 ## Still open
 

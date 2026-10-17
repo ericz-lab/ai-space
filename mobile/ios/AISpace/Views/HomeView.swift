@@ -21,23 +21,21 @@ struct HomeView: View {
 
     private var screens: [PanelScreen] { store.screens(connection.id) }
 
-    private let columns = [GridItem(.adaptive(minimum: 76, maximum: 110), spacing: 12, alignment: .top)]
-
     var body: some View {
         Group {
             if let screenID {
-                page(longPress: { model.showingScreenMenu = true }) {
+                page(longPress: { model.showingScreenMenu = true }) { layout in
                     if screenID == screens.first?.id {
                         OmniboxField(query: $commandText, api: loader.api, voiceBusy: $searchVoiceBusy, focused: $searchFocused, submit: { searchSubmit += 1 })
                             .anchorPreference(key: OmniboxFieldBounds.self, value: .bounds) { $0 }
                     }
                     if let catalogue = loader.catalogue, let screen = screens.first(where: { $0.id == screenID }) {
-                        self.screen(screen, catalogue)
+                        self.screen(screen, catalogue, layout)
                     }
                 }
             } else {
-                page(spacing: 12) {
-                    if let catalogue = loader.catalogue { library(catalogue) }
+                page(spacing: 12) { layout in
+                    if let catalogue = loader.catalogue { library(catalogue, layout) }
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     SearchField(model: model, focused: $searchFocused)
@@ -55,9 +53,9 @@ struct HomeView: View {
 
     // MARK: Pages
 
-    private func page<Content: View>(spacing: CGFloat = 22, longPress: (() -> Void)? = nil, @ViewBuilder _ content: () -> Content) -> some View {
-        let content = content()
-        return GeometryReader { geo in
+    private func page<Content: View>(spacing: CGFloat = 22, longPress: (() -> Void)? = nil, @ViewBuilder _ content: @escaping (TileLayout) -> Content) -> some View {
+        GeometryReader { geo in
+            let content = content(TileLayout(width: geo.size.width - 32, stackSpacing: spacing))
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: spacing) {
                     StatusCard(model: model, connection: connection, loader: loader)
@@ -121,11 +119,11 @@ struct HomeView: View {
 
     /// One screen: its tiles in one grid, its widget cards below, in the screen's order. A key
     /// whose entry is gone is skipped and kept, so it comes back with the entry.
-    @ViewBuilder private func screen(_ screen: PanelScreen, _ catalogue: Catalogue) -> some View {
+    @ViewBuilder private func screen(_ screen: PanelScreen, _ catalogue: Catalogue, _ layout: TileLayout) -> some View {
         let tiles = screen.items.compactMap { catalogue.entry($0) }.filter { $0.kind != .widget }
         // Settings can leave the widget cards off the screens; they stay pinned and stay in the library.
         let widgets = model.showsWidgets ? screen.items.compactMap { key in catalogue.widgets.first { "widget:\($0.id)" == key } } : []
-        if !tiles.isEmpty { grid(tiles, catalogue, on: screen.id) }
+        if !tiles.isEmpty { grid(tiles, catalogue, layout, on: screen.id) }
         ForEach(widgets) { widgetCard($0, on: screen.id) }
         if tiles.isEmpty && widgets.isEmpty {
             ContentUnavailableView {
@@ -142,7 +140,7 @@ struct HomeView: View {
     /// Everything the Space has, pinned or not. The titles, grids and cards are the page's own
     /// rows, not stacks of their own, so a widget card is made when it is scrolled to: all of
     /// them made at once is what the page then carries on every frame of a scroll.
-    @ViewBuilder private func library(_ catalogue: Catalogue) -> some View {
+    @ViewBuilder private func library(_ catalogue: Catalogue, _ layout: TileLayout) -> some View {
         let query = model.query
         let apps = CatalogueSearch.filter(catalogue.apps, query: query)
         let agents = CatalogueSearch.filter(catalogue.agents, query: query)
@@ -150,11 +148,11 @@ struct HomeView: View {
 
         if !apps.isEmpty {
             heading("Apps", first: true)
-            grid(apps, catalogue, on: nil)
+            grid(apps, catalogue, layout, on: nil)
         }
         if !agents.isEmpty {
             heading("Agents", first: apps.isEmpty)
-            grid(agents, catalogue, on: nil)
+            grid(agents, catalogue, layout, on: nil)
         }
         if !widgets.isEmpty {
             heading("Widgets", first: apps.isEmpty && agents.isEmpty)
@@ -177,12 +175,23 @@ struct HomeView: View {
             .padding(.top, first ? 0 : 10)
     }
 
-    private func grid(_ entries: [CatalogueEntry], _ catalogue: Catalogue, on screen: String?) -> some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-            ForEach(entries) { entry in
-                EntryTile(entry: current(entry), icons: icons, peer: catalogue.peer(entry.peer)) { model.open(entry) }
-                    .contextMenu { menu(entry, on: screen) }
+    /// Tiles in rows, each row a row of the page's lazy stack. One grid for all of them would be a
+    /// single row taller than the screen, which the stack drops when it scrolls away and measures
+    /// again when it comes back: scrolling up past it, the page jumped by a quarter of a screen.
+    @ViewBuilder private func grid(_ entries: [CatalogueEntry], _ catalogue: Catalogue, _ layout: TileLayout, on screen: String?) -> some View {
+        let count = layout.columns.count
+        let rows = stride(from: 0, to: entries.count, by: count).map { entries[$0..<min($0 + count, entries.count)] }
+        // A row is known by its first entry: the Apps and Agents rows share one stack, and an
+        // index alone would give both sections the same ids.
+        ForEach(rows, id: \.first!.id) { row in
+            LazyVGrid(columns: layout.columns, alignment: .leading) {
+                ForEach(row) { entry in
+                    EntryTile(entry: current(entry), icons: icons, peer: catalogue.peer(entry.peer)) { model.open(entry) }
+                        .contextMenu { menu(entry, on: screen) }
+                }
             }
+            // The stack's own spacing sits between rows; the rows of a grid stand 16 pt apart.
+            .padding(.top, row.startIndex == 0 ? 0 : 16 - layout.stackSpacing)
         }
     }
 
@@ -244,6 +253,18 @@ struct HomeView: View {
         }
     }
 
+}
+
+/// A page's tile columns, as many as fit the width, and the spacing of the stack the tile rows are rows of.
+struct TileLayout {
+    let width: CGFloat
+    let stackSpacing: CGFloat
+    /// What an adaptive grid of tiles 76 to 110 pt wide and 12 pt apart makes of the width, fixed,
+    /// so every row of a grid has the same columns.
+    var columns: [GridItem] {
+        let count = max(1, Int((width + 12) / (76 + 12)))
+        return Array(repeating: GridItem(.flexible(minimum: 76, maximum: 110), spacing: 12, alignment: .top), count: count)
+    }
 }
 
 /// The library's search: one field over apps, agents and widgets.
