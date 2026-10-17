@@ -2,13 +2,13 @@ import Photos
 import SwiftUI
 import UIKit
 
-/// A screenshot taken while the app is on screen, offered to Spark.
+/// A screenshot taken while the app is on screen, offered to the apps of the Space that keep pictures.
 ///
 /// iOS says only that a screenshot was taken (`userDidTakeScreenshotNotification`, after the
 /// fact, with no image). So the app offers to keep it; on the operator's tap it reads the newest
-/// screenshot from Photos (read access is asked for then, not before), lets them add a line, and
-/// sends it to the Space's `POST /api/capture/image`, which hands it to `ai-spark/capture-image`
-/// as the operator. When Photos cannot give the screenshot (access refused or limited, or it is
+/// screenshot from Photos (read access is asked for then, not before), lets them add a line and
+/// choose where it goes among the Space's capture targets (Spark, Notes, …; `GET /api/capture`),
+/// and sends it to `POST /api/capture/image?to=<target>`, which hands it to that app as the operator. When Photos cannot give the screenshot (access refused or limited, or it is
 /// not there yet), the operator picks it. Nothing is kept on the phone after the answer.
 @MainActor
 final class ScreenshotCapture: ObservableObject {
@@ -21,7 +21,7 @@ final class ScreenshotCapture: ObservableObject {
         case needsPick(String)
         case composing
         case saving
-        case saved(id: Int, url: URL?)
+        case saved(label: String, url: URL?)
         case failed(String)
     }
 
@@ -37,6 +37,10 @@ final class ScreenshotCapture: ObservableObject {
     @Published private(set) var picture: Picture?
     @Published var text = ""
     @Published var showingPicker = false
+    /// Where the Space can keep the picture, and the one chosen (remembered across launches).
+    @Published private(set) var targets: [ScreenshotRules.Target] = []
+    @Published private(set) var target: ScreenshotRules.Target?
+    private static let lastTargetKey = "screenshotTarget"
 
     /// The Space screenshots go to, and whether it can keep them (nil: not asked yet); set by the app model.
     private var api: SpaceAPI?
@@ -64,6 +68,8 @@ final class ScreenshotCapture: ObservableObject {
                 let answer = try? await api.get("/api/capture", as: ScreenshotRules.Availability.self)
                 guard self.api?.base == api.base else { return }
                 available = answer?.image ?? false
+                targets = answer?.targets ?? []
+                target = ScreenshotRules.preferred(targets, last: UserDefaults.standard.string(forKey: Self.lastTargetKey))
             }
             guard available == true else { return }
             offer(at: date)
@@ -126,18 +132,24 @@ final class ScreenshotCapture: ObservableObject {
         phase = .composing
     }
 
-    /// Send the picture and the words; a retry sends the same id.
+    func choose(_ target: ScreenshotRules.Target) {
+        self.target = target
+        UserDefaults.standard.set(target.id, forKey: Self.lastTargetKey)
+    }
+
+    /// Send the picture and the words to the chosen target; a retry sends the same id.
     func save() {
         guard let api, let picture else { return }
+        let target = self.target
         phase = .saving
         Task {
             do {
                 let data = try await api.upload(
-                    "/api/capture/image", field: "file", filename: "screenshot.\(picture.kind.fileExtension)",
+                    ScreenshotRules.uploadPath(to: target), field: "file", filename: "screenshot.\(picture.kind.fileExtension)",
                     mimeType: picture.kind.mimeType, data: picture.data,
                     fields: ScreenshotRules.fields(id: picture.id, text: text, via: "screenshot"), timeout: 60)
                 let answer = try JSONDecoder().decode(ScreenshotRules.Answer.self, from: data)
-                phase = .saved(id: answer.idea.id, url: answer.url.flatMap(URL.init(string:)))
+                phase = .saved(label: ScreenshotRules.receipt(answer, target: target), url: answer.url.flatMap(URL.init(string:)))
                 dismissTask?.cancel()
                 dismissTask = Task {
                     try? await Task.sleep(for: .seconds(4))

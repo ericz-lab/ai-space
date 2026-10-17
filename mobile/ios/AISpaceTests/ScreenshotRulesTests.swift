@@ -31,11 +31,28 @@ import Testing
         #expect(words.last! == ("text", "这个排版好看"))
     }
 
-    @Test func theCapturersAnswerIsRead() throws {
-        let data = Data(#"{"ok":true,"idea":{"id":14,"text":"","source":"image"},"url":"https://spark.example/?idea=14"}"#.utf8)
-        let answer = try JSONDecoder().decode(ScreenshotRules.Answer.self, from: data)
-        #expect(answer == .init(idea: .init(id: 14), url: "https://spark.example/?idea=14"))
-        let none = try JSONDecoder().decode(ScreenshotRules.Availability.self, from: Data(#"{"ok":true,"image":false}"#.utf8))
-        #expect(!none.image)
+    @Test func aTargetsAnswerNamesWhatWasKept() throws {
+        let spark = try JSONDecoder().decode(ScreenshotRules.Answer.self, from: Data(#"{"ok":true,"idea":{"id":14,"text":""},"url":"https://spark.example/?idea=14"}"#.utf8))
+        #expect(spark.url == "https://spark.example/?idea=14")
+        let target = ScreenshotRules.Target(id: "ai-spark/capture-image", app: "ai-spark", title: "Spark")
+        #expect(ScreenshotRules.receipt(spark, target: target) == "Spark #14")
+        let notes = try JSONDecoder().decode(ScreenshotRules.Answer.self, from: Data(#"{"ok":true,"label":"笔记 #9","url":"https://notes.example/?note=9"}"#.utf8))
+        #expect(ScreenshotRules.receipt(notes, target: nil) == "笔记 #9")
+    }
+
+    @Test func theSpacesTargetsAreListedAndTheLastChoiceKept() throws {
+        let data = Data(#"{"ok":true,"image":true,"targets":[{"id":"ai-spark/capture-image","app":"ai-spark","capability":"capture-image","title":"Spark","i18n":{"zh":{"title":"灵光一闪"}}},{"id":"david/ai-notes/capture-image","app":"ai-notes","peer":"david","title":"Notes"}]}"#.utf8)
+        let a = try JSONDecoder().decode(ScreenshotRules.Availability.self, from: data)
+        let targets = try #require(a.targets)
+        #expect(targets.map(\.id) == ["ai-spark/capture-image", "david/ai-notes/capture-image"])
+        #expect(targets[0].displayTitle(lang: "zh") == "灵光一闪")
+        #expect(targets[0].displayTitle(lang: "en") == "Spark")
+        #expect(ScreenshotRules.preferred(targets, last: "david/ai-notes/capture-image")?.app == "ai-notes")
+        #expect(ScreenshotRules.preferred(targets, last: "gone/x")?.app == "ai-spark")
+        #expect(ScreenshotRules.uploadPath(to: targets[1]) == "/api/capture/image?to=david/ai-notes/capture-image")
+        #expect(ScreenshotRules.uploadPath(to: nil) == "/api/capture/image")
+        // A Space older than the target list says only whether it can keep one.
+        let old = try JSONDecoder().decode(ScreenshotRules.Availability.self, from: Data(#"{"ok":true,"image":true,"app":"ai-spark"}"#.utf8))
+        #expect(old.image && old.targets == nil)
     }
 }

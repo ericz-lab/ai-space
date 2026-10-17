@@ -77,8 +77,8 @@ struct ScreenshotOverlayView: View {
                 Color.clear
             case .offered:
                 offer
-            case .saved(let id, let url):
-                saved(id: id, url: url)
+            case .saved(let label, let url):
+                saved(label: label, url: url)
             default:
                 Color.black.opacity(0.35)
                     .ignoresSafeArea()
@@ -106,7 +106,7 @@ struct ScreenshotOverlayView: View {
             Image(systemName: "camera.viewfinder").font(.title3).foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Keep this screenshot?").font(.subheadline.weight(.semibold))
-                Text("Save it to Spark").font(.caption).foregroundStyle(.secondary)
+                Text(offerDetail).font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             Button("Save") { capture.accept() }
@@ -117,10 +117,17 @@ struct ScreenshotOverlayView: View {
         }
     }
 
-    private func saved(id: Int, url: URL?) -> some View {
+    /// Where it can go: the one target, or the choice among several.
+    private var offerDetail: String {
+        let names = capture.targets.map { $0.displayTitle() }
+        if names.count > 1 { return String(localized: "Keep it in \(names.joined(separator: " · "))") }
+        return String(localized: "Save it to \(names.first ?? String(localized: "Spark"))")
+    }
+
+    private func saved(label: String, url: URL?) -> some View {
         bar {
             Image(systemName: "checkmark.circle.fill").font(.title3).foregroundStyle(Theme.success)
-            Text("Saved to Spark #\(id)").font(.subheadline.weight(.semibold))
+            Text("Saved to \(label)").font(.subheadline.weight(.semibold)).lineLimit(1)
             Spacer(minLength: 8)
             if let url {
                 Button("Open") { capture.open(url) }.buttonStyle(.bordered).controlSize(.small)
@@ -149,7 +156,7 @@ struct ScreenshotOverlayView: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Save to Spark").font(.headline)
+                Text("Keep Screenshot").font(.headline)
                 Spacer()
                 Button("Cancel") { capture.dismiss() }.disabled(capture.phase == .saving)
             }
@@ -179,6 +186,18 @@ struct ScreenshotOverlayView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline))
         }
+        if capture.targets.count > 1 {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Save to").font(.caption).foregroundStyle(.secondary)
+                Picker(String(localized: "Save to"), selection: Binding(get: { capture.target?.id ?? "" }, set: { id in
+                    if let t = capture.targets.first(where: { $0.id == id }) { capture.choose(t) }
+                })) {
+                    ForEach(capture.targets) { t in Text(verbatim: t.displayTitle()).tag(t.id) }
+                }
+                .modifier(TargetPickerStyle(count: capture.targets.count))
+                .disabled(capture.phase == .saving)
+            }
+        }
         TextField(String(localized: "Add a line (optional)"), text: $capture.text, axis: .vertical)
             .lineLimit(1...4)
             .focused($writing)
@@ -194,7 +213,7 @@ struct ScreenshotOverlayView: View {
         } label: {
             HStack {
                 if capture.phase == .saving { ProgressView().tint(.white) }
-                Text(capture.isFailed ? "Retry" : "Save").frame(maxWidth: .infinity)
+                Text(capture.isFailed ? String(localized: "Retry") : String(localized: "Save to \(capture.target?.displayTitle() ?? String(localized: "Spark"))")).frame(maxWidth: .infinity)
             }
         }
         .buttonStyle(.borderedProminent)
@@ -204,4 +223,12 @@ struct ScreenshotOverlayView: View {
 
 extension ScreenshotCapture {
     var isFailed: Bool { if case .failed = phase { return true } else { return false } }
+}
+
+/// Two or three places side by side; more in a menu.
+private struct TargetPickerStyle: ViewModifier {
+    let count: Int
+    func body(content: Content) -> some View {
+        if count <= 3 { content.pickerStyle(.segmented) } else { content.pickerStyle(.menu) }
+    }
 }

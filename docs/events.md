@@ -94,6 +94,25 @@ Errors the bus itself answers: 401 no valid token, 404 unknown app or capability
 
 A provider only has to trust requests that come from loopback and carry `x-space-caller`; it no longer hands out push tokens. The operator token calls as `space`. A capability with an `action:` block is also run by the operator from the command box and the Shortcuts panel, as `space` ([shortcuts.md](shortcuts.md)); `callers`, when set, must include `space` for that.
 
+## Capture
+
+A capability can offer itself as a place to keep what a client captures. Today that is a picture: the iPhone client's screenshots (mobile/ios/README.md#screenshots). Several apps may declare it; the client lists them and the operator picks one each time.
+
+```yaml
+provides:
+  capture-image:
+    http: { method: POST, path: /api/ideas/image }
+    timeout: 30s
+    capture:
+      kinds: [image]          # what it takes; only image so far
+      title: Spark            # the name in the client's picker
+      i18n: { zh: { title: 灵光一闪 } }
+```
+
+The target is called as `space` (so `callers`, when set, must include it) with a POST of multipart `file` (PNG or JPEG; the whole call is capped at 4 MiB), `text?` (the operator's words, may be absent), `via?` (`screenshot`, `share` or `pick`) and `id` (a UUID the client keeps across retries: a repeated `id` must answer the first result, not make a second). It answers `{ ok, url?, label? }`: the page of what was kept and a short name for it ("Spark #12"); anything else in the answer is the app's own.
+
+`GET /api/capture` lists the targets of this space and its peers as `{ id, app, capability, peer?, title, i18n? }`; `POST /api/capture/image?to=<id>` forwards the client's request as the operator to that one, and refuses an id that is not a declared target. Both are panel routes: no token, writes held to the panel's origin.
+
 ## Catalogue
 
 `GET /api/capabilities` lists, per app, what it provides (with description, method, path, timeout, callers), what it publishes (with description and example) and what it consumes, plus call counts, failures and mean duration per capability. Peers' apps follow under `<peer>/<app>` with a `peer` field. This is what an agent reads to learn that "save this link" is `keep/save-link`, and what a new app reads to find which events exist.

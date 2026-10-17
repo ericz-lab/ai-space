@@ -46,6 +46,26 @@ export type Capability = {
   callers?: string[];
   /** Offered to the operator as an action in the command box and the Shortcuts panel (docs/shortcuts.md). */
   action?: ActionSpec;
+  /** Offered as a place to keep what a client captures, such as the phone's screenshots (docs/events.md#capture). */
+  capture?: CaptureSpec;
+};
+
+/** What a capture target takes. */
+export const CAPTURE_KINDS = ["image"] as const;
+export type CaptureKind = (typeof CAPTURE_KINDS)[number];
+
+/**
+ * A capability that keeps a captured picture. It is called as `space` with multipart `file` (PNG or
+ * JPEG), `text?` (the operator's words), `via?` (screenshot, share, pick) and `id` (a UUID kept
+ * across retries; a repeated id answers the first result), and answers `{ ok, url?, label? }`:
+ * where the kept item opens and how to name it ("Spark #12").
+ */
+export type CaptureSpec = {
+  kinds: CaptureKind[];
+  /** The name the client's picker shows. */
+  title: string;
+  /** Titles in other languages, e.g. { zh: { title: "灵光一闪" } }. */
+  i18n?: Record<string, { title: string }>;
 };
 
 export type DeliveryKind = "http" | "stream";

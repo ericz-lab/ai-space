@@ -48,16 +48,51 @@ enum ScreenshotRules {
         return out
     }
 
-    /// What the capturer answered: the idea it made and the address of its page, when the Space knows one.
+    /// What the target answered (ai-space docs/events.md#capture): where the kept item opens and
+    /// a short name for it. Spark also says the idea it made, read when there is no label.
     struct Answer: Decodable, Equatable {
         struct Idea: Decodable, Equatable { let id: Int }
-        let idea: Idea
-        let url: String?
+        var url: String?
+        var label: String?
+        var idea: Idea?
     }
 
-    /// Whether the Space has an image capturer (`GET /api/capture`).
+    /// A place the Space can keep the picture (`GET /api/capture`).
+    struct Target: Decodable, Equatable, Identifiable {
+        let id: String
+        let app: String
+        var peer: String?
+        let title: String
+        var i18n: I18n?
+
+        func displayTitle(lang: String = Lang.current) -> String { Lang.pick(title, i18n, \.title, lang: lang) }
+    }
+
+    /// Whether the Space can keep a picture, and where. A Space older than the target list says
+    /// only `image`; the picture then goes where the Space sends it by default.
     struct Availability: Decodable, Equatable {
         let image: Bool
-        let app: String?
+        var targets: [Target]?
+    }
+
+    /// The target to preselect: the one chosen last when it is still there, else the first.
+    static func preferred(_ targets: [Target], last: String?) -> Target? {
+        targets.first { $0.id == last } ?? targets.first
+    }
+
+    /// The route for a picture to `target`; none names no target (an older Space).
+    static func uploadPath(to target: Target?) -> String {
+        guard let target else { return "/api/capture/image" }
+        var c = URLComponents()
+        c.path = "/api/capture/image"
+        c.queryItems = [URLQueryItem(name: "to", value: target.id)]
+        return c.string ?? "/api/capture/image"
+    }
+
+    /// How the receipt names what was kept.
+    static func receipt(_ answer: Answer, target: Target?) -> String {
+        if let label = answer.label, !label.isEmpty { return label }
+        let name = target?.displayTitle() ?? String(localized: "Spark")
+        return answer.idea.map { "\(name) #\($0.id)" } ?? name
     }
 }

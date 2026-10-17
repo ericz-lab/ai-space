@@ -23,10 +23,11 @@ import { OPERATOR as SPACE_OPERATOR, bearer, identify as identifyCaller, isOpera
  *   GET  /api/voice                         { transcribe: boolean }: whether a speech-to-text capability is reachable
  *   POST /api/voice/transcribe              multipart `file` (+ `language`, `context`), forwarded as the operator to the
  *                                           transcriber capability (voice-studio/transcribe, here or on one peer)
- *   GET  /api/capture                       { image: boolean }: whether a picture can be kept (the image capturer is reachable)
- *   POST /api/capture/image                 multipart `file` (+ `text`, `via`, `id`), forwarded as the operator to the image
- *                                           capturer capability (ai-spark/capture-image, here or on one peer): the
- *                                           phone's screenshots
+ *   GET  /api/capture                       { image, targets }: the capabilities that declare `capture: { kinds: [image] }`,
+ *                                           here and on the peers, for the client to choose from (docs/events.md#capture)
+ *   POST /api/capture/image?to=<target>     multipart `file` (+ `text`, `via`, `id`), forwarded as the operator to the chosen
+ *                                           target (`app/capability`, or `peer/app/capability`); without `to`, to
+ *                                           ai-spark/capture-image as before
  *   GET  /api/consumers                     external consumers (operator token)
  *   POST /api/consumers                     { name, subscriptions, calls } create one; the credential is in the answer, once
  *   GET  /api/consumers/:name               one consumer (operator token)
@@ -58,12 +59,15 @@ export type BusApiOptions = {
   consumers?: Consumers;
   /** The capability voice input is transcribed by; default `voice-studio/transcribe` (docs/panel.md#omnibox). */
   transcriber?: { app: string; capability: string };
-  /** The capability a picture from a client (the phone's screenshot) is kept by; default `ai-spark/capture-image`. */
+  /** Where a picture goes when the client names no target (clients older than the target list); default `ai-spark/capture-image`. */
   imageCapturer?: { app: string; capability: string };
 };
 
 export const TRANSCRIBER = { app: "voice-studio", capability: "transcribe" };
 export const IMAGE_CAPTURER = { app: "ai-spark", capability: "capture-image" };
+
+/** A place a client's picture can go, as `GET /api/capture` lists it; `id` is what `?to=` names. */
+export type CaptureTarget = { id: string; app: string; capability: string; peer?: string; title: string; i18n?: Record<string, { title: string }> };
 
 /** What the bus routes need from the peer hub; `name` is this space's own name, prefixed onto forwarded callers. */
 export type RemoteBus = {
@@ -170,6 +174,16 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
   };
   const transcriber = opts.transcriber ?? TRANSCRIBER;
   const imageCapturer = opts.imageCapturer ?? IMAGE_CAPTURER;
+  /** Every capability that keeps a captured picture: this space's first, then each peer's. */
+  const captureTargets = (): CaptureTarget[] => {
+    // A peer's apps come as `<peer>/<app>` from the hub.
+    const one = (a: AppCapabilities, peer?: string): CaptureTarget[] =>
+      a.provides.filter((c) => c.capture?.kinds.includes("image")).map((c) => ({
+        id: `${a.app}/${c.name}`, app: peer && a.app.startsWith(`${peer}/`) ? a.app.slice(peer.length + 1) : a.app, capability: c.name, ...(peer ? { peer } : {}),
+        title: c.capture!.title, ...(c.capture!.i18n ? { i18n: c.capture!.i18n } : {}),
+      }));
+    return [...bus.capabilities().flatMap((a) => one(a)), ...(opts.remote?.capabilities() ?? []).flatMap((a) => one(a, a.peer))];
+  };
 
   return {
     "/api/voice": {
@@ -181,11 +195,22 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
     },
 
     "/api/capture": {
-      GET: () => json({ ok: true, image: providerAt(imageCapturer) !== undefined, ...imageCapturer }),
+      GET: () => {
+        const targets = captureTargets();
+        return json({ ok: true, image: targets.length > 0 || providerAt(imageCapturer) !== undefined, targets });
+      },
     },
 
     "/api/capture/image": {
-      POST: (req) => forwardAsOperator(req, imageCapturer),
+      POST: (req) => {
+        const to = new URL(req.url).searchParams.get("to");
+        if (!to) return forwardAsOperator(req, imageCapturer);
+        const target = captureTargets().find((t) => t.id === to);
+        if (!target) return error(404, `${to} is not a capture target here or on a peer (GET /api/capture lists them)`);
+        if (!target.peer) return callLocal(req, OPERATOR, target.app, target.capability);
+        const peer = opts.remote?.get(target.peer);
+        return peer ? callRemote(req, OPERATOR, peer, target.app, target.capability) : error(503, `peer ${target.peer} is not connected`);
+      },
     },
 
     "/api/events/stream": {

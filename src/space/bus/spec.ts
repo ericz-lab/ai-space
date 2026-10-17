@@ -2,7 +2,7 @@ import { parseActionSpec } from "../shortcuts/spec.ts";
 import { assertEventName, assertTriggerEvent, parseTriggers } from "../scheduler/events.ts";
 import { parseDuration } from "../scheduler/schedule.ts";
 import type { EventTrigger } from "../scheduler/types.ts";
-import { type Capability, DEFAULT_CALL_TIMEOUT_MS, type EventConsumption, type EventPublication, type EventsSpec, HTTP_METHODS, type HttpMethod, MAX_CALL_TIMEOUT_MS } from "./types.ts";
+import { CAPTURE_KINDS, type Capability, type CaptureKind, type CaptureSpec, DEFAULT_CALL_TIMEOUT_MS, type EventConsumption, type EventPublication, type EventsSpec, HTTP_METHODS, type HttpMethod, MAX_CALL_TIMEOUT_MS } from "./types.ts";
 
 /**
  * The `events:` and `provides:` sections of space.yaml.
@@ -26,6 +26,7 @@ import { type Capability, DEFAULT_CALL_TIMEOUT_MS, type EventConsumption, type E
  *     timeout: 2m
  *     callers: [portfolio]                       # default: every app on this space
  *     action: { ... }                            # optional: offered in the command box (shortcuts/spec.ts)
+ *     capture: { kinds: [image], title, i18n? }  # optional: a place a client keeps a screenshot (docs/events.md#capture)
  * ```
  *
  * Parsing is strict, like the rest of the manifest: an unknown key or a bad value rejects the app.
@@ -115,8 +116,8 @@ export function parseProvidesSpec(raw: unknown, ctx = "provides"): Capability[] 
   return Object.entries(raw).map(([name, item]) => {
     const where = `${ctx}.${name}`;
     if (!NAME_RE.test(name)) throw new Error(`${ctx}: "${name}" is not a capability name (letters, digits, dots, dashes, underscores)`);
-    if (!isRecord(item)) throw new Error(`${where} must be a mapping with http / description / timeout / callers / action`);
-    for (const key of Object.keys(item)) if (!["description", "http", "timeout", "callers", "action"].includes(key)) throw new Error(`${where} has unknown key "${key}"`);
+    if (!isRecord(item)) throw new Error(`${where} must be a mapping with http / description / timeout / callers / action / capture`);
+    for (const key of Object.keys(item)) if (!["description", "http", "timeout", "callers", "action", "capture"].includes(key)) throw new Error(`${where} has unknown key "${key}"`);
     if (item.http === undefined) throw new Error(`${where}: http is required`);
     const { method, path } = parseHttp(item.http, `${where}.http`);
     const description = optionalString(item.description, `${where}.description`);
@@ -130,7 +131,11 @@ export function parseProvidesSpec(raw: unknown, ctx = "provides"): Capability[] 
     // A user-facing action (docs/shortcuts.md#app-actions); the operator runs it, so `callers` must let `space` in.
     const action = item.action === undefined ? undefined : parseActionSpec(item.action, `${where}.action`);
     if (action && callers && !callers.includes("space")) throw new Error(`${where}: an action is called as space; add space to callers`);
-    return { name, ...(description !== undefined ? { description } : {}), method, path, timeoutMs, ...(callers ? { callers } : {}), ...(action ? { action } : {}) };
+    // A place a client's capture can be kept (docs/events.md#capture); called as space too.
+    const capture = item.capture === undefined ? undefined : parseCaptureSpec(item.capture, `${where}.capture`);
+    if (capture && callers && !callers.includes("space")) throw new Error(`${where}: a capture target is called as space; add space to callers`);
+    if (capture && method !== "POST") throw new Error(`${where}: a capture target takes a POST`);
+    return { name, ...(description !== undefined ? { description } : {}), method, path, timeoutMs, ...(callers ? { callers } : {}), ...(action ? { action } : {}), ...(capture ? { capture } : {}) };
   });
 }
 
@@ -156,4 +161,23 @@ function optionalString(v: unknown, what: string): string | undefined {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** `capture: { kinds: [image], title, i18n?: { zh: { title } } }` on a capability. */
+export function parseCaptureSpec(raw: unknown, ctx: string): CaptureSpec {
+  if (!isRecord(raw)) throw new Error(`${ctx} must be a mapping with kinds / title / i18n`);
+  for (const key of Object.keys(raw)) if (!["kinds", "title", "i18n"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
+  if (!Array.isArray(raw.kinds) || !raw.kinds.length || !raw.kinds.every((k) => (CAPTURE_KINDS as readonly unknown[]).includes(k))) throw new Error(`${ctx}.kinds must list ${CAPTURE_KINDS.join(", ")}`);
+  const title = typeof raw.title === "string" ? raw.title.trim() : "";
+  if (!title) throw new Error(`${ctx}.title is required`);
+  let i18n: Record<string, { title: string }> | undefined;
+  if (raw.i18n !== undefined) {
+    if (!isRecord(raw.i18n)) throw new Error(`${ctx}.i18n must map languages to { title }`);
+    i18n = {};
+    for (const [lang, v] of Object.entries(raw.i18n)) {
+      if (!/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(lang) || !isRecord(v) || typeof v.title !== "string" || !v.title.trim() || Object.keys(v).some((k) => k !== "title")) throw new Error(`${ctx}.i18n.${lang} must be { title }`);
+      i18n[lang] = { title: v.title.trim() };
+    }
+  }
+  return { kinds: [...new Set(raw.kinds as CaptureKind[])], title, ...(i18n ? { i18n } : {}) };
 }

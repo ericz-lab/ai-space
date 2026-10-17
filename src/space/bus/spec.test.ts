@@ -67,3 +67,19 @@ describe("provides spec", () => {
     expect(parseProvidesSpec(undefined)).toEqual([]);
   });
 });
+
+describe("capture targets", () => {
+  test("a capability can declare that it keeps a captured picture", () => {
+    const [cap] = parseProvidesSpec({ "capture-image": { http: { method: "POST", path: "/i" }, capture: { kinds: ["image"], title: "Spark", i18n: { zh: { title: "灵光一闪" } } } } });
+    expect(cap!.capture).toEqual({ kinds: ["image"], title: "Spark", i18n: { zh: { title: "灵光一闪" } } });
+  });
+
+  test("a bad capture block rejects the manifest", () => {
+    const http = { method: "POST", path: "/i" };
+    expect(() => parseProvidesSpec({ c: { http, capture: { kinds: ["video"], title: "x" } } })).toThrow(/kinds/);
+    expect(() => parseProvidesSpec({ c: { http, capture: { kinds: ["image"] } } })).toThrow(/title/);
+    expect(() => parseProvidesSpec({ c: { http: { method: "GET", path: "/i" }, capture: { kinds: ["image"], title: "x" } } })).toThrow(/POST/);
+    expect(() => parseProvidesSpec({ c: { http, callers: ["other"], capture: { kinds: ["image"], title: "x" } } })).toThrow(/space/);
+    expect(() => parseProvidesSpec({ c: { http, capture: { kinds: ["image"], title: "x", icon: "y" } } })).toThrow(/unknown key/);
+  });
+});
