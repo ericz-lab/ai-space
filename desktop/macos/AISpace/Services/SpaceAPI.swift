@@ -204,7 +204,14 @@ enum Cookies {
 @MainActor
 final class DeviceUsageReporter {
     private var task: Task<Void, Never>?
-    private var current: (api: SpaceAPI, device: String, session: String)?
+    private var current: (api: SpaceAPI, device: String, session: String, app: String?)?
+    private var resolve: (@MainActor () -> (api: SpaceAPI, app: String?)?)?
+    private var sequence = 0
+    private let send: (SpaceAPI, String, [String: Any]) async -> Void
+
+    init(send: ((SpaceAPI, String, [String: Any]) async -> Void)? = nil) {
+        self.send = send ?? { api, path, body in _ = try? await api.send("POST", path, json: body) }
+    }
     #if os(macOS)
     private let client = "macos"
     #else
@@ -219,7 +226,8 @@ final class DeviceUsageReporter {
         return id
     }
 
-    func setActive(_ active: Bool, resolve: @escaping @MainActor () -> SpaceAPI?) {
+    func setActive(_ active: Bool, resolve: @escaping @MainActor () -> (api: SpaceAPI, app: String?)?) {
+        self.resolve = active ? resolve : nil
         task?.cancel()
         task = nil
         close()
@@ -236,21 +244,45 @@ final class DeviceUsageReporter {
     private func close() {
         guard let previous = current else { return }
         current = nil
-        let body = payload(previous.device, previous.session, active: false)
-        Task { try? await previous.api.send("POST", "/api/panel/usage/device", json: body) }
+        let body = payload(previous.device, previous.session, app: previous.app, active: false)
+        Task { await send(previous.api, "/api/panel/usage/device", body) }
     }
 
-    private func payload(_ device: String, _ session: String, active: Bool) -> [String: Any] {
-        ["deviceId": device, "client": client, "session": session, "active": active]
+    private func payload(_ device: String, _ session: String, app: String?, active: Bool) -> [String: Any] {
+        sequence += 1
+        return ["deviceId": device, "client": client, "session": session, "active": active,
+                "app": app as Any? ?? NSNull(), "sequence": sequence]
     }
 
-    private func beat(_ api: SpaceAPI?) async {
+    /// Navigation changes sample immediately; sequence numbers reject reordered requests.
+    func refresh() {
+        guard let resolve else { return }
+        Task { [weak self] in await self?.beat(resolve()) }
+    }
+
+    func recordOpen(api: SpaceAPI, app: String) {
+        let body: [String: Any] = ["deviceId": Self.identity(for: api.base.absoluteString), "client": client,
+                                   "key": app, "eventId": UUID().uuidString]
+        Task { await send(api, "/api/panel/usage/device/open", body) }
+    }
+
+    static func appKey(_ key: String?) -> String? {
+        guard let key, key.hasPrefix("app:"), key.count > 4 else { return nil }
+        return String(key.dropFirst(4))
+    }
+
+    private func beat(_ context: (api: SpaceAPI, app: String?)?) async {
+        guard resolve != nil, !Task.isCancelled else { return }
+        let api = context?.api
         if current?.api.base != api?.base { close() }
-        guard let api, !Task.isCancelled else { return }
+        guard let api else { return }
         if current == nil {
-            current = (api, Self.identity(for: api.base.absoluteString), UUID().uuidString)
+            current = (api, Self.identity(for: api.base.absoluteString), UUID().uuidString, nil)
         }
+        let opened = current?.app != context?.app
+        current?.app = context?.app
+        if opened, let app = context?.app { recordOpen(api: api, app: app) }
         guard let current else { return }
-        _ = try? await api.send("POST", "/api/panel/usage/device", json: payload(current.device, current.session, active: true))
+        await send(api, "/api/panel/usage/device", payload(current.device, current.session, app: current.app, active: true))
     }
 }

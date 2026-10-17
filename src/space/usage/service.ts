@@ -27,7 +27,17 @@ export class UsageService {
     if (!DEVICE_CLIENTS.includes(input.client as DeviceClient)) throw new Error("invalid client");
     if (typeof input.session !== "string" || !TAB_PATTERN.test(input.session)) throw new Error("invalid session");
     if (typeof input.active !== "boolean") throw new Error("active must be boolean");
-    this.store.deviceBeat(input.deviceId, input.client as DeviceClient, input.session, input.active, this.now());
+    if (input.app != null && (typeof input.app !== "string" || !KEY_PATTERN.test(input.app))) throw new Error("invalid app");
+    if (input.sequence !== undefined && (!Number.isSafeInteger(input.sequence) || (input.sequence as number) < 0)) throw new Error("invalid sequence");
+    this.store.deviceBeat(input.deviceId, input.client as DeviceClient, input.session, input.active, this.now(), input.app as string | null ?? null, input.sequence as number | undefined);
+  }
+
+  deviceOpen(input: Record<string, unknown>): void {
+    if (typeof input.deviceId !== "string" || !TAB_PATTERN.test(input.deviceId)) throw new Error("invalid deviceId");
+    if (!DEVICE_CLIENTS.includes(input.client as DeviceClient)) throw new Error("invalid client");
+    if (typeof input.eventId !== "string" || !TAB_PATTERN.test(input.eventId)) throw new Error("invalid eventId");
+    if (typeof input.key !== "string" || !KEY_PATTERN.test(input.key)) throw new Error("invalid key");
+    this.store.deviceOpen(input.deviceId, input.client as DeviceClient, input.eventId, input.key, this.now());
   }
 
   devices(window: Window) {

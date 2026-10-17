@@ -90,7 +90,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedID: UUID? {
         didSet { if usageActive && oldValue != selectedID { setUsageActive(true, restart: true) } }
     }
-    @Published var destination: Destination = .launcher
+    @Published var destination: Destination = .launcher {
+        didSet { deviceUsage.refresh() }
+    }
     /// Where the launcher stands, observed by the pager and its indicator (PagerPosition).
     let pager = PagerPosition()
     /// The page on show: `Pager.home`, a screen's id, or `Pager.settings`. The window opens on the
@@ -137,6 +139,10 @@ final class AppModel: ObservableObject {
         self.store = store
         let screens = screens ?? ScreenStore(fileURL: DesktopPaths.screens)
         self.screens = screens
+        NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification).sink { [weak self] _ in
+            guard let self else { return }
+            self.deviceUsage.refresh()
+        }.store(in: &watchers)
         selectedID = store.defaultConnection?.id
         screens.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
         // A swipe moves the pager without the model; the screen it lands on is the one last shown.
@@ -175,8 +181,15 @@ final class AppModel: ObservableObject {
         guard restart || usageActive != active else { return }
         usageActive = active
         deviceUsage.setActive(active) { [weak self] in
-            guard let self, let connection = self.selected else { return nil }
-            return self.loader(for: connection).api
+            guard let self else { return nil }
+            if let front = self.appWindows.foregroundApp {
+                return (self.loader(for: front.connection).api, front.app)
+            }
+            guard let connection = self.selected else { return nil }
+            let app: String?
+            if NSApp.keyWindow?.identifier?.rawValue == "SpaceMain", case .app(let id) = self.destination { app = id }
+            else { app = nil }
+            return (self.loader(for: connection).api, app)
         }
     }
 

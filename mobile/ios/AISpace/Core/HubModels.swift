@@ -343,6 +343,35 @@ struct AppUsageRow: Decodable, Hashable, Identifiable {
     }
 }
 
+/// Device foreground intervals, independent of the application's own usage metric.
+struct DeviceAppUsageRow: Decodable, Hashable, Identifiable {
+    var key: String
+    var opens: Int
+    var activeMs: Double?
+    var lastAt: String
+    var id: String { key }
+}
+
+struct DeviceUsageRow: Decodable, Hashable, Identifiable {
+    var apps: [DeviceAppUsageRow]?
+    var deviceId: String
+    var client: String
+    var sessions: Int
+    var activeMs: Double
+    var lastAt: String
+    var id: String { "\(client):\(deviceId)" }
+    var clientName: String {
+        switch client {
+        case "ios": return "iOS"
+        case "macos": return "macOS"
+        case "android": return "Android"
+        case "web": return "Web"
+        default: return client
+        }
+    }
+    var shortID: String { String(deviceId.suffix(8)) }
+}
+
 // MARK: App models (docs/model.md#app-models)
 
 struct AppModelRows: Decodable, Hashable, Identifiable {

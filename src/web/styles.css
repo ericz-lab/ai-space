@@ -479,6 +479,10 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .usage-table th:nth-child(-n + 3), .usage-table td:nth-child(-n + 3) { text-align: left; }
 .usage-table tbody tr:hover { background: var(--glass-strong); }
 .usage-table .usage-dim td { color: var(--muted); }
+.device-usage-table, .device-usage-table .usage-table { white-space: normal; table-layout: fixed; overflow-wrap: anywhere; }
+.device-usage-table th:first-child { width: 40%; }
+.device-usage-table .lib-chip { max-width: 100%; padding: 4px; font-size: 12px; text-align: left; }
+
 .usage-err { font-style: normal; color: var(--danger); margin-left: 4px; }
 .usage-call { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-grid { display: grid; grid-auto-rows: 11px; gap: 2px; padding: 6px 8px 4px; width: max-content; }

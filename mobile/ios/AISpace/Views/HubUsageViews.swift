@@ -169,6 +169,57 @@ struct AppUsagePage: View {
             } footer: {
                 Text("How often each app, agent and panel window was opened, and for how long. An app's time comes from its heartbeat script; one without it shows a dash. An agent's opens are chat turns.")
             }
+            Section {
+                if let error = store.devicesError {
+                    Text("Device usage is unavailable on this Space.").foregroundStyle(.secondary)
+                    Text(verbatim: error).font(.caption).foregroundStyle(.secondary)
+                } else if !store.devicesLoaded {
+                    ProgressView()
+                } else if store.devices.isEmpty {
+                    Text("No device activity in this period. Updated clients report while in the foreground.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(store.devices) { device in
+                        DisclosureGroup {
+                            if let apps = device.apps {
+                                if apps.isEmpty { Text("No app activity recorded for this device.").foregroundStyle(.secondary) }
+                                ForEach(apps) { app in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(verbatim: catalogue?.apps.first { $0.ref == app.key }?.displayTitle() ?? app.key)
+                                        HStack {
+                                            Text("Opens: \(app.opens)")
+                                            Spacer()
+                                            if let ms = app.activeMs {
+                                                Text(verbatim: HubFormat.duration(ms: ms))
+                                            } else { Text("Time not measured") }
+                                        }.font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            } else {
+                                Text("This Space does not provide app activity by device yet.").foregroundStyle(.secondary)
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(verbatim: "\(device.clientName) · \(device.shortID)")
+                                    Spacer(minLength: 8)
+                                    Text(verbatim: HubFormat.duration(ms: device.activeMs)).monospacedDigit()
+                                }
+                                Text("Foreground visits: \(device.sessions)").font(.caption).foregroundStyle(.secondary)
+                                if let date = ISO8601.parse(device.lastAt) {
+                                    Text("Last used: \(date.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Text(verbatim: device.deviceId).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("Device usage")
+            } footer: {
+                Text("Foreground time in the Space client. Overlapping windows count once per device. App filters do not affect device usage.")
+            }
             if !store.rows.isEmpty {
                 Section {
                     ForEach(store.rows) { row in

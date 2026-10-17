@@ -164,17 +164,45 @@ final class AppUsageStore: HubStore {
     /// The same entries over 30 days, for the trend, whatever the window.
     @Published private(set) var month: [String: AppUsageRow] = [:]
 
+    @Published private(set) var devices: [DeviceUsageRow] = []
+    @Published private(set) var devicesError: String?
+    @Published private(set) var devicesLoaded = false
+    private let fetch: (String) async throws -> Data
+
+    init(api: SpaceAPI, fetch: ((String) async throws -> Data)? = nil) {
+        self.fetch = fetch ?? { try await api.data($0) }
+        super.init(api: api)
+    }
+
     override func load() async throws {
         let (w, k) = (window, kind)
         let q = k == "all" ? "" : "&kind=\(k)"
-        let fresh = try Hub.rows(AppUsageRow.self, "usage", from: try await api.data("/api/usage?window=\(w)\(q)"))
+        devicesLoaded = false
+        devicesError = nil
+        devices = []
+        // Device support can be unavailable on an older Space without hiding application use.
+        await loadDevices(window: w)
+        let fresh = try Hub.rows(AppUsageRow.self, "usage", from: try await fetch("/api/usage?window=\(w)\(q)"))
         var thirty = fresh
-        if w != "30d", let data = try? await api.data("/api/usage?window=30d\(q)") {
+        if w != "30d", let data = try? await fetch("/api/usage?window=30d\(q)") {
             thirty = (try? Hub.rows(AppUsageRow.self, "usage", from: data)) ?? []
         }
         guard w == window, k == kind else { return }
         rows = fresh
         month = Dictionary(thirty.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    private func loadDevices(window asked: String) async {
+        do {
+            struct Response: Decodable { var devices: [DeviceUsageRow] }
+            let answer = try Hub.decode(Response.self, from: try await fetch("/api/usage/devices?window=\(asked)"))
+            guard asked == window, !Task.isCancelled else { return }
+            devices = answer.devices
+            devicesLoaded = true
+        } catch {
+            guard asked == window, !Task.isCancelled else { return }
+            devicesError = HubStore.message(error)
+        }
     }
 
     var opens: Int { rows.reduce(0) { $0 + $1.opens } }

@@ -22,6 +22,11 @@ final class AppWindows: NSObject, NSWindowDelegate {
 
     static func key(_ connection: UUID, _ app: String) -> String { "\(connection.uuidString)/\(app)" }
 
+    var foregroundApp: (connection: Connection, app: String)? {
+        guard let id = NSApp.keyWindow?.identifier?.rawValue, let entry = windows[id] else { return nil }
+        return (entry.connection, entry.app.id)
+    }
+
     func isOpen(_ app: String, connection: UUID) -> Bool { windows[Self.key(connection, app)] != nil }
 
     /// Brings an app's window forward, loading `url` in it first when given. False when it has none.

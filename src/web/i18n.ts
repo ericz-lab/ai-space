@@ -432,6 +432,10 @@ const en = {
   "tasks.eventRun": "{n} event(s)",
 
   "usage.title": "Model usage",
+  "activity.deviceAppsNote": "Apps opened on this device. Native clients measure foreground app time; standalone browser app pages have no shared device duration yet.",
+  "activity.deviceAppsUnavailable": "This Space does not provide app activity by device yet.",
+  "activity.deviceAppsEmpty": "No app activity recorded for this device.",
+  "activity.timeUnmeasured": "Not measured",
   "activity.devices": "Devices",
   "activity.device": "Client · device",
   "activity.sessions": "Foreground visits",
@@ -968,6 +972,10 @@ const zh: Record<Key, string> = {
   "tasks.eventRun": "{n} 个事件",
 
   "usage.title": "模型用量",
+  "activity.deviceAppsNote": "此设备打开过的应用。原生客户端记录应用前台时长；浏览器独立应用页面尚未关联设备时长。",
+  "activity.deviceAppsUnavailable": "此 Space 尚未提供按设备区分的应用统计。",
+  "activity.deviceAppsEmpty": "此设备暂无应用使用记录。",
+  "activity.timeUnmeasured": "未采集",
   "activity.devices": "设备使用",
   "activity.device": "客户端 · 设备",
   "activity.sessions": "前台访问次数",

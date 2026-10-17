@@ -47,6 +47,14 @@ export function createUsageRoutes(opts: UsageApiOptions): Routes {
         return new Response(null, { status: 204 });
       },
     },
+    "/api/panel/usage/device/open": {
+      POST: async (req) => {
+        const b = await body(req);
+        if (!b) return error(400, "body must be a JSON object");
+        try { service.deviceOpen(b); } catch (e) { return error(400, (e as Error).message); }
+        return new Response(null, { status: 204 });
+      },
+    },
     "/api/usage/devices": {
       GET: (req) => {
         const window = (new URL(req.url).searchParams.get("window") || "30d") as Window;

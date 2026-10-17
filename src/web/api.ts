@@ -1,3 +1,4 @@
+import { recordDeviceAppOpen } from "./device-usage.ts";
 import { type I18n, LOCALE, type Lang, translate } from "./i18n.ts";
 
 /** Types of the panel API as the browser sees them, plus tiny fetch helpers. */
@@ -140,6 +141,7 @@ export type UsageRow = { kind: UsageKind; key: string; opens: number; activeMs: 
  */
 export const recordOpen = (kind: UsageKind, key: string, source: "panel" | "library") => {
   try {
+    if (kind === "app") recordDeviceAppOpen(key);
     const body = JSON.stringify({ kind, key, source });
     if (!navigator.sendBeacon?.("/api/panel/usage/open", new Blob([body], { type: "text/plain" }))) void fetch("/api/panel/usage/open", { method: "POST", body, keepalive: true }).catch(() => {});
   } catch {

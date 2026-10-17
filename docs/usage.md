@@ -81,7 +81,7 @@ The script is recommended, not required (see [app-spec.md](app-spec.md#usage)). 
 
 ## Device usage
 
-The **Devices** section of App usage reports foreground use of the Space client,
+The **Devices** section of web App usage and **Device usage** section of the native iOS/macOS App usage pages report foreground use of the Space client,
 separately from application opens and agent execution time. It uses the same
 7/30/90-day and all-time controls. Application-kind filters do not affect it.
 
@@ -132,3 +132,42 @@ sessions and `/api/usage` response are unchanged. Historical and older-client
 usage has no device attribution and is not guessed or converted. The existing
 usage retention setting applies to device segments too. Updated native binaries
 must be installed before they can report; updating the server alone is insufficient.
+
+### Applications used by each device
+
+Expand a device in the web or iOS/macOS native report to see its `apps` array:
+`[{ key, opens, activeMs, lastAt }]`. `key` is the catalogue application reference,
+including a peer prefix when present. Labels come from the current catalogue;
+removed applications keep their reference. `activeMs: null` means unmeasured,
+which is different from a measured zero. Device-only historical intervals are
+not retroactively assigned to an application. Older servers without `apps`
+show an explicit unavailable message in updated native clients.
+
+Native clients include `app: string | null` and an increasing `sequence` in each
+foreground heartbeat. The active app is sampled on navigation and at the regular
+heartbeat. Returning to the launcher or a native Space page sets `app: null`;
+backgrounding closes the visit. A change of app ends the previous app interval
+at receipt time and starts the next one, without starting another device visit.
+Older in-flight sequence numbers cannot overwrite the latest context. Per-app
+intervals are clipped and unioned independently, as the device total is.
+
+`POST /api/panel/usage/device/open` accepts
+`{ deviceId, client, eventId, key }`. The same event ID for the same device/client
+counts once. Native clients send an open when an application enters the
+foreground context, including returning to it after the client was backgrounded.
+A heartbeat of the same app is not another open. Browser panel app clicks use
+the same local-storage identity as the panel's device beats. These device opens
+are a separate metric from the legacy application report.
+
+Browser app time is intentionally **unmeasured** in this breakdown: the shared
+app heartbeat script does not yet carry a panel-scoped device identity across
+origins. Panel time must not be assigned to the last app link clicked. No
+individual application needs changing for native measurement. Connecting browser
+app time requires a separate cross-origin identity handoff before upgrading the
+shared script (and adding the script to applications which do not load it).
+
+Storage adds `app` and `sequence` columns to device segments and a deduplicated
+`usage_device_opens` table. These migrate idempotently; existing intervals retain
+null app attribution. The usage retention policy covers both tables. Native
+reports read when opened, when filters change and on pull/toolbar refresh; they
+can show a zero-duration visit until a later heartbeat has arrived and is read.

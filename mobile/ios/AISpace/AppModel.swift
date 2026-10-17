@@ -91,14 +91,14 @@ final class AppModel: ObservableObject {
         set { pager.lastScreenID = newValue }
     }
     /// The Space's web panel over the tabs: the sign-in, package installs and what the app does not draw.
-    @Published var showingWebPanel = false
+    @Published var showingWebPanel = false { didSet { deviceUsage.refresh() } }
     /// A page of the Space drawn by the app, over the tabs.
-    @Published var hubPage: HubPage?
+    @Published var hubPage: HubPage? { didSet { deviceUsage.refresh() } }
     /// The screen whose entries are being rearranged, in a sheet.
     @Published var editingScreen: String?
     @Published var confirmingDeleteScreen = false
     @Published var confirmingResetScreens = false
-    @Published var page: OpenPage?
+    @Published var page: OpenPage? { didSet { deviceUsage.refresh() } }
     /// Retained web pages, isolated by Space; returning home does not close a tab.
     @Published private(set) var appTabs: [OpenPage] = []
     @Published var showingAdd = false
@@ -173,8 +173,23 @@ final class AppModel: ObservableObject {
         usageActive = active
         deviceUsage.setActive(active) { [weak self] in
             guard let self, let connection = self.selected else { return nil }
-            return self.loader(for: connection).api
+            return (self.loader(for: connection).api, self.usageApp)
         }
+    }
+
+    private var usageApp: String? {
+        guard !showingWebPanel, hubPage == nil, let page, page.connection == selected?.id else { return nil }
+        let target = page.session.webView.url ?? page.session.home
+        let homePath = page.session.home.path.hasSuffix("/") ? page.session.home.path : page.session.home.path + "/"
+        if ConnectionRules.sameOrigin(target, page.session.home),
+           target.path == page.session.home.path || target.path.hasPrefix(homePath), let key = DeviceUsageReporter.appKey(page.key) { return key }
+        guard let connection = selected else { return nil }
+        let matches = (loaders[connection.id]?.catalogue?.apps ?? []).filter { app in
+            guard let base = app.pageURL(space: connection.url), ConnectionRules.sameOrigin(base, target) else { return false }
+            let path = base.path.hasSuffix("/") ? base.path : base.path + "/"
+            return target.path == base.path || target.path.hasPrefix(path)
+        }
+        return matches.count == 1 ? matches.first?.ref : nil
     }
 
     var selected: Connection? { selectedID.flatMap(store.connection) ?? store.defaultConnection }
@@ -461,6 +476,7 @@ final class AppModel: ObservableObject {
         session.openExternally = { [weak self] in self?.openInBrowser($0) }
         // An app's host may sit behind its own access rule; a sign-in finished there counts for the catalogue too.
         session.onStateChange = { [weak self] state in
+            self?.deviceUsage.refresh()
             guard state == .ready, let loader = self?.loaders[connection.id], loader.status != .ok else { return }
             Task { await loader.refresh() }
         }

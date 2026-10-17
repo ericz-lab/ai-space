@@ -47,3 +47,17 @@ test("denied storage and failed telemetry leave the page usable", () => {
   expect(() => b.start()()).not.toThrow();
   expect(b.bodies).toHaveLength(0);
 });
+
+test("app opens use the same browser identity and unique event IDs", async () => {
+  const { recordDeviceAppOpen } = await import("./device-usage.ts");
+  const b = browser();
+  const close = b.start();
+  recordDeviceAppOpen("ai-todo", b.win as Window);
+  recordDeviceAppOpen("peer/ai-notes", b.win as Window);
+  close();
+  const sent = await Promise.all(b.bodies.map(async b => JSON.parse(await b.text())));
+  expect(new Set(sent.map(b => b.deviceId)).size).toBe(1);
+  expect(sent[1].key).toBe("ai-todo");
+  expect(sent[2].key).toBe("peer/ai-notes");
+  expect(sent[1].eventId).not.toBe(sent[2].eventId);
+});

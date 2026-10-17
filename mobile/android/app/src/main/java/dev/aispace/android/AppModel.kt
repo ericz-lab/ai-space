@@ -16,6 +16,7 @@ import dev.aispace.android.core.CatalogueCache
 import dev.aispace.android.core.CatalogueEntry
 import dev.aispace.android.core.ChatRoute
 import dev.aispace.android.core.Connection
+import dev.aispace.android.core.ConnectionRules
 import dev.aispace.android.core.ConnectionStore
 import dev.aispace.android.core.DeepLink
 import dev.aispace.android.core.EntryKind
@@ -175,14 +176,32 @@ class AppModel(private val context: Context) {
         private set
 
     /** The Space's web panel over the tabs: the sign-in, package installs and what the app does not draw. */
-    var showingWebPanel by mutableStateOf(false)
+    private var showingWebPanelState by mutableStateOf<Boolean>(false)
+    var showingWebPanel: Boolean
+        get() = showingWebPanelState
+        set(value) {
+            showingWebPanelState = value
+            usageChanged()
+        }
     /** A page of the Space drawn by the app, over the tabs. */
-    var hubPage by mutableStateOf<HubPage?>(null)
+    private var hubPageState by mutableStateOf<HubPage?>(null)
+    var hubPage: HubPage?
+        get() = hubPageState
+        set(value) {
+            hubPageState = value
+            usageChanged()
+        }
     /** The screen whose entries are being rearranged, in a sheet. */
     var editingScreen by mutableStateOf<String?>(null)
     var confirmingDeleteScreen by mutableStateOf(false)
     var confirmingResetScreens by mutableStateOf(false)
-    var page by mutableStateOf<OpenPage?>(null)
+    private var pageState by mutableStateOf<OpenPage?>(null)
+    var page: OpenPage?
+        get() = pageState
+        set(value) {
+            pageState = value
+            usageChanged()
+        }
     /** Retained web pages, isolated by Space; returning home does not close a tab. */
     val appTabs = mutableStateListOf<OpenPage>()
     var showingAdd by mutableStateOf(false)
@@ -240,12 +259,15 @@ class AppModel(private val context: Context) {
 
     private var usageJob: Job? = null
     private var usageActive = false
-    private data class UsageVisit(val api: SpaceApi, val device: String, val session: String)
+    private data class UsageVisit(val api: SpaceApi, val device: String, val session: String, val app: String?)
     private var usageVisit: UsageVisit? = null
+
+    private var usageSequence = 0L
 
     private fun usageBody(visit: UsageVisit, active: Boolean) = JSONObject()
         .put("deviceId", visit.device).put("client", "android")
         .put("session", visit.session).put("active", active)
+        .put("app", visit.app ?: JSONObject.NULL).put("sequence", ++usageSequence)
 
     private fun closeUsage() {
         val visit = usageVisit ?: return
@@ -266,24 +288,64 @@ class AppModel(private val context: Context) {
         if (!active) return
         usageJob = scope.launch {
             while (true) {
-                val api = selected?.let { loader(it).api }
-                if (usageVisit?.api?.base != api?.base) closeUsage()
-                if (api != null) {
-                    if (usageVisit == null) {
-                        val prefs = context.getSharedPreferences("device-usage", Context.MODE_PRIVATE)
-                        val key = api.base.toString()
-                        val device = prefs.getString(key, null) ?: UUID.randomUUID().toString().also {
-                            prefs.edit().putString(key, it).apply()
-                        }
-                        usageVisit = UsageVisit(api, device, UUID.randomUUID().toString())
-                    }
-                    val visit = usageVisit!!
-                    try { api.send("POST", "/api/panel/usage/device", usageBody(visit, true)) }
-                    catch (e: CancellationException) { throw e }
-                    catch (_: Exception) { /* A later live beat can recover without backfilling time. */ }
-                }
+                sendUsageBeat()
                 delay(30_000)
             }
+        }
+    }
+
+    private val usageApp: String?
+        get() {
+            val c = selected ?: return null
+            val current = page ?: return null
+            if (showingWebPanel || hubPage != null || current.connection != c.id) return null
+            val target = current.session.webView.url?.let { runCatching { URI(it) }.getOrNull() } ?: current.session.home
+            if (ConnectionRules.sameOrigin(target, current.session.home) &&
+                (target.path == current.session.home.path || target.path.startsWith(current.session.home.path.trimEnd('/') + "/"))) {
+                current.key?.takeIf { it.startsWith("app:") }?.let { return it.removePrefix("app:") }
+            }
+            val matches = loaders[c.id]?.catalogue?.value?.apps.orEmpty().filter { app ->
+                val base = app.pageURL(c.url) ?: return@filter false
+                ConnectionRules.sameOrigin(base, target) && (target.path == base.path || target.path.startsWith(base.path.trimEnd('/') + "/"))
+            }
+            return matches.singleOrNull()?.ref
+        }
+
+    private fun usageDevice(api: SpaceApi): String {
+        val prefs = context.getSharedPreferences("device-usage", Context.MODE_PRIVATE)
+        val key = api.base.toString()
+        return prefs.getString(key, null) ?: UUID.randomUUID().toString().also {
+            prefs.edit().putString(key, it).apply()
+        }
+    }
+
+    private suspend fun sendUsageBeat() {
+        if (!usageActive) return
+        val api = selected?.let { loader(it).api }
+        if (usageVisit?.api?.base != api?.base) closeUsage()
+        if (api == null) return
+        val opened = usageVisit?.app != usageApp
+        val visit = usageVisit?.copy(app = usageApp)
+            ?: UsageVisit(api, usageDevice(api), UUID.randomUUID().toString(), usageApp)
+        usageVisit = visit
+        if (opened && visit.app != null) recordUsageOpen(api, visit.app)
+        val body = usageBody(visit, true)
+        try { api.send("POST", "/api/panel/usage/device", body) }
+        catch (e: CancellationException) { throw e }
+        catch (_: Exception) { /* No offline replay. */ }
+    }
+
+    private fun usageChanged() {
+        if (usageActive) scope.launch { sendUsageBeat() }
+    }
+
+    private fun recordUsageOpen(api: SpaceApi, app: String) {
+        val body = JSONObject().put("deviceId", usageDevice(api)).put("client", "android")
+            .put("key", app).put("eventId", UUID.randomUUID().toString())
+        scope.launch {
+            try { api.send("POST", "/api/panel/usage/device/open", body) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Best effort. */ }
         }
     }
 
@@ -539,6 +601,7 @@ class AppModel(private val context: Context) {
         session.openExternally = { openInBrowser(it) }
         // An app's host may sit behind its own access rule; a sign-in finished there counts for the catalogue too.
         session.onStateChange = { state ->
+            usageChanged()
             val loader = loaders[connection.id]
             if (state == SpaceState.Ready && loader != null && loader.status.value != LoaderStatus.Ok) {
                 scope.launch { loader.refresh() }

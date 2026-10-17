@@ -51,7 +51,9 @@ export type BeatResult = "new" | "extended" | "dropped";
 /** A browser profile on one origin, or a native installation on one Space. */
 export const DEVICE_CLIENTS = ["web", "ios", "macos", "android"] as const;
 export type DeviceClient = (typeof DEVICE_CLIENTS)[number];
+export type DeviceAppUsageRow = { key: string; opens: number; activeMs: number | null; lastAt: string };
 export type DeviceUsageRow = {
+  apps: DeviceAppUsageRow[];
   deviceId: string;
   client: DeviceClient;
   sessions: number;

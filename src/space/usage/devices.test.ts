@@ -79,3 +79,74 @@ describe("device foreground usage", () => {
     expect(service.devices("7d")).toMatchObject([{ deviceId: device, client: "ios", activeMs: 30_000 }]);
   });
 });
+
+describe("device application breakdown", () => {
+  test("switching apps attributes preceding time correctly and preserves device visit count", () => {
+    const store = new UsageStore(new Database(":memory:"));
+    store.deviceOpen(device, "ios", "event-0001", "ai-todo", 1000);
+    store.deviceOpen(device, "ios", "event-0001", "ai-todo", 2000); // retry
+    store.deviceBeat(device, "ios", a, true, 1000, "ai-todo", 1);
+    store.deviceBeat(device, "ios", a, true, 31_000, "ai-notes", 2);
+    store.deviceOpen(device, "ios", "event-0002", "ai-notes", 31_000);
+    store.deviceBeat(device, "ios", a, true, 35_000, "ai-todo", 1); // delayed old context
+    store.deviceBeat(device, "ios", a, true, 51_000, null, 3); // launcher
+    store.deviceBeat(device, "ios", a, false, 61_000, null, 4);
+    expect(store.devices(0, 70_000)).toMatchObject([{ sessions: 1, activeMs: 60_000, apps: [
+      { key: "ai-todo", opens: 1, activeMs: 30_000 },
+      { key: "ai-notes", opens: 1, activeMs: 20_000 },
+    ] }]);
+    expect(store.devices(21_000, 41_000)[0]?.apps).toMatchObject([
+      { key: "ai-notes", opens: 1, activeMs: 10_000 },
+      { key: "ai-todo", opens: 0, activeMs: 10_000 },
+    ]);
+  });
+
+  test("per-app intervals deduplicate windows and isolate devices and peer keys", () => {
+    const store = new UsageStore(new Database(":memory:"));
+    for (const id of [device, other]) {
+      store.deviceBeat(id, "ios", a, true, 1000, "peer/ai-todo", 1);
+      store.deviceBeat(id, "ios", a, true, 31_000, "peer/ai-todo", 2);
+    }
+    store.deviceBeat(device, "ios", b, true, 11_000, "peer/ai-todo", 1);
+    store.deviceBeat(device, "ios", b, false, 41_000, "peer/ai-todo", 2);
+    expect(store.devices(0, 50_000).map(r => r.apps[0]?.activeMs)).toEqual([40_000, 30_000]);
+  });
+
+  test("web opens do not invent app duration; device-only history stays unattributed", () => {
+    const store = new UsageStore(new Database(":memory:"));
+    store.deviceBeat(device, "web", a, true, 1000);
+    store.deviceBeat(device, "web", a, false, 31_000);
+    store.deviceOpen(device, "web", "event-0001", "ai-todo", 1000);
+    expect(store.devices(0, 40_000)).toMatchObject([{ activeMs: 30_000, apps: [{ key: "ai-todo", opens: 1, activeMs: null }] }]);
+  });
+
+  test("same-millisecond navigation and exit cannot leave a session open", () => {
+    const store = new UsageStore(new Database(":memory:"));
+    store.deviceBeat(device, "ios", a, true, 1000, "a", 1);
+    store.deviceBeat(device, "ios", a, true, 1000, "b", 2);
+    store.deviceBeat(device, "ios", a, false, 1000, "b", 3);
+    store.deviceBeat(device, "ios", a, true, 31_000, "b", 4);
+    expect(store.devices(0, 40_000)[0]?.activeMs).toBe(0);
+  });
+
+  test("rejects malformed app context and device opens", () => {
+    const service = new UsageService(new UsageStore(new Database(":memory:")));
+    const beat = { deviceId: device, client: "ios", session: a, active: true };
+    expect(() => service.deviceBeat({ ...beat, app: "app:todo" })).toThrow();
+    for (const sequence of [-1, 1.5, "1", Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => service.deviceBeat({ ...beat, sequence })).toThrow();
+    }
+    for (const bad of [{ key: "../../x" }, { deviceId: "x" }, { client: "watch" }, { eventId: null }]) {
+      expect(() => service.deviceOpen({ deviceId: device, client: "ios", eventId: "event-0001", key: "todo", ...bad })).toThrow();
+    }
+  });
+});
+
+test("migrating device-only history preserves time without invented app attribution", () => {
+  const db = new Database(":memory:");
+  db.exec("CREATE TABLE usage_device_segments (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT NOT NULL, client TEXT NOT NULL, session TEXT NOT NULL, started_at INTEGER NOT NULL, last_at INTEGER NOT NULL, closed INTEGER NOT NULL DEFAULT 0)");
+  db.exec("INSERT INTO usage_device_segments VALUES (1, 'iphone-0001', 'ios', 'session-aaa', 1000, 31000, 1)");
+  const store = new UsageStore(db);
+  new UsageStore(db);
+  expect(store.devices(0, 40_000)).toMatchObject([{ activeMs: 30_000, sessions: 1, apps: [] }]);
+});

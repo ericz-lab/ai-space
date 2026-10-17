@@ -50,6 +50,10 @@ describe("usage routes", () => {
     expect((await call("POST", "/api/panel/usage/device", { body: "{}" })).status).toBe(400);
     expect((await call("POST", "/api/panel/usage/device", { body: "[]" })).status).toBe(400);
     expect((await call("GET", "/api/usage/devices?window=bad")).status).toBe(400);
+    const openBody = JSON.stringify({ deviceId: "iphone-001", client: "ios", key: "ai-todo", eventId: "event-0001" });
+    expect((await call("POST", "/api/panel/usage/device/open", { body: openBody, headers: { origin: "https://evil.example" } })).status).toBe(403);
+    expect((await call("POST", "/api/panel/usage/device/open", { body: openBody, headers: { origin: "http://todo.example.com" } })).status).toBe(204);
+    expect((await call("POST", "/api/panel/usage/device/open", { body: "{}" })).status).toBe(400);
     expect(JSON.parse((await call("GET", "/api/usage/devices?window=all")).text).ok).toBe(true);
   });
 

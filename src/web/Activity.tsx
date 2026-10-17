@@ -1,5 +1,5 @@
 import type { DeviceUsageRow } from "../space/usage/types.ts";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { activityBars, activityRange, type UsageWindow } from "./activity-range.ts";
 import { dateTime, fmtDuration, getJson, relTime, type UsageKind, type UsageRow } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
@@ -33,6 +33,7 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
   const [window, setWindow] = useState<Win>("30d");
   const [kind, setKind] = useState<UsageKind | "all">("all");
   const [rows, setRows] = useState<UsageRow[] | null>(null);
+  const [expandedDevice, setExpandedDevice] = useState<string | null>(null);
   const [devices, setDevices] = useState<DeviceUsageRow[] | null>(null);
   const [loadedAt, setLoadedAt] = useState(Date.now);
   const [err, setErr] = useState("");
@@ -110,13 +111,22 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
             <h3>{t("activity.devices")}</h3>
             <p className="task-note">{t("activity.devicesNote")}</p>
             {devices === null ? <p className="task-note">{t("activity.devicesUnavailable")}</p> : devices.length === 0 ? <p className="task-note">{t("activity.devicesEmpty")}</p> : (
-              <div className="usage-scroll"><table className="usage-table">
+              <div className="usage-scroll"><table className="usage-table device-usage-table">
                 <thead><tr><th>{t("activity.device")}</th><th>{t("activity.sessions")}</th><th>{t("activity.foreground")}</th><th>{t("activity.last")}</th></tr></thead>
-                <tbody>{devices.map(d => <tr key={`${d.client}:${d.deviceId}`}>
-                  <td title={d.deviceId}>{({ web: "Web", ios: "iOS", macos: "macOS", android: "Android" })[d.client]} · {d.deviceId.slice(-8)}</td>
+                <tbody>{devices.map(d => <Fragment key={`${d.client}:${d.deviceId}`}><tr>
+                  <td title={d.deviceId}><button className="lib-chip" aria-expanded={expandedDevice === `${d.client}:${d.deviceId}`} onClick={() => setExpandedDevice(expandedDevice === `${d.client}:${d.deviceId}` ? null : `${d.client}:${d.deviceId}`)}>{({ web: "Web", ios: "iOS", macos: "macOS", android: "Android" })[d.client]} · {d.deviceId.slice(-8)} ▾</button></td>
                   <td>{d.sessions}</td><td>{fmtDuration(d.activeMs, lang)}</td>
                   <td title={dateTime(d.lastAt, lang)}>{relTime(d.lastAt, lang)}</td>
-                </tr>)}</tbody>
+                </tr>{expandedDevice === `${d.client}:${d.deviceId}` && <tr><td colSpan={4}>
+                  <p className="task-note">{t("activity.deviceAppsNote")}</p>
+                  {!d.apps ? <p>{t("activity.deviceAppsUnavailable")}</p> : d.apps.length === 0 ? <p>{t("activity.deviceAppsEmpty")}</p> :
+                    <table className="usage-table"><thead><tr><th>{t("activity.name")}</th><th>{t("activity.opens")}</th><th>{t("activity.foreground")}</th></tr></thead>
+                      <tbody>{d.apps.map(app => <tr key={app.key}>
+                        <td>{nameOf("app", app.key)}</td><td>{app.opens}</td>
+                        <td>{app.activeMs === null ? t("activity.timeUnmeasured") : fmtDuration(app.activeMs, lang)}</td>
+                      </tr>)}</tbody>
+                    </table>}
+                </td></tr>}</Fragment>)}</tbody>
               </table></div>
             )}
           </section>
