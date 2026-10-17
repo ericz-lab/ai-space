@@ -1,3 +1,4 @@
+import type { DeviceUsageRow } from "../space/usage/types.ts";
 import { useEffect, useState } from "react";
 import { activityBars, activityRange, type UsageWindow } from "./activity-range.ts";
 import { dateTime, fmtDuration, getJson, relTime, type UsageKind, type UsageRow } from "./api.ts";
@@ -32,6 +33,7 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
   const [window, setWindow] = useState<Win>("30d");
   const [kind, setKind] = useState<UsageKind | "all">("all");
   const [rows, setRows] = useState<UsageRow[] | null>(null);
+  const [devices, setDevices] = useState<DeviceUsageRow[] | null>(null);
   const [loadedAt, setLoadedAt] = useState(Date.now);
   const [err, setErr] = useState("");
 
@@ -40,6 +42,7 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
     let active = true;
     let request = 0;
     setRows(null);
+    setDevices(null);
     setErr("");
     const q = kind === "all" ? "" : `&kind=${kind}`;
     const load = async () => {
@@ -48,6 +51,13 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
         const result = await getJson<{ usage: UsageRow[] }>(`/api/usage?window=${window}${q}`);
         if (!active || current !== request) return;
         setRows(result.usage);
+        // A device report failure must not hide the existing application report.
+        try {
+          const d = await getJson<{ devices: DeviceUsageRow[] }>(`/api/usage/devices?window=${window}`);
+          if (!active || current !== request) return;
+          setDevices(d.devices);
+        } catch { if (active && current === request) setDevices(null); }
+        if (!active || current !== request) return;
         setLoadedAt(Date.now());
         setErr("");
       } catch (e) {
@@ -96,6 +106,20 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
           </button>
         </div>
         <div className="task-body">
+          <section className="task-group">
+            <h3>{t("activity.devices")}</h3>
+            <p className="task-note">{t("activity.devicesNote")}</p>
+            {devices === null ? <p className="task-note">{t("activity.devicesUnavailable")}</p> : devices.length === 0 ? <p className="task-note">{t("activity.devicesEmpty")}</p> : (
+              <div className="usage-scroll"><table className="usage-table">
+                <thead><tr><th>{t("activity.device")}</th><th>{t("activity.sessions")}</th><th>{t("activity.foreground")}</th><th>{t("activity.last")}</th></tr></thead>
+                <tbody>{devices.map(d => <tr key={`${d.client}:${d.deviceId}`}>
+                  <td title={d.deviceId}>{({ web: "Web", ios: "iOS", macos: "macOS", android: "Android" })[d.client]} · {d.deviceId.slice(-8)}</td>
+                  <td>{d.sessions}</td><td>{fmtDuration(d.activeMs, lang)}</td>
+                  <td title={dateTime(d.lastAt, lang)}>{relTime(d.lastAt, lang)}</td>
+                </tr>)}</tbody>
+              </table></div>
+            )}
+          </section>
           <p className="task-note">{t("activity.note")}</p>
           <div className="lib-filters act-kinds" role="tablist">
             {KINDS.map((k) => (

@@ -83,13 +83,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         #endif
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) { model.setUsageActive(true) }
+    func applicationDidResignActive(_ notification: Notification) { model.setUsageActive(false) }
+    func applicationWillTerminate(_ notification: Notification) { model.setUsageActive(false) }
+
     func showWindow() {
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
+        model.setUsageActive(true)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
+        if !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeKey }) { model.setUsageActive(false) }
         return false
     }
 

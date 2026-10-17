@@ -87,7 +87,9 @@ final class AppModel: ObservableObject {
     let notifier = Notifier()
     private let cache = CatalogueCache(directory: DesktopPaths.caches)
 
-    @Published private(set) var selectedID: UUID?
+    @Published private(set) var selectedID: UUID? {
+        didSet { if usageActive && oldValue != selectedID { setUsageActive(true, restart: true) } }
+    }
     @Published var destination: Destination = .launcher
     /// Where the launcher stands, observed by the pager and its indicator (PagerPosition).
     let pager = PagerPosition()
@@ -165,6 +167,18 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: Connections
+
+    private let deviceUsage = DeviceUsageReporter()
+    private var usageActive = false
+
+    func setUsageActive(_ active: Bool, restart: Bool = false) {
+        guard restart || usageActive != active else { return }
+        usageActive = active
+        deviceUsage.setActive(active) { [weak self] in
+            guard let self, let connection = self.selected else { return nil }
+            return self.loader(for: connection).api
+        }
+    }
 
     var selected: Connection? { selectedID.flatMap(store.connection) }
 

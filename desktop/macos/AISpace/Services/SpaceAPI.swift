@@ -199,3 +199,58 @@ enum Cookies {
         return HTTPCookie.requestHeaderFields(with: matched)["Cookie"]
     }
 }
+
+/// One foreground visit per client, independent of background catalogue refreshes and WebViews.
+@MainActor
+final class DeviceUsageReporter {
+    private var task: Task<Void, Never>?
+    private var current: (api: SpaceAPI, device: String, session: String)?
+    #if os(macOS)
+    private let client = "macos"
+    #else
+    private let client = "ios"
+    #endif
+
+    static func identity(for origin: String, defaults: UserDefaults = .standard) -> String {
+        let key = "space-usage-device:\(origin)"
+        if let saved = defaults.string(forKey: key), UUID(uuidString: saved) != nil { return saved }
+        let id = UUID().uuidString
+        defaults.set(id, forKey: key)
+        return id
+    }
+
+    func setActive(_ active: Bool, resolve: @escaping @MainActor () -> SpaceAPI?) {
+        task?.cancel()
+        task = nil
+        close()
+        guard active else { return }
+        task = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.beat(resolve())
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
+        }
+    }
+
+    private func close() {
+        guard let previous = current else { return }
+        current = nil
+        let body = payload(previous.device, previous.session, active: false)
+        Task { try? await previous.api.send("POST", "/api/panel/usage/device", json: body) }
+    }
+
+    private func payload(_ device: String, _ session: String, active: Bool) -> [String: Any] {
+        ["deviceId": device, "client": client, "session": session, "active": active]
+    }
+
+    private func beat(_ api: SpaceAPI?) async {
+        if current?.api.base != api?.base { close() }
+        guard let api, !Task.isCancelled else { return }
+        if current == nil {
+            current = (api, Self.identity(for: api.base.absoluteString), UUID().uuidString)
+        }
+        guard let current else { return }
+        _ = try? await api.send("POST", "/api/panel/usage/device", json: payload(current.device, current.session, active: true))
+    }
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { startDeviceUsage } from "./device-usage.ts";
 import App from "./App.tsx";
 import { LOCALE, LangContext, loadLang } from "./i18n.ts";
 import { initAppearance } from "./theme.ts";
@@ -10,6 +11,7 @@ initAppearance();
 
 /** The root owns the page language (saved preference, else the browser's) and provides it; see docs/i18n.md. */
 function Root() {
+  useEffect(() => startDeviceUsage(), []);
   const [lang, setLang] = useState(loadLang);
   useEffect(() => {
     document.documentElement.lang = LOCALE[lang];

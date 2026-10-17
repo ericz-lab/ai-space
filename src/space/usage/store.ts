@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { AGENT_GAP_MS, BEAT_GAP_MS, BEAT_MAX_STEP_MS, BEAT_MIN_INTERVAL_MS, type BeatResult, type Kind, type Source, type UsageRow } from "./types.ts";
+import { AGENT_GAP_MS, BEAT_GAP_MS, BEAT_MAX_STEP_MS, BEAT_MIN_INTERVAL_MS, type DeviceClient, type DeviceUsageRow, type BeatResult, type Kind, type Source, type UsageRow } from "./types.ts";
 
 /**
  * Usage in space.db (docs/usage.md): one row per open, and segments of time in
@@ -10,6 +10,17 @@ import { AGENT_GAP_MS, BEAT_GAP_MS, BEAT_MAX_STEP_MS, BEAT_MIN_INTERVAL_MS, type
  */
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS usage_device_segments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_id TEXT NOT NULL,
+  client TEXT NOT NULL,
+  session TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL,
+  closed INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS usage_device_session ON usage_device_segments(device_id, client, session, last_at DESC);
+CREATE INDEX IF NOT EXISTS usage_device_last ON usage_device_segments(last_at);
 CREATE TABLE IF NOT EXISTS usage_opens (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
   kind    TEXT NOT NULL,
@@ -47,6 +58,48 @@ export class UsageStore {
     db.exec(SCHEMA);
     const days = opts.retentionDays ?? 0;
     this.retentionMs = days > 0 ? days * 86400_000 : 0;
+  }
+
+  /** Server receipt times only. Missing beats never fill an offline/background gap. */
+  deviceBeat(deviceId: string, client: DeviceClient, session: string, active: boolean, at: number): void {
+    this.db.transaction(() => {
+      const previous = this.db.query<{ id: number; last_at: number; closed: number }, string[]>(
+        "SELECT id, last_at, closed FROM usage_device_segments WHERE device_id = ? AND client = ? AND session = ? ORDER BY last_at DESC, id DESC LIMIT 1",
+      ).get(deviceId, client, session);
+      // A session id belongs to a single foreground visit; late packets cannot reopen it.
+      if (previous?.closed || (previous && at <= previous.last_at)) return;
+      if (previous && at - previous.last_at <= 45_000) {
+        this.db.query("UPDATE usage_device_segments SET last_at = ?, closed = ? WHERE id = ?").run(at, active ? 0 : 1, previous.id);
+      } else {
+        this.db.query("INSERT INTO usage_device_segments (device_id, client, session, started_at, last_at, closed) VALUES (?, ?, ?, ?, ?, ?)")
+          .run(deviceId, client, session, at, at, active ? 0 : 1);
+      }
+      this.prune(at);
+    })();
+  }
+
+  /** Union foreground intervals per device; clip to the requested [since, until) window. */
+  devices(since: number, until: number): DeviceUsageRow[] {
+    const segments = this.db.query<{ device_id: string; client: DeviceClient; session: string; started_at: number; last_at: number }, number[]>(
+      "SELECT device_id, client, session, started_at, last_at FROM usage_device_segments WHERE last_at >= ? AND started_at < ? ORDER BY started_at, last_at",
+    ).all(since, until);
+    const groups = new Map<string, { row: DeviceUsageRow; end: number; sessions: Set<string> }>();
+    for (const s of segments) {
+      const key = `${s.client}:${s.device_id}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = { row: { deviceId: s.device_id, client: s.client, sessions: 0, activeMs: 0, lastAt: new Date(s.last_at).toISOString() }, end: since, sessions: new Set() };
+        groups.set(key, group);
+      }
+      const start = Math.max(since, s.started_at);
+      const end = Math.min(until, s.last_at);
+      group.row.activeMs += Math.max(0, end - Math.max(start, group.end));
+      group.end = Math.max(group.end, end);
+      group.sessions.add(s.session);
+      if (s.last_at > Date.parse(group.row.lastAt)) group.row.lastAt = new Date(s.last_at).toISOString();
+    }
+    return [...groups.values()].map(({ row, sessions }) => ({ ...row, sessions: sessions.size }))
+      .sort((a, b) => b.activeMs - a.activeMs || b.lastAt.localeCompare(a.lastAt) || a.deviceId.localeCompare(b.deviceId));
   }
 
   addOpen(kind: Kind, key: string, source: Source, at: number): void {
@@ -145,6 +198,7 @@ export class UsageStore {
   private prune(at: number): void {
     if (!this.retentionMs) return;
     const before = at - this.retentionMs;
+    this.db.query("DELETE FROM usage_device_segments WHERE last_at < ?").run(before);
     this.db.query("DELETE FROM usage_opens WHERE at < ?").run(before);
     this.db.query("DELETE FROM usage_sessions WHERE last_at < ?").run(before);
   }

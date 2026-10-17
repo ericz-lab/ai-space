@@ -19,9 +19,11 @@ struct AISpaceApp: App {
                     model.screenshotTaken()
                 }
                 .onChange(of: phase) { _, now in
+                    model.setUsageActive(now == .active)
                     if now == .active { model.becameActive() }
                 }
                 .onAppear {
+                    model.setUsageActive(phase == .active)
                     if let target = AppDelegate.launchAction {
                         AppDelegate.launchAction = nil
                         model.handle(target)

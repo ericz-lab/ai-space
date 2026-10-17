@@ -1,5 +1,5 @@
 import type { UsageStore } from "./store.ts";
-import { type BeatResult, KEY_PATTERN, KINDS, type Kind, SOURCES, type Source, TAB_PATTERN, type UsageRow, WINDOW_MS, type Window } from "./types.ts";
+import { DEVICE_CLIENTS, type DeviceClient, type BeatResult, KEY_PATTERN, KINDS, type Kind, SOURCES, type Source, TAB_PATTERN, type UsageRow, WINDOW_MS, type Window } from "./types.ts";
 
 /**
  * The usage service (docs/usage.md): validates what the panel, the heartbeat
@@ -20,6 +20,20 @@ export class UsageService {
   ) {
     this.now = opts.now ?? Date.now;
     this.log = opts.log ?? ((l) => console.error(`[usage] ${l}`));
+  }
+
+  deviceBeat(input: Record<string, unknown>): void {
+    if (typeof input.deviceId !== "string" || !TAB_PATTERN.test(input.deviceId)) throw new Error("invalid deviceId");
+    if (!DEVICE_CLIENTS.includes(input.client as DeviceClient)) throw new Error("invalid client");
+    if (typeof input.session !== "string" || !TAB_PATTERN.test(input.session)) throw new Error("invalid session");
+    if (typeof input.active !== "boolean") throw new Error("active must be boolean");
+    this.store.deviceBeat(input.deviceId, input.client as DeviceClient, input.session, input.active, this.now());
+  }
+
+  devices(window: Window) {
+    const now = this.now();
+    const span = WINDOW_MS[window];
+    return this.store.devices(Number.isFinite(span) ? now - span : 0, now);
   }
 
   /** An open from the panel; throws on a malformed one. */

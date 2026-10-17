@@ -42,6 +42,17 @@ describe("usage routes", () => {
     expect(usage.report("all")).toMatchObject([{ kind: "app", key: "ai-todo", sessions: 1, activeMs: 0 }]);
   });
 
+  test("device telemetry validates bodies and retains the same-origin write boundary", async () => {
+    const { call } = setup();
+    const body = JSON.stringify({ deviceId: "iphone-001", client: "ios", session: "session-001", active: true });
+    expect((await call("POST", "/api/panel/usage/device", { body, headers: { origin: "http://todo.example.com" } })).status).toBe(204);
+    expect((await call("POST", "/api/panel/usage/device", { body, headers: { origin: "https://evil.example" } })).status).toBe(403);
+    expect((await call("POST", "/api/panel/usage/device", { body: "{}" })).status).toBe(400);
+    expect((await call("POST", "/api/panel/usage/device", { body: "[]" })).status).toBe(400);
+    expect((await call("GET", "/api/usage/devices?window=bad")).status).toBe(400);
+    expect(JSON.parse((await call("GET", "/api/usage/devices?window=all")).text).ok).toBe(true);
+  });
+
   test("the script is served as JavaScript; bad query values are refused", async () => {
     const { call } = setup();
     const js = await call("GET", "/_space/usage.js");

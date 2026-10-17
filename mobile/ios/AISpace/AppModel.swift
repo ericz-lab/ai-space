@@ -54,7 +54,9 @@ final class AppModel: ObservableObject {
     let screens: ScreenStore
     private let cache = CatalogueCache(directory: AppPaths.caches)
 
-    @Published private(set) var selectedID: UUID?
+    @Published private(set) var selectedID: UUID? {
+        didSet { if usageActive && oldValue != selectedID { setUsageActive(true, restart: true) } }
+    }
     /// Where the pager stands, observed by the pager alone (PagerPosition).
     let pager = PagerPosition()
     /// The page on show: `Pager.home`, a screen's id, or `Pager.settings`. The app opens on the
@@ -162,6 +164,18 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: Spaces
+
+    private let deviceUsage = DeviceUsageReporter()
+    private var usageActive = false
+
+    func setUsageActive(_ active: Bool, restart: Bool = false) {
+        guard restart || usageActive != active else { return }
+        usageActive = active
+        deviceUsage.setActive(active) { [weak self] in
+            guard let self, let connection = self.selected else { return nil }
+            return self.loader(for: connection).api
+        }
+    }
 
     var selected: Connection? { selectedID.flatMap(store.connection) ?? store.defaultConnection }
 

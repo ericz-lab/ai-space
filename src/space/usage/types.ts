@@ -47,3 +47,14 @@ export type UsageRow = {
 
 /** What a heartbeat did. */
 export type BeatResult = "new" | "extended" | "dropped";
+
+/** A browser profile on one origin, or a native installation on one Space. */
+export const DEVICE_CLIENTS = ["web", "ios", "macos", "android"] as const;
+export type DeviceClient = (typeof DEVICE_CLIENTS)[number];
+export type DeviceUsageRow = {
+  deviceId: string;
+  client: DeviceClient;
+  sessions: number;
+  activeMs: number;
+  lastAt: string;
+};

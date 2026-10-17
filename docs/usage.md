@@ -78,3 +78,57 @@ The panel sends opens with `navigator.sendBeacon`, so an open is never held up a
 ## For app authors
 
 The script is recommended, not required (see [app-spec.md](app-spec.md#usage)). The `space-app` template's page includes it. ai-todo, ai-notes and ai-calendar load it.
+
+## Device usage
+
+The **Devices** section of App usage reports foreground use of the Space client,
+separately from application opens and agent execution time. It uses the same
+7/30/90-day and all-time controls. Application-kind filters do not affect it.
+
+- `client` is `web`, `ios`, `macos`, or `android`.
+- `deviceId` is a random UUID persisted in browser local storage or native
+  preferences, scoped to the Space origin. Two iOS installations have separate
+  IDs and separate rows. This is a client installation/profile identity, not a
+  hardware identifier. Clearing storage or reinstalling may change it; restoring
+  copied native preferences can copy it. No serial number, model, hostname, IP or
+  raw User-Agent is stored. The UI abbreviates the ID and exposes the full value
+  in its title; the API returns it in full.
+- `session` is a new random UUID for each foreground visit. Web visibility,
+  pagehide/pageshow (including BFCache), iOS scene phase, macOS application
+  activation and Android resume/pause start and stop reporting. Native clients
+  target the selected Space, including embedded app pages. Changing the selected
+  Space closes the old visit. Background catalogue refreshes do not report use.
+- Web measures the panel page while visible, including idle visible time. It
+  does not link identities across app hostnames or count a separate app tab when
+  the panel is hidden. Embedded panels with an `AISpaceMobile/` or
+  `AISpaceDesktop/` User-Agent marker defer to their native host to avoid duplicate
+  web devices. Existing app heartbeat and app-open metrics remain independent.
+
+`POST /api/panel/usage/device` accepts
+`{ deviceId, client, session, active: boolean }`, returning 204. IDs must be
+8–64 ASCII letters, digits, underscores or hyphens. It has the same browser
+same-origin write guard as app opens; native clients use their existing Space
+cookie session. This is best-effort operational telemetry, not authenticated
+hardware attestation.
+
+Clients send immediately and about every 30 seconds while foregrounded, then a
+final `active: false` on exit. The server records receipt instants in milliseconds.
+Beats no more than 45 seconds apart extend an interval; longer gaps start a new
+interval with zero duration, so an offline/suspended period is not filled in.
+Closed session IDs reject late packets. There is no offline replay queue. A lost
+last beat can undercount the last interval. Native networking delays also reduce
+sampling precision. A visit that only sends its first beat has zero duration.
+
+`GET /api/usage/devices?window=7d|30d|90d|all` returns
+`{ ok, window, devices: [{ deviceId, client, sessions, activeMs, lastAt }] }`.
+`lastAt` is a UTC ISO instant. `sessions` counts distinct foreground visit IDs
+with an observation overlapping the window; `activeMs` is the union of observed
+intervals for that device/client, clipped to `[windowStart, now)`. Thus concurrent
+windows do not multiply time. The same ID with a different client type remains
+separate. Reports belong to the receiving Space and do not combine peers.
+
+`usage_device_segments` is added idempotently in `space.db`; the existing opens,
+sessions and `/api/usage` response are unchanged. Historical and older-client
+usage has no device attribution and is not guessed or converted. The existing
+usage retention setting applies to device segments too. Updated native binaries
+must be installed before they can report; updating the server alone is insufficient.

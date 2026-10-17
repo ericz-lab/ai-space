@@ -36,6 +36,10 @@ import dev.aispace.android.ui.theme.Appearance
 import dev.aispace.android.ui.theme.ThemePreset
 import dev.aispace.android.web.SpaceProfile
 import dev.aispace.android.web.WebSession
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import dev.aispace.android.core.SpaceApi
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -234,6 +238,55 @@ class AppModel(private val context: Context) {
 
     // Spaces
 
+    private var usageJob: Job? = null
+    private var usageActive = false
+    private data class UsageVisit(val api: SpaceApi, val device: String, val session: String)
+    private var usageVisit: UsageVisit? = null
+
+    private fun usageBody(visit: UsageVisit, active: Boolean) = JSONObject()
+        .put("deviceId", visit.device).put("client", "android")
+        .put("session", visit.session).put("active", active)
+
+    private fun closeUsage() {
+        val visit = usageVisit ?: return
+        usageVisit = null
+        scope.launch {
+            try { visit.api.send("POST", "/api/panel/usage/device", usageBody(visit, false)) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Best effort; never replay an offline visit. */ }
+        }
+    }
+
+    fun setUsageActive(active: Boolean, restart: Boolean = false) {
+        if (!restart && usageActive == active) return
+        usageActive = active
+        usageJob?.cancel()
+        usageJob = null
+        closeUsage()
+        if (!active) return
+        usageJob = scope.launch {
+            while (true) {
+                val api = selected?.let { loader(it).api }
+                if (usageVisit?.api?.base != api?.base) closeUsage()
+                if (api != null) {
+                    if (usageVisit == null) {
+                        val prefs = context.getSharedPreferences("device-usage", Context.MODE_PRIVATE)
+                        val key = api.base.toString()
+                        val device = prefs.getString(key, null) ?: UUID.randomUUID().toString().also {
+                            prefs.edit().putString(key, it).apply()
+                        }
+                        usageVisit = UsageVisit(api, device, UUID.randomUUID().toString())
+                    }
+                    val visit = usageVisit!!
+                    try { api.send("POST", "/api/panel/usage/device", usageBody(visit, true)) }
+                    catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { /* A later live beat can recover without backfilling time. */ }
+                }
+                delay(30_000)
+            }
+        }
+    }
+
     val selected: Connection?
         get() = selectedID?.let { store.connection(it) } ?: store.defaultConnection
 
@@ -314,6 +367,7 @@ class AppModel(private val context: Context) {
         if (store.connection(id) == null) return
         page = null
         selectedID = id
+        if (usageActive) setUsageActive(true, restart = true)
         query = ""
         homePage = Screens.home
         tab = MainTab.Panel

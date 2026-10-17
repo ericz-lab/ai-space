@@ -39,6 +39,21 @@ export function createUsageRoutes(opts: UsageApiOptions): Routes {
     }
   };
   return {
+    "/api/panel/usage/device": {
+      POST: async (req) => {
+        const b = await body(req);
+        if (!b) return error(400, "body must be a JSON object");
+        try { service.deviceBeat(b); } catch (e) { return error(400, (e as Error).message); }
+        return new Response(null, { status: 204 });
+      },
+    },
+    "/api/usage/devices": {
+      GET: (req) => {
+        const window = (new URL(req.url).searchParams.get("window") || "30d") as Window;
+        if (!WINDOWS.includes(window)) return error(400, "invalid window");
+        return json({ ok: true, window, devices: service.devices(window) });
+      },
+    },
     "/api/panel/usage/open": {
       POST: async (req) => {
         const b = await body(req);

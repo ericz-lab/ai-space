@@ -84,7 +84,13 @@ class MainActivity : ComponentActivity(), WebHost.Host {
 
     override fun onResume() {
         super.onResume()
+        model.setUsageActive(true)
         model.becameActive()
+    }
+
+    override fun onPause() {
+        model.setUsageActive(false)
+        super.onPause()
     }
 
     override fun onDestroy() {
