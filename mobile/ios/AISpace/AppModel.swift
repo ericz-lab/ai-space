@@ -119,6 +119,9 @@ final class AppModel: ObservableObject {
     private var panels: [UUID: WebSession] = [:]
     private var cookieSessions: [UUID: WebCookieSession] = [:]
     private var watchers: Set<AnyCancellable> = []
+    /// A screenshot taken in the app, offered to the Space's Spark.
+    let screenshots = ScreenshotCapture()
+    private var screenshotOverlay: ScreenshotOverlay?
 
     init(store: ConnectionStore? = nil, screens: ScreenStore? = nil) {
         self.store = store ?? ConnectionStore(fileURL: AppPaths.connections)
@@ -132,6 +135,18 @@ final class AppModel: ObservableObject {
             self?.objectWillChange.send()
             DispatchQueue.main.async { self?.publishQuickActions() }
         }.store(in: &watchers)
+        screenshots.openPage = { [weak self] url in
+            guard let self, let connection = self.selected else { return }
+            self.open(url, title: String(localized: "Spark"), in: connection)
+        }
+    }
+
+    /// iOS told the app a screenshot was just taken.
+    func screenshotTaken() {
+        guard let connection = selected else { return }
+        if screenshotOverlay == nil { screenshotOverlay = ScreenshotOverlay(capture: screenshots) }
+        screenshots.use(loader(for: connection).api)
+        screenshots.screenshotTaken()
     }
 
     /// The tab the page on show belongs to; choosing Panel returns to the screen last shown.
@@ -395,6 +410,7 @@ final class AppModel: ObservableObject {
 
     /// The phone came back to the app: failed pages try again and the catalogue catches up.
     func becameActive() {
+        screenshots.recheck()
         guard let c = selected else { return }
         panels[c.id]?.recoverIfFailed()
         page?.session.recoverIfFailed()

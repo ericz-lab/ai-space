@@ -215,6 +215,7 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 | `DELETE /api/panel/icons/:pack` | a whole pack; an active one turns packs off |
 | `POST /api/panel/usage/open`, `GET /api/usage` | an open of a tile or library card (a beacon); opens and time in use per entry ([usage.md](usage.md)) |
 | `GET /api/voice`, `POST /api/voice/transcribe` | whether voice input can be transcribed, and a recorded clip (multipart `file`) forwarded to `voice-studio/transcribe` as the operator ([Omnibox](#omnibox)) |
+| `GET /api/capture`, `POST /api/capture/image` | whether a picture can be kept, and a picture (multipart `file`, `text`, `via`, `id`) forwarded to `ai-spark/capture-image` as the operator: the iPhone client's screenshots ([mobile/ios/README.md](../mobile/ios/README.md#screenshots)) |
 | `GET /api/agents` | every agent the panel lists |
 | `POST /api/agents/:app/:agent/chat` | one chat turn as a background run, SSE |
 | `GET /api/agents/runs`, `GET /api/agents/:app/:agent/runs[/:id[/events]]`, `POST /api/agents/:app/:agent/runs/:id/stop` | chat runs: list, one, replay and follow, stop ([Background runs](#background-runs)) |

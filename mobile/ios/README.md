@@ -57,6 +57,12 @@ One dependency: [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) 1.20.0 (
 
 The visual identity is the panel's: the mark is the ai-space logo, drawn from `docs/logo.svg` (`scripts/icons.swift`), and `Views/Theme.swift` carries the default "Aurora" tokens of `src/web/styles.css` (ground, the three glows, accent, radii, glass with a hairline). The launch screen is the mark on the Aurora ground (`UILaunchScreen` in `Info.plist`, `LaunchLogo` and `LaunchGround` in the asset catalog). While a Space is reached for the first time, Home shows the mark with its circles and leaf dipping in turn (`ConnectingMark`), still under Reduce Motion.
 
+## Screenshots
+
+A screenshot taken while the app is on screen can be kept in Spark (ai-spark). iOS only says that one was taken (`userDidTakeScreenshotNotification`, after the fact, without the image), so the app offers it in a bar at the bottom, drawn in a window of its own above every page and cover; untouched, the bar goes after eight seconds. On Save the app asks for Photos read access (once), reads the newest screenshot taken around the notice, and shows it with a field for a line of words. It is sent to the Space's `POST /api/capture/image` (multipart `file`, `text`, `via: screenshot`, `id`), which hands it to `ai-spark/capture-image` as the operator, here or on one peer (docs/panel.md). A PNG or JPEG within the bus limit goes as it is; anything else is re-encoded as JPEG and scaled down until it fits. The `id` stays the same for every retry, so a lost answer cannot make two ideas. The bar then names the idea and opens its page.
+
+When Photos access is refused or limited, or the screenshot is not in the library yet, the app opens the photo picker on screenshots instead. The offer appears only when `GET /api/capture` says the Space has an image capturer (asked again each time the app comes to the foreground). Screenshots taken in other apps are not seen: that needs a share extension and a client session of the Space's own (see the end of this file).
+
 ## Build and run
 
 ### With the Command Line Tools only

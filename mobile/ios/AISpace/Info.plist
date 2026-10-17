@@ -51,6 +51,8 @@
 	<string>Pages of your Space can take a photo or video to upload.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Use the microphone for voice input in search and pages of your Space.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Read the screenshot you just took, to keep it in Spark.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save an image from your Space to your photo library.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -265,3 +265,58 @@ describe("voice routes", () => {
     }
   });
 });
+
+describe("the panel's image capture", () => {
+  const serveCapture = (at: "local" | "peer" | "none") => {
+    const spark = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: async (req) => {
+        const form = await req.formData();
+        const file = form.get("file") as File;
+        return Response.json({ ok: true, bytes: file.size, type: file.type, via: form.get("via"), id: form.get("id"), caller: req.headers.get("x-space-caller") }, { status: 201 });
+      },
+    });
+    const store = new BusStore(":memory:");
+    const b = new Bus({ store, events: new Store(":memory:"), servicePort: (name) => (name === "ai-spark" ? spark.port : undefined), log: () => {} });
+    if (at === "local") b.syncApp("ai-spark", { events: { publishes: [], consumes: [] }, provides: [{ name: "capture-image", method: "POST", path: "/api/ideas/image", timeoutMs: 5000 }] });
+    const imageCapturer = at === "peer" ? { app: "thesis", capability: "summarize" } : undefined;
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createBusRoutes({ bus: b, store, events: new Store(":memory:"), token: "op", remote, ...(imageCapturer ? { imageCapturer } : {}) }) });
+    return { url: `http://127.0.0.1:${server.port}`, store, stop: () => (server.stop(true), spark.stop(true)) };
+  };
+  const shot = () => {
+    const form = new FormData();
+    form.append("file", new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5])], "shot.png", { type: "image/png" }));
+    form.append("via", "screenshot");
+    form.append("id", "2f1c7a9e-4b3d-4c2a-9e8f-1a2b3c4d5e6f");
+    return form;
+  };
+
+  test("a screenshot reaches the local ai-spark without a token, as the operator", async () => {
+    const s = serveCapture("local");
+    try {
+      expect(await fetch(`${s.url}/api/capture`).then((r) => r.json())).toEqual({ ok: true, image: true, app: "ai-spark", capability: "capture-image" });
+      const r = await fetch(`${s.url}/api/capture/image`, { method: "POST", body: shot() });
+      expect(r.status).toBe(201);
+      expect(await r.json()).toEqual({ ok: true, bytes: 9, type: "image/png", via: "screenshot", id: "2f1c7a9e-4b3d-4c2a-9e8f-1a2b3c4d5e6f", caller: "space" });
+      expect(s.store.listCalls({}).map((c) => [c.caller, c.app, c.capability, c.status])).toEqual([["space", "ai-spark", "capture-image", 201]]);
+    } finally {
+      s.stop();
+    }
+  });
+
+  test("a capturer on one peer is reached through it; none answers 503", async () => {
+    const p = serveCapture("peer");
+    const n = serveCapture("none");
+    try {
+      expect(await fetch(`${p.url}/api/capture`).then((r) => r.json())).toMatchObject({ image: true });
+      expect(await fetch(`${p.url}/api/capture/image`, { method: "POST", body: shot() }).then((r) => r.json())).toEqual({ from: "dailie" });
+      expect(forwarded.pop()).toMatchObject({ path: "/api/peer/call/thesis/summarize", caller: "seoul/space" });
+      expect(await fetch(`${n.url}/api/capture`).then((r) => r.json())).toMatchObject({ image: false });
+      expect((await fetch(`${n.url}/api/capture/image`, { method: "POST", body: shot() })).status).toBe(503);
+    } finally {
+      p.stop();
+      n.stop();
+    }
+  });
+});

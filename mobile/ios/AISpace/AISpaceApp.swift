@@ -15,6 +15,9 @@ struct AISpaceApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: .quickAction)) { note in
                     if let target = note.object as? QuickAction.Target { model.handle(target) }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+                    model.screenshotTaken()
+                }
                 .onChange(of: phase) { _, now in
                     if now == .active { model.becameActive() }
                 }

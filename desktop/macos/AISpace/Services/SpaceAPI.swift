@@ -68,9 +68,10 @@ final class SpaceAPI {
         return data
     }
 
-    /// A file posted as the multipart field `field`, from the Space's own origin as the panel's page
-    /// would send it (voice input: `POST /api/voice/transcribe`).
-    func upload(_ path: String, field: String, filename: String, mimeType: String, data file: Data, timeout: TimeInterval = 300) async throws -> Data {
+    /// A file posted as the multipart field `field`, with plain `fields` before it, from the Space's
+    /// own origin as the panel's page would send it (voice input: `POST /api/voice/transcribe`;
+    /// the phone's screenshots: `POST /api/capture/image`).
+    func upload(_ path: String, field: String, filename: String, mimeType: String, data file: Data, fields: [(String, String)] = [], timeout: TimeInterval = 300) async throws -> Data {
         var r = await request("POST", path)
         r.timeoutInterval = timeout
         let boundary = "aispace-\(UUID().uuidString)"
@@ -78,6 +79,9 @@ final class SpaceAPI {
         let origin = base.absoluteString
         r.setValue(origin.hasSuffix("/") ? String(origin.dropLast()) : origin, forHTTPHeaderField: "Origin")
         var body = Data()
+        for (name, value) in fields {
+            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8))
+        }
         body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(field)\"; filename=\"\(filename)\"\r\nContent-Type: \(mimeType)\r\n\r\n".utf8))
         body.append(file)
         body.append(Data("\r\n--\(boundary)--\r\n".utf8))

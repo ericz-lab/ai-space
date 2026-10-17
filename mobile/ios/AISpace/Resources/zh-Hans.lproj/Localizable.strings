@@ -360,3 +360,38 @@
 "Voice connection is too slow." = "语音连接速度过慢。";
 
 "Voice connection timed out." = "语音连接超时。";
+
+/* Screenshots to Spark */
+"Keep this screenshot?" = "保存这张截图？";
+
+"Save it to Spark" = "存到灵光一闪";
+
+"Save to Spark" = "存到灵光一闪";
+
+"Saved to Spark #%lld" = "已存到灵光一闪 #%lld";
+
+"Spark" = "灵光一闪";
+
+"Reading the screenshot…" = "正在读取截图…";
+
+"Pick the Screenshot" = "选择截图";
+
+"Add a line (optional)" = "补一句（可选）";
+
+"Photos access is off, so pick the screenshot." = "没有相册访问权限，请手动选择截图。";
+
+"Photos access is limited to some pictures, so pick the screenshot." = "相册只开放了部分照片，请手动选择截图。";
+
+"The screenshot is not in Photos yet, so pick it." = "相册里还没找到这张截图，请手动选择。";
+
+"That picture could not be read. Pick another one." = "这张图读不出来，请换一张。";
+
+"Not saved (%lld): %@" = "没保存上（%lld）：%@";
+
+"Sign in to the Space again, then retry." = "请重新登录 Space 后再试。";
+
+"Not saved: %@" = "没保存上：%@";
+
+"Save" = "保存";
+
+"Dismiss" = "关闭";
