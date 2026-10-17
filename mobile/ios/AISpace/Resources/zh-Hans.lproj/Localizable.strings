@@ -403,14 +403,10 @@
 "Time not measured" = "时长未采集";
 "This Space does not provide app activity by device yet." = "此 Space 尚未提供按设备区分的应用统计。";
 
-"Keep it in %@" = "可存到 %@";
-
-"Save it to %@" = "存到%@";
-
 "Saved to %@" = "已存到 %@";
 
 "Keep Screenshot" = "保存截图";
 
-"Save to" = "存到";
+"Save to Spark" = "存到灵光一闪";
 
 "Save to %@" = "存到%@";

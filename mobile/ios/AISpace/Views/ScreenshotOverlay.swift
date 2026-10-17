@@ -101,27 +101,39 @@ struct ScreenshotOverlayView: View {
 
     // MARK: The offer and the receipt
 
+    /// Where it goes is chosen here, one button per target; the last one chosen stands out.
     private var offer: some View {
         bar {
-            Image(systemName: "camera.viewfinder").font(.title3).foregroundStyle(Theme.accent)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Keep this screenshot?").font(.subheadline.weight(.semibold))
-                Text(offerDetail).font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Image(systemName: "camera.viewfinder").font(.title3).foregroundStyle(Theme.accent)
+                    Text("Keep this screenshot?").font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Button { capture.dismiss() } label: { Image(systemName: "xmark").font(.footnote.weight(.semibold)) }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                        .accessibilityLabel(Text("Dismiss"))
+                }
+                if capture.targets.isEmpty {
+                    Button { capture.accept() } label: { Text("Save to Spark").frame(maxWidth: .infinity) }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                } else if capture.targets.count <= 3 {
+                    HStack(spacing: 8) { targetButtons }
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 8) { targetButtons } }
+                }
             }
-            Spacer(minLength: 8)
-            Button("Save") { capture.accept() }
-                .buttonStyle(.borderedProminent).controlSize(.small)
-            Button { capture.dismiss() } label: { Image(systemName: "xmark").font(.footnote.weight(.semibold)) }
-                .buttonStyle(.plain).foregroundStyle(.secondary)
-                .accessibilityLabel(Text("Dismiss"))
         }
     }
 
-    /// Where it can go: the one target, or the choice among several.
-    private var offerDetail: String {
-        let names = capture.targets.map { $0.displayTitle() }
-        if names.count > 1 { return String(localized: "Keep it in \(names.joined(separator: " · "))") }
-        return String(localized: "Save it to \(names.first ?? String(localized: "Spark"))")
+    @ViewBuilder private var targetButtons: some View {
+        ForEach(capture.targets) { t in
+            let label = Text(verbatim: t.displayTitle()).lineLimit(1).frame(maxWidth: capture.targets.count <= 3 ? .infinity : nil)
+            if t.id == capture.target?.id {
+                Button { capture.accept(t) } label: { label }.buttonStyle(.borderedProminent).controlSize(.small)
+            } else {
+                Button { capture.accept(t) } label: { label }.buttonStyle(.bordered).controlSize(.small)
+            }
+        }
     }
 
     private func saved(label: String, url: URL?) -> some View {
@@ -156,7 +168,7 @@ struct ScreenshotOverlayView: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Keep Screenshot").font(.headline)
+                Text(verbatim: capture.target.map { String(localized: "Save to \($0.displayTitle())") } ?? String(localized: "Keep Screenshot")).font(.headline)
                 Spacer()
                 Button("Cancel") { capture.dismiss() }.disabled(capture.phase == .saving)
             }
@@ -186,18 +198,6 @@ struct ScreenshotOverlayView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline))
         }
-        if capture.targets.count > 1 {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Save to").font(.caption).foregroundStyle(.secondary)
-                Picker(String(localized: "Save to"), selection: Binding(get: { capture.target?.id ?? "" }, set: { id in
-                    if let t = capture.targets.first(where: { $0.id == id }) { capture.choose(t) }
-                })) {
-                    ForEach(capture.targets) { t in Text(verbatim: t.displayTitle()).tag(t.id) }
-                }
-                .modifier(TargetPickerStyle(count: capture.targets.count))
-                .disabled(capture.phase == .saving)
-            }
-        }
         TextField(String(localized: "Add a line (optional)"), text: $capture.text, axis: .vertical)
             .lineLimit(1...4)
             .focused($writing)
@@ -225,10 +225,3 @@ extension ScreenshotCapture {
     var isFailed: Bool { if case .failed = phase { return true } else { return false } }
 }
 
-/// Two or three places side by side; more in a menu.
-private struct TargetPickerStyle: ViewModifier {
-    let count: Int
-    func body(content: Content) -> some View {
-        if count <= 3 { content.pickerStyle(.segmented) } else { content.pickerStyle(.menu) }
-    }
-}

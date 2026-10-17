@@ -7,8 +7,8 @@ import UIKit
 /// iOS says only that a screenshot was taken (`userDidTakeScreenshotNotification`, after the
 /// fact, with no image). So the app offers to keep it; on the operator's tap it reads the newest
 /// screenshot from Photos (read access is asked for then, not before), lets them add a line and
-/// choose where it goes among the Space's capture targets (Spark, Notes, …; `GET /api/capture`),
-/// and sends it to `POST /api/capture/image?to=<target>`, which hands it to that app as the operator. When Photos cannot give the screenshot (access refused or limited, or it is
+/// sends it where they chose on the offer, one of the Space's capture targets (Spark, Notes,
+/// Todo, …; `GET /api/capture`), to `POST /api/capture/image?to=<target>`, which hands it to that app as the operator. When Photos cannot give the screenshot (access refused or limited, or it is
 /// not there yet), the operator picks it. Nothing is kept on the phone after the answer.
 @MainActor
 final class ScreenshotCapture: ObservableObject {
@@ -100,9 +100,10 @@ final class ScreenshotCapture: ObservableObject {
         text = ""
     }
 
-    /// The offer was taken: find the screenshot in Photos.
-    func accept() {
+    /// The offer was taken for `target` (none: an older Space that names no targets): find the screenshot in Photos.
+    func accept(_ target: ScreenshotRules.Target? = nil) {
         guard case .offered(let noticed) = phase else { return }
+        if let target { choose(target) }
         dismissTask?.cancel()
         phase = .loading
         Task {
