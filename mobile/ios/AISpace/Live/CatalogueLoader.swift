@@ -27,6 +27,7 @@ final class CatalogueLoader: ObservableObject {
     private let cache: CatalogueCache
     /// Counts the sign-outs; see `forget()`.
     private var session = 0
+    private var refreshPending = false
     /// Reads one route of the Space; the API's own call unless a test supplies the answers.
     private let fetch: @MainActor (String) async throws -> Data
 
@@ -43,11 +44,20 @@ final class CatalogueLoader: ObservableObject {
         }
     }
 
-    func refresh() async {
-        guard !isRefreshing else { return }
+    func refresh(afterCurrent: Bool = false) async {
+        guard !isRefreshing else {
+            if afterCurrent { refreshPending = true }
+            return
+        }
         isRefreshing = true
         // An answer counts only for the session that asked: `forget()` moves on to the next one.
         let session = self.session
+        defer {
+            if session == self.session && refreshPending {
+                refreshPending = false
+                Task { await refresh() }
+            }
+        }
         let outcome: Status
         do {
             async let apps = fetch("/api/apps")
@@ -102,6 +112,7 @@ final class CatalogueLoader: ObservableObject {
     /// belongs to the session that ended: its answer is dropped, and it does not hold up the next one.
     func forget() {
         session += 1
+        refreshPending = false
         isRefreshing = false
         cache.remove(connection.id)
         catalogue = nil

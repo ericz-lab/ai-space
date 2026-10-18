@@ -28,6 +28,9 @@ final class ChatController: ObservableObject {
     /// The agent's stored conversations, newest first, to pick one up again.
     @Published private(set) var sessions: [ChatSessionInfo] = []
 
+    /// A turn may install or change apps, even when it ends with an error or Stop.
+    var onTurnEnded: () -> Void = {}
+
     private var sessionID: String?
     private var runID: String?
     private var task: Task<Void, Never>?
@@ -168,6 +171,7 @@ final class ChatController: ObservableObject {
             messages[index].live = false
             busy = false
             runID = nil
+            onTurnEnded()
         }
     }
 

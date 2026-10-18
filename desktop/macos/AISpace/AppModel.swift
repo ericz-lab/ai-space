@@ -94,7 +94,10 @@ final class AppModel: ObservableObject {
         didSet { if usageActive && oldValue != selectedID { setUsageActive(true, restart: true) } }
     }
     @Published var destination: Destination = .launcher {
-        didSet { deviceUsage.refresh() }
+        didSet {
+            deviceUsage.refresh()
+            if destination == .launcher && oldValue != .launcher { refreshCatalogue() }
+        }
     }
     /// Where the launcher stands, observed by the pager and its indicator (PagerPosition).
     let pager = PagerPosition()
@@ -288,7 +291,7 @@ final class AppModel: ObservableObject {
     func refreshCatalogue() {
         guard let c = selected else { return }
         let l = loader(for: c)
-        Task { await l.refresh() }
+        Task { await l.refresh(afterCurrent: true) }
     }
 
     func session(for connection: Connection) -> PanelSession {
@@ -735,6 +738,12 @@ final class AppModel: ObservableObject {
         if let c = chats[ref] { return c }
         guard let live = lives[ref.connection], let agent = live.agent(ref.agent) else { return nil }
         let c = ChatController(agent: agent, api: live.api)
+        c.onTurnEnded = { [weak self] in
+            guard let self, let connection = self.store.connection(ref.connection) else { return }
+            let catalogue = self.loader(for: connection)
+            Task { await catalogue.refresh(afterCurrent: true) }
+            Task { await live.refresh(catalogue: true) }
+        }
         c.attachRunning(live.running)
         chats[ref] = c
         return c

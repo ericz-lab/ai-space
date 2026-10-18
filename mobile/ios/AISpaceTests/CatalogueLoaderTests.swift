@@ -63,6 +63,39 @@ struct CatalogueLoaderTests {
         CatalogueLoader(connection: connection, cache: cache, cookies: { [] }, fetch: space.fetch)
     }
 
+    @Test func aChangeDuringRefreshQueuesOneFreshCatalogue() async {
+        let l = loader()
+        var seen = 0
+        l.onCatalogue = { _ in seen += 1 }
+        space.holds = true
+        let old = Task { await l.refresh() }
+        await space.reached(6)
+        await l.refresh(afterCurrent: true)
+        await l.refresh(afterCurrent: true)
+        #expect(space.requests == 6)
+        space.release()
+        await old.value
+        await space.reached(12)
+        for _ in 0..<10_000 where seen < 2 { await Task.yield() }
+        #expect(space.requests == 12)
+        #expect(seen == 2)
+        #expect(l.status == .ok)
+    }
+
+    @Test func signingOutDropsAPendingRefresh() async {
+        let l = loader()
+        space.holds = true
+        let old = Task { await l.refresh() }
+        await space.reached(6)
+        await l.refresh(afterCurrent: true)
+        l.forget()
+        space.release()
+        await old.value
+        for _ in 0..<100 { await Task.yield() }
+        #expect(space.requests == 6)
+        #expect(l.catalogue == nil)
+    }
+
     @Test func aRefreshShowsAndSavesTheCatalogue() async {
         let l = loader()
         var seen = 0
