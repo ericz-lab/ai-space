@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// A native conversation with one agent: messages, the activity of the running turn, and the
 /// composer. Return sends, Shift-Return starts a new line, Stop ends the turn on the server.
@@ -54,6 +55,20 @@ struct ChatView: View {
             .font(.caption)
             .padding(.horizontal, compact ? 14 : 20).padding(.vertical, 6)
             .frame(maxWidth: Self.column + 32)
+            if !chat.images.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(chat.images) { image in
+                            ChatImagePreview(image: image)
+                                .overlay(alignment: .topTrailing) {
+                                    Button { chat.images.removeAll { $0.id == image.id } } label: { Image(systemName: "xmark.circle.fill") }
+                                        .buttonStyle(.plain).help("Remove image")
+                                }
+                        }
+                    }.padding(8)
+                }.frame(maxWidth: Self.column + 32)
+            }
+            if let error = chat.imageError { Text(error).font(.caption).foregroundStyle(Theme.danger) }
             composer
         }
         .toolbar {
@@ -69,28 +84,104 @@ struct ChatView: View {
                     } label: {
                         Label("Earlier chats", systemImage: "clock.arrow.circlepath")
                     }
-                    .disabled(chat.busy)
+                    .disabled(chat.busy || chat.pendingImageImports > 0)
                     .help("Earlier chats")
                 }
                 ToolbarItem {
                     Button { chat.newConversation() } label: { Label("New Conversation", systemImage: "square.and.pencil") }
-                        .disabled(chat.busy)
+                        .disabled(chat.busy || chat.pendingImageImports > 0)
                         .help("New Conversation")
                 }
             }
+        }
+        .onDrop(of: [UTType.image.identifier, UTType.fileURL.identifier], isTargeted: nil) { providers in
+            importImages(providers)
+            return true
         }
         .onAppear { focused = true }
         .task { if !compact { await chat.loadSessions() } }
         .task(id: chat.busy) { if !compact, !chat.busy { await chat.loadSessions() } }
     }
 
+    private func chooseImages() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.begin { result in
+            if result == .OK { for url in panel.urls { importImage(url: url) } }
+        }
+    }
+
+    private func importImage(url: URL) {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        do { appendImage(try PictureImport.read(url), name: url.lastPathComponent) }
+        catch { chat.imageError = String(localized: "Could not read this image.") }
+    }
+
+    private func appendImage(_ data: Data, name: String) {
+        guard data.count <= 40 * 1024 * 1024, let source = NSBitmapImageRep(data: data), source.pixelsWide > 0, source.pixelsHigh > 0,
+              source.pixelsWide <= 16000, source.pixelsHigh <= 16000 else {
+            chat.imageError = String(localized: "Could not read this image.")
+            return
+        }
+        let prefix = [UInt8](data.prefix(12))
+        let mediaType: String?
+        if prefix.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]) { mediaType = "image/png" }
+        else if prefix.starts(with: [255, 216, 255]) { mediaType = "image/jpeg" }
+        else if prefix.starts(with: Array("GIF8".utf8)) { mediaType = "image/gif" }
+        else if prefix.starts(with: Array("RIFF".utf8)) && Array(prefix.suffix(4)) == Array("WEBP".utf8) { mediaType = "image/webp" }
+        else { mediaType = nil }
+        guard let bytes = mediaType == nil ? source.representation(using: .png, properties: [:]) : data else { return }
+        let image = ChatImage(name: String(name.prefix(80)) + (mediaType == nil ? ".png" : ""), mediaType: mediaType ?? "image/png", bytes: bytes)
+        guard ChatImage.validate(chat.images + [image]) else {
+            chat.imageError = String(localized: "Add up to 4 images, 5 MB each and 10 MB in total.")
+            return
+        }
+        chat.images.append(image)
+        chat.imageError = nil
+    }
+
+    private func importImages(_ providers: [NSItemProvider]) {
+        guard providers.count + chat.images.count + chat.pendingImageImports <= 4 else {
+            chat.imageError = String(localized: "Add up to 4 images, 5 MB each and 10 MB in total.")
+            return
+        }
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                chat.pendingImageImports += 1
+                _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
+                    Task { @MainActor in
+                        defer { chat.pendingImageImports -= 1 }
+                        guard let data, let url = URL(dataRepresentation: data, relativeTo: nil) else { chat.imageError = String(localized: "Could not read this image."); return }
+                        importImage(url: url)
+                    }
+                }
+            } else if let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) {
+                chat.pendingImageImports += 1
+                _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+                    Task { @MainActor in
+                        defer { chat.pendingImageImports -= 1 }
+                        guard let data else { chat.imageError = String(localized: "Could not read this image."); return }
+                        appendImage(data, name: "Image")
+                    }
+                }
+            }
+        }
+    }
+
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            Button { chooseImages() } label: { Image(systemName: "photo.badge.plus").font(.system(size: 20)) }
+                .buttonStyle(.borderless).help("Add images").accessibilityLabel(Text("Add images"))
+                .disabled(chat.images.count >= 4)
             TextField("Message \(chat.agent.displayTitle)", text: $chat.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...8)
                 .focused($focused)
                 .focusEffectDisabled()
+                .onPasteCommand(of: [.image]) { importImages($0) }
                 .onKeyPress(.return, phases: .down) { press in
                     if TextInputComposition.isActive || press.modifiers.contains(.shift) { return .ignored }
                     chat.send()
@@ -109,7 +200,7 @@ struct ChatView: View {
                     .buttonStyle(.borderless).foregroundStyle(Theme.danger)
                     .help("Stop").accessibilityLabel(Text("Stop"))
             } else {
-                let empty = chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let empty = (chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chat.images.isEmpty) || chat.pendingImageImports > 0
                 Button { chat.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 26)) }
                     .buttonStyle(.borderless).foregroundStyle(empty ? Color.secondary : Theme.accent)
                     .help("Send").accessibilityLabel(Text("Send"))
@@ -173,7 +264,12 @@ private struct MessageRow: View {
         case .user:
             HStack {
                 Spacer(minLength: 60)
-                Text(message.text)
+                VStack(alignment: .trailing, spacing: 8) {
+                    if !message.images.isEmpty {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 88))], alignment: .trailing) { ForEach(message.images) { ChatImagePreview(image: $0) } }.frame(maxWidth: 360)
+                    }
+                    if !message.text.isEmpty { Text(message.text) }
+                }
                     .textSelection(.enabled)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12).padding(.vertical, 8)
@@ -362,6 +458,18 @@ struct FailureCard: View {
         case .unavailable: return String(localized: "The agent's runtime could not start on the Space.")
         case .connection: return String(localized: "The reply could not be reached.")
         case .other: return String(localized: "The agent could not reply.")
+        }
+    }
+}
+
+private struct ChatImagePreview: View {
+    let image: ChatImage
+    var body: some View {
+        if let picture = NSImage(data: image.bytes) {
+            Image(nsImage: picture).resizable().scaledToFit()
+                .frame(width: 88, height: 88)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                .help(image.name).accessibilityLabel(Text(image.name))
         }
     }
 }

@@ -62,9 +62,11 @@ enum ChatPermission: String, CaseIterable, Identifiable {
 struct ChatTurnRequest: Equatable {
     var message: String
     var permission: ChatPermission
+    var images: [ChatImage] = []
 
     func body(sessionID: String?) -> [String: Any] {
         var body: [String: Any] = ["message": message]
+        if !images.isEmpty { body["images"] = images.map(\.body) }
         if permission != .readOnly { body["permissionMode"] = permission.rawValue }
         if let sessionID { body["sessionId"] = sessionID }
         return body

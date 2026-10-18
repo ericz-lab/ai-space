@@ -1115,3 +1115,13 @@ a.widget-title:hover { color: var(--text); }
 .auth-change { padding: 4px 12px 8px; }
 .auth-session { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
 .auth-session small { color: var(--muted); }
+
+.chat-images { display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-images img { display: block; width: 96px; height: 96px; object-fit: contain; border-radius: 10px; background: rgba(128,128,128,.12); }
+.chat-images:empty { display: none; }
+.chat-image-drafts { padding: 8px 16px; }
+.chat-image-drafts > div { position: relative; }
+.chat-image-drafts button { position: absolute; top: 0; right: 0; border-radius: 50%; width: 24px; height: 24px; }
+.chat-attach { align-self: flex-end; flex-shrink: 0; width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; font-size: 24px; }
+.chat-attach:hover { background: rgba(128,128,128,.12); }
+.chat-attach:disabled { opacity: .4; cursor: default; }

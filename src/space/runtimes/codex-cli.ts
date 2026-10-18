@@ -289,12 +289,12 @@ export function parseCodexOutput(raw: string): { text?: string; error?: string; 
 }
 
 /** Persistent local chat with native context, skills and tools; permissions remain explicit. */
-export function codexChatArgs(turn: ChatTurn): string[] {
+export function codexChatArgs(turn: ChatTurn, images: string[] = []): string[] {
   const sandbox = turn.permissionMode === "bypassPermissions" ? "danger-full-access" : turn.permissionMode === "acceptEdits" ? "workspace-write" : "read-only";
   return ["exec", "--skip-git-repo-check", "--json", "--sandbox", sandbox, "-c", 'approval_policy="never"', "-c", 'web_search="live"',
     ...(turn.model ? ["--model", turn.model] : []),
     ...(turn.systemPrompt ? ["-c", `developer_instructions=${JSON.stringify(turn.systemPrompt)}`] : []),
-    ...(turn.sessionId ? ["resume", turn.sessionId] : []), "-"];
+    ...(turn.sessionId ? ["resume", turn.sessionId] : []), ...images.flatMap((path) => ["--image", path]), "-"];
 }
 
 /**
@@ -313,10 +313,20 @@ function codexChat(bin: string[], turn: ChatTurn, cb: ChatCallbacks): { kill: ()
   const controller = new AbortController();
   const emit = (event: unknown) => cb.onEvent(JSON.stringify(event));
   void (async () => {
+    let imageDir: string | undefined;
     try {
+      const paths: string[] = [];
+      if (turn.images?.length) {
+        imageDir = await mkdtemp(join(tmpdir(), "space-chat-images-"));
+        for (const [index, image] of turn.images.entries()) {
+          const path = join(imageDir, `image${index}.${image.mediaType.split("/")[1]}`);
+          await Bun.write(path, Buffer.from(image.data, "base64"));
+          paths.push(path);
+        }
+      }
       if (turn.allowedTools?.length) throw new Error("Codex chat does not support custom tool allow-lists");
       let sid = turn.sessionId;
-      const result = await spawnCollect([...bin, ...codexChatArgs(turn)], {
+      const result = await spawnCollect([...bin, ...codexChatArgs(turn, paths)], {
         cwd: turn.cwd, env: turn.env, stdin: turn.message, signal: controller.signal,
         onLine(line) {
           let event;
@@ -349,6 +359,8 @@ function codexChat(bin: string[], turn: ChatTurn, cb: ChatCallbacks): { kill: ()
       cb.onFinish(error);
     } catch (e) {
       cb.onFinish(`could not run Codex: ${(e as Error).message}`);
+    } finally {
+      if (imageDir) await rm(imageDir, { recursive: true, force: true });
     }
   })();
   return { kill: () => controller.abort() };

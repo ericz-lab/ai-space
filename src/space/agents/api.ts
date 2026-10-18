@@ -1,3 +1,4 @@
+import { chatBody, parseChatImages } from "./images.ts";
 import { intents } from "../shortcuts/resolve.ts";
 import type { Action } from "../shortcuts/types.ts";
 import { matchAgentIntents, parseAgentIntent, type AgentIntentView } from "../shortcuts/agent-intents.ts";
@@ -289,10 +290,12 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     "/api/agents/:app/:agent/chat": {
       POST: wrap(async (req) => {
         const agent = await resolveAgent(req.params.app ?? "", req.params.agent ?? "");
-        const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+        const body = await chatBody(req);
         if (!body) return error(400, "body must be JSON");
-        const message = typeof body.message === "string" ? body.message.trim() : "";
-        if (!message) return error(400, "message is required");
+        let message = typeof body.message === "string" ? body.message.trim() : "";
+        const images = parseChatImages(body.images);
+        if (!message && !images.length) return error(400, "message is required");
+        if (!message) message = "Please inspect the attached images.";
         if (message.length > MAX_MESSAGE) return error(400, `message is longer than ${MAX_MESSAGE} characters`);
         const sessionId = typeof body.sessionId === "string" && SESSION_ID_RE.test(body.sessionId) ? body.sessionId : undefined;
         let skillIntent = sessionId ? sessions.intentContext(agent.id, sessionId) : null;
@@ -328,6 +331,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         if (!configured) return error(501, `runtime ${selectedName} is not configured on this space`);
         if (!configured.capabilities.chat) return error(501, `runtime ${selectedName} does not support chat`);
         const runtime = configured;
+        if (images.length && !["claude-code", "codex-cli"].includes(runtime.kind)) return error(400, "This runtime does not support chat images");
         // A tier the runtime has no model for (DeepSeek Harness) leaves the runtime's own default.
         const tier = (MODEL_TIERS as readonly string[]).includes(selected.slice(selectedName.length + 1));
         const model = tier && !opts.runtimes.tierOptions().some((o) => o.value === selected) ? undefined : opts.runtimes.resolve(selected).model;
@@ -341,7 +345,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
             runtime,
             model,
             // The manifest's tool list is Claude Code's syntax; other runtimes bound the agent by the permission mode's sandbox.
-            turn: { message, sessionId, model, permissionMode, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
+            turn: { message, images, sessionId, model, permissionMode, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
             onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model, skillIntent ?? undefined),
           });
           if (release) runs.subscribe(run.id, run.lastSeq, { onEvent() {}, onEnd: release });

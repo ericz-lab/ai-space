@@ -112,6 +112,7 @@ targets:
       - path: AISpace/Services/SpaceAPI.swift
       - path: AISpace/Services/SpaceModels.swift
       - path: AISpace/Services/SpaceCheck.swift
+      - path: AISpace/Services/ChatImage.swift
       - path: AISpace/Services/ChatStream.swift
       - path: AISpace/Resources
         includes: ["**/*.strings"]

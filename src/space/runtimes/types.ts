@@ -1,3 +1,4 @@
+import type { ChatImage } from "../agents/images.ts";
 /**
  * Runtime adapters: the one place ai-space starts an AI runtime, shared by the
  * model service (a one-shot answer), the scheduler (an agent task fed a prompt
@@ -115,6 +116,7 @@ export type AgentOutcome = {
 /** One turn of a conversation, decided by the caller from the manifest, never by the browser. */
 export type ChatTurn = {
   message: string;
+  images?: ChatImage[];
   model?: string;
   sessionId?: string;
   /** Write authorisation tier; anything else means read-only (the headless default). */

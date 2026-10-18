@@ -263,7 +263,7 @@ export function agentArgs(run: Pick<AgentRun, "model" | "permissionMode" | "allo
 
 /** Arguments after the binary; exported for tests. */
 export function chatArgs(t: ChatTurn, extra: string[] = []): string[] {
-  const args = ["-p", t.message, "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
+  const args = ["-p", ...(t.images?.length ? ["--input-format", "stream-json"] : [t.message]), "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
   if (t.model) args.push("--model", t.model);
   if (t.sessionId) args.push("--resume", t.sessionId);
   if ((PERMISSION_MODES as readonly string[]).includes(t.permissionMode ?? "")) args.push("--permission-mode", t.permissionMode!);
@@ -273,10 +273,19 @@ export function chatArgs(t: ChatTurn, extra: string[] = []): string[] {
   return args;
 }
 
+export function chatImageInput(t: ChatTurn): string {
+  return JSON.stringify({ type: "user", message: { role: "user", content: [
+    ...(t.message ? [{ type: "text", text: t.message }] : []),
+    ...(t.images ?? []).map((image) => ({ type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } })),
+  ] } }) + "\n";
+}
+
 function chatStream(cmd: string[], t: ChatTurn, cb: ChatCallbacks): { kill: () => void } {
-  let proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
+  let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
   try {
-    proc = Bun.spawn(cmd, { cwd: t.cwd, env: t.env ?? process.env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    proc = Bun.spawn(cmd, { cwd: t.cwd, env: t.env ?? process.env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+    if (t.images?.length) proc.stdin.write(chatImageInput(t));
+    proc.stdin.end();
   } catch (e) {
     queueMicrotask(() => cb.onFinish(`could not start the runtime: ${(e as Error).message}`));
     return { kill: () => {} };

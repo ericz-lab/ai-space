@@ -5,6 +5,7 @@ struct ChatMessage: Identifiable, Equatable {
     let id = UUID()
     var role: Role
     var text: String
+    var images: [ChatImage] = []
     var tools: [String] = []
     var steps: [ChatStep] = []
     var denied: [String] = []
@@ -24,6 +25,9 @@ final class ChatController: ObservableObject {
     @Published private(set) var messages: [ChatMessage] = []
     @Published private(set) var busy = false
     @Published var draft = ""
+    @Published var images: [ChatImage] = []
+    @Published var imageError: String?
+    @Published var pendingImageImports = 0
     @Published private(set) var error: String?
     /// The agent's stored conversations, newest first, to pick one up again.
     @Published private(set) var sessions: [ChatSessionInfo] = []
@@ -49,10 +53,13 @@ final class ChatController: ObservableObject {
 
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !busy else { return }
+        guard (!text.isEmpty || !images.isEmpty), !busy, pendingImageImports == 0 else { return }
         draft = ""
-        messages.append(ChatMessage(role: .user, text: text))
-        start(source: .new(ChatTurnRequest(message: text, permission: Preferences.shared.chatPermission)))
+        messages.append(ChatMessage(role: .user, text: text, images: images))
+        let turn = ChatTurnRequest(message: text, permission: Preferences.shared.chatPermission, images: images)
+        images = []
+        imageError = nil
+        start(source: .new(turn))
     }
 
     /// The message of the last turn when that turn failed: what Try Again sends once more.
@@ -66,7 +73,7 @@ final class ChatController: ObservableObject {
     func retry() {
         guard let text = retryableMessage else { return }
         messages.removeLast()
-        start(source: .new(ChatTurnRequest(message: text, permission: Preferences.shared.chatPermission)))
+        start(source: .new(ChatTurnRequest(message: text, permission: Preferences.shared.chatPermission, images: messages.last?.images ?? [])))
     }
 
     /// Like Web's Grant and retry: continue the session, keeping an unsent draft intact.
@@ -91,7 +98,7 @@ final class ChatController: ObservableObject {
 
     /// Shows a stored conversation; the next message continues it.
     func open(_ session: ChatSessionInfo) async {
-        guard !busy else { return }
+        guard !busy, pendingImageImports == 0 else { return }
         do {
             let stored = try Hub.rows(ChatStored.self, "messages", from: try await api.data("\(agent.base)/sessions/\(SpacePath.escape(session.sid))"))
             messages = stored.compactMap { m in
@@ -105,8 +112,10 @@ final class ChatController: ObservableObject {
     }
 
     func newConversation() {
-        guard !busy else { return }
+        guard !busy, pendingImageImports == 0 else { return }
         messages = []
+        images = []
+        imageError = nil
         sessionID = nil
         error = nil
     }

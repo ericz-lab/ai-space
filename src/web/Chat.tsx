@@ -1,3 +1,4 @@
+import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
 import { ChatSteps, submitsChat, type ChatStep } from "./chat-steps.ts";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useRef, useState } from "react";
@@ -135,7 +136,7 @@ const toolHint = (input: Record<string, unknown> = {}) => {
 
 const Ava = ({ icon, fallback = "✨" }: { icon?: string; fallback?: string }) => (isImgIcon(icon) ? <img src={icon} alt="" /> : <>{icon || fallback}</>);
 
-type Msg = { role: "user"; text: string } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean };
+type Msg = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean };
 type Conv = { agent: AgentInfo | null; msgs: Msg[]; sid: string | null; busy: boolean; queued: number };
 const EMPTY_CONV: Conv = { agent: null, msgs: [], sid: null, busy: false, queued: 0 };
 /** The turn a conversation is following: its run (once the server named it) and the stream's abort. */
@@ -166,6 +167,11 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
   tRef.current = t;
   const [convs, setConvs] = useState<Record<string, Conv>>({});
   const [input, setInput] = useState("");
+  const [imageDrafts, setImageDrafts] = useState<Record<string, ChatImage[]>>({});
+  const [imageError, setImageError] = useState("");
+  const [readingImages, setReadingImages] = useState(false);
+  const readingImagesRef = useRef(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [stick, setStick] = useState(true); // stick to the bottom unless the user scrolled up
   const [model, setModel] = useState(localStorage.getItem("chat-model") || "");
   const [baseChoices, setBaseChoices] = useState<Record<string, string>>({});
@@ -197,6 +203,18 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
   const runner = (k: string): Runner => (runnersRef.current[k] ||= { queue: [], running: false, active: null });
 
   const key = agent.id;
+  const images = imageDrafts[key] ?? [];
+  const addImages = async (files: File[]) => {
+    if (!files.length || readingImagesRef.current) return;
+    readingImagesRef.current = true;
+    setReadingImages(true);
+    setImageError("");
+    try {
+      const next = await readChatImages(files, images);
+      setImageDrafts((drafts) => ({ ...drafts, [key]: next }));
+    } catch { setImageError(t("chat.imageError")); }
+    finally { readingImagesRef.current = false; setReadingImages(false); }
+  };
   const conv = convs[key] || EMPTY_CONV;
   const patch = (k: string, fn: (v: Conv) => Conv) => setConvs((c) => ({ ...c, [k]: fn(c[k] || { ...EMPTY_CONV }) }));
   const base = agentBase(agent);
@@ -452,7 +470,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
       let history: Msg[] = [];
       if (run.sessionId) {
         try {
-          const j = await getJson<{ messages: ({ role: "user"; text: string } | { role: "ai"; text: string; tools: Tool[] })[] }>(`${b}/sessions/${encodeURIComponent(run.sessionId)}`);
+          const j = await getJson<{ messages: ({ role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[] })[] }>(`${b}/sessions/${encodeURIComponent(run.sessionId)}`);
           history = j.messages.map((m) => (m.role === "ai" ? { denied: [], ...m } : m));
           // The transcript may already hold this turn: cut it at the run's own message.
           const last = history.findLastIndex((m) => m.role === "user");
@@ -473,9 +491,9 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
     void restoreRuns(agents);
   }, [agents]);
 
-  const send = (text: string, intentId?: string) => {
-    patch(key, (v) => ({ ...v, agent: agent || v.agent, msgs: [...v.msgs, { role: "user", text }] }));
-    runner(key).queue.push(queuedChatTurn(agent, text, modelRef.current, baseChoice(key), permRef.current, intentId ? { intentId, timezone: browserZone() } : undefined));
+  const send = (text: string, intentId?: string, images?: ChatImage[]) => {
+    patch(key, (v) => ({ ...v, agent: agent || v.agent, msgs: [...v.msgs, { role: "user", text, images }] }));
+    runner(key).queue.push({ ...queuedChatTurn(agent, text, modelRef.current, baseChoice(key), permRef.current, intentId ? { intentId, timezone: browserZone() } : undefined), images });
     drain(key, base);
   };
   // A question from the box starts a new conversation, unless the current one is still working:
@@ -494,10 +512,12 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
 
   const submit = () => {
     const text = input.trim();
-    if (!text) return;
+    if ((!text && !images.length) || readingImagesRef.current) return;
     setInput("");
+    setImageDrafts((drafts) => ({ ...drafts, [key]: [] }));
+    setImageError("");
     setStick(true);
-    send(text);
+    send(text, undefined, images);
   };
 
   // ⏹ stops the run on the server; its stream then ends with the "stopped" error and "done".
@@ -552,7 +572,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
     leave(key);
     let msgs: Msg[];
     try {
-      const j = await getJson<{ messages: ({ role: "user"; text: string } | { role: "ai"; text: string; tools: Tool[] })[] }>(`${base}/sessions/${encodeURIComponent(s.sid)}`);
+      const j = await getJson<{ messages: ({ role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[] })[] }>(`${base}/sessions/${encodeURIComponent(s.sid)}`);
       msgs = j.messages.map((m) => (m.role === "ai" ? { denied: [], ...m } : m));
     } catch (e) {
       msgs = [{ role: "ai", text: t("chat.transcriptUnavailable", { error: (e as Error).message }), tools: [], denied: [] }];
@@ -670,7 +690,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
                   <div className={`md ${m.live ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(m.text) }} />
                 </>}
                 {m.note && <div className="msg-note" role="status">{m.note}</div>}
-              </> : linkNodes(m.text)}
+              </> : <><div className="chat-images">{m.images?.map((image, i) => <a key={i} href={imageURL(image)} download={image.name}><img src={imageURL(image)} alt={image.name} /></a>)}</div>{linkNodes(m.text)}</>}
               {m.role === "ai" && m.denied.length > 0 && (
                 <span className="msg-denied">
                   {t("chat.denied", { tools: m.denied.join(", ") })}
@@ -686,7 +706,16 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
             ↓
           </button>
         )}
-        <div className="chat-input">
+        {imageError && <div className="msg-note" role="alert">{imageError}</div>}
+        {!!images.length && <div className="chat-images chat-image-drafts">{images.map((image, index) => <div key={index}>
+          <img src={imageURL(image)} alt={image.name} />
+          <button aria-label={t("chat.removeImage")} disabled={readingImages} onClick={() => setImageDrafts((drafts) => ({ ...drafts, [key]: images.filter((_, i) => i !== index) }))}>×</button>
+        </div>)}</div>}
+        <div className="chat-input" onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={(e) => {
+          if (e.dataTransfer.files.length) { e.preventDefault(); void addImages(Array.from(e.dataTransfer.files)); }
+        }}>
+          <input ref={fileRef} type="file" hidden accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(e) => { void addImages(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+          <button className="chat-attach" title={t("chat.addImages")} aria-label={t("chat.addImages")} disabled={readingImages || images.length >= 4} onClick={() => fileRef.current?.click()}>＋</button>
           <textarea
             ref={inputRef}
             rows={1}
@@ -694,6 +723,10 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
             aria-label={t("chat.inputLabel")}
             placeholder={conv.busy ? t("chat.placeholderBusy") : t("chat.placeholder")}
             onChange={(e) => setInput(e.target.value)}
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData.items).filter((item) => item.type.startsWith("image/")).flatMap((item) => { const file = item.getAsFile(); return file ? [file] : []; });
+              if (files.length) { e.preventDefault(); void addImages(files); }
+            }}
             onCompositionStart={() => { composingRef.current = true; }}
             onCompositionEnd={() => { composingRef.current = false; }}
             onKeyDown={(e) => {
@@ -703,7 +736,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
               }
             }}
           />
-          <button className="chat-send" disabled={!input.trim()} onClick={submit}>
+          <button className="chat-send" disabled={readingImages || (!input.trim() && !images.length)} onClick={submit}>
             ↑
           </button>
         </div>

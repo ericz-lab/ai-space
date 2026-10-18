@@ -1,6 +1,7 @@
+import type { ChatImage } from "./chat-images.ts";
 import type { AgentInfo } from "./api.ts";
 
-export type QueuedChatTurn = { message: string; model?: string; permissionMode?: string; intentId?: string; timezone?: string };
+export type QueuedChatTurn = { message: string; images?: ChatImage[]; model?: string; permissionMode?: string; intentId?: string; timezone?: string };
 
 /**
  * Capture the visible controls at send time, before React commits conversation metadata.

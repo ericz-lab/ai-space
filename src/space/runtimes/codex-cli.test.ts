@@ -155,6 +155,20 @@ describe("Codex chat", () => {
     if (mode === "hang") setTimeout(handle.kill, 50);
   });
 
+  test("passes image bytes to new and resumed turns without changing permissions", async () => {
+    const bytes = Buffer.from("image fixture");
+    for (const sessionId of [undefined, "c0de0001-0000-4000-8000-000000000000"]) {
+      const result = await run("ok", { sessionId, images: [{ name: "ignored/filename.png", mediaType: "image/png", data: bytes.toString("base64") }] });
+      expect(result.error).toBeNull();
+      const answer = JSON.parse(result.events.filter((e) => e.type === "assistant").at(-1)!.message.content[0].text);
+      expect(answer.images).toEqual([Array.from(bytes)]);
+      expect(answer.args).toContain("read-only");
+      const path = answer.args[answer.args.indexOf("--image") + 1];
+      for (let i = 0; i < 50 && await Bun.file(path).exists(); i++) await Bun.sleep(5);
+      expect(await Bun.file(path).exists()).toBe(false);
+    }
+  });
+
   test("streams persistent sessions with full context and a separate identity", async () => {
     const result = await run();
     expect(result.error).toBeNull();

@@ -275,3 +275,9 @@ src/web/            index.html, main.tsx (language root), App.tsx, screens.ts (s
 - An icon path points outside the app directory: 404.
 
 Agent chat shows text and tool operations as separate, ordered entries. AI text has no bubble or outer border; tools use subtly shaded cards with state, command or file, and expandable results (up to 12,000 characters). Repeated tools remain separate and incomplete work is not marked successful. Recent run replay restores these entries; older transcripts retain their available tool hints without inventing results. The Permission selector applies to the next message. IME confirmation Enter is ignored by submission, including Safari key code 229; Shift-Enter inserts a newline.
+
+### Agent chat images
+
+The Web and Mac agent composers accept image selection, clipboard images and drag-and-drop, with removable previews and image-only turns. A turn carries `images: [{ name, mediaType, data }]` (base64 bytes, never a client file path) on the existing agent chat route; peer forwarding uses the same request. Limits are four images, 5 MiB each, 10 MiB combined, and 15 MiB for the encoded request. PNG, JPEG, GIF and WebP signatures must match the declared format. Other chat runtimes reject image turns explicitly.
+
+Claude Code receives native base64 image blocks on stream-json stdin. Codex receives private temporary image files with `--image` on both new and resumed turns; they are removed when the CLI ends. Neither path grants additional tools or changes the selected permissions. Pending turns retain their own images when queued, and Mac retries retain the failed turn's images. Sent previews remain in the current client conversation; restored runtime transcripts currently show text and tools rather than attachment thumbnails. Mac converts other readable clipboard/image formats, such as TIFF, to PNG.

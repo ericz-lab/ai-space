@@ -18,7 +18,11 @@ import { parseTranscript, transcriptPath } from "./transcript.ts";
 // A stand-in for the claude CLI: prints its arguments back as stream-json events.
 const FAKE_CLI = `
 const args = process.argv.slice(2);
-const msg = args[args.indexOf("-p") + 1] ?? "";
+let msg = args[args.indexOf("-p") + 1] ?? "";
+if (args.includes("--input-format")) {
+  const input = JSON.parse(await new Response(Bun.stdin.stream()).text());
+  msg = JSON.stringify(input.message.content);
+}
 const resume = args.includes("--resume") ? args[args.indexOf("--resume") + 1] : "";
 const sid = resume ? "cafe0002-0000-4000-8000-000000000000" : "cafe0001-0000-4000-8000-000000000000";
 const out = (o) => console.log(JSON.stringify(o));
@@ -79,6 +83,19 @@ describe("chat runtime", () => {
 });
 
 describe("agents api", () => {
+  test("image-only chat reaches Claude as native image content, including resumed turns", async () => {
+    const image = { name: "screenshot.png", mediaType: "image/png", data: Buffer.from("\x89PNG\r\n\x1a\n", "latin1").toString("base64") };
+    for (const sessionId of [undefined, "cafe0001-0000-4000-8000-000000000000"]) {
+      const response = await post("/api/agents/space/assistant/chat", { message: "", images: [image], sessionId });
+      expect(response.status).toBe(200);
+      const ev = await events(response);
+      expect(JSON.stringify(ev)).toContain("base64");
+      expect(JSON.stringify(ev)).toContain(image.data);
+      expect(JSON.stringify(ev)).not.toContain("bypassPermissions");
+    }
+    expect((await post("/api/agents/space/assistant/chat", { message: "look", images: [{ ...image, data: "bad" }] })).status).toBe(400);
+  });
+
   test("lists the space agent and the apps' agents", async () => {
     const r = (await (await fetch(`${base}/api/agents`)).json()) as { agents: { id: string }[] };
     expect(r.agents.map((a) => a.id)).toEqual(["notes/coder", "notes/librarian", "space/assistant"]);
