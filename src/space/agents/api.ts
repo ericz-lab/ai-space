@@ -109,6 +109,7 @@ function spaceAgentPrompt(ws: Workspace): string {
   return [
     `You are the assistant of an ai-space workspace at ${ws.home}.`,
     "Apps live under apps/<name>/, each with a space.yaml manifest (spec in core/docs/app-spec.md when ai-space is deployed here). Runtime data is under data/<name>/. Answer questions about the space, inspect manifests and files, and help operate apps.",
+    "Apps made inside this Space have their source in app-src/<name>/: change the files there and run `space app build <name>` to install the change (the app-studio skill says how). `space app create <name>` makes a new one from the template.",
     "Be honest: say when you cannot find or verify something instead of guessing.",
   ].join("\n");
 }

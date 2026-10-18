@@ -59,6 +59,7 @@ Rules:
 | Command | Does | Route or file |
 | --- | --- | --- |
 | `space auth status` / `init [--password-stdin]` / `reset-password [--password-stdin]` / `revoke-sessions` / `device-add <name>` / `devices` / `device-revoke <id>` | the owner's password, sessions and device credentials of the built-in sign-in ([auth.md](auth.md)); the password is asked without echo or read from stdin, never an argument | disk (`space.db`), works without ai-space |
+| `space app create NAME [--title T] [--description D]` / `space app build NAME` | apps made inside the Space: the source in `app-src/NAME` from the template, packed and installed or upgraded ([app-studio.md](app-studio.md)) | `/api/studio/*` |
 | `space local status` / `install [--migrate] [--device <name>]` / `start` / `stop` / `restart` / `remove-service` | the Local edition's installation on this Mac, what its app runs ([local.md](local.md)) | disk and launchd, works without ai-space |
 | `space status` | health, app services with their health, tasks failing or overdue, last backup per app, model calls in flight, peers up or down; one screen | `/healthz`, `/api/services`, `/api/tasks`, `/api/backups`, `/api/model/status`, `/api/peers` |
 | `space app ls [--panel]` | every app: title, status, service health, url, hidden (`--panel`: only what the panel shows) | `GET /api/apps?all=1` |

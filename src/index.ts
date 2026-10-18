@@ -31,6 +31,7 @@ import { readVersion } from "./space/version.ts";
 import { withUserToolDirs } from "./space/host-tools.ts";
 import { readOwnership } from "./space/local.ts";
 import { createPackageRoutes } from "./space/packages/api.ts";
+import { createStudioRoutes } from "./space/studio.ts";
 import { PackageStore } from "./space/packages/store.ts";
 import { PackageInstaller } from "./space/packages/install.ts";
 import { PackageRuntime } from "./space/packages/runtime.ts";
@@ -42,7 +43,7 @@ import { runPackageTask } from "./space/packages/tasks.ts";
 import { loadAppEnv } from "./space/scheduler/targets.ts";
 import { PackageLifecycle } from "./space/packages/lifecycle.ts";
 import { createPackagePanelRoutes } from "./space/packages/panel.ts";
-import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
+import { type Config, SHARED_SKILLS, SPACE_ROOT, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { guardBrowserWrites } from "./space/auth.ts";
 import { AUTH_PUBLIC, AUTH_SELF, AuthService, AuthStore, composeRoutes, createAuthRoutes, ensureOperatorToken, gateRoutes } from "./space/auth/index.ts";
@@ -68,7 +69,8 @@ export { parseNotifyArgs } from "./cli/notify.ts";
 
 export async function boot(ws: Workspace, config: Config, env: Record<string, string | undefined> = process.env) {
   // The Local edition runs under launchd with a bare PATH; agent CLIs live in the user's tool directories (docs/editions.md#ai-space-local).
-  if (config.edition === "local") env.PATH = withUserToolDirs(env.PATH, homedir());
+  // Its own bin/ first, so agents and the terminal run this release's `space` (the app-studio skill uses it).
+  if (config.edition === "local") env.PATH = `${join(SPACE_ROOT, "bin")}:${withUserToolDirs(env.PATH, homedir())}`;
   // Built-in sign-in (docs/auth.md): the operator token is never empty then, or every caller past the gate would be the operator.
   if (config.auth === "builtin") config = { ...config, apiToken: await ensureOperatorToken(ws.home, config.apiToken) };
   const store = new Store(config.dbPath, { eventRetentionMs: config.eventRetentionMs });
@@ -449,6 +451,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["public", createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name, token: config.apiToken, managed: Boolean(await readOwnership(ws.home)) })],
       ["owner", panelRoutes],
       ["owner", createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage })],
+      ["owner", createStudioRoutes({ ws, installer: packageInstaller, lifecycle: packageLifecycle, store: packageStore, activate: activatePackage, token: config.apiToken, log: (l) => console.error(`[studio] ${l}`) })],
       ["owner", createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks })],
       ["owner", createConnectionRoutes({ links: packageLinks, token: config.apiToken })],
       ["owner", createPackageOpenRoutes(packageGateway, config.apiToken)],

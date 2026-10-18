@@ -3,6 +3,7 @@ import { parseArgs, need, noMore } from "./args.ts";
 import { type TaskView, confirm, listTasks, scheduleText, taskRef } from "./common.ts";
 import { deployVerb } from "./deploy.ts";
 import { newApp } from "./newapp.ts";
+import { buildVerb, createVerb } from "./studio.ts";
 import { inspectPackageVerb, packVerb, installPackageVerb, packagesVerb, openPackageVerb, packageChangeVerb } from "./package.ts";
 import { ago, bytes, until } from "./output.ts";
 import { ApiError, type Ctx, type Noun, UsageError } from "./types.ts";
@@ -236,6 +237,8 @@ export const appNoun: Noun = {
   name: "app",
   summary: "the apps of the workspace: list, show, sync, deploy, service, start/stop/restart, supervise, hide, uninstall, env, new",
   verbs: {
+    create: { usage: "NAME [--title T] [--description D]", summary: "make a new app inside the Space: source in app-src/NAME from the template, packed and installed (no GitHub)", run: createVerb },
+    build: { usage: "NAME", summary: "pack app-src/NAME and install it, or upgrade the installed app (patch version +1)", run: buildVerb },
     install: { usage: "FILE [--allow-unsigned] [--operation-id UUID]", summary: "install a prepared package on the selected Space", run: installPackageVerb() },
     upgrade: { usage: "FILE [--allow-unsigned] [--operation-id UUID]", summary: "replace an installed package, retaining previous code and data", run: installPackageVerb(true) },
     packages: { usage: "", summary: "Space identity and package installation history", run: packagesVerb },

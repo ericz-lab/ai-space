@@ -425,6 +425,8 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
   // The default port taken by another program (not an ai-space: that was refused above): use a free one.
   const extra: Record<string, string> = {};
   for (const [k, v] of Object.entries(LOCAL_DEFAULTS)) if (!new RegExp(`^\\s*${k}\\s*=`, "m").test(envText)) extra[k] = v;
+  // Package apps open through their own loopback gateway (docs/app-packages.md#application-entry-gateway): a stable port.
+  if (!/^\s*SPACE_PACKAGE_PORT\s*=/m.test(envText)) extra.SPACE_PACKAGE_PORT = String(portFree(8702) ? 8702 : freePort());
   if (!/^\s*SPACE_PORT\s*=/m.test(envText) && !status.running && !portFree(status.port)) extra.SPACE_PORT = String(freePort());
   await Bun.write(envPath, updateEnvText(envText, { ...LOCAL_ENV, ...extra }));
   await writeOwnership(p.workspace, { managedBy: MANAGED_BY, installedAt: status.ownership?.installedAt ?? new Date().toISOString(), version: bundle.version, release: name });
