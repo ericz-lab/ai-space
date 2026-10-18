@@ -1,0 +1,40 @@
+# The checks every change must pass (AGENTS.md#validation), and the native clients' tests and build.
+# Also called by release.yml before anything is packaged.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  bun:
+    name: typecheck and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+
+  native:
+    name: Mac and iPhone clients
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: desktop/macos/scripts/test.sh
+      - run: mobile/ios/scripts/test.sh
+      - run: CONFIG=release desktop/macos/scripts/build.sh

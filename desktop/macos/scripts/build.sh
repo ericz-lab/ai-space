@@ -46,10 +46,15 @@ xcrun swiftc $FLAGS -parse-as-library -swift-version 5 -module-name AISpace \
   -o "$APP/Contents/MacOS/AISpace"
 
 cp AISpace/Info.plist "$APP/Contents/Info.plist"
+# The release pipeline numbers each build (CFBundleVersion); the version itself is the plist's.
+if [ -n "${BUILD_NUMBER:-}" ]; then plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP/Contents/Info.plist"; fi
 cp AISpace/Resources/AppIcon.icns AISpace/Resources/Logo.png "$APP/Contents/Resources/"
 cp -R AISpace/Resources/*.lproj "$APP/Contents/Resources/"
 
 # The hardened runtime refuses the microphone unless the entitlement asks for it, so voice input
 # in a page would fail without a word (AISpace.entitlements).
-codesign --force --options runtime --timestamp=none --entitlements AISpace/AISpace.entitlements --sign "${SIGN_IDENTITY:--}" "$APP"
+# A Developer ID signature needs Apple's secure timestamp to pass notarization; ad-hoc needs none.
+TIMESTAMP=--timestamp=none
+[ "${SIGN_IDENTITY:--}" = "-" ] || TIMESTAMP=--timestamp
+codesign --force --options runtime $TIMESTAMP --entitlements AISpace/AISpace.entitlements --sign "${SIGN_IDENTITY:--}" "$APP"
 echo "built $(pwd)/$APP ($CONFIG)"

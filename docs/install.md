@@ -143,6 +143,8 @@ git remote add <host> <host>:~/ai-space.git
 git push <host> main      # checks out into the unit's checkout (~/.ai-space/core by default), runs deploy/install.sh, restarts the unit
 ```
 
+**From a release archive** instead of a checkout: a tagged release has an archive for Linux x64 and arm64 with its own Bun, so the machine needs no Bun or Git for ai-space itself. `tar -xzf ai-space-server-<version>-linux-<arch>.tar.gz && bash ai-space-server-<version>-linux-<arch>/install.sh` installs the same unit, and installing the next archive upgrades it, with a rollback if it does not come up ([release.md](release.md)).
+
 **Workspace `.env`**
 
 The interactive way: `space setup` (or `bun run setup` in `~/.ai-space/core`). It checks the tools from steps 1 to 3 and step 5 (and lingering for the systemd user manager), asks for every value below, who runs the apps' services, and for the notification channel, R2 credentials and peers of steps 7 to 9 (each can be skipped and added on a later run), sends a test message, probes the bucket, shows a summary with secrets masked, writes `~/.ai-space/.env` keeping every line it did not touch, and restarts the unit. Existing values are the defaults, so re-running it is how a value is changed later.

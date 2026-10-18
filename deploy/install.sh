@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install (or refresh) ai-space as a user-level systemd service on this machine.
-# Run from the checkout: bash deploy/install.sh
+# Run from the checkout: bash deploy/install.sh. A release archive runs it through its own
+# install.sh (release/install.sh), with BUN set to the Bun inside the release.
 # Idempotent: creates the workspace, installs the unit, enables linger, restarts.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -23,15 +24,25 @@ SPACE_HOME="$(cd "$SPACE_HOME" && pwd)"
 export SPACE_HOME
 
 cd "$HERE"
-"$BUN" install --frozen-lockfile
+# A release (RELEASE.json) ships its dependencies; a checkout installs them from the lockfile.
+[ -f "$HERE/RELEASE.json" ] || "$BUN" install --frozen-lockfile
 "$BUN" src/index.ts init
 
 # The `space` command on PATH (~/.local/bin is on the unit's and the profile's PATH; docs/cli.md).
 mkdir -p ~/.local/bin && ln -sfn "$HERE/bin/space" ~/.local/bin/space
+# A release brings its own Bun; on a machine with none, the apps and the shell find it there too.
+if [ -f "$HERE/RELEASE.json" ] && ! command -v bun >/dev/null && [ ! -x "$HOME/.bun/bin/bun" ]; then
+  ln -sfn "$BUN" ~/.local/bin/bun
+fi
 
 mkdir -p ~/.config/systemd/user
-sed "s|%h/.ai-space/core|$HERE|; s|^Environment=SPACE_HOME=.*|Environment=SPACE_HOME=$SPACE_HOME|; s|%h/.bun/bin/bun|$BUN|" deploy/ai-space.service > "$UNIT"
-loginctl enable-linger "$USER" 2>/dev/null || true
+# The unit's PATH starts with the directory of this Bun, so the apps' services (which inherit
+# it) find the same one; for the usual ~/.bun/bin it is already there.
+BUN_DIR="$(dirname "$BUN")"
+PATH_FIX=""
+[ "$BUN_DIR" = "$HOME/.bun/bin" ] || PATH_FIX="s|^Environment=PATH=|Environment=PATH=$BUN_DIR:|;"
+sed "s|%h/.ai-space/core|$HERE|; s|^Environment=SPACE_HOME=.*|Environment=SPACE_HOME=$SPACE_HOME|; s|%h/.bun/bin/bun|$BUN|; $PATH_FIX" deploy/ai-space.service > "$UNIT"
+loginctl enable-linger "${USER:-$(id -un)}" 2>/dev/null || true
 systemctl --user daemon-reload
 systemctl --user enable --now ai-space
 systemctl --user restart ai-space

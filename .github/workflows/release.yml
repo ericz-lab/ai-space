@@ -1,0 +1,165 @@
+# Builds the Server and Client editions from one commit and one version (docs/release.md).
+#
+# A tag vX.Y.Z (equal to package.json's version, set with `bun run set-version`) builds, checks and
+# packages everything, then creates a draft GitHub Release with the artifacts, SHA256SUMS and
+# manifest.json. Publishing the draft stays a person's decision, after the install checks.
+# Run by hand (workflow_dispatch) it builds the same artifacts as X.Y.Z-dev.<sha> and keeps them
+# on the run only.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          base=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' package.json | head -n1)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            [ "$GITHUB_REF_NAME" = "v$base" ] || { echo "::error::tag $GITHUB_REF_NAME does not match package.json version $base (bun run set-version)"; exit 1; }
+            echo "version=$base" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$base-dev.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  check:
+    uses: ./.github/workflows/check.yml
+
+  server:
+    name: server ${{ matrix.arch }}
+    needs: [version, check]
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          bun run set-version "$VERSION"
+          # set-version edits tracked files; the archive takes committed files only, so commit locally.
+          git -c user.name=release -c user.email=release@localhost commit -qam "release $VERSION" || true
+      - run: bun release/server.ts --out dist
+      - name: smoke test
+        run: bun release/smoke.ts dist/ai-space-server-*.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  client:
+    name: client macOS
+    needs: [version, check]
+    runs-on: macos-15
+    timeout-minutes: 60
+    # The signing secrets live in this environment; protect it (required reviewers, tags only).
+    environment: release
+    env:
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - name: version
+        run: bun run set-version "${{ needs.version.outputs.version }}"
+      - name: signing keychain
+        if: env.MACOS_CERT_P12_BASE64 != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          PASS=$(openssl rand -hex 16)
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$PASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "SIGN_IDENTITY=$MACOS_SIGN_IDENTITY" >> "$GITHUB_ENV"
+      - name: package
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: desktop/macos/scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+      - name: remove keychain
+        if: always() && env.MACOS_CERT_P12_BASE64 != ''
+        run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
+
+  release:
+    name: draft release
+    needs: [version, server, client]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums and manifest
+        run: bun release/manifest.ts dist --version "${{ needs.version.outputs.version }}" --commit "$GITHUB_SHA" --run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - name: draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          files=()
+          for f in dist/*; do [ "${f##*/}" = NOTES.md ] || files+=("$f"); done
+          if gh release view "$TAG" --json isDraft >/dev/null 2>&1; then
+            # A rerun may refresh a draft built from the same commit, never a published release
+            # and never with artifacts of another commit.
+            [ "$(gh release view "$TAG" --json isDraft -q .isDraft)" = true ] || { echo "::error::$TAG is already published"; exit 1; }
+            rm -rf old && mkdir old
+            gh release download "$TAG" -p manifest.json -D old || true
+            old=$(sed -n 's/.*"commit": *"\([^"]*\)".*/\1/p' old/manifest.json 2>/dev/null | head -n1)
+            [ -z "$old" ] || [ "$old" = "$GITHUB_SHA" ] || { echo "::error::draft $TAG holds artifacts of $old, this run is $GITHUB_SHA"; exit 1; }
+            gh release upload "$TAG" "${files[@]}" --clobber
+            gh release edit "$TAG" --notes-file dist/NOTES.md
+          else
+            gh release create "$TAG" --draft --verify-tag --title "AI Space ${TAG#v}" --notes-file dist/NOTES.md "${files[@]}"
+          fi

@@ -74,8 +74,9 @@ supported entries are a Cloudflare Tunnel with Access ([ingress.md](ingress.md))
 built-in user system exists, a login of ai-space's own. Binding to `0.0.0.0` does not replace
 either. `SPACE_API_TOKEN` protects the API, not the panel.
 
-**Today:** source install and git-push deploy work, and the service reports its version and edition
-(`GET /api/space`). Missing: a release archive, a setup that does not ask for `gh` and Cloudflare during the basic install, and a
+**Today:** source install and git-push deploy work, the service reports its version and edition
+(`GET /api/space`), and a release tag builds an archive for Linux x64 and arm64 with an installer
+that upgrades and rolls back ([release.md](release.md)). Missing: a setup that does not ask for `gh` and Cloudflare during the basic install, and a
 login that does not depend on Cloudflare Access.
 
 ## AI Space Client
@@ -99,9 +100,10 @@ Git and no developer tools on the client machine.
 behind its access layer. A connection counts only after the client has checked the panel and a known
 API answer, not because a port answered ([macos-desktop.md](macos-desktop.md#connections-and-first-launch)).
 
-**Today:** the Mac and iPhone clients connect to existing Spaces and are built with
-`bun run desktop:build` and `bun run ios:build`. Missing: Developer ID signing, notarization, a
-`.dmg`, version injection from the release tag, and a release.
+**Today:** the Mac and iPhone clients connect to existing Spaces. A release tag builds the Mac
+app into a `.dmg`, signed and notarized once the Developer ID secrets are configured
+([release.md](release.md)). Missing: the Developer ID certificate itself, the Share extension in
+the release build, and store or test-channel distribution for the phones.
 
 ## AI Space Local
 
@@ -190,9 +192,9 @@ side.
 | # | Work | Unblocks |
 | --- | --- | --- |
 | 1 | GitHub CLI and Cloudflare become optional extensions of the Server's setup | A basic install with no accounts and no domain, for Server and Local |
-| 2 | Release pipeline, phase 1: checks on every push, a version from the tag, the Client signed, notarized, in a `.dmg`, published as a draft release | Client edition |
+| 2 | Release pipeline, phase 1: checks on every push, a version from the tag, the Client signed, notarized, in a `.dmg`, published as a draft release (built; signing waits for a Developer ID certificate) | Client edition |
 | 3 | Built-in user system: owner login, sessions, revocation, one access policy across the API (in progress separately) | A Server reachable without Cloudflare Access; device credentials for Local |
-| 4 | Release pipeline, phase 2: the Server release archive, install script, health check, upgrade test | Server edition as a download |
+| 4 | Release pipeline, phase 2: the Server release archive, install script, health check, upgrade test (built, [release.md](release.md)) | Server edition as a download |
 | 5 | Local prototype: the service from packaged resources on a clean Mac | Proves the Local edition can be packaged at all |
 | 6 | Managed mode: identity, ownership, exclusion, background helper, bundled `.spaceapp` apps, first-run flow | Local edition |
 | 7 | Release pipeline, phase 3: Local built and signed in the same run | Local edition as a download |
