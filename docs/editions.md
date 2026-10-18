@@ -144,7 +144,8 @@ assets, chat-widget build, skills, PTY through a bundled helper, SQLite, runtime
 [release.md](release.md#local-edition)). Managed mode is built ([local.md](local.md)): ownership,
 the one-service-per-workspace lock, the LaunchAgent, the device credential, bundled apps, the
 first-run flow and Settings. The release workflow builds, smoke-tests, signs and notarizes it with
-the others. Missing: updates inside the app coordinated with running work (step 9).
+the others. Updates inside the app are built ([local.md](local.md#updates)); signed DMG
+installation and live launchd timing still need release acceptance testing.
 
 ## Service identity
 
@@ -200,7 +201,7 @@ side.
 | 6 | Managed mode: identity, ownership, exclusion, background helper, bundled `.spaceapp` apps, first-run flow (built, [local.md](local.md)) | Local edition |
 | 7 | Release pipeline, phase 3: Local built and signed in the same run (built, [release.md](release.md#local-edition)) | Local edition as a download |
 | 8 | Creating, changing and installing apps from inside ai-space (built, [app-studio.md](app-studio.md)) | Apps without GitHub and a coding tool outside the product |
-| 9 | Updates inside the installed app, coordinated with running work and database migrations | Keeping Local current without a manual reinstall |
+| 9 | Updates inside the installed app, coordinated with running work and database migrations (built; signed release acceptance pending, [local.md](local.md#updates)) | Keeping Local current without a manual reinstall |
 
 Step 1 and steps 2–3 do not depend on each other. Steps 5 and 6 come after 1 and 3, because a Local
 install has to stand without accounts and needs a credential for its own client.

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { RunResult } from "./services/manager.ts";
 import { packApplication } from "./packages/pack.ts";
-import { LOCAL_LABEL, LocalError, type LocalDeps, localInstall, localPaths, localRemoveService, localStatus, localStop, localStart, renderLocalPlist } from "./local.ts";
+import { LOCAL_LABEL, LocalError, type LocalDeps, localInstall, localPaths, localRemoveService, localStatus, localStop, localStart, renderLocalPlist, readActivity } from "./local.ts";
 
 // The Local edition's install, upgrade, rollback and removal, with a stand-in for launchctl that
 // runs the plist's program the way launchd would: real service processes on a temporary workspace.
@@ -25,7 +25,7 @@ afterAll(async () => {
 });
 
 /** A release tree like the app's Resources/space, linking to this checkout's files. */
-async function fakeRelease(dir: string, version: string, commit: string, opts: { broken?: boolean; migrates?: boolean; app?: string } = {}): Promise<string> {
+async function fakeRelease(dir: string, version: string, commit: string, opts: { broken?: boolean; brokenInit?: boolean; migrates?: boolean; app?: string } = {}): Promise<string> {
   if (opts.app) {
     // One bundled app, as release/local.ts puts them in: bundled-apps/<name>.spaceapp.
     const src = `${dir}-hello`;
@@ -41,6 +41,7 @@ async function fakeRelease(dir: string, version: string, commit: string, opts: {
   await cp(join(REPO, "src"), join(dir, "src"), { recursive: true, filter: (f) => !f.endsWith(".test.ts") });
   // `migrates`: a broken start that first changes space.db's schema, as a failed migration would.
   const migrate = opts.migrates ? `{ const { Database } = await import("bun:sqlite"); const db = new Database(process.env.SPACE_HOME + "/data/space.db"); db.exec("CREATE TABLE from_broken (x)"); db.close(); }\n` : "";
+  if (opts.brokenInit) await Bun.write(join(dir, "src", "index.ts"), `${migrate} throw new Error("broken init");`);
   if (opts.broken) await Bun.write(join(dir, "src", "index.ts"), `if (process.argv[2] !== "init") { ${migrate} process.exit(3); }\nawait import("./cli/main.ts").then((m) => m.run(process.argv.slice(2), {})).then((c) => process.exit(c));\n`);
   await Bun.write(join(dir, "RELEASE.json"), JSON.stringify({ product: "ai-space", edition: "local", version, commit, os: "macos", arch: process.arch, bun: Bun.version }));
   return dir;
@@ -124,6 +125,15 @@ async function setup() {
 }
 
 describe("space local", () => {
+  test("activity failures do not silently become idle", async () => {
+    const { deps, workspace } = await setup();
+    for (const code of [401, 500]) {
+      await expect(readActivity({ ...deps("/unused"), fetch: (async (_input: string | URL | Request) => new Response("", { status: code })) as typeof fetch }, workspace, 1)).rejects.toThrow(`HTTP ${code}`);
+    }
+    await expect(readActivity({ ...deps("/unused"), fetch: (async (_input: string | URL | Request) => Response.json({ ok: true })) as typeof fetch }, workspace, 1)).rejects.toThrow("invalid running-work response");
+    expect(await readActivity({ ...deps("/unused"), fetch: (async (_input: string | URL | Request) => new Response("", { status: 404 })) as typeof fetch }, workspace, 1)).toBeUndefined();
+  });
+
   test("the LaunchAgent runs the current release's Bun on the workspace, edition local", () => {
     const p = localPaths({ SPACE_HOME: "/Users/u/.ai-space" }, "/Users/u");
     const text = renderLocalPlist(p);
@@ -245,6 +255,31 @@ describe("space local", () => {
     db.close();
     const p = localPaths(deps(v2).env, deps(v2).home);
     expect((await readdir(join(p.prefix, "db-snapshots"))).length).toBe(2);
+
+    // Initialization can change the schema and then throw before the health check even starts.
+    const badInit = await fakeRelease(join(root, "app4"), "0.4.0", "3".repeat(40), { brokenInit: true, migrates: true });
+    await expect(localInstall(deps(badInit))).rejects.toThrow(/init failed:/);
+    const restored = await localStatus(deps(v2));
+    expect(restored.running?.version).toBe("0.2.0");
+    expect(restored.ownership?.version).toBe("0.2.0");
+    const restoredDb = new Database(join(workspace, "data", "space.db"), { readonly: true });
+    expect(restoredDb.query("SELECT name FROM sqlite_master WHERE name = 'from_broken'").all()).toEqual([]);
+    restoredDb.close();
+
+    // A failed launchctl bootstrap must also restore the previous release.
+    let failOnce = true;
+    const bootstrapDeps = { ...deps(badInit), root: await fakeRelease(join(root, "app5"), "0.5.0", "4".repeat(40)),
+      run: async (cmd: string[]) => {
+        if (cmd[1] === "bootstrap" && failOnce) {
+          failOnce = false;
+          return { code: 1, stdout: "", stderr: "bootstrap failed" };
+        }
+        return deps(v2).run(cmd);
+      },
+    };
+    await expect(localInstall(bootstrapDeps)).rejects.toThrow(/bootstrap failed/);
+    expect((await localStatus(deps(v2))).running?.version).toBe("0.2.0");
+
   }, 120_000);
 
   test("a workspace this app did not make is foreign: install refuses, migrate takes it once it is stopped", async () => {

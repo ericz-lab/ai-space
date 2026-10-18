@@ -87,6 +87,7 @@ final class AppModel: ObservableObject {
     let notifier = Notifier()
     /// The Local edition's service on this Mac; `available` is false in the Client edition.
     let local = LocalManager()
+    let updater = AppUpdater(current: LocalBundle.find()?.version ?? "0.0.0")
     private let cache = CatalogueCache(directory: DesktopPaths.caches)
 
     @Published private(set) var selectedID: UUID? {
@@ -181,10 +182,13 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.syncLives(list) } }
         }.store(in: &watchers)
         if local.available {
+            updater.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
+            Task { [weak self] in await self?.updater.check() }
             local.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
             Task { [weak self] in
                 await self?.local.refresh()
                 await self?.ensureLocalSignIn()
+                if let self { await self.local.autoUpdate(into: self) }
             }
         }
         wake = NSWorkspace.shared.notificationCenter.addObserver(

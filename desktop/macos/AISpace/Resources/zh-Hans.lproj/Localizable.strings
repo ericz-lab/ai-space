@@ -440,3 +440,18 @@
 "Paste Picture" = "粘贴图片";
 "Copy one picture first." = "请先复制一张图片。";
 "Unsaved pictures stay on this Mac in Space → Pending Shares." = "未保存的图片会保留在此 Mac，可从「Space → 待保存的分享」继续保存。";
+
+/* Local edition updates */
+"Update when idle" = "空闲时更新";
+"Update now…" = "立即更新…";
+"Update Now" = "立即更新";
+"Update the background service now?" = "立即更新后台服务？";
+"Running work has up to 30 seconds to finish before the service restarts. Unfinished work may be interrupted." = "服务重启前，正在运行的工作最多有 30 秒完成。未完成的工作可能会中断。";
+"Waiting for: %@" = "正在等待：%@";
+"Checking for updates…" = "正在检查更新…";
+"No newer Local release is available." = "暂无更新的本机版。";
+"AI Space %@ is available." = "AI Space %@ 已可用。";
+"Install and relaunch" = "安装并重新启动";
+"Release notes" = "版本说明";
+"Download from the release page" = "前往发行页面下载";
+"Check for app updates" = "检查应用更新";

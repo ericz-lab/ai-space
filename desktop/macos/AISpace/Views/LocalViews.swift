@@ -122,6 +122,7 @@ struct LocalSettingsSection: View {
     @ObservedObject var model: AppModel
     @ObservedObject var local: LocalManager
     @State private var confirmingRemove = false
+    @State private var confirmingUpdate = false
 
     var body: some View {
         Section {
@@ -143,9 +144,14 @@ struct LocalSettingsSection: View {
             } else {
                 ProgressView().controlSize(.small)
             }
+            if let waiting = local.updateWaitingFor ?? local.failure?.activity {
+                Text("Waiting for: \(waiting.summary)").font(.callout).foregroundStyle(.secondary)
+            }
             if let failure = local.failure {
                 Text(failure.error).font(.callout).foregroundStyle(.red)
             }
+            LocalAppUpdateView(updater: model.updater)
+                .disabled(local.busy != nil)
         } header: {
             Text("AI Space on This Mac")
         } footer: {
@@ -166,8 +172,14 @@ struct LocalSettingsSection: View {
         case .managed:
             HStack {
                 if s.updateAvailable {
-                    Button("Update to \(local.bundle?.version ?? "")") { Task { await local.install(into: model) } }
+                    Button("Update when idle") { Task { await local.install(whenBusy: .wait, into: model) } }
                         .buttonStyle(.borderedProminent)
+                    Button("Update now…") { confirmingUpdate = true }
+                        .confirmationDialog("Update the background service now?", isPresented: $confirmingUpdate) {
+                            Button("Update Now") { Task { await local.install(whenBusy: .now, into: model) } }
+                        } message: {
+                            Text("Running work has up to 30 seconds to finish before the service restarts. Unfinished work may be interrupted.")
+                        }
                 }
                 if s.service.running {
                     Button("Stop") { Task { await local.stop() } }
@@ -205,5 +217,43 @@ struct LocalSettingsSection: View {
     private func runtimesText(_ r: LocalStatus.Runtimes) -> String {
         let found = [r.claude.map { _ in "Claude Code" }, r.codex.map { _ in "Codex" }].compactMap { $0 }
         return found.isEmpty ? "None found" : found.joined(separator: ", ")
+    }
+}
+
+
+/// The app download is separate from updating the service it carries.
+private struct LocalAppUpdateView: View {
+    @ObservedObject var updater: AppUpdater
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch updater.phase {
+            case .idle:
+                checkButton
+            case .checking:
+                ProgressView("Checking for updates…").controlSize(.small)
+            case .upToDate:
+                Text("No newer Local release is available.").foregroundStyle(.secondary)
+                checkButton
+            case .available(let update):
+                Text("AI Space \(update.version) is available.")
+                HStack {
+                    Button("Install and relaunch") { Task { await updater.install(update) } }
+                        .buttonStyle(.borderedProminent)
+                    Link("Release notes", destination: update.page)
+                }
+            case .installing(_, let message):
+                ProgressView(message).controlSize(.small)
+            case .failed(let message, let page):
+                Text(message).font(.callout).foregroundStyle(.red)
+                if let page { Link("Download from the release page", destination: page) }
+                checkButton
+            }
+        }
+        .task { await updater.check() }
+    }
+
+    private var checkButton: some View {
+        Button("Check for app updates") { Task { await updater.check(force: true) } }
     }
 }

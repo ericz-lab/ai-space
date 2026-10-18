@@ -51,7 +51,7 @@ All take `--json`; the app parses that. They work with ai-space down.
 | Command | Does |
 | --- | --- |
 | `space local status` | the app's release, the installed one, the workspace and its owner, the LaunchAgent, what answers on the port, `claude` and `codex` |
-| `space local install [--migrate] [--device <name>]` | copy the release out, switch `current`, `init` the workspace, set `SPACE_EDITION=local`, `SPACE_AUTH=builtin`, `SPACE_SUPERVISOR=space`, `SPACE_DEFAULT_APPS=none` (other values stay; `SPACE_TERMINAL_ENABLED=1` and `SPACE_PACKAGE_PORT`, 8702 or a free port, only when the workspace has no value), mark it owned, write and start the LaunchAgent, wait for the service to answer as this version, install the bundled apps. A start that does not answer within a minute puts the previous release back. `--device` also makes a device credential and prints its token once |
+| `space local install [--migrate] [--device <name>] [--wait | --now]` | copy the release out, switch `current`, `init` the workspace, set `SPACE_EDITION=local`, `SPACE_AUTH=builtin`, `SPACE_SUPERVISOR=space`, `SPACE_DEFAULT_APPS=none` (other values stay; `SPACE_TERMINAL_ENABLED=1` and `SPACE_PACKAGE_PORT`, 8702 or a free port, only when the workspace has no value), mark it owned, write and start the LaunchAgent, wait for the service to answer as this version, install the bundled apps. A start that does not answer within a minute puts the previous release back. `--device` also makes a device credential and prints its token once |
 | `space local start` / `stop` / `restart` | `launchctl enable`+`bootstrap` / `bootout`+`disable` (stays off at login until started) / both |
 | `space local remove-service` | stop and unregister the LaunchAgent and delete the program under Application Support; the workspace stays, still owned, so installing again picks it up |
 
@@ -75,3 +75,47 @@ the Mac; `space auth init` sets one later for a browser elsewhere ([auth.md](aut
 | `git` | a stub, never started: default apps are not cloned; bundled apps install from packages |
 | `claude`, `codex` | the user's own; the service adds `~/.local/bin`, `~/.claude/local`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and others to the bare PATH launchd gives it (`src/space/host-tools.ts`) |
 | `zstd` | missing: backups fail until it is installed |
+
+
+## Updates
+
+The Local app checks GitHub's latest published release at launch and when its Settings section
+opens, at most once every six hours. **Check for app updates** checks immediately. Draft and
+prerelease builds are excluded; the release must contain a newer Local DMG for this Mac's
+architecture and its matching `manifest.json` entry. **Install and relaunch** downloads it,
+checks its size and SHA-256, then verifies the app's Local release version, bundle identifier,
+code signature, signing team (the same as the running app), and Gatekeeper assessment. An unsigned
+or ad-hoc build cannot self-update. Developer ID signing, notarization and a published release
+are required for an end-to-end production update.
+
+After the app quits, a helper swaps the verified bundle into place and opens it. A failed swap
+or launch command restores the previous app. A successful swap leaves `AI Space Previous <id>.app`
+beside the installed app for manual recovery; remove it once the new app works. This checks the
+launch command, not the new GUI's ongoing health. If the new app crashes after launch, quit it and
+open the retained previous app. An unwritable installation folder requires downloading and copying
+the app manually. Translocated apps must first be moved to Applications.
+
+Updating the app does not pull files from under the background service. On launch the app updates
+its managed service only when its bundled version is newer and the service has not been disabled.
+Running tasks, model calls, agent turns, terminal sessions and package installs are reported by
+`GET /api/space/activity` (owner only). Busy services are retried every two minutes while the app
+stays open. Equal or older versions are not automatically installed; **Repair** remains explicit.
+
+Settings offers **Update when idle** (wait up to 30 minutes) and **Update now…** (confirm that work
+may be interrupted). The CLI equivalents are `space local install --wait` and `--now`; without
+either, an upgrade is refused while work is running. The normal shutdown gives work 30 seconds
+with the default `SPACE_DRAIN_SECONDS`, within the LaunchAgent's 40-second timeout. Failed activity
+requests do not count as idle; a 404 is accepted for compatibility with older releases.
+
+With the service stopped, the installer snapshots `data/space.db` under
+`~/Library/Application Support/ai-space/local/db-snapshots/` (the last three snapshots are kept).
+Initialization, bootstrap or health-check failure during an upgrade restores the database, release
+link, workspace environment and ownership metadata, then checks the previous service's health.
+Database replacement is refused while the workspace is locked by a service. This recovery covers
+Space's own database, not arbitrary app databases or external side effects. Bundled apps are
+installed only after the new service passes its health check.
+
+Validation includes Swift feed/checksum/version tests and helper replacement tests (successful
+swap, missing staged app and failed launch), plus service integration tests for busy/refuse/wait/now,
+a failed migration, failed initialization and failed bootstrap. Signed DMG installation and live
+launchd timing still need release testing on a Mac with a Developer ID build.

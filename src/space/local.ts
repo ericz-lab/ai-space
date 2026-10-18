@@ -172,7 +172,7 @@ export function realLocalDeps(log: (line: string) => void = () => {}): LocalDeps
 }
 
 function launchctl(d: LocalDeps, p: LocalPaths): Launchctl {
-  return new Launchctl({ run: d.run, unitDir: p.agentsDir, logDir: p.logs, uid: d.uid, stopWaitMs: 15_000 });
+  return new Launchctl({ run: d.run, unitDir: p.agentsDir, logDir: p.logs, uid: d.uid, stopWaitMs: 35_000 });
 }
 
 function serviceView(s: UnitState, plist: boolean) {
@@ -273,7 +273,7 @@ export function renderLocalPlist(p: LocalPaths): string {
 
 export class LocalError extends Error {
   constructor(
-    readonly code: "foreign" | "foreign-running" | "no-bundle" | "unhealthy" | "not-installed" | "busy",
+    readonly code: "foreign" | "foreign-running" | "no-bundle" | "unhealthy" | "not-installed" | "busy" | "still-running" | "upgrade-failed",
     message: string,
     readonly status?: LocalStatus,
     /** For `busy`: what the running Space is doing (GET /api/space/activity). */
@@ -285,16 +285,14 @@ export class LocalError extends Error {
 
 export type Activity = { busy: boolean; items: { kind: string; label: string; since?: number }[] };
 
-/** What the running Space is doing; undefined when it does not say (not running, or a release before /api/space/activity). */
+/** An older release may lack this endpoint; other failures must not be mistaken for idle. */
 export async function readActivity(d: LocalDeps, workspace: string, port: number): Promise<Activity | undefined> {
-  try {
-    const r = await d.fetch(`http://127.0.0.1:${port}/api/space/activity`, { headers: { authorization: `Bearer ${await operatorToken(workspace)}` }, signal: AbortSignal.timeout(5000) });
-    if (!r.ok) return undefined;
-    const body = (await r.json()) as Activity & { ok?: boolean };
-    return { busy: Boolean(body.busy), items: body.items ?? [] };
-  } catch {
-    return undefined;
-  }
+  const r = await d.fetch(`http://127.0.0.1:${port}/api/space/activity`, { headers: { authorization: `Bearer ${await operatorToken(workspace)}` }, signal: AbortSignal.timeout(5000) });
+  if (r.status === 404) return undefined;
+  if (!r.ok) throw new Error(`could not check running work (HTTP ${r.status}); try again or use --now`);
+  const body = (await r.json()) as Activity & { ok?: boolean };
+  if (body.ok !== true || typeof body.busy !== "boolean" || !Array.isArray(body.items)) throw new Error("invalid running-work response; no update was applied");
+  return { busy: body.busy, items: body.items };
 }
 
 /**
@@ -491,8 +489,9 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
   if (changing) {
     if (status.service.loaded) {
       d.log("stopping the running service (its work drains)");
-      await lc.disableNow(LOCAL_LABEL).catch(() => {});
+      await lc.disableNow(LOCAL_LABEL);
     }
+    if (workspaceLocked(join(p.workspace, "run"))) throw new LocalError("still-running", "the service has not stopped; no update was applied", status);
     try {
       snapshot = await snapshotDb(p, name);
     } catch (e) {
@@ -502,53 +501,67 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
     }
     if (snapshot) d.log(`space.db copied to ${snapshot}`);
   }
-  await switchCurrent(p, release);
-
-  await mkdir(p.workspace, { recursive: true });
-  await runInit(d, p);
-  const envPath = join(p.workspace, ".env");
-  const envText = await Bun.file(envPath).text().catch(() => "");
-  // The default port taken by another program (not an ai-space: that was refused above): use a free one.
-  const extra: Record<string, string> = {};
-  for (const [k, v] of Object.entries(LOCAL_DEFAULTS)) if (!new RegExp(`^\\s*${k}\\s*=`, "m").test(envText)) extra[k] = v;
-  // Package apps open through their own loopback gateway (docs/app-packages.md#application-entry-gateway): a stable port.
-  if (!/^\s*SPACE_PACKAGE_PORT\s*=/m.test(envText)) extra.SPACE_PACKAGE_PORT = String(portFree(8702) ? 8702 : freePort());
-  if (!/^\s*SPACE_PORT\s*=/m.test(envText) && !status.running && !portFree(status.port)) extra.SPACE_PORT = String(freePort());
-  await Bun.write(envPath, updateEnvText(envText, { ...LOCAL_ENV, ...extra }));
-  await writeOwnership(p.workspace, { managedBy: MANAGED_BY, installedAt: status.ownership?.installedAt ?? new Date().toISOString(), version: bundle.version, release: name });
-
   let device: InstallResult["device"];
-  if (opts.device) {
-    const db = new Database(join(p.workspace, "data", "space.db"), { create: true });
-    try {
-      db.exec("PRAGMA journal_mode = WAL");
-      db.exec("PRAGMA busy_timeout = 5000");
-      const made = new AuthService(new AuthStore(db)).addDevice(opts.device);
-      device = { id: made.device.id, name: made.device.name, token: made.token };
-    } finally {
-      db.close();
-    }
-  }
+  let port = status.port;
+  const previousEnv = await Bun.file(join(p.workspace, ".env")).text().catch(() => undefined);
+  try {
+    await switchCurrent(p, release);
 
-  await mkdir(p.agentsDir, { recursive: true });
-  await mkdir(p.logs, { recursive: true });
-  await Bun.write(p.plist, renderLocalPlist(p));
-  d.log("starting the background service");
-  await lc.disableNow(LOCAL_LABEL).catch(() => {});
-  await lc.enableNow(LOCAL_LABEL);
-  const port = await workspacePort(p.workspace);
-  if (!(await waitHealthy(d, port, bundle.version, d.healthTimeoutMs))) {
-    let back = "";
-    if (previous && previous !== release) {
-      d.log(`the new release did not answer; going back to ${basename(previous)}`);
-      await lc.disableNow(LOCAL_LABEL).catch(() => {});
-      // The new release may have migrated space.db into a shape the previous one does not read.
-      if (snapshot) await restoreDb(p, snapshot);
-      await switchCurrent(p, previous);
-      await lc.enableNow(LOCAL_LABEL).catch(() => {});
-      back = `; ${basename(previous)} runs again${snapshot ? " with space.db as it was before" : ""}`;
+    await mkdir(p.workspace, { recursive: true });
+    await runInit(d, p);
+    const envPath = join(p.workspace, ".env");
+    const envText = await Bun.file(envPath).text().catch(() => "");
+    // The default port taken by another program (not an ai-space: that was refused above): use a free one.
+    const extra: Record<string, string> = {};
+    for (const [k, v] of Object.entries(LOCAL_DEFAULTS)) if (!new RegExp(`^\\s*${k}\\s*=`, "m").test(envText)) extra[k] = v;
+    // Package apps open through their own loopback gateway (docs/app-packages.md#application-entry-gateway): a stable port.
+    if (!/^\s*SPACE_PACKAGE_PORT\s*=/m.test(envText)) extra.SPACE_PACKAGE_PORT = String(portFree(8702) ? 8702 : freePort());
+    if (!/^\s*SPACE_PORT\s*=/m.test(envText) && !status.running && !portFree(status.port)) extra.SPACE_PORT = String(freePort());
+    await Bun.write(envPath, updateEnvText(envText, { ...LOCAL_ENV, ...extra }));
+    await writeOwnership(p.workspace, { managedBy: MANAGED_BY, installedAt: status.ownership?.installedAt ?? new Date().toISOString(), version: bundle.version, release: name });
+
+    if (opts.device) {
+      const db = new Database(join(p.workspace, "data", "space.db"), { create: true });
+      try {
+        db.exec("PRAGMA journal_mode = WAL");
+        db.exec("PRAGMA busy_timeout = 5000");
+        const made = new AuthService(new AuthStore(db)).addDevice(opts.device);
+        device = { id: made.device.id, name: made.device.name, token: made.token };
+      } finally {
+        db.close();
+      }
     }
-    throw new LocalError("unhealthy", `the service did not answer as ${bundle.version} on port ${port} in time${back}; see ${join(p.logs, "space.log")}`, await localStatus(d));
+
+    await mkdir(p.agentsDir, { recursive: true });
+    await mkdir(p.logs, { recursive: true });
+    await Bun.write(p.plist, renderLocalPlist(p));
+    d.log("starting the background service");
+    await lc.disableNow(LOCAL_LABEL);
+    await lc.enableNow(LOCAL_LABEL);
+    port = await workspacePort(p.workspace);
+    if (!(await waitHealthy(d, port, bundle.version, d.healthTimeoutMs))) {
+      throw new LocalError("unhealthy", `the service did not answer as ${bundle.version} on port ${port} in time; see ${join(p.logs, "space.log")}`, await localStatus(d));
+    }
+  } catch (error) {
+    if (!previous || previous === release) throw error;
+    // Init and bootstrap can fail before the health check, including after a schema change.
+    // Never replace the database while a service still owns the workspace.
+    await lc.disableNow(LOCAL_LABEL);
+    if (workspaceLocked(join(p.workspace, "run"))) throw new LocalError("still-running", "the failed release has not stopped; database recovery was not attempted", await localStatus(d));
+    if (snapshot) await restoreDb(p, snapshot);
+    await switchCurrent(p, previous);
+    if (previousEnv !== undefined) await Bun.write(join(p.workspace, ".env"), previousEnv);
+    if (status.ownership) await writeOwnership(p.workspace, status.ownership);
+    let back = `; restored ${basename(previous)}`;
+    if (!status.service.disabled) {
+      await lc.enableNow(LOCAL_LABEL);
+      if (await waitHealthy(d, status.port, status.installed!.version, d.healthTimeoutMs)) {
+        back = `; ${basename(previous)} runs again${snapshot ? " with space.db as it was before" : ""}`;
+      } else {
+        back += "; the previous service did not pass its health check";
+      }
+    }
+    throw new LocalError(error instanceof LocalError ? error.code : "upgrade-failed", `${(error as Error).message}${back}`, await localStatus(d));
   }
   await prune(p, [name, ...(previous ? [basename(previous)] : [])]);
   const apps = await installBundledApps(d, p, port);

@@ -18,7 +18,7 @@ struct LocalBundle: Equatable {
         guard let root = resources?.appendingPathComponent("space", isDirectory: true),
               let data = try? Data(contentsOf: root.appendingPathComponent("RELEASE.json")),
               let info = try? JSONDecoder().decode(Release.self, from: data),
-              info.edition == "local"
+              info.product == "ai-space", info.edition == "local"
         else { return nil }
         return LocalBundle(root: root, version: info.version, commit: info.commit)
     }
@@ -75,10 +75,10 @@ struct LocalStatus: Codable, Equatable {
     var service: Service
     var runtimes: Runtimes
 
-    /// The app carries a newer (or just different) release than the one installed.
+    /// Only a newer version is offered automatically; Repair can reinstall a development build.
     var updateAvailable: Bool {
         guard state == .managed, let bundle, let installed else { return false }
-        return bundle.commit != installed.commit
+        return AppUpdateFeed.newer(bundle.version, than: installed.version)
     }
 
     /// Whether the running service is the one this app installed.
@@ -110,11 +110,34 @@ struct LocalInstallResult: Codable, Equatable {
     var apps: [App]
 }
 
-/// A refusal from `space local`: `{ ok: false, code, error, status }`.
+/// What the running Space is doing (`GET /api/space/activity`): an update waits for it.
+struct SpaceActivity: Codable, Equatable {
+    struct Item: Codable, Equatable {
+        var kind: String
+        var label: String
+        var since: Double?
+    }
+
+    var busy: Bool
+    var items: [Item]
+
+    var summary: String { items.map(\.label).joined(separator: ", ") }
+}
+
+/// A refusal from `space local`: `{ ok: false, code, error, status, activity? }`.
 struct LocalFailure: Codable, Error, Equatable, LocalizedError {
     var code: String
     var error: String
     var status: LocalStatus?
+
+    init(code: String, error: String, status: LocalStatus? = nil, activity: SpaceActivity? = nil) {
+        self.code = code
+        self.error = error
+        self.status = status
+        self.activity = activity
+    }
+    /// For `busy`: the work an upgrade would cut off.
+    var activity: SpaceActivity?
 
     var errorDescription: String? { error }
 }
