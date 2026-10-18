@@ -2,6 +2,7 @@
   "name": "ai-space",
   "module": "src/index.ts",
   "type": "module",
+  "version": "0.1.0",
   "private": true,
   "bin": {
     "space": "bin/space"
@@ -17,6 +18,7 @@
     "space": "bun src/index.ts",
     "package-pilot": "bun src/space/packages/pilot.ts",
     "package-check-edge": "test -n \"$SPACE_TEST_CADDY\" && bun test src/space/packages/gateway.test.ts",
+    "set-version": "bun src/space/version.ts",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test",
     "hooks": "git config core.hooksPath .githooks",

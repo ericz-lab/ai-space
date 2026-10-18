@@ -5,6 +5,7 @@ import { BackupStore, type BackupTarget, type TaskDefaults, missingArchiveTools,
 import type { Workspace } from "./workspace.ts";
 import { type TerminalConfig, loadTerminalConfig } from "./terminal/index.ts";
 import { type RouterConfig, loadRouterConfig } from "./router/index.ts";
+import { type Edition, parseEdition } from "./identity.ts";
 
 /**
  * ai-space configuration: the workspace `.env` (and the process environment)
@@ -73,6 +74,8 @@ export type Config = {
   serviceLogs: string;
   /** What this space calls itself towards a hub (SPACE_NAME); default: the hostname. */
   name: string;
+  /** Which edition runs this service (SPACE_EDITION, docs/editions.md): `server` or `local`. */
+  edition: Edition;
   /** Token a hub must present on `/api/peer/*` (SPACE_HUB_TOKEN); empty = those routes are absent. */
   hubToken: string;
   /** The web terminal (docs/terminal.md): off unless SPACE_TERMINAL_ENABLED is set. */
@@ -117,7 +120,9 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
   const supervisor = loadSupervisor(env);
   const packagePort = env.SPACE_PACKAGE_PORT?.trim() ? Number(env.SPACE_PACKAGE_PORT) : undefined;
   if (packagePort !== undefined && (!Number.isInteger(packagePort) || packagePort < 1 || packagePort > 65535)) throw new Error("SPACE_PACKAGE_PORT must be an integer from 1 to 65535");
+  const edition = parseEdition(env.SPACE_EDITION);
   return {
+    edition,
     // One prefix per machine: several spaces sharing a bucket must not mix their `space/` (and same-named apps') snapshots.
     backupUrl: env.SPACE_BACKUP_URL?.trim() || (s3Configured && s3Bucket ? `s3://${s3Bucket}/backups/${name}/` : ""),
     backupSchedule: env.SPACE_BACKUP_SCHEDULE?.trim() || "0 3 * * *",

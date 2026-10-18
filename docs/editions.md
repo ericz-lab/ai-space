@@ -31,9 +31,10 @@ What differs is how each one is packaged, installed, started and updated.
 
 ## Rules every edition keeps
 
-1. **One codebase, one version.** A release tag builds all three. A Client of version N talks to a
-   Server of version N; the compatibility range across versions is part of the Space API's contract
-   and is checked when connecting, not assumed.
+1. **One codebase, one version.** A release tag builds all three. The version lives in
+   `package.json`; the native projects carry copies that `bun run set-version <x.y.z>` rewrites and
+   a test keeps equal. Which clients work with which services is decided by the API level the
+   service reports ([Service identity](#service-identity)), checked when connecting, not assumed.
 2. **Program and data are separate.** The workspace stays `$SPACE_HOME` or `~/.ai-space`
    ([machines.md](machines.md)): apps, databases, logs, configuration and credentials. The program
    lives elsewhere: an `.app` bundle, or a release directory on a server. Replacing, moving or
@@ -73,8 +74,8 @@ supported entries are a Cloudflare Tunnel with Access ([ingress.md](ingress.md))
 built-in user system exists, a login of ai-space's own. Binding to `0.0.0.0` does not replace
 either. `SPACE_API_TOKEN` protects the API, not the panel.
 
-**Today:** source install and git-push deploy work. Missing: a release archive, a version number in
-`package.json`, a setup that does not ask for `gh` and Cloudflare during the basic install, and a
+**Today:** source install and git-push deploy work, and the service reports its version and edition
+(`GET /api/space`). Missing: a release archive, a setup that does not ask for `gh` and Cloudflare during the basic install, and a
 login that does not depend on Cloudflare Access.
 
 ## AI Space Client
@@ -140,6 +141,30 @@ started. Missing, in order: a prototype that runs the service from packaged reso
 with no Bun on `PATH` (HTML imports, public assets, chat-widget build, skills, PTY, SQLite, runtime
 adapters); the service identity, ownership and exclusion contract; the background helper and its
 status and repair views; bundled apps as `.spaceapp` packages; and coordinated updates.
+
+## Service identity
+
+`GET /api/space` says what a running service is:
+
+```json
+{ "product": "ai-space", "api": 1, "version": "0.1.0", "edition": "server", "id": "<uuid>", "name": "<SPACE_NAME>" }
+```
+
+- `product` and `api` let a client tell an ai-space from any other program on the port, and tell
+  whether it can talk to it. `api` is raised only when a change breaks clients of the previous
+  level (`API_LEVEL` in `src/space/identity.ts`); a new route or field does not raise it.
+- `version` is `package.json`'s; `edition` is `SPACE_EDITION` (`server` by default, `local` when the
+  Local edition starts the service). There is no `client` value: a client never runs the service.
+- `id` is the Space's stable id, the same one packages and connections use. The Local edition will
+  compare it with the id it recorded at install time to know whether it owns the running service.
+- `name` is `SPACE_NAME`, by default the hostname.
+
+The route is a panel route: it sits behind the same access layer as the rest of the panel. When the
+built-in user system classifies routes, the fields a client needs before signing in (`product`,
+`api`, `version`, `edition`) are the candidates for the public part.
+
+The native clients do not call it yet; checking it before showing Connected is the next client
+change.
 
 ## How the editions relate
 

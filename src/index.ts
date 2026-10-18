@@ -26,6 +26,8 @@ import { createLogsRoutes } from "./space/logs/index.ts";
 import { UsageService, UsageStore, createUsageRoutes } from "./space/usage/index.ts";
 import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/services/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
+import { createIdentityRoutes } from "./space/identity.ts";
+import { readVersion } from "./space/version.ts";
 import { createPackageRoutes } from "./space/packages/api.ts";
 import { PackageStore } from "./space/packages/store.ts";
 import { PackageInstaller } from "./space/packages/install.ts";
@@ -66,6 +68,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const packageStore = new PackageStore(store.db);
   const packageInstaller = new PackageInstaller(ws, packageStore);
   await packageInstaller.recover();
+  const version = await readVersion();
   const packageTrustKeys = await Promise.all(config.packageTrustKeys.map((path) => Bun.file(path).text()));
   const storage = await openStorage(ws, config);
   const packageEnvFor = async (app: string) => ({ ...await loadAppEnv(storage.appDataDir(app)), ...await storage.envFor(app) });
@@ -441,6 +444,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ...createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag) }),
       ...createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) }),
       ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
+      ...createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name }),
       ...panelRoutes,
       ...createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage }),
       ...createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks }),
