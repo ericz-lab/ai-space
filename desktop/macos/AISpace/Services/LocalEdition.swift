@@ -73,6 +73,9 @@ struct LocalStatus: Codable, Equatable {
     var url: String
     var running: Identity?
     var service: Service
+    /// Before the workspace is the app's: the default models it can start with, every tier of
+    /// every agent CLI found (`space local status`).
+    var models: [ModelPreferences.Option]?
     var runtimes: Runtimes
 
     /// Only a newer version is offered automatically; Repair can reinstall a development build.

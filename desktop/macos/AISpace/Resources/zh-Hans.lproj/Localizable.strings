@@ -480,3 +480,5 @@
 "Space Assistant, other agents and apps use it when nothing chooses a model for them. You can change it later in Settings." = "Space Assistant、其他 Agent 和应用在未指定模型时使用它。之后可在设置中修改。";
 "The choice was not saved: %@" = "选择未保存：%@";
 "Continue" = "继续";
+"Available once an agent CLI is found." = "检测到 Agent CLI 后即可选择。";
+"Choose the default model first." = "请先选择默认模型。";

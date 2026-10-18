@@ -14,7 +14,11 @@ import { Launchctl } from "./services/launchd.ts";
 import type { Runner, UnitState } from "./services/manager.ts";
 import { spawnCollect } from "./services/manager.ts";
 import { updateEnvText } from "./setup.ts";
-import { RUNTIMES_FILE } from "./runtimes/config.ts";
+import { RUNTIMES_FILE, parseRuntimesYaml } from "./runtimes/config.ts";
+import { RuntimeRegistry } from "./runtimes/registry.ts";
+import { spawnCollect as spawnRuntime } from "./runtimes/process.ts";
+import { type Run as CodexRun, refreshCodexTiers } from "./runtimes/codex-upgrade.ts";
+import type { ModelTier } from "./runtimes/types.ts";
 
 /**
  * The Local edition's managed installation on this Mac (docs/editions.md#ai-space-local,
@@ -151,12 +155,36 @@ function executableFile(path: string): boolean {
   }
 }
 
+export type ModelOption = { value: string; runtime: string; tier: ModelTier; model: string };
+
+/**
+ * The default models a new Space can start with: every tier of every agent CLI found, as the
+ * service will offer them (`GET /api/model/preferences`), Codex's read from its own catalogue.
+ */
+export async function localModelOptions(r: Runtimes, run?: CodexRun): Promise<ModelOption[]> {
+  const text = renderLocalRuntimes(r);
+  if (!text) return [];
+  const { config } = parseRuntimesYaml(text, {});
+  const registry = new RuntimeRegistry(config);
+  // A catalogue that does not answer soon leaves the built-in names; status must stay quick.
+  await refreshCodexTiers(registry, config.runtimes, () => {}, run ?? (async (cmd) => {
+    const res = await spawnRuntime(cmd, { timeoutMs: 20_000 });
+    return { code: res.timedOut ? 124 : res.code, stdout: res.stdout, stderr: res.stderr };
+  }));
+  return registry
+    .tierOptions()
+    .filter((o) => o.capabilities.complete && o.capabilities.chat)
+    .map(({ value, runtime, tier, model }) => ({ value, runtime, tier, model }));
+}
+
 /** Variables that already describe the space's runtime (runtimes/config.ts): then no file is written. */
 const RUNTIME_ENV = ["SPACE_MODEL_BIN", "SPACE_CHAT_BIN", "SPACE_MODEL_SSH_HOST", "SPACE_MODEL_API_KEY"];
 
 /**
  * `runtimes.yaml` for the agent CLIs found: Claude Code and Codex, each by its absolute path, so the
- * service runs them whatever PATH launchd gives it. Claude Code is the default when both are here.
+ * service runs them whatever PATH launchd gives it. No `default`: every model an app or agent asks
+ * for names its runtime (`claude/opus`, `codex/intermediate`), and the Space's default model, set at
+ * install, covers a request that names none.
  */
 export function renderLocalRuntimes(r: Runtimes): string | undefined {
   const entries: string[] = [];
@@ -166,7 +194,6 @@ export function renderLocalRuntimes(r: Runtimes): string | undefined {
   return [
     "# Written by the AI Space app at setup: the agent CLIs found on this Mac (docs/runtimes.md).",
     "# Edit freely; the app writes this file only when the workspace has none.",
-    `default: ${r.claude ? "claude" : "codex"}`,
     "runtimes:",
     ...entries,
     "",
@@ -195,6 +222,8 @@ export type LocalStatus = {
   running?: Identity;
   service: { label: string; plist: boolean; loaded: boolean; running: boolean; disabled: boolean; pid: number; detail: string };
   runtimes: Runtimes;
+  /** Before the workspace is the app's: the default models it can start with (see `localModelOptions`). */
+  models?: ModelOption[];
 };
 
 export type LocalDeps = {
@@ -211,6 +240,8 @@ export type LocalDeps = {
   healthTimeoutMs?: number;
   /** Agent CLIs the user chose by path (`--claude`, `--codex`), over the search; null: not that one. */
   runtimes?: Partial<Runtimes>;
+  /** How `codex debug models` runs, for the tiers offered before install; tests replace it. */
+  codexRun?: CodexRun;
 };
 
 export function realLocalDeps(log: (line: string) => void = () => {}): LocalDeps {
@@ -259,6 +290,7 @@ export async function localStatus(d: LocalDeps): Promise<LocalStatus> {
     .show(LOCAL_LABEL)
     .catch((e: Error) => ({ loadState: "unknown", activeState: "unknown", subState: e.message, unitFileState: "", fragmentPath: "", restarts: 0, mainPid: 0 }) as UnitState);
   const locked = wsExists && workspaceLocked(join(p.workspace, "run"));
+  const runtimes = findRuntimes(d.env, d.home, d.runtimes);
 
   let state: LocalState = "absent";
   let reason: string | undefined;
@@ -280,7 +312,8 @@ export async function localStatus(d: LocalDeps): Promise<LocalStatus> {
     url: `http://127.0.0.1:${port}/`,
     ...(running ? { running } : {}),
     service: serviceView(unit, plist),
-    runtimes: findRuntimes(d.env, d.home, d.runtimes),
+    runtimes,
+    ...(state === "managed" ? {} : { models: await localModelOptions(runtimes, d.codexRun) }),
   };
 }
 
@@ -319,7 +352,7 @@ export function renderLocalPlist(p: LocalPaths): string {
 
 export class LocalError extends Error {
   constructor(
-    readonly code: "foreign" | "foreign-running" | "no-bundle" | "no-runtime" | "unhealthy" | "not-installed" | "busy" | "still-running" | "upgrade-failed",
+    readonly code: "foreign" | "foreign-running" | "no-bundle" | "no-runtime" | "no-default-model" | "unhealthy" | "not-installed" | "busy" | "still-running" | "upgrade-failed",
     message: string,
     readonly status?: LocalStatus,
     /** For `busy`: what the running Space is doing (GET /api/space/activity). */
@@ -457,6 +490,20 @@ async function prune(p: LocalPaths, keep: string[]): Promise<void> {
   for (const { n } of dated) if (!kept.has(n)) await rm(join(p.releases, n), { recursive: true, force: true });
 }
 
+/** Whether a workspace being taken over already chose a default model. */
+async function hasDefaultModel(workspace: string): Promise<boolean> {
+  const path = join(workspace, "data", "space.db");
+  if (!(await exists(path))) return false;
+  const db = new Database(path, { readonly: true });
+  try {
+    return Boolean(db.query<{ value: string }, []>("SELECT value FROM model_preferences WHERE key = 'default'").get());
+  } catch {
+    return false;
+  } finally {
+    db.close();
+  }
+}
+
 async function runInit(d: LocalDeps, p: LocalPaths): Promise<void> {
   const bun = join(p.current, "runtime", "bun");
   const env = { PATH: withUserToolDirs("/usr/bin:/bin:/usr/sbin:/sbin", d.home), HOME: d.home, SPACE_HOME: p.workspace, SPACE_EDITION: "local", SPACE_DEFAULT_APPS: "none" };
@@ -491,7 +538,7 @@ export type WhenBusy = "refuse" | "wait" | "now";
  * does the new release touch the workspace. If it does not answer, the copy is restored and the
  * previous release starts again.
  */
-export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; device?: string; whenBusy?: WhenBusy; waitMs?: number } = {}): Promise<InstallResult> {
+export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; device?: string; whenBusy?: WhenBusy; waitMs?: number; defaultModel?: string } = {}): Promise<InstallResult> {
   const p = localPaths(d.env, d.home);
   const status = await localStatus(d);
   const bundle = status.bundle;
@@ -506,6 +553,16 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
   const needsRuntimes = !(await exists(runtimesFile)) && !RUNTIME_ENV.some((k) => new RegExp(`^\\s*${k}\\s*=\\s*\\S`, "m").test(envBefore));
   const runtimesText = needsRuntimes ? renderLocalRuntimes(status.runtimes) : undefined;
   if (needsRuntimes && !runtimesText) throw new LocalError("no-runtime", "no agent CLI on this Mac: install Claude Code or Codex and sign in to it, or choose where it is (--claude, --codex)", status);
+  // A Space this app starts gets its default model now, so nothing ever runs on an implicit one.
+  // An upgrade keeps the one it has (Settings changes it).
+  if (status.state !== "managed" || opts.defaultModel !== undefined) {
+    const offered = status.models ?? (await localModelOptions(status.runtimes, d.codexRun));
+    if (opts.defaultModel === undefined) {
+      if (!(await hasDefaultModel(p.workspace))) throw new LocalError("no-default-model", `choose the Space's default model (--default-model): ${offered.map((o) => o.value).join(", ")}`, status);
+    } else if (!offered.some((o) => o.value === opts.defaultModel)) {
+      throw new LocalError("no-default-model", `${opts.defaultModel} is not a model this Mac's agent CLIs offer: ${offered.map((o) => o.value).join(", ")}`, status);
+    }
+  }
   const migrated = status.state === "foreign";
   const changing = migrated || Boolean(status.installed && status.installed.commit !== bundle.commit);
 
@@ -572,6 +629,18 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
     await Bun.write(envPath, updateEnvText(envText, { ...LOCAL_ENV, ...extra }));
     if (runtimesText) await Bun.write(runtimesFile, runtimesText);
     await writeOwnership(p.workspace, { managedBy: MANAGED_BY, installedAt: status.ownership?.installedAt ?? new Date().toISOString(), version: bundle.version, release: name });
+
+    if (opts.defaultModel !== undefined) {
+      const db = new Database(join(p.workspace, "data", "space.db"), { create: true });
+      try {
+        db.exec("PRAGMA busy_timeout = 5000");
+        // The table ModelPreferences (model/preferences.ts) keeps; the service reads it at boot.
+        db.exec("CREATE TABLE IF NOT EXISTS model_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+        db.query("INSERT INTO model_preferences (key, value) VALUES ('default', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(opts.defaultModel);
+      } finally {
+        db.close();
+      }
+    }
 
     if (opts.device) {
       const db = new Database(join(p.workspace, "data", "space.db"), { create: true });

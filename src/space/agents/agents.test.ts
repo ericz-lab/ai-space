@@ -116,7 +116,7 @@ describe("agents api", () => {
 
   test("keeps the stream alive with comment lines during a long tool call", async () => {
     const runs = new RunRegistry(new Database(":memory:"));
-    const run = runs.start({ agent: "space/assistant", runtime: runtimes.default, turn: { message: "slow", cwd: home } });
+    const run = runs.start({ agent: "space/assistant", runtime: runtimes.default!, turn: { message: "slow", cwd: home } });
     const text = await runResponse(runs, run.id, 0, { heartbeatMs: 40 })!.text();
     expect(text.split(": keepalive\n\n").length).toBeGreaterThan(2);
     expect(text.trim().endsWith('data: {"type":"done"}')).toBe(true);

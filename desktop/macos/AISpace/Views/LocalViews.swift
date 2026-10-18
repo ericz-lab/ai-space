@@ -8,8 +8,13 @@ struct LocalSetupView: View {
     @ObservedObject var local: LocalManager
     @State private var confirmingMigrate = false
     @State private var showingRemote = false
+    @State private var defaultModel: String?
+
+    /// Agents and a default model: what a new Space needs before it is set up.
+    private func ready(_ s: LocalStatus) -> Bool { s.runtimes.any && defaultModel != nil }
 
     var body: some View {
+        ScrollView {
         VStack(spacing: 18) {
             Logo(size: 96)
             content
@@ -23,7 +28,8 @@ struct LocalSetupView: View {
             .foregroundStyle(.secondary)
         }
         .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+        }
         .task { if local.status == nil { await local.refresh() } }
     }
 
@@ -37,10 +43,11 @@ struct LocalSetupView: View {
                 Text("Your apps, agents and their data stay on this Mac. AI Space runs in the background, also while this window is closed.")
                     .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
                 LocalRuntimesCheck(local: local, runtimes: status.runtimes).frame(width: 460)
-                Button("Set Up") { Task { await local.install(into: model) } }
+                LocalDefaultModelPicker(options: status.models ?? [], choice: $defaultModel).frame(width: 460)
+                Button("Set Up") { Task { await local.install(defaultModel: defaultModel, into: model) } }
                     .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction)
-                    .disabled(!status.runtimes.any)
-                    .help(status.runtimes.any ? "" : "Install Claude Code or Codex first, or choose where it is.")
+                    .disabled(!ready(status))
+                    .help(status.runtimes.any ? (defaultModel == nil ? "Choose the default model first." : "") : "Install Claude Code or Codex first, or choose where it is.")
             case .managed:
                 Text("AI Space is installed on this Mac").font(.largeTitle)
                 Text(status.ownServiceRunning ? "It is running. Open it to continue." : "It is not running. Opening it starts it again.")
@@ -54,6 +61,7 @@ struct LocalSetupView: View {
                 Text("Connect to it as it is, or let this app take it over. Taking over keeps its apps, data and settings; stop the running one first.")
                     .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
                 LocalRuntimesCheck(local: local, runtimes: status.runtimes).frame(width: 460)
+                LocalDefaultModelPicker(options: status.models ?? [], choice: $defaultModel).frame(width: 460)
                 HStack {
                     Button("Connect to It") {
                         if let url = URL(string: status.url) { model.add(name: "This Mac", url: url) }
@@ -61,12 +69,12 @@ struct LocalSetupView: View {
                     .disabled(status.running == nil)
                     .help(status.running == nil ? "It is not running: start it, or take it over." : "")
                     Button("Take It Over…") { confirmingMigrate = true }
-                        .disabled(status.running != nil || status.workspace.locked == true)
+                        .disabled(status.running != nil || status.workspace.locked == true || !ready(status))
                         .help(status.running != nil ? "Stop the running ai-space first." : "")
                 }
                 .controlSize(.large)
                 .confirmationDialog("Take over \(status.workspace.path)?", isPresented: $confirmingMigrate) {
-                    Button("Take It Over") { Task { await local.install(migrate: true, into: model) } }
+                    Button("Take It Over") { Task { await local.install(migrate: true, defaultModel: defaultModel, into: model) } }
                 } message: {
                     Text("This app will run that workspace from now on, with its apps, data and settings as they are.")
                 }
@@ -125,7 +133,36 @@ struct LocalRuntimesCheck: View {
     }
 }
 
-/// The first run's last step: which model the Space's agents and apps use when nothing chooses one
+/// Before Set Up: the Space's default model, the same setting as Settings → Models → Default
+/// model, from every tier of every agent CLI found. Set at install, so the Space never runs on an
+/// implicit one.
+struct LocalDefaultModelPicker: View {
+    let options: [ModelPreferences.Option]
+    @Binding var choice: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Default model").font(.headline)
+            if options.isEmpty {
+                Text("Available once an agent CLI is found.").font(.callout).foregroundStyle(.secondary)
+            } else {
+                Picker("Default model", selection: $choice) {
+                    ForEach(options) { Text(verbatim: $0.label).tag(Optional($0.value)) }
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+                Text("Space Assistant, other agents and apps use it when nothing chooses a model for them. You can change it later in Settings.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .onChange(of: options) { _, new in if let c = choice, !new.contains(where: { $0.value == c }) { choice = nil } }
+    }
+}
+
+/// A Space already set up without a default model (taken over, or from an older app): which model the Space's agents and apps use when nothing chooses one
 /// for them. The same setting as Settings → Models → Default model, with every tier of every agent
 /// CLI the Space has. It cannot be skipped; it can be changed later in Settings.
 struct LocalModelChoice: View {

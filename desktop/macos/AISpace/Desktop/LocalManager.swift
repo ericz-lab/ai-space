@@ -113,7 +113,7 @@ final class LocalManager: ObservableObject {
     /// Install or upgrade, then make sure the app has its Space saved and is signed in to it. An
     /// upgrade while the Space is busy is refused with the work (`failure.activity`), waits for
     /// it (`.wait`, up to 30 minutes), or drains it now (`.now`).
-    func install(migrate: Bool = false, whenBusy: WhenBusy = .refuse, into model: AppModel) async {
+    func install(migrate: Bool = false, whenBusy: WhenBusy = .refuse, defaultModel: String? = nil, into model: AppModel) async {
         guard busy == nil else { return }
         retry?.cancel()
         retry = nil
@@ -130,6 +130,7 @@ final class LocalManager: ObservableObject {
             }
             if !haveToken { args += ["--device", Host.current().localizedName ?? "This Mac"] }
             args += runtimeArgs
+            if let defaultModel { args += ["--default-model", defaultModel] }
             let result = try await run(LocalInstallResult.self, args)
             if let device = result.device { DeviceKeychain.save(device.token, for: result.workspace) }
             lastApps = result.apps

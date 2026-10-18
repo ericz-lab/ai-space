@@ -54,7 +54,7 @@ export class ModelService {
 
   /** Where a bare model name runs; the status view shows it. */
   get backend(): string {
-    return this.runtimes.default.backend;
+    return this.runtimes.default?.backend ?? "none (every model names its runtime)";
   }
 
   /** In flight and waiting, for the status view. */

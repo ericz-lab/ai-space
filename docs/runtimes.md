@@ -36,7 +36,7 @@ Every operation reports what the runtime said about the model call, token counts
 `<workspace>/runtimes.yaml` names the runtimes. Keys never go in the file; `apiKeyEnv` names the environment variable that holds one (the workspace `.env` is loaded into the environment).
 
 ```yaml
-default: claude                  # runtime a bare model name goes to
+default: claude                  # optional: runtime a bare model name goes to; without it every model must be runtime/model
 runtimes:
   claude:
     kind: claude-code

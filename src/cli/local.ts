@@ -18,6 +18,7 @@ function show(ctx: Ctx, s: LocalStatus): void {
     ["answers", s.running ? `${s.url} ${s.running.version} ${s.running.edition} ${s.running.installation ?? ""}` : "nothing"],
     ["claude", s.runtimes.claude ?? "not found"],
     ["codex", s.runtimes.codex ?? "not found"],
+    ...(s.models ? [["default models", s.models.map((m) => `${m.value} (${m.model})`).join(", ") || "none: no agent CLI"] as [string, string]] : []),
   ]);
 }
 
@@ -52,12 +53,12 @@ const status = (ctx: Ctx, argv: string[]) => {
 };
 
 const install = (ctx: Ctx, argv: string[]) => {
-  const p = parseArgs(argv, { migrate: { kind: "bool" }, device: { kind: "value" }, wait: { kind: "bool" }, now: { kind: "bool" }, ...RUNTIME_FLAGS });
+  const p = parseArgs(argv, { migrate: { kind: "bool" }, device: { kind: "value" }, wait: { kind: "bool" }, now: { kind: "bool" }, "default-model": { kind: "value" }, ...RUNTIME_FLAGS });
   noMore(p.positional, 0);
   const whenBusy = p.flags.now ? "now" : p.flags.wait ? "wait" : "refuse";
   return guarded(
     ctx,
-    () => localInstall(deps(ctx, p.flags), { migrate: Boolean(p.flags.migrate), whenBusy, ...(typeof p.flags.device === "string" ? { device: p.flags.device } : {}) }),
+    () => localInstall(deps(ctx, p.flags), { migrate: Boolean(p.flags.migrate), whenBusy, ...(typeof p.flags.device === "string" ? { device: p.flags.device } : {}), ...(typeof p.flags["default-model"] === "string" ? { defaultModel: p.flags["default-model"] } : {}) }),
     (r: Awaited<ReturnType<typeof localInstall>>) => {
       ctx.print.line(`ai-space ${r.version} ${r.upgraded ? "upgraded" : "installed"}${r.migrated ? " (workspace migrated)" : ""}: ${r.url}`);
       if (r.device) ctx.print.line(`device ${r.device.id} "${r.device.name}": ${r.device.token} (shown only now)`);
@@ -76,7 +77,7 @@ export const localNoun: Noun = {
   summary: "the Local edition's installation on this Mac (what the app runs)",
   verbs: {
     status: { usage: "[--claude <path>] [--codex <path>]", summary: "what this Mac has: the app's release, the installed one, the workspace, the background service", run: status },
-    install: { usage: "[--migrate] [--device <name>] [--wait | --now] [--claude <path>] [--codex <path>]", summary: "install or upgrade from the app and start the background service; a workspace without runtimes.yaml gets one from the agent CLIs found (refused when there is none); an upgrade while the Space is busy is refused unless --wait (until it is idle) or --now (drain it)", run: install },
+    install: { usage: "[--migrate] [--device <name>] [--default-model <runtime/tier>] [--wait | --now] [--claude <path>] [--codex <path>]", summary: "install or upgrade from the app and start the background service; a workspace without runtimes.yaml gets one from the agent CLIs found (refused when there is none); a first install needs --default-model; an upgrade while the Space is busy is refused unless --wait (until it is idle) or --now (drain it)", run: install },
     start: { usage: "", summary: "start the background service and keep it on at login", run: lifecycle(localStart) },
     stop: { usage: "", summary: "stop it and keep it off until started again", run: lifecycle(localStop) },
     restart: { usage: "", summary: "stop and start it", run: lifecycle(localRestart) },

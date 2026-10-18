@@ -43,9 +43,9 @@ runtimes:
     });
   });
 
-  test("a runtime whose key is missing is skipped with a warning; the first runtime is the default when none is named", () => {
+  test("a runtime whose key is missing is skipped with a warning; no default unless one is named", () => {
     const { config, warnings } = parseRuntimesYaml("runtimes:\n  claude: { kind: claude-code }\n  api: { kind: anthropic-api }\n", {});
-    expect(config.default).toBe("claude");
+    expect(config.default).toBeUndefined();
     expect(config.runtimes.map((r) => r.name)).toEqual(["claude"]);
     expect(warnings).toEqual(["runtime api skipped: ANTHROPIC_API_KEY is not set"]);
   });
@@ -80,7 +80,7 @@ describe("loadRuntimes", () => {
   test("uses the file when present, else the environment", async () => {
     expect(await loadRuntimes(dir, { SPACE_MODEL_SSH_HOST: "box" })).toMatchObject({ source: "env", config: { runtimes: [{ sshHost: "box" }] } });
     await writeFile(join(dir, RUNTIMES_FILE), "runtimes:\n  local: { kind: claude-code }\n");
-    expect(await loadRuntimes(dir, { SPACE_MODEL_SSH_HOST: "box" })).toMatchObject({ source: "file", config: { default: "local", runtimes: [{ name: "local", kind: "claude-code" }] } });
+    expect(await loadRuntimes(dir, { SPACE_MODEL_SSH_HOST: "box" })).toMatchObject({ source: "file", config: { runtimes: [{ name: "local", kind: "claude-code" }] } });
   });
 });
 
@@ -110,7 +110,17 @@ describe("RuntimeRegistry", () => {
   test("refuses duplicate names and a default that is not configured", () => {
     expect(() => new RuntimeRegistry({ default: "a", runtimes: [{ name: "a", kind: "claude-code", bin: [], chatArgs: [] }, { name: "a", kind: "claude-code", bin: [], chatArgs: [] }] })).toThrow(/duplicate/);
     expect(() => new RuntimeRegistry({ default: "b", runtimes: [{ name: "a", kind: "claude-code", bin: [], chatArgs: [] }] })).toThrow(/default runtime is not configured/);
-    expect(claudeOnly().default.name).toBe("claude");
+    expect(claudeOnly().default!.name).toBe("claude");
+  });
+
+  test("without a default, a bare model is an error that says which runtime to name", () => {
+    const r = new RuntimeRegistry({ runtimes: [{ name: "claude", kind: "claude-code", bin: [], chatArgs: [] }, { name: "codex", kind: "codex-cli", bin: [] }] });
+    expect(r.default).toBeUndefined();
+    expect(() => r.resolve("opus")).toThrow("model opus names no runtime: write it as claude/opus or codex/opus");
+    expect(() => r.resolve("intermediate")).toThrow(/names no runtime/);
+    expect(r.resolve("claude/intermediate").model).toBe("opus");
+    expect(r.resolve("codex/gpt-6.1-sol").runtime.name).toBe("codex");
+    expect(r.list().every((v) => !v.default)).toBe(true);
   });
 });
 
@@ -134,7 +144,7 @@ runtimes:
       expect(registry.resolve(tier!).model).toBe(claude!);
       expect(registry.resolve(`codex/${tier}`)).toMatchObject({ model: codex, runtime: { name: "codex", capabilities: { complete: true, agent: true, chat: true } } });
     }
-    const overridden = new RuntimeRegistry(parseRuntimesYaml("runtimes:\n  codex: { kind: codex-cli, models: { basic: my-luna-version } }").config);
+    const overridden = new RuntimeRegistry(parseRuntimesYaml("default: codex\nruntimes:\n  codex: { kind: codex-cli, models: { basic: my-luna-version } }").config);
     expect(overridden.resolve("basic").model).toBe("my-luna-version");
     expect(overridden.resolve("gpt-6-sol").model).toBe("gpt-6-sol");
   });

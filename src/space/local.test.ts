@@ -6,6 +6,7 @@ import type { RunResult } from "./services/manager.ts";
 import { packApplication } from "./packages/pack.ts";
 import { LOCAL_LABEL, LocalError, type LocalDeps, findRuntimes, localInstall, localPaths, localRemoveService, localStatus, localStop, localStart, renderLocalPlist, renderLocalRuntimes, readActivity } from "./local.ts";
 import { parseRuntimesYaml } from "./runtimes/config.ts";
+import { Database } from "bun:sqlite";
 
 // The Local edition's install, upgrade, rollback and removal, with a stand-in for launchctl that
 // runs the plist's program the way launchd would: real service processes on a temporary workspace.
@@ -148,15 +149,14 @@ describe("agent CLIs", () => {
     expect(findRuntimes({ PATH: "/nowhere" }, root, { claude: "claude", codex: plain })).toEqual({ claude: null, codex: null });
   });
 
-  test("runtimes.yaml names both CLIs by path, Claude Code first", () => {
+  test("runtimes.yaml names both CLIs by path, with no default runtime", () => {
     const text = renderLocalRuntimes({ claude: "/Users/me/.local/bin/claude", codex: "/Applications/Codex Tools/codex" })!;
     const { config } = parseRuntimesYaml(text, {});
-    expect(config.default).toBe("claude");
+    expect(config.default).toBeUndefined();
     expect(config.runtimes.map((r) => [r.name, r.kind, (r as { bin: string[] }).bin])).toEqual([
       ["claude", "claude-code", ["/Users/me/.local/bin/claude"]],
       ["codex", "codex-cli", ["/Applications/Codex Tools/codex"]],
     ]);
-    expect(parseRuntimesYaml(renderLocalRuntimes({ claude: null, codex: "/bin/codex" })!, {}).config.default).toBe("codex");
     expect(renderLocalRuntimes({ claude: null, codex: null })).toBeUndefined();
   });
 });
@@ -232,7 +232,7 @@ describe("space local", () => {
     expect(env).toContain("SPACE_TERMINAL_ENABLED=1");
     // The agent CLI found becomes the workspace's runtime, by its absolute path.
     const runtimes = parseRuntimesYaml(await Bun.file(join(workspace, "runtimes.yaml")).text(), {}).config;
-    expect(runtimes).toEqual({ default: "claude", runtimes: [{ name: "claude", kind: "claude-code", bin: [claude], chatArgs: [] }] });
+    expect(runtimes).toEqual({ runtimes: [{ name: "claude", kind: "claude-code", bin: [claude], chatArgs: [] }] });
 
     // The device token reaches an owner route; nothing else does.
     const layout = (h: Record<string, string>) => fetch(`http://127.0.0.1:${port}/api/panel/layout`, { headers: h });
@@ -363,8 +363,17 @@ describe("space local", () => {
     theirs.kill("SIGTERM");
     await theirs.exited;
 
-    const r = await localInstall(deps(v1), { migrate: true });
+    // A Space this app takes on starts with a default model the user chose, from what this Mac offers.
+    const before = await localStatus(deps(v1));
+    expect(before.models?.map((m) => m.value)).toEqual(["claude/basic", "claude/junior", "claude/intermediate", "claude/advanced"]);
+    await expect(localInstall(deps(v1), { migrate: true })).rejects.toMatchObject({ code: "no-default-model" });
+    await expect(localInstall(deps(v1), { migrate: true, defaultModel: "codex/intermediate" })).rejects.toMatchObject({ code: "no-default-model" });
+    const r = await localInstall(deps(v1), { migrate: true, defaultModel: "claude/intermediate" });
     expect(r.migrated).toBe(true);
+    const db = new Database(join(workspace, "data", "space.db"), { readonly: true });
+    expect(db.query("SELECT value FROM model_preferences WHERE key = 'default'").get()).toEqual({ value: "claude/intermediate" });
+    db.close();
+    expect((await localStatus(deps(v1))).models).toBeUndefined();
     expect(await Bun.file(join(workspace, "AGENTS.local.md")).text()).toBe("mine\n");
     expect((await localStatus(deps(v1))).state).toBe("managed");
   }, 120_000);
