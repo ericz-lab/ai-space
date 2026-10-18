@@ -12,6 +12,16 @@ final class ChatTextEditor: NSTextView {
     var pasteboard: () -> NSPasteboard = { .general }
     var onFocus: (Bool) -> Void = { _ in }
 
+    func contentHeight(for width: CGFloat) -> CGFloat {
+        guard let container = textContainer, let layout = layoutManager else { return 20 }
+        setFrameSize(NSSize(width: width, height: frame.height))
+        container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        layout.ensureLayout(for: container)
+        // The extra fragment overlaps the used rect for an empty editor; it is not
+        // an additional line. Its bottom also accounts for a trailing newline.
+        return max(20, ceil(max(layout.usedRect(for: container).maxY, layout.extraLineFragmentRect.maxY)))
+    }
+
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if accepted { onFocus(true) }
@@ -115,12 +125,8 @@ struct ChatTextInput: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
-        guard let width = proposal.width, let editor = nsView.documentView as? ChatTextEditor,
-              let container = editor.textContainer, let layout = editor.layoutManager else { return nil }
-        editor.setFrameSize(NSSize(width: width, height: editor.frame.height))
-        container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
-        layout.ensureLayout(for: container)
-        let height = max(20, ceil(layout.usedRect(for: container).height + layout.extraLineFragmentRect.height))
+        guard let width = proposal.width, let editor = nsView.documentView as? ChatTextEditor else { return nil }
+        let height = editor.contentHeight(for: width)
         editor.setFrameSize(NSSize(width: width, height: height))
         return CGSize(width: width, height: min(160, height))
     }

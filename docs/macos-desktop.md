@@ -370,6 +370,6 @@ The Mac refreshes the owning Space catalogue after every native agent turn and w
 
 Native agent chat supports image selection, clipboard paste and drag-and-drop, removable thumbnails, and image-only messages under the same limits as [Web chat images](panel.md#agent-chat-images). Image imports finish before sending, and failed turns retain their attachments for retry.
 
-The Mac chat composer handles screenshot and Finder-image paste in its AppKit text editor, including Command-V and Edit → Paste. Ordinary text paste stays with AppKit; Return confirms marked input before it can send, and Shift-Return inserts a line break.
+The Mac chat composer handles screenshot and Finder-image paste in its AppKit text editor, including Command-V and Edit → Paste. Ordinary text paste stays with AppKit; Return confirms marked input before it can send, and Shift-Return inserts a line break. The empty composer and a single line share the same height; wrapping and explicit newlines grow it up to the scrolling limit.
 
 Native Mac assistant replies use Foundation Markdown parsing and SwiftUI block layout for tables, headings, nested lists, quotes and fenced code. Tables and code scroll horizontally when needed; ordinary reply text remains borderless. Inline emphasis and links retain their parsed attributes.

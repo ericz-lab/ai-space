@@ -6,6 +6,22 @@ import Testing
 
 @MainActor
 struct ChatTextInputTests {
+    @Test func emptyAndSingleLineShareHeightAndNewlinesGrow() {
+        let editor = ChatTextEditor(frame: NSRect(x: 0, y: 0, width: 300, height: 20))
+        editor.font = .systemFont(ofSize: 14)
+        editor.textContainerInset = .zero
+        editor.textContainer?.lineFragmentPadding = 0
+        let empty = editor.contentHeight(for: 300)
+        editor.string = "Hello"
+        #expect(editor.contentHeight(for: 300) == empty)
+        editor.string = "Hello\n"
+        #expect(editor.contentHeight(for: 300) > empty)
+        editor.string = String(repeating: "long message ", count: 20)
+        #expect(editor.contentHeight(for: 100) > empty)
+        editor.string = ""
+        #expect(editor.contentHeight(for: 300) == empty)
+    }
+
     @Test func screenshotPasteReachesTheComposerAndLeavesTextAlone() {
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
