@@ -4,7 +4,9 @@ import { createHash, timingSafeEqual } from "node:crypto";
  * Who may call the Space API. Two kinds of caller present a bearer token: the
  * operator (`SPACE_API_TOKEN`) and an app (its own `SPACE_APP_TOKEN`). Routes
  * without a token (the panel's) are browser routes: `guardBrowserWrites` holds
- * their writes to the panel's own origin.
+ * their writes to the panel's own origin. Under `SPACE_AUTH=builtin` the owner's
+ * session is a third kind (docs/auth.md): the gate marks its requests, and they
+ * count as the operator's.
  */
 
 /** The token after `Bearer ` (any case), or "" when none was presented. */
@@ -20,9 +22,20 @@ export function tokenEquals(presented: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** An operator route: allowed when no token is configured (loopback only) or the operator's token is presented. */
+const owners = new WeakSet<Request>();
+
+/** The owner's signed-in session let this request through the built-in sign-in (src/space/auth/gate.ts): it acts as the operator. */
+export function markOwner(req: Request): void {
+  owners.add(req);
+}
+
+export function isOwner(req: Request): boolean {
+  return owners.has(req);
+}
+
+/** An operator route: allowed for the signed-in owner, when no token is configured (loopback only) or the operator's token is presented. */
 export function isOperator(req: Request, token: string): boolean {
-  return !token || tokenEquals(bearer(req), token);
+  return owners.has(req) || !token || tokenEquals(bearer(req), token);
 }
 
 export const OPERATOR = Symbol("operator");
@@ -34,6 +47,7 @@ export type Caller = typeof OPERATOR | { app: string };
  */
 export async function identify(req: Request, opts: { token: string; appForToken?: (token: string) => Promise<string | undefined> }): Promise<Caller | undefined> {
   const presented = bearer(req);
+  if (!presented && owners.has(req)) return OPERATOR;
   if (opts.token && tokenEquals(presented, opts.token)) return OPERATOR;
   if (presented && opts.appForToken) {
     const app = await opts.appForToken(presented);

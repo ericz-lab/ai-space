@@ -158,7 +158,7 @@ Tables by default, `--json` for scripts. `space <command> help` lists the verbs;
 An AI system with shell access deserves a clear boundary. In short:
 
 - **No open port.** The panel and apps are published through a Cloudflare Tunnel, never by listening on the public interface. → [ingress](docs/ingress.md)
-- **A login in front.** Cloudflare Access guards the panel and every app hostname. Without it, keep the panel on loopback.
+- **A login in front.** Cloudflare Access guards the panel and every app hostname. Without it, keep the panel on loopback, or turn on the built-in sign-in (`SPACE_AUTH=builtin`, `space auth init`), which protects the panel and the Space API; app hostnames still need Access for now. → [auth](docs/auth.md)
 - **Tokens for apps.** Every app calls the Space API with its own token; tokenless writes from another site's page are refused. → [panel trust boundary](docs/panel.md#trust-boundary)
 - **The web terminal is off by default.** When enabled it uses one-time tickets, same-origin checks, an optional passphrase, idle limits, a session cap and an audit row per session. → [terminal](docs/terminal.md)
 - **Agents act with your account.** They run as your user, with your coding agent's login. Model calls run under a concurrency cap and are recorded in the ledger, so cost stays visible.

@@ -1100,3 +1100,10 @@ a.widget-title:hover { color: var(--text); }
 
 .omni-spinner { transform-origin: center; animation: omni-spin 1s linear infinite; }
 @keyframes omni-spin { to { transform: rotate(360deg); } }
+
+/* Built-in sign-in (docs/auth.md#the-panel): the card sits above every panel. */
+.auth-overlay { z-index: 60; }
+.auth-overlay .modal { width: min(360px, 100%); }
+.auth-change { padding: 4px 12px 8px; }
+.auth-session { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.auth-session small { color: var(--muted); }

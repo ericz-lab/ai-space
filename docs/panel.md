@@ -227,7 +227,7 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 
 ## Trust boundary
 
-These routes carry no bearer token. The browser cannot hold `SPACE_API_TOKEN`, and the panel is reached the way the previous panel was: through the operator's tunnel and access layer from outside, through loopback on the machine. The machine-side routes (tasks, storage, notify) keep the token. Consequences to be aware of:
+These routes carry no bearer token. The browser cannot hold `SPACE_API_TOKEN`, and the panel is reached the way the previous panel was: through the operator's tunnel and access layer from outside, through loopback on the machine. This section describes the default, `SPACE_AUTH=external`; under `builtin` ai-space signs the owner in itself and every route needs a session or a credential, loopback included ([auth.md](auth.md)). The machine-side routes (tasks, storage, notify) keep the token. Consequences to be aware of:
 
 - Anyone who passes the access layer can open a chat with `bypassPermissions`, which is a shell on the machine with the operator's runtime login. This is the same exposure as before, now written down.
 - Anything on the machine that can reach loopback can add an app from a link, uninstall an app (which runs the stop command) and change the layout. Command tasks run as the same user anyway.

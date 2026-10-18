@@ -158,7 +158,7 @@ space backup ls                       # 每个 app 数据的快照
 一个有 shell 权限的 AI 系统需要清晰的边界。简要来说：
 
 - **不开端口。** 面板和 app 通过 Cloudflare Tunnel 发布，从不监听公网接口。→ [ingress](docs/ingress.md)
-- **前面有登录。** Cloudflare Access 保护面板和每个 app 的主机名。没有它时，让面板只留在回环地址上。
+- **前面有登录。** Cloudflare Access 保护面板和每个 app 的主机名。没有它时，让面板只留在回环地址上，或者开启内置登录（`SPACE_AUTH=builtin`，`space auth init`），它保护面板和 Space API；app 的主机名目前仍需要 Access。→ [auth](docs/auth.md)
 - **App 用令牌。** 每个 app 用自己的令牌调用 Space API；来自其他站点页面、不带令牌的写请求一律拒绝。→ [面板信任边界](docs/panel.md#trust-boundary)
 - **Web 终端默认关闭。** 开启后使用一次性票据、同源检查、可选口令、空闲超时、会话数上限，每个会话一条审计记录。→ [terminal](docs/terminal.md)
 - **Agent 以你的账号行事。** 它们以你的用户身份、用你的 coding agent 登录运行。模型调用有并发上限并记入账本，成本始终可见。
