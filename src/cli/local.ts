@@ -29,7 +29,7 @@ async function guarded(ctx: Ctx, work: () => Promise<unknown>, done: (v: never) 
     return 0;
   } catch (e) {
     if (!(e instanceof LocalError)) throw e;
-    if (ctx.flags.json) ctx.print.data({ ok: false, code: e.code, error: e.message, ...(e.status ? { status: e.status } : {}) });
+    if (ctx.flags.json) ctx.print.data({ ok: false, code: e.code, error: e.message, ...(e.status ? { status: e.status } : {}), ...(e.activity ? { activity: e.activity } : {}) });
     else ctx.io.err(`error: ${e.message}`);
     return 1;
   }
@@ -43,11 +43,12 @@ const status = (ctx: Ctx, argv: string[]) => {
 };
 
 const install = (ctx: Ctx, argv: string[]) => {
-  const p = parseArgs(argv, { migrate: { kind: "bool" }, device: { kind: "value" } });
+  const p = parseArgs(argv, { migrate: { kind: "bool" }, device: { kind: "value" }, wait: { kind: "bool" }, now: { kind: "bool" } });
   noMore(p.positional, 0);
+  const whenBusy = p.flags.now ? "now" : p.flags.wait ? "wait" : "refuse";
   return guarded(
     ctx,
-    () => localInstall(deps(ctx), { migrate: Boolean(p.flags.migrate), ...(typeof p.flags.device === "string" ? { device: p.flags.device } : {}) }),
+    () => localInstall(deps(ctx), { migrate: Boolean(p.flags.migrate), whenBusy, ...(typeof p.flags.device === "string" ? { device: p.flags.device } : {}) }),
     (r: Awaited<ReturnType<typeof localInstall>>) => {
       ctx.print.line(`ai-space ${r.version} ${r.upgraded ? "upgraded" : "installed"}${r.migrated ? " (workspace migrated)" : ""}: ${r.url}`);
       if (r.device) ctx.print.line(`device ${r.device.id} "${r.device.name}": ${r.device.token} (shown only now)`);
@@ -65,7 +66,7 @@ export const localNoun: Noun = {
   summary: "the Local edition's installation on this Mac (what the app runs)",
   verbs: {
     status: { usage: "", summary: "what this Mac has: the app's release, the installed one, the workspace, the background service", run: status },
-    install: { usage: "[--migrate] [--device <name>]", summary: "install or upgrade from the app and start the background service", run: install },
+    install: { usage: "[--migrate] [--device <name>] [--wait | --now]", summary: "install or upgrade from the app and start the background service; an upgrade while the Space is busy is refused unless --wait (until it is idle) or --now (drain it)", run: install },
     start: { usage: "", summary: "start the background service and keep it on at login", run: lifecycle(localStart) },
     stop: { usage: "", summary: "stop it and keep it off until started again", run: lifecycle(localStop) },
     restart: { usage: "", summary: "stop and start it", run: lifecycle(localRestart) },

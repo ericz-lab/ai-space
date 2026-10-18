@@ -32,6 +32,7 @@ import { withUserToolDirs } from "./space/host-tools.ts";
 import { readOwnership } from "./space/local.ts";
 import { createPackageRoutes } from "./space/packages/api.ts";
 import { createStudioRoutes } from "./space/studio.ts";
+import { createActivityRoutes } from "./space/activity.ts";
 import { PackageStore } from "./space/packages/store.ts";
 import { PackageInstaller } from "./space/packages/install.ts";
 import { PackageRuntime } from "./space/packages/runtime.ts";
@@ -451,6 +452,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["public", createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name, token: config.apiToken, managed: Boolean(await readOwnership(ws.home)) })],
       ["owner", panelRoutes],
       ["owner", createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage })],
+      ["owner", createActivityRoutes({ token: config.apiToken, tasks: () => scheduler.running(), modelCalls: () => model.inFlight(), agentTurns: () => agentRuns.running(), terminals: () => terminal.status().active, packageChanges: () => packageInstaller.busy + packageLifecycle.busy })],
       ["owner", createStudioRoutes({ ws, installer: packageInstaller, lifecycle: packageLifecycle, store: packageStore, activate: activatePackage, token: config.apiToken, log: (l) => console.error(`[studio] ${l}`) })],
       ["owner", createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks })],
       ["owner", createConnectionRoutes({ links: packageLinks, token: config.apiToken })],

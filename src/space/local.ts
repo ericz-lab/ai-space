@@ -273,12 +273,58 @@ export function renderLocalPlist(p: LocalPaths): string {
 
 export class LocalError extends Error {
   constructor(
-    readonly code: "foreign" | "foreign-running" | "no-bundle" | "unhealthy" | "not-installed",
+    readonly code: "foreign" | "foreign-running" | "no-bundle" | "unhealthy" | "not-installed" | "busy",
     message: string,
     readonly status?: LocalStatus,
+    /** For `busy`: what the running Space is doing (GET /api/space/activity). */
+    readonly activity?: Activity,
   ) {
     super(message);
   }
+}
+
+export type Activity = { busy: boolean; items: { kind: string; label: string; since?: number }[] };
+
+/** What the running Space is doing; undefined when it does not say (not running, or a release before /api/space/activity). */
+export async function readActivity(d: LocalDeps, workspace: string, port: number): Promise<Activity | undefined> {
+  try {
+    const r = await d.fetch(`http://127.0.0.1:${port}/api/space/activity`, { headers: { authorization: `Bearer ${await operatorToken(workspace)}` }, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return undefined;
+    const body = (await r.json()) as Activity & { ok?: boolean };
+    return { busy: Boolean(body.busy), items: body.items ?? [] };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Before the release changes, a copy of space.db, the one database the release itself migrates,
+ * taken with the service stopped. Restored when the new release does not start and the previous
+ * one is put back, so it finds the schema it knows. The last KEEP_RELEASES are kept.
+ */
+async function snapshotDb(p: LocalPaths, label: string): Promise<string | undefined> {
+  const db = join(p.workspace, "data", "space.db");
+  if (!(await exists(db))) return undefined;
+  const root = join(p.prefix, "db-snapshots");
+  const dir = join(root, `${new Date().toISOString().replace(/[:.]/g, "-")}-before-${label}`);
+  await mkdir(dir, { recursive: true });
+  const target = join(dir, "space.db");
+  const src = new Database(db);
+  try {
+    src.query("VACUUM INTO ?").run(target);
+  } finally {
+    src.close();
+  }
+  const names = (await readdir(root)).sort().reverse();
+  for (const n of names.slice(KEEP_RELEASES)) await rm(join(root, n), { recursive: true, force: true });
+  return target;
+}
+
+async function restoreDb(p: LocalPaths, snapshot: string): Promise<void> {
+  const db = join(p.workspace, "data", "space.db");
+  for (const f of [`${db}-wal`, `${db}-shm`]) await rm(f, { force: true });
+  await cp(snapshot, `${db}.restoring`);
+  await rename(`${db}.restoring`, db);
 }
 
 export type BundledApp = { file: string; app?: string; version?: string; status: "installed" | "upgraded" | "present" | "failed"; detail?: string };
@@ -384,14 +430,24 @@ export const LOCAL_ENV = { SPACE_EDITION: "local", SPACE_AUTH: "builtin", SPACE_
  * Values set only when the workspace has none: the user may change them. The terminal is on: the
  * service listens on loopback only and every session needs the owner (the app's device credential).
  */
-export const LOCAL_DEFAULTS = { SPACE_TERMINAL_ENABLED: "1" };
+// The drain on stop stays inside the LaunchAgent's ExitTimeOut (40 s), after which launchd kills.
+export const LOCAL_DEFAULTS = { SPACE_TERMINAL_ENABLED: "1", SPACE_DRAIN_SECONDS: "30" };
+
+/** What an upgrade does while the Space is busy: refuse and say with what, wait for it, or drain it now. */
+export type WhenBusy = "refuse" | "wait" | "now";
 
 /**
  * Install or upgrade: copy the bundle's release out, point `current` at it, make the workspace
  * (or take over a foreign one with `migrate`), write the LaunchAgent, start it, and wait for the
  * service to answer as this version. A start that fails puts the previous release back.
+ *
+ * An upgrade is coordinated with the work in progress (docs/local.md#updates): while the running
+ * Space reports work, it is refused (`busy`, with the work), waited for, or drained now, per
+ * `whenBusy`. The old service then stops (draining what is left), space.db is copied, and only then
+ * does the new release touch the workspace. If it does not answer, the copy is restored and the
+ * previous release starts again.
  */
-export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; device?: string } = {}): Promise<InstallResult> {
+export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; device?: string; whenBusy?: WhenBusy; waitMs?: number } = {}): Promise<InstallResult> {
   const p = localPaths(d.env, d.home);
   const status = await localStatus(d);
   const bundle = status.bundle;
@@ -401,6 +457,20 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
     if (status.running || status.workspace.locked) throw new LocalError("foreign-running", `stop the ai-space that runs now before migrating it: ${status.reason}`, status);
   }
   const migrated = status.state === "foreign";
+  const changing = migrated || Boolean(status.installed && status.installed.commit !== bundle.commit);
+
+  if (changing && status.state === "managed" && status.running) {
+    const whenBusy = opts.whenBusy ?? "refuse";
+    const until = Date.now() + (opts.waitMs ?? 30 * 60_000);
+    for (;;) {
+      const work = whenBusy === "now" ? undefined : await readActivity(d, p.workspace, status.port);
+      if (!work?.busy) break;
+      const what = work.items.map((i) => i.label).join(", ");
+      if (whenBusy === "refuse" || Date.now() >= until) throw new LocalError("busy", `the Space is busy: ${what}. Update when it is done, or now (the work gets ${LOCAL_DEFAULTS.SPACE_DRAIN_SECONDS} s to finish)`, status, work);
+      d.log(`waiting for: ${what}`);
+      await d.sleep(5000);
+    }
+  }
 
   const name = releaseDirName(bundle);
   const release = join(p.releases, name);
@@ -416,6 +486,22 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
   }
   const previous = status.installed?.path;
   const upgraded = Boolean(previous && basename(previous) !== name);
+  const lc = launchctl(d, p);
+  let snapshot: string | undefined;
+  if (changing) {
+    if (status.service.loaded) {
+      d.log("stopping the running service (its work drains)");
+      await lc.disableNow(LOCAL_LABEL).catch(() => {});
+    }
+    try {
+      snapshot = await snapshotDb(p, name);
+    } catch (e) {
+      // Nothing changed yet: the old release goes back to work.
+      if (status.service.loaded) await lc.enableNow(LOCAL_LABEL).catch(() => {});
+      throw e;
+    }
+    if (snapshot) d.log(`space.db copied to ${snapshot}`);
+  }
   await switchCurrent(p, release);
 
   await mkdir(p.workspace, { recursive: true });
@@ -447,19 +533,22 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
   await mkdir(p.agentsDir, { recursive: true });
   await mkdir(p.logs, { recursive: true });
   await Bun.write(p.plist, renderLocalPlist(p));
-  const lc = launchctl(d, p);
   d.log("starting the background service");
   await lc.disableNow(LOCAL_LABEL).catch(() => {});
   await lc.enableNow(LOCAL_LABEL);
   const port = await workspacePort(p.workspace);
   if (!(await waitHealthy(d, port, bundle.version, d.healthTimeoutMs))) {
+    let back = "";
     if (previous && previous !== release) {
       d.log(`the new release did not answer; going back to ${basename(previous)}`);
-      await switchCurrent(p, previous);
       await lc.disableNow(LOCAL_LABEL).catch(() => {});
+      // The new release may have migrated space.db into a shape the previous one does not read.
+      if (snapshot) await restoreDb(p, snapshot);
+      await switchCurrent(p, previous);
       await lc.enableNow(LOCAL_LABEL).catch(() => {});
+      back = `; ${basename(previous)} runs again${snapshot ? " with space.db as it was before" : ""}`;
     }
-    throw new LocalError("unhealthy", `the service did not answer as ${bundle.version} on port ${port} in time; see ${join(p.logs, "space.log")}`, await localStatus(d));
+    throw new LocalError("unhealthy", `the service did not answer as ${bundle.version} on port ${port} in time${back}; see ${join(p.logs, "space.log")}`, await localStatus(d));
   }
   await prune(p, [name, ...(previous ? [basename(previous)] : [])]);
   const apps = await installBundledApps(d, p, port);

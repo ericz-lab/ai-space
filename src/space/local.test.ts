@@ -25,7 +25,7 @@ afterAll(async () => {
 });
 
 /** A release tree like the app's Resources/space, linking to this checkout's files. */
-async function fakeRelease(dir: string, version: string, commit: string, opts: { broken?: boolean; app?: string } = {}): Promise<string> {
+async function fakeRelease(dir: string, version: string, commit: string, opts: { broken?: boolean; migrates?: boolean; app?: string } = {}): Promise<string> {
   if (opts.app) {
     // One bundled app, as release/local.ts puts them in: bundled-apps/<name>.spaceapp.
     const src = `${dir}-hello`;
@@ -39,7 +39,9 @@ async function fakeRelease(dir: string, version: string, commit: string, opts: {
   // The service reports package.json's version, read beside its own src/: both are real copies here.
   await Bun.write(join(dir, "package.json"), JSON.stringify({ ...(await Bun.file(join(REPO, "package.json")).json()), version }));
   await cp(join(REPO, "src"), join(dir, "src"), { recursive: true, filter: (f) => !f.endsWith(".test.ts") });
-  if (opts.broken) await Bun.write(join(dir, "src", "index.ts"), `if (process.argv[2] !== "init") process.exit(3);\nawait import("./cli/main.ts").then((m) => m.run(process.argv.slice(2), {})).then((c) => process.exit(c));\n`);
+  // `migrates`: a broken start that first changes space.db's schema, as a failed migration would.
+  const migrate = opts.migrates ? `{ const { Database } = await import("bun:sqlite"); const db = new Database(process.env.SPACE_HOME + "/data/space.db"); db.exec("CREATE TABLE from_broken (x)"); db.close(); }\n` : "";
+  if (opts.broken) await Bun.write(join(dir, "src", "index.ts"), `if (process.argv[2] !== "init") { ${migrate} process.exit(3); }\nawait import("./cli/main.ts").then((m) => m.run(process.argv.slice(2), {})).then((c) => process.exit(c));\n`);
   await Bun.write(join(dir, "RELEASE.json"), JSON.stringify({ product: "ai-space", edition: "local", version, commit, os: "macos", arch: process.arch, bun: Bun.version }));
   return dir;
 }
@@ -198,6 +200,51 @@ describe("space local", () => {
     expect(removed.state).toBe("managed"); // the workspace stays the app's
     expect(await Bun.file(join(workspace, "data", "space.db")).exists()).toBe(true);
     expect(log.filter((v) => v === "bootstrap").length).toBeGreaterThanOrEqual(4);
+  }, 120_000);
+
+  test("an upgrade waits for the work in progress, and a failed one gets space.db back", async () => {
+    const { root, workspace, port, deps } = await setup();
+    await rm(workspace, { recursive: true });
+    await mkdir(workspace);
+    await Bun.write(join(workspace, ".env"), `SPACE_PORT=${port}\n`);
+    await Bun.write(join(workspace, "installation.json"), JSON.stringify({ managedBy: "ai-space-local", installedAt: "2026-10-18T00:00:00.000Z", version: "0.0.0", release: "none" }));
+    const v1 = await fakeRelease(join(root, "app1"), "0.1.0", "f".repeat(40));
+    const r1 = await localInstall(deps(v1), { device: "This Mac" });
+    expect(await Bun.file(join(workspace, ".env")).text()).toContain("SPACE_DRAIN_SECONDS=30");
+
+    // The real service says it is idle.
+    const idle = await fetch(`http://127.0.0.1:${port}/api/space/activity`, { headers: { authorization: `Bearer ${r1.device!.token}` } });
+    expect(await idle.json()).toEqual({ ok: true, busy: false, items: [] });
+    expect((await fetch(`http://127.0.0.1:${port}/api/space/activity`)).status).toBe(401);
+
+    // A Space that reports work: the activity answer is replaced, everything else is real.
+    let busyFor = Infinity;
+    const busyFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith("/api/space/activity") && busyFor-- > 0) return Response.json({ ok: true, busy: true, items: [{ kind: "task", label: "notes/digest" }] });
+      return fetch(url, init);
+    }) as typeof fetch;
+    const v2 = await fakeRelease(join(root, "app2"), "0.2.0", "1".repeat(40));
+    const busyDeps = { ...deps(v2), fetch: busyFetch, sleep: async () => {} };
+    const refused = await localInstall(busyDeps).catch((e) => e);
+    expect(refused).toMatchObject({ code: "busy", activity: { busy: true, items: [{ label: "notes/digest" }] } });
+    expect((await localStatus(deps(v2))).running?.version).toBe("0.1.0"); // untouched
+    await expect(localInstall(busyDeps, { whenBusy: "wait", waitMs: 0 })).rejects.toMatchObject({ code: "busy" });
+    busyFor = 2;
+    expect(await localInstall(busyDeps, { whenBusy: "wait" })).toMatchObject({ version: "0.2.0", upgraded: true });
+    expect(busyFor).toBe(-1); // asked three times: busy, busy, idle
+
+    // A release that migrates space.db and then fails: the previous release gets the database it knew.
+    busyFor = Infinity;
+    const broken = await fakeRelease(join(root, "app3"), "0.3.0", "2".repeat(40), { broken: true, migrates: true });
+    await expect(localInstall({ ...deps(broken), fetch: busyFetch, healthTimeoutMs: 4000 }, { whenBusy: "now" })).rejects.toThrow(/0.2.0-1{12} runs again with space.db as it was before/);
+    for (let i = 0; i < 100 && (await localStatus(deps(v2))).running?.version !== "0.2.0"; i++) await Bun.sleep(100);
+    expect((await localStatus(deps(v2))).running?.version).toBe("0.2.0");
+    const { Database } = await import("bun:sqlite");
+    const db = new Database(join(workspace, "data", "space.db"), { readonly: true });
+    expect(db.query("SELECT name FROM sqlite_master WHERE name = 'from_broken'").all()).toEqual([]);
+    db.close();
+    const p = localPaths(deps(v2).env, deps(v2).home);
+    expect((await readdir(join(p.prefix, "db-snapshots"))).length).toBe(2);
   }, 120_000);
 
   test("a workspace this app did not make is foreign: install refuses, migrate takes it once it is stopped", async () => {

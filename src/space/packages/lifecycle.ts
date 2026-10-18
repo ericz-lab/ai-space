@@ -92,6 +92,9 @@ export class PackageLifecycle {
     });
   }
 
+  /** Upgrades, rollbacks and removals in progress. */
+  get busy(): number { return this.pending.size; }
+
   async drain(): Promise<void> { this.closing = true; await Promise.allSettled(this.pending); }
 
   /**

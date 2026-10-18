@@ -142,6 +142,11 @@ export class Scheduler {
     this.timer = null;
   }
 
+  /** The ids of the tasks with a run in flight (docs/local.md#updates). */
+  running(): string[] {
+    return [...this.inflight.keys()];
+  }
+
   /** Resolves once no run is in flight. Mostly for tests and graceful shutdown. */
   async idle(): Promise<void> {
     while (this.inflight.size > 0) await Promise.allSettled([...this.inflight.values()].map((r) => r.promise));

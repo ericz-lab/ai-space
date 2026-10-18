@@ -137,6 +137,11 @@ export class ModelService {
     return { outcome, call };
   }
 
+  /** The calls in flight (docs/local.md#updates). */
+  inFlight(): { app: string; tag: string; model: string; startedAt: number }[] {
+    return [...this.inflight.values()].map((e) => ({ app: e.app, tag: e.tag, model: e.model, startedAt: e.startedAt }));
+  }
+
   /** Resolves once no call is in flight. */
   async idle(): Promise<void> {
     while (this.inflight.size > 0) await Promise.allSettled([...this.inflight.keys()]);
