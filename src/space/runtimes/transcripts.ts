@@ -165,14 +165,37 @@ export async function readCodexTranscript(cwd: string, sid: string, home = proce
     const lines = (await Bun.file(path).text()).split("\n");
     const messages: TranscriptMessage[] = [];
     let matches = false;
+    let previousUser: { source: string; text: string } | undefined;
+    const user = (text: string, source: string) => {
+      if (!text.trim()) return;
+      // Some CLI versions persist both forms for the same input, in either order.
+      if (previousUser?.text === text && previousUser.source !== source) {
+        previousUser = undefined;
+        return;
+      }
+      messages.push({ role: "user", text });
+      previousUser = { source, text };
+    };
     for (const line of lines) {
       let event;
       try { event = JSON.parse(line); } catch { continue; }
       const data = event?.payload;
       if (event?.type === "session_meta") matches = data?.id === sid && data?.cwd === cwd;
       // event_msg contains the actual user input, without injected environment instructions.
-      if (event?.type === "event_msg" && data?.type === "user_message" && typeof data.message === "string") messages.push({ role: "user", text: data.message });
+      if (event?.type === "event_msg" && data?.type === "user_message" && typeof data.message === "string") user(data.message, "event_msg");
+      if (event?.type === "event_msg" && data?.type === "task_started") previousUser = undefined;
+      if (event?.type === "response_item" && data?.type === "message" && data.role === "user") {
+        const text = (Array.isArray(data.content) ? data.content : [])
+          .filter((b: { type?: string; text?: unknown }) => b.type === "input_text" && typeof b.text === "string")
+          .map((b: { text: string }) => b.text)
+          .filter((text: string) => !/^# AGENTS\.md instructions for [^\n]+\n/.test(text)
+            && !/^\s*<environment_context>[\s\S]*<\/environment_context>\s*$/.test(text)
+            && !/^\s*<image\b[^>]*>\s*$/.test(text) && !/^\s*<\/image>\s*$/.test(text))
+          .join("\n");
+        user(text, "response_item");
+      }
       if (event?.type === "response_item" && data?.type === "message" && data.role === "assistant") {
+        previousUser = undefined;
         const text = (data.content ?? []).filter((b: { type: string }) => b.type === "output_text").map((b: { text: string }) => b.text).join("");
         if (text) { const last = lastAi(messages); last.text += (last.text ? "\n\n" : "") + text; }
       }

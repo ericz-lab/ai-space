@@ -239,6 +239,42 @@ test("Codex transcript restores user text and assistant tools only for the match
 });
 
 
+test("Codex history reads current user records, hides injected context and deduplicates legacy pairs", async () => {
+  const { mkdtemp, mkdir, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { readCodexTranscript } = await import("./transcripts.ts");
+  const home = await mkdtemp(join(tmpdir(), "codex-history-"));
+  const sid = "c0de0002-0000-4000-8000-000000000000";
+  const message = (role: string, text: string) => ({ type: "response_item", payload: { type: "message", role, content: [{ type: role === "assistant" ? "output_text" : "input_text", text }] } });
+  const legacy = (text: string) => ({ type: "event_msg", payload: { type: "user_message", message: text } });
+  try {
+    await mkdir(join(home, "sessions"));
+    await Bun.write(join(home, `sessions/rollout-2026-10-18-${sid}.jsonl`), [
+      { type: "session_meta", payload: { id: sid, cwd: "/workspace" } },
+      message("developer", "private system prompt"),
+      message("user", "# AGENTS.md instructions for /workspace\n<INSTRUCTIONS>private</INSTRUCTIONS>"),
+      message("user", "<environment_context>private</environment_context>"),
+      message("user", "首尔晚上九点半是 UTC 几点？"),
+      message("assistant", "12:30 UTC"),
+      legacy("same"), message("user", "same"), message("assistant", "first"),
+      message("user", "same"), legacy("same"), message("assistant", "second"),
+      message("user", "<div>keep actual user markup</div>"),
+      { type: "response_item", payload: { type: "message", role: "user", content: [
+        { type: "input_text", text: '<image name="Image" path="/tmp/image.png">' },
+        { type: "input_image", image_url: "data:image/png;base64,AAAA" },
+        { type: "input_text", text: "</image>" }, { type: "input_text", text: "describe this" },
+      ] } },
+    ].map((event) => JSON.stringify(event)).join("\n"));
+    const result = await readCodexTranscript("/workspace", sid, home);
+    expect(result?.filter((m) => m.role === "user").map((m) => m.text)).toEqual([
+      "首尔晚上九点半是 UTC 几点？", "same", "same", "<div>keep actual user markup</div>", "describe this",
+    ]);
+    expect(result?.map((m) => m.role)).toEqual(["user", "ai", "user", "ai", "user", "ai", "user", "user"]);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+
 test("web tool lists enable native web access locally and over SSH without enabling other tools", async () => {
   for (const tools of [["WebSearch"], ["WebFetch"], ["WebSearch", "WebFetch"]]) {
     const request = input({ tools });

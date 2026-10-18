@@ -248,3 +248,5 @@ Codex JSON events are translated into the panel's text and tool events. Sessions
 ### Per-request Codex speed tier
 
 A model run may send `serviceTier: "priority"` (Fast, higher usage) or `"default"` for an explicit standard-speed request. This is supported only for local tool-free Codex streaming completions with `streamCompletions: true`; unsupported paths fail instead of ignoring the choice. Omission preserves the existing runtime behavior. The override belongs to the ephemeral request thread, so one app can opt in without changing other apps. See [App Server turn configuration](https://learn.chatgpt.com/docs/app-server).
+
+Codex history accepts both legacy user-message events and current user response items. It omits injected workspace/environment instructions and deduplicates paired records, so saved conversations retain user turns on both native and Web clients.
