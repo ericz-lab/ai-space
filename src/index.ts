@@ -28,6 +28,7 @@ import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/s
 import { createWebRoutes } from "./web/routes.ts";
 import { createIdentityRoutes } from "./space/identity.ts";
 import { readVersion } from "./space/version.ts";
+import { withUserToolDirs } from "./space/host-tools.ts";
 import { createPackageRoutes } from "./space/packages/api.ts";
 import { PackageStore } from "./space/packages/store.ts";
 import { PackageInstaller } from "./space/packages/install.ts";
@@ -65,6 +66,8 @@ export { type Config, loadConfig, openBackups, openStorage, backupTaskDefaults }
 export { parseNotifyArgs } from "./cli/notify.ts";
 
 export async function boot(ws: Workspace, config: Config, env: Record<string, string | undefined> = process.env) {
+  // The Local edition runs under launchd with a bare PATH; agent CLIs live in the user's tool directories (docs/editions.md#ai-space-local).
+  if (config.edition === "local") env.PATH = withUserToolDirs(env.PATH, homedir());
   // Built-in sign-in (docs/auth.md): the operator token is never empty then, or every caller past the gate would be the operator.
   if (config.auth === "builtin") config = { ...config, apiToken: await ensureOperatorToken(ws.home, config.apiToken) };
   const store = new Store(config.dbPath, { eventRetentionMs: config.eventRetentionMs });

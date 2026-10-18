@@ -22,6 +22,8 @@
     "release:server": "bun release/server.ts",
     "release:smoke": "bun release/smoke.ts",
     "release:client": "desktop/macos/scripts/package.sh",
+    "release:local": "bun release/local.ts",
+    "release:local-smoke": "bun release/local-smoke.ts",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test",
     "hooks": "git config core.hooksPath .githooks",

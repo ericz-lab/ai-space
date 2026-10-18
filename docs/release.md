@@ -20,7 +20,7 @@ person: the pipeline ends in a draft GitHub Release.
 
 Only systems and architectures that are built and checked are published. Not yet: the Mac Share
 extension (it needs an Xcode build with a development team, `desktop:share:build`), Intel Macs,
-Windows, a Server edition for macOS, and the Local edition.
+Windows, a Server edition for macOS, and the Local edition (a prototype, [below](#local-edition)).
 
 ## Cutting a release
 
@@ -106,6 +106,37 @@ A rollback changes the program, not the data. A release whose start migrated a d
 it in a shape the older release does not read; then restore the snapshot taken before the upgrade
 ([backup.md](backup.md)), which is why a backup target is worth setting before upgrading a space
 that matters.
+
+## Local edition
+
+Prototype, not published yet (step 5 of [editions.md](editions.md#the-work-in-order)). On a Mac:
+
+```bash
+bun run release:local                                  # dist/local/AI Space.app, ad-hoc signed
+bun run release:local-smoke "dist/local/AI Space.app"  # the service from inside the app
+```
+
+`release/local.ts` builds the Mac client, puts the release tree of `release/server.ts` (edition
+`local`) at `Contents/Resources/space`, builds the terminal's forkpty helper there as
+`runtime/space-pty`, and signs every Mach-O file inside with the hardened runtime, the bundled Bun
+with `SpaceRuntime.entitlements` (JIT), then the app. `SIGN_IDENTITY` picks a Developer ID instead
+of ad-hoc.
+
+`release/local-smoke.ts` copies the app, makes `Resources/space` read-only, and starts the service
+from it with `PATH=/usr/bin:/bin`, a fresh home and `SPACE_EDITION=local`. It checks the identity
+route, the panel's HTML import and files, the chat widget, the linked skills, SQLite, a terminal
+session through `space-pty` (size, resize, job control) and the runtime adapters; then that nothing
+was written inside the app and its signature still verifies.
+
+What a running service needs from the machine, and what it does without it:
+
+| Needs | On a Mac without the Command Line Tools |
+| --- | --- |
+| Bun | Bundled (`runtime/bun`) |
+| A PTY for the terminal | Bundled (`runtime/space-pty`); the `/usr/bin/python3` stub is never started |
+| `git` | Missing (a stub, never started): default apps are not cloned; Local installs its apps from packages |
+| `claude`, `codex` | The user's; the service adds the usual tool directories (`~/.local/bin`, `/opt/homebrew/bin`, ...) to the bare PATH launchd gives it |
+| `zstd` | Missing: backups fail until it is installed (to solve before Local ships backups) |
 
 ## Checks before publishing
 

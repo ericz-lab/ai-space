@@ -138,10 +138,11 @@ can be added later from Settings.
 credential when the service is installed. Coming from loopback is never taken as proof that a
 request is from the app.
 
-**Today:** nothing of the managed mode exists. The Mac client connects to a Space someone else
-started. Missing, in order: a prototype that runs the service from packaged resources on a clean Mac
-with no Bun on `PATH` (HTML imports, public assets, chat-widget build, skills, PTY, SQLite, runtime
-adapters); the service identity, ownership and exclusion contract; the background helper and its
+**Today:** the prototype exists: `release/local.ts` packs the service into the Mac app and
+`release/local-smoke.ts` runs it from there, read-only, with no Bun on `PATH` (HTML imports, public
+assets, chat-widget build, skills, PTY through a bundled helper, SQLite, runtime adapters;
+[release.md](release.md#local-edition)). The app does not start it yet. Missing, in order: the
+ownership and exclusion contract; the background helper and its
 status and repair views; bundled apps as `.spaceapp` packages; and coordinated updates.
 
 ## Service identity
@@ -193,7 +194,7 @@ side.
 | 2 | Release pipeline, phase 1: checks on every push, a version from the tag, the Client signed, notarized, in a `.dmg`, published as a draft release (built; signing waits for a Developer ID certificate) | Client edition |
 | 3 | Built-in user system: owner login, sessions, revocation, one access policy across the API (in progress separately) | A Server reachable without Cloudflare Access; device credentials for Local |
 | 4 | Release pipeline, phase 2: the Server release archive, install script, health check, upgrade test (built, [release.md](release.md)) | Server edition as a download |
-| 5 | Local prototype: the service from packaged resources on a clean Mac | Proves the Local edition can be packaged at all |
+| 5 | Local prototype: the service from packaged resources on a clean Mac (built, [release.md](release.md#local-edition)) | Proves the Local edition can be packaged at all |
 | 6 | Managed mode: identity, ownership, exclusion, background helper, bundled `.spaceapp` apps, first-run flow | Local edition |
 | 7 | Release pipeline, phase 3: Local built and signed in the same run | Local edition as a download |
 | 8 | Creating, changing and installing apps from inside ai-space | Apps without GitHub and a coding tool outside the product |
