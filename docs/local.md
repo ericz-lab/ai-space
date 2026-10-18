@@ -51,7 +51,7 @@ All take `--json`; the app parses that. They work with ai-space down.
 | Command | Does |
 | --- | --- |
 | `space local status` | the app's release, the installed one, the workspace and its owner, the LaunchAgent, what answers on the port, `claude` and `codex` |
-| `space local install [--migrate] [--device <name>]` | copy the release out, switch `current`, `init` the workspace, set `SPACE_EDITION=local`, `SPACE_AUTH=builtin`, `SPACE_SUPERVISOR=space`, `SPACE_DEFAULT_APPS=none` (other values stay), mark it owned, write and start the LaunchAgent, wait for the service to answer as this version, install the bundled apps. A start that does not answer within a minute puts the previous release back. `--device` also makes a device credential and prints its token once |
+| `space local install [--migrate] [--device <name>]` | copy the release out, switch `current`, `init` the workspace, set `SPACE_EDITION=local`, `SPACE_AUTH=builtin`, `SPACE_SUPERVISOR=space`, `SPACE_DEFAULT_APPS=none` (other values stay; `SPACE_TERMINAL_ENABLED=1` only when the workspace has no value), mark it owned, write and start the LaunchAgent, wait for the service to answer as this version, install the bundled apps. A start that does not answer within a minute puts the previous release back. `--device` also makes a device credential and prints its token once |
 | `space local start` / `stop` / `restart` | `launchctl enable`+`bootstrap` / `bootout`+`disable` (stays off at login until started) / both |
 | `space local remove-service` | stop and unregister the LaunchAgent and delete the program under Application Support; the workspace stays, still owned, so installing again picks it up |
 

@@ -1,0 +1,183 @@
+import AppKit
+import Foundation
+import Security
+
+/// The Local edition's side of the app (docs/local.md): it reads where this Mac stands, installs
+/// or upgrades the service from the app bundle, starts, stops and removes the background service,
+/// and keeps the app signed in to it with its device credential. Every change goes through
+/// `space local` with the bundled Bun; the service process belongs to launchd, so quitting the
+/// app leaves it running.
+@MainActor
+final class LocalManager: ObservableObject {
+    let bundle: LocalBundle?
+    @Published private(set) var status: LocalStatus?
+    @Published private(set) var busy: String?
+    @Published var failure: LocalFailure?
+    /// Set after an install that found no agent CLI: the first-run flow then shows its guide.
+    @Published var needsRuntimeGuide = false
+    @Published private(set) var lastApps: [LocalInstallResult.App] = []
+
+    init(bundle: LocalBundle? = LocalBundle.find()) {
+        self.bundle = bundle
+    }
+
+    var available: Bool { bundle != nil }
+
+    // MARK: Commands
+
+    private func run<T: Decodable>(_ type: T.Type, _ args: [String]) async throws -> T {
+        guard let bundle else { throw LocalFailure(code: "no-bundle", error: "this app does not carry the Local edition") }
+        let data = try await Task.detached(priority: .userInitiated) { () throws -> Data in
+            let p = Process()
+            p.executableURL = bundle.bun
+            p.arguments = [bundle.entry.path, "local"] + args + ["--json"]
+            p.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+            // A GUI app's environment is not a terminal's: give the command a plain, known one.
+            var env = ["HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "en_US.UTF-8"]
+            if let user = ProcessInfo.processInfo.environment["USER"] { env["USER"] = user }
+            p.environment = env
+            let out = Pipe()
+            p.standardOutput = out
+            p.standardError = FileHandle.nullDevice
+            try p.run()
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            return data
+        }.value
+        return try LocalOutput.decode(T.self, from: data)
+    }
+
+    private func perform(_ what: String, _ work: () async throws -> Void) async {
+        busy = what
+        failure = nil
+        defer { busy = nil }
+        do { try await work() } catch let f as LocalFailure {
+            failure = f
+            if let s = f.status { status = s }
+        } catch {
+            failure = LocalFailure(code: "error", error: error.localizedDescription)
+        }
+    }
+
+    func refresh() async {
+        guard available else { return }
+        do { status = try await run(LocalStatus.self, ["status"]) } catch let f as LocalFailure { failure = f } catch {
+            failure = LocalFailure(code: "error", error: error.localizedDescription)
+        }
+    }
+
+    /// Install or upgrade, then make sure the app has its Space saved and is signed in to it.
+    func install(migrate: Bool = false, into model: AppModel) async {
+        await perform(migrate ? "Migrating…" : (status?.state == .managed ? "Updating…" : "Setting up…")) {
+            let haveToken = DeviceKeychain.token(for: workspaceKey) != nil
+            var args = ["install"]
+            if migrate { args.append("--migrate") }
+            if !haveToken { args += ["--device", Host.current().localizedName ?? "This Mac"] }
+            let result = try await run(LocalInstallResult.self, args)
+            if let device = result.device { DeviceKeychain.save(device.token, for: result.workspace) }
+            lastApps = result.apps
+            status = try await run(LocalStatus.self, ["status"])
+            guard let url = URL(string: result.url) else { return }
+            model.adoptLocal(url: url)
+            needsRuntimeGuide = !(status?.runtimes.any ?? true)
+        }
+    }
+
+    func start() async { await lifecycle("Starting…", "start") }
+    func stop() async { await lifecycle("Stopping…", "stop") }
+    func restart() async { await lifecycle("Restarting…", "restart") }
+
+    /// Before deleting the app: stops and unregisters the background service. The workspace stays.
+    func removeService(model: AppModel) async {
+        await lifecycle("Removing…", "remove-service")
+        if failure == nil, let c = model.store.managedConnection { model.store.setManaged(c.id, url: c.url, managed: false) }
+    }
+
+    private func lifecycle(_ what: String, _ verb: String) async {
+        await perform(what) { status = try await run(LocalStatus.self, [verb]) }
+    }
+
+    // MARK: Signing in
+
+    /// The workspace the device token belongs to: the status's, else the default.
+    private var workspaceKey: String {
+        status?.workspace.path ?? (NSHomeDirectory() as NSString).appendingPathComponent(".ai-space")
+    }
+
+    private var lastSignIn: Date?
+
+    /// Exchanges the device credential for a session cookie in the Space's web data, so the native
+    /// views and the pages are signed in. At most once every 20 seconds, so a refusal cannot loop.
+    @discardableResult
+    func signIn(_ connection: Connection, cookies: WebCookieSession) async -> Bool {
+        guard connection.managed, let token = DeviceKeychain.token(for: workspaceKey) else { return false }
+        if let last = lastSignIn, Date().timeIntervalSince(last) < 20 { return false }
+        lastSignIn = Date()
+        do {
+            let (_, response) = try await URLSession.shared.data(for: DeviceSession.request(base: connection.url, token: token))
+            guard let http = response as? HTTPURLResponse else { return false }
+            if http.statusCode == 401 {
+                // Revoked, or a workspace that never knew it: Repair (install) makes a new one.
+                DeviceKeychain.delete(for: workspaceKey)
+                failure = LocalFailure(code: "device", error: "This Mac's sign-in to its Space is no longer valid. Use Repair to make a new one.")
+                return false
+            }
+            guard http.statusCode == 200 else { return false }
+            for cookie in DeviceSession.cookies(from: http, base: connection.url) {
+                await cookies.dataStore.httpCookieStore.setCookie(cookie)
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Whether the Space's web data already holds a session cookie for it.
+    static func hasSession(_ cookies: [HTTPCookie], for url: URL) -> Bool {
+        cookies.contains { $0.name == "space_session" && ($0.domain == url.host || $0.domain == "." + (url.host ?? "")) && ($0.expiresDate.map { $0 > Date() } ?? true) }
+    }
+
+    func openLog() {
+        guard let status else { return }
+        let log = URL(fileURLWithPath: status.workspace.path).appendingPathComponent("logs/space.log")
+        NSWorkspace.shared.open(log)
+    }
+}
+
+/// The device credential, in the login keychain, by workspace path (docs/local.md#signing-in).
+enum DeviceKeychain {
+    static let service = "dev.ai-space.local.device"
+
+    static func token(for workspace: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: workspace,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func delete(for workspace: String) {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: workspace]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    static func save(_ token: String, for workspace: String) {
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: workspace,
+        ]
+        SecItemDelete(base as CFDictionary)
+        var add = base
+        add[kSecValueData as String] = Data(token.utf8)
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        add[kSecAttrLabel as String] = "AI Space on this Mac"
+        let status = SecItemAdd(add as CFDictionary, nil)
+        if status != errSecSuccess { NSLog("ai-space: could not keep the device credential: %d", status) }
+    }
+}

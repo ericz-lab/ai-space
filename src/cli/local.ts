@@ -14,7 +14,7 @@ function show(ctx: Ctx, s: LocalStatus): void {
     ["in this app", s.bundle ? `${s.bundle.version} ${s.bundle.commit.slice(0, 12)}` : ""],
     ["installed", s.installed ? `${s.installed.version} at ${s.installed.path}` : ""],
     ["workspace", `${s.workspace.path}${s.workspace.exists ? "" : " (none yet)"}`],
-    ["service", `${s.service.label}: ${s.service.running ? `running, pid ${s.service.pid}` : s.service.disabled ? "stopped" : s.service.plist ? s.service.detail : "not installed"}`],
+    ["service", `${s.service.label}: ${s.service.running ? `running, pid ${s.service.pid}` : !s.service.plist ? "not installed" : s.service.disabled ? "stopped" : s.service.detail}`],
     ["answers", s.running ? `${s.url} ${s.running.version} ${s.running.edition} ${s.running.installation ?? ""}` : "nothing"],
     ["claude", s.runtimes.claude ?? "not found"],
     ["codex", s.runtimes.codex ?? "not found"],

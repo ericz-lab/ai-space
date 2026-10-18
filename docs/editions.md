@@ -141,9 +141,10 @@ request is from the app.
 **Today:** the prototype exists: `release/local.ts` packs the service into the Mac app and
 `release/local-smoke.ts` runs it from there, read-only, with no Bun on `PATH` (HTML imports, public
 assets, chat-widget build, skills, PTY through a bundled helper, SQLite, runtime adapters;
-[release.md](release.md#local-edition)). The app does not start it yet. Missing, in order: the
-ownership and exclusion contract; the background helper and its
-status and repair views; bundled apps as `.spaceapp` packages; and coordinated updates.
+[release.md](release.md#local-edition)). Managed mode is built ([local.md](local.md)): ownership,
+the one-service-per-workspace lock, the LaunchAgent, the device credential, bundled apps, the
+first-run flow and Settings. Missing: building and signing it in the release pipeline, and updates
+coordinated with running work (steps 7 and 9).
 
 ## Service identity
 
@@ -196,7 +197,7 @@ side.
 | 3 | Built-in user system: owner login, sessions, revocation, one access policy across the API (in progress separately) | A Server reachable without Cloudflare Access; device credentials for Local |
 | 4 | Release pipeline, phase 2: the Server release archive, install script, health check, upgrade test (built, [release.md](release.md)) | Server edition as a download |
 | 5 | Local prototype: the service from packaged resources on a clean Mac (built, [release.md](release.md#local-edition)) | Proves the Local edition can be packaged at all |
-| 6 | Managed mode: identity, ownership, exclusion, background helper, bundled `.spaceapp` apps, first-run flow | Local edition |
+| 6 | Managed mode: identity, ownership, exclusion, background helper, bundled `.spaceapp` apps, first-run flow (built, [local.md](local.md)) | Local edition |
 | 7 | Release pipeline, phase 3: Local built and signed in the same run | Local edition as a download |
 | 8 | Creating, changing and installing apps from inside ai-space | Apps without GitHub and a coding tool outside the product |
 | 9 | Updates inside the installed app, coordinated with running work and database migrations | Keeping Local current without a manual reinstall |

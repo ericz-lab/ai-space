@@ -158,6 +158,7 @@ describe("space local", () => {
     expect(env).toContain("SPACE_EDITION=local");
     expect(env).toContain("SPACE_AUTH=builtin");
     expect(env).toContain(`SPACE_PORT=${port}`);
+    expect(env).toContain("SPACE_TERMINAL_ENABLED=1");
 
     // The device token reaches an owner route; nothing else does.
     const layout = (h: Record<string, string>) => fetch(`http://127.0.0.1:${port}/api/panel/layout`, { headers: h });

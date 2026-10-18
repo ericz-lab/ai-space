@@ -162,6 +162,25 @@ Desktop presence does not make a laptop an always-on server. Do not prevent slee
 
 This is the Local edition of [editions.md](editions.md); the client-only release is the Client edition.
 
+**Implemented** ([local.md](local.md)): the app carries the service in `Resources/space`
+(`release/local.ts`) and drives it through `space local … --json` run with the Bun in its bundle
+(`Desktop/LocalManager.swift`, `Services/LocalEdition.swift`). On first launch with no saved Space it
+offers Set Up, or, when this Mac already has an ai-space it did not install, Connect to It or Take It
+Over (`Views/LocalViews.swift`); after an install with no agent CLI it shows how to add Claude Code or
+Codex. Settings has "AI Space on This Mac": state, installed and bundled versions, Update, Start,
+Stop, Restart, Repair, Open Log, Remove Background Service. The saved Space is marked `managed`; the
+app signs in to it with a device credential kept in the Keychain, exchanged for a session cookie in
+that Space's web data whenever the cookie is missing or a page says sign-in is required.
+
+The decisions below were taken as follows. The background helper is a LaunchAgent the app writes to
+`~/Library/LaunchAgents/ai.space.local.plist` and loads with `launchctl`, running the release
+copied out to Application Support, not an `SMAppService` agent: `SMAppService` requires the
+program inside the app bundle, and a service run from inside the bundle breaks when the app is
+moved, replaced during an update, or deleted. Its state, a disabled label and the repair path are
+shown in Settings; macOS lists it under Login Items as a background item.
+
+What follows is the design as it was written before the implementation.
+
 This is a separate milestone. First build a release prototype that launches the current server from packaged resources on a clean Mac with no Bun on PATH. Verify Bun HTML imports, public assets, chat-widget builds, shared skills, PTY support, SQLite and runtime adapters. Do not assume copying one TypeScript entry point or compiling one binary packages every runtime resource.
 
 Retain `$SPACE_HOME` or `~/.ai-space` as the workspace contract. Keep the installed runtime and release files separate from apps, databases, logs and configuration. Moving or replacing the desktop app must not lose workspace data.

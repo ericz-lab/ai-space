@@ -14,6 +14,7 @@ struct SettingsPage: View {
     var body: some View {
         Form {
             spaces
+            if model.local.available { LocalSettingsSection(model: model, local: model.local) }
             display
             space
             Section {

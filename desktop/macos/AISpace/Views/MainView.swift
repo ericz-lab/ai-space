@@ -20,6 +20,9 @@ struct MainView: View {
         }
         // A theme changes tokens every view reads; the views are made again in it.
         .id(prefs.themeID)
+        .sheet(isPresented: Binding(get: { model.local.needsRuntimeGuide }, set: { model.local.needsRuntimeGuide = $0 })) {
+            LocalRuntimeGuide(local: model.local)
+        }
         .tint(Theme.accent)
         .frame(minWidth: 820, minHeight: 540)
     }
@@ -328,6 +331,14 @@ struct FirstLaunchView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
+        if model.local.available {
+            LocalSetupView(model: model, local: model.local)
+        } else {
+            connect
+        }
+    }
+
+    private var connect: some View {
         VStack(spacing: 20) {
             Logo(size: 96)
             Text("Connect to a Space").font(.largeTitle)

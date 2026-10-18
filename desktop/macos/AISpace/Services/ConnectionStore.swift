@@ -24,8 +24,8 @@ final class ConnectionStore: ObservableObject {
     func connection(_ id: UUID) -> Connection? { connections.first { $0.id == id } }
 
     @discardableResult
-    func add(name: String, url: URL, makeDefault: Bool = false) -> Connection {
-        let c = Connection(name: Self.displayName(name, url), url: url, isDefault: makeDefault || connections.isEmpty)
+    func add(name: String, url: URL, makeDefault: Bool = false, managed: Bool = false) -> Connection {
+        let c = Connection(name: Self.displayName(name, url), url: url, isDefault: makeDefault || connections.isEmpty, managed: managed)
         if c.isDefault { clearDefault() }
         connections.append(c)
         save()
@@ -35,6 +35,17 @@ final class ConnectionStore: ObservableObject {
     func update(_ id: UUID, name: String, url: URL) {
         guard let i = connections.firstIndex(where: { $0.id == id }) else { return }
         connections[i].name = Self.displayName(name, url)
+        connections[i].url = url
+        save()
+    }
+
+    /// The Local edition's own Space, if one is saved.
+    var managedConnection: Connection? { connections.first(where: \.managed) }
+
+    /// Marks a saved Space as the Local edition's (or not), and points it at `url`.
+    func setManaged(_ id: UUID, url: URL, managed: Bool = true) {
+        guard let i = connections.firstIndex(where: { $0.id == id }) else { return }
+        connections[i].managed = managed
         connections[i].url = url
         save()
     }

@@ -7,12 +7,28 @@ struct Connection: Codable, Identifiable, Hashable {
     var name: String
     var url: URL
     var isDefault: Bool
+    /// The Space the Local edition installed on this Mac (docs/local.md): the app signs in to it
+    /// with its device credential and manages its background service. False for every other.
+    var managed: Bool
 
-    init(id: UUID = UUID(), name: String, url: URL, isDefault: Bool = false) {
+    init(id: UUID = UUID(), name: String, url: URL, isDefault: Bool = false, managed: Bool = false) {
         self.id = id
         self.name = name
         self.url = url
         self.isDefault = isDefault
+        self.managed = managed
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, url, isDefault, managed }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        url = try c.decode(URL.self, forKey: .url)
+        isDefault = try c.decode(Bool.self, forKey: .isDefault)
+        // Saved before the Local edition existed.
+        managed = try c.decodeIfPresent(Bool.self, forKey: .managed) ?? false
     }
 
     var isLocal: Bool { ConnectionRules.isLoopback(url.host ?? "") }

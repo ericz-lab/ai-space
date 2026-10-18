@@ -377,8 +377,14 @@ async function runInit(d: LocalDeps, p: LocalPaths): Promise<void> {
   if (r.code !== 0) throw new Error(`init failed: ${r.out.trim().split("\n").at(-1)}`);
 }
 
-/** The workspace values the Local edition runs with; the user's other values stay as they are. */
+/** The workspace values the Local edition runs with, set on every install; the user's other values stay as they are. */
 export const LOCAL_ENV = { SPACE_EDITION: "local", SPACE_AUTH: "builtin", SPACE_SUPERVISOR: "space", SPACE_DEFAULT_APPS: "none" };
+
+/**
+ * Values set only when the workspace has none: the user may change them. The terminal is on: the
+ * service listens on loopback only and every session needs the owner (the app's device credential).
+ */
+export const LOCAL_DEFAULTS = { SPACE_TERMINAL_ENABLED: "1" };
 
 /**
  * Install or upgrade: copy the bundle's release out, point `current` at it, make the workspace
@@ -418,6 +424,7 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
   const envText = await Bun.file(envPath).text().catch(() => "");
   // The default port taken by another program (not an ai-space: that was refused above): use a free one.
   const extra: Record<string, string> = {};
+  for (const [k, v] of Object.entries(LOCAL_DEFAULTS)) if (!new RegExp(`^\\s*${k}\\s*=`, "m").test(envText)) extra[k] = v;
   if (!/^\s*SPACE_PORT\s*=/m.test(envText) && !status.running && !portFree(status.port)) extra.SPACE_PORT = String(freePort());
   await Bun.write(envPath, updateEnvText(envText, { ...LOCAL_ENV, ...extra }));
   await writeOwnership(p.workspace, { managedBy: MANAGED_BY, installedAt: status.ownership?.installedAt ?? new Date().toISOString(), version: bundle.version, release: name });
