@@ -160,6 +160,8 @@ Desktop presence does not make a laptop an always-on server. Do not prevent slee
 
 ## Managed local installation
 
+This is the Local edition of [editions.md](editions.md); the client-only release is the Client edition.
+
 This is a separate milestone. First build a release prototype that launches the current server from packaged resources on a clean Mac with no Bun on PATH. Verify Bun HTML imports, public assets, chat-widget builds, shared skills, PTY support, SQLite and runtime adapters. Do not assume copying one TypeScript entry point or compiling one binary packages every runtime resource.
 
 Retain `$SPACE_HOME` or `~/.ai-space` as the workspace contract. Keep the installed runtime and release files separate from apps, databases, logs and configuration. Moving or replacing the desktop app must not lose workspace data.
