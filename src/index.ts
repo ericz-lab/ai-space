@@ -130,6 +130,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const packageCatalogue = new RemoteCatalogue(packageLinks);
   setTimeout(() => void packageCatalogue.refresh(), 8000).unref();
   const backups = await openBackups(config);
+  // No target means backups are off: no task is registered, so none fails or shows as stale.
+  const backupsOn = Boolean(config.backupUrl);
   const taskDefaults = backupTaskDefaults(ws, config);
   const { channels, errors: channelErrors } = loadChannels(env);
   const notifyStore = new NotifyStore(config.dbPath);
@@ -290,7 +292,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     for (const n of result.orphaned) console.log(`[storage] ${manifest.app}: ${n} left the manifest, kept as orphaned`);
     notify.syncApp(manifest.app, parseNotifySpec(manifest.notify, { title: manifest.title }));
     bus.syncApp(manifest.app, { events: manifest.events, provides: manifest.provides });
-    const backup = backupTask(manifest.app, parseBackupSpec(manifest.backup), taskDefaults);
+    const backup = backupsOn ? backupTask(manifest.app, parseBackupSpec(manifest.backup), taskDefaults) : undefined;
     if (backup && manifest.tasks.some((t) => t.name === BACKUP_TASK)) throw new Error(`task name "${BACKUP_TASK}" is reserved for ai-space's backup task; rename it, or set backup: false to bring your own`);
     await registry.set(manifest.spec === 2 && packageRuntime.get(manifest.app)?.manifest.launch ? { ...manifest, url: `/_space/apps/${encodeURIComponent(manifest.app)}` } : manifest);
     // After storage, so the unit's environment has the app's space.env. Never throws: a unit that
@@ -349,7 +351,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     }
   }
   // ai-space's own tasks: the space.db snapshot and the weekly verification of every app's newest snapshot.
-  scheduler.syncBuiltin(spaceManifest(taskDefaults));
+  scheduler.syncBuiltin(spaceManifest(taskDefaults, undefined, { backups: backupsOn }));
   // After the built-in: tasks of an app whose directory disappeared while ai-space was down: no sync registered
   // it, so nothing would ever forget it. A skipped directory of that name is not gone, only broken.
   for (const app of scheduler.leftovers()) {
@@ -435,6 +437,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createBackupRoutes({
         store: backups.store,
         target: backups.target,
+        enabled: backupsOn,
         token: config.apiToken,
         maxAgeMs: config.backupMaxAgeMs,
         taskFor: (app) => {

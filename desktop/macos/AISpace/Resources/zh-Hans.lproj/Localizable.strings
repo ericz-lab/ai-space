@@ -466,3 +466,17 @@
 "Next messages: %@" = "后续消息权限：%@";
 "Grant and retry" = "授权并重试";
 "I have granted more permissions. Please finish the step that was refused for lack of permission." = "我已授予更多权限，请完成刚才因权限不足被拒绝的步骤。";
+
+/* Local edition first run: agent CLIs and the default model */
+"Agents on this Mac" = "此 Mac 上的 Agent";
+"Install at least one and sign in to it in Terminal, then check again." = "请至少安装一个，并在终端中登录，然后重新检测。";
+"Check Again" = "重新检测";
+"Search Again" = "重新查找";
+"Choose…" = "选择…";
+"Choose the %@ program" = "选择 %@ 程序";
+"%@ is not a program that can run." = "%@ 不是可执行的程序。";
+"Install Claude Code or Codex first, or choose where it is." = "请先安装 Claude Code 或 Codex，或选择它所在的位置。";
+"Choose the default model" = "选择默认模型";
+"Space Assistant, other agents and apps use it when nothing chooses a model for them. You can change it later in Settings." = "Space Assistant、其他 Agent 和应用在未指定模型时使用它。之后可在设置中修改。";
+"The choice was not saved: %@" = "选择未保存：%@";
+"Continue" = "继续";

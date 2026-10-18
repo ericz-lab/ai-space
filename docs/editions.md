@@ -45,8 +45,9 @@ What differs is how each one is packaged, installed, started and updated.
    required to install, start, or use a Space on loopback.
 4. **AI access is configured, not bundled.** "Local" means the Space runs on this machine, not that
    every AI feature works offline. Agents and model calls still need a runtime (Claude Code, Codex, an
-   API key) chosen and set up by the user ([runtimes.md](runtimes.md)). The first run guides that
-   setup. It never installs or upgrades an agent CLI silently.
+   API key) chosen and set up by the user ([runtimes.md](runtimes.md)). The first run requires one
+   (Claude Code or Codex found or chosen) and a default model ([local.md](local.md#first-run)).
+   It never installs or upgrades an agent CLI silently.
 5. **Mac first.** Each edition is published only for the systems and CPU architectures that were
    built and tested. Mac on Apple Silicon is first. Linux x64 and arm64 follow for Server. Windows and
    Intel Macs are accepted one by one.

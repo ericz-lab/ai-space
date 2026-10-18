@@ -376,12 +376,25 @@ final class AppModel: ObservableObject {
 
     private func signInLocal(_ c: Connection, force: Bool) async {
         let cookies = cookieSession(c.id)
-        if !force, LocalManager.hasSession(await cookies.cookies(), for: c.url) { return }
-        guard await local.signIn(c, cookies: cookies) else { return }
-        _ = await cookies.cookies()
-        sessions[c.id]?.load()
-        if let loader = loaders[c.id] { await loader.refresh() }
-        await lives[c.id]?.refresh(catalogue: true)
+        let signedIn = force ? false : LocalManager.hasSession(await cookies.cookies(), for: c.url)
+        if !signedIn {
+            guard await local.signIn(c, cookies: cookies) else { return }
+            _ = await cookies.cookies()
+            sessions[c.id]?.load()
+            if let loader = loaders[c.id] { await loader.refresh() }
+            await lives[c.id]?.refresh(catalogue: true)
+        }
+        await askForDefaultModel(c)
+    }
+
+    /// The first run's last step (docs/local.md#first-run): the Space on this Mac has no default
+    /// model yet, so its agents would run on whatever the environment falls back to. Ask once it
+    /// answers with the models it offers.
+    private func askForDefaultModel(_ c: Connection) async {
+        let s = settings(for: c)
+        await s.refresh()
+        guard let models = s.settings?.models, models.defaultModel == nil, !models.options.isEmpty else { return }
+        local.needsModelChoice = true
     }
 
     /// Forgets the connection on this Mac. The Space itself, its agents and its data are untouched.

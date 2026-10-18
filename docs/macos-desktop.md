@@ -166,8 +166,10 @@ This is the Local edition of [editions.md](editions.md); the client-only release
 (`release/local.ts`) and drives it through `space local … --json` run with the Bun in its bundle
 (`Desktop/LocalManager.swift`, `Services/LocalEdition.swift`). On first launch with no saved Space it
 offers Set Up, or, when this Mac already has an ai-space it did not install, Connect to It or Take It
-Over (`Views/LocalViews.swift`); after an install with no agent CLI it shows how to add Claude Code or
-Codex. Settings has "AI Space on This Mac": state, installed and bundled versions, Update, Start,
+Over (`Views/LocalViews.swift`). Both screens list the agent CLIs found (Claude Code, Codex), with
+how to install each and Choose… for one installed elsewhere; Set Up stays off until one is there.
+Once the new Space answers without a default model, a sheet that cannot be skipped asks for one from
+every tier of every CLI it has (the same setting as Settings → Models). Settings has "AI Space on This Mac": state, installed and bundled versions, Update, Start,
 Stop, Restart, Repair, Open Log, Remove Background Service. The saved Space is marked `managed`; the
 app signs in to it with a device credential kept in the Keychain, exchanged for a session cookie in
 that Space's web data whenever the cookie is missing or a page says sign-in is required.

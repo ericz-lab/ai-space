@@ -1,3 +1,4 @@
+import { accessSync, constants, statSync } from "node:fs";
 import { cp, mkdir, readdir, readlink, rename, rm, stat, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -13,6 +14,7 @@ import { Launchctl } from "./services/launchd.ts";
 import type { Runner, UnitState } from "./services/manager.ts";
 import { spawnCollect } from "./services/manager.ts";
 import { updateEnvText } from "./setup.ts";
+import { RUNTIMES_FILE } from "./runtimes/config.ts";
 
 /**
  * The Local edition's managed installation on this Mac (docs/editions.md#ai-space-local,
@@ -124,9 +126,51 @@ export async function probe(port: number, fetcher: typeof fetch = fetch): Promis
 
 export type Runtimes = Record<"claude" | "codex", string | null>;
 
-export function findRuntimes(env: Record<string, string | undefined> = process.env, home = homedir()): Runtimes {
+/**
+ * The agent CLIs on this Mac. `chosen` is what the user pointed the app at (`--claude`, `--codex`):
+ * it wins over the search when it is an executable file; null means "do not use this one".
+ */
+export function findRuntimes(env: Record<string, string | undefined> = process.env, home = homedir(), chosen: Partial<Runtimes> = {}): Runtimes {
   const PATH = withUserToolDirs(env.PATH ?? "/usr/bin:/bin", home);
-  return { claude: whichUsable("claude", { PATH }) ?? null, codex: whichUsable("codex", { PATH }) ?? null };
+  const one = (name: "claude" | "codex") => {
+    const c = chosen[name];
+    if (c === null) return null;
+    if (c !== undefined) return executableFile(c) ? c : null;
+    return whichUsable(name, { PATH }) ?? null;
+  };
+  return { claude: one("claude"), codex: one("codex") };
+}
+
+function executableFile(path: string): boolean {
+  if (!path.startsWith("/")) return false;
+  try {
+    accessSync(path, constants.X_OK);
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Variables that already describe the space's runtime (runtimes/config.ts): then no file is written. */
+const RUNTIME_ENV = ["SPACE_MODEL_BIN", "SPACE_CHAT_BIN", "SPACE_MODEL_SSH_HOST", "SPACE_MODEL_API_KEY"];
+
+/**
+ * `runtimes.yaml` for the agent CLIs found: Claude Code and Codex, each by its absolute path, so the
+ * service runs them whatever PATH launchd gives it. Claude Code is the default when both are here.
+ */
+export function renderLocalRuntimes(r: Runtimes): string | undefined {
+  const entries: string[] = [];
+  if (r.claude) entries.push(`  claude:\n    kind: claude-code\n    bin: [${JSON.stringify(r.claude)}]`);
+  if (r.codex) entries.push(`  codex:\n    kind: codex-cli\n    bin: [${JSON.stringify(r.codex)}]`);
+  if (!entries.length) return undefined;
+  return [
+    "# Written by the AI Space app at setup: the agent CLIs found on this Mac (docs/runtimes.md).",
+    "# Edit freely; the app writes this file only when the workspace has none.",
+    `default: ${r.claude ? "claude" : "codex"}`,
+    "runtimes:",
+    ...entries,
+    "",
+  ].join("\n");
 }
 
 /**
@@ -165,6 +209,8 @@ export type LocalDeps = {
   sleep: (ms: number) => Promise<void>;
   /** How long an install waits for the new release to answer; default a minute. */
   healthTimeoutMs?: number;
+  /** Agent CLIs the user chose by path (`--claude`, `--codex`), over the search; null: not that one. */
+  runtimes?: Partial<Runtimes>;
 };
 
 export function realLocalDeps(log: (line: string) => void = () => {}): LocalDeps {
@@ -234,7 +280,7 @@ export async function localStatus(d: LocalDeps): Promise<LocalStatus> {
     url: `http://127.0.0.1:${port}/`,
     ...(running ? { running } : {}),
     service: serviceView(unit, plist),
-    runtimes: findRuntimes(d.env, d.home),
+    runtimes: findRuntimes(d.env, d.home, d.runtimes),
   };
 }
 
@@ -273,7 +319,7 @@ export function renderLocalPlist(p: LocalPaths): string {
 
 export class LocalError extends Error {
   constructor(
-    readonly code: "foreign" | "foreign-running" | "no-bundle" | "unhealthy" | "not-installed" | "busy" | "still-running" | "upgrade-failed",
+    readonly code: "foreign" | "foreign-running" | "no-bundle" | "no-runtime" | "unhealthy" | "not-installed" | "busy" | "still-running" | "upgrade-failed",
     message: string,
     readonly status?: LocalStatus,
     /** For `busy`: what the running Space is doing (GET /api/space/activity). */
@@ -454,6 +500,12 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
     if (!opts.migrate) throw new LocalError("foreign", status.reason ?? "this Mac already has an ai-space this app did not install", status);
     if (status.running || status.workspace.locked) throw new LocalError("foreign-running", `stop the ai-space that runs now before migrating it: ${status.reason}`, status);
   }
+  // A workspace without a runtime gets one from the agent CLIs here; with none, nothing can run its agents.
+  const runtimesFile = join(p.workspace, RUNTIMES_FILE);
+  const envBefore = await Bun.file(join(p.workspace, ".env")).text().catch(() => "");
+  const needsRuntimes = !(await exists(runtimesFile)) && !RUNTIME_ENV.some((k) => new RegExp(`^\\s*${k}\\s*=\\s*\\S`, "m").test(envBefore));
+  const runtimesText = needsRuntimes ? renderLocalRuntimes(status.runtimes) : undefined;
+  if (needsRuntimes && !runtimesText) throw new LocalError("no-runtime", "no agent CLI on this Mac: install Claude Code or Codex and sign in to it, or choose where it is (--claude, --codex)", status);
   const migrated = status.state === "foreign";
   const changing = migrated || Boolean(status.installed && status.installed.commit !== bundle.commit);
 
@@ -518,6 +570,7 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
     if (!/^\s*SPACE_PACKAGE_PORT\s*=/m.test(envText)) extra.SPACE_PACKAGE_PORT = String(portFree(8702) ? 8702 : freePort());
     if (!/^\s*SPACE_PORT\s*=/m.test(envText) && !status.running && !portFree(status.port)) extra.SPACE_PORT = String(freePort());
     await Bun.write(envPath, updateEnvText(envText, { ...LOCAL_ENV, ...extra }));
+    if (runtimesText) await Bun.write(runtimesFile, runtimesText);
     await writeOwnership(p.workspace, { managedBy: MANAGED_BY, installedAt: status.ownership?.installedAt ?? new Date().toISOString(), version: bundle.version, release: name });
 
     if (opts.device) {
@@ -551,6 +604,7 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
     if (snapshot) await restoreDb(p, snapshot);
     await switchCurrent(p, previous);
     if (previousEnv !== undefined) await Bun.write(join(p.workspace, ".env"), previousEnv);
+    if (runtimesText) await rm(runtimesFile, { force: true });
     if (status.ownership) await writeOwnership(p.workspace, status.ownership);
     let back = `; restored ${basename(previous)}`;
     if (!status.service.disabled) {

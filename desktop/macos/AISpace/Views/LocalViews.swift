@@ -36,8 +36,11 @@ struct LocalSetupView: View {
                 Text("Set up AI Space on this Mac").font(.largeTitle)
                 Text("Your apps, agents and their data stay on this Mac. AI Space runs in the background, also while this window is closed.")
                     .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
+                LocalRuntimesCheck(local: local, runtimes: status.runtimes).frame(width: 460)
                 Button("Set Up") { Task { await local.install(into: model) } }
                     .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction)
+                    .disabled(!status.runtimes.any)
+                    .help(status.runtimes.any ? "" : "Install Claude Code or Codex first, or choose where it is.")
             case .managed:
                 Text("AI Space is installed on this Mac").font(.largeTitle)
                 Text(status.ownServiceRunning ? "It is running. Open it to continue." : "It is not running. Opening it starts it again.")
@@ -50,6 +53,7 @@ struct LocalSetupView: View {
                     .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
                 Text("Connect to it as it is, or let this app take it over. Taking over keeps its apps, data and settings; stop the running one first.")
                     .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
+                LocalRuntimesCheck(local: local, runtimes: status.runtimes).frame(width: 460)
                 HStack {
                     Button("Connect to It") {
                         if let url = URL(string: status.url) { model.add(name: "This Mac", url: url) }
@@ -74,46 +78,95 @@ struct LocalSetupView: View {
     }
 }
 
-/// After an install that found no agent CLI: how to give the Space a model or an agent.
-struct LocalRuntimeGuide: View {
+/// The agent CLIs this Mac has, before anything is installed: AI Space runs its agents and model
+/// calls through Claude Code or Codex, so setting up needs at least one. Each is found where
+/// installers put it, or chosen by hand when it lives elsewhere.
+struct LocalRuntimesCheck: View {
     @ObservedObject var local: LocalManager
-    @Environment(\.dismiss) private var dismiss
+    let runtimes: LocalStatus.Runtimes
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Connect a model or agent").font(.title2.bold())
-            Text("AI Space runs its agents and model calls through a coding agent on this Mac. Install one and sign in to it in Terminal, then check again.")
-                .foregroundStyle(.secondary)
-            runtime("Claude Code", path: local.status?.runtimes.claude, how: "curl -fsSL https://claude.ai/install.sh | bash", then: "claude")
-            runtime("Codex", path: local.status?.runtimes.codex, how: "brew install --cask codex", then: "codex")
-            HStack {
-                Button("Later") { local.needsRuntimeGuide = false; dismiss() }
-                Spacer()
-                Button("Check Again") {
-                    Task {
-                        await local.refresh()
-                        if local.status?.runtimes.any == true { local.needsRuntimeGuide = false; dismiss() }
-                    }
-                }
-                .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Agents on this Mac").font(.headline)
+            runtime("claude", "Claude Code", path: runtimes.claude, how: "curl -fsSL https://claude.ai/install.sh | bash\nclaude")
+            runtime("codex", "Codex", path: runtimes.codex, how: "brew install --cask codex\ncodex")
+            if !runtimes.any {
+                Text("Install at least one and sign in to it in Terminal, then check again.")
+                    .font(.callout).foregroundStyle(Theme.warning)
             }
+            Button("Check Again") { Task { await local.refresh() } }
         }
-        .padding(24)
-        .frame(width: 480)
+        .padding(16)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func runtime(_ name: String, path: String?, how: String, then: String) -> some View {
+    private func runtime(_ name: String, _ title: String, path: String?, how: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label(name, systemImage: path == nil ? "circle" : "checkmark.circle.fill")
-                .foregroundStyle(path == nil ? Color.primary : Color.green)
+            HStack {
+                Label(title, systemImage: path == nil ? "xmark.circle" : "checkmark.circle.fill")
+                    .foregroundStyle(path == nil ? Color.secondary : Color.green)
+                Spacer()
+                if local.chosenRuntimes[name] != nil {
+                    Button("Search Again") { Task { await local.forgetRuntimeChoice(name) } }.buttonStyle(.link)
+                }
+                Button("Choose…") { Task { await local.chooseRuntime(name) } }.buttonStyle(.link)
+            }
             if let path {
-                Text(path).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
             } else {
-                Text(verbatim: "\(how)\n\(then)").font(.caption.monospaced()).textSelection(.enabled)
+                if let chosen = local.chosenRuntimes[name] {
+                    Text("\(chosen) is not a program that can run.").font(.caption).foregroundStyle(.red)
+                }
+                Text(verbatim: how).font(.caption.monospaced()).textSelection(.enabled)
                     .padding(8).frame(maxWidth: .infinity, alignment: .leading)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
             }
         }
+    }
+}
+
+/// The first run's last step: which model the Space's agents and apps use when nothing chooses one
+/// for them. The same setting as Settings → Models → Default model, with every tier of every agent
+/// CLI the Space has. It cannot be skipped; it can be changed later in Settings.
+struct LocalModelChoice: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var settings: SettingsLoader
+    @State private var choice: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Choose the default model").font(.title2.bold())
+            Text("Space Assistant, other agents and apps use it when nothing chooses a model for them. You can change it later in Settings.")
+                .foregroundStyle(.secondary)
+            if let m = settings.settings?.models {
+                Picker("Default model", selection: $choice) {
+                    ForEach(m.options) { Text(verbatim: $0.label).tag(Optional($0.value)) }
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+                .onAppear { if choice == nil { choice = m.options.first(where: { $0.tier == "intermediate" })?.value } }
+            } else {
+                ProgressView().controlSize(.small)
+            }
+            if let reason = settings.saveError {
+                Text("The choice was not saved: \(reason)").font(.callout).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Continue") {
+                    Task {
+                        await settings.setDefaultModel(choice)
+                        if settings.saveError == nil { model.local.needsModelChoice = false }
+                    }
+                }
+                .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                .disabled(choice == nil || settings.isSaving)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+        .interactiveDismissDisabled()
+        .task { if settings.settings?.models == nil { await settings.refresh() } }
     }
 }
 

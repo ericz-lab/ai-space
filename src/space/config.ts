@@ -85,7 +85,7 @@ export type Config = {
   terminal: TerminalConfig;
   /** The router (docs/router.md): off unless SPACE_ROUTER=caddy, with SPACE_DOMAIN as the wildcard's domain. */
   router: RouterConfig;
-  /** Where snapshots go (SPACE_BACKUP_URL); default s3://<SPACE_S3_BUCKET>/backups/<SPACE_NAME>/ when S3 is configured; empty = backup tasks fail until set. */
+  /** Where snapshots go (SPACE_BACKUP_URL); default s3://<SPACE_S3_BUCKET>/backups/<SPACE_NAME>/ when S3 is configured; empty = backups off, no backup task is registered. */
   backupUrl: string;
   /** Cron for the per-app backup tasks (SPACE_BACKUP_SCHEDULE); each app gets its own minute. */
   backupSchedule: string;
@@ -218,7 +218,7 @@ export async function openBackups(config: Config, log: (m: string) => void = (m)
   const db = await openDatabase(sqliteUrl(config.dbPath));
   const store = await BackupStore.open(db);
   let target: BackupTarget | undefined;
-  if (!config.backupUrl) log("[backup] SPACE_BACKUP_URL is not set; backup tasks will fail until it is (docs/backup.md)");
+  if (!config.backupUrl) log("[backup] off: SPACE_BACKUP_URL is not set (docs/backup.md)");
   else {
     try {
       target = openBackupTarget(config.backupUrl, config.s3);
@@ -227,7 +227,7 @@ export async function openBackups(config: Config, log: (m: string) => void = (m)
       log(`[backup] ${(e as Error).message}`);
     }
   }
-  const tools = missingArchiveTools();
+  const tools = config.backupUrl ? missingArchiveTools() : [];
   if (tools.length) log(`[backup] ${tools.join(" and ")} not on PATH; backup tasks will fail until installed`);
   return { db, store, target };
 }

@@ -9,7 +9,7 @@ import { type TaskView, taskRef } from "./common.ts";
  */
 
 type Services = { services: { app: string; peer?: string; port: number; health: string; status: string; supervision?: { action: string; error?: string } }[]; peers: unknown[]; supervisor?: string };
-type Backups = { target: string | null; backups: { app: string; lastOkAt?: number; lastStatus?: string; lastError?: string; stale: boolean; nextRunAt?: number }[] };
+type Backups = { enabled?: boolean; target: string | null; backups: { app: string; lastOkAt?: number; lastStatus?: string; lastError?: string; stale: boolean; nextRunAt?: number }[] };
 type Model = { backend: string; runtimes: { name: string; kind: string; backend: string; default: boolean }[]; maxConcurrency: number; running: number; waiting: number };
 type Peers = { peers: { name: string; url: string; health: string; asOf?: string; stale: boolean; apps: number; error?: string }[] };
 
@@ -54,7 +54,7 @@ export const statusNoun: Noun = {
         p.line(`tasks     ${all.length} · ${all.filter((t) => t.enabled).length} enabled${running.length ? ` · ${running.length} running` : ""}${failing.length ? ` · ${failing.length} FAILING: ${failing.map(taskRef).join(", ")}` : ""}${overdue.length ? ` · ${overdue.length} overdue: ${overdue.map(taskRef).join(", ")}` : ""}`);
         if (backups) {
           const b = backups.backups;
-          p.line(`backups   ${backups.target ? `${b.length} apps → ${backups.target}` : "no target (SPACE_BACKUP_URL)"}${staleBackups.length ? ` · ${staleBackups.length} STALE: ${staleBackups.map((x) => x.app).join(", ")}` : b.length ? " · all fresh" : ""}`);
+          p.line(`backups   ${backups.target ? `${b.length} apps → ${backups.target}` : backups.enabled === false ? "off (SPACE_BACKUP_URL is not set)" : "no target (SPACE_BACKUP_URL)"}${staleBackups.length ? ` · ${staleBackups.length} STALE: ${staleBackups.map((x) => x.app).join(", ")}` : b.length ? " · all fresh" : ""}`);
         }
         if (model) p.line(`model     ${model.runtimes.map((r) => `${r.name}${r.default ? "*" : ""}`).join(", ")} · ${model.running} running, ${model.waiting} waiting (cap ${model.maxConcurrency})`);
         if (peers?.peers.length) p.line(`peers     ${peers.peers.map((x) => `${x.name} ${x.health}${x.asOf ? ` (${ago(x.asOf, now)})` : ""}`).join(" · ")}`);

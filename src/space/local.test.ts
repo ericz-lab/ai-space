@@ -1,10 +1,11 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { cp, mkdir, mkdtemp, readlink, readdir, rm, symlink } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readlink, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { RunResult } from "./services/manager.ts";
 import { packApplication } from "./packages/pack.ts";
-import { LOCAL_LABEL, LocalError, type LocalDeps, localInstall, localPaths, localRemoveService, localStatus, localStop, localStart, renderLocalPlist, readActivity } from "./local.ts";
+import { LOCAL_LABEL, LocalError, type LocalDeps, findRuntimes, localInstall, localPaths, localRemoveService, localStatus, localStop, localStart, renderLocalPlist, renderLocalRuntimes, readActivity } from "./local.ts";
+import { parseRuntimesYaml } from "./runtimes/config.ts";
 
 // The Local edition's install, upgrade, rollback and removal, with a stand-in for launchctl that
 // runs the plist's program the way launchd would: real service processes on a temporary workspace.
@@ -106,6 +107,10 @@ async function setup() {
   const workspace = join(home, ".ai-space");
   const log: string[] = [];
   const run = fakeLaunchd(log);
+  // The agent CLI the user would have: a stand-in, chosen by path so the host's own never counts.
+  const claude = join(root, "bin", "claude");
+  await Bun.write(claude, "#!/bin/sh\necho claude-stand-in\n");
+  await chmod(claude, 0o755);
   const deps = (bundle: string): LocalDeps => ({
     env: { SPACE_HOME: workspace, SPACE_LOCAL_PREFIX: join(root, "prefix"), SPACE_LOCAL_AGENTS: join(root, "agents"), PATH: "/usr/bin:/bin" },
     home,
@@ -120,16 +125,65 @@ async function setup() {
     uid: 501,
     log: () => {},
     sleep: Bun.sleep,
+    runtimes: { claude, codex: null },
   });
   // The port is the workspace's: written before the first install, as the app would pick a free one.
   await mkdir(workspace);
   await Bun.write(join(workspace, ".env"), `SPACE_PORT=${port}\n`);
   await Bun.write(join(workspace, "installation.json"), "{}"); // not ours: replaced below
   await rm(join(workspace, "installation.json"));
-  return { root, home, workspace, port, log, deps };
+  return { root, home, workspace, port, log, deps, claude };
 }
 
+describe("agent CLIs", () => {
+  test("a chosen path wins when it is executable; null leaves that one out", async () => {
+    const root = await mkdtemp(join(tmpdir(), "space-local-rt-"));
+    roots.push(root);
+    const exe = join(root, "my claude");
+    await Bun.write(exe, "#!/bin/sh\n");
+    await chmod(exe, 0o755);
+    const plain = join(root, "codex.txt");
+    await Bun.write(plain, "");
+    expect(findRuntimes({ PATH: "/nowhere" }, root, { claude: exe, codex: null })).toEqual({ claude: exe, codex: null });
+    expect(findRuntimes({ PATH: "/nowhere" }, root, { claude: "claude", codex: plain })).toEqual({ claude: null, codex: null });
+  });
+
+  test("runtimes.yaml names both CLIs by path, Claude Code first", () => {
+    const text = renderLocalRuntimes({ claude: "/Users/me/.local/bin/claude", codex: "/Applications/Codex Tools/codex" })!;
+    const { config } = parseRuntimesYaml(text, {});
+    expect(config.default).toBe("claude");
+    expect(config.runtimes.map((r) => [r.name, r.kind, (r as { bin: string[] }).bin])).toEqual([
+      ["claude", "claude-code", ["/Users/me/.local/bin/claude"]],
+      ["codex", "codex-cli", ["/Applications/Codex Tools/codex"]],
+    ]);
+    expect(parseRuntimesYaml(renderLocalRuntimes({ claude: null, codex: "/bin/codex" })!, {}).config.default).toBe("codex");
+    expect(renderLocalRuntimes({ claude: null, codex: null })).toBeUndefined();
+  });
+});
+
 describe("space local", () => {
+  test("a new workspace with no agent CLI is refused before anything is installed", async () => {
+    const { root, workspace, deps } = await setup();
+    await rm(workspace, { recursive: true });
+    const v1 = await fakeRelease(join(root, "app1"), "0.1.0", "a".repeat(40));
+    const none = { ...deps(v1), runtimes: { claude: null, codex: null } };
+    const refused = localInstall(none, { device: "This Mac" });
+    await expect(refused).rejects.toMatchObject({ code: "no-runtime" });
+    expect(await Bun.file(join(workspace, "installation.json")).exists()).toBe(false);
+    expect((await localStatus(none)).state).toBe("absent");
+  });
+
+  test("a runtimes.yaml the workspace already has is left as it is", async () => {
+    const { root, workspace, port, deps } = await setup();
+    await Bun.write(join(workspace, "installation.json"), JSON.stringify({ managedBy: "ai-space-local", installedAt: "2026-10-18T00:00:00.000Z", version: "0.0.0", release: "none" }));
+    const mine = "default: api\nruntimes:\n  api:\n    kind: anthropic-api\n";
+    await Bun.write(join(workspace, "runtimes.yaml"), mine);
+    await Bun.write(join(workspace, ".env"), `SPACE_PORT=${port}\nANTHROPIC_API_KEY=sk-test\n`);
+    const v1 = await fakeRelease(join(root, "app1"), "0.1.0", "a".repeat(40));
+    await localInstall({ ...deps(v1), runtimes: { claude: null, codex: null } });
+    expect(await Bun.file(join(workspace, "runtimes.yaml")).text()).toBe(mine);
+  }, 60_000);
+
   test("activity failures do not silently become idle", async () => {
     const { deps, workspace } = await setup();
     for (const code of [401, 500]) {
@@ -150,7 +204,7 @@ describe("space local", () => {
   });
 
   test("installs, starts as managed, upgrades, rolls a broken release back, stops, removes the service", async () => {
-    const { root, workspace, port, log, deps } = await setup();
+    const { root, workspace, port, log, deps, claude } = await setup();
     // A workspace holding only the port is still "absent"-like? No: it has a file, so it would be foreign.
     // The app writes the port into a fresh workspace after this check; here we clear it for the first install.
     await rm(workspace, { recursive: true });
@@ -176,6 +230,9 @@ describe("space local", () => {
     expect(env).toContain("SPACE_AUTH=builtin");
     expect(env).toContain(`SPACE_PORT=${port}`);
     expect(env).toContain("SPACE_TERMINAL_ENABLED=1");
+    // The agent CLI found becomes the workspace's runtime, by its absolute path.
+    const runtimes = parseRuntimesYaml(await Bun.file(join(workspace, "runtimes.yaml")).text(), {}).config;
+    expect(runtimes).toEqual({ default: "claude", runtimes: [{ name: "claude", kind: "claude-code", bin: [claude], chatArgs: [] }] });
 
     // The device token reaches an owner route; nothing else does.
     const layout = (h: Record<string, string>) => fetch(`http://127.0.0.1:${port}/api/panel/layout`, { headers: h });

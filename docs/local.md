@@ -50,13 +50,32 @@ All take `--json`; the app parses that. They work with ai-space down.
 
 | Command | Does |
 | --- | --- |
-| `space local status` | the app's release, the installed one, the workspace and its owner, the LaunchAgent, what answers on the port, `claude` and `codex` |
-| `space local install [--migrate] [--device <name>] [--wait | --now]` | copy the release out, switch `current`, `init` the workspace, set `SPACE_EDITION=local`, `SPACE_AUTH=builtin`, `SPACE_SUPERVISOR=space`, `SPACE_DEFAULT_APPS=none` (other values stay; `SPACE_TERMINAL_ENABLED=1` and `SPACE_PACKAGE_PORT`, 8702 or a free port, only when the workspace has no value), mark it owned, write and start the LaunchAgent, wait for the service to answer as this version, install the bundled apps. A start that does not answer within a minute puts the previous release back. `--device` also makes a device credential and prints its token once |
+| `space local status [--claude <path>] [--codex <path>]` | the app's release, the installed one, the workspace and its owner, the LaunchAgent, what answers on the port, `claude` and `codex` |
+| `space local install [--migrate] [--device <name>] [--wait | --now] [--claude <path>] [--codex <path>]` | refuse a workspace with no runtime when this Mac has no agent CLI (`no-runtime`), copy the release out, switch `current`, `init` the workspace, write `runtimes.yaml` from the CLIs found when the workspace has none (see [First run](#first-run)), set `SPACE_EDITION=local`, `SPACE_AUTH=builtin`, `SPACE_SUPERVISOR=space`, `SPACE_DEFAULT_APPS=none` (other values stay; `SPACE_TERMINAL_ENABLED=1` and `SPACE_PACKAGE_PORT`, 8702 or a free port, only when the workspace has no value), mark it owned, write and start the LaunchAgent, wait for the service to answer as this version, install the bundled apps. A start that does not answer within a minute puts the previous release back. `--device` also makes a device credential and prints its token once |
 | `space local start` / `stop` / `restart` | `launchctl enable`+`bootstrap` / `bootout`+`disable` (stays off at login until started) / both |
 | `space local remove-service` | stop and unregister the LaunchAgent and delete the program under Application Support; the workspace stays, still owned, so installing again picks it up |
 
+`--claude` and `--codex` point at a CLI installed where the search does not look (the app's
+Choose…); every command takes them, so the status it prints counts that CLI.
+
 Upgrading is `install` from a newer app. The default port 8700 taken by another program at the
 first install gives the workspace a free one in `SPACE_PORT`.
+
+## First run
+
+1. **Agent CLIs.** The Space runs its agents and model calls through Claude Code or Codex, so the
+   app lists both before Set Up: the path found (`~/.local/bin`, `/opt/homebrew/bin` and the other
+   user tool directories), or how to install it, or Choose… for one elsewhere. Set Up stays off
+   until one is there. Install writes `<workspace>/runtimes.yaml` naming each CLI by its absolute
+   path, Claude Code the default when both are here, unless the workspace already has that file or
+   runtime variables (`SPACE_MODEL_BIN`, `SPACE_CHAT_BIN`, `SPACE_MODEL_SSH_HOST`,
+   `SPACE_MODEL_API_KEY`) in `.env`; then nothing is written. A failed upgrade removes a file it wrote.
+2. **Default model.** Once the Space answers, the app reads `GET /api/model/preferences`. With no
+   default yet it asks for one, from every tier of every CLI the Space has, and saves it with `PUT`:
+   the same setting as Settings → Models → Default model, used by Space Assistant, the other agents
+   and apps when nothing chooses a model for them. The step cannot be skipped; Settings changes it later.
+3. **Backups** are off until a target is set (`SPACE_BACKUP_URL`, [backup.md](backup.md)); the
+   first run does not ask, and Settings shows no backup status while they are off.
 
 ## Signing in
 
@@ -74,7 +93,7 @@ the Mac; `space auth init` sets one later for a browser elsewhere ([auth.md](aut
 | Bun, a PTY helper | in the release |
 | `git` | a stub, never started: default apps are not cloned; bundled apps install from packages |
 | `claude`, `codex` | the user's own; the service adds `~/.local/bin`, `~/.claude/local`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and others to the bare PATH launchd gives it (`src/space/host-tools.ts`) |
-| `zstd` | missing: backups fail until it is installed |
+| `zstd` | needed only once backups are turned on (`SPACE_BACKUP_URL`); they are off by default |
 
 
 ## Updates

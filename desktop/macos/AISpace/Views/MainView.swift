@@ -20,8 +20,10 @@ struct MainView: View {
         }
         // A theme changes tokens every view reads; the views are made again in it.
         .id(prefs.themeID)
-        .sheet(isPresented: Binding(get: { model.local.needsRuntimeGuide }, set: { model.local.needsRuntimeGuide = $0 })) {
-            LocalRuntimeGuide(local: model.local)
+        .sheet(isPresented: Binding(get: { model.local.needsModelChoice && model.store.managedConnection != nil }, set: { model.local.needsModelChoice = $0 })) {
+            if let c = model.store.managedConnection {
+                LocalModelChoice(model: model, settings: model.settings(for: c))
+            }
         }
         .tint(Theme.accent)
         .frame(minWidth: 820, minHeight: 540)

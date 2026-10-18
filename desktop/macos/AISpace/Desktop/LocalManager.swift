@@ -13,8 +13,10 @@ final class LocalManager: ObservableObject {
     @Published private(set) var status: LocalStatus?
     @Published private(set) var busy: String?
     @Published var failure: LocalFailure?
-    /// Set after an install that found no agent CLI: the first-run flow then shows its guide.
-    @Published var needsRuntimeGuide = false
+    /// Set once the managed Space answers without a default model: the first run asks for one.
+    @Published var needsModelChoice = false
+    /// Agent CLIs the user pointed the app at, by name (`claude`, `codex`), when the search misses them.
+    @Published private(set) var chosenRuntimes: [String: String] = LocalManager.loadChosenRuntimes()
     @Published private(set) var lastApps: [LocalInstallResult.App] = []
     /// The work an automatic update is waiting for; nil when it is not waiting.
     @Published private(set) var updateWaitingFor: SpaceActivity?
@@ -63,9 +65,44 @@ final class LocalManager: ObservableObject {
         }
     }
 
+    // MARK: Agent CLIs
+
+    private static let chosenKey = "local.chosenRuntimes"
+
+    private static func loadChosenRuntimes() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: chosenKey) as? [String: String] ?? [:]
+    }
+
+    /// `--claude <path> --codex <path>`: what the user chose, for every `space local` command.
+    private var runtimeArgs: [String] {
+        ["claude", "codex"].flatMap { name in chosenRuntimes[name].map { ["--\(name)", $0] } ?? [] }
+    }
+
+    /// Lets the user pick the CLI's program file when it is installed where the search does not look.
+    func chooseRuntime(_ name: String) async {
+        let panel = NSOpenPanel()
+        panel.title = String(localized: "Choose the \(name) program")
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = true
+        panel.showsHiddenFiles = true
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        chosenRuntimes[name] = url.resolvingSymlinksInPath().path
+        UserDefaults.standard.set(chosenRuntimes, forKey: Self.chosenKey)
+        await refresh()
+    }
+
+    func forgetRuntimeChoice(_ name: String) async {
+        chosenRuntimes[name] = nil
+        UserDefaults.standard.set(chosenRuntimes, forKey: Self.chosenKey)
+        await refresh()
+    }
+
     func refresh() async {
         guard available else { return }
-        do { status = try await run(LocalStatus.self, ["status"]) } catch let f as LocalFailure { failure = f } catch {
+        do { status = try await run(LocalStatus.self, ["status"] + runtimeArgs) } catch let f as LocalFailure { failure = f } catch {
             failure = LocalFailure(code: "error", error: error.localizedDescription)
         }
     }
@@ -92,13 +129,13 @@ final class LocalManager: ObservableObject {
             case .now: args.append("--now")
             }
             if !haveToken { args += ["--device", Host.current().localizedName ?? "This Mac"] }
+            args += runtimeArgs
             let result = try await run(LocalInstallResult.self, args)
             if let device = result.device { DeviceKeychain.save(device.token, for: result.workspace) }
             lastApps = result.apps
-            status = try await run(LocalStatus.self, ["status"])
+            status = try await run(LocalStatus.self, ["status"] + runtimeArgs)
             guard let url = URL(string: result.url) else { return }
             model.adoptLocal(url: url)
-            needsRuntimeGuide = !(status?.runtimes.any ?? true)
         }
     }
 
@@ -141,7 +178,7 @@ final class LocalManager: ObservableObject {
         retry?.cancel()
         retry = nil
         updateWaitingFor = nil
-        await perform(what) { status = try await run(LocalStatus.self, [verb]) }
+        await perform(what) { status = try await run(LocalStatus.self, [verb] + runtimeArgs) }
     }
 
     // MARK: Signing in
