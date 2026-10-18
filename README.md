@@ -94,23 +94,28 @@ git push <host> main      # checks out into ~/.ai-space/core, runs deploy/instal
 
 `deploy/install.sh` installs `deploy/ai-space.service` into `~/.config/systemd/user/`, enables linger, and restarts the service. Logs: `journalctl --user -u ai-space -f`.
 
-Then run `bun run setup` in `~/.ai-space/core`. It checks the tools ai-space spawns (claude, gh, cloudflared, and the optional `cf` CLI), asks for every workspace `.env` value section by section, sends a test notification, probes the bucket, and prints what is left to do on Cloudflare as `cf` commands ([docs/cloudflare.md](docs/cloudflare.md)).
+Then run `bun run setup` in `~/.ai-space/core`. It does the basic configuration first: checks the tools the basic install needs (bun, git, one logged-in AI runtime), asks for the core values, and chooses who runs the apps' services. Then it offers the optional extensions, each of which can also be run later on its own: `space setup github`, `ingress` (a domain through a tunnel, with Cloudflare's `cf` commands printed), `backup`, `notifications`, `peers`.
 
 </details>
 
 ### What you need
 
-Five things, in the order you will use them. The first two are required; the rest make the result usable from anywhere and safe to keep.
+Two things are required:
 
 | # | What | Why |
 | --- | --- | --- |
 | 1 | **A coding agent** ([Claude Code](https://claude.com/claude-code), Codex, …) with its login | It installs ai-space, the panel's agents run as it, and you build apps with it |
 | 2 | **A Linux server** (Debian/Ubuntu, systemd, SSH key) that stays on | 1 vCPU / 2 GB runs the core with swap; 2 vCPU / 4 GB is comfortable with several apps (each agent session is about 150 MB) |
-| 3 | **A Cloudflare account** (free tier) | Tunnel publishes the panel with no open port, Access puts a login in front, R2 (10 GB free) holds backups |
-| 4 | **GitHub CLI** (`gh`), logged in on the server | The agent clones, commits and pushes app repositories with one login and no deploy keys |
-| 5 | **A domain on Cloudflare** | One hostname per app, `space.example.com` for the panel |
 
-Without 3 and 5 the panel stays on loopback, reachable through an SSH port forward, and backups need another S3 bucket.
+With only these, the basic install is complete: the panel is on loopback, opened from your laptop through an SSH port forward, and new apps are local git repositories. Add the rest when you need it, each with `space setup <name>`:
+
+| Extension | What it takes | What it gives |
+| --- | --- | --- |
+| `ingress` | A domain and a Cloudflare account (free tier), or another tunnel with an access layer | The panel and every app on a hostname, from anywhere, with a login in front and no open port |
+| `github` | GitHub CLI (`gh`), logged in | Each new app gets a repository under your account; agents push with one login |
+| `backup` | An S3-compatible bucket (Cloudflare R2: 10 GB free) or a mounted directory | Daily snapshots of every app, weekly verification, restore |
+| `notifications` | A chat bot or webhook | Task failures and app messages in your chat |
+| `peers` | A second machine | One panel over both |
 
 ## 🏗️ Architecture
 

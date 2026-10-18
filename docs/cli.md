@@ -72,7 +72,7 @@ Rules:
 | `space app hide APP` / `unhide` | the panel's hidden flag | `PATCH /api/apps/:app` |
 | `space app uninstall APP [--yes] [--force]` | stop, remove, forget; asks unless `--yes`; refuses while a task of the app runs unless `--force` | `DELETE /api/apps/:app` |
 | `space app env APP` | `export` lines of the provisioned variables | disk (`storage.envFor`) |
-| `space app new NAME [--dir D] [--title T] [--port N] [--no-github]` | the `new-app` command of [app-spec.md](app-spec.md): the `space-app` template filled in, `git init`, first commit, a private repository under `SPACE_GITHUB_OWNER` when set | disk (`newapp.ts`) |
+| `space app new NAME [--dir D] [--title T] [--port N] [--no-github]` | the `new-app` command of [app-spec.md](app-spec.md): the `space-app` template filled in, `git init`, first commit, a private repository under `SPACE_GITHUB_OWNER` when set and `gh` is on PATH (otherwise a warning, and the app stays local) | disk (`newapp.ts`) |
 | `space task ls [--app APP] [--failing]` | task, schedule, enabled, last run, next run | `GET /api/tasks` |
 | `space task show TASK` | effective view, state, last runs | `GET /api/tasks/:id`, `/runs?limit=5` |
 | `space task run TASK [--wait] [--timeout D]` | force a run; `--wait` polls the run history to its end, prints the output and exits with its status | `POST /api/tasks/:id/run`, then `GET .../runs` |
@@ -100,7 +100,7 @@ Rules:
 | `space peer ls` | health, snapshot age, app counts | `GET /api/peers` |
 | `space router show` / `sync` | routes with status; write and reload | `GET /api/router`, `POST /api/router/sync` |
 | `space api METHOD PATH [BODY\|-] [--app]` | one call with the operator token (`--app`: the app's own); JSON pretty-printed, SSE one line per event | any |
-| `space init` / `setup` / `start` / `install-defaults` | the lifecycle commands, unchanged | disk |
+| `space init` / `setup` / `start` / `install-defaults` | the lifecycle commands, unchanged; `setup` is the basic configuration, `setup github` / `ingress` / `backup` / `notifications` / `peers` one optional extension each ([install.md](install.md)) | disk |
 | `space codex-upgrade run [--dry-run] [--no-update] [--no-restart]` | update the Codex CLI, check each codex tier's model, restart so the catalogue gives the tiers ([runtimes.md](runtimes.md#keeping-codex-tiers-current)) | disk, ssh |
 | `space completion zsh\|bash` | a completion script from the same command table the help prints | |
 

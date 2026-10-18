@@ -18,10 +18,14 @@ Before touching the machine, ask for what has no default:
 1. The host and the SSH user you may use, or confirmation that you are on the server.
 2. The name of the user that will own ai-space (default `space`; on a cloud image the existing sudo user is fine).
 3. A short machine name for `SPACE_NAME`.
-4. Whether the panel should be reachable from outside now (a domain on Cloudflare) or stay loopback-only for the moment.
-5. Whether to configure now, or leave for a later run: a notification channel, an S3 or R2 bucket, a peer.
+4. Which optional extensions to add now; each can be added later with `space setup <name>`, and none is needed for the basic install:
+   - `ingress`: the panel reachable from outside (a domain on Cloudflare), or loopback-only for the moment;
+   - `github`: a GitHub owner for new apps' repositories (and `gh` for private repositories and pushes);
+   - `backup`: an S3 or R2 bucket, or a backup directory;
+   - `notifications`: a chat channel;
+   - `peers`: another machine.
 
-Everything else has a default from `.env.example` and the docs.
+Everything else has a default from `.env.example` and the docs. The basic install (phases 1, 2, 3, 5 and 8) needs no GitHub account, Cloudflare account, domain or bucket.
 
 ## Procedure
 
@@ -64,9 +68,9 @@ Then stop: the person runs `claude` once and `/login` (URL plus code on a headle
 
 Proof: `claude -p "Say ok" --output-format json` from `/tmp` returns `"is_error":false`.
 
-### Phase 4: GitHub CLI (step 3, optional)
+### Phase 4: GitHub CLI (step 3, extension `github`, optional)
 
-Only needed to clone private app repositories or for agents that push. Install `gh` from the package repository as in install.md, then stop for `gh auth login --web` (device code). After: `gh auth setup-git`.
+Only needed to clone private app repositories, for agents that push, and for `space app new` to create a repository for each new app. Public repositories clone with git alone. Install `gh` from the package repository as in install.md, then stop for `gh auth login --web` (device code). After: `gh auth setup-git`, and `SPACE_GITHUB_OWNER=<user or org>` in the workspace `.env` if new apps should get a repository there.
 
 Proof: `gh auth status`.
 
@@ -93,11 +97,11 @@ SPACE_NAME=<machine name>
 
 With `SPACE_SUPERVISOR=operator` add `SPACE_SERVICE_STOP=systemctl --user disable --now {app}`; with `space` leave `SPACE_SERVICE_STOP` and `SPACE_SERVICE_LOGS` out, or ai-space will not start ([supervision.md](supervision.md)).
 
-Show the values, write them, `systemctl --user restart ai-space`.
+Show the values, write them, `systemctl --user restart ai-space`. `install.sh` reports the core as installed once `/healthz` answers; a default app whose installer fails is reported on its own line and retried with `bun src/index.ts install-defaults`, not a failed install.
 
-Proof: `curl -s 127.0.0.1:8700/healthz` is `{"ok":true}`; `curl -s 127.0.0.1:8700/api/apps` lists the default app (`ai-usage`) and nothing else, and `curl -s 127.0.0.1:8880/healthz` answers; `journalctl --user -u ai-space -n 20` shows `listening on` and no error. Also set up git-push deploys from the person's machine if you are in the first shape (install.md step 4, second block) and prove it with one push.
+Proof: `curl -s 127.0.0.1:8700/healthz` is `{"ok":true}`; `curl -s 127.0.0.1:8700/api/apps` lists the default app (`ai-usage`) and nothing else, and `curl -s 127.0.0.1:8880/healthz` answers; `journalctl --user -u ai-space -n 20` shows `listening on` and no error. Also set up git-push deploys from the person's machine if you are in the first shape (install.md step 4, second block) and prove it with one push. Without the `ingress` extension, show the person how to open the panel: `ssh -L 8700:127.0.0.1:8700 <host>` on their machine, then `http://127.0.0.1:8700`; an app with its own port needs its port forwarded the same way. With phase 8, this is the basic install.
 
-### Phase 6: tunnel and Access (steps 5 and 6, only with a domain)
+### Phase 6: tunnel and Access (steps 5 and 6, extension `ingress`, only with a domain)
 
 Order matters: the Access application first, the public hostname second, so the panel is never reachable without login.
 
@@ -109,8 +113,9 @@ Cloudflare changes go through the `cf` CLI ([cloudflare.md](cloudflare.md)); do 
 
 Proof: `systemctl --user is-active cloudflared`; from outside, `curl -sI https://space.<domain>/api/apps` is a 302 to the Cloudflare login; the person opens the panel in a browser and sees it after login.
 
-### Phase 7: bucket, notifications, peers (steps 7 to 9, each optional)
+### Phase 7: bucket, notifications, peers (steps 7 to 9, extensions `backup`, `notifications`, `peers`, each optional)
 
+- **Backup to a directory** (no account): `SPACE_BACKUP_URL=file:///<mounted dir>/`, restart, then `bun src/index.ts backup space`. Proof: `bun src/index.ts backups` lists it.
 - **Bucket:** `cf r2 buckets create --name <bucket>` (or the dashboard); stop: the person creates the bucket-scoped R2 API token on the dashboard and gives you the two keys. `SPACE_S3_*` in `.env`, restart, then `bun src/index.ts backup space` from the checkout. Proof: the object appears in the bucket; `bun src/index.ts backups` lists it.
 - **Notifications:** `SPACE_NOTIFY_DEFAULT` and `SPACE_NOTIFY_TASKS=default`, restart. Proof: `POST /api/notify/channels/default/test` with the API token and the person confirms the message arrived.
 - **Peer:** follow install.md step 9 for the role the person chose. Proof: `GET /api/peers` on the hub shows this machine `ok`.
@@ -131,7 +136,7 @@ Base, required on every install:
 - [ ] Time zone set (`timedatectl`)
 - [ ] `bun --version` is 1.3 or newer, on PATH in a fresh login shell
 - [ ] git identity set (`git config --global -l`)
-- [ ] `claude --version` works and `claude -p "Say ok" --output-format json` returns `"is_error":false`
+- [ ] One runtime logged in: `claude -p "Say ok" --output-format json` returns `"is_error":false`, or `codex login status` exits 0
 - [ ] `~/.ai-space/core` is a clean checkout of the intended branch (`git status`, `git log -1`)
 - [ ] `systemctl --user is-active ai-space` is `active`, `is-enabled` is `enabled`, `loginctl show-user <user> -p Linger` is `yes`
 - [ ] `curl -s 127.0.0.1:8700/healthz` is `{"ok":true}`
@@ -141,15 +146,19 @@ Base, required on every install:
 - [ ] `journalctl --user -u ai-space -n 50` has no error lines
 - [ ] The person has a copy of `.env` in their password manager (it is never in a backup)
 
-Reachability, when a domain was requested:
+Reachability, without `ingress`:
+
+- [ ] The person opened the panel through `ssh -L 8700:127.0.0.1:8700 <host>`
+
+Reachability, when a domain was requested (`ingress`):
 
 - [ ] `cloudflared` user unit active; token file mode 600
 - [ ] Access application exists for the panel hostname before the hostname does (`cf zero-trust access applications list`)
 - [ ] `curl -sI https://space.<domain>/api/apps` from outside is 302; an incognito browser is blocked; the person can log in and see the panel
 
-Services, when requested:
+Other extensions, when requested:
 
-- [ ] `gh auth status` logged in, `gh auth setup-git` done
+- [ ] GitHub: `gh auth status` logged in, `gh auth setup-git` done, `SPACE_GITHUB_OWNER` set if new apps should get a repository
 - [ ] Bucket: `backup space` ran and `backups` lists the snapshot
 - [ ] Notifications: test message received on the default channel
 - [ ] Peer: `GET /api/peers` shows `ok` on the hub

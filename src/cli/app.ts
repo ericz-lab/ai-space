@@ -257,6 +257,6 @@ export const appNoun: Noun = {
     unhide: { usage: "APP", summary: "show the app on the panel again", run: hidden(false) },
     uninstall: { usage: "APP [--yes] [--force]", summary: "stop, take out of the workspace, forget (data kept; --force: even with a task running)", run: uninstall },
     env: { usage: "APP", summary: "the variables storage provisioned, as export lines (eval \"$(space app env APP)\")", run: env },
-    new: { usage: "NAME [--dir DIR] [--title T] [--port N] [--no-github]", summary: "a new app from the template: git init, first commit, private GitHub repository when configured", run: newApp },
+    new: { usage: "NAME [--dir DIR] [--title T] [--port N] [--no-github]", summary: "a new app from the template: git init, first commit, private GitHub repository when GitHub is set up", run: (ctx, argv) => newApp(ctx, argv) },
   },
 };

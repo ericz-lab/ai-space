@@ -9,8 +9,8 @@ import { type Ctx, UsageError } from "./types.ts";
  * `space app new NAME`: the `new-app` command of docs/app-spec.md. Copies
  * the `space-app` skill's template, fills in the name, title and port,
  * `git init` and a first commit, then a private GitHub repository under
- * `SPACE_GITHUB_OWNER` (workspace `.env`) unless `--no-github` or nothing is
- * configured. Registers nothing: putting the directory under `apps/` (or a
+ * `SPACE_GITHUB_OWNER` (workspace `.env`, set by `space setup github`) unless
+ * `--no-github`, nothing is configured, or `gh` is missing (a warning, not a failure). Registers nothing: putting the directory under `apps/` (or a
  * clone of the repository there) is the registration.
  */
 
@@ -84,29 +84,34 @@ export async function createApp(opts: NewAppOptions): Promise<NewAppResult> {
   return { dir, files, committed, repo };
 }
 
-export async function newApp(ctx: Ctx, argv: string[]): Promise<number> {
+export async function newApp(ctx: Ctx, argv: string[], deps: { which?: (cmd: string) => string | undefined; exec?: NewAppOptions["exec"] } = {}): Promise<number> {
   const { flags, positional } = parseArgs(argv, { dir: { kind: "value" }, title: { kind: "value" }, port: { kind: "value" }, "no-github": { kind: "bool" } });
   const name = need(positional, 0, "NAME");
   noMore(positional, 1);
   const env = { ...(await readWorkspaceEnv(workspacePaths(resolveHome(ctx.io.env))).catch(() => ({}))), ...ctx.io.env };
   const owner = env.SPACE_GITHUB_OWNER?.trim();
-  const github = flags["no-github"] || !owner ? (false as const) : { owner, visibility: env.SPACE_GITHUB_VISIBILITY?.trim() || "private" };
+  // GitHub is an extension (space setup github): gh is needed only when it is on, and a missing gh
+  // leaves a complete local app instead of failing after it was made.
+  const ghMissing = Boolean(owner && !flags["no-github"] && !(deps.which ?? whichOnPath)("gh"));
+  const github = flags["no-github"] || !owner || ghMissing ? (false as const) : { owner, visibility: env.SPACE_GITHUB_VISIBILITY?.trim() || "private" };
   const r = await createApp({
     name,
     dir: flags.dir ? resolve(ctx.io.cwd, flags.dir) : resolve(ctx.io.cwd, name),
     title: flags.title ?? titleOf(name),
     port: parseCount(flags.port, Number(PLACEHOLDER_PORT), "--port"),
     github,
+    ...(deps.exec ? { exec: deps.exec } : {}),
     log: (l) => ctx.io.err(`[space] app new: ${l}`),
   });
+  if (ghMissing && !r.note) r.note = `SPACE_GITHUB_OWNER is ${owner} but gh is not on PATH: the app is local only; install gh, gh auth login, then gh repo create ${owner}/${name} --source ${r.dir} --push and set repo: in space.yaml`;
   if (ctx.flags.json) {
-    ctx.print.data({ ok: !r.note, ...r });
-    return r.note ? 1 : 0;
+    ctx.print.data({ ok: !r.note || ghMissing, ...r });
+    return r.note && !ghMissing ? 1 : 0;
   }
-  ctx.print.line(`${name}: created in ${r.dir}${r.repo ? `, repository ${r.repo}` : github ? "" : " (no repository: --no-github, or SPACE_GITHUB_OWNER is not set)"}`);
+  ctx.print.line(`${name}: created in ${r.dir}${r.repo ? `, repository ${r.repo}` : github ? "" : " (no repository: --no-github, or GitHub is not set up: space setup github)"}`);
   if (r.note) ctx.io.err(`space: app new: ${r.note}`);
   ctx.print.line(`next: edit space.yaml (delete the sections the app does not need), then put the directory under apps/ and run space app sync`);
-  return r.note ? 1 : 0;
+  return r.note && !ghMissing ? 1 : 0;
 }
 
 export function titleOf(name: string): string {
@@ -125,6 +130,10 @@ async function walk(root: string, rel = ""): Promise<string[]> {
     else out.push(path);
   }
   return out.sort();
+}
+
+function whichOnPath(cmd: string): string | undefined {
+  return Bun.which(cmd) ?? undefined;
 }
 
 async function exists(path: string): Promise<boolean> {

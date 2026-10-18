@@ -10,15 +10,15 @@ import type { Workspace } from "./workspace.ts";
 /**
  * `bun src/index.ts setup`: the interactive first-install walk-through.
  *
- * Checks the tools ai-space spawns (bun, git, tar, zstd, claude, gh, cloudflared, and the
- * optional `cf` for Cloudflare changes), then
- * asks for every workspace `.env` value section by section (core, who runs
- * the services, notification channel, S3 blob store, peers), verifies what can be verified from the
- * machine (a test message, one S3 list call), writes `<workspace>/.env`
- * keeping every line it does not touch, and prints what remains to be done
- * elsewhere (tunnel hostnames, the access layer, as the `cf` commands of
- * cloudflare.ts). Re-runnable: existing
- * values are the defaults. The full procedure is in docs/install.md.
+ * The basic install first: the tools it needs (bun, git, one AI runtime, a user service
+ * manager), the core values and who runs the apps' services. Then the optional extensions
+ * (github, ingress, backup, notifications, peers), each only when picked, or on its own as
+ * `setup <extension>`; an extension's tools are checked only when it is on, so a machine
+ * with no GitHub, Cloudflare, domain or bucket completes the basic install. Verifies what
+ * can be verified from the machine (a test message, one S3 list call), writes
+ * `<workspace>/.env` keeping every line it does not touch, and ends with the state of the
+ * basic install and of each extension. Re-runnable: existing values are the defaults.
+ * The full procedure is in docs/install.md.
  *
  * Every side effect goes through `SetupDeps`, so the flow runs unchanged
  * under a scripted terminal in tests.
@@ -62,8 +62,10 @@ export type SetupDeps = {
 export type SetupOutcome = {
   /** Keys written, in order; secrets included (the caller masks when printing). */
   written: string[];
-  /** Tool checks that did not pass, with the hint shown. */
+  /** Basic-install checks that did not pass (empty for `setup <extension>`). */
   missing: string[];
+  /** The state of each extension reported at the end. */
+  extensions: Partial<Record<Extension, ExtensionState>>;
   restarted: boolean;
 };
 
@@ -207,16 +209,17 @@ export const CHANNEL_FORMS: Record<ChannelKind, { fields: Field[]; build: (a: Re
 /** `optional`: a failure is shown with its hint but not counted as missing. */
 type Check = { name: string; ok: boolean; detail: string; hint?: string; optional?: boolean };
 
-export async function checkTools(d: SetupDeps): Promise<Check[]> {
+/**
+ * What the basic install needs: bun, git with an identity (a new app is a local repository),
+ * one AI runtime that answers, and a user service manager when the space runs the apps' services.
+ * Nothing here needs an account other than the runtime's, a domain, or a network service.
+ */
+export async function checkBasicTools(d: SetupDeps): Promise<Check[]> {
   const checks: Check[] = [];
   const bun = await d.run(["bun", "--version"]);
   checks.push({ name: "bun", ok: bun.code === 0, detail: bun.stdout.trim(), hint: "curl -fsSL https://bun.sh/install | bash" });
   const git = await d.run(["git", "--version"]);
   checks.push({ name: "git", ok: git.code === 0, detail: git.stdout.trim(), hint: "apt-get install git" });
-  for (const tool of ["tar", "zstd"]) {
-    const found = await d.which(tool);
-    checks.push({ name: tool, ok: Boolean(found), detail: found ?? "not on PATH", hint: `apt-get install ${tool} (backups archive with it; see docs/backup.md)` });
-  }
   const gitUser = await d.run(["git", "config", "--global", "user.email"]);
   checks.push({
     name: "git identity",
@@ -225,44 +228,34 @@ export async function checkTools(d: SetupDeps): Promise<Check[]> {
     hint: 'git config --global user.name "…" && git config --global user.email "…"',
   });
 
+  // One runtime is enough: each is shown, and only "none answers" counts as missing.
+  const runtimes: Check[] = [];
   const claudeBin = (d.env.SPACE_CHAT_BIN?.trim().split(/\s+/)[0] ?? "") || "claude";
   if (await d.which(claudeBin)) {
     const v = await d.run([claudeBin, "--version"]);
     const smoke = await d.run([claudeBin, "-p", "Reply with the single word ok", "--output-format", "json", "--model", "haiku"], { timeoutMs: 90_000 });
     const loggedIn = smoke.code === 0 && /"result"/.test(smoke.stdout);
-    checks.push({
+    runtimes.push({
       name: "claude",
       ok: loggedIn,
       detail: loggedIn ? v.stdout.trim() : (smoke.stderr || smoke.stdout).trim().split("\n").slice(-1)[0] ?? "",
       hint: "run `claude` once and /login (or put ANTHROPIC_API_KEY in the workspace .env)",
+      optional: true,
     });
-  } else {
-    checks.push({ name: "claude", ok: false, detail: "not on PATH", hint: "curl -fsSL https://claude.ai/install.sh | bash" });
   }
-
-  if (await d.which("gh")) {
-    const gh = await d.run(["gh", "auth", "status"]);
-    checks.push({ name: "gh", ok: gh.code === 0, detail: gh.code === 0 ? "logged in" : "not logged in", hint: "gh auth login --web && gh auth setup-git" });
-  } else {
-    checks.push({ name: "gh", ok: false, detail: "not on PATH", hint: "see docs/install.md step 3 (optional: only for cloning private apps)" });
+  if (await d.which("codex")) {
+    const status = await d.run(["codex", "login", "status"], { timeoutMs: 30_000 });
+    const loggedIn = status.code === 0;
+    runtimes.push({ name: "codex", ok: loggedIn, detail: (status.stdout || status.stderr).trim().split("\n")[0] ?? "", hint: "codex login", optional: true });
   }
-
-  // The tunnel's connector: the user unit of install.md, or a system unit from `cloudflared service install`.
-  if (await d.which("cloudflared")) {
-    const user = (await d.run(["systemctl", "--user", "is-active", "cloudflared"])).stdout.trim() === "active";
-    const system = !user && (await d.run(["systemctl", "is-active", "cloudflared"])).stdout.trim() === "active";
-    const detail = user ? "tunnel user unit active" : system ? "tunnel system unit active" : "installed, no active cloudflared unit";
-    checks.push({ name: "cloudflared", ok: user || system, detail, hint: "see docs/install.md step 5" });
-  } else {
-    checks.push({ name: "cloudflared", ok: false, detail: "not on PATH", hint: "see docs/install.md step 5 (the panel stays loopback-only until then)" });
-  }
-
-  // cf makes the Cloudflare changes (docs/cloudflare.md); optional, since any machine with the login can run them.
-  if (await d.which("cf")) {
-    const who = parseWhoami((await d.run(["cf", "auth", "whoami"], { timeoutMs: 30_000 })).stdout);
-    checks.push({ name: "cf", ok: who.ok, detail: who.detail, hint: "cf auth login (or CLOUDFLARE_API_TOKEN); optional", optional: true });
-  } else {
-    checks.push({ name: "cf", ok: false, detail: "not on PATH", hint: "bun add -g cf (Node 22+; optional: Cloudflare changes, docs/cloudflare.md)", optional: true });
+  checks.push(...runtimes);
+  if (!runtimes.some((r) => r.ok)) {
+    checks.push({
+      name: "AI runtime",
+      ok: false,
+      detail: runtimes.length ? "none logged in" : "neither claude nor codex on PATH",
+      hint: "install and log in to one: curl -fsSL https://claude.ai/install.sh | bash, or Codex (docs/runtimes.md)",
+    });
   }
 
   // Service supervision (docs/supervision.md) needs a user manager: systemd's outliving the login session, or launchd's GUI domain.
@@ -270,19 +263,6 @@ export async function checkTools(d: SetupDeps): Promise<Check[]> {
   if (sd) checks.push({ name: "systemd user", ok: sd.ok, detail: sd.detail, hint: `sudo loginctl enable-linger ${d.env.USER ?? "$USER"} (SPACE_SUPERVISOR=space needs it; docs/supervision.md)` });
   const ld = sd ? undefined : await userLaunchd(d);
   if (ld) checks.push({ name: "launchd", ok: ld.ok, detail: ld.detail, hint: "log in on the Mac (automatic login keeps a session after a reboot); SPACE_SUPERVISOR=space needs it (docs/supervision.md#macos)" });
-
-  // The router (docs/router.md) is optional: checked when it is on, or when caddy is there anyway.
-  const caddy = await d.which("caddy");
-  if (d.env.SPACE_ROUTER?.trim() === "caddy" || caddy) {
-    const hint = "see docs/install.md step 5 (wildcard and router)";
-    if (!caddy) checks.push({ name: "caddy", ok: false, detail: "not on PATH", hint });
-    else if (!(await d.which("systemctl"))) checks.push({ name: "caddy", ok: true, detail: "installed (no systemd here; keep it running with a LaunchAgent)", hint });
-    else {
-      const unit = await d.run(["systemctl", "--user", "is-active", "caddy"]);
-      const active = unit.stdout.trim() === "active";
-      checks.push({ name: "caddy", ok: active, detail: active ? "router unit active" : "installed, user unit not active", hint });
-    }
-  }
   return checks;
 }
 
@@ -311,56 +291,286 @@ export async function userLaunchd(d: SetupDeps): Promise<{ ok: boolean; detail: 
 }
 
 /* ------------------------------------------------------------------------ */
+/* Extensions                                                               */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * What a space can do beyond the basic install, each added on its own, after it and in any order
+ * (`space setup <extension>`). None is needed to install, start or use a space on loopback.
+ */
+export const EXTENSIONS = ["github", "ingress", "backup", "notifications", "peers"] as const;
+export type Extension = (typeof EXTENSIONS)[number];
+
+export const EXTENSION_TITLES: Record<Extension, string> = {
+  github: "GitHub: new apps get a repository under your account (gh)",
+  ingress: "Outside access: the panel and apps on a domain, through a tunnel and an access layer (e.g. Cloudflare)",
+  backup: "Backups: daily snapshots to an S3-compatible bucket (e.g. Cloudflare R2) or a directory",
+  notifications: "Notifications: a chat channel for task failures and app messages",
+  peers: "Peers: one panel over several machines",
+};
+
+/** `off`: not turned on; `on`: turned on and its tools pass; `incomplete`: turned on, something missing. */
+export type ExtensionState = "off" | "on" | "incomplete";
+export type ExtensionReport = { state: ExtensionState; checks: Check[] };
+
+/**
+ * Where the tunnel's connector runs: the user unit of install.md, a system unit from
+ * `cloudflared service install`, or any running cloudflared (a LaunchAgent on a Mac).
+ */
+async function tunnelRunning(d: SetupDeps): Promise<string | undefined> {
+  if (!(await d.which("cloudflared"))) return undefined;
+  if ((await d.run(["systemctl", "--user", "is-active", "cloudflared"])).stdout.trim() === "active") return "tunnel user unit active";
+  if ((await d.run(["systemctl", "is-active", "cloudflared"])).stdout.trim() === "active") return "tunnel system unit active";
+  if ((await d.run(["pgrep", "-x", "cloudflared"])).code === 0) return "cloudflared running";
+  return undefined;
+}
+
+/** Whether the values in force turn an extension on (a running tunnel counts as outside access; an installed binary does not). */
+export async function extensionEnabled(d: SetupDeps, ext: Extension, env: Record<string, string | undefined>): Promise<boolean> {
+  const v = (k: string) => env[k]?.trim() ?? "";
+  switch (ext) {
+    case "github":
+      return Boolean(v("SPACE_GITHUB_OWNER"));
+    case "ingress":
+      return Boolean(v("SPACE_PANEL_HOST") || v("SPACE_DOMAIN") || v("SPACE_ROUTER") === "caddy" || (await tunnelRunning(d)));
+    case "backup":
+      return Boolean(v("SPACE_BACKUP_URL") || (v("SPACE_S3_ACCESS_KEY_ID") && v("SPACE_S3_SECRET_ACCESS_KEY") && v("SPACE_S3_BUCKET")));
+    case "notifications":
+      return Boolean(v("SPACE_NOTIFY_DEFAULT"));
+    case "peers":
+      return Boolean(v("SPACE_HUB_TOKEN") || Object.keys(env).some((k) => /^SPACE_PEER_[A-Z0-9_]+$/.test(k) && !/_(TOKEN|HEADERS|REFRESH)$/.test(k) && v(k)));
+  }
+}
+
+/** The tools an extension needs; asked only for an extension that is on. */
+export async function checkExtensionTools(d: SetupDeps, ext: Extension, env: Record<string, string | undefined>): Promise<Check[]> {
+  const checks: Check[] = [];
+  if (ext === "github") {
+    if (await d.which("gh")) {
+      const gh = await d.run(["gh", "auth", "status"]);
+      checks.push({ name: "gh", ok: gh.code === 0, detail: gh.code === 0 ? "logged in" : "not logged in", hint: "gh auth login --web && gh auth setup-git" });
+    } else {
+      checks.push({ name: "gh", ok: false, detail: "not on PATH", hint: "install GitHub CLI (https://cli.github.com), then gh auth login --web && gh auth setup-git" });
+    }
+  }
+  if (ext === "ingress") {
+    if (await d.which("cloudflared")) {
+      const running = await tunnelRunning(d);
+      checks.push({ name: "cloudflared", ok: Boolean(running), detail: running ?? "installed, not running", hint: "see docs/install.md (outside access)" });
+    } else {
+      checks.push({ name: "cloudflared", ok: false, detail: "not on PATH", hint: "see docs/install.md (outside access)" });
+    }
+    // cf makes the Cloudflare changes (docs/cloudflare.md); optional, since any machine with the login can run them.
+    if (await d.which("cf")) {
+      const who = parseWhoami((await d.run(["cf", "auth", "whoami"], { timeoutMs: 30_000 })).stdout);
+      checks.push({ name: "cf", ok: who.ok, detail: who.detail, hint: "cf auth login (or CLOUDFLARE_API_TOKEN); optional", optional: true });
+    } else {
+      checks.push({ name: "cf", ok: false, detail: "not on PATH", hint: "bun add -g cf (Node 22+; optional: Cloudflare changes, docs/cloudflare.md)", optional: true });
+    }
+    // The router (docs/router.md): checked when it is on, or when caddy is there anyway.
+    const caddy = await d.which("caddy");
+    if (env.SPACE_ROUTER?.trim() === "caddy" || caddy) {
+      const hint = "see docs/install.md (wildcard and router)";
+      if (!caddy) checks.push({ name: "caddy", ok: false, detail: "not on PATH", hint });
+      else if (!(await d.which("systemctl"))) checks.push({ name: "caddy", ok: true, detail: "installed (no systemd here; keep it running with a LaunchAgent)", hint });
+      else {
+        const unit = await d.run(["systemctl", "--user", "is-active", "caddy"]);
+        const active = unit.stdout.trim() === "active";
+        checks.push({ name: "caddy", ok: active, detail: active ? "router unit active" : "installed, user unit not active", hint });
+      }
+    }
+  }
+  if (ext === "backup") {
+    for (const tool of ["tar", "zstd"]) {
+      const found = await d.which(tool);
+      checks.push({ name: tool, ok: Boolean(found), detail: found ?? "not on PATH", hint: `apt-get install ${tool} (backups archive with it; see docs/backup.md)` });
+    }
+  }
+  return checks;
+}
+
+export async function extensionReport(d: SetupDeps, ext: Extension, env: Record<string, string | undefined>): Promise<ExtensionReport> {
+  if (!(await extensionEnabled(d, ext, env))) return { state: "off", checks: [] };
+  const checks = await checkExtensionTools(d, ext, env);
+  return { state: checks.every((c) => c.ok || c.optional) ? "on" : "incomplete", checks };
+}
+
+/** Parse the extensions picked at the prompt: names separated by commas or spaces; undefined when one is unknown. */
+export function parseExtensionList(raw: string): Extension[] | undefined {
+  const names = raw.split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (names.some((n) => !(EXTENSIONS as readonly string[]).includes(n))) return undefined;
+  return EXTENSIONS.filter((e) => names.includes(e));
+}
+
+/* ------------------------------------------------------------------------ */
 /* The walk-through                                                         */
 /* ------------------------------------------------------------------------ */
 
-export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
+export type SetupOptions = {
+  /** Configure this extension only (`space setup <extension>`); the basic questions are skipped. */
+  only?: Extension;
+};
+
+/** What a section needs: ask, record a change, read the value in force. */
+type Section = {
+  d: SetupDeps;
+  set(k: string, v: string): void;
+  current(k: string): string;
+  /** The values in force with this run's changes on top. */
+  merged(): Record<string, string | undefined>;
+};
+
+function sayChecks(io: SetupIO, checks: Check[]): void {
+  for (const c of checks) io.say(`  ${c.ok ? "ok  " : "--  "} ${c.name.padEnd(13)} ${c.detail}${c.ok || !c.hint ? "" : `  →  ${c.hint}`}`);
+}
+
+export async function runSetup(d: SetupDeps, opts: SetupOptions = {}): Promise<SetupOutcome> {
   const { io } = d;
   const updates: Record<string, string> = {};
   const set = (k: string, v: string) => {
     if ((d.env[k] ?? "") !== v) updates[k] = v;
+    else delete updates[k];
   };
-  const current = (k: string) => d.env[k]?.trim() ?? "";
+  const current = (k: string) => (k in updates ? updates[k]! : (d.env[k]?.trim() ?? ""));
+  const sec: Section = { d, set, current, merged: () => ({ ...d.env, ...updates }) };
 
-  io.say("ai-space setup");
+  io.say(opts.only ? `ai-space setup ${opts.only}` : "ai-space setup");
   io.say(`workspace ${d.ws.home}`);
   io.say(`config    ${d.ws.envFile}`);
   io.say("Enter keeps the value in brackets. Nothing is written before the summary at the end.");
   io.say();
 
-  /* 1. tools */
-  io.say("[1/6] Tools");
-  const checks = await checkTools(d);
   const missing: string[] = [];
-  for (const c of checks) {
-    io.say(`  ${c.ok ? "ok  " : "--  "} ${c.name.padEnd(13)} ${c.detail}${c.ok || !c.hint ? "" : `  →  ${c.hint}`}`);
-    if (!c.ok && !c.optional) missing.push(c.name);
-  }
-  io.say();
-
-  /* 2. core */
-  io.say("[2/6] Core");
-  set("SPACE_HOST", await io.ask("Bind address (keep loopback; the tunnel is the way in)", { default: current("SPACE_HOST") || "127.0.0.1" }));
-  set("SPACE_PORT", await askNumber(io, "Port", current("SPACE_PORT") || "8700"));
-  const token = current("SPACE_API_TOKEN");
-  if (token) {
-    io.say(`  SPACE_API_TOKEN is set (${mask(token)}); kept.`);
+  let selected: Extension[];
+  if (opts.only) {
+    selected = [opts.only];
   } else {
-    const t = d.randomToken();
-    io.say("  SPACE_API_TOKEN protects the mutating API routes; generated:");
-    io.say(`  ${t}`);
-    set("SPACE_API_TOKEN", t);
+    /* 1. tools */
+    io.say("[1/3] Tools");
+    const checks = await checkBasicTools(d);
+    sayChecks(io, checks);
+    for (const c of checks) if (!c.ok && !c.optional) missing.push(c.name);
+    io.say();
+
+    /* 2. core */
+    io.say("[2/3] Core");
+    set("SPACE_HOST", await io.ask("Bind address (keep loopback; outside access goes through a tunnel)", { default: current("SPACE_HOST") || "127.0.0.1" }));
+    set("SPACE_PORT", await askNumber(io, "Port", current("SPACE_PORT") || "8700"));
+    const token = current("SPACE_API_TOKEN");
+    if (token) {
+      io.say(`  SPACE_API_TOKEN is set (${mask(token)}); kept.`);
+    } else {
+      const t = d.randomToken();
+      io.say("  SPACE_API_TOKEN protects the mutating API routes; generated:");
+      io.say(`  ${t}`);
+      set("SPACE_API_TOKEN", t);
+    }
+    set("SPACE_MAX_CONCURRENCY", await askNumber(io, "Task runs at the same time (agent tasks hold a slot for minutes)", current("SPACE_MAX_CONCURRENCY") || "4"));
+    set("SPACE_CHAT_MODEL", await io.ask("Default chat model", { default: current("SPACE_CHAT_MODEL") || "sonnet" }));
+    set("SPACE_NAME", await io.ask("Name of this space (shown in the panel and to other machines)", { default: current("SPACE_NAME") || d.hostname() }));
+    io.say();
+
+    /* 3. services */
+    io.say("[3/3] Services (docs/supervision.md)");
+    await sectionServices(sec);
+    io.say();
+
+    /* extensions */
+    io.say("Optional extensions (each one later with: space setup <name>)");
+    for (const ext of EXTENSIONS) {
+      const on = await extensionEnabled(d, ext, sec.merged());
+      io.say(`  ${on ? "on " : "off"}  ${ext.padEnd(13)} ${EXTENSION_TITLES[ext]}`);
+    }
+    for (;;) {
+      const picked = parseExtensionList(await io.ask(`Configure any now? (${EXTENSIONS.join(", ")}; Enter for none)`, { default: "" }));
+      if (picked) {
+        selected = picked;
+        break;
+      }
+      io.say(`  names from: ${EXTENSIONS.join(", ")}`);
+    }
+    io.say();
   }
-  set("SPACE_MAX_CONCURRENCY", await askNumber(io, "Task runs at the same time (agent tasks hold a slot for minutes)", current("SPACE_MAX_CONCURRENCY") || "4"));
-  set("SPACE_CHAT_MODEL", await io.ask("Default chat model", { default: current("SPACE_CHAT_MODEL") || "sonnet" }));
-  set("SPACE_NAME", await io.ask("Name of this space (shown to a hub, badge on peer tiles)", { default: current("SPACE_NAME") || d.hostname() }));
-  const router = (await io.ask("Router: none (one tunnel rule per app) or caddy (one wildcard rule; docs/router.md)", { default: current("SPACE_ROUTER") || "none" })).trim().toLowerCase();
-  if (router !== "none" || current("SPACE_ROUTER")) set("SPACE_ROUTER", router);
-  if (router === "caddy") set("SPACE_DOMAIN", await io.ask("Domain of the wildcard rule (apps get <app>.<domain>)", { default: current("SPACE_DOMAIN") }));
+
+  for (const ext of selected) {
+    io.say(`[${ext}] ${EXTENSION_TITLES[ext]}`);
+    await SECTIONS[ext](sec);
+    io.say();
+  }
+
+  /* summary and write */
+  const keys = Object.keys(updates);
+  if (!keys.length) {
+    io.say("Nothing changed.");
+  } else {
+    io.say(`Changes to ${d.ws.envFile}:`);
+    for (const k of keys) io.say(`  ${k}=${isSecretKey(k) ? mask(updates[k]!) : updates[k]}`);
+    if (await io.confirm("Write them?", true)) {
+      const file = Bun.file(d.ws.envFile);
+      const text = (await file.exists()) ? await file.text() : "";
+      await Bun.write(d.ws.envFile, updateEnvText(text, updates));
+      await chmod(d.ws.envFile, 0o600);
+      io.say("  written.");
+    } else {
+      io.say("  not written.");
+      keys.length = 0;
+      for (const k of Object.keys(updates)) delete updates[k];
+    }
+  }
   io.say();
 
-  /* 3. services */
-  io.say("[3/6] Services (docs/supervision.md)");
+  /* restart */
+  let restarted = false;
+  const unit = await d.run(["systemctl", "--user", "is-enabled", "ai-space"]);
+  if (keys.length && unit.stdout.trim() === "enabled") {
+    if (await io.confirm("Restart the ai-space unit now?", true)) {
+      const r = await d.run(["systemctl", "--user", "restart", "ai-space"]);
+      restarted = r.code === 0;
+      io.say(restarted ? "  restarted; journalctl --user -u ai-space -n 30" : `  restart failed: ${r.stderr.trim()}`);
+    }
+  } else if (unit.stdout.trim() !== "enabled") {
+    io.say("The ai-space unit is not installed yet: bash deploy/install.sh");
+  }
+
+  /* where things stand */
+  const env = sec.merged();
+  const extensions: Partial<Record<Extension, ExtensionState>> = {};
+  io.say();
+  if (!opts.only) io.say(missing.length ? `Basic install: missing ${missing.join(", ")} (hints above).` : "Basic install: ready.");
+  io.say("Extensions:");
+  for (const ext of opts.only ? [opts.only] : EXTENSIONS) {
+    const r = await extensionReport(d, ext, env);
+    extensions[ext] = r.state;
+    io.say(`  ${ext.padEnd(13)} ${r.state}`);
+    if (r.state === "incomplete") sayChecks(io, r.checks.filter((c) => !c.ok && !c.optional).map((c) => ({ ...c, name: `  ${c.name}` })));
+  }
+  io.say();
+  if (extensions.ingress === "off") {
+    sayLocalAccess(io, env);
+  } else if (extensions.ingress !== undefined) {
+    const r = await checkExtensionTools(d, "ingress", env);
+    if (r.find((c) => c.name === "cloudflared")?.ok) io.say("The tunnel is up. Later Cloudflare changes (a hostname, Access, a bucket) go through cf: docs/cloudflare.md");
+    else await sayEdgePlan(d, env);
+  }
+  return { written: keys, missing, extensions, restarted };
+}
+
+/** Without outside access: how to open the panel and the apps from another machine. */
+function sayLocalAccess(io: SetupIO, env: Record<string, string | undefined>): void {
+  const port = Number(env.SPACE_PORT?.trim() || 8700);
+  io.say(`The panel is on http://127.0.0.1:${port}, on this machine only. From another machine:`);
+  io.say(`  ssh -L ${port}:127.0.0.1:${port} <this host>     then open http://127.0.0.1:${port}`);
+  io.say("  An app with its own port needs that port forwarded the same way (-L <port>:127.0.0.1:<port>);");
+  io.say("  a packaged app opens through the gateway port (SPACE_PACKAGE_PORT) when it is on.");
+  io.say("Outside access on a domain: space setup ingress");
+}
+
+/* ------------------------------------------------------------------------ */
+/* Sections                                                                 */
+/* ------------------------------------------------------------------------ */
+
+async function sectionServices({ d, set, current }: Section): Promise<void> {
+  const { io } = d;
   const operatorTemplates = ["SPACE_SERVICE_STOP", "SPACE_SERVICE_LOGS"].filter((k) => current(k));
   const sd = await userSystemd(d);
   const ld = sd ? undefined : await userLaunchd(d);
@@ -385,10 +595,53 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
     io.say("  hand them over (space app supervise <app>), or disable that unit");
     io.say(`  (${ld ? "launchctl bootout gui/$(id -u)/<app> && launchctl disable gui/$(id -u)/<app>" : "systemctl --user disable --now <app>"}) and run \`space app sync <app>\`.`);
   }
-  io.say();
+}
 
-  /* 4. notifications */
-  io.say("[4/6] Notifications");
+async function sectionGithub(sec: Section): Promise<void> {
+  const { d, set, current } = sec;
+  const { io } = d;
+  io.say("  `space app new` then creates a repository for each new app under this owner and pushes to it.");
+  io.say("  Without an owner, new apps stay local git repositories; cloning public apps needs only git.");
+  const owner = (await io.ask("GitHub owner (user or organisation; empty turns it off)", { default: current("SPACE_GITHUB_OWNER") })).trim();
+  set("SPACE_GITHUB_OWNER", owner);
+  if (owner) set("SPACE_GITHUB_VISIBILITY", await io.ask("Visibility of new repositories", { default: current("SPACE_GITHUB_VISIBILITY") || "private", choices: ["private", "public"] }));
+  if (owner) sayChecks(io, await checkExtensionTools(d, "github", sec.merged()));
+}
+
+async function sectionIngress(sec: Section): Promise<void> {
+  const { d, set, current } = sec;
+  const { io } = d;
+  io.say("  ai-space keeps listening on loopback; the way in is a tunnel with an access layer in front (docs/ingress.md).");
+  const router = (await io.ask("Router: none (one tunnel rule per app) or caddy (one wildcard rule; docs/router.md)", { default: current("SPACE_ROUTER") || "none", choices: ["none", "caddy"] })).trim().toLowerCase();
+  if (router !== "none" || current("SPACE_ROUTER")) set("SPACE_ROUTER", router);
+  if (router === "caddy") set("SPACE_DOMAIN", await io.ask("Domain of the wildcard rule (apps get <app>.<domain>)", { default: current("SPACE_DOMAIN") }));
+  else set("SPACE_PANEL_HOST", await io.ask("Hostname of the panel (e.g. space.example.com)", { default: current("SPACE_PANEL_HOST") }));
+  sayChecks(io, await checkExtensionTools(d, "ingress", sec.merged()));
+}
+
+async function sectionBackup(sec: Section): Promise<void> {
+  const { d, set, current } = sec;
+  const { io } = d;
+  const hasS3 = Boolean(current("SPACE_S3_ACCESS_KEY_ID"));
+  if (hasS3) io.say(`  S3 configured: ${current("SPACE_S3_ENDPOINT") || "aws"} bucket ${current("SPACE_S3_BUCKET") || "(per app)"}`);
+  if (current("SPACE_BACKUP_URL")) io.say(`  SPACE_BACKUP_URL=${current("SPACE_BACKUP_URL")}`);
+  io.say("  With S3 credentials, backups go to s3://<default bucket>/backups/<name>/ and apps that declare");
+  io.say("  `storage.blobs: s3` use the bucket too. A directory (a mounted disk) needs no account (docs/backup.md).");
+  const where = (await io.ask("Back up to: s3, dir, or skip", { default: hasS3 ? "skip" : "s3", choices: ["s3", "dir", "skip"] })).trim();
+  if (where === "s3") {
+    const s3 = await askS3(d);
+    if (s3) for (const [k, v] of Object.entries(s3)) set(k, v);
+  } else if (where === "dir") {
+    const cur = current("SPACE_BACKUP_URL").startsWith("file://") ? current("SPACE_BACKUP_URL").slice("file://".length) : "";
+    const dir = (await io.ask("  Absolute directory", { default: cur })).trim().replace(/\/?$/, "/");
+    if (!dir.startsWith("/")) io.say("  not an absolute path; skipped");
+    else set("SPACE_BACKUP_URL", `file://${dir}`);
+  }
+  sayChecks(io, await checkExtensionTools(d, "backup", sec.merged()));
+}
+
+async function sectionNotifications({ d, set, current }: Section): Promise<void> {
+  const { io } = d;
   const existingDefault = current("SPACE_NOTIFY_DEFAULT");
   if (existingDefault) io.say(`  default channel is set (${existingDefault.split("://")[0]}://…)`);
   if (await io.confirm(existingDefault ? "Replace the default channel?" : "Configure a notification channel now?", !existingDefault)) {
@@ -400,29 +653,18 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
   } else if (existingDefault && !current("SPACE_NOTIFY_TASKS")) {
     if (await io.confirm("Report failing tasks to the default channel (SPACE_NOTIFY_TASKS=default)?", true)) set("SPACE_NOTIFY_TASKS", "default");
   }
-  io.say();
+}
 
-  /* 5. blob store */
-  io.say("[5/6] Blob store (S3-compatible, e.g. Cloudflare R2)");
-  const hasS3 = Boolean(current("SPACE_S3_ACCESS_KEY_ID"));
-  if (hasS3) io.say(`  configured: ${current("SPACE_S3_ENDPOINT") || "aws"} bucket ${current("SPACE_S3_BUCKET") || "(per app)"}`);
-  io.say("  Backups go to s3://<default bucket>/backups/ with these credentials unless SPACE_BACKUP_URL says otherwise (docs/backup.md).");
-  io.say("  Only apps that declare `storage.blobs: s3` use it; `file` stores need nothing here.");
-  if (await io.confirm(hasS3 ? "Change the S3 credentials?" : "Configure one now?", false)) {
-    const s3 = await askS3(d);
-    if (s3) for (const [k, v] of Object.entries(s3)) set(k, v);
-  }
-  io.say();
-
-  /* 6. peers */
-  io.say("[6/6] Peers (only with a second machine; see docs/peers.md)");
+async function sectionPeers({ d, set, current }: Section): Promise<void> {
+  const { io } = d;
+  io.say("  Only with a second machine; see docs/peers.md.");
   const hub = current("SPACE_HUB_TOKEN");
   if (hub) io.say(`  SPACE_HUB_TOKEN is set (${mask(hub)}): a hub may list this machine.`);
   if (await io.confirm(hub ? "Rotate the hub token?" : "Will a hub on another machine list this one as a peer?", false)) {
     const t = d.randomToken();
     set("SPACE_HUB_TOKEN", t);
     io.say(`  SPACE_HUB_TOKEN=${t}`);
-    io.say(`  On the hub: SPACE_PEER_${(updates.SPACE_NAME ?? current("SPACE_NAME") ?? d.hostname()).toUpperCase().replace(/[^A-Z0-9]/g, "_")}_TOKEN=<that value>`);
+    io.say(`  On the hub: SPACE_PEER_${(current("SPACE_NAME") || d.hostname()).toUpperCase().replace(/[^A-Z0-9]/g, "_")}_TOKEN=<that value>`);
   }
   const peers = Object.keys(d.env).filter((k) => /^SPACE_PEER_[A-Z0-9_]+$/.test(k) && !/_(TOKEN|HEADERS|REFRESH)$/.test(k));
   if (peers.length) io.say(`  peers listed here: ${peers.map((k) => k.slice("SPACE_PEER_".length).toLowerCase()).join(", ")}`);
@@ -431,51 +673,15 @@ export async function runSetup(d: SetupDeps): Promise<SetupOutcome> {
     if (!p) break;
     for (const [k, v] of Object.entries(p)) set(k, v);
   }
-  io.say();
-
-  /* summary and write */
-  const keys = Object.keys(updates);
-  if (!keys.length) {
-    io.say("Nothing changed.");
-  } else {
-    io.say(`Changes to ${d.ws.envFile}:`);
-    for (const k of keys) io.say(`  ${k}=${isSecretKey(k) ? mask(updates[k]!) : updates[k]}`);
-    if (await io.confirm("Write them?", true)) {
-      const file = Bun.file(d.ws.envFile);
-      const text = (await file.exists()) ? await file.text() : "";
-      await Bun.write(d.ws.envFile, updateEnvText(text, updates));
-      await chmod(d.ws.envFile, 0o600);
-      io.say("  written.");
-    } else {
-      io.say("  not written.");
-      keys.length = 0;
-    }
-  }
-  io.say();
-
-  /* restart */
-  let restarted = false;
-  const unit = await d.run(["systemctl", "--user", "is-enabled", "ai-space"]);
-  if (keys.length && unit.stdout.trim() === "enabled") {
-    if (await io.confirm("Restart the ai-space unit now?", true)) {
-      const r = await d.run(["systemctl", "--user", "restart", "ai-space"]);
-      restarted = r.code === 0;
-      io.say(restarted ? "  restarted; journalctl --user -u ai-space -n 30" : `  restart failed: ${r.stderr.trim()}`);
-    }
-  } else if (unit.stdout.trim() !== "enabled") {
-    io.say("The ai-space unit is not installed yet: bash deploy/install.sh");
-  }
-
-  /* what remains */
-  io.say();
-  if (checks.find((c) => c.name === "cloudflared")?.ok) {
-    io.say("The tunnel is up. Later Cloudflare changes (a hostname, Access, a bucket) go through cf: docs/cloudflare.md");
-  } else {
-    await sayEdgePlan(d, { ...d.env, ...updates });
-  }
-  if (missing.length) io.say(`Tools still missing: ${missing.join(", ")} (hints above).`);
-  return { written: keys, missing, restarted };
 }
+
+const SECTIONS: Record<Extension, (sec: Section) => Promise<void>> = {
+  github: sectionGithub,
+  ingress: sectionIngress,
+  backup: sectionBackup,
+  notifications: sectionNotifications,
+  peers: sectionPeers,
+};
 
 /**
  * What is left on Cloudflare: the `cf` commands of cloudflare.ts when the
@@ -489,9 +695,9 @@ async function sayEdgePlan(d: SetupDeps, env: Record<string, string | undefined>
   const panelHost = v("SPACE_PANEL_HOST") || (domain ? `space.${domain}` : "");
   const zone = domain || panelHost.split(".").slice(1).join(".");
   if (!panelHost || !zone.includes(".")) {
-    io.say("Next, on Cloudflare (docs/install.md steps 5 and 6; the cf commands are in docs/cloudflare.md):");
+    io.say("Next, for outside access (docs/install.md; the cf commands for Cloudflare are in docs/cloudflare.md):");
     io.say(`  - a tunnel with the hostname  space.<your-domain>  →  http://127.0.0.1:${port}`);
-    io.say("  - an Access application on that hostname allowing only you, before it goes live");
+    io.say("  - an access layer on that hostname allowing only you, before it goes live (Cloudflare Access)");
     io.say("  - one hostname per app page (or SPACE_ROUTER=caddy and one wildcard), then that hostname as `url` in the app's space.yaml");
     return;
   }
@@ -508,11 +714,11 @@ async function sayEdgePlan(d: SetupDeps, env: Record<string, string | undefined>
   });
   io.say(`Next, on Cloudflare, from any machine with cf (docs/cloudflare.md). Access allows ${email}; change the body if that is wrong.`);
   for (const line of renderCfScript(cmds)) io.say(`  ${line}`);
-  io.say("Then the cloudflared unit of docs/install.md step 5 with that token.");
+  io.say("Then the cloudflared unit of docs/install.md with that token.");
 }
 
 /* ------------------------------------------------------------------------ */
-/* Sections                                                                 */
+/* Questions                                                                */
 /* ------------------------------------------------------------------------ */
 
 async function askNumber(io: SetupIO, q: string, def: string): Promise<string> {

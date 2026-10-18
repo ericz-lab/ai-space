@@ -1,22 +1,22 @@
 # First install on a server
 
-How to bring ai-space up on a fresh Linux machine, from an empty user account to a panel reachable on a domain behind an access layer, with agents, storage, notifications and app deploys working. Everything runs as one non-root user; sudo is needed only for the few system packages named below.
+How to bring ai-space up on a fresh Linux machine, from an empty user account to a working space, and then, if you want them, a panel reachable on a domain behind an access layer, backups, notifications and more machines. Everything runs as one non-root user; sudo is needed only for the few system packages named below.
 
-What to have before starting is summarised in the README under [What you need](../README.md#what-you-need): a coding agent, a Linux server, a Cloudflare account, GitHub CLI and a domain on Cloudflare.
+What to have before starting is summarised in the README under [What you need](../README.md#what-you-need). The **basic install** (steps 1, 2, 4 and 10) needs only a coding agent and a Linux server: no GitHub account, no Cloudflare account, no domain, no bucket. The panel is then on loopback and opened from your laptop through an SSH port forward. Every other step is an **optional extension**, added afterwards in any order with `space setup <name>`: `github` (step 3), `ingress` (steps 5 and 6), `backup` (step 7), `notifications` (step 8), `peers` (step 9).
 
 The order matters: each step only needs what the steps before it produced.
 
 | Step | What it produces | Needed by |
 | --- | --- | --- |
 | 1. Server user and base tools | a user, git, Bun, a locale and time zone | everything |
-| 2. Claude Code | the runtime login agents run with | panel chat, `agent` tasks, "Add from link" |
-| 3. GitHub CLI | HTTPS git credentials and an identity | cloning apps, agents that push |
-| 4. ai-space core | `~/.ai-space`, the unit on `127.0.0.1:8700`, git-push deploys, `bun run setup` | steps 5 to 9 |
-| 5. Cloudflare Tunnel and DNS | the panel and app hostnames | opening the panel from anywhere |
-| 6. Cloudflare Access | who may open those hostnames | must exist before the panel hostname does |
-| 7. Cloudflare R2 | `SPACE_S3_*` | daily backups of every app, apps that declare `storage.blobs: s3` |
-| 8. Notifications | `SPACE_NOTIFY_*` | task failure reports, apps that notify |
-| 9. Peers | `SPACE_NAME`, `SPACE_HUB_TOKEN` or `SPACE_PEER_*` | only with a second machine |
+| 2. Claude Code (or Codex) | the runtime login agents run with | panel chat, `agent` tasks, "Add from link" |
+| 3. GitHub CLI · optional, `github` | HTTPS git credentials and an identity | private app repositories, a repository for each new app, agents that push |
+| 4. ai-space core | `~/.ai-space`, the unit on `127.0.0.1:8700`, git-push deploys, `bun run setup` | everything after |
+| 5. Cloudflare Tunnel and DNS · optional, `ingress` | the panel and app hostnames | opening the panel from anywhere without an SSH forward |
+| 6. Cloudflare Access · optional, `ingress` | who may open those hostnames | must exist before the panel hostname does |
+| 7. Cloudflare R2 · optional, `backup` | `SPACE_S3_*` (or a backup directory) | daily backups of every app, apps that declare `storage.blobs: s3` |
+| 8. Notifications · optional, `notifications` | `SPACE_NOTIFY_*` | task failure reports, apps that notify |
+| 9. Peers · optional, `peers` | `SPACE_NAME`, `SPACE_HUB_TOKEN` or `SPACE_PEER_*` | only with a second machine |
 | 10. First app and checks | a tile, a chat, a task run | done |
 
 ## Letting an agent install it
@@ -27,7 +27,7 @@ The steps below are written for a person, but a coding agent with a shell (Claud
 
 > Install ai-space on `<host>` following docs/install-by-agent.md. Do the root part of step 1 with sudo and the rest as the user that will own ai-space; stop at every step that needs a login in a browser and tell me what to do.
 
-It runs steps 1 to 4 over SSH and comes back with the browser logins of steps 2, 3 and 5 (a URL and a code each, which it can relay) and the Access application of step 6. Steps 7 to 10 need values from you (bucket credentials, a webhook URL); give them in the terminal when it asks, they end up in the workspace `.env` and nowhere else.
+It runs steps 1, 2 and 4 over SSH and comes back with the browser login of step 2 (a URL and a code, which it can relay); that is the basic install. For the extensions you ask for, it adds the logins of steps 3 and 5 and the Access application of step 6. Steps 7 to 9 need values from you (bucket credentials, a webhook URL); give them in the terminal when it asks, they end up in the workspace `.env` and nowhere else.
 
 **The agent runs on the server.** Install and log in to the agent first, which for Claude Code is step 2, then clone the repository and start the agent inside the checkout:
 
@@ -99,7 +99,7 @@ Optional, in `~/.claude/settings.json`: a default model and any global permissio
 
 ## 3. GitHub CLI
 
-Apps live in `~/.ai-space/apps/<name>` and are usually clones of their repositories; agents that work on an app commit and may push. Use HTTPS with `gh` as the credential helper: one login, no deploy keys per repo.
+Optional (`space setup github`). Apps live in `~/.ai-space/apps/<name>` and are usually clones of their repositories; agents that work on an app commit and may push. Cloning a public repository needs only git, and committing locally needs only git; `gh` is for private repositories, for `space app new` creating a repository under your account (`SPACE_GITHUB_OWNER`), and for agents that push. Without it, new apps stay local git repositories. Use HTTPS with `gh` as the credential helper: one login, no deploy keys per repo.
 
 ```bash
 # Debian/Ubuntu package repo, needs sudo once
@@ -147,7 +147,7 @@ git push <host> main      # checks out into the unit's checkout (~/.ai-space/cor
 
 **Workspace `.env`**
 
-The interactive way: `space setup` (or `bun run setup` in `~/.ai-space/core`). It checks the tools from steps 1 to 3 and step 5 (and lingering for the systemd user manager), asks for every value below, who runs the apps' services, and for the notification channel, R2 credentials and peers of steps 7 to 9 (each can be skipped and added on a later run), sends a test message, probes the bucket, shows a summary with secrets masked, writes `~/.ai-space/.env` keeping every line it did not touch, and restarts the unit. Existing values are the defaults, so re-running it is how a value is changed later.
+The interactive way: `space setup` (or `bun run setup` in `~/.ai-space/core`). It does the basic configuration: checks the tools of steps 1 and 2 (bun, git and its identity, one logged-in runtime, Claude Code or Codex) and lingering for the systemd user manager, asks for the core values below and who runs the apps' services. It then lists the extensions with their state and configures the ones you name, now or later with `space setup github`, `ingress`, `backup`, `notifications` or `peers`; an extension's tools (`gh`, `cloudflared`, `cf`, `caddy`, `tar`, `zstd`) are checked only when it is on. It sends a test message, probes the bucket, shows a summary with secrets masked, writes `~/.ai-space/.env` keeping every line it did not touch, restarts the unit, and ends with "Basic install: ready" or what is missing, then each extension as `off`, `on` or `incomplete`. Existing values are the defaults, so re-running it is how a value is changed later, and re-running the basic part keeps every extension's values.
 
 By hand: edit `~/.ai-space/.env`; `.env.example` in the checkout lists every key. Set now:
 
@@ -183,6 +183,8 @@ space app ls
 If `systemctl --user` says the bus is not available, log out and back in once after `loginctl enable-linger`, or export `XDG_RUNTIME_DIR=/run/user/$(id -u)`.
 
 ## 5. Cloudflare Tunnel and DNS
+
+Optional (`space setup ingress`). Without steps 5 and 6 the panel stays on loopback, and you open it from another machine through an SSH forward: `ssh -L 8700:127.0.0.1:8700 <host>`, then `http://127.0.0.1:8700`. An app with its own port needs that port forwarded the same way; a packaged app opens through the gateway port (`SPACE_PACKAGE_PORT`) when it is on. Do not bind `0.0.0.0` instead of a tunnel: `SPACE_API_TOKEN` protects the API, not the panel, and any other public entry needs an access layer in front of it ([ingress.md](ingress.md)).
 
 ai-space binds loopback on purpose. The tunnel publishes chosen ports on hostnames of your domain, TLS included, with nothing listening on the public IP.
 
@@ -277,7 +279,7 @@ Check from the laptop: the panel hostname shows the Cloudflare login page, then 
 
 ## 7. Cloudflare R2
 
-Only needed when an app declares `storage.blobs: s3`; an app with `storage.blobs: file` uses `<workspace>/data/<app>/blobs/` and needs nothing here. R2 is recommended once files are large (video) or must survive the machine.
+Optional (`space setup backup`). Backups go to any S3-compatible bucket (R2 here, or another provider) or to a directory on a mounted disk (`SPACE_BACKUP_URL=file:///mnt/backup/`, no account needed; [backup.md](backup.md)). The bucket itself is only needed when an app declares `storage.blobs: s3`; an app with `storage.blobs: file` uses `<workspace>/data/<app>/blobs/` and needs nothing here. R2 is recommended once files are large (video) or must survive the machine.
 
 1. R2 → Create bucket (or `cf r2 buckets create --name <bucket>`). One bucket for the space is enough: each app gets its own prefix (`<app>/`) unless its manifest says otherwise.
 2. R2 → Manage R2 API Tokens → Create API token: permission Object Read & Write, scoped to that bucket, no TTL. This one stays on the dashboard: `cf` offers only short-lived R2 credentials. Note the Access Key ID, Secret Access Key and the S3 endpoint `https://<account-id>.r2.cloudflarestorage.com`.
@@ -298,7 +300,7 @@ Optional: a custom domain on the bucket (R2 → Settings → Public access) when
 
 ## 8. Notifications
 
-One channel called `default` is required as soon as any channel exists; apps that name no channel send there, and the scheduler reports tasks that failed three times in a row through `SPACE_NOTIFY_TASKS`. Pick the chat app you actually read.
+Optional (`space setup notifications`). One channel called `default` is required as soon as any channel exists; apps that name no channel send there, and the scheduler reports tasks that failed three times in a row through `SPACE_NOTIFY_TASKS`. Pick the chat app you actually read.
 
 **Telegram**
 
@@ -327,7 +329,7 @@ A message arrives, or `GET /api/notify/channels` shows the provider's error. Bot
 
 ## 9. Peers
 
-Skip this on a single machine. Peers are not addressed by IP: a peer is reached by its tunnel hostname (step 5), so the same hostnames serve both the operator and the hub. Decide which role this machine has:
+Optional (`space setup peers`). Skip this on a single machine. Peers are not addressed by IP: a peer is reached by its tunnel hostname (step 5), so the same hostnames serve both the operator and the hub. Decide which role this machine has:
 
 - **This is the only machine, or the hub** (the one whose panel you open): nothing to set now. When a second machine exists, add to this `.env` `SPACE_PEER_<NAME>=https://space-<name>.example.com`, `SPACE_PEER_<NAME>_TOKEN=<that machine's SPACE_HUB_TOKEN>` and, if its Access app is not bypassed on `/api/peer/*`, `SPACE_PEER_<NAME>_HEADERS=CF-Access-Client-Id: ...; CF-Access-Client-Secret: ...`; restart; `GET /api/peers` shows `ok` and the counts.
 - **This is a peer** of a hub elsewhere: `SPACE_HUB_TOKEN=$(openssl rand -hex 32)` and `SPACE_NAME=<name>` in this `.env`, the Access bypass or service token from step 6 on this panel hostname, and the token goes into the hub's `.env`.

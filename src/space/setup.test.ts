@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHANNEL_FORMS, type SetupDeps, type SetupIO, isSecretKey, mask, quoteEnvValue, runSetup, updateEnvText } from "./setup.ts";
+import { CHANNEL_FORMS, type SetupDeps, type SetupIO, isSecretKey, mask, parseExtensionList, quoteEnvValue, runSetup, updateEnvText } from "./setup.ts";
 import type { ChannelKind } from "./notify/types.ts";
 import { parseChannelUrl } from "./notify/channels.ts";
 import { ensureWorkspace } from "./workspace.ts";
@@ -103,22 +103,28 @@ describe("channel forms", () => {
   });
 });
 
+describe("parseExtensionList", () => {
+  test("names separated by commas or spaces, in the canonical order; unknown names refused", () => {
+    expect(parseExtensionList("")).toEqual([]);
+    expect(parseExtensionList("peers, github backup")).toEqual(["github", "backup", "peers"]);
+    expect(parseExtensionList("cloudflare")).toBeUndefined();
+  });
+});
+
 describe("runSetup", () => {
-  test("first run: generates a token, configures telegram, writes and restarts", async () => {
+  test("first run: generates a token, configures telegram when picked, writes and restarts", async () => {
     const io = scripted([
       ["Port", "8701"],
       ["Task runs", "6"],
       ["Default chat model", "sonnet"],
       ["Name of this space", "box"],
+      ["Configure any now?", "notifications"],
       ["Configure a notification channel now?", true],
       ["Kind", "telegram"],
       ["Bot token", "123:ABC"],
       ["Chat id", "-100"],
       ["Send a test message", true],
       ["Report tasks that fail", true],
-      ["Configure one now?", false],
-      ["Will a hub", false],
-      ["Add a peer", false],
       ["Write them?", true],
       ["Restart the ai-space unit", true],
     ]);
@@ -128,7 +134,8 @@ describe("runSetup", () => {
     expect(io.remaining).toEqual([]);
     expect(sent).toEqual(["telegram://123:ABC@-100"]);
     expect(out.written).toEqual(["SPACE_HOST", "SPACE_PORT", "SPACE_API_TOKEN", "SPACE_MAX_CONCURRENCY", "SPACE_CHAT_MODEL", "SPACE_NAME", "SPACE_NOTIFY_DEFAULT", "SPACE_NOTIFY_TASKS"]);
-    expect(out.missing).toEqual(["gh", "cloudflared"]);
+    expect(out.missing).toEqual([]);
+    expect(out.extensions).toEqual({ github: "off", ingress: "off", backup: "off", notifications: "on", peers: "off" });
     expect(out.restarted).toBe(true);
     const text = await Bun.file(d.ws.envFile).text();
     expect(text).toContain("SPACE_PORT=8701");
@@ -140,13 +147,35 @@ describe("runSetup", () => {
     expect(io.log.join("\n")).not.toContain("SPACE_NOTIFY_DEFAULT=telegram://123");
   });
 
-  test("re-run with everything set changes nothing and writes nothing", async () => {
-    const io = scripted([
-      ["Replace the default channel?", false],
-      ["Change the S3 credentials?", false],
-      ["Rotate the hub token?", false],
-      ["Add a peer", false],
-    ]);
+  test("basic install with no gh, cloudflared or cf: ready, and none of them is run", async () => {
+    const io = scripted([["Write them?", true], ["Restart the ai-space unit", false]]);
+    const d = await deps(io, {}, { which: async (cmd) => (cmd === "claude" ? "/usr/bin/claude" : undefined) });
+    const out = await runSetup(d);
+    expect(out.missing).toEqual([]);
+    expect(out.extensions).toEqual({ github: "off", ingress: "off", backup: "off", notifications: "off", peers: "off" });
+    const ran = d.ran.map((c) => c.join(" "));
+    expect(ran.some((c) => /^(gh|cf|cloudflared)\b/.test(c) || c.includes("cloudflared"))).toBe(false);
+    const log = io.log.join("\n");
+    expect(log).toContain("Basic install: ready.");
+    expect(log).toContain("ssh -L 8700:127.0.0.1:8700");
+    expect(log).toContain("An app with its own port needs that port forwarded");
+    expect(log).not.toContain("cf tunnels create");
+    expect(log).not.toMatch(/--\s+(gh|cloudflared|cf)\b/);
+  });
+
+  test("one runtime is enough: codex logged in without claude passes; neither is missing", async () => {
+    const quiet = scripted([["Write them?", false]]);
+    const codex = await deps(quiet, { SPACE_API_TOKEN: "t" }, {
+      which: async (cmd) => (cmd === "codex" ? "/usr/bin/codex" : undefined),
+      run: async (cmd) => (cmd[0] === "codex" ? { code: 0, stdout: "Logged in using ChatGPT\n", stderr: "" } : cmd[0] === "git" ? { code: 0, stdout: "me@example.com\n", stderr: "" } : { code: 0, stdout: "1.3.0\n", stderr: "" }),
+    });
+    expect((await runSetup(codex)).missing).toEqual([]);
+    const none = await deps(scripted([["Write them?", false]]), { SPACE_API_TOKEN: "t" }, { which: async () => undefined });
+    expect((await runSetup(none)).missing).toEqual(["AI runtime"]);
+  });
+
+  test("re-run with every extension set: changes nothing, writes nothing, keeps the extensions", async () => {
+    const io = scripted([]);
     const env = {
       SPACE_HOST: "127.0.0.1",
       SPACE_PORT: "8700",
@@ -157,15 +186,43 @@ describe("runSetup", () => {
       SPACE_NOTIFY_DEFAULT: "stdout://",
       SPACE_NOTIFY_TASKS: "default",
       SPACE_S3_ACCESS_KEY_ID: "k",
+      SPACE_S3_SECRET_ACCESS_KEY: "s",
+      SPACE_S3_BUCKET: "b",
       SPACE_HUB_TOKEN: "h",
+      SPACE_GITHUB_OWNER: "acme",
     };
     const d = await deps(io, env);
     const before = await Bun.file(d.ws.envFile).text();
     const out = await runSetup(d);
-    expect(io.remaining).toEqual([]);
     expect(out.written).toEqual([]);
     expect(await Bun.file(d.ws.envFile).text()).toBe(before);
     expect(io.log).toContain("Nothing changed.");
+    // gh is on PATH but not logged in: only the GitHub extension is incomplete.
+    expect(out.missing).toEqual([]);
+    expect(out.extensions).toEqual({ github: "incomplete", ingress: "off", backup: "on", notifications: "on", peers: "on" });
+  });
+
+  test("setup github alone: asks only its questions; a missing gh affects only that extension", async () => {
+    const io = scripted([["GitHub owner", "acme"], ["Visibility", "private"], ["Write them?", true], ["Restart the ai-space unit", false]]);
+    const d = await deps(io, { SPACE_API_TOKEN: "t" }, { which: async (cmd) => (cmd === "claude" ? "/usr/bin/claude" : undefined) });
+    const out = await runSetup(d, { only: "github" });
+    expect(io.remaining).toEqual([]);
+    expect(out.written).toEqual(["SPACE_GITHUB_OWNER", "SPACE_GITHUB_VISIBILITY"]);
+    expect(out.missing).toEqual([]);
+    expect(out.extensions).toEqual({ github: "incomplete" });
+    const log = io.log.join("\n");
+    expect(log).not.toContain("[1/3] Tools");
+    expect(log).toContain("gh auth login");
+    expect(d.ran.some((c) => c[0] === "claude")).toBe(false);
+  });
+
+  test("backup to a directory needs no account; tar and zstd are checked only then", async () => {
+    const io = scripted([["Back up to", "dir"], ["Absolute directory", "/mnt/backup"], ["Write them?", true], ["Restart the ai-space unit", false]]);
+    const d = await deps(io, { SPACE_API_TOKEN: "t" }, { which: async (cmd) => (cmd === "tar" ? "/usr/bin/tar" : undefined) });
+    const out = await runSetup(d, { only: "backup" });
+    expect(await Bun.file(d.ws.envFile).text()).toContain("SPACE_BACKUP_URL=file:///mnt/backup/");
+    expect(out.extensions).toEqual({ backup: "incomplete" });
+    expect(io.log.join("\n")).toContain("zstd");
   });
 
   describe("who runs the services", () => {
@@ -177,10 +234,11 @@ describe("runSetup", () => {
         if (bin === "systemctl" && rest[1] === "is-system-running") return { code: 0, stdout: "running\n", stderr: "" };
         if (bin === "systemctl") return { code: 0, stdout: rest[1] === "is-enabled" ? "enabled\n" : "", stderr: "" };
         if (bin === "loginctl") return { code: 0, stdout: `Linger=${linger ? "yes" : "no"}\n`, stderr: "" };
+        if (bin === "claude") return { code: 0, stdout: '{"result":"ok"}\n', stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
       },
     });
-    const quiet: [string, string | boolean][] = [["Configure a notification channel now?", false], ["Configure one now?", false], ["Will a hub", false], ["Add a peer", false], ["Write them?", true], ["Restart the ai-space unit", false]];
+    const quiet: [string, string | boolean][] = [["Write them?", true], ["Restart the ai-space unit", false]];
 
     test("a fresh machine with lingering gets space by default", async () => {
       const io = scripted([...quiet]);
@@ -218,6 +276,7 @@ describe("runSetup", () => {
       which: async (cmd) => (["claude", "gh", "tar", "zstd", "launchctl"].includes(cmd) ? `/usr/bin/${cmd}` : undefined),
       async run(cmd) {
         if (cmd[0] === "launchctl" && cmd[1] === "print") return session ? { code: 0, stdout: `${cmd[2]} = {\n}\n`, stderr: "" } : { code: 125, stdout: "", stderr: "Domain does not support specified action" };
+        if (cmd[0] === "claude") return { code: 0, stdout: '{"result":"ok"}\n', stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
       },
     });
@@ -241,14 +300,15 @@ describe("runSetup", () => {
     });
   });
 
-  describe("Cloudflare", () => {
-    const quiet: [string, string | boolean][] = [["Configure a notification channel now?", false], ["Configure one now?", false], ["Will a hub", false], ["Add a peer", false], ["Write them?", false]];
+  describe("outside access", () => {
+    const quiet: [string, string | boolean][] = [["Write them?", false]];
 
-    test("no tunnel yet and a known domain: the cf commands are printed; a missing cf is not counted", async () => {
-      const io = scripted([...quiet]);
-      const d = await deps(io, { SPACE_API_TOKEN: "t", SPACE_NAME: "box", SPACE_ROUTER: "caddy", SPACE_DOMAIN: "example.com" });
-      const out = await runSetup(d);
-      expect(out.missing).toEqual(["gh", "cloudflared", "caddy"]);
+    test("ingress picked with a domain and no tunnel yet: the cf commands are printed; a missing cf is not counted", async () => {
+      const io = scripted([["Router", "caddy"], ["Domain of the wildcard", "example.com"], ["Write them?", true], ["Restart the ai-space unit", false]]);
+      const d = await deps(io, { SPACE_API_TOKEN: "t", SPACE_NAME: "box" });
+      const out = await runSetup(d, { only: "ingress" });
+      expect(out.missing).toEqual([]);
+      expect(out.extensions).toEqual({ ingress: "incomplete" });
       const log = io.log.join("\n");
       expect(log).toContain("bun add -g cf");
       expect(log).toContain("cf tunnels create --name box --config-src cloudflare");
@@ -256,30 +316,39 @@ describe("runSetup", () => {
       expect(log).toContain("Access allows me@example.com");
     });
 
-    test("a cloudflared system unit counts as the tunnel; cf's login is checked", async () => {
+    test("cloudflared installed but not running does not turn outside access on", async () => {
+      const io = scripted([...quiet]);
+      const d = await deps(io, { SPACE_API_TOKEN: "t" }, { which: async (cmd) => (["claude", "cloudflared"].includes(cmd) ? `/usr/bin/${cmd}` : undefined) });
+      const out = await runSetup(d);
+      expect(out.extensions.ingress).toBe("off");
+      expect(io.log.join("\n")).toContain("ssh -L 8700:127.0.0.1:8700");
+    });
+
+    test("an existing Cloudflare deployment: a cloudflared system unit counts as the tunnel, no question asked", async () => {
       const io = scripted([...quiet]);
       const d = await deps(io, { SPACE_API_TOKEN: "t" });
       const base = d.run;
-      d.which = async (cmd) => (["claude", "gh", "tar", "zstd", "cloudflared", "cf"].includes(cmd) ? `/usr/bin/${cmd}` : undefined);
+      d.which = async (cmd) => (["claude", "tar", "zstd", "cloudflared", "cf"].includes(cmd) ? `/usr/bin/${cmd}` : undefined);
       d.run = async (cmd, opts) => {
         if (cmd.join(" ") === "systemctl is-active cloudflared") return { code: 0, stdout: "active\n", stderr: "" };
         if (cmd[0] === "cf") return { code: 0, stdout: '{"authenticated":false,"error":"Not logged in"}', stderr: "" };
         return base(cmd, opts);
       };
       const out = await runSetup(d);
-      expect(out.missing).toEqual(["gh"]);
+      expect(io.remaining).toEqual([]);
+      expect(out.missing).toEqual([]);
+      expect(out.extensions.ingress).toBe("on");
       const log = io.log.join("\n");
-      expect(log).toContain("tunnel system unit active");
-      expect(log).toContain("Not logged in");
       expect(log).toContain("The tunnel is up.");
       expect(log).not.toContain("cf tunnels create");
+      expect(log).not.toContain("ssh -L");
     });
   });
 
   test("a failed S3 probe is dropped unless kept; a rejected peer token is reported", async () => {
     const io = scripted([
-      ["Configure a notification channel now?", false],
-      ["Configure one now?", true],
+      ["Configure any now?", "backup, peers"],
+      ["Back up to", "s3"],
       ["Endpoint", "https://acc.r2.cloudflarestorage.com"],
       ["Access key id", "id"],
       ["Secret access key", "sec"],
@@ -322,9 +391,6 @@ describe("runSetup", () => {
       ["Bot token", "123:ABC"],
       ["Send a test message", false],
       ["Report tasks that fail", false],
-      ["Configure one now?", false],
-      ["Will a hub", false],
-      ["Add a peer", false],
       ["Write them?", false],
     ]);
     const d = await deps(
@@ -332,7 +398,7 @@ describe("runSetup", () => {
       { SPACE_API_TOKEN: "x" },
       { fetch: (async () => new Response(JSON.stringify({ ok: true, result: [{ message: { chat: { id: -1001, title: "Ops" } } }] }))) as unknown as typeof fetch },
     );
-    await runSetup(d);
+    await runSetup(d, { only: "notifications" });
     // "Chat id" was not scripted, so the default (the first chat found) was taken
     expect(io.remaining).toEqual([]);
     expect(io.log).toContain("    -1001  Ops");
