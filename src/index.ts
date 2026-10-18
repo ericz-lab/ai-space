@@ -467,11 +467,15 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       "/api/connections/channel": "self",
       // What apps read about the space today (space-ops, ai-usage, ai-spark, voice-chat), with their app token.
       "/api/apps": "app-read",
+      "/api/apps/:app": "app-read",
+      "/api/peers/:peer/apps/:app": "app-read",
       "/api/services": "app-read",
       "/api/peers": "app-read",
       "/api/agents": "app-read",
       "/api/checks": "app-read",
       "/api/panel/packages/apps/:app/checks/:check": "app-read",
+      // An app's /api/ paths on a peer, as an app on this machine reaches another app's port directly (space-ops, ai-usage, asset-center).
+      "/api/peers/:peer/apps/:app/proxy/*": "app",
     },
   );
 

@@ -52,8 +52,8 @@ Each route table is composed with a policy in `src/index.ts`; a key overrides it
 | --- | --- | --- |
 | `public` | anyone | `/api/auth/session`, `/api/auth/login`, `/api/auth/logout`, `/healthz`, the page shell and its static files, `/api/chat/widget.js` and `.css`, `/_space/usage.js`, `/_space/usage/beat` |
 | `self` | the route's own strict check | `/api/peer/*` (the hub's `SPACE_HUB_TOKEN`), `/api/connections/channel` (a package connection's token and space id) |
-| `app` | the owner, the operator token, an app's `SPACE_APP_TOKEN`, an external consumer's key | tasks and events (`createRoutes`), the bus, notify, model, chat, voice; each route then decides what that caller may do, as before |
-| `app-read` | as `app` for `GET`/`HEAD`; `owner` otherwise | `/api/apps`, `/api/services`, `/api/peers`, `/api/agents`, `/api/checks`, `/api/panel/packages/apps/:app/checks/:check`: what apps such as space-ops, ai-usage, ai-spark and voice-chat read today |
+| `app` | the owner, the operator token, an app's `SPACE_APP_TOKEN`, an external consumer's key | tasks and events (`createRoutes`), the bus, notify, model, chat, voice, and `/api/peers/:peer/apps/:app/proxy/*` (an app's `/api/` paths on a peer, which an app here could reach on this machine's ports anyway); each route then decides what that caller may do, as before |
+| `app-read` | as `app` for `GET`/`HEAD`; `owner` otherwise | `/api/apps`, `/api/apps/:app`, `/api/peers/:peer/apps/:app`, `/api/services`, `/api/peers`, `/api/agents`, `/api/checks`, `/api/panel/packages/apps/:app/checks/:check`: what apps such as space-ops, ai-usage, ai-spark and voice-chat read today |
 | `owner` | the owner's session or the operator token | everything else: the panel, settings, chat with agents, the terminal, packages, storage, backups, logs, services, shortcuts, the router, usage |
 
 Rules the gate (`src/space/auth/gate.ts`) holds:
