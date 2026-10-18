@@ -5,8 +5,10 @@ import { isOperator } from "./auth.ts";
  * Connected, so a port that answers is not taken for an ai-space; the Local edition will use the
  * id to recognise the installation it owns.
  *
- *   GET /api/space   { product, api, version, edition }, plus { id, name } for the operator token
- *                    or the owner's session
+ *   GET /api/space   { product, api, version, edition, installation }, plus { id, name } for the
+ *                    operator token or the owner's session. `installation` is "managed" when the
+ *                    Local app installed this service (installation.json in the workspace), else
+ *                    "external": the app uses it to tell its own service from someone else's.
  *
  * A public route (docs/auth.md#access-policy): a client asks before anyone has signed in.
  */
@@ -35,14 +37,15 @@ export type SpaceIdentity = {
   version: string;
   edition: Edition;
   api: number;
+  installation: "managed" | "external";
   /** The Space's stable id (the same one packages and connections use); the operator's only. */
   id?: string;
   /** SPACE_NAME, default the hostname; the operator's only. */
   name?: string;
 };
 
-export function createIdentityRoutes(opts: { version: string; edition: Edition; id: string; name: string; token: string }) {
-  const open: SpaceIdentity = { product: PRODUCT, api: API_LEVEL, version: opts.version, edition: opts.edition };
+export function createIdentityRoutes(opts: { version: string; edition: Edition; id: string; name: string; token: string; managed?: boolean }) {
+  const open: SpaceIdentity = { product: PRODUCT, api: API_LEVEL, version: opts.version, edition: opts.edition, installation: opts.managed ? "managed" : "external" };
   return {
     "/api/space": {
       GET: (req: Request) => Response.json(isOperator(req, opts.token) ? { ...open, id: opts.id, name: opts.name } : open, { headers: { "cache-control": "no-store" } }),

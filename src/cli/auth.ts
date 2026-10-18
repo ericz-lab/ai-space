@@ -103,6 +103,54 @@ const revokeSessions = async (ctx: Ctx, argv: string[]) => {
   }
 };
 
+/** A device credential for one client; the token is printed once (docs/auth.md#device-credentials). */
+const deviceAdd = async (ctx: Ctx, argv: string[]) => {
+  const p = parseArgs(argv, {});
+  noMore(p.positional, 1);
+  const name = p.positional[0];
+  if (!name) throw new UsageError("usage: space auth device-add <name>");
+  const { service, mode, close } = await open(ctx);
+  try {
+    const { device, token } = service.addDevice(name);
+    if (ctx.flags.json) return ctx.print.data({ id: device.id, name: device.name, token }), 0;
+    ctx.print.line(`device ${device.id} "${device.name}": ${token}`);
+    ctx.print.line("the token is shown only now; the client sends it as a bearer token");
+    note(ctx, mode);
+    return 0;
+  } finally {
+    close();
+  }
+};
+
+const devices = async (ctx: Ctx, argv: string[]) => {
+  noMore(parseArgs(argv, {}).positional, 0);
+  const { service, close } = await open(ctx);
+  try {
+    const list = service.devices().map((d) => ({ id: d.id, name: d.name, createdAt: new Date(d.createdAt).toISOString(), lastSeenAt: d.lastSeenAt === null ? null : new Date(d.lastSeenAt).toISOString() }));
+    if (ctx.flags.json) return ctx.print.data({ devices: list }), 0;
+    if (!list.length) return ctx.print.line("no device credentials"), 0;
+    for (const d of list) ctx.print.line(`${d.id}  ${d.name}  made ${d.createdAt}  last seen ${d.lastSeenAt ?? "never"}`);
+    return 0;
+  } finally {
+    close();
+  }
+};
+
+const deviceRevoke = async (ctx: Ctx, argv: string[]) => {
+  const p = parseArgs(argv, {});
+  noMore(p.positional, 1);
+  const id = Number(p.positional[0]);
+  if (!Number.isInteger(id)) throw new UsageError("usage: space auth device-revoke <id>");
+  const { service, close } = await open(ctx);
+  try {
+    if (!service.revokeDevice(id)) return ctx.io.err(`error: no live device ${id}`), 1;
+    ctx.print.line(`device ${id} revoked`);
+    return 0;
+  } finally {
+    close();
+  }
+};
+
 export const authNoun: Noun = {
   name: "auth",
   summary: "the owner's password and sign-in sessions (on this machine)",
@@ -111,6 +159,9 @@ export const authNoun: Noun = {
     init: { usage: "[--password-stdin]", summary: "set the owner's password the first time", run: init },
     "reset-password": { usage: "[--password-stdin]", summary: "set a new password and sign every session out", run: resetPassword },
     "revoke-sessions": { usage: "", summary: "sign every session out", run: revokeSessions },
+    "device-add": { usage: "<name>", summary: "make a device credential for one client (printed once)", run: deviceAdd },
+    devices: { usage: "", summary: "list live device credentials", run: devices },
+    "device-revoke": { usage: "<id>", summary: "revoke one device credential", run: deviceRevoke },
   },
   defaultVerb: "status",
 };

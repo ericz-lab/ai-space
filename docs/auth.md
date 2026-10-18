@@ -68,6 +68,17 @@ Rules the gate (`src/space/auth/gate.ts`) holds:
 
 `src/web/Auth.tsx`. When `GET /api/auth/session` says `builtin` and not signed in, the panel shows only the sign-in card. When a session ends while the page is open, the next API call's 401 opens the card over the page: what was open stays open, and the page carries on after signing in. Settings has an Account section under `builtin`: change password, the live sessions with their last activity, sign out one, sign out.
 
+## Device credentials
+
+A client that is its own device, the Local edition's Mac app, holds a device credential instead of
+the owner's password ([local.md](local.md#signing-in)). `space auth device-add <name>` on the
+machine (or `space local install --device <name>`) makes one and prints the token (`spd_…`) once;
+`auth_devices` keeps its SHA-256, a name, and when it was made and last seen. Under `builtin` a
+bearer device token passes the gate as the owner, with or without an owner password set. `POST
+/api/auth/device/session` with it opens an ordinary session for the device's web view and sets the
+cookie. `space auth device-revoke <id>`, or `DELETE /api/auth/devices/:id`, ends it; the sessions it
+opened live on until they are revoked or expire, like any other.
+
 ## Native clients
 
 The Mac and iPhone clients send the cookies of their WebKit store with their own HTTP calls and treat a 401 or a redirect as "sign-in required", which opens the panel in the web view. The built-in sign-in sets an ordinary cookie there, so the same flow applies; verifying it on each client (API, SSE, WebSocket, app pages) is stage 2.
@@ -83,6 +94,9 @@ The Mac and iPhone clients send the cookies of their WebKit store with their own
 | `GET /api/auth/sessions` | owner | `{ sessions: [{ id, createdAt, expiresAt, lastSeenAt, userAgent, current }] }` |
 | `DELETE /api/auth/sessions/:id` | owner | ends one session |
 | `POST /api/auth/sessions/revoke-others` | owner | ends every session but this one |
+| `POST /api/auth/device/session` | self (a device credential) | `{ device, session }` and the cookie |
+| `GET /api/auth/devices` | owner | `{ devices: [{ id, name, createdAt, lastSeenAt }] }` |
+| `DELETE /api/auth/devices/:id` | owner | revokes one device credential |
 
 Under `external` the routes other than `session` answer 404.
 
@@ -96,9 +110,12 @@ Under `external` the routes other than `session` answer 404.
 | `space auth init [--password-stdin]` | sets the owner's password the first time; refused afterwards |
 | `space auth reset-password [--password-stdin]` | a new password, every session ended |
 | `space auth revoke-sessions` | every session ended |
+| `space auth device-add <name>` | a device credential; the token is printed once |
+| `space auth devices` | the live device credentials |
+| `space auth device-revoke <id>` | ends one |
 
 ## Not done yet
 
 - **App hostnames.** Under the router ([router.md](router.md)) an app's own hostname goes from the proxy straight to the app's port, without passing ai-space. The built-in sign-in does not protect those yet, so a space that publishes app hostnames still needs Access in front of them. Stage 2 adds a check route for the proxy (`forward_auth`) and a cookie the app hostnames share. Until then this document does not claim a space can go without an access layer.
 - **Apps reading `app-read` routes** must send their `SPACE_APP_TOKEN`; an app that relied on loopback with no token gets a 401 under `builtin`.
-- The installer's default (`builtin` for a new space), migration of existing spaces, device credentials for the native clients and the desktop edition, more accounts and roles: stages 2 and 3 of #181.
+- The installer's default (`builtin` for a new space), migration of existing spaces, device credentials for the Mac and iPhone clients connecting to a remote Space, more accounts and roles: stages 2 and 3 of #181. The Local edition's device credential is done (above).

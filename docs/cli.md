@@ -58,7 +58,8 @@ Rules:
 
 | Command | Does | Route or file |
 | --- | --- | --- |
-| `space auth status` / `init [--password-stdin]` / `reset-password [--password-stdin]` / `revoke-sessions` | the owner's password and sessions of the built-in sign-in ([auth.md](auth.md)); the password is asked without echo or read from stdin, never an argument | disk (`space.db`), works without ai-space |
+| `space auth status` / `init [--password-stdin]` / `reset-password [--password-stdin]` / `revoke-sessions` / `device-add <name>` / `devices` / `device-revoke <id>` | the owner's password, sessions and device credentials of the built-in sign-in ([auth.md](auth.md)); the password is asked without echo or read from stdin, never an argument | disk (`space.db`), works without ai-space |
+| `space local status` / `install [--migrate] [--device <name>]` / `start` / `stop` / `restart` / `remove-service` | the Local edition's installation on this Mac, what its app runs ([local.md](local.md)) | disk and launchd, works without ai-space |
 | `space status` | health, app services with their health, tasks failing or overdue, last backup per app, model calls in flight, peers up or down; one screen | `/healthz`, `/api/services`, `/api/tasks`, `/api/backups`, `/api/model/status`, `/api/peers` |
 | `space app ls [--panel]` | every app: title, status, service health, url, hidden (`--panel`: only what the panel shows) | `GET /api/apps?all=1` |
 | `space app pack DIR --output FILE [--include PATH,...] [--target OS/ARCH] [--source-included] [--sign-key FILE]` | build a package from explicitly selected prepared files, without network or build hooks ([app-packages.md](app-packages.md)) | disk, works without ai-space |

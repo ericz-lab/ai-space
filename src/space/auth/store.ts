@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   user_agent TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS auth_sessions_expires ON auth_sessions (expires_at);
+CREATE TABLE IF NOT EXISTS auth_devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER,
+  revoked_at INTEGER
+);
 `;
 
 export type Owner = { passwordHash: string; createdAt: number; passwordChangedAt: number };
@@ -39,6 +47,16 @@ export type Session = {
 type SessionRow = { id: number; created_at: number; expires_at: number; last_seen_at: number; revoked_at: number | null; user_agent: string };
 
 const session = (r: SessionRow): Session => ({ id: r.id, createdAt: r.created_at, expiresAt: r.expires_at, lastSeenAt: r.last_seen_at, revokedAt: r.revoked_at, userAgent: r.user_agent });
+
+/**
+ * A device credential: a long-lived bearer token one client holds for itself (the Local edition's
+ * Mac app), made on the machine and revocable on its own. It counts as the owner.
+ */
+export type Device = { id: number; name: string; createdAt: number; lastSeenAt: number | null; revokedAt: number | null };
+
+type DeviceRow = { id: number; name: string; created_at: number; last_seen_at: number | null; revoked_at: number | null };
+
+const device = (r: DeviceRow): Device => ({ id: r.id, name: r.name, createdAt: r.created_at, lastSeenAt: r.last_seen_at, revokedAt: r.revoked_at });
 
 export class OwnerExists extends Error {
   constructor() {
@@ -99,6 +117,27 @@ export class AuthStore {
   /** Revokes every live session except `keep`; the number revoked. */
   revokeAll(at: number, keep?: number): number {
     return this.db.query("UPDATE auth_sessions SET revoked_at = ? WHERE revoked_at IS NULL AND id != ?").run(at, keep ?? -1).changes;
+  }
+
+  addDevice(name: string, tokenHash: string, at: number): Device {
+    return device(this.db.query<DeviceRow, [string, string, number]>("INSERT INTO auth_devices (name, token_hash, created_at) VALUES (?, ?, ?) RETURNING id, name, created_at, last_seen_at, revoked_at").get(name.slice(0, 100), tokenHash, at)!);
+  }
+
+  liveDevice(tokenHash: string): Device | undefined {
+    const r = this.db.query<DeviceRow, [string]>("SELECT id, name, created_at, last_seen_at, revoked_at FROM auth_devices WHERE token_hash = ? AND revoked_at IS NULL").get(tokenHash);
+    return r ? device(r) : undefined;
+  }
+
+  touchDevice(id: number, at: number): void {
+    this.db.query("UPDATE auth_devices SET last_seen_at = ? WHERE id = ?").run(at, id);
+  }
+
+  liveDevices(): Device[] {
+    return this.db.query<DeviceRow, []>("SELECT id, name, created_at, last_seen_at, revoked_at FROM auth_devices WHERE revoked_at IS NULL ORDER BY id").all().map(device);
+  }
+
+  revokeDevice(id: number, at: number): boolean {
+    return this.db.query("UPDATE auth_devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(at, id).changes === 1;
   }
 
   /** Drops rows that can never be valid again, a day after they stopped being valid. */

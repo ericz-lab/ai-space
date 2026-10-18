@@ -27,11 +27,16 @@ describe("GET /api/space", () => {
     const res = await get();
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(await res.json()).toEqual({ product: PRODUCT, api: API_LEVEL, version: "1.2.3", edition: "local" });
+    expect(await res.json()).toEqual({ product: PRODUCT, api: API_LEVEL, version: "1.2.3", edition: "local", installation: "external" });
   });
 
   test("the operator also gets the Space's id and name; a wrong token does not", async () => {
-    expect(await (await get({ authorization: "Bearer op" })).json()).toEqual({ product: PRODUCT, api: API_LEVEL, version: "1.2.3", edition: "local", id, name: "mac" });
+    expect(await (await get({ authorization: "Bearer op" })).json()).toEqual({ product: PRODUCT, api: API_LEVEL, version: "1.2.3", edition: "local", installation: "external", id, name: "mac" });
     expect(await (await get({ authorization: "Bearer nope" })).json()).not.toHaveProperty("id");
+  });
+
+  test("says managed when the Local app installed it", async () => {
+    const managed = createIdentityRoutes({ version: "1.2.3", edition: "local", id, name: "mac", token: "op", managed: true });
+    expect(await (await managed["/api/space"].GET(new Request("http://x/api/space"))).json()).toMatchObject({ installation: "managed" });
   });
 });

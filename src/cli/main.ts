@@ -1,5 +1,6 @@
 import { loadConfig, type Config } from "../space/config.ts";
 import { authNoun } from "./auth.ts";
+import { localNoun } from "./local.ts";
 import { readOperatorToken } from "../space/auth/operator-token.ts";
 import { type Workspace, ensureWorkspace, loadWorkspaceEnv, readWorkspaceEnv, resolveHome, workspacePaths } from "../space/workspace.ts";
 import { parseArgs } from "./args.ts";
@@ -34,7 +35,7 @@ import { taskNoun } from "./task.ts";
  * the docs and the scheduler's tasks spell keeps working.
  */
 
-export const NOUNS: Noun[] = [statusNoun, authNoun, appNoun, taskNoun, logsNoun, modelNoun, usageNoun, notifyNoun, backupNoun, chatNoun, eventNoun, consumerNoun, peerNoun, connectionNoun, routerNoun, apiNoun, ...lifecycleNouns, completionNoun];
+export const NOUNS: Noun[] = [statusNoun, authNoun, appNoun, taskNoun, logsNoun, modelNoun, usageNoun, notifyNoun, backupNoun, chatNoun, eventNoun, consumerNoun, peerNoun, connectionNoun, routerNoun, apiNoun, localNoun, ...lifecycleNouns, completionNoun];
 
 /** Older spellings of `src/index.ts`: word → noun and verb. */
 export const ALIASES: Record<string, string[]> = {

@@ -8,6 +8,8 @@ import { describeSkillLinks, linkSkills } from "../space/skills.ts";
 import { discoverApps, ensureWorkspace, readWorkspaceEnv, resolveHome } from "../space/workspace.ts";
 import { noMore, parseArgs } from "./args.ts";
 import { type Ctx, type Noun, UsageError } from "./types.ts";
+import { WorkspaceBusy, acquireWorkspaceLock } from "../space/instance.ts";
+import { readVersion } from "../space/version.ts";
 
 /**
  * The commands that work with no ai-space running, or that start it:
@@ -62,6 +64,13 @@ const start = async (ctx: Ctx, argv: string[]) => {
   noMore(parseArgs(argv, {}).positional, 0);
   if (!ctx.boot) throw new UsageError("start is only available through the entry point (bun src/index.ts)");
   const { ws, config } = await ctx.workspace();
+  // One service per workspace: a second one would run a second scheduler on the same data (src/space/instance.ts).
+  try {
+    await acquireWorkspaceLock(ws.run, ws.home, { port: config.port, edition: config.edition, version: await readVersion() });
+  } catch (e) {
+    if (e instanceof WorkspaceBusy) return ctx.io.err(`[space] ${e.message}`), 1;
+    throw e;
+  }
   await ctx.boot(ws, config);
   // boot serves until a signal ends the process; the exit code is the process's.
   return await new Promise<number>(() => {});

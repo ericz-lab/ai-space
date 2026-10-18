@@ -29,6 +29,7 @@ import { createWebRoutes } from "./web/routes.ts";
 import { createIdentityRoutes } from "./space/identity.ts";
 import { readVersion } from "./space/version.ts";
 import { withUserToolDirs } from "./space/host-tools.ts";
+import { readOwnership } from "./space/local.ts";
 import { createPackageRoutes } from "./space/packages/api.ts";
 import { PackageStore } from "./space/packages/store.ts";
 import { PackageInstaller } from "./space/packages/install.ts";
@@ -44,7 +45,7 @@ import { createPackagePanelRoutes } from "./space/packages/panel.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { guardBrowserWrites } from "./space/auth.ts";
-import { AUTH_PUBLIC, AuthService, AuthStore, composeRoutes, createAuthRoutes, ensureOperatorToken, gateRoutes } from "./space/auth/index.ts";
+import { AUTH_PUBLIC, AUTH_SELF, AuthService, AuthStore, composeRoutes, createAuthRoutes, ensureOperatorToken, gateRoutes } from "./space/auth/index.ts";
 import { ShortcutStore, Shortcuts, createShortcutRoutes } from "./space/shortcuts/index.ts";
 
 /**
@@ -445,7 +446,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag) })],
       ["owner", createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) })],
       ["app", createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget })],
-      ["public", createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name, token: config.apiToken })],
+      ["public", createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name, token: config.apiToken, managed: Boolean(await readOwnership(ws.home)) })],
       ["owner", panelRoutes],
       ["owner", createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage })],
       ["owner", createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks })],
@@ -464,6 +465,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     ],
     {
       ...Object.fromEntries(AUTH_PUBLIC.map((k) => [k, "public" as const])),
+      ...Object.fromEntries(AUTH_SELF.map((k) => [k, "self" as const])),
       "/healthz": "public",
       "/api/chat/widget.js": "public",
       "/api/chat/widget.css": "public",

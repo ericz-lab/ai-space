@@ -151,7 +151,7 @@ status and repair views; bundled apps as `.spaceapp` packages; and coordinated u
 a client asks before anyone has signed in.
 
 ```json
-{ "product": "ai-space", "api": 1, "version": "0.1.0", "edition": "server" }
+{ "product": "ai-space", "api": 1, "version": "0.1.0", "edition": "server", "installation": "external" }
 ```
 
 - `product` and `api` let a client tell an ai-space from any other program on the port, and tell
@@ -161,8 +161,9 @@ a client asks before anyone has signed in.
   Local edition starts the service). There is no `client` value: a client never runs the service.
 - With the operator token or the owner's session, the answer also has `id`, the Space's stable id
   (the same one packages and connections use), and `name` (`SPACE_NAME`, by default the hostname).
-  The Local edition will compare the id with the one it recorded at install time to know whether
-  it owns the running service.
+- `installation` is `managed` when the Local app installed the service (`installation.json` in its
+  workspace), `external` otherwise: the app's way to tell its own service from someone else's
+  ([local.md](local.md#ownership-and-exclusion)).
 
 The native clients do not call it yet; checking it before showing Connected is the next client
 change.

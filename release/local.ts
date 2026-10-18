@@ -1,5 +1,5 @@
 /**
- * `bun release/local.ts [--out dist]`: the Local edition's Mac app, the native client with the
+ * `bun release/local.ts [--out dist] [--app <file.spaceapp>]...`: the Local edition's Mac app, the native client with the
  * Space service inside it (docs/editions.md#ai-space-local, docs/release.md#local-edition).
  *
  *   <out>/local/AI Space.app/Contents/
@@ -8,17 +8,19 @@
  *       RELEASE.json                  product, edition, version, commit, os, arch, bun
  *       runtime/bun                   the Bun that built it
  *       runtime/space-pty             the terminal's forkpty helper (src/space/terminal/pty_helper.c)
+ *       bundled-apps/*.spaceapp       the apps installed on first launch, from `--app` or LOCAL_APPS
+ *                                     (space-separated paths); `space local install` installs them
  *       node_modules/ src/ skills/ bin/ ...
  *
  * Every Mach-O file inside Resources/space is signed with the hardened runtime and the runtime's
  * entitlements (JIT), then the app itself, so the bundle verifies as one. SIGN_IDENTITY picks the
  * identity, ad-hoc ("-") by default; notarizing and the .dmg are the pipeline's (release step 7).
  *
- * The app does not start the service yet: this is the prototype of step 5, proved by
- * release/local-smoke.ts, which runs the service from inside the bundle.
+ * release/local-smoke.ts runs the service from inside the bundle; the app installs it with
+ * `space local install` (src/space/local.ts, docs/local.md).
  */
 import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { SPACE_ROOT } from "../src/space/config.ts";
 import { run, stageRelease } from "./server.ts";
 
@@ -50,7 +52,7 @@ function codesign(identity: string, path: string, entitlements?: string): string
   return ["codesign", "--force", "--options", "runtime", identity === "-" ? "--timestamp=none" : "--timestamp", ...(entitlements ? ["--entitlements", entitlements] : []), "--sign", identity, path];
 }
 
-export async function buildLocal(opts: { root?: string; out: string; identity?: string }): Promise<string> {
+export async function buildLocal(opts: { root?: string; out: string; identity?: string; apps?: string[] }): Promise<string> {
   if (process.platform !== "darwin") throw new Error("the Local edition builds on macOS only");
   const root = opts.root ?? SPACE_ROOT;
   const identity = opts.identity ?? process.env.SIGN_IDENTITY ?? "-";
@@ -67,18 +69,26 @@ export async function buildLocal(opts: { root?: string; out: string; identity?: 
 
   const info = await stageRelease({ root, stage: payload, edition: "local" });
   await run(["cc", "-O2", "-Wall", "-o", join(payload, "runtime", "space-pty"), join(root, "src", "space", "terminal", "pty_helper.c")], root);
+  const apps = opts.apps ?? (process.env.LOCAL_APPS ?? "").split(/\s+/).filter(Boolean);
+  if (apps.length) await mkdir(join(payload, "bundled-apps"), { recursive: true });
+  for (const app of apps) {
+    if (!app.endsWith(".spaceapp")) throw new Error(`${app}: a bundled app is a .spaceapp package (space app pack)`);
+    await cp(resolve(app), join(payload, "bundled-apps", basename(app)));
+  }
 
   const entitlements = join(MACOS, "AISpace", "SpaceRuntime.entitlements");
   const bins = await machOFiles(payload);
   for (const bin of bins) await run(codesign(identity, bin, bin.endsWith("/runtime/bun") ? entitlements : undefined), root);
   await run(codesign(identity, app, join(MACOS, "AISpace", "AISpace.entitlements")), root);
   await run(["codesign", "--verify", "--strict", "--deep", app], root);
-  console.error(`[local] ${info.version} (${info.commit.slice(0, 12)}), ${bins.length} signed binaries, identity ${identity === "-" ? "ad-hoc" : identity}`);
+  console.error(`[local] ${info.version} (${info.commit.slice(0, 12)}), ${bins.length} signed binaries, ${apps.length} bundled app(s), identity ${identity === "-" ? "ad-hoc" : identity}`);
   return app;
 }
 
 if (import.meta.main) {
-  const i = process.argv.indexOf("--out");
-  const out = i > 0 ? process.argv[i + 1]! : join(SPACE_ROOT, "dist");
-  console.log(await buildLocal({ out }));
+  const argv = process.argv.slice(2);
+  const value = (flag: string) => argv.flatMap((a, i) => (a === flag && argv[i + 1] ? [argv[i + 1]!] : []));
+  const out = value("--out")[0] ?? join(SPACE_ROOT, "dist");
+  const apps = value("--app");
+  console.log(await buildLocal({ out, ...(apps.length ? { apps } : {}) }));
 }
