@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { OPERATOR, bearer, crossSiteWrite, guardBrowserWrites, identify, isOperator, tokenEquals } from "./auth.ts";
+import { OPERATOR, bearer, crossSiteWrite, guardBrowserWrites, identify, isOperator, markOwner, tokenEquals } from "./auth.ts";
 
 const req = (headers: Record<string, string> = {}, method = "POST") => new Request("http://127.0.0.1:8700/api/x", { method, headers });
 
@@ -55,5 +55,16 @@ describe("browser writes", () => {
     expect(await (await routes["/a"].GET(evil("GET"))).text()).toBe("ok");
     expect((await routes["/b"](evil("DELETE"))).status).toBe(403);
     expect(routes["/"]).toBe(page);
+  });
+});
+
+describe("the owner's session", () => {
+  test("a request the gate marked counts as the operator; an unmarked one does not", async () => {
+    const marked = req();
+    markOwner(marked);
+    expect(isOperator(marked, "op")).toBe(true);
+    expect(await identify(marked, { token: "op" })).toBe(OPERATOR);
+    expect(isOperator(req(), "op")).toBe(false);
+    expect(await identify(req(), { token: "op" })).toBeUndefined();
   });
 });

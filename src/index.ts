@@ -41,6 +41,7 @@ import { createPackagePanelRoutes } from "./space/packages/panel.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { guardBrowserWrites } from "./space/auth.ts";
+import { AUTH_PUBLIC, AuthService, AuthStore, composeRoutes, createAuthRoutes, ensureOperatorToken, gateRoutes } from "./space/auth/index.ts";
 import { ShortcutStore, Shortcuts, createShortcutRoutes } from "./space/shortcuts/index.ts";
 
 /**
@@ -62,7 +63,11 @@ export { type Config, loadConfig, openBackups, openStorage, backupTaskDefaults }
 export { parseNotifyArgs } from "./cli/notify.ts";
 
 export async function boot(ws: Workspace, config: Config, env: Record<string, string | undefined> = process.env) {
+  // Built-in sign-in (docs/auth.md): the operator token is never empty then, or every caller past the gate would be the operator.
+  if (config.auth === "builtin") config = { ...config, apiToken: await ensureOperatorToken(ws.home, config.apiToken) };
   const store = new Store(config.dbPath, { eventRetentionMs: config.eventRetentionMs });
+  const auth = new AuthService(new AuthStore(store.db));
+  if (config.auth === "builtin" && !auth.initialized()) console.error("[auth] SPACE_AUTH=builtin and no owner yet: every management route refuses until `space auth init` sets the password on this machine");
   const packageStore = new PackageStore(store.db);
   const packageInstaller = new PackageInstaller(ws, packageStore);
   await packageInstaller.recover();
@@ -392,17 +397,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");
   const terminalRoutes = createTerminalRoutes({ service: terminal, name: config.name, hub: peers });
 
-  const server = Bun.serve({
-    hostname: config.host,
-    port: config.port,
-    // Bun closes a connection idle for 10 s by default, which cuts a chat stream during a long tool
-    // call; 255 s is the maximum, and the chat heartbeat (20 s) keeps proxies in between alive.
-    idleTimeout: 255,
-    // The web UI is bundled once at boot; SPACE_DEV=1 turns on Bun's dev server (hot reload) instead.
-    development: process.env.SPACE_DEV === "1",
-    // Panel routes carry no token: a write from another site's page is refused (src/space/auth.ts).
-    routes: guardBrowserWrites({
-      ...createRoutes({
+  // Every route table with the callers it serves under SPACE_AUTH=builtin (docs/auth.md#access-policy); later tables win a shared key.
+  const { routes, policies } = composeRoutes(
+    [
+      ["app", createRoutes({
         scheduler,
         store,
         runtimes,
@@ -419,12 +417,12 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
           console.log(`[space] ${app}: directory gone, deregistered`);
         },
         appForToken: (t) => storage.appForToken(t),
-      }),
-      ...createVoiceRoutes(() => voiceTarget(bus, remote, (app) => registry.get(app)?.manifest.service?.port)),
-      ...createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t), remote, consumers }),
-      ...createShortcutRoutes({ shortcuts }),
-      ...createStorageRoutes({ storage, token: config.apiToken }),
-      ...createBackupRoutes({
+      })],
+      ["app", createVoiceRoutes(() => voiceTarget(bus, remote, (app) => registry.get(app)?.manifest.service?.port))],
+      ["app", createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t), remote, consumers })],
+      ["owner", createShortcutRoutes({ shortcuts })],
+      ["owner", createStorageRoutes({ storage, token: config.apiToken })],
+      ["owner", createBackupRoutes({
         store: backups.store,
         target: backups.target,
         token: config.apiToken,
@@ -435,27 +433,60 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         },
         runNow: (id) => scheduler.runNow(id),
         apps: () => scheduler.apps().filter((app) => store.findTask(app, BACKUP_TASK)?.orphaned === false),
-      }),
-      ...createNotifyRoutes({ notify, store: notifyStore, token: config.apiToken, appForToken: (t) => storage.appForToken(t) }),
-      ...createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel }),
-      ...createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag) }),
-      ...createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) }),
-      ...createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget }),
-      ...panelRoutes,
-      ...createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage }),
-      ...createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks }),
-      ...createConnectionRoutes({ links: packageLinks, token: config.apiToken }),
-      ...createPackageOpenRoutes(packageGateway, config.apiToken),
-      ...createRouterRoutes({ router }),
-      ...createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)) }),
-      ...createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) }),
-      ...createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest }),
-      ...agentRoutes,
-      ...createPeerRoutes({ hub: peers, layout, registry }),
-      ...terminalRoutes,
-      ...createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) }),
-      ...createWebRoutes(),
-    }),
+      })],
+      ["app", createNotifyRoutes({ notify, store: notifyStore, token: config.apiToken, appForToken: (t) => storage.appForToken(t) })],
+      ["owner", createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel })],
+      ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag) })],
+      ["owner", createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) })],
+      ["app", createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget })],
+      ["owner", panelRoutes],
+      ["owner", createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage })],
+      ["owner", createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks })],
+      ["owner", createConnectionRoutes({ links: packageLinks, token: config.apiToken })],
+      ["owner", createPackageOpenRoutes(packageGateway, config.apiToken)],
+      ["owner", createRouterRoutes({ router })],
+      ["owner", createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)) })],
+      ["owner", createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) })],
+      ["owner", createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest })],
+      ["owner", agentRoutes],
+      ["owner", createPeerRoutes({ hub: peers, layout, registry })],
+      ["owner", terminalRoutes],
+      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) })],
+      ["public", createWebRoutes()],
+      ["owner", createAuthRoutes({ mode: config.auth, auth })],
+    ],
+    {
+      ...Object.fromEntries(AUTH_PUBLIC.map((k) => [k, "public" as const])),
+      "/healthz": "public",
+      "/api/chat/widget.js": "public",
+      "/api/chat/widget.css": "public",
+      "/_space/usage.js": "public",
+      // Heartbeats arrive through the router from app pages, which hold no panel session; they only count time in use.
+      "/_space/usage/beat": "public",
+      // Checked by the connection's own token and the remote space's id.
+      "/api/connections/channel": "self",
+      // What apps read about the space today (space-ops, ai-usage, ai-spark, voice-chat), with their app token.
+      "/api/apps": "app-read",
+      "/api/services": "app-read",
+      "/api/peers": "app-read",
+      "/api/agents": "app-read",
+      "/api/checks": "app-read",
+      "/api/panel/packages/apps/:app/checks/:check": "app-read",
+    },
+  );
+
+  const server = Bun.serve({
+    hostname: config.host,
+    port: config.port,
+    // Bun closes a connection idle for 10 s by default, which cuts a chat stream during a long tool
+    // call; 255 s is the maximum, and the chat heartbeat (20 s) keeps proxies in between alive.
+    idleTimeout: 255,
+    // The web UI is bundled once at boot; SPACE_DEV=1 turns on Bun's dev server (hot reload) instead.
+    development: process.env.SPACE_DEV === "1",
+    // Panel routes carry no token: a write from another site's page is refused (src/space/auth.ts).
+    // Under SPACE_AUTH=builtin each route also needs the caller its policy names (src/space/auth/gate.ts).
+    // Each module types its own table; the merged one is a plain record, hence the cast.
+    routes: guardBrowserWrites(gateRoutes(routes, policies, { mode: config.auth, auth, operatorToken: config.apiToken, isAppCredential: async (t) => Boolean(await storage.appForToken(t)) || Boolean(consumers.authenticate(t)) })) as never,
     websocket: terminalWebSocket,
     fetch: () => new Response(JSON.stringify({ ok: false, error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }),
   });

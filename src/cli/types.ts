@@ -27,6 +27,8 @@ export type Io = {
   isTTY: boolean;
   /** Ask one question on the terminal; the answer without its newline. */
   prompt: (question: string) => Promise<string>;
+  /** Ask for a secret on the terminal without echoing it; absent where no terminal can hide input. */
+  secret?: (question: string) => Promise<string>;
   /** The current directory (`app new` puts the app under it). */
   cwd: string;
 };
