@@ -328,14 +328,9 @@ private struct MessageRow: View {
     }
 
     private func textBubble(_ text: String) -> some View {
-        Text(Self.markdown(text)).textSelection(.enabled).foregroundStyle(Theme.text)
-            .lineSpacing(4)
+        ChatMarkdownView(text: text)
             .padding(.horizontal, 4).padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    static func markdown(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
     }
 
     static func label(_ a: ChatActivity) -> String {
