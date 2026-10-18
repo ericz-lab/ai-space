@@ -161,7 +161,8 @@ describe("consumers on the bus", () => {
     expect(counts.pending).toBe(MAX_CONSUMER_BACKLOG);
     expect(counts.skipped).toBe(3);
     h.close();
-  });
+    // Thousands of deliveries: about 2 s on a laptop, 6 s on a CI runner.
+  }, 30_000);
 
   test("calls: only listed capabilities, only bodies the filter accepts", () => {
     const h = harness();
