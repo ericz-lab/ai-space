@@ -35,6 +35,8 @@ export function notes(m: Manifest): string {
     if (a.name.startsWith("ai-space-server-")) what = "Server edition: unpack, then `bash <dir>/install.sh` (Linux, systemd user unit; docs/release.md)";
     else if (a.name.startsWith("ai-space-client-") && a.name.includes("-unsigned")) what = "Client edition for Mac, **not signed**: for testing only, macOS blocks it for everyone else";
     else if (a.name.startsWith("ai-space-client-")) what = "Client edition for Mac: signed and notarized";
+    else if (a.name.startsWith("ai-space-local-") && a.name.includes("-unsigned")) what = "Local edition for Mac (the app with the service inside), **not signed**: for testing only";
+    else if (a.name.startsWith("ai-space-local-")) what = "Local edition for Mac: the app with the service inside, signed and notarized (docs/local.md)";
     lines.push(`| \`${a.name}\` | ${what} |`);
   }
   lines.push("", "Verify a download with `sha256sum -c SHA256SUMS --ignore-missing` (on a Mac: `shasum -a 256 -c`).");

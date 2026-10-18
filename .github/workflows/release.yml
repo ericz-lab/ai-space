@@ -1,4 +1,4 @@
-# Builds the Server and Client editions from one commit and one version (docs/release.md).
+# Builds the Server, Client and Local editions from one commit and one version (docs/release.md).
 #
 # A tag vX.Y.Z (equal to package.json's version, set with `bun run set-version`) builds, checks and
 # packages everything, then creates a draft GitHub Release with the artifacts, SHA256SUMS and
@@ -85,8 +85,6 @@ jobs:
     environment: release
     env:
       MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
@@ -98,19 +96,11 @@ jobs:
       - name: version
         run: bun run set-version "${{ needs.version.outputs.version }}"
       - name: signing keychain
-        if: env.MACOS_CERT_P12_BASE64 != ''
-        run: |
-          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
-          PASS=$(openssl rand -hex 16)
-          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security create-keychain -p "$PASS" "$KEYCHAIN"
-          security set-keychain-settings -lut 3600 "$KEYCHAIN"
-          security unlock-keychain -p "$PASS" "$KEYCHAIN"
-          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
-          security set-key-partition-list -S apple-tool:,apple: -k "$PASS" "$KEYCHAIN" >/dev/null
-          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
-          rm "$RUNNER_TEMP/cert.p12"
-          echo "SIGN_IDENTITY=$MACOS_SIGN_IDENTITY" >> "$GITHUB_ENV"
+        uses: ./.github/actions/macos-signing
+        with:
+          p12-base64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          p12-password: ${{ secrets.MACOS_CERT_PASSWORD }}
+          identity: ${{ secrets.MACOS_SIGN_IDENTITY }}
       - name: package
         env:
           BUILD_NUMBER: ${{ github.run_number }}
@@ -124,9 +114,56 @@ jobs:
         if: always() && env.MACOS_CERT_P12_BASE64 != ''
         run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
 
+  local:
+    name: local macOS
+    needs: [version, check]
+    runs-on: macos-26
+    timeout-minutes: 60
+    environment: release
+    env:
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          bun run set-version "$VERSION"
+          # The service inside the app takes committed files only, as the Server archive does.
+          git -c user.name=release -c user.email=release@localhost commit -qam "release $VERSION" || true
+      - name: signing keychain
+        uses: ./.github/actions/macos-signing
+        with:
+          p12-base64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          p12-password: ${{ secrets.MACOS_CERT_PASSWORD }}
+          identity: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      - name: build the app with the service inside
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: bun release/local.ts --out dist
+      - name: smoke test
+        run: bun release/local-smoke.ts "dist/local/AI Space.app"
+      - name: package
+        run: EDITION=local APP="dist/local/AI Space.app" desktop/macos/scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+      - name: remove keychain
+        if: always() && env.MACOS_CERT_P12_BASE64 != ''
+        run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
+
   release:
     name: draft release
-    needs: [version, server, client]
+    needs: [version, server, client, local]
     if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15

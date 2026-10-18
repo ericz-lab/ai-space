@@ -1,9 +1,11 @@
 #!/bin/sh
-# The Client edition's Mac download (docs/release.md): build/AISpace.app from build.sh, in a .dmg
-# with an Applications link, under dist/ at the repository root.
+# The Mac downloads (docs/release.md), in a .dmg with an Applications link, under dist/ at the
+# repository root:
 #
-#   ai-space-client-<version>-macos-<arch>.dmg            signed and notarized
-#   ai-space-client-<version>-macos-<arch>-unsigned.dmg   no Developer ID given: for testing only,
+#   ai-space-client-<version>-macos-<arch>.dmg            build/AISpace.app from build.sh
+#   ai-space-local-<version>-macos-<arch>.dmg             EDITION=local APP=<AI Space.app> from
+#                                                         release/local.ts (already signed inside)
+#   ...-unsigned.dmg                                      no Developer ID given: for testing only,
 #                                                         Gatekeeper blocks it for everyone else
 #
 # SIGN_IDENTITY   "Developer ID Application: <name> (<team>)", in a keychain codesign can reach
@@ -25,16 +27,26 @@ if [ "$SIGNED" = yes ] && { [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_TEAM_ID:-}" 
   exit 1
 fi
 
-CONFIG=release ./scripts/build.sh
+EDITION=${EDITION:-client}
+case "$EDITION" in
+  client) CONFIG=release ./scripts/build.sh; APP=build/AISpace.app ;;
+  local)
+    [ -n "${APP:-}" ] || { echo "EDITION=local needs APP=<path to AI Space.app> from release/local.ts" >&2; exit 2; }
+    case "$APP" in /*) ;; *) APP="$ROOT/$APP" ;; esac
+    [ -f "$APP/Contents/Resources/space/RELEASE.json" ] || { echo "$APP carries no Local release" >&2; exit 1; }
+    codesign --verify --strict --deep "$APP"
+    ;;
+  *) echo "EDITION must be client or local" >&2; exit 2 ;;
+esac
 
-NAME="ai-space-client-$VERSION-macos-$ARCH"
+NAME="ai-space-$EDITION-$VERSION-macos-$ARCH"
 [ "$SIGNED" = yes ] || NAME="$NAME-unsigned"
 mkdir -p "$ROOT/dist"
 DMG="$ROOT/dist/$NAME.dmg"
 STAGE=build/dmg
 rm -rf "$STAGE" "$DMG"
 mkdir -p "$STAGE"
-cp -R build/AISpace.app "$STAGE/AI Space.app"
+cp -R "$APP" "$STAGE/AI Space.app"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname "AI Space $VERSION" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG" >/dev/null
 rm -rf "$STAGE"
