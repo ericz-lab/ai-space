@@ -85,6 +85,9 @@ final class AppModel: ObservableObject {
     let prefs = Preferences.shared
     let appWindows = AppWindows()
     let notifier = Notifier()
+    /// The Local edition's service on this Mac; `available` is false in the Client edition.
+    let local = LocalManager()
+    let updater = AppUpdater(current: LocalBundle.find()?.version ?? "0.0.0")
     private let cache = CatalogueCache(directory: DesktopPaths.caches)
 
     @Published private(set) var selectedID: UUID? {
@@ -178,6 +181,16 @@ final class AppModel: ObservableObject {
         store.$connections.sink { [weak self] list in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.syncLives(list) } }
         }.store(in: &watchers)
+        if local.available {
+            updater.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
+            Task { [weak self] in await self?.updater.check() }
+            local.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
+            Task { [weak self] in
+                await self?.local.refresh()
+                await self?.ensureLocalSignIn()
+                if let self { await self.local.autoUpdate(into: self) }
+            }
+        }
         wake = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -284,6 +297,13 @@ final class AppModel: ObservableObject {
         s.openLink = { [weak self] url in self?.openLink(url, from: connection) }
         // Signing in on the panel is what lets the native views in: refresh them right away.
         s.onStateChange = { [weak self, weak s] state in
+            // The Local edition's own Space: sign in again with the device credential, then reload.
+            if state == .authenticationRequired, connection.managed, let self, let s {
+                Task {
+                    if await self.local.signIn(connection, cookies: self.cookieSession(connection.id)) { s.load() }
+                }
+                return
+            }
             guard let self, state == .ready, self.sessions[connection.id] === s else { return }
             self.shareSignedOut.remove(connection.id)
             Task { await self.prepareSharing() }
@@ -328,6 +348,53 @@ final class AppModel: ObservableObject {
         store.update(id, name: name, url: url)
         if changed { discard(id) }
         objectWillChange.send()
+    }
+
+    // MARK: Local edition
+
+    /// Saves (or re-points) the Local edition's own Space after an install, selects it and signs
+    /// in to it with the device credential.
+    func adoptLocal(url: URL) {
+        let c: Connection
+        if let existing = store.managedConnection ?? store.connections.first(where: { ConnectionRules.sameOrigin($0.url, url) }) {
+            store.setManaged(existing.id, url: url)
+            c = store.connection(existing.id)!
+        } else {
+            c = store.add(name: "This Mac", url: url, makeDefault: true, managed: true)
+        }
+        store.setDefault(c.id)
+        selectedID = c.id
+        destination = .launcher
+        Task { await signInLocal(c, force: true) }
+    }
+
+    /// At launch: the managed Space's web data has no session cookie yet (or it expired).
+    func ensureLocalSignIn() async {
+        guard let c = store.managedConnection else { return }
+        await signInLocal(c, force: false)
+    }
+
+    private func signInLocal(_ c: Connection, force: Bool) async {
+        let cookies = cookieSession(c.id)
+        let signedIn = force ? false : LocalManager.hasSession(await cookies.cookies(), for: c.url)
+        if !signedIn {
+            guard await local.signIn(c, cookies: cookies) else { return }
+            _ = await cookies.cookies()
+            sessions[c.id]?.load()
+            if let loader = loaders[c.id] { await loader.refresh() }
+            await lives[c.id]?.refresh(catalogue: true)
+        }
+        await askForDefaultModel(c)
+    }
+
+    /// The first run's last step (docs/local.md#first-run): the Space on this Mac has no default
+    /// model yet, so its agents would run on whatever the environment falls back to. Ask once it
+    /// answers with the models it offers.
+    private func askForDefaultModel(_ c: Connection) async {
+        let s = settings(for: c)
+        await s.refresh()
+        guard let models = s.settings?.models, models.defaultModel == nil, !models.options.isEmpty else { return }
+        local.needsModelChoice = true
     }
 
     /// Forgets the connection on this Mac. The Space itself, its agents and its data are untouched.

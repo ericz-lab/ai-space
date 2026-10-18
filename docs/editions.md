@@ -45,8 +45,9 @@ What differs is how each one is packaged, installed, started and updated.
    required to install, start, or use a Space on loopback.
 4. **AI access is configured, not bundled.** "Local" means the Space runs on this machine, not that
    every AI feature works offline. Agents and model calls still need a runtime (Claude Code, Codex, an
-   API key) chosen and set up by the user ([runtimes.md](runtimes.md)). The first run guides that
-   setup. It never installs or upgrades an agent CLI silently.
+   API key) chosen and set up by the user ([runtimes.md](runtimes.md)). The first run requires one
+   (Claude Code or Codex found or chosen) and a default model ([local.md](local.md#first-run)).
+   It never installs or upgrades an agent CLI silently.
 5. **Mac first.** Each edition is published only for the systems and CPU architectures that were
    built and tested. Mac on Apple Silicon is first. Linux x64 and arm64 follow for Server. Windows and
    Intel Macs are accepted one by one.
@@ -138,11 +139,14 @@ can be added later from Settings.
 credential when the service is installed. Coming from loopback is never taken as proof that a
 request is from the app.
 
-**Today:** nothing of the managed mode exists. The Mac client connects to a Space someone else
-started. Missing, in order: a prototype that runs the service from packaged resources on a clean Mac
-with no Bun on `PATH` (HTML imports, public assets, chat-widget build, skills, PTY, SQLite, runtime
-adapters); the service identity, ownership and exclusion contract; the background helper and its
-status and repair views; bundled apps as `.spaceapp` packages; and coordinated updates.
+**Today:** the prototype exists: `release/local.ts` packs the service into the Mac app and
+`release/local-smoke.ts` runs it from there, read-only, with no Bun on `PATH` (HTML imports, public
+assets, chat-widget build, skills, PTY through a bundled helper, SQLite, runtime adapters;
+[release.md](release.md#local-edition)). Managed mode is built ([local.md](local.md)): ownership,
+the one-service-per-workspace lock, the LaunchAgent, the device credential, bundled apps, the
+first-run flow and Settings. The release workflow builds, smoke-tests, signs and notarizes it with
+the others. Updates inside the app are built ([local.md](local.md#updates)); signed DMG
+installation and live launchd timing still need release acceptance testing.
 
 ## Service identity
 
@@ -150,7 +154,7 @@ status and repair views; bundled apps as `.spaceapp` packages; and coordinated u
 a client asks before anyone has signed in.
 
 ```json
-{ "product": "ai-space", "api": 1, "version": "0.1.0", "edition": "server" }
+{ "product": "ai-space", "api": 1, "version": "0.1.0", "edition": "server", "installation": "external" }
 ```
 
 - `product` and `api` let a client tell an ai-space from any other program on the port, and tell
@@ -160,8 +164,9 @@ a client asks before anyone has signed in.
   Local edition starts the service). There is no `client` value: a client never runs the service.
 - With the operator token or the owner's session, the answer also has `id`, the Space's stable id
   (the same one packages and connections use), and `name` (`SPACE_NAME`, by default the hostname).
-  The Local edition will compare the id with the one it recorded at install time to know whether
-  it owns the running service.
+- `installation` is `managed` when the Local app installed the service (`installation.json` in its
+  workspace), `external` otherwise: the app's way to tell its own service from someone else's
+  ([local.md](local.md#ownership-and-exclusion)).
 
 The native clients do not call it yet; checking it before showing Connected is the next client
 change.
@@ -193,11 +198,11 @@ side.
 | 2 | Release pipeline, phase 1: checks on every push, a version from the tag, the Client signed, notarized, in a `.dmg`, published as a draft release (built; signing waits for a Developer ID certificate) | Client edition |
 | 3 | Built-in user system: owner login, sessions, revocation, one access policy across the API (in progress separately) | A Server reachable without Cloudflare Access; device credentials for Local |
 | 4 | Release pipeline, phase 2: the Server release archive, install script, health check, upgrade test (built, [release.md](release.md)) | Server edition as a download |
-| 5 | Local prototype: the service from packaged resources on a clean Mac | Proves the Local edition can be packaged at all |
-| 6 | Managed mode: identity, ownership, exclusion, background helper, bundled `.spaceapp` apps, first-run flow | Local edition |
-| 7 | Release pipeline, phase 3: Local built and signed in the same run | Local edition as a download |
-| 8 | Creating, changing and installing apps from inside ai-space | Apps without GitHub and a coding tool outside the product |
-| 9 | Updates inside the installed app, coordinated with running work and database migrations | Keeping Local current without a manual reinstall |
+| 5 | Local prototype: the service from packaged resources on a clean Mac (built, [release.md](release.md#local-edition)) | Proves the Local edition can be packaged at all |
+| 6 | Managed mode: identity, ownership, exclusion, background helper, bundled `.spaceapp` apps, first-run flow (built, [local.md](local.md)) | Local edition |
+| 7 | Release pipeline, phase 3: Local built and signed in the same run (built, [release.md](release.md#local-edition)) | Local edition as a download |
+| 8 | Creating, changing and installing apps from inside ai-space (built, [app-studio.md](app-studio.md)) | Apps without GitHub and a coding tool outside the product |
+| 9 | Updates inside the installed app, coordinated with running work and database migrations (built; signed release acceptance pending, [local.md](local.md#updates)) | Keeping Local current without a manual reinstall |
 
 Step 1 and steps 2–3 do not depend on each other. Steps 5 and 6 come after 1 and 3, because a Local
 install has to stand without accounts and needs a credential for its own client.

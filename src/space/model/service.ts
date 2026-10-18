@@ -54,7 +54,7 @@ export class ModelService {
 
   /** Where a bare model name runs; the status view shows it. */
   get backend(): string {
-    return this.runtimes.default.backend;
+    return this.runtimes.default?.backend ?? "none (every model names its runtime)";
   }
 
   /** In flight and waiting, for the status view. */
@@ -135,6 +135,11 @@ export class ModelService {
     const call = row(target.runtime.name, target.model, outcome, startedAt, Math.max(0, this.now() - startedAt));
     if (!outcome.ok) this.log(`${app}/${input.tag} image (${target.runtime.name}/${target.model}, ${outcome.backend}): ${outcome.error}`);
     return { outcome, call };
+  }
+
+  /** The calls in flight (docs/local.md#updates). */
+  inFlight(): { app: string; tag: string; model: string; startedAt: number }[] {
+    return [...this.inflight.values()].map((e) => ({ app: e.app, tag: e.tag, model: e.model, startedAt: e.startedAt }));
   }
 
   /** Resolves once no call is in flight. */

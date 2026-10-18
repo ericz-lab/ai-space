@@ -49,6 +49,48 @@ struct ChatStreamTests {
         #expect(r.body == "Half" && r.text == "Half\n\n⚠️ runtime exited with 1" && r.failure == "runtime exited with 1")
     }
 
+    @Test func permissionRefusalsMatchWebToolResultsAndSurviveReplay() {
+        var reply = ChatReply()
+        reply.apply(#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"shell","name":"Bash"},{"type":"tool_use","id":"edit","name":"Edit"}]}}"#)
+        let denied = #"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"shell","is_error":true,"content":"This command requires approval"}]}}"#
+        reply.apply(denied)
+        reply.apply(denied)
+        reply.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"edit","is_error":true,"content":[{"type":"text","text":"Permission denied"}]}]}}"#)
+        reply.apply(#"{"type":"done"}"#)
+        #expect(reply.denied == ["Bash", "Edit"])
+        #expect(reply.finished && reply.failure == nil)
+        #expect(reply.body.isEmpty)
+    }
+
+    @Test func ordinaryToolErrorsAndSuccessfulPermissionTextAreNotRefusals() {
+        var reply = ChatReply()
+        reply.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","is_error":true,"content":"File not found"},{"type":"tool_result","tool_use_id":"y","is_error":false,"content":"permission granted"}]}}"#)
+        #expect(reply.denied.isEmpty)
+        reply.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"unknown","is_error":true,"content":"permission denied"}]}}"#)
+        #expect(reply.denied == ["tool"])
+    }
+
+    @Test func grantUsesWebTiersAndNeverLowersAnExistingGrant() {
+        #expect(ChatPermission.readOnly.granting(["Edit"]) == .editFiles)
+        #expect(ChatPermission.readOnly.granting(["Bash"]) == .all)
+        #expect(ChatPermission.editFiles.granting(["Edit"]) == .all)
+        #expect(ChatPermission.all.granting(["Edit"]) == .all)
+        #expect(ChatPermission(rawValue: "unrecognized") == nil)
+    }
+
+    @Test func requestCapturesPermissionAndResumesTheSameSession() {
+        var selected = ChatPermission.readOnly
+        let original = ChatTurnRequest(message: "Check status", permission: selected)
+        selected = .all
+        #expect(original.body(sessionID: nil)["permissionMode"] == nil)
+        let retry = ChatTurnRequest(message: "Finish the refused step", permission: selected)
+        let body = retry.body(sessionID: "same-session")
+        #expect(body["permissionMode"] as? String == "bypassPermissions")
+        #expect(body["sessionId"] as? String == "same-session")
+        #expect(body["message"] as? String == "Finish the refused step")
+        #expect(ChatTurnRequest(message: "edit", permission: .editFiles).body(sessionID: nil)["permissionMode"] as? String == "acceptEdits")
+    }
+
     @Test func tellsWhyATurnFailed() {
         // What Seoul's codex said on 2026-10-14, and what the Space passed on.
         #expect(ChatFailure("exceeded retry limit, last status: 429 Too Many Requests").kind == .busy)
@@ -63,5 +105,44 @@ struct ChatStreamTests {
         #expect(ChatFailure("something odd").kind == .other)
         #expect(ChatFailure("runtime exited with 1").retryable && ChatFailure("429").retryable)
         #expect(!ChatFailure("Not logged in").retryable && !ChatFailure("could not run Codex: x").retryable)
+    }
+}
+
+/// Codex adapter output uses the shared event contract; no live Claude process is used here.
+struct CodexWorkStepsTests {
+    @Test func preservesMessagesAndMatchesResultsWithoutDuplicatingSteps() {
+        var r = ChatReply()
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"text","text":"Checking the workspace."}]}}"#)
+        let start = #"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"shell-1","name":"Bash","input":{"command":"pwd"}}]}}"#
+        r.apply(start)
+        r.apply(start)
+        #expect(r.steps.count == 2)
+        #expect(r.steps[1].text == "pwd" && r.steps[1].state == .running)
+        r.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"shell-1","is_error":false,"content":"/workspace"}]}}"#)
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"text","text":"Workspace checked."}]}}"#)
+        r.apply(#"{"type":"done"}"#)
+        #expect(r.steps.map(\.kind) == [.text, .tool, .text])
+        #expect(r.steps[1].state == .succeeded && r.steps[1].output == "/workspace")
+        #expect(r.steps[2].text == "Workspace checked.")
+    }
+
+    @Test func failedAndInterruptedWorkNeverLooksSuccessful() {
+        var r = ChatReply()
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Bash","input":{"command":"false"}},{"type":"tool_use","id":"b","name":"Edit","input":{"file_path":"notes.txt"}}]}}"#)
+        r.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"command failed"}]}}"#)
+        r.apply(#"{"type":"error","status":"stopped"}"#)
+        r.apply(#"{"type":"done"}"#)
+        #expect(r.steps[0].state == .failed)
+        #expect(r.steps[1].state == .incomplete)
+        #expect(r.denied.isEmpty)
+    }
+
+    @Test func capsLargeResultsAndKeepsParallelStepsIndependent() {
+        var r = ChatReply()
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Bash"},{"type":"tool_use","id":"b","name":"Bash"}]}}"#)
+        let event: [String: Any] = ["type": "user", "message": ["content": [["type": "tool_result", "tool_use_id": "b", "content": String(repeating: "x", count: 20000)]]]]
+        r.apply(String(data: try! JSONSerialization.data(withJSONObject: event), encoding: .utf8)!)
+        #expect(r.steps[0].state == .running)
+        #expect(r.steps[1].state == .succeeded && r.steps[1].output.count == 12000)
     }
 }

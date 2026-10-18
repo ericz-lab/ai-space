@@ -7,7 +7,8 @@ import { MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type ModelTier, type 
  * `SPACE_CHAT_*` variables describe (the shape every space had before the
  * file existed, so nothing changes for them).
  *
- *   default: claude               # runtime a bare model name goes to
+ *   default: claude               # optional: runtime a bare model name goes to; without it, every
+ *                                 # model must be `runtime/model` (a bare one is an error)
  *   runtimes:
  *     claude:
  *       kind: claude-code
@@ -80,9 +81,10 @@ export function parseRuntimesYaml(text: string, env: Record<string, string | und
   }
   if (runtimes.length === 0) throw new Error(`${RUNTIMES_FILE}: no usable runtime (${warnings.join("; ")})`);
 
-  const def = doc.default === undefined ? runtimes[0]!.name : doc.default;
-  if (typeof def !== "string" || !runtimes.some((r) => r.name === def)) throw new Error(`${RUNTIMES_FILE}: default must name a configured runtime`);
-  return { config: { default: def, runtimes }, warnings };
+  // No `default`: no runtime takes a bare model name; every model names its runtime.
+  const def = doc.default;
+  if (def !== undefined && (typeof def !== "string" || !runtimes.some((r) => r.name === def))) throw new Error(`${RUNTIMES_FILE}: default must name a configured runtime`);
+  return { config: { ...(def !== undefined ? { default: def as string } : {}), runtimes }, warnings };
 }
 
 function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>, env: Record<string, string | undefined>): RuntimeSpec | { warning: string } {

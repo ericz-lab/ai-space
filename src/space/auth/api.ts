@@ -1,4 +1,4 @@
-import { isOwner } from "../auth.ts";
+import { bearer, isOwner } from "../auth.ts";
 import { type AuthMode, SESSION_COOKIE, cookieValue } from "./gate.ts";
 import { type AuthService, PasswordRejected, SESSION_TTL_MS } from "./service.ts";
 import type { Session } from "./store.ts";
@@ -13,6 +13,9 @@ import type { Session } from "./store.ts";
  *   GET    /api/auth/sessions                    owner: live sessions, the current one marked
  *   DELETE /api/auth/sessions/:id                owner: signs one session out
  *   POST   /api/auth/sessions/revoke-others      owner: signs out every session but this one
+ *   POST   /api/auth/device/session              self (a device credential): a session cookie for the device's web view
+ *   GET    /api/auth/devices                     owner: live device credentials
+ *   DELETE /api/auth/devices/:id                 owner: revokes one device credential
  *
  * Writes go through the same-origin check of the whole table (src/space/auth.ts).
  */
@@ -24,6 +27,8 @@ type Req = Request & { params: Record<string, string> };
 type Server = { requestIP?: (req: Request) => { address: string } | null };
 
 export const AUTH_PUBLIC = ["/api/auth/session", "/api/auth/login", "/api/auth/logout"];
+/** Routes that check their own credential (policy `self`). */
+export const AUTH_SELF = ["/api/auth/device/session"];
 
 function secure(req: Request): boolean {
   return new URL(req.url).protocol === "https:" || req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() === "https";
@@ -108,6 +113,29 @@ export function createAuthRoutes(opts: { mode: AuthMode; auth: AuthService }) {
       POST: (req: Request) => {
         if (!builtin) return off();
         return json(200, { ok: true, revoked: auth.revokeAll(current(req)?.id) });
+      },
+    },
+    "/api/auth/device/session": {
+      POST: (req: Request) => {
+        if (!builtin) return off();
+        const d = auth.verifyDevice(bearer(req));
+        if (!d) return json(401, { ok: false, error: "a device credential is required" });
+        const { token, session } = auth.deviceSession(d, req.headers.get("user-agent") ?? "");
+        return json(200, { ok: true, device: { id: d.id, name: d.name }, session: view(session, session.id) }, { "set-cookie": cookie(req, token, Math.floor(SESSION_TTL_MS / 1000)) });
+      },
+    },
+    "/api/auth/devices": {
+      GET: () => {
+        if (!builtin) return off();
+        return json(200, { ok: true, devices: auth.devices().map((d) => ({ id: d.id, name: d.name, createdAt: iso(d.createdAt), lastSeenAt: d.lastSeenAt === null ? null : iso(d.lastSeenAt) })) });
+      },
+    },
+    "/api/auth/devices/:id": {
+      DELETE: (req: Req) => {
+        if (!builtin) return off();
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return json(400, { ok: false, error: "bad device id" });
+        return auth.revokeDevice(id) ? json(200, { ok: true }) : json(404, { ok: false, error: "no such live device" });
       },
     },
     "/api/auth/sessions/:id": {

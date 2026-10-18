@@ -1,0 +1,23 @@
+# An ai-space app made inside ai-space (docs/app-studio.md), installed as a package
+# (docs/app-packages.md, spec 2). Change it here, then `space app build my-app`.
+spec: 2
+name: my-app
+version: 0.1.0
+title: My App
+description: One sentence saying what the app does.
+icon: icon.svg
+requires:
+  spaceApi: 1
+  bun: 1.3.0
+offline:
+  features: [Everything]
+  online: []
+# The app's own process: ai-space gives it PORT and starts it when someone opens it.
+launch:
+  kind: process
+  runtime: bun
+  entry: server.ts
+  mode: on-demand
+  idleTimeoutMs: 300000
+  health: /healthz
+# Add sections from docs/app-spec.md as the app needs them: agents, widgets, tasks, storage, ...

@@ -30,3 +30,55 @@
 "Unsaved pictures stay on this Mac in Space → Pending Shares." = "Unsaved pictures stay on this Mac in Space → Pending Shares.";
 
 "Cancel" = "Cancel";
+
+/* Local edition updates */
+"Update when idle" = "Update when idle";
+"Update now…" = "Update now…";
+"Update Now" = "Update Now";
+"Update the background service now?" = "Update the background service now?";
+"Running work has up to 30 seconds to finish before the service restarts. Unfinished work may be interrupted." = "Running work has up to 30 seconds to finish before the service restarts. Unfinished work may be interrupted.";
+"Waiting for: %@" = "Waiting for: %@";
+"Checking for updates…" = "Checking for updates…";
+"No newer Local release is available." = "No newer Local release is available.";
+"AI Space %@ is available." = "AI Space %@ is available.";
+"Install and relaunch" = "Install and relaunch";
+"Release notes" = "Release notes";
+"Download from the release page" = "Download from the release page";
+"Check for app updates" = "Check for app updates";
+
+/* Native chat permissions, matching the Web panel */
+"Read-only" = "Read-only";
+"Edit files" = "Edit files";
+"All permissions" = "All permissions";
+"Write access (next message)" = "Write access (next message)";
+"The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval." = "The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval.";
+"%@ was refused for lack of permission" = "%@ was refused for lack of permission";
+"Next messages: %@" = "Next messages: %@";
+"Grant and retry" = "Grant and retry";
+"I have granted more permissions. Please finish the step that was refused for lack of permission." = "I have granted more permissions. Please finish the step that was refused for lack of permission.";
+
+"Detected" = "Detected";
+
+"Not detected" = "Not detected";
+
+"Choose Path…" = "Choose Path…";
+
+"Choose a model…" = "Choose a model…";
+
+"The selected program could not be verified as this agent. Choose its executable and try again." = "The selected program could not be verified as this agent. Choose its executable and try again.";
+
+"Choose an installed agent to continue. Sign in to it in Terminal before using AI Space." = "Choose an installed agent to continue. Sign in to it in Terminal before using AI Space.";
+
+"Permission" = "Permission";
+
+"No result received" = "No result received";
+
+"Output limited to 12,000 characters." = "Output limited to 12,000 characters.";
+
+"Details" = "Details";
+
+"Completed" = "Completed";
+
+"Failed" = "Failed";
+
+"Running" = "Running";

@@ -1,8 +1,9 @@
 # Releases
 
-Status: implemented for the Server edition (Linux x64 and arm64) and the Client edition (Mac, Apple
-Silicon). The Local edition joins the same pipeline once its managed installation exists
-([editions.md](editions.md)). Updates inside an installed app are a separate piece of work.
+Status: implemented for the Server edition (Linux x64 and arm64), the Client edition and the Local
+edition (Mac, Apple Silicon; [editions.md](editions.md)). Updates inside an installed app are a
+separate piece of work: a newer Local app is installed over the old one and its Settings offer the
+update ([local.md](local.md)).
 
 One tag builds every edition from one commit and one version. Nothing is published without a
 person: the pipeline ends in a draft GitHub Release.
@@ -15,12 +16,14 @@ person: the pipeline ends in a draft GitHub Release.
 | `ai-space-server-<version>-linux-arm64.tar.gz` | Server | The same for arm64 |
 | `ai-space-client-<version>-macos-arm64.dmg` | Client | The Mac app, signed with a Developer ID and notarized |
 | `ai-space-client-<version>-macos-arm64-unsigned.dmg` | Client | Built when no signing identity is configured: for testing, macOS blocks it for everyone else |
+| `ai-space-local-<version>-macos-arm64.dmg` | Local | The Mac app with the service inside ([local.md](local.md)), signed and notarized |
+| `ai-space-local-<version>-macos-arm64-unsigned.dmg` | Local | The same without a signing identity: for testing only |
 | `SHA256SUMS` | | `sha256sum -c SHA256SUMS --ignore-missing` checks a download |
 | `manifest.json` | | Version, commit, the run that built it, every file's size and SHA-256 |
 
 Only systems and architectures that are built and checked are published. Not yet: the Mac Share
 extension (it needs an Xcode build with a development team, `desktop:share:build`), Intel Macs,
-Windows, a Server edition for macOS, and the Local edition.
+Windows, a Server edition for macOS.
 
 ## Cutting a release
 
@@ -106,6 +109,43 @@ A rollback changes the program, not the data. A release whose start migrated a d
 it in a shape the older release does not read; then restore the snapshot taken before the upgrade
 ([backup.md](backup.md)), which is why a backup target is worth setting before upgrading a space
 that matters.
+
+## Local edition
+
+The `local` job of the release workflow, after the checks, with the same signing secrets as the
+Client. By hand on a Mac:
+
+```bash
+bun run release:local [--app <file.spaceapp>]...       # dist/local/AI Space.app, ad-hoc unless SIGN_IDENTITY
+bun run release:local-smoke "dist/local/AI Space.app"  # the service from inside the app
+EDITION=local APP="dist/local/AI Space.app" desktop/macos/scripts/package.sh   # the .dmg
+```
+
+The Client and the Local app share the bundle id: installing the Local app replaces the Client,
+which it contains. Bundled apps come from `--app` or `LOCAL_APPS`; the workflow bundles none until
+the list is chosen ([editions.md](editions.md#open-questions)).
+
+`release/local.ts` builds the Mac client, puts the release tree of `release/server.ts` (edition
+`local`) at `Contents/Resources/space`, builds the terminal's forkpty helper there as
+`runtime/space-pty`, and signs every Mach-O file inside with the hardened runtime, the bundled Bun
+with `SpaceRuntime.entitlements` (JIT), then the app. `SIGN_IDENTITY` picks a Developer ID instead
+of ad-hoc.
+
+`release/local-smoke.ts` copies the app, makes `Resources/space` read-only, and starts the service
+from it with `PATH=/usr/bin:/bin`, a fresh home and `SPACE_EDITION=local`. It checks the identity
+route, the panel's HTML import and files, the chat widget, the linked skills, SQLite, a terminal
+session through `space-pty` (size, resize, job control) and the runtime adapters; then that nothing
+was written inside the app and its signature still verifies.
+
+What a running service needs from the machine, and what it does without it:
+
+| Needs | On a Mac without the Command Line Tools |
+| --- | --- |
+| Bun | Bundled (`runtime/bun`) |
+| A PTY for the terminal | Bundled (`runtime/space-pty`); the `/usr/bin/python3` stub is never started |
+| `git` | Missing (a stub, never started): default apps are not cloned; Local installs its apps from packages |
+| `claude`, `codex` | The user's; the service adds the usual tool directories (`~/.local/bin`, `/opt/homebrew/bin`, ...) to the bare PATH launchd gives it |
+| `zstd` | Missing: backups fail until it is installed (to solve before Local ships backups) |
 
 ## Checks before publishing
 

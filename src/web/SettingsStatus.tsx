@@ -35,9 +35,13 @@ export default function SettingsStatus() {
     }
   };
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);
+  const [backupsOn, setBackupsOn] = useState(true);
   useEffect(() => {
-    getJson<{ backups: BackupInfo[] }>("/api/backups")
-      .then((d) => setBackups(d.backups || []))
+    getJson<{ enabled?: boolean; backups: BackupInfo[] }>("/api/backups")
+      .then((d) => {
+        setBackupsOn(d.enabled !== false);
+        setBackups(d.backups || []);
+      })
       .catch(() => setBackups([]));
   }, []);
   const [statusOpen, setStatusOpen] = useState(false);
@@ -50,7 +54,7 @@ export default function SettingsStatus() {
   const statusSummary = statusLoaded
     ? [
         t("settings.countServices", { n: services.services.length }),
-        t("settings.countBackups", { n: backups.length }),
+        backupsOn || backups.length ? t("settings.countBackups", { n: backups.length }) : "",
         services.peers.length ? t("settings.countPeers", { n: services.peers.length }) : "",
       ]
         .filter(Boolean)
@@ -151,7 +155,7 @@ export default function SettingsStatus() {
           </div>
         ))
       ) : (
-        <p className="setnote">{t("settings.noBackups")}</p>
+        <p className="setnote">{t(backupsOn ? "settings.noBackups" : "settings.backupsOff")}</p>
       )}
       </>
       )}

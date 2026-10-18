@@ -142,6 +142,11 @@ export class RunRegistry {
     db.query("UPDATE agent_runs SET status = 'interrupted', error = 'ai-space restarted during the turn', finished_at = COALESCE(finished_at, ?) WHERE status = 'running'").run(this.now());
   }
 
+  /** The turns running now (docs/local.md#updates). */
+  running(): RunInfo[] {
+    return [...this.live.values()].filter((l) => l.info.status === "running").map((l) => l.info);
+  }
+
   /** Start a turn on `runtime`. Throws RunBusyError when the conversation already has a turn running, RunClosedError while shutting down. */
   start(spec: StartRun): RunInfo {
     if (this.closing) throw new RunClosedError("ai-space is shutting down; try again in a moment");

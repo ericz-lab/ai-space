@@ -7,7 +7,7 @@ import { MODEL_TIERS, RUNTIME_NAME_PATTERN, type ModelTier, type TierModels, typ
 /**
  * The configured runtimes by name, and the rule that turns a model string
  * into one of them: `runtime/model` names the runtime, a bare model goes to
- * the default. Unknown names are errors the callers turn into 400s or 501s;
+ * the default, and is an error when there is no default. Unknown names are errors the callers turn into 400s or 501s;
  * nothing falls back silently to another runtime.
  */
 
@@ -29,7 +29,8 @@ export class RuntimeRegistry {
   private readonly byName = new Map<string, RuntimeAdapter>();
   private readonly models = new Map<string, TierModels>();
   private readonly specs = new Map<string, RuntimeSpec>();
-  readonly default: RuntimeAdapter;
+  /** Where a bare model name goes; undefined when every model must name its runtime. */
+  readonly default: RuntimeAdapter | undefined;
 
   constructor(config: RuntimesConfig, deps: RegistryDeps = {}) {
     for (const spec of config.runtimes) {
@@ -38,9 +39,12 @@ export class RuntimeRegistry {
       this.specs.set(spec.name, spec);
       this.models.set(spec.name, { ...TIER_DEFAULTS[spec.kind], ...spec.models });
     }
-    const def = this.byName.get(config.default);
-    if (!def) throw new Error(`default runtime is not configured: ${config.default}`);
-    this.default = def;
+    if (config.default === undefined) this.default = undefined;
+    else {
+      const def = this.byName.get(config.default);
+      if (!def) throw new Error(`default runtime is not configured: ${config.default}`);
+      this.default = def;
+    }
   }
 
   /** Tier models read from a runtime's own catalogue; the runtimes.yaml `models` pins still win. */
@@ -56,7 +60,10 @@ export class RuntimeRegistry {
   /** `runtime/model` → that runtime and the bare model; `model` → the default runtime. Throws on an unknown runtime. */
   resolve(model: string): { runtime: RuntimeAdapter; model: string } {
     const slash = model.indexOf("/");
-    if (slash < 0) return { runtime: this.default, model: this.tierModel(this.default.name, model) };
+    if (slash < 0) {
+      if (!this.default) throw new Error(`model ${model} names no runtime: write it as ${[...this.byName.keys()].map((n) => `${n}/${model}`).join(" or ")}`);
+      return { runtime: this.default, model: this.tierModel(this.default.name, model) };
+    }
     const name = model.slice(0, slash);
     const bare = model.slice(slash + 1);
     if (!RUNTIME_NAME_PATTERN.test(name) || !bare) throw new Error(`invalid model: ${model}`);

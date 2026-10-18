@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { AuthStore, type Session } from "./store.ts";
+import { AuthStore, type Device, type Session } from "./store.ts";
 
 /**
  * The owner's password and sessions (docs/auth.md). One owner per space, no
@@ -155,5 +155,40 @@ export class AuthService {
 
   revokeAll(keep?: number): number {
     return this.store.revokeAll(this.now(), keep);
+  }
+
+  /** From the machine: a new device credential. The token is returned once and stored only as its hash. */
+  addDevice(name: string): { device: Device; token: string } {
+    const clean = name.trim();
+    if (!clean) throw new Error("a device needs a name");
+    const token = `spd_${randomBytes(32).toString("base64url")}`;
+    return { device: this.store.addDevice(clean, hashToken(token), this.now()), token };
+  }
+
+  /** The live device behind a bearer token, or undefined. */
+  verifyDevice(token: string): Device | undefined {
+    if (!token.startsWith("spd_") || token.length > 200) return undefined;
+    const d = this.store.liveDevice(hashToken(token));
+    const now = this.now();
+    if (d && (d.lastSeenAt === null || now - d.lastSeenAt >= TOUCH_EVERY_MS)) {
+      this.store.touchDevice(d.id, now);
+      d.lastSeenAt = now;
+    }
+    return d;
+  }
+
+  devices(): Device[] {
+    return this.store.liveDevices();
+  }
+
+  revokeDevice(id: number): boolean {
+    return this.store.revokeDevice(id, this.now());
+  }
+
+  /** A browser session for a device's web view, so its pages are signed in as the device is. */
+  deviceSession(d: Device, userAgent: string): { token: string; session: Session } {
+    const now = this.now();
+    const token = randomBytes(32).toString("base64url");
+    return { token, session: this.store.addSession(hashToken(token), now, now + this.ttl, `device ${d.name}: ${userAgent}`) };
   }
 }

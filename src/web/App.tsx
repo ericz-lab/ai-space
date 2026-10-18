@@ -785,6 +785,13 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
             setAdding(null);
             reload();
           }}
+          onCreated={(made) => {
+            if (adding.pinTo) pinEntry(entryKey("app", made.app), adding.pinTo);
+            setAdding(null);
+            reload();
+            // The template is installed; the assistant now builds what was asked for (docs/app-studio.md).
+            askAssistant(t("create.ask", { name: made.app, what: made.description }));
+          }}
         />
       )}
       {setsOpen && (

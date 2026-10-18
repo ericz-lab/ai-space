@@ -440,3 +440,71 @@
 "Paste Picture" = "粘贴图片";
 "Copy one picture first." = "请先复制一张图片。";
 "Unsaved pictures stay on this Mac in Space → Pending Shares." = "未保存的图片会保留在此 Mac，可从「Space → 待保存的分享」继续保存。";
+
+/* Local edition updates */
+"Update when idle" = "空闲时更新";
+"Update now…" = "立即更新…";
+"Update Now" = "立即更新";
+"Update the background service now?" = "立即更新后台服务？";
+"Running work has up to 30 seconds to finish before the service restarts. Unfinished work may be interrupted." = "服务重启前，正在运行的工作最多有 30 秒完成。未完成的工作可能会中断。";
+"Waiting for: %@" = "正在等待：%@";
+"Checking for updates…" = "正在检查更新…";
+"No newer Local release is available." = "暂无更新的本机版。";
+"AI Space %@ is available." = "AI Space %@ 已可用。";
+"Install and relaunch" = "安装并重新启动";
+"Release notes" = "版本说明";
+"Download from the release page" = "前往发行页面下载";
+"Check for app updates" = "检查应用更新";
+
+/* Native chat permissions, matching the Web panel */
+"Read-only" = "只读";
+"Edit files" = "可改文件";
+"All permissions" = "全部权限";
+"Write access (next message)" = "写权限（下一条消息生效）";
+"The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval." = "此选择会被记住并应用于新消息。“全部权限”允许执行命令及修改文件，不再逐项请求批准。";
+"%@ was refused for lack of permission" = "%@ 因权限不足被拒绝";
+"Next messages: %@" = "后续消息权限：%@";
+"Grant and retry" = "授权并重试";
+"I have granted more permissions. Please finish the step that was refused for lack of permission." = "我已授予更多权限，请完成刚才因权限不足被拒绝的步骤。";
+
+/* Local edition first run: agent CLIs and the default model */
+"Agents on this Mac" = "此 Mac 上的 Agent";
+"Install at least one and sign in to it in Terminal, then check again." = "请至少安装一个，并在终端中登录，然后重新检测。";
+"Check Again" = "重新检测";
+"Search Again" = "重新查找";
+"Choose…" = "选择…";
+"Choose the %@ program" = "选择 %@ 程序";
+"%@ is not a program that can run." = "%@ 不是可执行的程序。";
+"Install Claude Code or Codex first, or choose where it is." = "请先安装 Claude Code 或 Codex，或选择它所在的位置。";
+"Choose the default model" = "选择默认模型";
+"Space Assistant, other agents and apps use it when nothing chooses a model for them. You can change it later in Settings." = "Space Assistant、其他 Agent 和应用在未指定模型时使用它。之后可在设置中修改。";
+"The choice was not saved: %@" = "选择未保存：%@";
+"Continue" = "继续";
+"Available once an agent CLI is found." = "检测到 Agent CLI 后即可选择。";
+"Choose the default model first." = "请先选择默认模型。";
+
+"Detected" = "已检测到";
+
+"Not detected" = "未检测到";
+
+"Choose Path…" = "选择路径…";
+
+"Choose a model…" = "选择模型…";
+
+"The selected program could not be verified as this agent. Choose its executable and try again." = "无法确认所选程序是此 Agent。请选择对应的可执行文件后重试。";
+
+"Choose an installed agent to continue. Sign in to it in Terminal before using AI Space." = "请选择已安装的 Agent 以继续。使用 AI Space 前，请先在终端中登录该 Agent。";
+
+"Permission" = "权限";
+
+"No result received" = "未收到结果";
+
+"Output limited to 12,000 characters." = "输出最多显示 12,000 个字符。";
+
+"Details" = "详情";
+
+"Completed" = "已完成";
+
+"Failed" = "失败";
+
+"Running" = "运行中";

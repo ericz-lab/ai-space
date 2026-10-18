@@ -11,7 +11,7 @@ import type { AuthService } from "./service.ts";
  * - `app`: the owner, the operator token, or an app's token or an external consumer's key;
  *   the route then decides what that caller may do, as before.
  * - `app-read`: as `app` for GET and HEAD, `owner` otherwise.
- * - `owner`: the owner's session or the operator token. The default.
+ * - `owner`: the owner's session, a device credential or the operator token. The default.
  *
  * `external` (the default mode) leaves every route as it was: the access layer in front
  * (Cloudflare Access) is the sign-in.
@@ -89,6 +89,11 @@ export async function check(req: Request, policy: Policy, opts: GateOptions): Pr
   const presented = bearer(req);
   if (presented) {
     if (tokenEquals(presented, opts.operatorToken)) return undefined;
+    // A device credential (the Local edition's app) is the owner on that device.
+    if (opts.auth.verifyDevice(presented)) {
+      markOwner(req);
+      return undefined;
+    }
     const appAllowed = policy === "app" || (policy === "app-read" && READS.has(req.method));
     if (appAllowed && (await opts.isAppCredential(presented))) return undefined;
     // A bearer token that is none of the above is refused, never treated as "no token".

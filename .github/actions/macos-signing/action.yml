@@ -1,0 +1,31 @@
+# The Developer ID certificate in a keychain of its own, for codesign and notarytool
+# (docs/release.md#signing-secrets). Sets SIGN_IDENTITY for later steps; does nothing without the
+# certificate, so the build goes on unsigned. Remove the keychain with `security delete-keychain
+# "$RUNNER_TEMP/release.keychain-db"` at the end of the job.
+name: macOS signing keychain
+description: Import the Developer ID certificate when the release environment has one
+inputs:
+  p12-base64: { description: "MACOS_CERT_P12_BASE64", required: false, default: "" }
+  p12-password: { description: "MACOS_CERT_PASSWORD", required: false, default: "" }
+  identity: { description: "MACOS_SIGN_IDENTITY", required: false, default: "" }
+runs:
+  using: composite
+  steps:
+    - if: inputs.p12-base64 != ''
+      shell: bash
+      env:
+        P12: ${{ inputs.p12-base64 }}
+        P12_PASSWORD: ${{ inputs.p12-password }}
+        IDENTITY: ${{ inputs.identity }}
+      run: |
+        KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+        PASS=$(openssl rand -hex 16)
+        echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+        security create-keychain -p "$PASS" "$KEYCHAIN"
+        security set-keychain-settings -lut 3600 "$KEYCHAIN"
+        security unlock-keychain -p "$PASS" "$KEYCHAIN"
+        security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+        security set-key-partition-list -S apple-tool:,apple: -k "$PASS" "$KEYCHAIN" >/dev/null
+        security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+        rm "$RUNNER_TEMP/cert.p12"
+        echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"

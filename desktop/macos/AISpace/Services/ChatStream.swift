@@ -37,12 +37,58 @@ struct SSEParser {
     }
 }
 
+/// The Web panel's three write-access choices (src/web/Chat.tsx).
+enum ChatPermission: String, CaseIterable, Identifiable {
+    case readOnly = ""
+    case editFiles = "acceptEdits"
+    case all = "bypassPermissions"
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .readOnly: return String(localized: "Read-only")
+        case .editFiles: return String(localized: "Edit files")
+        case .all: return String(localized: "All permissions")
+        }
+    }
+
+    /// A shell refusal needs all permissions; an edit first tries acceptEdits.
+    func granting(_ denied: [String]) -> ChatPermission {
+        denied.contains("Bash") || self != .readOnly ? .all : .editFiles
+    }
+}
+
+/// Capture the controls at send time, as queuedChatTurn does in the Web client.
+struct ChatTurnRequest: Equatable {
+    var message: String
+    var permission: ChatPermission
+
+    func body(sessionID: String?) -> [String: Any] {
+        var body: [String: Any] = ["message": message]
+        if permission != .readOnly { body["permissionMode"] = permission.rawValue }
+        if let sessionID { body["sessionId"] = sessionID }
+        return body
+    }
+}
+
 /// What a chat turn shows while it runs.
 enum ChatActivity: Equatable {
     case starting
     case reconnecting
     case thinking(model: String)
     case running(tool: String)
+}
+
+/// Ordered, observable work in one turn. Tool IDs remain stable from start to result.
+struct ChatStep: Identifiable, Equatable {
+    enum Kind: Equatable { case text, tool }
+    enum State: Equatable { case running, succeeded, failed, incomplete }
+    var id: String
+    var kind: Kind
+    var title: String = ""
+    var text: String = ""
+    var output: String = ""
+    var state: State = .running
 }
 
 /// One chat turn's reply, built from the run's events the way the panel's Chat.tsx reads them:
@@ -52,6 +98,39 @@ struct ChatReply: Equatable {
     var finishedText = ""
     var streaming = ""
     var tools: [String] = []
+    var steps: [ChatStep] = []
+    private var streamingStep: String?
+
+    private mutating func recordText(_ text: String, final: Bool) {
+        if let id = streamingStep, let index = steps.firstIndex(where: { $0.id == id }) {
+            if final { steps[index].text = text } else { steps[index].text += text }
+            if final { steps[index].state = .succeeded }
+        } else {
+            let id = UUID().uuidString
+            steps.append(ChatStep(id: id, kind: .text, text: text, state: final ? .succeeded : .running))
+            if !final { streamingStep = id }
+        }
+        if final { streamingStep = nil }
+    }
+
+    private static func detail(_ value: Any?) -> String {
+        guard let value else { return "" }
+        if let text = value as? String { return String(text.prefix(12000)) }
+        if let blocks = value as? [[String: Any]], blocks.contains(where: { $0["type"] as? String == "text" }) {
+            return String(blocks.compactMap { $0["text"] as? String }.joined(separator: "\n").prefix(12000))
+        }
+        guard JSONSerialization.isValidJSONObject(value),
+              let bytes = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: bytes, encoding: .utf8) else { return "" }
+        return String(text.prefix(12000))
+    }
+
+    mutating func endSteps() {
+        for i in steps.indices where steps[i].state == .running {
+            steps[i].state = steps[i].kind == .text ? .succeeded : .incomplete
+        }
+    }
+
     var activity: ChatActivity? = .starting
     var note: String?
     /// The run's own error as the Space reported it, apart from the reply text, so a client can
@@ -59,7 +138,8 @@ struct ChatReply: Equatable {
     var failure: String?
     var stopped = false
     var finished = false
-    private var seenTools: Set<String> = []
+    var denied: [String] = []
+    private var toolNames: [String: String] = [:]
 
     /// What the agent wrote, without any note.
     var body: String {
@@ -84,6 +164,7 @@ struct ChatReply: Equatable {
             let event = ev["event"] as? [String: Any]
             let delta = event?["delta"] as? [String: Any]
             if delta?["type"] as? String == "text_delta", let t = delta?["text"] as? String {
+                recordText(t, final: false)
                 streaming += t
                 activity = nil
             }
@@ -95,12 +176,38 @@ struct ChatReply: Equatable {
                 streaming = ""
                 activity = nil
             }
-            for b in blocks where b["type"] as? String == "tool_use" {
-                guard let id = b["id"] as? String, !seenTools.contains(id) else { continue }
-                seenTools.insert(id)
+            for b in blocks {
+                if b["type"] as? String == "text", let text = b["text"] as? String, !text.isEmpty {
+                    recordText(text, final: true)
+                    continue
+                }
+                guard b["type"] as? String == "tool_use", let id = b["id"] as? String else { continue }
+                let input = b["input"] as? [String: Any] ?? [:]
+                let hint = Self.detail(input["command"] ?? input["file_path"] ?? input["path"] ?? input["query"] ?? input)
+                if let i = steps.firstIndex(where: { $0.id == "tool:" + id }) {
+                    if !hint.isEmpty { steps[i].text = hint }
+                    continue
+                }
                 let name = b["name"] as? String ?? "tool"
+                toolNames[id] = name
                 tools.append(name)
+                steps.append(ChatStep(id: "tool:" + id, kind: .tool, title: name, text: hint))
                 activity = .running(tool: name)
+            }
+        case "user":
+            let blocks = (ev["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+            for block in blocks where block["type"] as? String == "tool_result" {
+                let text = Self.detail(block["content"])
+                let id = "tool:" + (block["tool_use_id"] as? String ?? "")
+                if let i = steps.firstIndex(where: { $0.id == id }) {
+                    steps[i].output = text
+                    steps[i].state = block["is_error"] as? Bool == true ? .failed : .succeeded
+                }
+                activity = steps.last(where: { $0.kind == .tool && $0.state == .running }).map { .running(tool: $0.title) } ?? .thinking(model: "")
+                guard block["is_error"] as? Bool == true else { continue }
+                guard text.range(of: "requires approval|permission|granted|denied", options: [.regularExpression, .caseInsensitive]) != nil else { continue }
+                let tool = toolNames[block["tool_use_id"] as? String ?? ""] ?? "tool"
+                if !denied.contains(tool) { denied.append(tool) }
             }
         case "result":
             sessionID = ev["session_id"] as? String ?? sessionID
@@ -116,6 +223,7 @@ struct ChatReply: Equatable {
                 note = "⚠️ " + error
             }
         case "done":
+            endSteps()
             finished = true
             activity = nil
         default:

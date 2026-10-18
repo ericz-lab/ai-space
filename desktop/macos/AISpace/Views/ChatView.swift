@@ -11,6 +11,7 @@ struct ChatView: View {
     let compact: Bool
     @FocusState private var focused: Bool
     @StateObject private var voice = VoiceInput()
+    @ObservedObject private var preferences = Preferences.shared
 
     /// About 72 characters of body text (docs/design-guidelines.md, chat panel).
     private static let column: CGFloat = 680
@@ -24,7 +25,10 @@ struct ChatView: View {
                             ChatIntro(agent: chat.agent, icons: compact ? nil : icons, keys: compact)
                         }
                         ForEach(chat.messages) { message in
-                            MessageRow(message: message, retry: message.id == chat.messages.last?.id && chat.retryableMessage != nil ? { chat.retry() } : nil)
+                            MessageRow(message: message,
+                                       retry: message.id == chat.messages.last?.id && chat.retryableMessage != nil ? { chat.retry() } : nil,
+                                       grant: message.id == chat.messages.last?.id && !chat.busy ? { chat.grantAndRetry() } : nil,
+                                       grantPermission: preferences.chatPermission.granting(message.denied))
                         }
                         if let error = chat.error {
                             // An earlier chat that would not open; a failed turn shows in its own reply.
@@ -39,6 +43,17 @@ struct ChatView: View {
                 }
                 .onChange(of: chat.messages) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
             }
+            HStack {
+                Picker("Permission", selection: $preferences.chatPermission) {
+                    ForEach(ChatPermission.allCases) { permission in Text(permission.label).tag(permission) }
+                }
+                .fixedSize()
+                .help("The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval.")
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .padding(.horizontal, compact ? 14 : 20).padding(.vertical, 6)
+            .frame(maxWidth: Self.column + 32)
             composer
         }
         .toolbar {
@@ -77,7 +92,7 @@ struct ChatView: View {
                 .focused($focused)
                 .focusEffectDisabled()
                 .onKeyPress(.return, phases: .down) { press in
-                    if press.modifiers.contains(.shift) { return .ignored }
+                    if TextInputComposition.isActive || press.modifiers.contains(.shift) { return .ignored }
                     chat.send()
                     return .handled
                 }
@@ -150,6 +165,8 @@ private struct MessageRow: View {
     let message: ChatMessage
     /// Present on the last reply when it failed and its message can go again.
     let retry: (() -> Void)?
+    let grant: (() -> Void)?
+    let grantPermission: ChatPermission
 
     var body: some View {
         switch message.role {
@@ -167,6 +184,19 @@ private struct MessageRow: View {
                 if !message.tools.isEmpty || !message.text.isEmpty || message.activity != nil {
                     reply
                 }
+                if !message.denied.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("\(message.denied.joined(separator: ", ")) was refused for lack of permission", systemImage: "lock.fill")
+                            .font(.callout).foregroundStyle(Theme.danger)
+                        if let grant, !message.live {
+                            Text("Next messages: \(grantPermission.label)").font(.caption).foregroundStyle(.secondary)
+                            Button("Grant and retry", action: grant).controlSize(.small)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.solid, in: RoundedRectangle(cornerRadius: 10))
+                }
                 if let failure = message.failure {
                     FailureCard(failure: failure, retry: retry)
                 }
@@ -176,27 +206,37 @@ private struct MessageRow: View {
     }
 
     private var reply: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 6) {
-                if !message.tools.isEmpty {
-                    Text(message.tools.suffix(6).joined(separator: " · "))
-                        .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2)
-                }
-                if !message.text.isEmpty {
-                    Text(Self.markdown(message.text)).textSelection(.enabled).foregroundStyle(Theme.text)
-                }
-                if let activity = message.activity {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text(Self.label(activity)).font(.callout).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            if message.steps.isEmpty {
+                if !message.text.isEmpty { textBubble(message.text) }
+            } else {
+                ForEach(message.steps) { step in
+                    if step.kind == .text {
+                        textBubble(step.text)
+                    } else {
+                        ChatWorkStep(step: step)
                     }
                 }
+                if !message.live && message.text.hasSuffix(String(localized: "(stopped)")) {
+                    Text("(stopped)").font(.caption).foregroundStyle(.secondary)
+                }
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(Theme.solid, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline))
-            Spacer(minLength: 24)
+            if let activity = message.activity {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(Self.label(activity)).font(.callout).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+            }
         }
+        .padding(.trailing, 24)
+    }
+
+    private func textBubble(_ text: String) -> some View {
+        Text(Self.markdown(text)).textSelection(.enabled).foregroundStyle(Theme.text)
+            .lineSpacing(4)
+            .padding(.horizontal, 4).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     static func markdown(_ text: String) -> AttributedString {
@@ -210,6 +250,75 @@ private struct MessageRow: View {
         case .thinking(let model): return model.isEmpty ? String(localized: "Thinking…") : String(localized: "Thinking with \(model)…")
         case .running(let tool): return String(localized: "Running \(tool)…")
         }
+    }
+}
+
+/// Each operation keeps its own result instead of disappearing into a tool-name summary.
+private struct ChatWorkStep: View {
+    let step: ChatStep
+    @State private var expanded = false
+
+    private var color: Color {
+        switch step.state {
+        case .running: return Theme.accent
+        case .succeeded: return Theme.success
+        case .failed: return Theme.danger
+        case .incomplete: return .secondary
+        }
+    }
+
+    private var status: String {
+        switch step.state {
+        case .running: return String(localized: "Running")
+        case .succeeded: return String(localized: "Completed")
+        case .failed: return String(localized: "Failed")
+        case .incomplete: return String(localized: "No result received")
+        }
+    }
+
+    private var symbol: String {
+        switch step.title.lowercased() {
+        case "bash", "exec_command", "command_execution": return "terminal"
+        case "read", "read_file": return "doc.text.magnifyingglass"
+        case "edit", "write", "apply_patch": return "square.and.pencil"
+        case "websearch", "web_search", "webfetch": return "globe"
+        default: return "wrench.and.screwdriver"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).foregroundStyle(color)
+                    .frame(width: 28, height: 28)
+                    .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+                Text(verbatim: step.title).font(.callout.weight(.semibold))
+                Spacer()
+                if step.state == .running { ProgressView().controlSize(.small) }
+                else { Image(systemName: step.state == .succeeded ? "checkmark.circle.fill" : step.state == .failed ? "exclamationmark.circle.fill" : "minus.circle").foregroundStyle(color) }
+                Text(status).font(.caption).foregroundStyle(color)
+            }
+            if !step.text.isEmpty {
+                Text(verbatim: step.text).font(.caption.monospaced()).textSelection(.enabled)
+                    .lineLimit(expanded ? nil : 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !step.output.isEmpty || step.text.count > 180 {
+                DisclosureGroup("Details", isExpanded: $expanded) {
+                    if !step.output.isEmpty {
+                        Text(verbatim: step.output).font(.caption.monospaced()).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+                    }
+                    if step.output.count >= 12000 {
+                        Text("Output limited to 12,000 characters.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.solid.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

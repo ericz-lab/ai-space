@@ -70,7 +70,7 @@ struct SpaceBackup: Decodable, Hashable, Identifiable {
 /// The Space's default model (`GET` and `PUT /api/model/preferences`): what app requests and
 /// new Space Assistant chats use when nothing chooses a model for them.
 struct ModelPreferences: Decodable, Equatable {
-    struct Option: Decodable, Hashable, Identifiable {
+    struct Option: Codable, Hashable, Identifiable {
         var value: String
         var runtime: String?
         var tier: String?

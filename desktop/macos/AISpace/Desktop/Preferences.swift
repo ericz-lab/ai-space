@@ -36,6 +36,8 @@ final class Preferences: ObservableObject {
 
     private let defaults = UserDefaults.standard
 
+    @Published var chatPermission: ChatPermission { didSet { defaults.set(chatPermission.rawValue, forKey: "chat-perm") } }
+
     @Published var menuBar: Bool { didSet { defaults.set(menuBar, forKey: "menuBar") } }
     @Published var notifications: Bool { didSet { defaults.set(notifications, forKey: "notifications") } }
     @Published var quickChat: Shortcut { didSet { defaults.set(quickChat.rawValue, forKey: "quickChat") } }
@@ -58,6 +60,7 @@ final class Preferences: ObservableObject {
     @Published var showsWidgets: Bool { didSet { defaults.set(!showsWidgets, forKey: "hidesWidgets") } }
 
     private init() {
+        chatPermission = ChatPermission(rawValue: defaults.string(forKey: "chat-perm") ?? "") ?? .readOnly
         menuBar = defaults.object(forKey: "menuBar") as? Bool ?? true
         notifications = defaults.object(forKey: "notifications") as? Bool ?? true
         quickChat = Shortcut(rawValue: defaults.string(forKey: "quickChat") ?? "") ?? .optionSpace

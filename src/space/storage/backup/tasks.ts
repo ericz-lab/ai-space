@@ -39,9 +39,13 @@ export function backupTask(app: string, spec: BackupSpec, d: TaskDefaults): Mani
   };
 }
 
-/** ai-space's own tasks, as a manifest the scheduler can sync. */
-export function spaceManifest(d: TaskDefaults, spec: BackupSpec = DEFAULT_SPEC): Manifest {
+/**
+ * ai-space's own tasks, as a manifest the scheduler can sync. Without a backup target backups are
+ * off: no snapshot and no verification task, so nothing reports a backup that was never wanted.
+ */
+export function spaceManifest(d: TaskDefaults, spec: BackupSpec = DEFAULT_SPEC, opts: { backups: boolean } = { backups: true }): Manifest {
   const tasks: ManifestTask[] = [];
+  if (!opts.backups) return { app: SPACE_APP, dir: d.spaceRoot, spec: 1, title: "ai-space", status: "active", agents: [], widgets: [], tasks };
   const own = backupTask(SPACE_APP, spec, d);
   if (own) tasks.push({ ...own, description: "Snapshot space.db to the backup target" });
   tasks.push({

@@ -31,6 +31,11 @@ export class PackageInstaller {
     return promise;
   }
 
+  /** Installs in progress. */
+  get busy(): number {
+    return this.pending.size;
+  }
+
   async drain(): Promise<void> {
     this.closing = true;
     await Promise.allSettled(this.pending);

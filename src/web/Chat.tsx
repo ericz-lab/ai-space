@@ -1,3 +1,4 @@
+import { ChatSteps, submitsChat, type ChatStep } from "./chat-steps.ts";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useRef, useState } from "react";
 import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun } from "./api.ts";
@@ -10,7 +11,7 @@ import { localized, useLang } from "./i18n.ts";
 // - Mounted permanently (closing only slides it away) so conversations and session ids survive.
 // - Conversations are keyed by agent id and run in parallel: each has its own queue and in-flight turn;
 //   the bookmark bar on the left switches between them, a busy one shows a pulsing dot.
-// - Typewriter smoothing: a burst of text is released at a steady rate per frame.
+// - Text and tool events render independently, in order, without collapsing repeated tools.
 // - Messages sent while a turn runs are queued in the page and sent in order; ⏹ stops the current run.
 // - Model and write-permission tier are picked in the header and remembered in localStorage.
 
@@ -127,22 +128,6 @@ const linkNodes = (text: string) =>
     );
 
 type Tool = { name: string; hint: string };
-// Same-named tools collapse into one chip ("Read ×12") so a long run does not flood the bubble.
-const groupTools = (tools: Tool[]) => {
-  const order: { name: string; count: number; hint: string }[] = [];
-  const byName = new Map<string, { name: string; count: number; hint: string }>();
-  for (const t of tools) {
-    let g = byName.get(t.name);
-    if (!g) {
-      g = { name: t.name, count: 0, hint: "" };
-      byName.set(t.name, g);
-      order.push(g);
-    }
-    g.count++;
-    g.hint = t.hint || g.hint;
-  }
-  return order;
-};
 const toolHint = (input: Record<string, unknown> = {}) => {
   const v = input.command || input.file_path || input.pattern || input.url || input.path || input.query || "";
   return String(v).replace(/\s+/g, " ").slice(0, 42);
@@ -150,7 +135,7 @@ const toolHint = (input: Record<string, unknown> = {}) => {
 
 const Ava = ({ icon, fallback = "✨" }: { icon?: string; fallback?: string }) => (isImgIcon(icon) ? <img src={icon} alt="" /> : <>{icon || fallback}</>);
 
-type Msg = { role: "user"; text: string } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; status?: string | null; live?: boolean };
+type Msg = { role: "user"; text: string } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean };
 type Conv = { agent: AgentInfo | null; msgs: Msg[]; sid: string | null; busy: boolean; queued: number };
 const EMPTY_CONV: Conv = { agent: null, msgs: [], sid: null, busy: false, queued: 0 };
 /** The turn a conversation is following: its run (once the server named it) and the stream's abort. */
@@ -207,6 +192,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
   }, [convs]);
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composingRef = useRef(false);
   const runnersRef = useRef<Record<string, Runner>>({});
   const runner = (k: string): Runner => (runnersRef.current[k] ||= { queue: [], running: false, active: null });
 
@@ -278,28 +264,13 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
         m[aiIdx] = fn(cur);
         return { ...v, msgs: m };
       });
-    const typer: { target: string; timer: ReturnType<typeof setInterval> | null; done: boolean } = { target: "", timer: null, done: false };
-    const pump = () => {
-      if (typer.timer) return;
-      typer.timer = setInterval(() => {
-        upd((x) => {
-          const shown = x.text.length;
-          if (shown >= typer.target.length) {
-            if (typer.done && typer.timer) {
-              clearInterval(typer.timer);
-              typer.timer = null;
-            }
-            return x;
-          }
-          const step = Math.max(2, Math.ceil((typer.target.length - shown) / 12));
-          return { ...x, text: typer.target.slice(0, shown + step), status: null };
-        });
-      }, 33);
+    const typer = { target: "" };
+    const steps = new ChatSteps();
+    const setTarget = (text: string) => {
+      typer.target = text;
+      upd((x) => ({ ...x, text, status: null }));
     };
-    const setTarget = (s: string) => {
-      typer.target = s;
-      pump();
-    };
+    const setNote = (note: string) => upd((x) => ({ ...x, note }));
     const ctrl = new AbortController();
     const active: Active = { ctrl, typer, base: chatBase, runId: source.kind === "attach" ? source.runId : null, stopRequested: false };
     runner(turnKey).active = active;
@@ -312,6 +283,9 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
     const toolNames = new Map<string, string>();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handle = (ev: any) => {
+      steps.apply(ev);
+      const snapshot = steps.snapshot();
+      upd((x) => ({ ...x, steps: snapshot }));
       if (ev.type === "system" && ev.subtype === "init") {
         setSid(ev.session_id);
         upd((x) => ({ ...x, status: tRef.current("chat.thinkingModel", { model: ev.model || "claude" }) }));
@@ -348,10 +322,10 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
         }
       } else if (ev.type === "result") {
         if (ev.session_id) setSid(ev.session_id);
-        if (ev.is_error && !acc) setTarget(String(ev.result || ev.subtype || tRef.current("chat.wentWrong")));
+        if (ev.is_error) setNote(String(ev.result || ev.subtype || tRef.current("chat.wentWrong")));
       } else if (ev.type === "error") {
         const note = ev.status === "stopped" ? tRef.current("chat.interrupted") : `⚠️ ${ev.error}`;
-        setTarget((typer.target ? typer.target + "\n\n" : "") + note);
+        setNote(note);
       } else if (ev.type === "done") finished = true;
     };
     const open = async (): Promise<Response> => {
@@ -406,7 +380,10 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
               } catch {
                 continue;
               }
-              if (seq !== null && Number.isFinite(seq)) lastSeq = seq;
+              if (seq !== null && Number.isFinite(seq)) {
+                if (seq <= lastSeq) { seq = null; continue; }
+                lastSeq = seq;
+              }
               seq = null;
               handle(ev);
             }
@@ -424,16 +401,13 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
       }
     } catch (e) {
       const err = e as Error;
-      if (err.name === "AbortError") setTarget((typer.target ? typer.target + "\n\n" : "") + tRef.current("chat.detached"));
-      else setTarget((typer.target ? typer.target + "\n\n" : "") + `⚠️ ${err.message || err}`);
+      if (err.name === "AbortError") setNote(tRef.current("chat.detached"));
+      else setNote(`⚠️ ${err.message || err}`);
     }
-    if (!typer.target) typer.target = tRef.current("chat.noOutput");
-    typer.done = true;
-    if (typer.timer) {
-      clearInterval(typer.timer);
-      typer.timer = null;
-    }
-    upd((x) => ({ ...x, text: typer.target, status: null, live: false }));
+    steps.finish();
+    const snapshot = steps.snapshot();
+    if (!typer.target && !snapshot.length) typer.target = tRef.current("chat.noOutput");
+    upd((x) => ({ ...x, text: typer.target, steps: snapshot, status: null, live: false }));
     if (runner(turnKey).active === active) runner(turnKey).active = null;
   };
 
@@ -655,11 +629,12 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
                 <option value="fable">{t("chat.modelFable")}</option>
               </select>
             )}
+            <label className="chat-permission">{t("chat.permTitle")}
             <select className="chat-model" value={perm} onChange={pickPerm} title={t("chat.permTitle")} aria-label={t("chat.permTitle")}>
               <option value="">{t("chat.permRead")}</option>
               <option value="acceptEdits">{t("chat.permEdit")}</option>
               <option value="bypassPermissions">{t("chat.permAll")}</option>
-            </select>
+            </select></label>
           </div>
           {hist && (
             <div className="chat-hist">
@@ -686,17 +661,16 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
           )}
           {conv.msgs.map((m, i) => (
             <div key={i} className={`msg ${m.role}`}>
-              {m.role === "ai" && m.tools.length > 0 && (
-                <span className="msg-tools">
-                  {groupTools(m.tools).map((t, j) => (
-                    <i key={j}>
-                      🔧 {t.name}
-                      {t.count > 1 ? ` ×${t.count}` : t.hint ? <em> {t.hint}</em> : null}
-                    </i>
-                  ))}
-                </span>
-              )}
-              {m.role === "ai" ? <span className={`md ${m.live ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(m.text) }} /> : linkNodes(m.text)}
+              {m.role === "ai" ? <>
+                {m.steps?.length ? m.steps.map((step) => step.kind === "text" ?
+                  <div key={step.id} className={`md ${step.state === "running" ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(step.text) }} /> :
+                  <WorkStep key={step.id} step={step} />
+                ) : <>
+                  {m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}
+                  <div className={`md ${m.live ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(m.text) }} />
+                </>}
+                {m.note && <div className="msg-note" role="status">{m.note}</div>}
+              </> : linkNodes(m.text)}
               {m.role === "ai" && m.denied.length > 0 && (
                 <span className="msg-denied">
                   {t("chat.denied", { tools: m.denied.join(", ") })}
@@ -720,8 +694,10 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
             aria-label={t("chat.inputLabel")}
             placeholder={conv.busy ? t("chat.placeholderBusy") : t("chat.placeholder")}
             onChange={(e) => setInput(e.target.value)}
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={() => { composingRef.current = false; }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              if (submitsChat(e.key, e.shiftKey, composingRef.current || e.nativeEvent.isComposing, e.nativeEvent.keyCode)) {
                 e.preventDefault();
                 submit();
               }
@@ -735,4 +711,14 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
       </aside>
     </div>
   );
+}
+
+function WorkStep({ step }: { step: ChatStep }) {
+  const { t } = useLang();
+  const icon = /bash|exec|command/i.test(step.name) ? "⌘" : /read|edit|write|patch/i.test(step.name) ? "▤" : "⚙";
+  return <section className={`chat-work ${step.state}`} aria-label={step.name}>
+    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true">{icon}</span><strong>{step.name}</strong><span className="chat-work-state">{t(`chat.step.${step.state}`)}</span></div>
+    {step.text && <pre className="chat-work-input">{step.text}</pre>}
+    {step.output && <details><summary>{t("chat.step.details")}</summary><pre>{step.output}</pre>{step.output.length >= 12000 && <small>{t("chat.step.truncated")}</small>}</details>}
+  </section>;
 }

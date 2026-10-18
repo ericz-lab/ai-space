@@ -331,8 +331,14 @@ function codexChat(bin: string[], turn: ChatTurn, cb: ChatCallbacks): { kill: ()
             emit({ type: "assistant", message: { content: [{ type: "text", text: item.text }] } });
           } else if ((event?.type === "item.started" || event?.type === "item.completed") && item && ["command_execution", "file_change", "mcp_tool_call", "web_search"].includes(item.type)) {
             const name = item.type === "command_execution" ? "Bash" : item.type === "file_change" ? "Edit" : item.tool ?? item.type;
-            emit({ type: "assistant", message: { content: [{ type: "tool_use", id: item.id, name, input: { command: item.command ?? item.query ?? item.changes?.map((c: { path: string }) => c.path).join(", ") ?? "" } }] } });
-            if (item.status === "failed") emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: item.id, is_error: true, content: item.aggregated_output ?? item.error?.message ?? "Tool failed" }] } });
+            const input = item.type === "mcp_tool_call" ? (item.arguments ?? {}) : { command: item.command ?? item.query ?? item.changes?.map((c: { path: string }) => c.path).join(", ") ?? "" };
+            emit({ type: "assistant", message: { content: [{ type: "tool_use", id: item.id, name, input }] } });
+            if (event.type === "item.completed") {
+              const failed = item.status === "failed" || (typeof item.exit_code === "number" && item.exit_code !== 0) || Boolean(item.error);
+              const output = item.aggregated_output ?? item.error?.message ?? item.result ?? item.changes ?? "";
+              const content = (typeof output === "string" ? output : JSON.stringify(output)).slice(0, 12000);
+              emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: item.id, is_error: failed, content }] } });
+            }
           }
         },
       });

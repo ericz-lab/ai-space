@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { whichUsable } from "./host-tools.ts";
 import type { Manifest } from "./scheduler/manifest.ts";
 import type { Workspace } from "./workspace.ts";
 
@@ -67,10 +68,16 @@ export async function cloneDefaultApps(ws: Workspace, apps: DefaultApp[], opts: 
   const run = opts.run ?? runCommand;
   const log = opts.log ?? (() => {});
   const reports: InstallReport[] = [];
+  // A Mac without the Command Line Tools has only a stub of git, which would open an install dialog.
+  const noGit = !opts.run && !whichUsable("git");
   for (const app of apps) {
     const dir = join(ws.apps, app.name);
     if (await exists(dir)) {
       reports.push({ name: app.name, status: "present" });
+      continue;
+    }
+    if (noGit) {
+      reports.push({ name: app.name, status: "failed", detail: "git clone: git is not installed" });
       continue;
     }
     log(`cloning ${app.repo} into ${dir}`);

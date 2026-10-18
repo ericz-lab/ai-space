@@ -162,6 +162,27 @@ Desktop presence does not make a laptop an always-on server. Do not prevent slee
 
 This is the Local edition of [editions.md](editions.md); the client-only release is the Client edition.
 
+**Implemented** ([local.md](local.md)): the app carries the service in `Resources/space`
+(`release/local.ts`) and drives it through `space local … --json` run with the Bun in its bundle
+(`Desktop/LocalManager.swift`, `Services/LocalEdition.swift`). On first launch with no saved Space it
+offers Set Up, or, when this Mac already has an ai-space it did not install, Connect to It or Take It
+Over (`Views/LocalViews.swift`). Both screens list the agent CLIs found (Claude Code, Codex), with
+how to install each and Choose… for one installed elsewhere, and the default model from every tier of
+every CLI found (the same setting as Settings → Models); Set Up stays off until a CLI is there and a
+model is chosen. A managed Space without a default model gets a sheet asking for one. Settings has "AI Space on This Mac": state, installed and bundled versions, Update, Start,
+Stop, Restart, Repair, Open Log, Remove Background Service. The saved Space is marked `managed`; the
+app signs in to it with a device credential kept in the Keychain, exchanged for a session cookie in
+that Space's web data whenever the cookie is missing or a page says sign-in is required.
+
+The decisions below were taken as follows. The background helper is a LaunchAgent the app writes to
+`~/Library/LaunchAgents/ai.space.local.plist` and loads with `launchctl`, running the release
+copied out to Application Support, not an `SMAppService` agent: `SMAppService` requires the
+program inside the app bundle, and a service run from inside the bundle breaks when the app is
+moved, replaced during an update, or deleted. Its state, a disabled label and the repair path are
+shown in Settings; macOS lists it under Login Items as a background item.
+
+What follows is the design as it was written before the implementation.
+
 This is a separate milestone. First build a release prototype that launches the current server from packaged resources on a clean Mac with no Bun on PATH. Verify Bun HTML imports, public assets, chat-widget builds, shared skills, PTY support, SQLite and runtime adapters. Do not assume copying one TypeScript entry point or compiling one binary packages every runtime resource.
 
 Retain `$SPACE_HOME` or `~/.ai-space` as the workspace contract. Keep the installed runtime and release files separate from apps, databases, logs and configuration. Moving or replacing the desktop app must not lose workspace data.
@@ -322,3 +343,25 @@ DEVELOPMENT_TEAM=YOUR_TEAM_ID bun run desktop:share:build
 The output is `desktop/macos/build/share/Build/Products/Release/AISpace.app`. The ordinary `desktop:build` remains ad-hoc signed, supports the in-app import menu, and has no Share extension. Its drafts live in `Application Support/ai-space/PendingShares`; signed builds use the App Group instead. These stores are separate; finish pending imports in the build that received them before switching builds.
 
 Validation: signed macOS build and 52 Xcode tests passed, including shared Keychain isolation/revocation, frozen-payload retries, unavailable destinations, stale responses and bounded previews. The Foundation-only Mac suite passed 46 tests. The system registered and enabled `dev.ai-space.desktop.share`. A native sharing-service smoke test received an AppKit `NSImage` archive, persisted the image and loaded the authenticated destination list; it did not upload a fixture into a user app. The iOS regression suite passed 113 Simulator tests and 97 Foundation-only tests.
+
+
+### Native chat permissions
+
+Mac chat and Quick Chat use the Web panel's permission flow (`src/web/Chat.tsx`). The composer
+offers Read-only (default), Edit files (`acceptEdits`) and All permissions (`bypassPermissions`).
+The choice is remembered on this Mac and captured when each new turn is sent; changing it during
+a run does not change that run or its reconnect request.
+
+A permission-denied tool result is shown beneath the reply with the refused tool names. Once the
+turn finishes, **Grant and retry** on the latest reply selects the next permission tier and asks
+the agent to finish the refused step in the same session, preserving any unsent draft. Bash needs
+All permissions; other tools first get Edit files and a further refusal can raise it to All
+permissions. The selected scope is shown beside the button and applies to subsequent messages.
+This retries a refused step; it is not a live per-command approval channel. Without clicking the
+button or changing the picker, permissions are not increased.
+
+### Native agent work messages
+
+A running turn previously collapsed tool names into one short line and omitted successful Codex results. Native chat and Quick Chat show assistant messages as borderless text and operations on subtly shaded, borderless cards in event order. Each operation retains its command or file, running/completed/failed state, and expandable result (up to 12,000 characters). An operation with no result is marked as such when the turn ends; it is never assumed successful. Replay uses event sequence numbers and stable tool IDs to avoid duplicate cards. Claude and Codex share the normalized tool-use/result contract; no private reasoning is displayed. Older saved transcripts still use their text-only view. The composer labels its access selector **Permission**.
+
+Chat, Quick Chat and the home command box leave Return to the input method while it has marked text (for example, a Chinese candidate). After composition finishes, Return submits; Shift-Return inserts a newline.

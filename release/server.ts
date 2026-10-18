@@ -26,34 +26,37 @@ export function included(path: string): boolean {
   return INCLUDE.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p));
 }
 
-export type ReleaseInfo = { product: "ai-space"; edition: "server"; version: string; commit: string; os: string; arch: string; bun: string };
+export type ReleaseInfo = { product: "ai-space"; edition: "server" | "local"; version: string; commit: string; os: string; arch: string; bun: string };
 
 export function archiveName(info: Pick<ReleaseInfo, "version" | "os" | "arch">): string {
   return `ai-space-server-${info.version}-${info.os}-${info.arch}`;
 }
 
-async function run(cmd: string[], cwd: string): Promise<string> {
+export async function run(cmd: string[], cwd: string): Promise<string> {
   const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "inherit" });
   const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
   if (code !== 0) throw new Error(`${cmd.join(" ")} exited ${code}`);
   return out;
 }
 
-export async function buildServer(opts: { root?: string; out: string }): Promise<string> {
+/**
+ * The release tree both editions run from, at `stage`: the committed files, production
+ * dependencies, `runtime/bun` and `RELEASE.json`. The Server puts `install.sh` beside it and tars
+ * it; the Local edition puts it inside the Mac app (release/local.ts).
+ */
+export async function stageRelease(opts: { root?: string; stage: string; edition: ReleaseInfo["edition"] }): Promise<ReleaseInfo> {
   const root = opts.root ?? SPACE_ROOT;
   const os = process.platform === "darwin" ? "macos" : process.platform;
   const info: ReleaseInfo = {
     product: "ai-space",
-    edition: "server",
+    edition: opts.edition,
     version: await readVersion(root),
     commit: (process.env.GITHUB_SHA || (await run(["git", "rev-parse", "HEAD"], root))).trim(),
     os,
     arch: process.arch,
     bun: Bun.version,
   };
-  const name = archiveName(info);
-  const out = resolve(opts.out);
-  const stage = join(out, name);
+  const stage = resolve(opts.stage);
   await rm(stage, { recursive: true, force: true });
   await mkdir(stage, { recursive: true });
 
@@ -68,9 +71,19 @@ export async function buildServer(opts: { root?: string; out: string }): Promise
   await mkdir(join(stage, "runtime"), { recursive: true });
   await cp(process.execPath, join(stage, "runtime", "bun"));
   await chmod(join(stage, "runtime", "bun"), 0o755);
+  await Bun.write(join(stage, "RELEASE.json"), `${JSON.stringify(info, null, 2)}\n`);
+  return info;
+}
+
+export async function buildServer(opts: { root?: string; out: string }): Promise<string> {
+  const root = opts.root ?? SPACE_ROOT;
+  const out = resolve(opts.out);
+  const os = process.platform === "darwin" ? "macos" : process.platform;
+  const name = archiveName({ version: await readVersion(root), os, arch: process.arch });
+  const stage = join(out, name);
+  await stageRelease({ root, stage, edition: "server" });
   await cp(join(root, "release", "install.sh"), join(stage, "install.sh"));
   await chmod(join(stage, "install.sh"), 0o755);
-  await Bun.write(join(stage, "RELEASE.json"), `${JSON.stringify(info, null, 2)}\n`);
 
   const archive = join(out, `${name}.tar.gz`);
   await rm(archive, { force: true });

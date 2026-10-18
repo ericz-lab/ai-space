@@ -347,7 +347,7 @@ struct OmniboxField: View {
                     .lineLimit(1...4)
                     .focused($focused)
                     .onKeyPress(.return, phases: .down) { press in
-                        if press.modifiers.contains(.shift) { return .ignored }
+                        if TextInputComposition.isActive || press.modifiers.contains(.shift) { return .ignored }
                         submit(ask: press.modifiers.contains(.command))
                         return .handled
                     }

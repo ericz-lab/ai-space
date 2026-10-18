@@ -102,13 +102,14 @@ function chatOptions(runtimes: RuntimeRegistry): NonNullable<AgentView["modelOpt
 
 function baseRuntime(runtimes: RuntimeRegistry, defaultModel?: string): string {
   if (defaultModel?.includes("/")) return defaultModel.split("/")[0]!;
-  return runtimes.get("claude")?.capabilities.chat ? "claude" : runtimes.list().find((r) => r.capabilities.chat)?.name ?? runtimes.default.name;
+  return runtimes.get("claude")?.capabilities.chat ? "claude" : runtimes.list().find((r) => r.capabilities.chat)?.name ?? runtimes.default?.name ?? runtimes.list()[0]!.name;
 }
 
 function spaceAgentPrompt(ws: Workspace): string {
   return [
     `You are the assistant of an ai-space workspace at ${ws.home}.`,
     "Apps live under apps/<name>/, each with a space.yaml manifest (spec in core/docs/app-spec.md when ai-space is deployed here). Runtime data is under data/<name>/. Answer questions about the space, inspect manifests and files, and help operate apps.",
+    "Apps made inside this Space have their source in app-src/<name>/: change the files there and run `space app build <name>` to install the change (the app-studio skill says how). `space app create <name>` makes a new one from the template.",
     "Be honest: say when you cannot find or verify something instead of guessing.",
   ].join("\n");
 }
@@ -152,7 +153,9 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
   /** `runtime/model` for a value: a bare tier on `tierRuntime`, another bare model on `runtime` (else the space's default runtime). */
   const qualify = (value: string | undefined, tierRuntime: string, runtime?: string): string | undefined => {
     if (!value || value.includes("/")) return value;
-    return `${(MODEL_TIERS as readonly string[]).includes(value) ? tierRuntime : runtime ?? opts.runtimes.default.name}/${value}`;
+    const owner = (MODEL_TIERS as readonly string[]).includes(value) ? tierRuntime : runtime ?? opts.runtimes.default?.name;
+    // No runtime for a bare model: left bare, so resolving it says which runtime to name.
+    return owner ? `${owner}/${value}` : value;
   };
   /** A qualified value a chat can run: a configured runtime that chats, and a model it knows (a tier it lacks means its own default). */
   const chatRunnable = (value: string): boolean => {

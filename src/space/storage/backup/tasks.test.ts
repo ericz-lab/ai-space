@@ -33,4 +33,10 @@ describe("spaceManifest", () => {
     expect((m.tasks[1]!.target as { command: string }).command).toEndWith(" backup-verify");
     expect(m.tasks[1]!.schedule).toEqual({ kind: "cron", expr: "0 5 * * 1" });
   });
+
+  test("no backup target: backups are off, no snapshot or verification task", () => {
+    const m = spaceManifest(d, undefined, { backups: false });
+    expect(m.app).toBe("space");
+    expect(m.tasks).toEqual([]);
+  });
 });

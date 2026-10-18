@@ -5,7 +5,7 @@ import { isOperator } from "../../auth.ts";
 /**
  * HTTP surface for backups, merged into the Space API routes.
  *
- *   GET  /api/backups                every app: last snapshot, last ok, last verified, next run; `stale` when the
+ *   GET  /api/backups                `enabled` (false: no target, backups are off), then every app: last snapshot, last ok, last verified, next run; `stale` when the
  *                                    last good snapshot is older than the limit, `retired` when no task will ever
  *                                    refresh it (the app left the workspace, or opted out) and its snapshots are history
  *   GET  /api/apps/:app/backups      one app's snapshots, newest first
@@ -17,6 +17,8 @@ import { isOperator } from "../../auth.ts";
 export type BackupApiOptions = {
   store: BackupStore;
   target?: BackupTarget;
+  /** False when no target is configured: backups are off and no task is registered. */
+  enabled?: boolean;
   token?: string;
   /** A last successful snapshot older than this is reported `stale`. */
   maxAgeMs: number;
@@ -73,7 +75,7 @@ export function createBackupRoutes(opts: BackupApiOptions): Routes {
 
   return {
     "/api/backups": {
-      GET: async () => json({ ok: true, target: opts.target?.url ?? null, maxAgeHours: Math.round(opts.maxAgeMs / 3600_000), backups: await overview(), asOf: new Date().toISOString() }),
+      GET: async () => json({ ok: true, enabled: opts.enabled ?? true, target: opts.target?.url ?? null, maxAgeHours: Math.round(opts.maxAgeMs / 3600_000), backups: await overview(), asOf: new Date().toISOString() }),
     },
     "/api/apps/:app/backups": {
       GET: async (req) => {
