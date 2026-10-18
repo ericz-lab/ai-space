@@ -6,6 +6,7 @@ struct ChatMessage: Identifiable, Equatable {
     var role: Role
     var text: String
     var tools: [String] = []
+    var steps: [ChatStep] = []
     var denied: [String] = []
     var activity: ChatActivity?
     var live = false
@@ -138,7 +139,10 @@ final class ChatController: ObservableObject {
                         runID = opened.runID
                     } else { break }
                     for try await message in opened.stream {
-                        if let id = message.id { lastSeq = id }
+                        if let id = message.id {
+                            guard id > lastSeq else { continue }
+                            lastSeq = id
+                        }
                         reply.apply(message.data)
                         failures = 0
                         update(index, reply)
@@ -159,6 +163,7 @@ final class ChatController: ObservableObject {
             }
             if let sid = reply.sessionID { sessionID = sid }
             reply.activity = nil
+            reply.endSteps()
             update(index, reply)
             messages[index].live = false
             busy = false
@@ -173,6 +178,7 @@ final class ChatController: ObservableObject {
         if reply.stopped { text += (text.isEmpty ? "" : "\n\n") + String(localized: "(stopped)") }
         messages[index].text = text
         messages[index].tools = reply.tools
+        messages[index].steps = reply.steps
         messages[index].denied = reply.denied
         messages[index].activity = reply.activity
         if let failure = reply.failure { messages[index].failure = ChatFailure(failure) }

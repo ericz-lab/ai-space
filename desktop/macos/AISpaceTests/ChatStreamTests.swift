@@ -107,3 +107,42 @@ struct ChatStreamTests {
         #expect(!ChatFailure("Not logged in").retryable && !ChatFailure("could not run Codex: x").retryable)
     }
 }
+
+/// Codex adapter output uses the shared event contract; no live Claude process is used here.
+struct CodexWorkStepsTests {
+    @Test func preservesMessagesAndMatchesResultsWithoutDuplicatingSteps() {
+        var r = ChatReply()
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"text","text":"Checking the workspace."}]}}"#)
+        let start = #"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"shell-1","name":"Bash","input":{"command":"pwd"}}]}}"#
+        r.apply(start)
+        r.apply(start)
+        #expect(r.steps.count == 2)
+        #expect(r.steps[1].text == "pwd" && r.steps[1].state == .running)
+        r.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"shell-1","is_error":false,"content":"/workspace"}]}}"#)
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"text","text":"Workspace checked."}]}}"#)
+        r.apply(#"{"type":"done"}"#)
+        #expect(r.steps.map(\.kind) == [.text, .tool, .text])
+        #expect(r.steps[1].state == .succeeded && r.steps[1].output == "/workspace")
+        #expect(r.steps[2].text == "Workspace checked.")
+    }
+
+    @Test func failedAndInterruptedWorkNeverLooksSuccessful() {
+        var r = ChatReply()
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Bash","input":{"command":"false"}},{"type":"tool_use","id":"b","name":"Edit","input":{"file_path":"notes.txt"}}]}}"#)
+        r.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"command failed"}]}}"#)
+        r.apply(#"{"type":"error","status":"stopped"}"#)
+        r.apply(#"{"type":"done"}"#)
+        #expect(r.steps[0].state == .failed)
+        #expect(r.steps[1].state == .incomplete)
+        #expect(r.denied.isEmpty)
+    }
+
+    @Test func capsLargeResultsAndKeepsParallelStepsIndependent() {
+        var r = ChatReply()
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Bash"},{"type":"tool_use","id":"b","name":"Bash"}]}}"#)
+        let event: [String: Any] = ["type": "user", "message": ["content": [["type": "tool_result", "tool_use_id": "b", "content": String(repeating: "x", count: 20000)]]]]
+        r.apply(String(data: try! JSONSerialization.data(withJSONObject: event), encoding: .utf8)!)
+        #expect(r.steps[0].state == .running)
+        #expect(r.steps[1].state == .succeeded && r.steps[1].output.count == 12000)
+    }
+}

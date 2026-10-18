@@ -482,3 +482,29 @@
 "Continue" = "继续";
 "Available once an agent CLI is found." = "检测到 Agent CLI 后即可选择。";
 "Choose the default model first." = "请先选择默认模型。";
+
+"Detected" = "已检测到";
+
+"Not detected" = "未检测到";
+
+"Choose Path…" = "选择路径…";
+
+"Choose a model…" = "选择模型…";
+
+"The selected program could not be verified as this agent. Choose its executable and try again." = "无法确认所选程序是此 Agent。请选择对应的可执行文件后重试。";
+
+"Choose an installed agent to continue. Sign in to it in Terminal before using AI Space." = "请选择已安装的 Agent 以继续。使用 AI Space 前，请先在终端中登录该 Agent。";
+
+"Permission" = "权限";
+
+"No result received" = "未收到结果";
+
+"Output limited to 12,000 characters." = "输出最多显示 12,000 个字符。";
+
+"Details" = "详情";
+
+"Completed" = "已完成";
+
+"Failed" = "失败";
+
+"Running" = "运行中";

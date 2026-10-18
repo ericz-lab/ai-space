@@ -78,6 +78,12 @@ struct LocalStatus: Codable, Equatable {
     var models: [ModelPreferences.Option]?
     var runtimes: Runtimes
 
+    /// A keychain entry can outlive a deleted workspace. A fresh setup or takeover must
+    /// create a credential in the new database even if the path still has an old token.
+    func needsDeviceCredential(hasStoredToken: Bool) -> Bool {
+        state != .managed || !workspace.exists || !hasStoredToken
+    }
+
     /// Only a newer version is offered automatically; Repair can reinstall a development build.
     var updateAvailable: Bool {
         guard state == .managed, let bundle, let installed else { return false }

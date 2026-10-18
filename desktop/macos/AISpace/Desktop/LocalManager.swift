@@ -17,6 +17,7 @@ final class LocalManager: ObservableObject {
     @Published var needsModelChoice = false
     /// Agent CLIs the user pointed the app at, by name (`claude`, `codex`), when the search misses them.
     @Published private(set) var chosenRuntimes: [String: String] = LocalManager.loadChosenRuntimes()
+    @Published private(set) var checkingRuntime: String?
     @Published private(set) var lastApps: [LocalInstallResult.App] = []
     /// The work an automatic update is waiting for; nil when it is not waiting.
     @Published private(set) var updateWaitingFor: SpaceActivity?
@@ -80,6 +81,7 @@ final class LocalManager: ObservableObject {
 
     /// Lets the user pick the CLI's program file when it is installed where the search does not look.
     func chooseRuntime(_ name: String) async {
+        guard checkingRuntime == nil else { return }
         let panel = NSOpenPanel()
         panel.title = String(localized: "Choose the \(name) program")
         panel.canChooseFiles = true
@@ -89,7 +91,9 @@ final class LocalManager: ObservableObject {
         panel.showsHiddenFiles = true
         panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        chosenRuntimes[name] = url.resolvingSymlinksInPath().path
+        checkingRuntime = name
+        defer { checkingRuntime = nil }
+        chosenRuntimes[name] = url.path
         UserDefaults.standard.set(chosenRuntimes, forKey: Self.chosenKey)
         await refresh()
     }
@@ -120,7 +124,9 @@ final class LocalManager: ObservableObject {
         updateWaitingFor = nil
         let label = migrate ? "Migrating…" : whenBusy == .wait ? "Waiting for the work in progress, then updating…" : (status?.state == .managed ? "Updating…" : "Setting up…")
         await perform(label) {
-            let haveToken = DeviceKeychain.token(for: workspaceKey) != nil
+            let current = try await run(LocalStatus.self, ["status"] + runtimeArgs)
+            status = current
+            let needsDevice = current.needsDeviceCredential(hasStoredToken: DeviceKeychain.token(for: workspaceKey) != nil)
             var args = ["install"]
             if migrate { args.append("--migrate") }
             switch whenBusy {
@@ -128,11 +134,14 @@ final class LocalManager: ObservableObject {
             case .wait: args.append("--wait")
             case .now: args.append("--now")
             }
-            if !haveToken { args += ["--device", Host.current().localizedName ?? "This Mac"] }
+            if needsDevice { args += ["--device", Host.current().localizedName ?? "This Mac"] }
             args += runtimeArgs
             if let defaultModel { args += ["--default-model", defaultModel] }
             let result = try await run(LocalInstallResult.self, args)
-            if let device = result.device { DeviceKeychain.save(device.token, for: result.workspace) }
+            if let device = result.device {
+                DeviceKeychain.save(device.token, for: result.workspace)
+                lastSignIn = nil
+            }
             lastApps = result.apps
             status = try await run(LocalStatus.self, ["status"] + runtimeArgs)
             guard let url = URL(string: result.url) else { return }

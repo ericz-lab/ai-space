@@ -27,6 +27,18 @@ struct LocalEditionTests {
         #expect(s.runtimes.any)
     }
 
+    @Test func freshSetupDoesNotReuseADeletedWorkspacesKeychainToken() throws {
+        var s = try LocalOutput.decode(LocalStatus.self, from: Data(Self.statusJSON.utf8))
+        #expect(!s.needsDeviceCredential(hasStoredToken: true))
+        #expect(s.needsDeviceCredential(hasStoredToken: false))
+        s.state = .absent
+        s.workspace.exists = false
+        #expect(s.needsDeviceCredential(hasStoredToken: true))
+        s.state = .foreign
+        s.workspace.exists = true
+        #expect(s.needsDeviceCredential(hasStoredToken: true))
+    }
+
     @Test func aRefusalBecomesAnErrorWithItsStatus() throws {
         let json = #"{"ok":false,"code":"foreign","error":"/Users/u/.ai-space exists and was not made by this app","status":"# + Self.statusJSON.replacingOccurrences(of: "\"managed\",\"bundle\"", with: "\"foreign\",\"bundle\"").replacingOccurrences(of: "{\"ok\":true,", with: "{") + "}"
         do {

@@ -607,14 +607,22 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
   font-size: 13px; font-weight: 400; line-height: 1.65; word-break: break-word;
 }
 .msg.user { align-self: flex-end; background: color-mix(in srgb, var(--link) 14%, transparent); border: 1px solid color-mix(in srgb, var(--link) 20%, transparent); border-bottom-right-radius: 4px; white-space: pre-wrap; }
-.msg.ai { align-self: flex-start; background: var(--glass); border: 1px solid var(--glass-border); border-bottom-left-radius: 4px; }
-.msg-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
-.msg-tools i {
-  font-style: normal; font-size: 11px; color: var(--muted);
-  border: 1px solid var(--glass-border); border-radius: 999px; padding: 1px 8px;
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.msg-tools i em { font-style: normal; opacity: 0.65; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10px; }
+.msg.ai { align-self: flex-start; width: 88%; background: none; border: 0; padding: 8px 4px; display: flex; flex-direction: column; gap: 14px; }
+.msg.ai .chat-work { margin: 0; background: var(--glass); border: 0; border-radius: var(--radius-sm); padding: 12px; min-width: 0; }
+.chat-work-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.chat-work-icon { color: var(--link); background: color-mix(in srgb, var(--link) 12%, transparent); border-radius: 6px; padding: 3px 7px; }
+.chat-work-state { margin-left: auto; color: var(--muted); font-size: 11px; }
+.chat-work.completed .chat-work-state { color: var(--success); }
+.chat-work.failed .chat-work-state { color: var(--danger); }
+.chat-work.running .chat-work-state { color: var(--link); }
+.chat-work pre { font: 12px/1.6 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0 0; max-height: 320px; overflow: auto; }
+.chat-work .chat-work-input { max-height: 100px; }
+.chat-work details { margin-top: 8px; }
+.chat-work summary { color: var(--muted); cursor: pointer; font-size: 12px; }
+.chat-work small { color: var(--muted); }
+.chat-permission { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; min-width: 0; }
+.chat-opts { flex-wrap: wrap; }
+.msg-note { color: var(--muted); }
 .msg-denied {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   margin-top: 8px; font-size: 12px; color: var(--danger);

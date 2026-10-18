@@ -132,17 +132,24 @@ export type Runtimes = Record<"claude" | "codex", string | null>;
 
 /**
  * The agent CLIs on this Mac. `chosen` is what the user pointed the app at (`--claude`, `--codex`):
- * it wins over the search when it is an executable file; null means "do not use this one".
+ * it wins over the search when its version identifies the expected agent; null means "do not use this one".
  */
-export function findRuntimes(env: Record<string, string | undefined> = process.env, home = homedir(), chosen: Partial<Runtimes> = {}): Runtimes {
+export async function findRuntimes(env: Record<string, string | undefined> = process.env, home = homedir(), chosen: Partial<Runtimes> = {}): Promise<Runtimes> {
   const PATH = withUserToolDirs(env.PATH ?? "/usr/bin:/bin", home);
-  const one = (name: "claude" | "codex") => {
+  const one = async (name: "claude" | "codex") => {
     const c = chosen[name];
     if (c === null) return null;
-    if (c !== undefined) return executableFile(c) ? c : null;
-    return whichUsable(name, { PATH }) ?? null;
+    const path = c ?? whichUsable(name, { PATH });
+    if (!path || !executableFile(path)) return null;
+    try {
+      const result = await spawnRuntime([path, "--version"], { env: { ...env, HOME: home, PATH }, timeoutMs: 3000 });
+      const version = result.stdout.trim();
+      const matches = name === "claude" ? /^\d+\.\d+\.\d+[^\n]*\(Claude Code\)$/i.test(version) : /^codex-cli \d+\.\d+\.\d+[^\n]*$/i.test(version);
+      return result.code === 0 && !result.timedOut && matches ? path : null;
+    } catch { return null; }
   };
-  return { claude: one("claude"), codex: one("codex") };
+  const [claude, codex] = await Promise.all([one("claude"), one("codex")]);
+  return { claude, codex };
 }
 
 function executableFile(path: string): boolean {
@@ -290,7 +297,7 @@ export async function localStatus(d: LocalDeps): Promise<LocalStatus> {
     .show(LOCAL_LABEL)
     .catch((e: Error) => ({ loadState: "unknown", activeState: "unknown", subState: e.message, unitFileState: "", fragmentPath: "", restarts: 0, mainPid: 0 }) as UnitState);
   const locked = wsExists && workspaceLocked(join(p.workspace, "run"));
-  const runtimes = findRuntimes(d.env, d.home, d.runtimes);
+  const runtimes = await findRuntimes(d.env, d.home, d.runtimes);
 
   let state: LocalState = "absent";
   let reason: string | undefined;

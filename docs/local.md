@@ -144,3 +144,7 @@ Validation includes Swift feed/checksum/version tests and helper replacement tes
 swap, missing staged app and failed launch), plus service integration tests for busy/refuse/wait/now,
 a failed migration, failed initialization and failed bootstrap. Signed DMG installation and live
 launchd timing still need release testing on a Mac with a Developer ID build.
+
+The setup page hides the remote connection form while setup is running. It shows detected agents with their icons. Only missing agents offer a path picker; selected executables must return the expected Claude Code or Codex version signature within three seconds. This checks the CLI identity, not its sign-in state. Choose the default model from the dropdown before continuing. Agent icons are from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT).
+
+A fresh setup or takeover always creates a new device credential, even if the keychain still contains one for the same workspace path after a reset. Existing managed installations keep their credential during upgrades.

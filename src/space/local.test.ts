@@ -110,7 +110,7 @@ async function setup() {
   const run = fakeLaunchd(log);
   // The agent CLI the user would have: a stand-in, chosen by path so the host's own never counts.
   const claude = join(root, "bin", "claude");
-  await Bun.write(claude, "#!/bin/sh\necho claude-stand-in\n");
+  await Bun.write(claude, "#!/bin/sh\necho '2.1.0 (Claude Code)'\n");
   await chmod(claude, 0o755);
   const deps = (bundle: string): LocalDeps => ({
     env: { SPACE_HOME: workspace, SPACE_LOCAL_PREFIX: join(root, "prefix"), SPACE_LOCAL_AGENTS: join(root, "agents"), PATH: "/usr/bin:/bin" },
@@ -137,16 +137,30 @@ async function setup() {
 }
 
 describe("agent CLIs", () => {
-  test("a chosen path wins when it is executable; null leaves that one out", async () => {
+  test("a chosen path must identify the expected agent; null leaves that one out", async () => {
     const root = await mkdtemp(join(tmpdir(), "space-local-rt-"));
     roots.push(root);
     const exe = join(root, "my claude");
-    await Bun.write(exe, "#!/bin/sh\n");
+    await Bun.write(exe, "#!/bin/sh\necho '2.1.0 (Claude Code)'\n");
     await chmod(exe, 0o755);
     const plain = join(root, "codex.txt");
     await Bun.write(plain, "");
-    expect(findRuntimes({ PATH: "/nowhere" }, root, { claude: exe, codex: null })).toEqual({ claude: exe, codex: null });
-    expect(findRuntimes({ PATH: "/nowhere" }, root, { claude: "claude", codex: plain })).toEqual({ claude: null, codex: null });
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: exe, codex: null })).toEqual({ claude: exe, codex: null });
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: "claude", codex: plain })).toEqual({ claude: null, codex: null });
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: null, codex: exe })).toEqual({ claude: null, codex: null });
+    await Bun.write(exe, "#!/bin/sh\necho 'codex-cli 0.100.0'\n");
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: exe, codex: exe })).toEqual({ claude: null, codex: exe });
+    await Bun.write(exe, "#!/bin/sh\necho 'codex-cli 0.100.0'\nexit 1\n");
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: null, codex: exe })).toEqual({ claude: null, codex: null });
+  });
+
+  test("an unresponsive selected program times out", async () => {
+    const root = await mkdtemp(join(tmpdir(), "space-local-rt-"));
+    roots.push(root);
+    const exe = join(root, "hung-agent");
+    await Bun.write(exe, "#!/bin/sh\nexec /bin/sleep 10\n");
+    await chmod(exe, 0o755);
+    expect(await findRuntimes({ PATH: "/usr/bin:/bin" }, root, { claude: exe, codex: null })).toEqual({ claude: null, codex: null });
   });
 
   test("runtimes.yaml names both CLIs by path, with no default runtime", () => {

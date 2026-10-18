@@ -359,3 +359,9 @@ All permissions; other tools first get Edit files and a further refusal can rais
 permissions. The selected scope is shown beside the button and applies to subsequent messages.
 This retries a refused step; it is not a live per-command approval channel. Without clicking the
 button or changing the picker, permissions are not increased.
+
+### Native agent work messages
+
+A running turn previously collapsed tool names into one short line and omitted successful Codex results. Native chat and Quick Chat show assistant messages as borderless text and operations on subtly shaded, borderless cards in event order. Each operation retains its command or file, running/completed/failed state, and expandable result (up to 12,000 characters). An operation with no result is marked as such when the turn ends; it is never assumed successful. Replay uses event sequence numbers and stable tool IDs to avoid duplicate cards. Claude and Codex share the normalized tool-use/result contract; no private reasoning is displayed. Older saved transcripts still use their text-only view. The composer labels its access selector **Permission**.
+
+Chat, Quick Chat and the home command box leave Return to the input method while it has marked text (for example, a Chinese candidate). After composition finishes, Return submits; Shift-Return inserts a newline.

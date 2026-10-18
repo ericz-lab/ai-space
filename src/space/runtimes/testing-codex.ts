@@ -28,6 +28,17 @@ if (import.meta.main) {
     process.exit(0);
   }
   if (!args.includes("--ephemeral")) console.log(JSON.stringify({ type: "thread.started", thread_id: "c0de0001-0000-4000-8000-000000000000" }));
+  if (mode === "steps") {
+    for (const item of [
+      { id: "shell-1", type: "command_execution", command: "pwd", status: "completed", exit_code: 0, aggregated_output: "/workspace\n" },
+      { id: "shell-2", type: "command_execution", command: "false", status: "completed", exit_code: 1, aggregated_output: "command failed" },
+      { id: "edit-1", type: "file_change", status: "completed", changes: [{ path: "notes.txt", kind: "update" }] },
+      { id: "mcp-1", type: "mcp_tool_call", tool: "lookup", status: "completed", result: { content: [{ type: "text", text: "found" }] } },
+    ]) {
+      console.log(JSON.stringify({ type: "item.started", item: { ...item, status: "in_progress" } }));
+      console.log(JSON.stringify({ type: "item.completed", item }));
+    }
+  }
   const systemArg = args.find((s) => s.startsWith("model_instructions_file="));
   const systemFile = systemArg ? JSON.parse(systemArg.slice(systemArg.indexOf("=") + 1)) : undefined;
   const images = await Promise.all(args.flatMap((a, i) => a === "--image" ? [Bun.file(args[i + 1]!).arrayBuffer().then((b) => Array.from(new Uint8Array(b)))] : []));

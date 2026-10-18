@@ -273,3 +273,5 @@ src/web/            index.html, main.tsx (language root), App.tsx, screens.ts (s
 - A turn never ends: the run timeout stops it. ai-space restarts mid-turn: the turn gets the drain time, then is stopped and recorded as interrupted.
 - Two people reorder at once: last write wins; the layout is small enough that this is acceptable.
 - An icon path points outside the app directory: 404.
+
+Agent chat shows text and tool operations as separate, ordered entries. AI text has no bubble or outer border; tools use subtly shaded cards with state, command or file, and expandable results (up to 12,000 characters). Repeated tools remain separate and incomplete work is not marked successful. Recent run replay restores these entries; older transcripts retain their available tool hints without inventing results. The Permission selector applies to the next message. IME confirmation Enter is ignored by submission, including Safari key code 229; Shift-Enter inserts a newline.

@@ -16,20 +16,23 @@ struct LocalSetupView: View {
     var body: some View {
         ScrollView {
         VStack(spacing: 18) {
-            Logo(size: 96)
+            Logo(size: 64)
             content
             if let failure = local.failure {
                 Text(failure.error).font(.callout).foregroundStyle(.red).multilineTextAlignment(.center).frame(maxWidth: 460)
             }
-            DisclosureGroup("Connect to a Space elsewhere", isExpanded: $showingRemote) {
-                ConnectionForm(initial: nil) { name, url in model.add(name: name, url: url) }.padding(.top, 8)
+            if local.busy == nil {
+                DisclosureGroup("Connect to a Space elsewhere", isExpanded: $showingRemote) {
+                    ConnectionForm(initial: nil) { name, url in model.add(name: name, url: url) }.padding(.top, 8)
+                }
+                .frame(width: 440)
+                .foregroundStyle(.secondary)
             }
-            .frame(width: 440)
-            .foregroundStyle(.secondary)
         }
-        .padding(40)
+        .padding(32)
         .frame(maxWidth: .infinity)
         }
+        .tint(Color(hex: 0x3F63CF))
         .task { if local.status == nil { await local.refresh() } }
     }
 
@@ -94,42 +97,56 @@ struct LocalRuntimesCheck: View {
     let runtimes: LocalStatus.Runtimes
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("Agents on this Mac").font(.headline)
-            runtime("claude", "Claude Code", path: runtimes.claude, how: "curl -fsSL https://claude.ai/install.sh | bash\nclaude")
-            runtime("codex", "Codex", path: runtimes.codex, how: "brew install --cask codex\ncodex")
-            if !runtimes.any {
-                Text("Install at least one and sign in to it in Terminal, then check again.")
-                    .font(.callout).foregroundStyle(Theme.warning)
+            LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 16) {
+                runtime("claude", "Claude Code", path: runtimes.claude, icon: "Claude")
+                runtime("codex", "Codex", path: runtimes.codex, icon: "Codex")
             }
-            Button("Check Again") { Task { await local.refresh() } }
+            if !runtimes.any {
+                Text("Choose an installed agent to continue. Sign in to it in Terminal before using AI Space.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
         }
-        .padding(16)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .padding(20)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
     }
 
-    private func runtime(_ name: String, _ title: String, path: String?, how: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Label(title, systemImage: path == nil ? "xmark.circle" : "checkmark.circle.fill")
-                    .foregroundStyle(path == nil ? Color.secondary : Color.green)
-                Spacer()
-                if local.chosenRuntimes[name] != nil {
-                    Button("Search Again") { Task { await local.forgetRuntimeChoice(name) } }.buttonStyle(.link)
+    private func runtime(_ name: String, _ title: String, path: String?, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                if path != nil, let url = Bundle.main.url(forResource: icon, withExtension: "svg"),
+                   let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image).resizable().renderingMode(.template).scaledToFit()
+                        .foregroundStyle(name == "claude" ? Color(red: 0.80, green: 0.47, blue: 0.35) : Color.primary)
+                        .padding(9).frame(width: 42, height: 42)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 11))
+                        .accessibilityHidden(true)
                 }
-                Button("Choose…") { Task { await local.chooseRuntime(name) } }.buttonStyle(.link)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: title).font(.body.weight(.medium))
+                    if path != nil {
+                        Label("Detected", systemImage: "checkmark.circle.fill")
+                            .font(.caption).foregroundStyle(.green)
+                    } else if local.chosenRuntimes[name] != nil {
+                        Text("The selected program could not be verified as this agent. Choose its executable and try again.")
+                            .font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("Not detected").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
-            if let path {
-                Text(path).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-            } else {
-                if let chosen = local.chosenRuntimes[name] {
-                    Text("\(chosen) is not a program that can run.").font(.caption).foregroundStyle(.red)
+            if path == nil {
+                if local.checkingRuntime == name {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Choose Path…") { Task { await local.chooseRuntime(name) } }
+                        .disabled(local.checkingRuntime != nil)
                 }
-                Text(verbatim: how).font(.caption.monospaced()).textSelection(.enabled)
-                    .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
             }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .help(path ?? "")
     }
 }
 
@@ -147,9 +164,12 @@ struct LocalDefaultModelPicker: View {
                 Text("Available once an agent CLI is found.").font(.callout).foregroundStyle(.secondary)
             } else {
                 Picker("Default model", selection: $choice) {
+                    Text("Choose a model…").tag(nil as String?)
                     ForEach(options) { Text(verbatim: $0.label).tag(Optional($0.value)) }
                 }
-                .pickerStyle(.radioGroup)
+                .pickerStyle(.menu)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
                 .labelsHidden()
                 Text("Space Assistant, other agents and apps use it when nothing chooses a model for them. You can change it later in Settings.")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -177,9 +197,12 @@ struct LocalModelChoice: View {
                 .foregroundStyle(.secondary)
             if let m = settings.settings?.models {
                 Picker("Default model", selection: $choice) {
+                    Text("Choose a model…").tag(nil as String?)
                     ForEach(m.options) { Text(verbatim: $0.label).tag(Optional($0.value)) }
                 }
-                .pickerStyle(.radioGroup)
+                .pickerStyle(.menu)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
                 .labelsHidden()
                 .onAppear { if choice == nil { choice = m.options.first(where: { $0.tier == "intermediate" })?.value } }
             } else {

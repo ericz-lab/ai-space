@@ -168,6 +168,17 @@ describe("Codex chat", () => {
     expect(result.events.at(-1)).toMatchObject({ type: "result", is_error: false });
   });
 
+  test("keeps successful and failed work results with their stable tool IDs", async () => {
+    const result = await run("steps");
+    expect(result.error).toBeNull();
+    const results = result.events.filter((e) => e.type === "user").map((e) => e.message.content[0]);
+    expect(results).toHaveLength(4);
+    expect(results[0]).toMatchObject({ tool_use_id: "shell-1", is_error: false, content: "/workspace\n" });
+    expect(results[1]).toMatchObject({ tool_use_id: "shell-2", is_error: true, content: "command failed" });
+    expect(results[2].content).toContain("notes.txt");
+    expect(results[3].content).toContain("found");
+  });
+
   test("applies permissions on both new and resumed sessions", () => {
     for (const sessionId of [undefined, "c0de0001-0000-4000-8000-000000000000"]) {
       for (const [permissionMode, sandbox] of [[undefined, "read-only"], ["acceptEdits", "workspace-write"], ["bypassPermissions", "danger-full-access"], ["invalid", "read-only"]]) {

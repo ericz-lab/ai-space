@@ -56,3 +56,29 @@
 "Next messages: %@" = "Next messages: %@";
 "Grant and retry" = "Grant and retry";
 "I have granted more permissions. Please finish the step that was refused for lack of permission." = "I have granted more permissions. Please finish the step that was refused for lack of permission.";
+
+"Detected" = "Detected";
+
+"Not detected" = "Not detected";
+
+"Choose Path…" = "Choose Path…";
+
+"Choose a model…" = "Choose a model…";
+
+"The selected program could not be verified as this agent. Choose its executable and try again." = "The selected program could not be verified as this agent. Choose its executable and try again.";
+
+"Choose an installed agent to continue. Sign in to it in Terminal before using AI Space." = "Choose an installed agent to continue. Sign in to it in Terminal before using AI Space.";
+
+"Permission" = "Permission";
+
+"No result received" = "No result received";
+
+"Output limited to 12,000 characters." = "Output limited to 12,000 characters.";
+
+"Details" = "Details";
+
+"Completed" = "Completed";
+
+"Failed" = "Failed";
+
+"Running" = "Running";
