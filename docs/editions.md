@@ -146,10 +146,11 @@ status and repair views; bundled apps as `.spaceapp` packages; and coordinated u
 
 ## Service identity
 
-`GET /api/space` says what a running service is:
+`GET /api/space` says what a running service is. It is a public route ([auth.md](auth.md#access-policy)):
+a client asks before anyone has signed in.
 
 ```json
-{ "product": "ai-space", "api": 1, "version": "0.1.0", "edition": "server", "id": "<uuid>", "name": "<SPACE_NAME>" }
+{ "product": "ai-space", "api": 1, "version": "0.1.0", "edition": "server" }
 ```
 
 - `product` and `api` let a client tell an ai-space from any other program on the port, and tell
@@ -157,13 +158,10 @@ status and repair views; bundled apps as `.spaceapp` packages; and coordinated u
   level (`API_LEVEL` in `src/space/identity.ts`); a new route or field does not raise it.
 - `version` is `package.json`'s; `edition` is `SPACE_EDITION` (`server` by default, `local` when the
   Local edition starts the service). There is no `client` value: a client never runs the service.
-- `id` is the Space's stable id, the same one packages and connections use. The Local edition will
-  compare it with the id it recorded at install time to know whether it owns the running service.
-- `name` is `SPACE_NAME`, by default the hostname.
-
-The route is a panel route: it sits behind the same access layer as the rest of the panel. When the
-built-in user system classifies routes, the fields a client needs before signing in (`product`,
-`api`, `version`, `edition`) are the candidates for the public part.
+- With the operator token or the owner's session, the answer also has `id`, the Space's stable id
+  (the same one packages and connections use), and `name` (`SPACE_NAME`, by default the hostname).
+  The Local edition will compare the id with the one it recorded at install time to know whether
+  it owns the running service.
 
 The native clients do not call it yet; checking it before showing Connected is the next client
 change.

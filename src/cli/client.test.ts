@@ -4,6 +4,14 @@ import { Client, DEFAULT_URL, parseSse, resolveTarget } from "./client.ts";
 import { ApiError, Unreachable } from "./types.ts";
 
 describe("resolveTarget", () => {
+  test("the local operator-token file is the last choice, and only for a space on loopback", async () => {
+    const none = async () => ({});
+    const local = async () => "from-file";
+    expect((await resolveTarget({}, {}, none, local)).token).toBe("from-file");
+    expect((await resolveTarget({}, { SPACE_API_TOKEN: "env" }, none, local)).token).toBe("env");
+    expect((await resolveTarget({ url: "https://space.example.com" }, {}, none, local)).token).toBe("");
+  });
+
   test("flags win, then the environment, then the workspace .env, then loopback", async () => {
     const file = async () => ({ SPACE_HOST: "10.0.0.1", SPACE_PORT: "9000", SPACE_API_TOKEN: "file-token" });
     expect(await resolveTarget({ url: "http://x:1/", token: "t" }, {}, file)).toMatchObject({ url: "http://x:1", token: "t" });

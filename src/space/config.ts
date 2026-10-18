@@ -1,4 +1,5 @@
 import { hostname } from "node:os";
+import { type AuthMode, parseAuthMode } from "./auth/gate.ts";
 import { join, resolve } from "node:path";
 import { type S3Config, StorageService, openDatabase, sqliteUrl } from "./storage/index.ts";
 import { BackupStore, type BackupTarget, type TaskDefaults, missingArchiveTools, openBackupTarget } from "./storage/backup/index.ts";
@@ -30,6 +31,8 @@ export type Config = {
   host: string;
   port: number;
   dbPath: string;
+  /** Who signs browsers in (SPACE_AUTH, docs/auth.md): the access layer in front (`external`, the default) or ai-space itself (`builtin`). */
+  auth: AuthMode;
   /** Extra app directories (comma-separated SPACE_APPS) synced in addition to <workspace>/apps/*. */
   extraAppDirs: string[];
   apiToken: string;
@@ -132,6 +135,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     host: env.SPACE_HOST?.trim() || "127.0.0.1",
     port: Number(env.SPACE_PORT ?? 8700),
     dbPath: resolve(env.SPACE_DB?.trim() || join(ws.data, "space.db")),
+    auth: parseAuthMode(env.SPACE_AUTH),
     extraAppDirs: (env.SPACE_APPS ?? "")
       .split(",")
       .map((s) => s.trim())

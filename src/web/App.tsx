@@ -2,6 +2,7 @@ import type { AgentIntentView } from "../space/shortcuts/agent-intents.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddForm, UninstallForm } from "./AppForms.tsx";
 import ModelPreference from "./ModelPreference.tsx";
+import { AccountSettings } from "./Auth.tsx";
 import Chat, { type Ask } from "./Chat.tsx";
 import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
@@ -855,6 +856,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               </button>
               <SettingsStatus />
               <Packages onChange={reload} />
+              <AccountSettings />
             </div>
           </div>
         </div>

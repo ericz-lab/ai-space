@@ -19,11 +19,19 @@ describe("parseEdition", () => {
 });
 
 describe("GET /api/space", () => {
-  test("says what this service is, uncached", async () => {
-    const routes = createIdentityRoutes({ version: "1.2.3", edition: "local", id: "6f1c1b7e-3c39-4d55-9d1e-0c5c2a6b8f10", name: "mac" });
-    const res = await routes["/api/space"].GET();
+  const id = "6f1c1b7e-3c39-4d55-9d1e-0c5c2a6b8f10";
+  const routes = createIdentityRoutes({ version: "1.2.3", edition: "local", id, name: "mac", token: "op" });
+  const get = (headers: Record<string, string> = {}) => routes["/api/space"].GET(new Request("http://x/api/space", { headers }));
+
+  test("anyone learns what the service is, uncached", async () => {
+    const res = await get();
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(await res.json()).toEqual({ product: PRODUCT, api: API_LEVEL, version: "1.2.3", edition: "local", id: "6f1c1b7e-3c39-4d55-9d1e-0c5c2a6b8f10", name: "mac" });
+    expect(await res.json()).toEqual({ product: PRODUCT, api: API_LEVEL, version: "1.2.3", edition: "local" });
+  });
+
+  test("the operator also gets the Space's id and name; a wrong token does not", async () => {
+    expect(await (await get({ authorization: "Bearer op" })).json()).toEqual({ product: PRODUCT, api: API_LEVEL, version: "1.2.3", edition: "local", id, name: "mac" });
+    expect(await (await get({ authorization: "Bearer nope" })).json()).not.toHaveProperty("id");
   });
 });

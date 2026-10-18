@@ -1,4 +1,6 @@
 import { loadConfig, type Config } from "../space/config.ts";
+import { authNoun } from "./auth.ts";
+import { readOperatorToken } from "../space/auth/operator-token.ts";
 import { type Workspace, ensureWorkspace, loadWorkspaceEnv, readWorkspaceEnv, resolveHome, workspacePaths } from "../space/workspace.ts";
 import { parseArgs } from "./args.ts";
 import { Client, resolveTarget } from "./client.ts";
@@ -32,7 +34,7 @@ import { taskNoun } from "./task.ts";
  * the docs and the scheduler's tasks spell keeps working.
  */
 
-export const NOUNS: Noun[] = [statusNoun, appNoun, taskNoun, logsNoun, modelNoun, usageNoun, notifyNoun, backupNoun, chatNoun, eventNoun, consumerNoun, peerNoun, connectionNoun, routerNoun, apiNoun, ...lifecycleNouns, completionNoun];
+export const NOUNS: Noun[] = [statusNoun, authNoun, appNoun, taskNoun, logsNoun, modelNoun, usageNoun, notifyNoun, backupNoun, chatNoun, eventNoun, consumerNoun, peerNoun, connectionNoun, routerNoun, apiNoun, ...lifecycleNouns, completionNoun];
 
 /** Older spellings of `src/index.ts`: word → noun and verb. */
 export const ALIASES: Record<string, string[]> = {
@@ -84,7 +86,7 @@ export async function run(argv: string[], options: RunOptions = {}): Promise<num
     client: () =>
       (clientPromise ??= (async () => {
         const home = resolveHome(io.env);
-        const target = await resolveTarget(flags, io.env, () => readWorkspaceEnv(workspacePaths(home)));
+        const target = await resolveTarget(flags, io.env, () => readWorkspaceEnv(workspacePaths(home)), () => readOperatorToken(home));
         return new Client(target, io.fetch);
       })()),
     workspace: () =>
@@ -208,6 +210,32 @@ export function nounHelp(noun: Noun): string[] {
   return [`usage: space ${noun.name} <verb> [args]`, "", `  ${noun.summary}`, "", ...lines];
 }
 
+/** One line from the terminal without echoing it (a password). */
+function readSecret(question: string): Promise<string> {
+  const stdin = process.stdin;
+  return new Promise((resolve, reject) => {
+    let value = "";
+    const done = () => {
+      stdin.off("data", onData);
+      stdin.setRawMode(false);
+      stdin.pause();
+      process.stdout.write("\n");
+    };
+    const onData = (chunk: string) => {
+      for (const ch of chunk) {
+        if (ch === "\r" || ch === "\n") return done(), resolve(value);
+        if (ch === "\u0003" || ch === "\u0004") return done(), reject(new UsageError("cancelled"));
+        value = ch === "\u007f" || ch === "\b" ? value.slice(0, -1) : value + ch;
+      }
+    };
+    process.stdout.write(question);
+    stdin.setRawMode(true);
+    stdin.setEncoding("utf8");
+    stdin.resume();
+    stdin.on("data", onData);
+  });
+}
+
 function realIo(): Io {
   return {
     out: (l) => console.log(l),
@@ -222,6 +250,7 @@ function realIo(): Io {
       for await (const line of console) return line;
       return "";
     },
+    secret: readSecret,
     cwd: process.cwd(),
   };
 }

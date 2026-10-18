@@ -14,13 +14,15 @@ export const DEFAULT_URL = "http://127.0.0.1:8700";
 /**
  * URL: `--url`, `SPACE_API_URL` (a task's command, an app's `space.env`), `SPACE_HOST`/`SPACE_PORT`
  * from the environment or the workspace `.env`, then loopback. Token: `--token`, `SPACE_API_TOKEN`
- * from the environment or the `.env`. `SPACE_APP_TOKEN` and `SPACE_APP` are kept for the routes
- * that take an app's identity. The `.env` is read only for what is not already set.
+ * from the environment or the `.env`, then, for a space on loopback, the token ai-space keeps in
+ * `<workspace>/run/operator-token` under `SPACE_AUTH=builtin` (docs/auth.md). `SPACE_APP_TOKEN` and
+ * `SPACE_APP` are kept for the routes that take an app's identity. The `.env` is read only for what is not already set.
  */
 export async function resolveTarget(
   flags: { url?: string; token?: string },
   env: Record<string, string | undefined>,
   readEnvFile: () => Promise<Record<string, string>>,
+  readLocalToken: () => Promise<string> = async () => "",
 ): Promise<Target> {
   let file: Record<string, string> | undefined;
   const fromFile = async (key: string) => (file ??= await readEnvFile().catch(() => ({}) as Record<string, string>))[key]?.trim();
@@ -32,8 +34,16 @@ export async function resolveTarget(
     const port = await pick("SPACE_PORT");
     url = host || port ? `http://${host || "127.0.0.1"}:${port || 8700}` : DEFAULT_URL;
   }
-  const token = flags.token?.trim() || (await pick("SPACE_API_TOKEN")) || "";
+  const token = flags.token?.trim() || (await pick("SPACE_API_TOKEN")) || (isLoopback(url) ? await readLocalToken().catch(() => "") : "");
   return { url: url.replace(/\/+$/, ""), token, appToken: env.SPACE_APP_TOKEN?.trim() ?? "", app: env.SPACE_APP?.trim() || undefined };
+}
+
+function isLoopback(url: string): boolean {
+  try {
+    return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(url).hostname);
+  } catch {
+    return false;
+  }
 }
 
 export type RequestOptions = {
