@@ -99,7 +99,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const [zoneHot, setZoneHot] = useState(false);
   // One floating panel at a time: opening one closes the others.
   const [panel, setPanel] = useState<Panel | null>(null);
-  const close = () => setPanel(null);
+  const close = () => { if (panel === "chat") void reload(); setPanel(null); };
   // The chat opens on the space agent by default; an agent tile switches to that agent.
   const [chatAgent, setChatAgent] = useState<AgentInfo>({ id: "space/assistant", app: "space", name: "assistant", title: "Space Assistant", i18n: { zh: { title: "空间助手" } }, avatar: "/assistant.svg", appIcon: "✨", runtime: "claude" });
   const [prefs, setPrefs] = useState<Prefs>(() => {
@@ -168,8 +168,13 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // probed yet comes back "unknown", so the list is asked once more after the probes had their
   // timeout to turn those dots green or red.
   const PROBE_MS = 2_500;
-  const reload = () =>
-    Promise.all([getJson<{ apps: AppInfo[]; builtins?: BuiltinIcons }>("/api/apps"), getJson<{ agents: AgentInfo[] }>("/api/agents")])
+  const catalogueVersion = useRef(0);
+  const reloadPending = useRef(false);
+  const reloadActive = useRef<Promise<void> | null>(null);
+  const reload = (): Promise<void> => {
+    if (reloadActive.current) { reloadPending.current = true; return reloadActive.current; }
+    const version = ++catalogueVersion.current;
+    reloadActive.current = Promise.all([getJson<{ apps: AppInfo[]; builtins?: BuiltinIcons }>("/api/apps"), getJson<{ agents: AgentInfo[] }>("/api/agents")])
       .then(([p, a]) => {
         setApps(p.apps);
         if (p.builtins) setBuiltins(p.builtins);
@@ -178,12 +183,21 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         setLoaded(true);
         setListed(true);
         if (p.apps.some((x) => x.service?.health === "unknown"))
-          setTimeout(() => getJson<{ apps: AppInfo[] }>("/api/apps").then((d) => setApps(d.apps)).catch(() => {}), PROBE_MS);
+          setTimeout(() => getJson<{ apps: AppInfo[] }>("/api/apps").then((d) => { if (version === catalogueVersion.current) setApps(d.apps); }).catch(() => {}), PROBE_MS);
       })
-      .catch(() => setLoaded(true));
+      .catch(() => setLoaded(true))
+      .finally(() => {
+        reloadActive.current = null;
+        if (reloadPending.current) { reloadPending.current = false; void reload(); }
+      });
+    return reloadActive.current;
+  };
 
   useEffect(() => {
-    reload();
+    void reload();
+    const visible = () => { if (document.visibilityState === "visible") void reload(); };
+    document.addEventListener("visibilitychange", visible);
+    return () => document.removeEventListener("visibilitychange", visible);
   }, []);
 
   // Widgets: once on load, then every 5 minutes while visible; the server caches per widget refresh.
@@ -876,7 +890,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Terminal open={panel === "terminal"} onClose={close} />
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
       <Shortcuts open={panel === "shortcuts"} onClose={close} onOpenTasks={openTasks} />
-      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} ask={ask} />
+      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} ask={ask} onTurnSettled={() => { void reload(); }} />
     </>
   );
 }

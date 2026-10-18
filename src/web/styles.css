@@ -638,9 +638,9 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 
 .md p { margin: 0; }
 .md p + p, .md ul + p, .md .tblwrap + p, .md pre + p, .md h4 + p { margin-top: 8px; }
-.md h4 { font-size: 13.5px; margin: 10px 0 4px; }
-.md h4:first-child { margin-top: 0; }
-.md ul { margin: 4px 0; padding-left: 18px; }
+.md :is(h1, h2, h3, h4, h5, h6) { font-size: 14px; margin: 10px 0 4px; }
+.md :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+.md ul, .md ol { margin: 4px 0; padding-left: 18px; }
 .md li { margin: 2px 0; }
 .md a { color: var(--link); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--link) 35%, transparent); }
 .msg.user a { color: var(--link); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--link) 35%, transparent); word-break: break-all; }
@@ -676,10 +676,10 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 }
 .chat-input { display: flex; align-items: flex-end; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--glass-border); }
 .chat-input textarea {
-  flex: 1; resize: none; max-height: 120px; padding: 9px 12px;
+  flex: 1; min-width: 0; resize: none; box-sizing: border-box; max-height: 160px; overflow-y: auto; padding: 9px 12px;
   border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
   background: var(--glass); color: var(--text);
-  font: 400 13px/1.5 inherit; font-family: inherit; outline: none;
+  font-size: 13px; line-height: 1.5; font-weight: 400; font-family: inherit; outline: none;
 }
 .chat-send {
   width: 34px; height: 34px; border-radius: 50%; border: none; cursor: pointer;

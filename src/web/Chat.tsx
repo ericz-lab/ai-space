@@ -1,7 +1,8 @@
+import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
 import { ChatSteps, submitsChat, type ChatStep } from "./chat-steps.ts";
 import { browserZone } from "./shortcuts.ts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun } from "./api.ts";
 import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
 import { localized, useLang } from "./i18n.ts";
@@ -15,104 +16,6 @@ import { localized, useLang } from "./i18n.ts";
 // - Text and tool events render independently, in order, without collapsing repeated tools.
 // - Messages sent while a turn runs are queued in the page and sent in order; ⏹ stops the current run.
 // - Model and write-permission tier are picked in the header and remembered in localStorage.
-
-// Minimal markdown → html (escape first, then mark up): headings, lists, tables, quotes, rules,
-// fenced code, bold, inline code, links and bare URLs.
-const escMd = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] as string);
-// Bare URL: up to whitespace, angle brackets or CJK punctuation; trailing ASCII punctuation is not part of it.
-const BARE_URL = /https?:\/\/[^\s<>　-〿一-鿿＀-￯]+/g;
-const trimUrl = (u: string) => u.replace(/[),.;:!?'"]+$/, "");
-function mdHtml(src: string): string {
-  const mkA = (url: string, txt: string) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${txt}</a>`;
-  // Links are stashed in slots before the other replacements so their hrefs are not rewritten twice.
-  const inline = (s: string) => {
-    const slots: string[] = [];
-    const stash = (html: string) => `\x00${slots.push(html) - 1}\x00`;
-    return escMd(s)
-      .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, (_, t: string, u: string) => stash(mkA(u, t)))
-      .replace(BARE_URL, (u) => {
-        const url = trimUrl(u);
-        return stash(mkA(url, url)) + u.slice(url.length);
-      })
-      .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\x00(\d+)\x00/g, (_, i: string) => slots[Number(i)] ?? "");
-  };
-  let out = "";
-  let list = false;
-  let table: string[][] | null = null;
-  let fence: string | null = null;
-  const closeList = () => {
-    if (list) {
-      out += "</ul>";
-      list = false;
-    }
-  };
-  const closeTable = () => {
-    if (!table) return;
-    const [h = [], ...b] = table;
-    out += `<div class="tblwrap"><table><thead><tr>${h.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${b.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
-    table = null;
-  };
-  for (const line of (src || "").split("\n")) {
-    if (fence !== null) {
-      if (line.trim().startsWith("```")) {
-        out += `<pre>${escMd(fence)}</pre>`;
-        fence = null;
-      } else fence += (fence ? "\n" : "") + line;
-      continue;
-    }
-    const t = line.trim();
-    if (t.startsWith("```")) {
-      closeList();
-      closeTable();
-      fence = "";
-      continue;
-    }
-    if (t.startsWith("|") && t.endsWith("|") && t.length > 2) {
-      closeList();
-      if (!table) table = [];
-      if (!/^\|[\s:|-]+\|$/.test(t)) table.push(t.slice(1, -1).split("|").map((c) => inline(c.trim())));
-      continue;
-    }
-    closeTable();
-    if (list && !/^[-*] |^\d+[.)] /.test(t)) closeList();
-    if (!t) continue;
-    if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) {
-      out += "<hr>";
-      continue;
-    }
-    if (t.startsWith("#")) {
-      out += `<h4>${inline(t.replace(/^#+\s*/, ""))}</h4>`;
-      continue;
-    }
-    if (t.startsWith("> ")) {
-      out += `<blockquote>${inline(t.slice(2))}</blockquote>`;
-      continue;
-    }
-    if (/^[-*] /.test(t)) {
-      if (!list) {
-        out += "<ul>";
-        list = true;
-      }
-      out += `<li>${inline(t.slice(2))}</li>`;
-      continue;
-    }
-    if (/^\d+[.)] /.test(t)) {
-      if (!list) {
-        out += "<ul>";
-        list = true;
-      }
-      out += `<li>${inline(t.replace(/^\d+[.)] /, ""))}</li>`;
-      continue;
-    }
-    out += `<p>${inline(t)}</p>`;
-  }
-  closeList();
-  closeTable();
-  if (fence !== null) out += `<pre>${escMd(fence)}</pre>`; // an unclosed block while streaming still renders
-  return out;
-}
 
 // User messages render as text; URLs inside become links without HTML injection.
 const linkNodes = (text: string) =>
@@ -159,12 +62,14 @@ async function stopRun(a: Active): Promise<void> {
 /** A question from the home screen's box; a new `id` sends `text` once. */
 export type Ask = { id: number; text: string; intentId?: string };
 
-export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void; ask?: Ask | null }) {
+export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask, onTurnSettled }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void; ask?: Ask | null; onTurnSettled?: () => void }) {
   const { lang, t } = useLang();
   // Status lines are written into the message state while a turn streams, so they read `t` through a
   // ref: a language change mid-turn applies from the next status on.
   const tRef = useRef(t);
   tRef.current = t;
+  const settledRef = useRef(onTurnSettled);
+  settledRef.current = onTurnSettled;
   const [convs, setConvs] = useState<Record<string, Conv>>({});
   const [input, setInput] = useState("");
   const [imageDrafts, setImageDrafts] = useState<Record<string, ChatImage[]>>({});
@@ -199,6 +104,21 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (!input || !open) return;
+    const resize = () => {
+      input.style.height = "auto";
+      input.style.height = `${Math.min(160, input.scrollHeight + 2)}px`;
+    };
+    resize();
+    let width = input.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (input.clientWidth !== width) { width = input.clientWidth; resize(); }
+    });
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, [input, open]);
   const runnersRef = useRef<Record<string, Runner>>({});
   const runner = (k: string): Runner => (runnersRef.current[k] ||= { queue: [], running: false, active: null });
 
@@ -427,6 +347,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask 
     if (!typer.target && !snapshot.length) typer.target = tRef.current("chat.noOutput");
     upd((x) => ({ ...x, text: typer.target, steps: snapshot, status: null, live: false }));
     if (runner(turnKey).active === active) runner(turnKey).active = null;
+    settledRef.current?.();
   };
 
   const drain = async (k: string, chatBase: string, first?: TurnSource) => {
