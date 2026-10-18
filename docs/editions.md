@@ -85,6 +85,11 @@ Android app (`mobile/android/`).
 **Installs** as a signed, notarized `.app` in a `.dmg` on the Mac. Phones install through their
 stores or a test channel.
 
+**Phones are Client only.** iOS and Android do not get a Server or Local edition: a phone cannot keep
+the Space service, its scheduler and the apps' processes running in the background. Server and
+Local are for computers (Local starts on the Mac); a phone always connects to a Space on another
+machine.
+
 **Never** installs, starts, stops or upgrades a Space service, on this machine or another. With no
 reachable Space it shows how to reach one, and does not start one itself. Remote use needs no Bun, no
 Git and no developer tools on the client machine.
