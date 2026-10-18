@@ -369,3 +369,5 @@ Chat, Quick Chat and the home command box leave Return to the input method while
 The Mac refreshes the owning Space catalogue after every native agent turn and when returning to the launcher. Refreshes requested during an existing fetch queue one follow-up, so an older in-flight response cannot hide a newly installed app. Local package pages use isolated `*.localhost` HTTP origins; the Mac ATS configuration permits HTTP for `localhost` and its subdomains only, in addition to local networking.
 
 Native agent chat supports image selection, clipboard paste and drag-and-drop, removable thumbnails, and image-only messages under the same limits as [Web chat images](panel.md#agent-chat-images). Image imports finish before sending, and failed turns retain their attachments for retry.
+
+The Mac chat composer handles screenshot and Finder-image paste in its AppKit text editor, including Command-V and Edit → Paste. Ordinary text paste stays with AppKit; Return confirms marked input before it can send, and Shift-Return inserts a line break.

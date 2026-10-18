@@ -176,16 +176,15 @@ struct ChatView: View {
             Button { chooseImages() } label: { Image(systemName: "photo.badge.plus").font(.system(size: 20)) }
                 .buttonStyle(.borderless).help("Add images").accessibilityLabel(Text("Add images"))
                 .disabled(chat.images.count >= 4)
-            TextField("Message \(chat.agent.displayTitle)", text: $chat.draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...8)
-                .focused($focused)
-                .focusEffectDisabled()
-                .onPasteCommand(of: [.image]) { importImages($0) }
-                .onKeyPress(.return, phases: .down) { press in
-                    if TextInputComposition.isActive || press.modifiers.contains(.shift) { return .ignored }
-                    chat.send()
-                    return .handled
+            ChatTextInput(text: $chat.draft, focused: Binding(get: { focused }, set: { focused = $0 }),
+                          placeholder: String(localized: "Message \(chat.agent.displayTitle)"),
+                          onImage: { appendImage($0, name: "Image") },
+                          onImageFile: { importImage(url: $0) }, onSend: { chat.send() })
+                .overlay(alignment: .topLeading) {
+                    if chat.draft.isEmpty {
+                        Text("Message \(chat.agent.displayTitle)").foregroundStyle(.tertiary)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 // Circular corners: a continuous curve wider than half a one-line field draws spurs.
