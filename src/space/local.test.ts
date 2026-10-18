@@ -111,7 +111,12 @@ async function setup() {
     home,
     root: bundle,
     run,
-    fetch,
+    // Before the fixture writes .env, status probes the default port. Never inspect a real Space.
+    fetch: ((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.port !== String(port)) return Promise.reject(new Error("outside the fixture's port"));
+      return fetch(input, init);
+    }) as typeof fetch,
     uid: 501,
     log: () => {},
     sleep: Bun.sleep,

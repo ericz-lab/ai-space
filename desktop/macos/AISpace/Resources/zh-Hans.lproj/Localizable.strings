@@ -455,3 +455,14 @@
 "Release notes" = "版本说明";
 "Download from the release page" = "前往发行页面下载";
 "Check for app updates" = "检查应用更新";
+
+/* Native chat permissions, matching the Web panel */
+"Read-only" = "只读";
+"Edit files" = "可改文件";
+"All permissions" = "全部权限";
+"Write access (next message)" = "写权限（下一条消息生效）";
+"The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval." = "此选择会被记住并应用于新消息。“全部权限”允许执行命令及修改文件，不再逐项请求批准。";
+"%@ was refused for lack of permission" = "%@ 因权限不足被拒绝";
+"Next messages: %@" = "后续消息权限：%@";
+"Grant and retry" = "授权并重试";
+"I have granted more permissions. Please finish the step that was refused for lack of permission." = "我已授予更多权限，请完成刚才因权限不足被拒绝的步骤。";

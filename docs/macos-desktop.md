@@ -341,3 +341,19 @@ DEVELOPMENT_TEAM=YOUR_TEAM_ID bun run desktop:share:build
 The output is `desktop/macos/build/share/Build/Products/Release/AISpace.app`. The ordinary `desktop:build` remains ad-hoc signed, supports the in-app import menu, and has no Share extension. Its drafts live in `Application Support/ai-space/PendingShares`; signed builds use the App Group instead. These stores are separate; finish pending imports in the build that received them before switching builds.
 
 Validation: signed macOS build and 52 Xcode tests passed, including shared Keychain isolation/revocation, frozen-payload retries, unavailable destinations, stale responses and bounded previews. The Foundation-only Mac suite passed 46 tests. The system registered and enabled `dev.ai-space.desktop.share`. A native sharing-service smoke test received an AppKit `NSImage` archive, persisted the image and loaded the authenticated destination list; it did not upload a fixture into a user app. The iOS regression suite passed 113 Simulator tests and 97 Foundation-only tests.
+
+
+### Native chat permissions
+
+Mac chat and Quick Chat use the Web panel's permission flow (`src/web/Chat.tsx`). The composer
+offers Read-only (default), Edit files (`acceptEdits`) and All permissions (`bypassPermissions`).
+The choice is remembered on this Mac and captured when each new turn is sent; changing it during
+a run does not change that run or its reconnect request.
+
+A permission-denied tool result is shown beneath the reply with the refused tool names. Once the
+turn finishes, **Grant and retry** on the latest reply selects the next permission tier and asks
+the agent to finish the refused step in the same session, preserving any unsent draft. Bash needs
+All permissions; other tools first get Edit files and a further refusal can raise it to All
+permissions. The selected scope is shown beside the button and applies to subsequent messages.
+This retries a refused step; it is not a live per-command approval channel. Without clicking the
+button or changing the picker, permissions are not increased.

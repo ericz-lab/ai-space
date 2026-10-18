@@ -45,3 +45,14 @@
 "Release notes" = "Release notes";
 "Download from the release page" = "Download from the release page";
 "Check for app updates" = "Check for app updates";
+
+/* Native chat permissions, matching the Web panel */
+"Read-only" = "Read-only";
+"Edit files" = "Edit files";
+"All permissions" = "All permissions";
+"Write access (next message)" = "Write access (next message)";
+"The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval." = "The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval.";
+"%@ was refused for lack of permission" = "%@ was refused for lack of permission";
+"Next messages: %@" = "Next messages: %@";
+"Grant and retry" = "Grant and retry";
+"I have granted more permissions. Please finish the step that was refused for lack of permission." = "I have granted more permissions. Please finish the step that was refused for lack of permission.";

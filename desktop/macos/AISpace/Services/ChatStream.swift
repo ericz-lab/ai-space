@@ -37,6 +37,40 @@ struct SSEParser {
     }
 }
 
+/// The Web panel's three write-access choices (src/web/Chat.tsx).
+enum ChatPermission: String, CaseIterable, Identifiable {
+    case readOnly = ""
+    case editFiles = "acceptEdits"
+    case all = "bypassPermissions"
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .readOnly: return String(localized: "Read-only")
+        case .editFiles: return String(localized: "Edit files")
+        case .all: return String(localized: "All permissions")
+        }
+    }
+
+    /// A shell refusal needs all permissions; an edit first tries acceptEdits.
+    func granting(_ denied: [String]) -> ChatPermission {
+        denied.contains("Bash") || self != .readOnly ? .all : .editFiles
+    }
+}
+
+/// Capture the controls at send time, as queuedChatTurn does in the Web client.
+struct ChatTurnRequest: Equatable {
+    var message: String
+    var permission: ChatPermission
+
+    func body(sessionID: String?) -> [String: Any] {
+        var body: [String: Any] = ["message": message]
+        if permission != .readOnly { body["permissionMode"] = permission.rawValue }
+        if let sessionID { body["sessionId"] = sessionID }
+        return body
+    }
+}
+
 /// What a chat turn shows while it runs.
 enum ChatActivity: Equatable {
     case starting
@@ -59,7 +93,9 @@ struct ChatReply: Equatable {
     var failure: String?
     var stopped = false
     var finished = false
+    var denied: [String] = []
     private var seenTools: Set<String> = []
+    private var toolNames: [String: String] = [:]
 
     /// What the agent wrote, without any note.
     var body: String {
@@ -99,8 +135,17 @@ struct ChatReply: Equatable {
                 guard let id = b["id"] as? String, !seenTools.contains(id) else { continue }
                 seenTools.insert(id)
                 let name = b["name"] as? String ?? "tool"
+                toolNames[id] = name
                 tools.append(name)
                 activity = .running(tool: name)
+            }
+        case "user":
+            let blocks = (ev["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
+            for block in blocks where block["type"] as? String == "tool_result" && block["is_error"] as? Bool == true {
+                let text = (block["content"] as? String) ?? (block["content"] as? [[String: Any]] ?? []).compactMap { $0["text"] as? String }.joined(separator: " ")
+                guard text.range(of: "requires approval|permission|granted|denied", options: [.regularExpression, .caseInsensitive]) != nil else { continue }
+                let tool = toolNames[block["tool_use_id"] as? String ?? ""] ?? "tool"
+                if !denied.contains(tool) { denied.append(tool) }
             }
         case "result":
             sessionID = ev["session_id"] as? String ?? sessionID

@@ -11,6 +11,7 @@ struct ChatView: View {
     let compact: Bool
     @FocusState private var focused: Bool
     @StateObject private var voice = VoiceInput()
+    @ObservedObject private var preferences = Preferences.shared
 
     /// About 72 characters of body text (docs/design-guidelines.md, chat panel).
     private static let column: CGFloat = 680
@@ -24,7 +25,10 @@ struct ChatView: View {
                             ChatIntro(agent: chat.agent, icons: compact ? nil : icons, keys: compact)
                         }
                         ForEach(chat.messages) { message in
-                            MessageRow(message: message, retry: message.id == chat.messages.last?.id && chat.retryableMessage != nil ? { chat.retry() } : nil)
+                            MessageRow(message: message,
+                                       retry: message.id == chat.messages.last?.id && chat.retryableMessage != nil ? { chat.retry() } : nil,
+                                       grant: message.id == chat.messages.last?.id && !chat.busy ? { chat.grantAndRetry() } : nil,
+                                       grantPermission: preferences.chatPermission.granting(message.denied))
                         }
                         if let error = chat.error {
                             // An earlier chat that would not open; a failed turn shows in its own reply.
@@ -39,6 +43,17 @@ struct ChatView: View {
                 }
                 .onChange(of: chat.messages) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
             }
+            HStack {
+                Picker("Write access (next message)", selection: $preferences.chatPermission) {
+                    ForEach(ChatPermission.allCases) { permission in Text(permission.label).tag(permission) }
+                }
+                .fixedSize()
+                .help("The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval.")
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .padding(.horizontal, compact ? 14 : 20).padding(.vertical, 6)
+            .frame(maxWidth: Self.column + 32)
             composer
         }
         .toolbar {
@@ -150,6 +165,8 @@ private struct MessageRow: View {
     let message: ChatMessage
     /// Present on the last reply when it failed and its message can go again.
     let retry: (() -> Void)?
+    let grant: (() -> Void)?
+    let grantPermission: ChatPermission
 
     var body: some View {
         switch message.role {
@@ -166,6 +183,19 @@ private struct MessageRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 if !message.tools.isEmpty || !message.text.isEmpty || message.activity != nil {
                     reply
+                }
+                if !message.denied.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("\(message.denied.joined(separator: ", ")) was refused for lack of permission", systemImage: "lock.fill")
+                            .font(.callout).foregroundStyle(Theme.danger)
+                        if let grant, !message.live {
+                            Text("Next messages: \(grantPermission.label)").font(.caption).foregroundStyle(.secondary)
+                            Button("Grant and retry", action: grant).controlSize(.small)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.solid, in: RoundedRectangle(cornerRadius: 10))
                 }
                 if let failure = message.failure {
                     FailureCard(failure: failure, retry: retry)

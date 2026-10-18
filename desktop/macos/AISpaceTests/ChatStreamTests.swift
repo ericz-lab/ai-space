@@ -49,6 +49,48 @@ struct ChatStreamTests {
         #expect(r.body == "Half" && r.text == "Half\n\n⚠️ runtime exited with 1" && r.failure == "runtime exited with 1")
     }
 
+    @Test func permissionRefusalsMatchWebToolResultsAndSurviveReplay() {
+        var reply = ChatReply()
+        reply.apply(#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"shell","name":"Bash"},{"type":"tool_use","id":"edit","name":"Edit"}]}}"#)
+        let denied = #"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"shell","is_error":true,"content":"This command requires approval"}]}}"#
+        reply.apply(denied)
+        reply.apply(denied)
+        reply.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"edit","is_error":true,"content":[{"type":"text","text":"Permission denied"}]}]}}"#)
+        reply.apply(#"{"type":"done"}"#)
+        #expect(reply.denied == ["Bash", "Edit"])
+        #expect(reply.finished && reply.failure == nil)
+        #expect(reply.body.isEmpty)
+    }
+
+    @Test func ordinaryToolErrorsAndSuccessfulPermissionTextAreNotRefusals() {
+        var reply = ChatReply()
+        reply.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x","is_error":true,"content":"File not found"},{"type":"tool_result","tool_use_id":"y","is_error":false,"content":"permission granted"}]}}"#)
+        #expect(reply.denied.isEmpty)
+        reply.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"unknown","is_error":true,"content":"permission denied"}]}}"#)
+        #expect(reply.denied == ["tool"])
+    }
+
+    @Test func grantUsesWebTiersAndNeverLowersAnExistingGrant() {
+        #expect(ChatPermission.readOnly.granting(["Edit"]) == .editFiles)
+        #expect(ChatPermission.readOnly.granting(["Bash"]) == .all)
+        #expect(ChatPermission.editFiles.granting(["Edit"]) == .all)
+        #expect(ChatPermission.all.granting(["Edit"]) == .all)
+        #expect(ChatPermission(rawValue: "unrecognized") == nil)
+    }
+
+    @Test func requestCapturesPermissionAndResumesTheSameSession() {
+        var selected = ChatPermission.readOnly
+        let original = ChatTurnRequest(message: "Check status", permission: selected)
+        selected = .all
+        #expect(original.body(sessionID: nil)["permissionMode"] == nil)
+        let retry = ChatTurnRequest(message: "Finish the refused step", permission: selected)
+        let body = retry.body(sessionID: "same-session")
+        #expect(body["permissionMode"] as? String == "bypassPermissions")
+        #expect(body["sessionId"] as? String == "same-session")
+        #expect(body["message"] as? String == "Finish the refused step")
+        #expect(ChatTurnRequest(message: "edit", permission: .editFiles).body(sessionID: nil)["permissionMode"] as? String == "acceptEdits")
+    }
+
     @Test func tellsWhyATurnFailed() {
         // What Seoul's codex said on 2026-10-14, and what the Space passed on.
         #expect(ChatFailure("exceeded retry limit, last status: 429 Too Many Requests").kind == .busy)

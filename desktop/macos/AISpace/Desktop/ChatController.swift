@@ -6,6 +6,7 @@ struct ChatMessage: Identifiable, Equatable {
     var role: Role
     var text: String
     var tools: [String] = []
+    var denied: [String] = []
     var activity: ChatActivity?
     var live = false
     /// Why the turn failed, shown in the thread under what the agent wrote, with a retry.
@@ -47,7 +48,7 @@ final class ChatController: ObservableObject {
         guard !text.isEmpty, !busy else { return }
         draft = ""
         messages.append(ChatMessage(role: .user, text: text))
-        start(source: .new(text))
+        start(source: .new(ChatTurnRequest(message: text, permission: Preferences.shared.chatPermission)))
     }
 
     /// The message of the last turn when that turn failed: what Try Again sends once more.
@@ -61,7 +62,17 @@ final class ChatController: ObservableObject {
     func retry() {
         guard let text = retryableMessage else { return }
         messages.removeLast()
-        start(source: .new(text))
+        start(source: .new(ChatTurnRequest(message: text, permission: Preferences.shared.chatPermission)))
+    }
+
+    /// Like Web's Grant and retry: continue the session, keeping an unsent draft intact.
+    func grantAndRetry() {
+        guard !busy, let last = messages.last, last.role == .agent, !last.denied.isEmpty else { return }
+        let permission = Preferences.shared.chatPermission.granting(last.denied)
+        Preferences.shared.chatPermission = permission
+        let text = String(localized: "I have granted more permissions. Please finish the step that was refused for lack of permission.")
+        messages.append(ChatMessage(role: .user, text: text))
+        start(source: .new(ChatTurnRequest(message: text, permission: permission)))
     }
 
     func stop() {
@@ -97,7 +108,7 @@ final class ChatController: ObservableObject {
     }
 
     private enum Source {
-        case new(String)
+        case new(ChatTurnRequest)
         case attach(String)
     }
 
@@ -121,9 +132,8 @@ final class ChatController: ObservableObject {
                     let opened: (runID: String?, stream: AsyncThrowingStream<SSEMessage, Error>)
                     if let runID {
                         opened = try await api.events("GET", "\(agent.base)/runs/\(SpacePath.escape(runID))/events?after=\(lastSeq)")
-                    } else if case .new(let text) = source {
-                        var body: [String: Any] = ["message": text]
-                        if let sessionID { body["sessionId"] = sessionID }
+                    } else if case .new(let turn) = source {
+                        let body = turn.body(sessionID: sessionID)
                         opened = try await api.events("POST", "\(agent.base)/chat", json: body)
                         runID = opened.runID
                     } else { break }
@@ -163,6 +173,7 @@ final class ChatController: ObservableObject {
         if reply.stopped { text += (text.isEmpty ? "" : "\n\n") + String(localized: "(stopped)") }
         messages[index].text = text
         messages[index].tools = reply.tools
+        messages[index].denied = reply.denied
         messages[index].activity = reply.activity
         if let failure = reply.failure { messages[index].failure = ChatFailure(failure) }
     }
