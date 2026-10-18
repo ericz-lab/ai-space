@@ -7,6 +7,8 @@
  * could otherwise hold stdout open.
  */
 
+import { access, constants, stat } from "node:fs/promises";
+
 export type SpawnOptions = {
   cwd?: string;
   env?: Record<string, string | undefined>;
@@ -29,6 +31,9 @@ export type SpawnResult = {
 
 /** Throws only when the process cannot be started (no such binary). */
 export async function spawnCollect(cmd: string[], opts: SpawnOptions = {}): Promise<SpawnResult> {
+  // Through setsid a missing binary would only show as setsid's own failure, so look first.
+  const bin = cmd[0] ?? "";
+  if (!(await startable(bin, (opts.env ?? process.env).PATH))) throw new Error(`${bin}: not found or not executable`);
   const setsid = Bun.which("setsid");
   const proc = Bun.spawn(setsid ? [setsid, ...cmd] : cmd, {
     cwd: opts.cwd,
@@ -96,4 +101,16 @@ export async function pumpLines(stream: ReadableStream<Uint8Array>, onLine: (lin
     for (const line of lines) if (line.trim()) onLine(line);
   }
   if (rest.trim()) onLine(rest);
+}
+
+/** Whether `bin` names a program that can be started: a path to an executable file, or a name on PATH. */
+async function startable(bin: string, path: string | undefined): Promise<boolean> {
+  if (!bin) return false;
+  if (!bin.includes("/")) return Boolean(Bun.which(bin, path === undefined ? {} : { PATH: path }));
+  try {
+    await access(bin, constants.X_OK);
+    return (await stat(bin)).isFile();
+  } catch {
+    return false;
+  }
 }

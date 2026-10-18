@@ -79,7 +79,7 @@ jobs:
   client:
     name: client macOS
     needs: [version, check]
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     # The signing secrets live in this environment; protect it (required reviewers, tags only).
     environment: release
