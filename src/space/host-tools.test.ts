@@ -3,19 +3,36 @@ import { XCODE_STUBS, isXcodeStub, setDevToolsInstalled, whichUsable } from "./h
 
 afterEach(() => setDevToolsInstalled(undefined));
 
+// Simulated macOS paths must not resolve against the test host's filesystem.
+const unchangedPath = (path: string) => path;
+
 test("a /usr/bin stub counts as missing on a Mac without the Command Line Tools", () => {
   setDevToolsInstalled(false);
-  expect(isXcodeStub("/usr/bin/git", "darwin")).toBe(true);
-  expect(isXcodeStub("/usr/bin/python3", "darwin")).toBe(true);
-  expect(isXcodeStub("/opt/homebrew/bin/git", "darwin")).toBe(false);
-  expect(isXcodeStub("/usr/bin/ssh", "darwin")).toBe(false);
-  expect(isXcodeStub("/usr/bin/git", "linux")).toBe(false);
+  expect(isXcodeStub("/usr/bin/git", "darwin", unchangedPath)).toBe(true);
+  expect(isXcodeStub("/usr/bin/python3", "darwin", unchangedPath)).toBe(true);
+  expect(isXcodeStub("/opt/homebrew/bin/git", "darwin", unchangedPath)).toBe(false);
+  expect(isXcodeStub("/usr/bin/ssh", "darwin", unchangedPath)).toBe(false);
+  expect(isXcodeStub("/usr/bin/git", "linux", unchangedPath)).toBe(false);
   expect(XCODE_STUBS.has("git")).toBe(true);
 });
 
 test("with the tools installed the same paths are real programs", () => {
   setDevToolsInstalled(true);
-  expect(isXcodeStub("/usr/bin/git", "darwin")).toBe(false);
+  expect(isXcodeStub("/usr/bin/git", "darwin", unchangedPath)).toBe(false);
+});
+
+test("symlinks are classified by their target, including versioned Python executables", () => {
+  setDevToolsInstalled(false);
+  expect(isXcodeStub("/usr/local/bin/python3", "darwin", () => "/usr/bin/python3")).toBe(true);
+  expect(isXcodeStub("/usr/bin/python3", "darwin", () => "/usr/bin/python3.12")).toBe(false);
+  expect(isXcodeStub("/opt/homebrew/bin/git", "darwin", () => "/opt/homebrew/Cellar/git/bin/git")).toBe(false);
+});
+
+test("an unresolved path is still checked for a stub", () => {
+  setDevToolsInstalled(false);
+  const missingPath = () => { throw new Error("missing path"); };
+  expect(isXcodeStub("/usr/bin/python3", "darwin", missingPath)).toBe(true);
+  expect(isXcodeStub("/usr/local/bin/python3", "darwin", missingPath)).toBe(false);
 });
 
 test("whichUsable finds ordinary programs and nothing for a missing one", () => {

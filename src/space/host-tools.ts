@@ -32,11 +32,11 @@ export function setDevToolsInstalled(v: boolean | undefined): void {
 }
 
 /** Whether a resolved path is a Command Line Tools stub that would only open the install dialog. */
-export function isXcodeStub(path: string, platform = process.platform): boolean {
+export function isXcodeStub(path: string, platform = process.platform, realpath: (path: string) => string = realpathSync): boolean {
   if (platform !== "darwin") return false;
   let real = path;
   try {
-    real = realpathSync(path);
+    real = realpath(path);
   } catch {
     /* keep the path */
   }
