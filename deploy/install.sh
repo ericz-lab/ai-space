@@ -39,9 +39,13 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 2
   if curl -fsS "http://127.0.0.1:${SPACE_PORT:-8700}/healthz"; then
     echo
-    # The default apps' own installers, now that ai-space has written their space.env.
-    "$BUN" src/index.ts install-defaults
-    grep -qE '^SPACE_API_TOKEN=.+' "$SPACE_HOME/.env" || echo "next: $BUN src/index.ts setup   (fills $SPACE_HOME/.env interactively; see docs/install.md)"
+    echo "ai-space core: installed, answering on 127.0.0.1:${SPACE_PORT:-8700} (workspace $SPACE_HOME)"
+    # The default apps' own installers, now that ai-space has written their space.env. Their
+    # failure is theirs: the core is installed either way, and the step can be run again.
+    if ! "$BUN" src/index.ts install-defaults; then
+      echo "default apps: an installer failed (the core is fine); retry with: $BUN src/index.ts install-defaults" >&2
+    fi
+    grep -qE '^SPACE_API_TOKEN=.+' "$SPACE_HOME/.env" || echo "next: $BUN src/index.ts setup   (the basic configuration; GitHub, outside access, backups, notifications and peers are optional, later: space setup <name>)"
     exit 0
   fi
 done

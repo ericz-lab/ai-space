@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TEMPLATE_DIR, createApp, titleOf } from "./newapp.ts";
-import { UsageError } from "./types.ts";
+import { TEMPLATE_DIR, createApp, newApp, titleOf } from "./newapp.ts";
+import { testIo } from "./testing.ts";
+import { type Ctx, UsageError } from "./types.ts";
 
 let root: string;
 beforeEach(async () => {
@@ -72,4 +73,42 @@ test("refuses a bad name or an existing directory", async () => {
 test("the template ships with the checkout and titleOf makes a title", async () => {
   expect(await Bun.file(join(TEMPLATE_DIR, "space.yaml")).exists()).toBe(true);
   expect(titleOf("crypto-news_feed.v2")).toBe("Crypto News Feed V2");
+});
+
+describe("space app new and the GitHub extension", () => {
+  function ctxWith(env: Record<string, string>) {
+    const t = testIo({ env: { SPACE_HOME: join(root, "ws"), ...env }, cwd: root });
+    const lines: string[] = [];
+    const ctx = { io: t.io, flags: { json: false }, print: { line: (l: string) => lines.push(l), data: () => {} } } as unknown as Ctx;
+    return { ctx, lines, err: t.err };
+  }
+
+  test("GitHub not set up: a local app, and gh is never looked for or run", async () => {
+    const { exec, calls } = fakeExec();
+    const looked: string[] = [];
+    const { ctx, lines } = ctxWith({});
+    const code = await newApp(ctx, ["demo-app"], { exec, which: (c) => void looked.push(c) as undefined });
+    expect(code).toBe(0);
+    expect(looked).toEqual([]);
+    expect(calls.some((c) => c.cmd[0] === "gh")).toBe(false);
+    expect(lines[0]).toContain("space setup github");
+  });
+
+  test("owner set but no gh: the app is made locally, with a warning and exit 0", async () => {
+    const { exec, calls } = fakeExec();
+    const { ctx, err } = ctxWith({ SPACE_GITHUB_OWNER: "acme" });
+    const code = await newApp(ctx, ["demo-app"], { exec, which: () => undefined });
+    expect(code).toBe(0);
+    expect(calls.some((c) => c.cmd[0] === "gh")).toBe(false);
+    expect(calls.map((c) => c.cmd.slice(0, 2).join(" "))).toContain("git commit");
+    expect(err.join("\n")).toContain("gh is not on PATH");
+  });
+
+  test("owner set and gh present: the repository is created as before", async () => {
+    const { exec, calls } = fakeExec();
+    const { ctx } = ctxWith({ SPACE_GITHUB_OWNER: "acme" });
+    const code = await newApp(ctx, ["demo-app"], { exec, which: () => "/usr/bin/gh" });
+    expect(code).toBe(0);
+    expect(calls.find((c) => c.cmd[0] === "gh")?.cmd.slice(0, 4)).toEqual(["gh", "repo", "create", "acme/demo-app"]);
+  });
 });

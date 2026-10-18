@@ -3,7 +3,7 @@ import { SHARED_SKILLS } from "../space/config.ts";
 import { cloneDefaultApps, describeInstalls, installDefaultApps, parseDefaultApps } from "../space/defaults.ts";
 import { loadRouterConfig, renderCaddyfile } from "../space/router/index.ts";
 import { codexUpgrade } from "../space/runtimes/codex-upgrade.ts";
-import { SetupAborted, realDeps, runSetup, terminalIO } from "../space/setup.ts";
+import { EXTENSIONS, EXTENSION_TITLES, type Extension, SetupAborted, realDeps, runSetup, terminalIO } from "../space/setup.ts";
 import { describeSkillLinks, linkSkills } from "../space/skills.ts";
 import { discoverApps, ensureWorkspace, readWorkspaceEnv, resolveHome } from "../space/workspace.ts";
 import { noMore, parseArgs } from "./args.ts";
@@ -45,11 +45,11 @@ const init = (installDefaults: boolean) => async (ctx: Ctx, argv: string[]) => {
   return 0;
 };
 
-const setup = async (ctx: Ctx, argv: string[]) => {
+const setup = (only?: Extension) => async (ctx: Ctx, argv: string[]) => {
   noMore(parseArgs(argv, {}).positional, 0);
   const { ws } = await ctx.workspace();
   try {
-    await runSetup(realDeps(terminalIO(), ws));
+    await runSetup(realDeps(terminalIO(), ws), only ? { only } : {});
   } catch (e) {
     if (!(e instanceof SetupAborted)) throw e;
     ctx.io.err("\n[space] setup: input closed before the end; nothing written");
@@ -79,7 +79,15 @@ const upgradeCodex = async (ctx: Ctx, argv: string[]) => {
 export const lifecycleNouns: Noun[] = [
   { name: "init", summary: "create the workspace, clone the default apps, link the skills, and exit", defaultVerb: "run", verbs: { run: { usage: "", summary: "create ~/.ai-space (SPACE_HOME) and what a first boot needs", run: init(false) } } },
   { name: "install-defaults", summary: "run the default apps' own installers, once ai-space is up", defaultVerb: "run", verbs: { run: { usage: "", summary: "each default app's deploy/install.sh", run: init(true) } } },
-  { name: "setup", summary: "interactive first-install walk-through that fills the workspace .env", defaultVerb: "run", verbs: { run: { usage: "", summary: "asks for every value, sends a test message, probes the bucket, restarts the unit", run: setup } } },
+  {
+    name: "setup",
+    summary: "interactive walk-through that fills the workspace .env: the basic install, then optional extensions",
+    defaultVerb: "run",
+    verbs: {
+      run: { usage: "", summary: "the basic install (tools, core, services), then offers the extensions; restarts the unit", run: setup() },
+      ...Object.fromEntries(EXTENSIONS.map((ext) => [ext, { usage: "", summary: EXTENSION_TITLES[ext], run: setup(ext) }])),
+    },
+  },
   { name: "codex-upgrade", summary: "update the Codex CLI; its catalogue gives each codex tier the newest model", defaultVerb: "run", verbs: { run: { usage: "[--dry-run] [--no-update] [--no-restart]", summary: "codex update on every machine a codex runtime uses, a probe of each tier's model, then restart", run: upgradeCodex } } },
   { name: "start", summary: "boot: ensure the workspace, sync the apps, serve the Space API", defaultVerb: "run", verbs: { run: { usage: "", summary: "what the unit runs", run: start } } },
 ];

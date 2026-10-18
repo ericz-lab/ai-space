@@ -94,23 +94,28 @@ git push <host> main      # 检出到 ~/.ai-space/core，运行 deploy/install.s
 
 `deploy/install.sh` 把 `deploy/ai-space.service` 装进 `~/.config/systemd/user/`，开启 linger，重启服务。日志：`journalctl --user -u ai-space -f`。
 
-然后在 `~/.ai-space/core` 里运行 `bun run setup`。它会检查 ai-space 要调用的工具（claude、gh、cloudflared，以及可选的 `cf` CLI），逐节询问工作区 `.env` 的每个值，发一条测试通知，探测存储桶，并以 `cf` 命令的形式打印 Cloudflare 上还需要做的事（[docs/cloudflare.md](docs/cloudflare.md)）。
+然后在 `~/.ai-space/core` 里运行 `bun run setup`。它先做基础配置：检查基础安装需要的工具（bun、git、一个已登录的 AI 运行时），询问核心配置项，并选择由谁运行各 app 的服务。之后再提供可选扩展，每一项也可以以后单独运行：`space setup github`、`ingress`（经隧道的域名访问，会打印 Cloudflare 的 `cf` 命令）、`backup`、`notifications`、`peers`。
 
 </details>
 
 ### 运行前提
 
-五样东西，按使用顺序排列。前两项必须有，其余的让结果随处可用、可以长期保留。
+必须有两样：
 
 | # | 是什么 | 为什么 |
 | --- | --- | --- |
 | 1 | **一个 coding agent**（[Claude Code](https://claude.com/claude-code)、Codex 等）及其登录 | 它安装 ai-space，面板里的 agent 以它运行，你也用它构建 app |
 | 2 | **一台常开的 Linux 服务器**（Debian/Ubuntu，systemd，密钥 SSH） | 1 核 2G 加 swap 能跑核心；多个 app 同时运行时 2 核 4G 更从容（每个 agent 会话约 150 MB） |
-| 3 | **一个 Cloudflare 账号**（免费套餐） | Tunnel 发布面板、不开端口，Access 在前面加登录，R2（免费 10 GB）存备份 |
-| 4 | **GitHub CLI**（`gh`），在服务器上登录 | agent 一次登录即可 clone、提交和推送 app 仓库，不用配 deploy key |
-| 5 | **一个托管在 Cloudflare 的域名** | 每个 app 一个主机名，面板用 `space.example.com` |
 
-没有第 3、5 项时，面板只在本机回环地址上，通过 SSH 端口转发访问，备份需要另找一个 S3 桶。
+只有这两样，基础安装就已完成：面板在本机回环地址上，从你的电脑通过 SSH 端口转发打开，新建的 app 是本地 git 仓库。其余的按需添加，每项用 `space setup <名称>`：
+
+| 扩展 | 需要什么 | 带来什么 |
+| --- | --- | --- |
+| `ingress` | 一个域名和 Cloudflare 账号（免费套餐），或其他带访问控制的隧道 | 面板和每个 app 都有主机名，随处可访问，前面有登录，不开端口 |
+| `github` | GitHub CLI（`gh`），已登录 | 每个新 app 在你的账号下建仓库；agent 一次登录即可推送 |
+| `backup` | 一个 S3 兼容存储桶（Cloudflare R2 免费 10 GB）或挂载的目录 | 每个 app 每日快照、每周校验、可恢复 |
+| `notifications` | 一个聊天机器人或 webhook | 任务失败和 app 消息发到你的聊天里 |
+| `peers` | 第二台机器 | 一个面板管理两台 |
 
 ## 🏗️ 架构
 

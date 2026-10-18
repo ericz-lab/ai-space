@@ -84,7 +84,7 @@ To remove one: `curl -sS -X DELETE "$API/api/apps/<name>"`. This is the only kin
    ```
 
    Any error means the whole app would be skipped at sync; fix it here. This replaces `bun run validate` until that command exists.
-7. **Repository.** `git init`, first commit with the template, then a private repository named after the app under the operator's GitHub owner (`gh repo create <name> --private --source . --push`) unless `--no-github`. Put the origin URL into `repo:`. The repository never holds `.env`, `space.env`, `data/` or database files; the template `.gitignore` already says so.
+7. **Repository.** `git init` and a first commit with the template. GitHub is an optional extension of the space: only when `SPACE_GITHUB_OWNER` is set in the workspace `.env` (`space setup github`) and `gh` is logged in, also create a private repository named after the app under that owner (`gh repo create <owner>/<name> --private --source . --push`) unless `--no-github`, and put the origin URL into `repo:`. Otherwise the app stays a local repository; do not ask the operator to set up GitHub just to create an app. The repository never holds `.env`, `space.env`, `data/` or database files; the template `.gitignore` already says so.
 
 ## 4. Adopt an existing project
 
