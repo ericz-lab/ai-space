@@ -597,15 +597,15 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
             <b>{shown.title}</b>
             <span className="chat-sub">{conv.busy ? `${t("chat.thinking")}${conv.queued ? t("chat.queued", { n: conv.queued }) : ""}` : conv.sid ? t("chat.inSession") : t("chat.newSession")}</span>
             {conv.busy && (
-              <button className="chat-hbtn" title={t("chat.interrupt")} onClick={stop}>
-                ⏹
+              <button className="chat-hbtn" title={t("chat.interrupt")} aria-label={t("chat.interrupt")} onClick={stop}>
+                <Glyph name="stop" size={15} />
               </button>
             )}
-            <button className="chat-hbtn" title={t("chat.history")} onClick={toggleHist}>
-              🕘
+            <button className={`chat-hbtn${hist ? " on" : ""}`} title={t("chat.history")} aria-label={t("chat.history")} aria-pressed={!!hist} onClick={toggleHist}>
+              <Glyph name="history" size={16} weight={1.3} />
             </button>
-            <button className="chat-hbtn" title={t("chat.newConversation")} onClick={reset}>
-              ↺
+            <button className="chat-hbtn" title={t("chat.newConversation")} aria-label={t("chat.newConversation")} onClick={reset}>
+              <Glyph name="compose" size={16} weight={1.3} />
             </button>
             <button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
               ✕
@@ -688,8 +688,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           ))}
         </div>
         {!stick && conv.msgs.length > 0 && (
-          <button className="chat-down" title={t("chat.latest")} onClick={toLatest}>
-            ↓
+          <button className="chat-down" title={t("chat.latest")} aria-label={t("chat.latest")} onClick={toLatest}>
+            <Glyph name="down" size={18} weight={1.5} />
           </button>
         )}
         {imageError && <div className="msg-note" role="alert">{imageError}</div>}
@@ -701,7 +701,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           if (e.dataTransfer.files.length) { e.preventDefault(); void addImages(Array.from(e.dataTransfer.files)); }
         }}>
           <input ref={fileRef} type="file" hidden accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(e) => { void addImages(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
-          <button className="chat-attach" title={t("chat.addImages")} aria-label={t("chat.addImages")} disabled={readingImages || images.length >= 4} onClick={() => fileRef.current?.click()}>＋</button>
+          <button className="chat-attach" title={t("chat.addImages")} aria-label={t("chat.addImages")} disabled={readingImages || images.length >= 4} onClick={() => fileRef.current?.click()}><Glyph name="attach" size={18} weight={1.3} /></button>
           <textarea
             ref={inputRef}
             rows={1}
@@ -722,8 +722,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
               }
             }}
           />
-          <button className="chat-send" disabled={readingImages || (!input.trim() && !images.length)} onClick={submit}>
-            ↑
+          <button className="chat-send" title={t("chat.send")} aria-label={t("chat.send")} disabled={readingImages || (!input.trim() && !images.length)} onClick={submit}>
+            <Glyph name="send" size={17} weight={1.9} />
           </button>
         </div>
       </div>

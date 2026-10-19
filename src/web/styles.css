@@ -583,9 +583,11 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .chat-hbtn {
   width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--glass-border);
   background: var(--glass); color: var(--muted); font-size: 13px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: center; transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
-.chat-hbtn:hover { color: var(--text); }
+.chat-hbtn:hover { color: var(--text); background: color-mix(in srgb, var(--text) 8%, var(--glass)); }
+.chat-hbtn.on { color: var(--link); border-color: color-mix(in srgb, var(--link) 45%, transparent); background: color-mix(in srgb, var(--link) 14%, var(--glass)); }
+.chat-hbtn svg, .chat-send svg, .chat-down svg, .chat-attach svg { display: block; flex: none; }
 .chat-hbtn.back { font-size: 20px; padding-bottom: 2px; }
 .chat-hist { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; max-height: 260px; overflow-y: auto; }
 .hist-empty { font-size: 12px; color: var(--muted); text-align: center; padding: 8px 0; margin: 0; }
@@ -736,10 +738,14 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
   font-size: 13px; line-height: 1.5; font-weight: 400; font-family: inherit; outline: none;
 }
 .chat-send {
-  width: 34px; height: 34px; border-radius: 50%; border: none; cursor: pointer;
-  background: var(--link); color: var(--on-accent); font-size: 16px; flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--accent), var(--link)); color: var(--on-accent); font-size: 16px;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent); transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
-.chat-send:disabled { opacity: 0.4; cursor: default; }
+.chat-send:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 45%, transparent); }
+.chat-send:not(:disabled):active { transform: scale(0.94); }
+.chat-send:disabled { cursor: default; background: color-mix(in srgb, var(--text) 9%, transparent); color: var(--muted); box-shadow: none; }
 
 /* Size and scale are set inline by Pet.tsx from the sheet's cell size. */
 .pet { position: fixed; bottom: 0; left: 0; z-index: 25; cursor: pointer; overflow: hidden; }
@@ -1176,6 +1182,6 @@ a.widget-title:hover { color: var(--text); }
 .chat-image-drafts { padding: 8px 16px; }
 .chat-image-drafts > div { position: relative; }
 .chat-image-drafts button { position: absolute; top: 0; right: 0; border-radius: 50%; width: 24px; height: 24px; }
-.chat-attach { align-self: flex-end; flex-shrink: 0; width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; font-size: 24px; }
-.chat-attach:hover { background: rgba(128,128,128,.12); }
+.chat-attach { align-self: flex-end; flex-shrink: 0; width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; font-size: 24px; display: flex; align-items: center; justify-content: center; }
+.chat-attach:hover { background: rgba(128,128,128,.12); color: var(--text); }
 .chat-attach:disabled { opacity: .4; cursor: default; }
