@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ChatSteps, submitsChat } from "./chat-steps.ts";
+import { ChatSteps, submitsChat, toolSummary, toolVariant } from "./chat-steps.ts";
 
 const tool = (id: string) => ({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: "pwd" } }] } });
 test("Codex work preserves text order, repeated tools and separate results", () => {
@@ -57,4 +57,13 @@ test("a live turn's approvals and added messages are steps in order; an unanswer
     ["steer", "", "also say BANANA", "", "completed"],
     ["approval", "Edit", "b.txt", "", "cancelled"],
   ]);
+});
+test("tool rows pick a variant across runtimes and summarize to one line", () => {
+  expect(["Bash", "bash", "command_execution", "exec"].map(toolVariant)).toEqual(["bash", "bash", "bash", "bash"]);
+  expect(["Read", "Edit", "MultiEdit", "Write", "Grep", "Glob", "WebFetch", "web_search", "run_code", "Task", "TodoWrite"].map(toolVariant))
+    .toEqual(["read", "edit", "edit", "write", "search", "search", "web", "web", "code", "task", "plan"]);
+  expect(toolVariant("mcp__github__search")).toBe("search");
+  expect(toolVariant("space_notify")).toBe("other");
+  expect(toolSummary("\n  for d in *; do\n  echo $d\ndone")).toBe("for d in *; do");
+  expect(toolSummary("")).toBe("");
 });
