@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnCollect } from "./process.ts";
 import { streamCodex } from "./codex-stream.ts";
+import { CodexLive } from "./codex-live.ts";
+import { LivePool } from "./live.ts";
 import { readCodexTranscript, SESSION_ID_RE } from "./transcripts.ts";
 import { ustar } from "./tar.ts";
 import { assertCompletionMode, type AgentRun, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type GeneratedImage, type ImageInput, type RuntimeAdapter, type Usage } from "./types.ts";
@@ -22,6 +24,7 @@ export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
   if (host && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(host)) throw new Error(`runtime ${spec.name}: ssh is not a host name`);
   const bin = spec.bin.length ? spec.bin : ["codex"];
   const backend: Backend = host ? `ssh:${host}` : "local";
+  const live = new LivePool();
   return {
     name: spec.name, kind: "codex-cli", backend,
     capabilities: { complete: true, agent: true, chat: true, image: true },
@@ -113,7 +116,12 @@ export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
         return { ok: false, error: `could not run Codex: ${(e as Error).message}`, backend };
       }
     },
-    chat(turn, cb) { return codexChat(bin, turn, cb); },
+    chat(turn, cb) {
+      // An interactive turn goes to the conversation's app-server process (codex-live.ts).
+      if (turn.interactive && !turn.allowedTools?.length) return live.run(turn, cb, () => new CodexLive(bin, turn));
+      return codexChat(bin, turn, cb);
+    },
+    closeLive: () => live.closeAll(),
     transcript: (cwd, sid) => readCodexTranscript(cwd, sid),
   };
 }

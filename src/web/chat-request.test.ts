@@ -3,7 +3,7 @@ import { queuedChatTurn } from "./chat-request.ts";
 
 test("Space Assistant's first send uses its selection even before model options have reached conversation state", () => {
   const bootstrapAgent = { app: "space", name: "assistant" };
-  expect(queuedChatTurn(bootstrapAgent, "hello", "sonnet", "codex/basic", "")).toEqual({ message: "hello", model: "codex/basic", permissionMode: undefined });
+  expect(queuedChatTurn(bootstrapAgent, "hello", "sonnet", "codex/basic", "")).toEqual({ message: "hello", model: "codex/basic", permissionMode: undefined, interactive: true });
   expect(queuedChatTurn(bootstrapAgent, "hello", "opus", "claude/junior", "acceptEdits")).toMatchObject({ model: "claude/junior", permissionMode: "acceptEdits" });
   expect(queuedChatTurn(bootstrapAgent, "hello", "opus", "", "").model).toBeUndefined();
 });
@@ -28,5 +28,5 @@ test("an app agent with runtime/tier options sends its own pick; one of an older
 test("agent intent turns retain the original sentence and routing context without changing permissions", () => {
   const text = "查今天金融新闻";
   const turn = queuedChatTurn({ app: "whymove", name: "curator" }, text, "", "", "plan", { intentId: "financial-news", timezone: "Asia/Seoul" });
-  expect(turn).toEqual({ message: text, intentId: "financial-news", timezone: "Asia/Seoul", permissionMode: "plan", model: undefined });
+  expect(turn).toEqual({ message: text, intentId: "financial-news", timezone: "Asia/Seoul", permissionMode: "plan", model: undefined, interactive: true });
 });

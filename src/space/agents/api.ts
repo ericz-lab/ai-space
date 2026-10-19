@@ -16,12 +16,12 @@ import type { AppRegistry } from "../panel/registry.ts";
 import { type AgentView, agentView } from "../panel/view.ts";
 import type { PeerHub } from "../peers/hub.ts";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
-import { MODEL_TIERS } from "../runtimes/types.ts";
+import { APPROVAL_DECISIONS, MODEL_TIERS, type ApprovalDecision } from "../runtimes/types.ts";
 import type { Manifest, ManifestAgent } from "../scheduler/manifest.ts";
 import { loadAppEnv } from "../scheduler/targets.ts";
 import type { Workspace } from "../workspace.ts";
 import { MODEL_RE, SESSION_ID_RE, runResponse } from "./runtime.ts";
-import { RunBusyError, RunClosedError, RunRegistry } from "./runs.ts";
+import { RunBusyError, RunClosedError, RunRegistry, RunStateError } from "./runs.ts";
 import type { SessionStore } from "./sessions.ts";
 import { readTranscript } from "./transcript.ts";
 
@@ -29,12 +29,14 @@ import { readTranscript } from "./transcript.ts";
  * HTTP surface for agents, shaped as a Bun.serve `routes` table.
  *
  *   GET  /api/agents                              every agent of every visible app, plus the space agent, then the peers' agents
- *   POST /api/agents/:app/:agent/chat             { message, sessionId?, model?, permissionMode? } → SSE of a new background run (x-run-id)
+ *   POST /api/agents/:app/:agent/chat             { message, sessionId?, model?, permissionMode?, interactive? } → SSE of a new background run (x-run-id)
  *   GET  /api/agents/runs?recent=<s>&agent=        runs newest first: running ones and those that ended in the last `recent` seconds
  *   GET  /api/agents/:app/:agent/runs              the agent's runs (same query)
  *   GET  /api/agents/:app/:agent/runs/:id          one run
  *   GET  /api/agents/:app/:agent/runs/:id/events?after=<seq>   SSE: replay after `seq`, then live
  *   POST /api/agents/:app/:agent/runs/:id/stop     stop a running turn
+ *   POST /api/agents/:app/:agent/runs/:id/steer    { message, images? } add a message to a running interactive turn
+ *   POST /api/agents/:app/:agent/runs/:id/approvals/:rid  { decision: allow|deny } answer the turn's approval request
  *   GET  /api/agents/:app/:agent/sessions         recent sessions
  *   GET  /api/agents/:app/:agent/sessions/:sid    restored transcript
  *
@@ -336,6 +338,8 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const tier = (MODEL_TIERS as readonly string[]).includes(selected.slice(selectedName.length + 1));
         const model = tier && !opts.runtimes.tierOptions().some((o) => o.value === selected) ? undefined : opts.runtimes.resolve(selected).model;
         const permissionMode = typeof body.permissionMode === "string" ? body.permissionMode : undefined;
+        // The client answers approvals and may steer the turn: a live process (docs/runtimes.md#live-chat).
+        const interactive = body.interactive === true;
         const env: Record<string, string | undefined> = { ...process.env, ...(await loadAppEnv(agent.cwd)), ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}) };
         let run;
         const release = await opts.holdApp?.(agent.app);
@@ -345,7 +349,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
             runtime,
             model,
             // The manifest's tool list is Claude Code's syntax; other runtimes bound the agent by the permission mode's sandbox.
-            turn: { message, images, sessionId, model, permissionMode, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
+            turn: { message, images, sessionId, model, permissionMode, interactive, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
             onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model, skillIntent ?? undefined),
           });
           if (release) runs.subscribe(run.id, run.lastSeq, { onEvent() {}, onEnd: release });
@@ -388,6 +392,36 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const run = runOf(req);
         const stopped = runs.stop(run.id);
         return json({ ok: true, stopped, run: runs.get(run.id) });
+      }),
+    },
+
+    "/api/agents/:app/:agent/runs/:id/steer": {
+      POST: wrap(async (req) => {
+        const run = runOf(req);
+        const body = await chatBody(req);
+        if (!body) return error(400, "body must be JSON");
+        const message = typeof body.message === "string" ? body.message.trim() : "";
+        const images = parseChatImages(body.images);
+        if (!message && !images.length) return error(400, "message is required");
+        if (message.length > MAX_MESSAGE) return error(400, `message is longer than ${MAX_MESSAGE} characters`);
+        try {
+          await runs.steer(run.id, { message: message || "Please inspect the attached images.", images });
+        } catch (e) {
+          if (e instanceof RunStateError) return error(409, e.message);
+          throw e;
+        }
+        return json({ ok: true });
+      }),
+    },
+
+    "/api/agents/:app/:agent/runs/:id/approvals/:rid": {
+      POST: wrap(async (req) => {
+        const run = runOf(req);
+        const body = (await req.json().catch(() => null)) as { decision?: unknown } | null;
+        const decision = body?.decision;
+        if (!(APPROVAL_DECISIONS as readonly unknown[]).includes(decision)) return error(400, `decision must be one of ${APPROVAL_DECISIONS.join(", ")}`);
+        const answered = runs.respond(run.id, req.params.rid ?? "", decision as ApprovalDecision);
+        return answered ? json({ ok: true }) : error(409, "this request is no longer waiting for an answer");
       }),
     },
 

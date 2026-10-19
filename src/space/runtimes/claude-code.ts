@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { ClaudeLive } from "./claude-live.ts";
+import { LivePool } from "./live.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
@@ -14,7 +16,8 @@ import { assertCompletionMode, FILE_NAME_PATTERN, PERMISSION_MODES, type AgentRu
  *   agent      `claude -p --output-format json` in the app directory with the CLI's own
  *              system prompt and tools, the prompt file on stdin; always local
  *   chat       `claude -p <message> --output-format stream-json`, events forwarded as is;
- *              `--resume <sid>` for continuity; always local
+ *              `--resume <sid>` for continuity; always local. An interactive turn goes to the
+ *              conversation's live process instead (`claude-live.ts`)
  *
  * Why `complete` is started lean: left alone, `claude -p` sends its own system
  * prompt, every built-in tool's description, the MCP servers of the machine and
@@ -47,6 +50,7 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
   if (sshHost && !/^[A-Za-z0-9._@-]+$/.test(sshHost)) throw new Error(`runtime ${spec.name}: ssh host is not a host name: ${sshHost}`);
   const bin = spec.bin.length ? spec.bin : ["claude"];
   const backend: Backend = sshHost ? `ssh:${sshHost}` : "local";
+  const live = new LivePool();
 
   return {
     name: spec.name,
@@ -87,8 +91,11 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
     },
 
     chat(turn, cb) {
+      if (turn.interactive) return live.run(turn, cb, () => new ClaudeLive(bin, turn, spec.chatArgs));
       return chatStream([...bin, ...chatArgs(turn, spec.chatArgs)], turn, cb);
     },
+
+    closeLive: () => live.closeAll(),
 
     transcript: (cwd, sid) => readClaudeTranscript(cwd, sid, spec.transcriptHome),
   };

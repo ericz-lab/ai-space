@@ -1,0 +1,179 @@
+import type { ApprovalDecision, ChatCallbacks, ChatHandle, ChatTurn } from "./types.ts";
+
+/**
+ * Live chat (docs/runtimes.md#live-chat): a conversation keeps one runtime process across its
+ * turns instead of starting the CLI for each. The process stays connected while a turn runs, so
+ * the person can answer the runtime's approval requests and add messages to the turn, and it stays
+ * open after the turn for the next one. Each runtime implements `LiveProcess` over its own
+ * protocol; this file holds what they share: the pool and the events the panel reads.
+ *
+ * Events added to the runtime's stream (Claude Code's `stream-json` shapes otherwise):
+ *
+ *   {"type":"approval_request","id","tool","title","detail"?,"input"?}  the turn waits for an answer
+ *   {"type":"approval_resolved","id","decision":"allow"|"deny"|"cancelled"}
+ *   {"type":"steer","text"}  the agent has read a message the person added to the turn
+ */
+
+/** An idle process is closed this long after its last turn. */
+export const LIVE_IDLE_MS = 10 * 60_000;
+/** At most this many idle processes per runtime; the oldest goes first. */
+export const LIVE_MAX_IDLE = 6;
+/** A stop that the runtime has not answered by then kills the process. */
+export const LIVE_STOP_GRACE_MS = 4_000;
+
+export interface LiveProcess {
+  /** Conversation the process holds (the runtime's session id); null until it reports one. */
+  readonly sid: string | null;
+  /** What a turn must share with the process to reuse it: directory, identity, environment. */
+  readonly fingerprint: string;
+  readonly alive: boolean;
+  readonly busy: boolean;
+  /** Run one turn. Only called on an idle, live process. */
+  turn(turn: ChatTurn, cb: ChatCallbacks): ChatHandle;
+  close(): void;
+}
+
+/** What a turn must match to go to an existing process. */
+export function liveFingerprint(turn: ChatTurn): string {
+  const env = Object.entries(turn.env ?? {}).filter(([, v]) => v !== undefined).sort(([a], [b]) => (a < b ? -1 : 1));
+  return String(Bun.hash(JSON.stringify([turn.cwd, turn.systemPrompt ?? "", turn.allowedTools ?? [], env])));
+}
+
+/** One runtime's live processes: reuse by conversation, close when idle, close all on shutdown. */
+export class LivePool {
+  private readonly procs = new Map<LiveProcess, { timer?: ReturnType<typeof setTimeout>; idleSince: number }>();
+
+  constructor(private readonly opts: { idleMs?: number; maxIdle?: number } = {}) {}
+
+  /**
+   * A turn on this pool: the idle process holding the turn's session when it matches, else a new
+   * one from `open`. A process whose conversation does not match is never reused.
+   */
+  run(turn: ChatTurn, cb: ChatCallbacks, open: () => LiveProcess): ChatHandle {
+    const fingerprint = liveFingerprint(turn);
+    let proc: LiveProcess | undefined;
+    if (turn.sessionId) {
+      for (const p of this.procs.keys()) {
+        if (p.alive && !p.busy && p.sid === turn.sessionId) {
+          if (p.fingerprint === fingerprint) proc = p;
+          else this.drop(p, true); // same conversation, other identity: start it again with the new one
+          break;
+        }
+      }
+    }
+    if (proc) clearTimeout(this.procs.get(proc)?.timer);
+    else {
+      proc = open();
+      this.procs.set(proc, { idleSince: 0 });
+    }
+    const p = proc;
+    return p.turn(turn, {
+      ...cb,
+      onFinish: (error) => {
+        this.settle(p);
+        cb.onFinish(error);
+      },
+    });
+  }
+
+  /** After a turn: keep the process for the next one, or forget it when it died. */
+  private settle(p: LiveProcess): void {
+    const entry = this.procs.get(p);
+    if (!entry) return;
+    if (!p.alive) return void this.procs.delete(p);
+    clearTimeout(entry.timer);
+    entry.idleSince = Date.now();
+    entry.timer = setTimeout(() => this.drop(p, true), this.opts.idleMs ?? LIVE_IDLE_MS);
+    entry.timer.unref?.();
+    const idle = [...this.procs.entries()].filter(([q]) => !q.busy).sort(([, a], [, b]) => a.idleSince - b.idleSince);
+    while (idle.length > (this.opts.maxIdle ?? LIVE_MAX_IDLE)) this.drop(idle.shift()![0], true);
+  }
+
+  private drop(p: LiveProcess, close: boolean): void {
+    clearTimeout(this.procs.get(p)?.timer);
+    this.procs.delete(p);
+    if (close) p.close();
+  }
+
+  /** Processes alive now, busy or idle (tests, status). */
+  get size(): number {
+    return [...this.procs.keys()].filter((p) => p.alive).length;
+  }
+
+  closeAll(): void {
+    for (const p of [...this.procs.keys()]) this.drop(p, true);
+  }
+}
+
+/** The approvals a live turn is waiting on, by the id the panel answers with. */
+export class PendingApprovals<T> {
+  private readonly map = new Map<string, T>();
+
+  constructor(private readonly emit: (event: unknown) => void) {}
+
+  add(id: string, value: T, request: { tool: string; title: string; detail?: string; input?: unknown }): void {
+    this.map.set(id, value);
+    this.emit({ type: "approval_request", id, ...request });
+  }
+
+  /** Take an open request out, telling the stream how it ended; undefined when it is not open. */
+  take(id: string, decision: ApprovalDecision | "cancelled"): T | undefined {
+    const value = this.map.get(id);
+    if (value === undefined) return undefined;
+    this.map.delete(id);
+    this.emit({ type: "approval_resolved", id, decision });
+    return value;
+  }
+
+  ids(): string[] {
+    return [...this.map.keys()];
+  }
+}
+
+async function* chunks(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
+  const reader = stream.getReader();
+  try {
+    for (;;) {
+      const r = await reader.read();
+      if (r.done) return;
+      yield r.value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/** Read a stream line by line; resolves when it ends. */
+export async function readLines(stream: ReadableStream<Uint8Array>, onLine: (line: string) => void, maxLine = 8_000_000): Promise<void> {
+  const decoder = new TextDecoder();
+  let rest = "";
+  for await (const chunk of chunks(stream)) {
+    rest += decoder.decode(chunk, { stream: true });
+    if (rest.length > maxLine && !rest.includes("\n")) throw new Error("runtime event exceeds limit");
+    let nl: number;
+    while ((nl = rest.indexOf("\n")) >= 0) {
+      const line = rest.slice(0, nl).trim();
+      rest = rest.slice(nl + 1);
+      if (line) onLine(line);
+    }
+  }
+  if (rest.trim()) onLine(rest.trim());
+}
+
+/** Keep the last `max` characters a stream writes (a runtime's stderr, for its error message). */
+export function tail(stream: ReadableStream<Uint8Array>, max = 4000): { text: () => string } {
+  let text = "";
+  const decoder = new TextDecoder();
+  void (async () => {
+    for await (const chunk of chunks(stream)) text = (text + decoder.decode(chunk, { stream: true })).slice(-max);
+  })().catch(() => {});
+  return { text: () => text };
+}
+
+/** One line for an approval card: the command, the file, the URL, else the input as JSON. */
+export function approvalTitle(input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const i = input as Record<string, unknown>;
+  const value = i.command ?? i.file_path ?? i.notebook_path ?? i.path ?? i.url ?? i.query ?? i.pattern ?? i.plan;
+  return (typeof value === "string" ? value : JSON.stringify(input)).slice(0, 2000);
+}

@@ -125,6 +125,31 @@ export type ChatTurn = {
   allowedTools?: string[];
   cwd: string;
   env?: Record<string, string | undefined>;
+  /**
+   * The client answers approvals and may add messages while the turn runs: the turn goes to a
+   * process the runtime keeps for the conversation (docs/runtimes.md#live-chat). A runtime
+   * without live chat ignores it and runs the turn as usual.
+   */
+  interactive?: boolean;
+};
+
+/** A message the person adds to a running turn. */
+export type SteerInput = { message: string; images?: ChatImage[] };
+
+/** The person's answer to an approval request: run the action once, or refuse it. */
+export const APPROVAL_DECISIONS = ["allow", "deny"] as const;
+export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
+
+/**
+ * A running chat turn. `kill` ends it: a one-shot turn's process is killed, a live turn is
+ * interrupted and its process kept for the next one. Live turns also take messages and answers.
+ */
+export type ChatHandle = {
+  kill: () => void;
+  /** Hand a message to the running turn; rejects when the turn cannot take one now. */
+  steer?: (input: SteerInput) => Promise<void>;
+  /** Answer an approval request (`approval_request` event); false for an unknown or settled one. */
+  respond?: (id: string, decision: ApprovalDecision) => boolean;
 };
 
 export type ChatCallbacks = {
@@ -179,9 +204,12 @@ export type RuntimeAdapter = {
   /**
    * Spawn one turn and forward its events line by line. The lines are Claude
    * Code's `stream-json` shapes, which the panel reads; another runtime's
-   * adapter translates its own events into them. Returns a handle to kill it.
+   * adapter translates its own events into them. Returns a handle to kill it, and for an
+   * interactive turn on a runtime with live chat, to steer it and answer its approvals.
    */
-  chat(turn: ChatTurn, cb: ChatCallbacks): { kill: () => void };
+  chat(turn: ChatTurn, cb: ChatCallbacks): ChatHandle;
+  /** Close the processes live chat keeps between turns (service shutdown). */
+  closeLive?(): void;
   /** Pictures from a prompt and optional input images; only a runtime whose capabilities say `image`. */
   image?(input: ImageInput, signal?: AbortSignal): Promise<ImageOutcome>;
   /** A past chat session from the runtime's own records; null when it has none. */

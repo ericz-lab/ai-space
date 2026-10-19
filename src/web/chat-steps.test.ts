@@ -41,3 +41,20 @@ test("Enter sends only outside composition, including Safari's confirmation even
   expect(submitsChat("Enter", true, false, 13)).toBe(false);
   expect(submitsChat("Enter", false, false, 13)).toBe(true);
 });
+
+test("a live turn's approvals and added messages are steps in order; an unanswered approval ends cancelled", () => {
+  const steps = new ChatSteps();
+  steps.apply({ type: "stream_event", event: { delta: { type: "text_delta", text: "Removing it." } } });
+  steps.apply({ type: "approval_request", id: "r1", tool: "Bash", title: "rm a.txt", detail: "Remove a.txt" });
+  steps.apply({ type: "approval_request", id: "r1", tool: "Bash", title: "rm a.txt" }); // replayed after a reconnect
+  steps.apply({ type: "approval_resolved", id: "r1", decision: "allow" });
+  steps.apply({ type: "steer", text: "also say BANANA" });
+  steps.apply({ type: "approval_request", id: "r2", tool: "Edit", title: "b.txt" });
+  steps.apply({ type: "done" });
+  expect(steps.snapshot().map((s) => [s.kind, s.name, s.text, s.output, s.state])).toEqual([
+    ["text", "", "Removing it.", "", "completed"],
+    ["approval", "Bash", "rm a.txt", "Remove a.txt", "allowed"],
+    ["steer", "", "also say BANANA", "", "completed"],
+    ["approval", "Edit", "b.txt", "", "cancelled"],
+  ]);
+});

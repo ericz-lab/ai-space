@@ -14,7 +14,7 @@ ai-space starts an AI runtime in three places: the model service answers an app'
 | --- | --- | --- |
 | `complete` | model service | One answer to one prompt with the request's own system prompt, model, tools and thinking cap. Uses slim mode by default; full mode retains native CLI context and tools (see [completion modes](#completion-modes)). May run on another machine over ssh, borrowing its login. |
 | `agent` | scheduler | A coding agent at work: the runtime's own system prompt and tools, the prompt file on stdin, inside the app directory. Always local: it needs the directory. |
-| `chat` | panel | One turn of a conversation, streamed as the runtime's own events; a session id gives continuity. Always local, for the same reason. |
+| `chat` | panel | One turn of a conversation, streamed as the runtime's own events; a session id gives continuity. Always local, for the same reason. An interactive turn goes to a process kept for the conversation ([Live chat](#live-chat)). |
 
 A fourth, optional operation, `image`, makes pictures for the model service's `POST /api/model/image` ([model.md](model.md#images)); only `codex-cli` has it.
 
@@ -90,7 +90,7 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 
 ## Code
 
-`src/space/runtimes/`: `types.ts` (operations, specs, adapter interface), `process.ts` (spawn, collect, kill the process group on timeout), `claude-code.ts`, `deepseek-harness.ts`, `anthropic-api.ts`, `transcripts.ts` (past sessions from each runtime's records), `config.ts` (`runtimes.yaml` and the environment fallback), `registry.ts` (by name, `runtime/model` resolution), `testing.ts` and `testing-dsh.ts` (the fake CLIs tests use).
+`src/space/runtimes/`: `types.ts` (operations, specs, adapter interface), `process.ts` (spawn, collect, kill the process group on timeout), `claude-code.ts`, `live.ts` (live chat's process pool and events), `claude-live.ts` and `codex-live.ts` (live chat over each CLI's protocol), `deepseek-harness.ts`, `anthropic-api.ts`, `transcripts.ts` (past sessions from each runtime's records), `config.ts` (`runtimes.yaml` and the environment fallback), `registry.ts` (by name, `runtime/model` resolution), `testing.ts`, `testing-dsh.ts` and `testing-live.ts` (the fake CLIs tests use).
 
 ## Follow-ups
 
@@ -222,6 +222,34 @@ search is available by default on every execution host, independently of its
 Codex user configuration or the selected sandbox. Slim text-only completions and
 image-only calls retain their tool restrictions.
 
+
+## Live chat
+
+Motivation: a one-shot chat turn (`claude -p`, `codex exec`) cannot ask before an action its permission tier does not cover, so the action was refused and the person had to raise the tier and ask again; and a message written while the agent worked waited for the whole turn to end. A turn that stays connected to its runtime can do both.
+
+A chat request with `interactive: true` (the web panel sends it) goes to a process the runtime keeps for the conversation instead of a CLI started for the turn. The process stays open after the turn; the conversation's next turn reuses it when it names the same session and matches the process's working directory, system prompt, tool list and environment (a different identity starts a new process with `--resume`). Model and tier may change from turn to turn: the process switches in place. An idle process is closed after 10 minutes, at most 6 idle ones are kept per runtime (oldest out first), and all of them close when ai-space shuts down. A request without the flag (the Mac, iPhone and Android clients today) keeps the one-shot path; a runtime without live chat (DeepSeek Harness) ignores it.
+
+| | Claude Code | Codex CLI |
+| --- | --- | --- |
+| process | `claude -p --input-format stream-json --output-format stream-json --replay-user-messages --permission-prompt-tool stdio`, user messages on stdin | `codex app-server`, JSON-RPC over stdio; `thread/start`, or `thread/resume` for a session |
+| approvals | the CLI's `can_use_tool` control request; the answer allows with the input as asked or denies | `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` (`accept` / `decline`), `item/permissions/requestApproval` (the requested grant for the turn, or none) |
+| tier | `--permission-mode`: the read-only default becomes `default`, which asks before an edit or a command that changes files | read-only sandbox with `approvalPolicy: "on-request"`; edit files: `workspace-write`; all permissions: `danger-full-access` with `never`; plan: read-only with `never` |
+| message added to a running turn | a user message written to stdin; the CLI reads it once the running tool call ends. Written as the turn ends, it starts the CLI's next turn and the run lasts until that one ends too | `turn/steer` with the running turn's id; refused once the turn has ended |
+| stop | `interrupt` control request; with a message still waiting in the CLI, the process is ended instead | `turn/interrupt` |
+
+Claude Code's `AskUserQuestion` tool is turned off in live chat (`--disallowedTools`): the panel has no form for it, and the agent asks in its reply. Other requests either runtime sends that ai-space does not handle (MCP elicitation, dynamic tool calls) are refused rather than left waiting. A stop the runtime has not answered within 4 s kills the process.
+
+The turn's events are the runtime's, translated into Claude Code's `stream-json` shapes as for one-shot chat, plus three:
+
+| event | meaning |
+| --- | --- |
+| `{"type":"approval_request","id","tool","title","detail"?,"input"?}` | the turn waits for an answer: `title` is what the agent wants to do (the command, the file), `detail` why |
+| `{"type":"approval_resolved","id","decision"}` | `allow`, `deny`, or `cancelled` when the turn ended or the runtime withdrew the request |
+| `{"type":"steer","text"}` | the agent has read a message the person added to the turn |
+
+The answers and the added messages go through the run ([panel.md](panel.md#background-runs)). Nothing waits for an approval except the turn: an unanswered one lasts until the run's timeout, a stop or a shutdown, which deny it.
+
+Tested with Claude Code 2.1.302 and Codex 0.163: both protocols are the CLIs' own, Codex's app-server marked experimental. `src/space/runtimes/live.test.ts` runs both against stand-ins (`testing-live.ts`); approvals, steering, stop and reuse were also checked against the real CLIs.
 
 ## Codex agent runs
 

@@ -620,6 +620,25 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .chat-work details { margin-top: 8px; }
 .chat-work summary { color: var(--muted); cursor: pointer; font-size: 12px; }
 .chat-work small { color: var(--muted); }
+/* An action waiting for the person's answer (docs/runtimes.md#live-chat). */
+.msg.ai .chat-approval.waiting { background: color-mix(in srgb, var(--warning) 10%, var(--glass)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 40%, transparent); }
+.chat-approval .chat-work-icon { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.chat-approval.waiting .chat-work-state { color: var(--warning); }
+.chat-approval.allowed .chat-work-state { color: var(--success); }
+.chat-approval.denied .chat-work-state { color: var(--danger); }
+.chat-approval-why { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.chat-approval-actions { display: flex; gap: 8px; margin-top: 10px; }
+.chat-approval-actions button {
+  font: inherit; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 5px 16px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent); background: transparent; color: var(--text);
+}
+.chat-approval-actions button.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.chat-approval-actions button:disabled { opacity: 0.5; cursor: default; }
+/* A message the person added to the running turn. */
+.chat-steer { font-size: 12px; padding: 6px 10px; border-left: 2px solid var(--link); color: var(--text); white-space: pre-wrap; }
+.chat-steer b { color: var(--link); font-weight: 600; margin-right: 4px; }
+.chat-steer.pending { opacity: 0.6; border-left-style: dashed; }
+.chat-steer small { color: var(--muted); }
 .chat-permission { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; min-width: 0; }
 .chat-opts { flex-wrap: wrap; }
 .msg-note { color: var(--muted); }
