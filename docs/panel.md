@@ -124,6 +124,8 @@ Making a pack is the `space:app-icons` skill's job: the operator describes a sty
 
 `POST /api/agents/:app/:agent/chat` runs one turn: ai-space spawns `claude -p <message> --output-format stream-json` in the agent's working directory with the identity from the manifest (`--append-system-prompt` from the prompt file plus the app title, description and `AGENTS.md`; `--allowedTools` from `tools`; `--model` from the request, else as [Agent models](#agent-models) resolves it) and streams the events back as server-sent events. Multi-turn continuity is `--resume <sid>`. The browser can pick a write tier (`acceptEdits`, `bypassPermissions`, `plan`); the default is the headless read-only behaviour. `SPACE_CHAT_ARGS` appends operator-chosen arguments to every run.
 
+The panel sends `interactive: true`: on Claude Code and Codex the turn then runs in a process kept for the conversation ([runtimes.md](runtimes.md#live-chat)), and two things change. An action the tier does not cover is no longer refused: the reply shows an approval card (what the agent wants to run or edit, and why), and the agent waits for Allow or Deny; the default tier reads "ask before changes". And a message sent while the reply is being written goes into that turn: it shows under the reply as waiting, then as the person's line once the agent has read it (after its current step). When the turn cannot take it (a runtime without live chat, or the turn just ended), the panel queues it as the next message, as before.
+
 ### Background runs
 
 A turn is a run owned by the server, not by the request that started it (`src/space/agents/runs.ts`). The chat route creates the run, answers with its id in `x-run-id` and streams it; the browser closing, refreshing or losing its connection only detaches that stream. Three things end a run: the operator's stop (⏹ in the chat, `POST …/runs/:id/stop`), the timeout (`SPACE_CHAT_TIMEOUT_MINUTES`, 60 by default, 0 for none), and the service shutting down, which gives running turns `SPACE_DRAIN_SECONDS` to finish, as it does task runs, and then stops the rest as `interrupted`. A stopped runtime that has not exited 5 s after the kill is closed anyway.
@@ -137,6 +139,8 @@ Each event of a run gets a sequence number, sent as the SSE `id:`. The events ar
 | `GET /api/agents/:app/:agent/runs/:id` | one run |
 | `GET /api/agents/:app/:agent/runs/:id/events?after=<seq>` | SSE: the events after `seq` (or `Last-Event-ID`), then live; the stream ends with `{"type":"error","error","status"}` when the run did not end `done`, then `{"type":"done"}` |
 | `POST /api/agents/:app/:agent/runs/:id/stop` | stop a running turn: `{ ok, stopped, run }` |
+| `POST /api/agents/:app/:agent/runs/:id/steer` | `{ message, images? }` into a running interactive turn: `{ ok }`; `409` when the turn has ended or cannot take a message |
+| `POST /api/agents/:app/:agent/runs/:id/approvals/:rid` | `{ decision: "allow" \| "deny" }` for the turn's `approval_request` `rid`: `{ ok }`; `409` when it is no longer waiting |
 
 A conversation runs one turn at a time: a chat request that resumes a session with a turn still running is a 409. On load the panel asks for the runs of the last half hour (and each peer's), takes the newest per agent, and restores it as that agent's conversation: the session's earlier turns from its transcript, the run's message, then the run's events from the start, following it live while it goes. A stream that drops mid-turn reattaches after the last `id:` seen, five times at most. Leaving a conversation in the panel (new conversation, a past session) stops its running turn, as the panel did before; messages queued behind a running turn are kept in the page only.
 
@@ -218,7 +222,7 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 | `GET /api/capture`, `POST /api/capture/image?to=` | the places a picture can be kept (capabilities declaring `capture`, here and on peers), and a picture (multipart `file`, `text`, `via`, `id`) forwarded to the chosen one as the operator: the iPhone client's screenshots ([events.md](events.md#capture)) |
 | `GET /api/agents` | every agent the panel lists |
 | `POST /api/agents/:app/:agent/chat` | one chat turn as a background run, SSE |
-| `GET /api/agents/runs`, `GET /api/agents/:app/:agent/runs[/:id[/events]]`, `POST /api/agents/:app/:agent/runs/:id/stop` | chat runs: list, one, replay and follow, stop ([Background runs](#background-runs)) |
+| `GET /api/agents/runs`, `GET /api/agents/:app/:agent/runs[/:id[/events]]`, `POST /api/agents/:app/:agent/runs/:id/stop`, `…/steer`, `…/approvals/:rid` | chat runs: list, one, replay and follow, stop, add a message, answer an approval ([Background runs](#background-runs)) |
 | `GET /api/agents/:app/:agent/sessions[/:sid]` | recent sessions, restored transcript |
 | `GET /api/inbox`, `POST /api/inbox/mark`, `POST /api/inbox/read-all` | the inbox: threads with read and done state, and changing it ([notify.md](notify.md#inbox)) |
 | `GET /api/peers`, `PATCH`/`DELETE /api/peers/:peer/apps/:app`, `/api/peers/:peer/…` | peer machines, hub-side hide, forwarded uninstall/icon/embed/chat/sessions ([peers.md](peers.md)) |

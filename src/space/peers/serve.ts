@@ -27,6 +27,8 @@ import { bridge, wantsWebSocket } from "../terminal/api.ts";
  *   GET  /api/peer/agents/runs                     = /api/agents/runs
  *   GET  /api/peer/agents/:app/:agent/runs[/:id[/events]]  = /api/agents/:app/:agent/runs…
  *   POST /api/peer/agents/:app/:agent/runs/:id/stop = /api/agents/:app/:agent/runs/:id/stop
+ *   POST /api/peer/agents/:app/:agent/runs/:id/steer = /api/agents/:app/:agent/runs/:id/steer
+ *   POST /api/peer/agents/:app/:agent/runs/:id/approvals/:rid = /api/agents/:app/:agent/runs/:id/approvals/:rid
  *   GET  /api/peer/terminal                        = /api/terminal            ┐ only when the terminal is
  *   POST /api/peer/terminal/sessions               = /api/terminal/sessions   │ enabled here; the snapshot
  *   DELETE /api/peer/terminal/sessions/:id         = /api/terminal/sessions/:id │ says so with `terminal: true`
@@ -204,6 +206,8 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     "/api/peer/agents/:app/:agent/runs/:id": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id", "GET")) },
     "/api/peer/agents/:app/:agent/runs/:id/events": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id/events", "GET")) },
     "/api/peer/agents/:app/:agent/runs/:id/stop": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id/stop", "POST")) },
+    "/api/peer/agents/:app/:agent/runs/:id/steer": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id/steer", "POST")) },
+    "/api/peer/agents/:app/:agent/runs/:id/approvals/:rid": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id/approvals/:rid", "POST")) },
     ...(opts.terminal
       ? {
           "/api/peer/terminal": { GET: guard(mirror(opts.terminal, "/api/terminal", "GET")) },

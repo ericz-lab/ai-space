@@ -533,6 +533,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     const at = Date.now();
     const [runs, calls, chats] = await Promise.all([scheduler.drain(config.drainMs), model.drain(config.drainMs), agentRuns.shutdown(config.drainMs)]);
     console.log(`[space] drained in ${Date.now() - at}ms: ${runs.finished} run(s) finished, ${runs.aborted} aborted; ${calls.finished} model call(s) finished, ${calls.interrupted} interrupted; ${chats.finished} chat turn(s) finished, ${chats.interrupted} interrupted`);
+    // Conversations' live processes waiting for their next turn (docs/runtimes.md#live-chat).
+    runtimes.closeLive();
     server.stop();
     await packageInstaller.drain();
     await packageLifecycle.drain();

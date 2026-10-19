@@ -1,7 +1,18 @@
-/** Ordered work shared by Claude and Codex's normalized stream events. */
-export type ChatStep = { id: string; kind: "text" | "tool"; name: string; text: string; output: string; state: "running" | "completed" | "failed" | "incomplete" };
+/**
+ * Ordered work shared by Claude and Codex's normalized stream events. A live turn
+ * (docs/runtimes.md#live-chat) adds two kinds: an approval the agent waits for (`name` the tool,
+ * `text` what it wants to do, `output` why) and a message the person added while it ran.
+ */
+export type ChatStep = {
+  id: string;
+  kind: "text" | "tool" | "approval" | "steer";
+  name: string;
+  text: string;
+  output: string;
+  state: "running" | "completed" | "failed" | "incomplete" | "waiting" | "allowed" | "denied" | "cancelled";
+};
 type Block = { type: string; id?: string; name?: string; text?: string; input?: unknown; tool_use_id?: string; content?: unknown; is_error?: boolean };
-type Event = { type: string; message?: { content?: Block[] }; event?: { delta?: { type?: string; text?: string } } };
+type Event = { type: string; message?: { content?: Block[] }; event?: { delta?: { type?: string; text?: string } }; id?: string; tool?: string; title?: string; detail?: string; decision?: string; text?: string };
 const detail = (value: unknown): string => {
   if (value == null) return "";
   if (typeof value === "string") return value.slice(0, 12000);
@@ -31,6 +42,16 @@ export class ChatSteps {
   }
 
   apply(event: Event) {
+    if (event.type === "approval_request" && event.id) {
+      if (!this.steps.some((s) => s.id === `approval:${event.id}`)) this.steps.push({ id: `approval:${event.id}`, kind: "approval", name: event.tool ?? "tool", text: event.title ?? "", output: event.detail ?? "", state: "waiting" });
+    }
+    if (event.type === "approval_resolved" && event.id) {
+      const current = this.steps.find((s) => s.id === `approval:${event.id}`);
+      if (current) current.state = event.decision === "allow" ? "allowed" : event.decision === "deny" ? "denied" : "cancelled";
+    }
+    if (event.type === "steer") {
+      this.steps.push({ id: `steer:${++this.serial}`, kind: "steer", name: "", text: event.text ?? "", output: "", state: "completed" });
+    }
     if (event.type === "stream_event" && event.event?.delta?.type === "text_delta") this.text(event.event.delta.text ?? "", false);
     for (const block of event.message?.content ?? []) {
       if (event.type === "assistant" && block.type === "text" && block.text) this.text(block.text, true);
@@ -51,7 +72,10 @@ export class ChatSteps {
   }
 
   finish() {
-    for (const step of this.steps) if (step.state === "running") step.state = step.kind === "tool" ? "incomplete" : "completed";
+    for (const step of this.steps) {
+      if (step.state === "running") step.state = step.kind === "tool" ? "incomplete" : "completed";
+      if (step.state === "waiting") step.state = "cancelled";
+    }
   }
 
   snapshot(): ChatStep[] { return this.steps.map((step) => ({ ...step })); }

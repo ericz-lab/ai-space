@@ -14,7 +14,10 @@ import { localized, useLang } from "./i18n.ts";
 // - Conversations are keyed by agent id and run in parallel: each has its own queue and in-flight turn;
 //   the bookmark bar on the left switches between them, a busy one shows a pulsing dot.
 // - Text and tool events render independently, in order, without collapsing repeated tools.
-// - Messages sent while a turn runs are queued in the page and sent in order; ⏹ stops the current run.
+// - A message sent while a turn runs goes into that turn (docs/runtimes.md#live-chat): the agent reads
+//   it after its current step. A runtime that cannot take it (no live chat, or the turn just ended)
+//   gets it queued in the page and sent next, in order. ⏹ stops the current run.
+// - An action the permission tier does not cover waits for the person: an approval card in the reply.
 // - Model and write-permission tier are picked in the header and remembered in localStorage.
 
 // User messages render as text; URLs inside become links without HTML injection.
@@ -39,7 +42,7 @@ const toolHint = (input: Record<string, unknown> = {}) => {
 
 const Ava = ({ icon, fallback = "✨" }: { icon?: string; fallback?: string }) => (isImgIcon(icon) ? <img src={icon} alt="" /> : <>{icon || fallback}</>);
 
-type Msg = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean };
+type Msg = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean; pending?: string[] };
 type Conv = { agent: AgentInfo | null; msgs: Msg[]; sid: string | null; busy: boolean; queued: number };
 const EMPTY_CONV: Conv = { agent: null, msgs: [], sid: null, busy: false, queued: 0 };
 /** The turn a conversation is following: its run (once the server named it) and the stream's abort. */
@@ -224,7 +227,16 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
       steps.apply(ev);
       const snapshot = steps.snapshot();
       upd((x) => ({ ...x, steps: snapshot }));
-      if (ev.type === "system" && ev.subtype === "init") {
+      if (ev.type === "steer") {
+        // The agent read a message added to the turn: it is a step now, no longer waiting.
+        upd((x) => {
+          const pending = x.pending ?? [];
+          const at = pending.findIndex((p) => p.trim() === String(ev.text ?? "").trim());
+          return { ...x, pending: pending.filter((_, i) => i !== (at >= 0 ? at : 0)) };
+        });
+      } else if (ev.type === "approval_request") {
+        upd((x) => ({ ...x, status: tRef.current("chat.waitingApproval") }));
+      } else if (ev.type === "system" && ev.subtype === "init") {
         setSid(ev.session_id);
         upd((x) => ({ ...x, status: tRef.current("chat.thinkingModel", { model: ev.model || "claude" }) }));
       } else if (ev.type === "stream_event" && ev.event?.delta?.type === "text_delta") {
@@ -345,7 +357,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     steps.finish();
     const snapshot = steps.snapshot();
     if (!typer.target && !snapshot.length) typer.target = tRef.current("chat.noOutput");
-    upd((x) => ({ ...x, text: typer.target, steps: snapshot, status: null, live: false }));
+    upd((x) => ({ ...x, text: typer.target, steps: snapshot, status: null, live: false, pending: [] }));
     if (runner(turnKey).active === active) runner(turnKey).active = null;
     settledRef.current?.();
   };
@@ -438,7 +450,55 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     setImageDrafts((drafts) => ({ ...drafts, [key]: [] }));
     setImageError("");
     setStick(true);
-    send(text, undefined, images);
+    const r = runner(key);
+    if (r.active?.runId && !r.active.stopRequested && !r.queue.length) void steer(key, r.active, text, images);
+    else send(text, undefined, images);
+  };
+
+  // A message for the running turn: shown in its reply as waiting until the agent reads it (a
+  // `steer` event). A turn that cannot take it (runtime without live chat, the turn just ended)
+  // gets it as the next message instead.
+  const steer = async (k: string, a: Active, text: string, images: ChatImage[]) => {
+    const label = text || `🖼 ×${images.length}`;
+    const mark = (fn: (pending: string[]) => string[]) =>
+      patch(k, (v) => {
+        const at = v.msgs.findLastIndex((m) => m.role === "ai" && m.live);
+        const cur = v.msgs[at];
+        if (at < 0 || !cur || cur.role !== "ai") return v;
+        const msgs = v.msgs.slice();
+        msgs[at] = { ...cur, pending: fn(cur.pending ?? []) };
+        return { ...v, msgs };
+      });
+    mark((p) => [...p, label]);
+    let ok = false;
+    try {
+      const r = await fetch(`${a.base}/runs/${encodeURIComponent(a.runId!)}/steer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: text, images }) });
+      ok = r.ok;
+    } catch {
+      /* network: send it as the next message */
+    }
+    if (ok) return;
+    mark((p) => { const i = p.lastIndexOf(label); return i < 0 ? p : p.filter((_, j) => j !== i); });
+    if (runner(k).active === a || runner(k).running) {
+      patch(k, (v) => ({ ...v, msgs: [...v.msgs, { role: "user", text, images }] }));
+      runner(k).queue.push({ ...queuedChatTurn(agent, text, modelRef.current, baseChoice(k), permRef.current), images });
+      patch(k, (v) => ({ ...v, queued: runner(k).queue.length }));
+      void drain(k, a.base);
+    } else send(text, undefined, images);
+  };
+
+  // The person's answer to an approval card of the running turn; the run's stream then reports it.
+  const answer = async (k: string, id: string, decision: "allow" | "deny"): Promise<string | null> => {
+    const a = runner(k).active;
+    if (!a?.runId) return t("chat.approval.failed", { error: "no run" });
+    try {
+      const r = await fetch(`${a.base}/runs/${encodeURIComponent(a.runId)}/approvals/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision }) });
+      if (r.ok) return null;
+      const j = (await r.json().catch(() => ({}))) as { error?: string };
+      return t("chat.approval.failed", { error: j.error || `HTTP ${r.status}` });
+    } catch (e) {
+      return t("chat.approval.failed", { error: (e as Error).message });
+    }
   };
 
   // ⏹ stops the run on the server; its stream then ends with the "stopped" error and "done".
@@ -605,14 +665,17 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
               {m.role === "ai" ? <>
                 {m.steps?.length ? m.steps.map((step) => step.kind === "text" ?
                   <div key={step.id} className={`md ${step.state === "running" ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(step.text) }} /> :
+                  step.kind === "approval" ? <ApprovalStep key={step.id} step={step} onAnswer={m.live ? (decision) => answer(key, step.id.slice("approval:".length), decision) : undefined} /> :
+                  step.kind === "steer" ? <div key={step.id} className="chat-steer"><b>↳ {t("chat.steerYou")}</b> {linkNodes(step.text)}</div> :
                   <WorkStep key={step.id} step={step} />
                 ) : <>
                   {m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}
                   <div className={`md ${m.live ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(m.text) }} />
                 </>}
+                {m.pending?.map((p, j) => <div key={`pending:${j}`} className="chat-steer pending"><b>↳ {t("chat.steerYou")}</b> {linkNodes(p)} <small>· {t("chat.steerPending")}</small></div>)}
                 {m.note && <div className="msg-note" role="status">{m.note}</div>}
               </> : <><div className="chat-images">{m.images?.map((image, i) => <a key={i} href={imageURL(image)} download={image.name}><img src={imageURL(image)} alt={image.name} /></a>)}</div>{linkNodes(m.text)}</>}
-              {m.role === "ai" && m.denied.length > 0 && (
+              {m.role === "ai" && m.denied.length > 0 && !m.steps?.some((step) => step.kind === "approval") && (
                 <span className="msg-denied">
                   {t("chat.denied", { tools: m.denied.join(", ") })}
                   {!m.live && <button onClick={() => retryWithPerm(m.denied)}>{t("chat.grantRetry")}</button>}
@@ -665,6 +728,31 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
       </aside>
     </div>
   );
+}
+
+/** An action the agent waits on: what it wants to do, and the person's answer while the turn runs. */
+function ApprovalStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (decision: "allow" | "deny") => Promise<string | null> }) {
+  const { t } = useLang();
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const reply = async (decision: "allow" | "deny") => {
+    setSending(true);
+    setError("");
+    const failed = await onAnswer!(decision);
+    setSending(false);
+    if (failed) setError(failed);
+  };
+  const waiting = step.state === "waiting" && !!onAnswer;
+  return <section className={`chat-work chat-approval ${step.state}`} aria-label={step.name}>
+    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true">?</span><strong>{step.name}</strong><span className="chat-work-state">{t(`chat.step.${step.state}`)}</span></div>
+    {step.text && <pre className="chat-work-input">{step.text}</pre>}
+    {step.output && <p className="chat-approval-why">{step.output}</p>}
+    {waiting && <div className="chat-approval-actions">
+      <button className="primary" disabled={sending} onClick={() => void reply("allow")}>{t("chat.approval.allow")}</button>
+      <button disabled={sending} onClick={() => void reply("deny")}>{t("chat.approval.deny")}</button>
+    </div>}
+    {error && <small role="alert">{error}</small>}
+  </section>;
 }
 
 function WorkStep({ step }: { step: ChatStep }) {

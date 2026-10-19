@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { ChatTurn, RuntimeAdapter } from "../runtimes/types.ts";
+import type { ApprovalDecision, ChatHandle, ChatTurn, RuntimeAdapter, SteerInput } from "../runtimes/types.ts";
 
 /**
  * Chat turns as background runs (docs/panel.md#chat). A turn belongs to the server, not to the
@@ -70,6 +70,8 @@ export type RunRegistryOptions = {
 
 export class RunBusyError extends Error {}
 export class RunClosedError extends Error {}
+/** The run is over, or its runtime cannot take this now. */
+export class RunStateError extends Error {}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS agent_runs (
@@ -112,7 +114,7 @@ type Live = {
   events: (RunEvent & { kind: string })[];
   bytes: number;
   listeners: Set<RunListener>;
-  kill: () => void;
+  handle: ChatHandle;
   timer?: ReturnType<typeof setTimeout>;
   grace?: ReturnType<typeof setTimeout>;
   /** Why the run is being ended, set by `stop`; the runtime's own error is kept out of it. */
@@ -174,7 +176,7 @@ export class RunRegistry {
     };
     let resolveEnded = () => {};
     const ended = new Promise<void>((r) => (resolveEnded = r));
-    const run: Live = { info, events: [], bytes: 0, listeners: new Set(), kill: () => {}, ended, resolveEnded };
+    const run: Live = { info, events: [], bytes: 0, listeners: new Set(), handle: { kill: () => {} }, ended, resolveEnded };
     this.live.set(info.id, run);
     this.db
       .query("INSERT INTO agent_runs (id, agent, session_id, message, runtime, model, status, started_at) VALUES (?, ?, ?, ?, ?, ?, 'running', ?)")
@@ -193,7 +195,7 @@ export class RunRegistry {
         },
         onFinish: (error) => this.finish(run, error),
       });
-      run.kill = () => handle.kill();
+      run.handle = handle;
     } catch (e) {
       this.finish(run, (e as Error).message);
     }
@@ -255,6 +257,29 @@ export class RunRegistry {
     return true;
   }
 
+  /**
+   * Add the person's message to a running turn. Throws RunStateError when the run is over or its
+   * runtime cannot take a message now (not a live turn, or between two of the runtime's steps);
+   * the caller then sends it as the next turn.
+   */
+  async steer(id: string, input: SteerInput): Promise<void> {
+    const r = this.live.get(id);
+    if (!r || r.info.status !== "running" || r.ending) throw new RunStateError("the turn has ended");
+    if (!r.handle.steer) throw new RunStateError("this turn cannot take messages while it runs");
+    try {
+      await r.handle.steer(input);
+    } catch (e) {
+      throw new RunStateError((e as Error).message);
+    }
+  }
+
+  /** Answer an approval the running turn is waiting on; false when the run or the request is not open. */
+  respond(id: string, requestId: string, decision: ApprovalDecision): boolean {
+    const r = this.live.get(id);
+    if (!r || r.info.status !== "running" || r.ending || !r.handle.respond) return false;
+    return r.handle.respond(requestId, decision);
+  }
+
   /** Number of runs still going. */
   get active(): number {
     let n = 0;
@@ -314,7 +339,7 @@ export class RunRegistry {
     run.ending = { status, error };
     clearTimeout(run.timer);
     try {
-      run.kill();
+      run.handle.kill();
     } catch {
       /* already gone */
     }

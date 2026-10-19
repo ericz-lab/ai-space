@@ -67,7 +67,7 @@ test("legacy peer tokens cannot discover or invoke newly registered package apps
     "/api/agents": list("agents", [{ id: "packaged/helper", app: "packaged" }]),
     "/api/agents/runs": list("runs", [{ agent: "packaged/helper" }, { agent: "legacy/helper" }]),
   };
-  for (const path of ["/chat", "/sessions", "/sessions/:sid", "/runs", "/runs/:id", "/runs/:id/events", "/runs/:id/stop"]) agents[`/api/agents/:app/:agent${path}`] = { GET: () => Response.json({}), POST: () => Response.json({}) };
+  for (const path of ["/chat", "/sessions", "/sessions/:sid", "/runs", "/runs/:id", "/runs/:id/events", "/runs/:id/stop", "/runs/:id/steer", "/runs/:id/approvals/:rid"]) agents[`/api/agents/:app/:agent${path}`] = { GET: () => Response.json({}), POST: () => Response.json({}) };
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", websocket: { message() {} }, routes: createPeerServeRoutes({ token: "old", name: "test", panel, agents, allowApp: (app) => app !== "packaged" }), fetch: () => new Response("missing", { status: 404 }) });
   cleanup.push(() => { server.stop(true); });
   const get = (path: string, method = "GET") => fetch(new URL(path, server.url), { method, headers: { authorization: "Bearer old" } });

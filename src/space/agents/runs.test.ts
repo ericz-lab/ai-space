@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { LayoutStore } from "../panel/layout.ts";
 import { AppRegistry } from "../panel/registry.ts";
 import { claudeOnly } from "../runtimes/registry.ts";
+import { fakeLiveBin } from "../runtimes/testing-live.ts";
 import type { ChatCallbacks, RuntimeAdapter } from "../runtimes/types.ts";
 import { workspacePaths } from "../workspace.ts";
 import { createAgentRoutes } from "./api.ts";
@@ -276,5 +277,71 @@ describe("background runs over HTTP", () => {
   test("unknown runs are 404", async () => {
     expect((await fetch(`${base}/space/assistant/runs/nope/events`)).status).toBe(404);
     expect((await fetch(`${base}/space/assistant/runs/nope/stop`, { method: "POST" })).status).toBe(404);
+  });
+});
+
+describe("live turns over HTTP", () => {
+  let live: ReturnType<typeof Bun.serve>;
+  let liveBase = "";
+  const liveRuns = new RunRegistry(new Database(":memory:"));
+  const runtimes = claudeOnly(fakeLiveBin("claude"));
+  beforeAll(() => {
+    live = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      routes: createAgentRoutes({ ws: workspacePaths(home), registry: new AppRegistry(), layout: new LayoutStore(new Database(":memory:")), sessions: new SessionStore(new Database(":memory:")), runtimes, runs: liveRuns }),
+    });
+    liveBase = `http://127.0.0.1:${live.port}/api/agents/space/assistant`;
+  });
+  afterAll(() => {
+    live.stop(true);
+    runtimes.closeLive();
+  });
+  const post = (path: string, body: unknown) => fetch(`${liveBase}${path}`, { method: "POST", body: JSON.stringify(body) });
+
+  test("an approval request is answered once over HTTP and the turn goes on", async () => {
+    const r = await post("/chat", { message: "approve:rm a.txt", interactive: true });
+    const id = r.headers.get("x-run-id")!;
+    let answers: Promise<number[]> | undefined;
+    const frames = await readFrames(r, (fs) => {
+      const request = fs.find(([, d]) => d.type === "approval_request");
+      if (request && !answers) {
+        const rid = encodeURIComponent(String(request[1].id));
+        answers = (async () => [
+          (await post(`/runs/${id}/approvals/${rid}`, { decision: "maybe" })).status,
+          (await post(`/runs/${id}/approvals/${rid}`, { decision: "allow" })).status,
+          (await post(`/runs/${id}/approvals/${rid}`, { decision: "deny" })).status,
+        ])();
+      }
+      return false;
+    });
+    expect(await answers).toEqual([400, 200, 409]);
+    expect(frames.map(([, d]) => d.type)).toEqual(expect.arrayContaining(["approval_request", "approval_resolved", "result", "done"]));
+    expect(frames.find(([, d]) => d.type === "approval_resolved")![1]).toMatchObject({ decision: "allow" });
+    expect(liveRuns.get(id)!.status).toBe("done");
+  });
+
+  test("a message steered into a running turn is read by it; a finished turn refuses one", async () => {
+    const r = await post("/chat", { message: "wait", interactive: true });
+    const id = r.headers.get("x-run-id")!;
+    let steered: Promise<number> | undefined;
+    const frames = await readFrames(r, (fs) => {
+      if (!steered && fs.some(([, d]) => d.type === "assistant")) steered = post(`/runs/${id}/steer`, { message: "also this" }).then((s) => s.status);
+      return false;
+    });
+    expect(await steered).toBe(200);
+    expect(frames.find(([, d]) => d.type === "steer")![1]).toEqual({ type: "steer", text: "also this" });
+    const said = frames.filter(([, d]) => d.type === "assistant").flatMap(([, d]) => (d.message as { content: { text?: string }[] }).content.map((c) => c.text));
+    expect(said).toContain("heard: also this");
+    expect((await post(`/runs/${id}/steer`, { message: "late" })).status).toBe(409);
+    expect((await post(`/runs/${id}/steer`, {})).status).toBe(400);
+  });
+
+  test("a one-shot turn cannot be steered: the client sends the message next instead", async () => {
+    const r = await startChat("ticks /dev/null 3");
+    const id = r.headers.get("x-run-id")!;
+    expect((await fetch(`${base}/space/assistant/runs/${id}/steer`, { method: "POST", body: JSON.stringify({ message: "x" }) })).status).toBe(409);
+    expect((await fetch(`${base}/space/assistant/runs/${id}/approvals/r1`, { method: "POST", body: JSON.stringify({ decision: "allow" }) })).status).toBe(409);
+    await readFrames(r);
   });
 });
