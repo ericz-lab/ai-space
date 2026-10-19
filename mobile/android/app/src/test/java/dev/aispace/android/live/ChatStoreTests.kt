@@ -1,5 +1,6 @@
 package dev.aispace.android.live
 
+import dev.aispace.android.core.ChatApprovalState
 import dev.aispace.android.core.ChatSessionInfo
 import dev.aispace.android.core.CookieSource
 import dev.aispace.android.core.SpaceApi
@@ -25,6 +26,10 @@ class ChatStoreTests {
     }
     private fun history(text: String) = MockResponse().setBody("""{"messages":[{"role":"user","text":"$text"}]}""")
     private fun done() = MockResponse().setBody("data: {\"type\":\"done\"}\n\n")
+    private fun turn(events: String, delayMs: Long = 0) = MockResponse()
+        .setHeader("x-run-id", "run-1")
+        .setBody(events)
+        .apply { if (delayMs > 0) setBodyDelay(delayMs, TimeUnit.MILLISECONDS) }
 
     @Test fun newChatInvalidatesPendingHistory() = runBlocking {
         server.enqueue(history("old").setHeadersDelay(200, TimeUnit.MILLISECONDS))
@@ -140,5 +145,104 @@ class ChatStoreTests {
         assertFalse(store.isRunning)
         assertTrue(store.bubbles.isEmpty())
         assertEquals(1, server.requestCount)
+    }
+
+    @Test fun everyTurnIsInteractive() = runBlocking {
+        server.enqueue(done())
+        val store = store(this)
+        store.draft.value = "hello"
+        store.send()
+        finished(store)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("\"interactive\":true"))
+        assertTrue(body.contains("\"message\":\"hello\""))
+    }
+
+    @Test fun aMessageDuringATurnIsSteeredIntoIt() = runBlocking {
+        server.enqueue(turn(
+            "id: 1\ndata: {\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\"}\n\n" +
+                "id: 2\ndata: {\"type\":\"steer\",\"text\":\"more\"}\n\n" +
+                "id: 3\ndata: {\"type\":\"done\"}\n\n",
+            400,
+        ))
+        server.enqueue(MockResponse().setBody("{\"ok\":true}"))
+        val store = store(this)
+        store.draft.value = "hello"
+        store.send()
+        requests(1)
+        delay(100)
+        store.draft.value = "more"
+        store.send()
+        requests(2)
+        finished(store)
+        assertEquals("POST", server.takeRequest().method)
+        val steer = server.takeRequest()
+        assertEquals("/agent/runs/run-1/steer", steer.path)
+        assertTrue(steer.body.readUtf8().contains("\"message\":\"more\""))
+        assertEquals(2, store.bubbles.size)
+        assertEquals(listOf("more"), store.bubbles.last().steers)
+        assertTrue(store.bubbles.last().pending.isEmpty())
+    }
+
+    @Test fun anApprovalIsAnsweredOverTheRun() = runBlocking {
+        server.enqueue(turn(
+            "id: 1\ndata: {\"type\":\"approval_request\",\"id\":\"codex-0\",\"tool\":\"Bash\",\"title\":\"rm -rf build\",\"detail\":\"the sandbox is read-only\"}\n\n" +
+                "id: 2\ndata: {\"type\":\"approval_resolved\",\"id\":\"codex-0\",\"decision\":\"allow\"}\n\n" +
+                "id: 3\ndata: {\"type\":\"done\"}\n\n",
+            400,
+        ))
+        server.enqueue(MockResponse().setBody("{\"ok\":true}"))
+        val store = store(this)
+        store.draft.value = "hello"
+        store.send()
+        requests(1)
+        delay(100)
+        assertNull(store.answer("codex-0", allow = true))
+        requests(2)
+        finished(store)
+        server.takeRequest()
+        val answer = server.takeRequest()
+        assertEquals("/agent/runs/run-1/approvals/codex-0", answer.path)
+        assertTrue(answer.body.readUtf8().contains("\"decision\":\"allow\""))
+        assertEquals(ChatApprovalState.Allowed, store.bubbles.last().approvals.single().state)
+    }
+
+    @Test fun queuedRepliesStayWithTheirMessages() = runBlocking {
+        server.enqueue(turn("id: 1\ndata: {\"type\":\"done\"}\n\n", 700))
+        server.enqueue(MockResponse().setResponseCode(409).setBody("{\"error\":\"the turn has ended\"}"))
+        server.enqueue(MockResponse().setHeader("x-run-id", "run-2").setBody("data: {\"type\":\"done\"}\n\n"))
+        server.enqueue(MockResponse().setHeader("x-run-id", "run-3").setBody("data: {\"type\":\"done\"}\n\n"))
+        val store = store(this)
+        store.draft.value = "hello"
+        store.send()
+        requests(1)
+        delay(100)
+        store.draft.value = "one"
+        store.send()
+        requests(2)
+        delay(50)
+        store.draft.value = "two"
+        store.send()
+        finished(store)
+        assertEquals(listOf(true, false, true, false, true, false), store.bubbles.map { it.isUser })
+        assertEquals(listOf("hello", "one", "two"), store.bubbles.filter { it.isUser }.map { it.text })
+    }
+
+    @Test fun aSteerFailureAfterANewChatDoesNotLandInIt() = runBlocking {
+        server.enqueue(turn("id: 1\ndata: {\"type\":\"done\"}\n\n", 150))
+        server.enqueue(MockResponse().setResponseCode(409).setHeadersDelay(700, TimeUnit.MILLISECONDS).setBody("{\"error\":\"the turn has ended\"}"))
+        val store = store(this)
+        store.draft.value = "hello"
+        store.send()
+        requests(1)
+        delay(50)
+        store.draft.value = "more"
+        store.send()
+        requests(2)
+        finished(store)
+        store.newChat()
+        delay(900)
+        assertTrue(store.bubbles.isEmpty())
+        assertEquals(2, server.requestCount)
     }
 }

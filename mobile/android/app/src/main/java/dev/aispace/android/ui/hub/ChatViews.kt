@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -32,6 +33,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -66,6 +68,8 @@ import dev.aispace.android.AppModel
 import dev.aispace.android.R
 import dev.aispace.android.core.CatalogueEntry
 import dev.aispace.android.core.ChatActivity
+import dev.aispace.android.core.ChatApproval
+import dev.aispace.android.core.ChatApprovalState
 import dev.aispace.android.core.ChatRoute
 import dev.aispace.android.core.Connection
 import dev.aispace.android.core.Reach
@@ -186,7 +190,9 @@ internal fun ChatPage(agent: CatalogueEntry, store: ChatStore, icons: IconImages
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (bubbles.isEmpty()) item(key = "intro") { Intro(agent, icons) }
-                items(bubbles, key = { it.id }) { ChatBubble(it) }
+                items(bubbles, key = { it.id }) {
+                    ChatBubble(it, answer = if (it.live) { id, allow -> store.answer(id, allow) } else null)
+                }
                 item(key = "end") { Spacer(Modifier.height(1.dp)) }
             }
             store.error?.let {
@@ -220,7 +226,10 @@ internal fun ChatPage(agent: CatalogueEntry, store: ChatStore, icons: IconImages
                     IconButton(onClick = { store.stop() }) {
                         Icon(Icons.Filled.StopCircle, contentDescription = stringResource(R.string.chat_stop), tint = ThemeTokens.danger, modifier = Modifier.size(32.dp))
                     }
-                } else {
+                }
+                // A message written during a turn joins it; Send stays beside Stop while the field
+                // has something to add.
+                if (!running || draft.isNotBlank()) {
                     val canSend = store.canSend
                     IconButton(onClick = { store.send() }, enabled = canSend) {
                         Icon(
@@ -252,7 +261,7 @@ private fun Intro(agent: CatalogueEntry, icons: IconImages) {
 }
 
 @Composable
-private fun ChatBubble(bubble: ChatStore.Bubble) {
+private fun ChatBubble(bubble: ChatStore.Bubble, answer: (suspend (String, Boolean) -> String?)?) {
     val t = AiTheme.tokens
     val shape = RoundedCornerShape(16.dp)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (bubble.isUser) Arrangement.End else Arrangement.Start) {
@@ -275,6 +284,16 @@ private fun ChatBubble(bubble: ChatStore.Bubble) {
                 }
                 SelectionContainer { Text(rendered, color = color) }
             }
+            if (!bubble.isUser) {
+                for (approval in bubble.approvals) {
+                    ApprovalCard(approval, answer = if (bubble.live) { allow -> answer?.invoke(approval.id, allow) } else null)
+                }
+                for (text in bubble.steers) SteerLine(text)
+                for (text in bubble.pending) SteerLine(text, pending = true)
+                if (bubble.live && bubble.approvals.any { it.state == ChatApprovalState.Waiting }) {
+                    Text(stringResource(R.string.chat_waiting_approval), style = MaterialTheme.typography.labelSmall, color = t.secondaryText)
+                }
+            }
             bubble.activity?.let { activity ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = t.secondaryText)
@@ -283,6 +302,86 @@ private fun ChatBubble(bubble: ChatStore.Bubble) {
             }
         }
         if (!bubble.isUser) Spacer(Modifier.size(24.dp, 1.dp))
+    }
+}
+
+/** An action the agent waits on (docs/runtimes.md#live-chat): nothing is allowed without a tap. */
+@Composable
+private fun ApprovalCard(approval: ChatApproval, answer: (suspend (Boolean) -> String?)?) {
+    val t = AiTheme.tokens
+    val scope = rememberCoroutineScope()
+    var sending by remember(approval.id) { mutableStateOf(false) }
+    var error by remember(approval.id) { mutableStateOf<String?>(null) }
+    val waiting = approval.state == ChatApprovalState.Waiting
+    // Only a waiting request takes an answer, and only while its turn runs.
+    val permit = if (waiting) answer else null
+    val shape = RoundedCornerShape(10.dp)
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(t.ground).then(Modifier.hairline(t.hairline, shape))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(approval.tool, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = t.text)
+            Spacer(Modifier.weight(1f))
+            Text(approvalStateText(approval.state), style = MaterialTheme.typography.labelSmall, color = t.secondaryText)
+        }
+        if (approval.title.isNotEmpty()) {
+            Text(approval.title, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = t.text, maxLines = 4, overflow = TextOverflow.Ellipsis)
+        }
+        if (approval.detail.isNotEmpty()) {
+            Text(approval.detail, style = MaterialTheme.typography.bodySmall, color = t.secondaryText)
+        }
+        if (permit != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        sending = true
+                        error = null
+                        scope.launch {
+                            error = permit(true)
+                            sending = false
+                        }
+                    },
+                    enabled = !sending,
+                ) { Text(stringResource(R.string.chat_allow)) }
+                OutlinedButton(
+                    onClick = {
+                        sending = true
+                        error = null
+                        scope.launch {
+                            error = permit(false)
+                            sending = false
+                        }
+                    },
+                    enabled = !sending,
+                ) { Text(stringResource(R.string.chat_deny)) }
+            }
+        }
+        error?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = ThemeTokens.danger) }
+    }
+}
+
+@Composable
+private fun approvalStateText(state: ChatApprovalState): String = when (state) {
+    ChatApprovalState.Waiting -> stringResource(R.string.chat_waiting_state)
+    ChatApprovalState.Allowed -> stringResource(R.string.chat_allowed)
+    ChatApprovalState.Denied -> stringResource(R.string.chat_denied)
+    ChatApprovalState.Cancelled -> stringResource(R.string.chat_not_answered)
+}
+
+/** A message the person added while the turn ran, waiting for the agent to read it or already read. */
+@Composable
+private fun SteerLine(text: String, pending: Boolean = false) {
+    val t = AiTheme.tokens
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Top) {
+        Text(stringResource(R.string.chat_you), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = t.text)
+        if (text.isNotEmpty()) {
+            Text(text, style = MaterialTheme.typography.bodySmall, color = t.text)
+        }
+        if (pending) {
+            Text(stringResource(R.string.chat_steer_pending), style = MaterialTheme.typography.labelSmall, color = t.secondaryText)
+        }
     }
 }
 

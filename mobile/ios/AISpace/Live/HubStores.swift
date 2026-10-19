@@ -335,6 +335,11 @@ final class ChatStore: ObservableObject {
         var text: String
         var tools: [String] = []
         var activity: ChatActivity?
+        /// The turn's work: an approval waiting on the person, or a message they added while it ran.
+        var steps: [ChatStep] = []
+        /// Messages added to the running turn that the agent has not read yet.
+        var pending: [String] = []
+        var live = false
     }
 
     let api: SpaceAPI
@@ -346,15 +351,31 @@ final class ChatStore: ObservableObject {
     @Published private(set) var error: String?
     private var sessionID: String?
     private var runID: String?
-    private var turn: Task<Void, Never>?
+    private var task: Task<Void, Never>?
     private static let reconnects = 5
+
+    /// One thread's identity: New Chat and opening an earlier chat start another one, so a late
+    /// answer for a steer of the old thread cannot land in the new one.
+    private var conversation = UUID()
+    /// Turns written while one runs that it could not take, each tied to the message it answers so
+    /// its reply is inserted right after that message.
+    private struct QueuedTurn {
+        let bubble: UUID
+        let text: String
+        let intentID: String?
+        let timezone: String?
+    }
+    private var queue: [QueuedTurn] = []
+    private var pending: [String] = []
+    private var steersSeen = 0
+    private var stopRequested = false
 
     init(api: SpaceAPI, base: String) {
         self.api = api
         self.base = base
     }
 
-    var canSend: Bool { !isRunning && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     func loadSessions() async {
         guard let data = try? await api.data("\(base)/sessions") else { return }
@@ -364,6 +385,7 @@ final class ChatStore: ObservableObject {
     func newChat() {
         guard !isRunning else { return }
         sessionID = nil
+        conversation = UUID()
         bubbles = []
         error = nil
     }
@@ -371,6 +393,9 @@ final class ChatStore: ObservableObject {
     /// Shows a stored conversation; the next message continues it.
     func open(_ session: ChatSessionInfo) async {
         guard !isRunning else { return }
+        // Choosing another thread already ends the one on screen: a late answer for a message
+        // written in it must not land in the history about to be shown.
+        conversation = UUID()
         do {
             let stored = try Hub.rows(ChatStored.self, "messages", from: try await api.data("\(base)/sessions/\(SpacePath.escape(session.sid))"))
             bubbles = stored.compactMap { m in (m.text ?? "").isEmpty ? nil : Bubble(isUser: m.role == "user", text: m.text ?? "") }
@@ -383,31 +408,137 @@ final class ChatStore: ObservableObject {
 
     func send(intentID: String? = nil, timezone: String? = nil) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isRunning else { return }
+        guard !text.isEmpty else { return }
         draft = ""
         error = nil
-        bubbles.append(Bubble(isUser: true, text: text))
-        bubbles.append(Bubble(isUser: false, text: "", activity: .starting))
-        let index = bubbles.count - 1
-        isRunning = true
-        runID = nil
-        turn = Task { [weak self] in
-            await self?.follow(text, into: index, intentID: intentID, timezone: timezone)
+        // A message written while a turn runs joins that turn (docs/runtimes.md#live-chat); a turn
+        // that cannot take it is queued and sent next. An intent keeps its own route through chat,
+        // so it is queued instead.
+        if isRunning {
+            if intentID != nil || !queue.isEmpty || stopRequested {
+                enqueue(text: text, intentID: intentID, timezone: timezone)
+            } else {
+                steer(text: text, intentID: intentID, timezone: timezone)
+            }
+            return
+        }
+        let bubble = Bubble(isUser: true, text: text)
+        bubbles.append(bubble)
+        start(QueuedTurn(bubble: bubble.id, text: text, intentID: intentID, timezone: timezone))
+    }
+
+    /// The person's answer to one of the running turn's approvals. Returns nil when it reached the
+    /// Space, else what the card shows.
+    func answer(_ requestID: String, allow: Bool) async -> String? {
+        guard let runID else { return String(localized: "The answer did not reach the agent: no turn is running") }
+        do {
+            _ = try await api.send("POST", "\(base)/runs/\(SpacePath.escape(runID))/approvals/\(SpacePath.escape(requestID))", json: ["decision": allow ? "allow" : "deny"])
+            return nil
+        } catch {
+            return String(localized: "The answer did not reach the agent: \(HubStore.message(error))")
         }
     }
 
-    private func follow(_ text: String, into index: Int, intentID: String?, timezone: String?) async {
+    /// Hands the message to the running turn; when that is refused (the turn just ended, or its
+    /// runtime has no live chat) it becomes the next turn.
+    private func steer(text: String, intentID: String?, timezone: String?) {
+        guard let runID else {
+            enqueue(text: text, intentID: intentID, timezone: timezone)
+            drain()
+            return
+        }
+        let conversation = self.conversation
+        markPending(text, add: true)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await api.send("POST", "\(base)/runs/\(SpacePath.escape(runID))/steer", json: ["message": text])
+            } catch {
+                // The person moved to another thread while the answer was on its way: the message
+                // belongs to the one that is gone, not to the new one.
+                guard self.conversation == conversation else { return }
+                markPending(text, add: false)
+                enqueue(text: text, intentID: intentID, timezone: timezone)
+                drain()
+            }
+        }
+    }
+
+    private func markPending(_ text: String, add: Bool) {
+        if add {
+            pending.append(text)
+        } else if let at = pending.lastIndex(of: text) {
+            pending.remove(at: at)
+        }
+        guard let i = bubbles.lastIndex(where: { !$0.isUser && $0.live }) else { return }
+        bubbles[i].pending = pending
+    }
+
+    /// The reply took one added message in: its text names it.
+    private func takePending(_ text: String) {
+        guard let at = pending.firstIndex(of: text) else { return }
+        pending.remove(at: at)
+    }
+
+    private func enqueue(text: String, intentID: String?, timezone: String?) {
+        let bubble = Bubble(isUser: true, text: text)
+        bubbles.append(bubble)
+        queue.append(QueuedTurn(bubble: bubble.id, text: text, intentID: intentID, timezone: timezone))
+    }
+
+    private func takeQueued() -> QueuedTurn? {
+        queue.isEmpty ? nil : queue.removeFirst()
+    }
+
+    /// Starts the next waiting turn when nothing runs.
+    private func drain() {
+        guard !isRunning, let next = takeQueued() else { return }
+        start(next)
+    }
+
+    private func start(_ turn: QueuedTurn) {
+        let reply = Bubble(isUser: false, text: "", activity: .starting, live: true)
+        // A queued turn's reply belongs right after its own message: with two waiting, appending it
+        // at the end would separate each message from the turn that answers it.
+        let index: Int
+        if let at = bubbles.firstIndex(where: { $0.id == turn.bubble }) {
+            index = at + 1
+            bubbles.insert(reply, at: index)
+        } else {
+            index = bubbles.count
+            bubbles.append(reply)
+        }
+        isRunning = true
+        stopRequested = false
+        runID = nil
+        pending = []
+        steersSeen = 0
+        task = Task { [weak self] in
+            await self?.follow(turn, into: index)
+        }
+    }
+
+    private func follow(_ turn: QueuedTurn, into index: Int) async {
         var reply = ChatReply()
         var lastSeq = 0
         var tries = 0
-        var body: [String: Any] = ["message": text]
+        var body: [String: Any] = ["message": turn.text, "interactive": true]
         if let sessionID { body["sessionId"] = sessionID }
-        if let intentID { body["intentId"] = intentID; body["timezone"] = timezone ?? TimeZone.current.identifier }
+        if let intentID = turn.intentID {
+            body["intentId"] = intentID
+            body["timezone"] = turn.timezone ?? TimeZone.current.identifier
+        }
         func show() {
             guard bubbles.indices.contains(index) else { return }
             bubbles[index].text = reply.stopped ? [reply.text, String(localized: "Stopped.")].filter { !$0.isEmpty }.joined(separator: "\n\n") : reply.text
             bubbles[index].tools = reply.tools
+            bubbles[index].steps = reply.steps
             bubbles[index].activity = reply.activity
+            while steersSeen < reply.consumedSteers.count {
+                takePending(reply.consumedSteers[steersSeen])
+                steersSeen += 1
+            }
+            bubbles[index].pending = pending
         }
         do {
             var (id, stream) = try await api.events("POST", "\(base)/chat", json: body)
@@ -438,15 +569,31 @@ final class ChatStore: ObservableObject {
         } catch {
             if !Task.isCancelled { reply.note = "⚠️ " + HubStore.message(error) }
         }
+        reply.endSteps()
         reply.activity = nil
-        show()
         sessionID = reply.sessionID ?? sessionID
         runID = nil
-        isRunning = false
+        if bubbles.indices.contains(index) {
+            bubbles[index].text = reply.stopped ? [reply.text, String(localized: "Stopped.")].filter { !$0.isEmpty }.joined(separator: "\n\n") : reply.text
+            bubbles[index].tools = reply.tools
+            bubbles[index].steps = reply.steps
+            bubbles[index].activity = nil
+            bubbles[index].pending = []
+            bubbles[index].live = false
+        }
+        pending = []
+        // A message that could not join this turn goes now, in the order it was written.
+        if let next = takeQueued() {
+            start(next)
+        } else {
+            stopRequested = false
+            isRunning = false
+        }
     }
 
     /// Stops the run on the Space; the stream then ends by itself.
     func stop() {
+        stopRequested = true
         guard let run = runID else { return }
         Task { _ = try? await api.send("POST", "\(base)/runs/\(SpacePath.escape(run))/stop", json: [:]) }
     }

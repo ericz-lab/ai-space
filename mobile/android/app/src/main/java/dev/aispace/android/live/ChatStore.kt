@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.aispace.android.R
 import dev.aispace.android.core.ChatActivity
+import dev.aispace.android.core.ChatApproval
 import dev.aispace.android.core.ChatReply
 import dev.aispace.android.core.ChatSessionInfo
 import dev.aispace.android.core.ChatStored
@@ -41,6 +42,13 @@ class ChatStore(val api: SpaceApi, val base: String, private val scope: Coroutin
         val text: String,
         val tools: List<String> = emptyList(),
         val activity: ChatActivity? = null,
+        /// An approval waiting on the person, or a message they added while the turn ran.
+        val approvals: List<ChatApproval> = emptyList(),
+        /// Messages the person added while the turn ran, as the reply shows them.
+        val steers: List<String> = emptyList(),
+        /// Messages added to the running turn that the agent has not read yet.
+        val pending: List<String> = emptyList(),
+        val live: Boolean = false,
         val id: UUID = UUID.randomUUID(),
     )
 
@@ -65,7 +73,15 @@ class ChatStore(val api: SpaceApi, val base: String, private val scope: Coroutin
     var isOpening by mutableStateOf(false)
         private set
 
-    val canSend: Boolean get() = !isRunning && !isOpening && draft.value.trim().isNotEmpty()
+    /// Turns written while one runs that it could not take, each tied to the message it answers so
+    /// its reply is inserted right after that message.
+    private data class QueuedTurn(val bubble: UUID, val text: String)
+    private var queue = mutableListOf<QueuedTurn>()
+    private var pending = emptyList<String>()
+    private var steersSeen = 0
+    private var stopRequested = false
+
+    val canSend: Boolean get() = !isOpening && draft.value.trim().isNotEmpty()
 
     suspend fun loadSessions() {
         val generation = this.generation
@@ -120,33 +136,135 @@ class ChatStore(val api: SpaceApi, val base: String, private val scope: Coroutin
 
     fun send() {
         val text = draft.value.trim()
-        if (!canSend) return
+        if (isOpening || text.isEmpty()) return
         draft.value = ""
         error = null
-        bubbles = bubbles + Bubble(isUser = true, text = text) + Bubble(isUser = false, text = "", activity = ChatActivity.Starting)
-        val index = bubbles.size - 1
-        isRunning = true
-        runID = null
-        val generation = this.generation
-        turn = scope.launch { follow(text, index, generation) }
+        // A message written while a turn runs joins that turn (docs/runtimes.md#live-chat); a turn
+        // that cannot take it is queued and sent next.
+        if (isRunning) {
+            if (queue.isNotEmpty() || stopRequested) enqueue(text) else steer(text)
+            return
+        }
+        val bubble = Bubble(isUser = true, text = text)
+        bubbles = bubbles + bubble
+        start(QueuedTurn(bubble.id, text))
     }
 
-    private suspend fun follow(text: String, index: Int, generation: Int) {
+    /** The person's answer to one of the running turn's approvals; null once it reached the Space. */
+    suspend fun answer(requestID: String, allow: Boolean): String? {
+        val run = runID ?: return HubText.get(R.string.chat_no_turn)
+        return try {
+            api.send("POST", "$base/runs/${SpacePath.escape(run)}/approvals/${SpacePath.escape(requestID)}", JSONObject().put("decision", if (allow) "allow" else "deny"))
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            HubText.get(R.string.chat_answer_failed, HubStore.message(e))
+        }
+    }
+
+    /** Hands the message to the running turn; when that is refused it becomes the next turn. */
+    private fun steer(text: String) {
+        val run = runID
+        if (run == null) {
+            enqueue(text)
+            drain()
+            return
+        }
+        val selection = this.selection
+        markPending(text, true)
+        scope.launch {
+            try {
+                api.send("POST", "$base/runs/${SpacePath.escape(run)}/steer", JSONObject().put("message", text))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The person moved to another thread while the answer was on its way: the message
+                // belongs to the one that is gone, not to the new one.
+                if (selection != this@ChatStore.selection) return@launch
+                markPending(text, false)
+                enqueue(text)
+                drain()
+            }
+        }
+    }
+
+    private fun markPending(text: String, add: Boolean) {
+        if (add) {
+            pending = pending + text
+        } else {
+            val at = pending.lastIndexOf(text)
+            if (at >= 0) pending = pending.filterIndexed { i, _ -> i != at }
+        }
+        val live = bubbles.indexOfLast { !it.isUser && it.live }
+        if (live >= 0) bubbles = bubbles.toMutableList().also { it[live] = it[live].copy(pending = pending) }
+    }
+
+    /// The reply took one added message in: its text names it.
+    private fun takePending(text: String) {
+        val at = pending.indexOf(text)
+        if (at >= 0) pending = pending.filterIndexed { i, _ -> i != at }
+    }
+
+    private fun enqueue(text: String) {
+        val bubble = Bubble(isUser = true, text = text)
+        bubbles = bubbles + bubble
+        queue.add(QueuedTurn(bubble.id, text))
+    }
+
+    /// Starts the next waiting turn when nothing runs.
+    private fun drain() {
+        if (isRunning) return
+        val next = if (queue.isEmpty()) null else queue.removeAt(0)
+        if (next != null) start(next)
+    }
+
+    private fun start(turn: QueuedTurn) {
+        // A queued turn's reply belongs right after its own message: with two waiting, appending it
+        // at the end would separate each message from the turn that answers it.
+        val list = bubbles.toMutableList()
+        val at = list.indexOfFirst { it.id == turn.bubble }
+        val index = if (at >= 0) at + 1 else list.size
+        list.add(index, Bubble(isUser = false, text = "", activity = ChatActivity.Starting, live = true))
+        bubbles = list
+        isRunning = true
+        stopRequested = false
+        runID = null
+        pending = emptyList()
+        steersSeen = 0
+        val generation = this.generation
+        this.turn = scope.launch { follow(turn, index, generation) }
+    }
+
+    private suspend fun follow(turn: QueuedTurn, index: Int, generation: Int) {
         var reply = ChatReply()
         var lastSeq = 0
         var tries = 0
-        val body = JSONObject().put("message", text)
+        val body = JSONObject().put("message", turn.text).put("interactive", true)
         sessionID?.let { body.put("sessionId", it) }
+        fun entered(): String = if (reply.stopped) {
+            listOf(reply.text, HubText.get(R.string.chat_stopped)).filter { it.isNotEmpty() }.joinToString("\n\n")
+        } else {
+            reply.text
+        }
         fun show() {
             if (generation != this.generation) return
             val list = bubbles
             if (index !in list.indices) return
-            val shown = if (reply.stopped) {
-                listOf(reply.text, HubText.get(R.string.chat_stopped)).filter { it.isNotEmpty() }.joinToString("\n\n")
-            } else {
-                reply.text
+            while (steersSeen < reply.consumedSteers.size) {
+                takePending(reply.consumedSteers[steersSeen])
+                steersSeen += 1
             }
-            bubbles = list.toMutableList().also { it[index] = it[index].copy(text = shown, tools = reply.tools, activity = reply.activity) }
+            bubbles = list.toMutableList().also {
+                it[index] = it[index].copy(
+                    text = entered(),
+                    tools = reply.tools,
+                    activity = reply.activity,
+                    approvals = reply.approvals,
+                    steers = reply.steers,
+                    pending = pending,
+                )
+            }
         }
         try {
             val first = api.events("POST", "$base/chat", body)
@@ -185,25 +303,50 @@ class ChatStore(val api: SpaceApi, val base: String, private val scope: Coroutin
             }
         } catch (e: CancellationException) {
             // Cancelled (the Space was removed): end the turn as it stands, then stop.
-            finishTurn(reply, generation)
+            finishTurn(reply, generation, index)
             throw e
         } catch (e: Exception) {
             reply = reply.copy(note = "⚠️ " + HubStore.message(e))
         }
-        reply = reply.copy(activity = null)
+        reply = reply.settled().copy(activity = null)
         show()
-        finishTurn(reply, generation)
+        finishTurn(reply, generation, index)
     }
 
-    private fun finishTurn(reply: ChatReply, generation: Int) {
+    private fun finishTurn(reply: ChatReply, generation: Int, index: Int) {
         if (generation != this.generation) return
         sessionID = reply.sessionID ?: sessionID
         runID = null
-        isRunning = false
+        pending = emptyList()
+        if (index in bubbles.indices) {
+            val shown = if (reply.stopped) {
+                listOf(reply.text, HubText.get(R.string.chat_stopped)).filter { it.isNotEmpty() }.joinToString("\n\n")
+            } else {
+                reply.text
+            }
+            bubbles = bubbles.toMutableList().also {
+                it[index] = it[index].copy(
+                    text = shown,
+                    tools = reply.tools,
+                    approvals = reply.approvals,
+                    steers = reply.steers,
+                    pending = emptyList(),
+                    activity = null,
+                    live = false,
+                )
+            }
+        }
+        // A message that could not join this turn goes now, in the order it was written.
+        val next = if (queue.isEmpty()) null else queue.removeAt(0)
+        if (next != null) start(next) else {
+            stopRequested = false
+            isRunning = false
+        }
     }
 
     /** Stops the run on the Space; the stream then ends by itself. */
     fun stop() {
+        stopRequested = true
         val run = runID ?: return
         scope.launch {
             try {
@@ -228,6 +371,9 @@ class ChatStore(val api: SpaceApi, val base: String, private val scope: Coroutin
         isRunning = false
         sessionID = null
         runID = null
+        queue.clear()
+        pending = emptyList()
+        stopRequested = false
         draft.value = ""
         bubbles = emptyList()
         sessions = emptyList()
