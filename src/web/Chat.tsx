@@ -1,6 +1,7 @@
 import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
-import { ChatSteps, submitsChat, type ChatStep } from "./chat-steps.ts";
+import { ChatSteps, stepGroups, submitsChat, type ChatStep } from "./chat-steps.ts";
+import { Glyph, WorkStep } from "./ChatToolRow.tsx";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun } from "./api.ts";
@@ -663,13 +664,14 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           {conv.msgs.map((m, i) => (
             <div key={i} className={`msg ${m.role}`}>
               {m.role === "ai" ? <>
-                {m.steps?.length ? m.steps.map((step) => step.kind === "text" ?
+                {m.steps?.length ? stepGroups(m.steps).map((step) => Array.isArray(step) ?
+                  <div key={step[0]!.id} className="chat-tools">{step.map((tool) => <WorkStep key={tool.id} step={tool} />)}</div> :
+                  step.kind === "text" ?
                   <div key={step.id} className={`md ${step.state === "running" ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(step.text) }} /> :
                   step.kind === "approval" ? <ApprovalStep key={step.id} step={step} onAnswer={m.live ? (decision) => answer(key, step.id.slice("approval:".length), decision) : undefined} /> :
-                  step.kind === "steer" ? <div key={step.id} className="chat-steer"><b>↳ {t("chat.steerYou")}</b> {linkNodes(step.text)}</div> :
-                  <WorkStep key={step.id} step={step} />
+                  <div key={step.id} className="chat-steer"><b>↳ {t("chat.steerYou")}</b> {linkNodes(step.text)}</div>
                 ) : <>
-                  {m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}
+                  {m.tools.length > 0 && <div className="chat-tools">{m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}</div>}
                   <div className={`md ${m.live ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(m.text) }} />
                 </>}
                 {m.pending?.map((p, j) => <div key={`pending:${j}`} className="chat-steer pending"><b>↳ {t("chat.steerYou")}</b> {linkNodes(p)} <small>· {t("chat.steerPending")}</small></div>)}
@@ -744,7 +746,7 @@ function ApprovalStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (decision
   };
   const waiting = step.state === "waiting" && !!onAnswer;
   return <section className={`chat-work chat-approval ${step.state}`} aria-label={step.name}>
-    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true">?</span><strong>{step.name}</strong><span className="chat-work-state">{t(`chat.step.${step.state}`)}</span></div>
+    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true"><Glyph name="shield" /></span><strong>{step.name}</strong><span className="chat-work-state">{t(`chat.step.${step.state}`)}</span></div>
     {step.text && <pre className="chat-work-input">{step.text}</pre>}
     {step.output && <p className="chat-approval-why">{step.output}</p>}
     {waiting && <div className="chat-approval-actions">
@@ -752,15 +754,5 @@ function ApprovalStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (decision
       <button disabled={sending} onClick={() => void reply("deny")}>{t("chat.approval.deny")}</button>
     </div>}
     {error && <small role="alert">{error}</small>}
-  </section>;
-}
-
-function WorkStep({ step }: { step: ChatStep }) {
-  const { t } = useLang();
-  const icon = /bash|exec|command/i.test(step.name) ? "⌘" : /read|edit|write|patch/i.test(step.name) ? "▤" : "⚙";
-  return <section className={`chat-work ${step.state}`} aria-label={step.name}>
-    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true">{icon}</span><strong>{step.name}</strong><span className="chat-work-state">{t(`chat.step.${step.state}`)}</span></div>
-    {step.text && <pre className="chat-work-input">{step.text}</pre>}
-    {step.output && <details><summary>{t("chat.step.details")}</summary><pre>{step.output}</pre>{step.output.length >= 12000 && <small>{t("chat.step.truncated")}</small>}</details>}
   </section>;
 }

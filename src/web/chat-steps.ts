@@ -81,5 +81,34 @@ export class ChatSteps {
   snapshot(): ChatStep[] { return this.steps.map((step) => ({ ...step })); }
 }
 
+/** How a tool row is drawn: its icon, its localized title, and the one-line summary beside it. */
+export type ToolVariant = "bash" | "read" | "write" | "edit" | "search" | "web" | "code" | "task" | "plan" | "other";
+const VARIANTS: [RegExp, ToolVariant][] = [
+  [/^(bash|pwsh|shell|exec|exec_command|command|command_execution|local_shell|run_command|terminal)$/i, "bash"],
+  [/^(read|read_file|read_image|view|notebookread|cat)$/i, "read"],
+  [/^(write|write_file|create_file)$/i, "write"],
+  [/^(edit|multiedit|notebookedit|apply_patch|patch|file_change|str_replace)$/i, "edit"],
+  [/^(grep|glob|ls|list|search|find|toolsearch|codebase_search)$/i, "search"],
+  [/^(webfetch|websearch|web_fetch|web_search|fetch|browse)$/i, "web"],
+  [/^(run_code|code)$/i, "code"],
+  [/^(task|agent|subagent|spawn_agent|send_message|wait_agent)$/i, "task"],
+  [/^(todowrite|todo_write|update_plan)$/i, "plan"],
+];
+export const toolVariant = (name: string): ToolVariant => {
+  const bare = name.replace(/^mcp__.*__/, "");
+  return VARIANTS.find(([re]) => re.test(bare))?.[1] ?? "other";
+};
+/** The first non-empty line, so a long command or a patch still reads as one row. */
+export const toolSummary = (text: string): string => text.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
+
+/** Runs of consecutive tool calls become one group, so they stack as a tight list between paragraphs. */
+export const stepGroups = (steps: ChatStep[]): (ChatStep | ChatStep[])[] => steps.reduce<(ChatStep | ChatStep[])[]>((groups, step) => {
+  const last = groups[groups.length - 1];
+  if (step.kind !== "tool") groups.push(step);
+  else if (Array.isArray(last)) last.push(step);
+  else groups.push([step]);
+  return groups;
+}, []);
+
 /** Safari can report the IME confirmation key as keyCode 229 after compositionend. */
 export const submitsChat = (key: string, shift: boolean, composing: boolean, keyCode: number) => key === "Enter" && !shift && !composing && keyCode !== 229;
