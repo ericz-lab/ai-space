@@ -123,10 +123,10 @@ Use these four names consistently when discussing models or selecting them in re
 | --- | --- | --- | --- | --- |
 | Basic | `basic` | Haiku (`haiku`) | Luna (`gpt-6-luna`) | `deepseek-flash` |
 | Junior | `junior` | Sonnet (`sonnet`) | Terra (`gpt-5.6-terra`) | `deepseek-flash` |
-| Intermediate | `intermediate` | Opus (`opus`) | Sol (`gpt-6.1-sol`) | `deepseek-v4-pro` |
+| Intermediate | `intermediate` | Opus (`opus`) | Sol (`gpt-6.1-sol`) | `deepseek-flash` |
 | Advanced | `advanced` | Fable (`fable`) | Astra (`gpt-6-astra`) | `deepseek-v4-pro` |
 
-These are operator-defined tiers, not a claim that two providers' models perform identically. Availability depends on the CLI and account. `codex/basic` selects Codex Luna; `claude/advanced` selects Claude Fable. A bare `advanced` uses the default runtime. Concrete model IDs still work. Unknown or unavailable models fail without silently switching provider or using a more expensive model. The DeepSeek Harness tiers are defaults; a `models` mapping pins other names. The Anthropic API has no tier mapping.
+These are operator-defined tiers, not a claim that two providers' models perform identically. Availability depends on the CLI and account. `codex/basic` selects Codex Luna; `claude/advanced` selects Claude Fable. A bare `advanced` uses the default runtime. Concrete model IDs still work. Unknown or unavailable models fail without silently switching provider or using a more expensive model. The DeepSeek Harness tiers are defaults: Flash serves basic, junior and the default intermediate, and only advanced uses Pro; a `models` mapping pins other names. The Anthropic API has no tier mapping.
 
 Each runtime may override versions with a `models` mapping. The ledger records the resolved concrete model, not the alias:
 

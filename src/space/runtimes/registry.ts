@@ -23,8 +23,8 @@ export type RuntimeView = { name: string; kind: string; backend: string; capabil
 export const TIER_DEFAULTS: Partial<Record<RuntimeSpec["kind"], TierModels>> = {
   "claude-code": { basic: "haiku", junior: "sonnet", intermediate: "opus", advanced: "fable" },
   "codex-cli": { basic: "gpt-6-luna", junior: "gpt-5.6-terra", intermediate: "gpt-6.1-sol", advanced: "gpt-6-astra" },
-  // DeepSeek Harness has two routes; runtimes.yaml may pin other names for the tiers.
-  "deepseek-harness": { basic: "deepseek-flash", junior: "deepseek-flash", intermediate: "deepseek-v4-pro", advanced: "deepseek-v4-pro" },
+  // DeepSeek Harness has two routes: flash serves basic, junior and the default intermediate; only advanced is pro.
+  "deepseek-harness": { basic: "deepseek-flash", junior: "deepseek-flash", intermediate: "deepseek-flash", advanced: "deepseek-v4-pro" },
 };
 
 export class RuntimeRegistry {

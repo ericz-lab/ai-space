@@ -155,6 +155,8 @@ runtimes:
     expect(() => parseRuntimesYaml("runtimes:\n  codex: { kind: codex-cli, ssh: '-bad' }")).toThrow();
     const dsh = new RuntimeRegistry({ default: "dsh", runtimes: [{ name: "dsh", kind: "deepseek-harness", bin: [], profile: "headless" }] });
     expect(dsh.resolve("basic").model).toBe("deepseek-flash");
+    expect(dsh.resolve("junior").model).toBe("deepseek-flash");
+    expect(dsh.resolve("intermediate").model).toBe("deepseek-flash");
     expect(dsh.resolve("advanced").model).toBe("deepseek-v4-pro");
     const api = new RuntimeRegistry({ default: "api", runtimes: [{ name: "api", kind: "anthropic-api", apiKey: "k", apiUrl: "" }] });
     expect(() => api.resolve("advanced")).toThrow(/no model for tier/);
