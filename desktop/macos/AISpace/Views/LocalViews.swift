@@ -50,7 +50,7 @@ struct LocalSetupView: View {
                 Button("Set Up") { Task { await local.install(defaultModel: defaultModel, into: model) } }
                     .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction)
                     .disabled(!ready(status))
-                    .help(status.runtimes.any ? (defaultModel == nil ? "Choose the default model first." : "") : "Install Claude Code or Codex first, or choose where it is.")
+                    .help(status.runtimes.any ? (defaultModel == nil ? "Choose the default model first." : "") : "Install Claude Code, Codex or DeepSeek Harness first, or choose where it is.")
             case .managed:
                 Text("AI Space is installed on this Mac").font(.largeTitle)
                 Text(status.ownServiceRunning ? "It is running. Open it to continue." : "It is not running. Opening it starts it again.")
@@ -90,8 +90,8 @@ struct LocalSetupView: View {
 }
 
 /// The agent CLIs this Mac has, before anything is installed: AI Space runs its agents and model
-/// calls through Claude Code or Codex, so setting up needs at least one. Each is found where
-/// installers put it, or chosen by hand when it lives elsewhere.
+/// calls through Claude Code, Codex or DeepSeek Harness, so setting up needs at least one. Each is
+/// found where installers put it, or chosen by hand when it lives elsewhere.
 struct LocalRuntimesCheck: View {
     @ObservedObject var local: LocalManager
     let runtimes: LocalStatus.Runtimes
@@ -102,9 +102,10 @@ struct LocalRuntimesCheck: View {
             LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 16) {
                 runtime("claude", "Claude Code", path: runtimes.claude, icon: "Claude")
                 runtime("codex", "Codex", path: runtimes.codex, icon: "Codex")
+                runtime("dsh", "DeepSeek Harness", path: runtimes.dsh, icon: "DeepSeek")
             }
             if !runtimes.any {
-                Text("Choose an installed agent to continue. Sign in to it in Terminal before using AI Space.")
+                Text("Choose an installed agent to continue. Sign in first: Claude Code or Codex in Terminal, DeepSeek Harness in its app.")
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
@@ -119,6 +120,12 @@ struct LocalRuntimesCheck: View {
                    let image = NSImage(contentsOf: url) {
                     Image(nsImage: image).resizable().renderingMode(.template).scaledToFit()
                         .foregroundStyle(name == "claude" ? Color(red: 0.80, green: 0.47, blue: 0.35) : Color.primary)
+                        .padding(9).frame(width: 42, height: 42)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 11))
+                        .accessibilityHidden(true)
+                } else if path != nil {
+                    Image(systemName: "sparkles").resizable().renderingMode(.template).scaledToFit()
+                        .foregroundStyle(name == "dsh" ? Color(red: 0.25, green: 0.52, blue: 0.95) : Color.primary)
                         .padding(9).frame(width: 42, height: 42)
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 11))
                         .accessibilityHidden(true)
@@ -328,7 +335,7 @@ struct LocalSettingsSection: View {
     }
 
     private func runtimesText(_ r: LocalStatus.Runtimes) -> String {
-        let found = [r.claude.map { _ in "Claude Code" }, r.codex.map { _ in "Codex" }].compactMap { $0 }
+        let found = [r.claude.map { _ in "Claude Code" }, r.codex.map { _ in "Codex" }, r.dsh.map { _ in "DeepSeek Harness" }].compactMap { $0 }
         return found.isEmpty ? "None found" : found.joined(separator: ", ")
     }
 }
