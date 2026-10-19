@@ -40,9 +40,17 @@ final class ChatController: ObservableObject {
     private var sessionID: String?
     private var runID: String?
     private var task: Task<Void, Never>?
+    /// One thread's identity: New Conversation and opening an earlier chat start another one, so a
+    /// late answer for a steer of the old thread cannot land in the new one.
+    private var conversation = UUID()
     /// Turns written while another one runs that the running turn could not take (`/steer` refused,
-    /// or none was open yet): sent in order once it ends.
-    private var queue: [ChatTurnRequest] = []
+    /// or none was open yet): each keeps the message it belongs to, so its reply is inserted right
+    /// after that message rather than at the end of whatever came later.
+    private struct QueuedTurn {
+        let message: UUID
+        let turn: ChatTurnRequest
+    }
+    private var queue: [QueuedTurn] = []
     /// Messages added to the running turn that the agent has not read yet, and how many of the
     /// reply's `steer` events have already taken one out.
     private var pending: [String] = []
@@ -97,6 +105,7 @@ final class ChatController: ObservableObject {
     /// runtime has no live chat) it becomes the next turn and is shown in the thread straight away.
     private func steer(_ turn: ChatTurnRequest, runID: String) {
         let label = turn.message.isEmpty ? "🖼 ×\(turn.images.count)" : turn.message
+        let conversation = self.conversation
         markPending(label, add: true)
         Task { [weak self] in
             guard let self else { return }
@@ -105,9 +114,12 @@ final class ChatController: ObservableObject {
                 if !turn.images.isEmpty { body["images"] = turn.images.map(\.body) }
                 _ = try await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/steer", json: body)
             } catch {
+                // The person moved to another thread while the answer was on its way: the message
+                // belongs to the one that is gone, not to the new one.
+                guard self.conversation == conversation else { return }
                 markPending(label, add: false)
                 enqueue(turn)
-                if !busy, let next = takeQueued() { start(source: .new(next)) }
+                if !busy, let next = takeQueued() { start(source: .new(next.turn), replyingTo: next.message) }
             }
         }
     }
@@ -134,13 +146,15 @@ final class ChatController: ObservableObject {
         }
     }
 
-    /// A message for after the running turn: kept in the thread and sent in order.
+    /// A message for after the running turn: kept in the thread and sent in order, with the reply
+    /// that answers it.
     private func enqueue(_ turn: ChatTurnRequest) {
-        messages.append(ChatMessage(role: .user, text: turn.message, images: turn.images))
-        queue.append(turn)
+        let message = ChatMessage(role: .user, text: turn.message, images: turn.images)
+        messages.append(message)
+        queue.append(QueuedTurn(message: message.id, turn: turn))
     }
 
-    private func takeQueued() -> ChatTurnRequest? {
+    private func takeQueued() -> QueuedTurn? {
         queue.isEmpty ? nil : queue.removeFirst()
     }
 
@@ -188,6 +202,7 @@ final class ChatController: ObservableObject {
                 (m.text ?? "").isEmpty ? nil : ChatMessage(role: m.role == "user" ? .user : .agent, text: m.text ?? "")
             }
             sessionID = session.sid
+            conversation = UUID()
             error = nil
         } catch {
             self.error = HubStore.message(error)
@@ -200,6 +215,7 @@ final class ChatController: ObservableObject {
         images = []
         imageError = nil
         sessionID = nil
+        conversation = UUID()
         error = nil
     }
 
@@ -208,7 +224,7 @@ final class ChatController: ObservableObject {
         case attach(String)
     }
 
-    private func start(source: Source) {
+    private func start(source: Source, replyingTo user: UUID? = nil) {
         busy = true
         error = nil
         stopRequested = false
@@ -217,8 +233,17 @@ final class ChatController: ObservableObject {
         var first = ChatReply()
         if case .attach = source { first.activity = .reconnecting }
         let initial = first
-        messages.append(ChatMessage(role: .agent, text: "", activity: initial.activity, live: true))
-        let index = messages.count - 1
+        let placeholder = ChatMessage(role: .agent, text: "", activity: initial.activity, live: true)
+        // A queued turn's reply belongs right after its own message: with two messages waiting,
+        // appending it at the end would separate them from the turns they answer.
+        let index: Int
+        if let user, let at = ChatThread.replyIndex(after: user, in: messages.map(\.id)) {
+            index = at
+            messages.insert(placeholder, at: at)
+        } else {
+            index = messages.count
+            messages.append(placeholder)
+        }
         if case .attach(let id) = source { runID = id } else { runID = nil }
 
         task = Task { [weak self] in
@@ -269,7 +294,7 @@ final class ChatController: ObservableObject {
             onTurnEnded()
             // A message that could not join this turn goes now, in the order it was written.
             if let next = takeQueued() {
-                start(source: .new(next))
+                start(source: .new(next.turn), replyingTo: next.message)
             } else {
                 pending = []
                 stopRequested = false

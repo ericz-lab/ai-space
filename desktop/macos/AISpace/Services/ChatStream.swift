@@ -85,6 +85,16 @@ enum ChatActivity: Equatable {
     case running(tool: String)
 }
 
+/// Where a turn's reply belongs in a thread. A turn that waited in the queue is answered right
+/// after the message that asked for it, not at the end: with two messages waiting, appending would
+/// separate each message from its reply.
+enum ChatThread {
+    /// The index after `message` in a thread of message ids; nil when the message is gone.
+    static func replyIndex(after message: UUID, in ids: [UUID]) -> Int? {
+        ids.firstIndex(of: message).map { $0 + 1 }
+    }
+}
+
 /// Ordered, observable work in one turn. Tool IDs remain stable from start to result. A live turn
 /// adds two kinds: an action the agent waits for (`approval`: `title` the tool, `text` what it wants
 /// to do, `output` why) and a message the person added while it ran (`steer`).

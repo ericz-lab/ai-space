@@ -127,6 +127,15 @@ struct ChatStreamTests {
         #expect(r.consumedSteers == ["check the logs", ""])
     }
 
+    @Test func aQueuedTurnsReplyGoesRightAfterItsOwnMessage() {
+        let a = UUID(), b = UUID(), c = UUID()
+        // Two messages waiting behind one turn: each reply sits after its own message, so neither
+        // message is separated from the turn that answers it.
+        #expect(ChatThread.replyIndex(after: b, in: [a, b, c]) == 2)
+        #expect(ChatThread.replyIndex(after: c, in: [a, b, c]) == 3)
+        #expect(ChatThread.replyIndex(after: UUID(), in: [a, b, c]) == nil)
+    }
+
     @Test func tellsWhyATurnFailed() {
         // What Seoul's codex said on 2026-10-14, and what the Space passed on.
         #expect(ChatFailure("exceeded retry limit, last status: 429 Too Many Requests").kind == .busy)
