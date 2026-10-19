@@ -16,7 +16,7 @@ import type { AppRegistry } from "../panel/registry.ts";
 import { type AgentView, agentView } from "../panel/view.ts";
 import type { PeerHub } from "../peers/hub.ts";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
-import { APPROVAL_DECISIONS, MODEL_TIERS, type ApprovalDecision } from "../runtimes/types.ts";
+import { APPROVAL_DECISIONS, MODEL_TIERS, type ApprovalDecision, type RuntimeKind } from "../runtimes/types.ts";
 import type { Manifest, ManifestAgent } from "../scheduler/manifest.ts";
 import { loadAppEnv } from "../scheduler/targets.ts";
 import type { Workspace } from "../workspace.ts";
@@ -134,6 +134,15 @@ type Routes = Record<string, Handler | Partial<Record<"GET" | "POST", Handler>>>
 
 const MAX_MESSAGE = 20_000;
 const MAX_CONTEXT = 24_000;
+
+/**
+ * Whether a chat turn may carry images. Claude Code and Codex take them on every turn;
+ * DeepSeek Harness only through its live ACP process, which advertises an image-capable route.
+ */
+export function supportsChatImages(kind: RuntimeKind, interactive: boolean): boolean {
+  if (kind === "claude-code" || kind === "codex-cli") return true;
+  return kind === "deepseek-harness" && interactive;
+}
 
 export function createAgentRoutes(opts: AgentsApiOptions): Routes {
   const { registry, layout, sessions } = opts;
@@ -333,13 +342,15 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         if (!configured) return error(501, `runtime ${selectedName} is not configured on this space`);
         if (!configured.capabilities.chat) return error(501, `runtime ${selectedName} does not support chat`);
         const runtime = configured;
-        if (images.length && !["claude-code", "codex-cli"].includes(runtime.kind)) return error(400, "This runtime does not support chat images");
+        // The client answers approvals and may steer the turn: a live process (docs/runtimes.md#live-chat).
+        const interactive = body.interactive === true;
+        if (images.length && !supportsChatImages(runtime.kind, interactive)) {
+          return error(400, runtime.kind === "deepseek-harness" ? "DeepSeek Harness needs an interactive turn for chat images" : "This runtime does not support chat images");
+        }
         // A tier the runtime has no model for (DeepSeek Harness) leaves the runtime's own default.
         const tier = (MODEL_TIERS as readonly string[]).includes(selected.slice(selectedName.length + 1));
         const model = tier && !opts.runtimes.tierOptions().some((o) => o.value === selected) ? undefined : opts.runtimes.resolve(selected).model;
         const permissionMode = typeof body.permissionMode === "string" ? body.permissionMode : undefined;
-        // The client answers approvals and may steer the turn: a live process (docs/runtimes.md#live-chat).
-        const interactive = body.interactive === true;
         const env: Record<string, string | undefined> = { ...process.env, ...(await loadAppEnv(agent.cwd)), ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}) };
         let run;
         const release = await opts.holdApp?.(agent.app);

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { RunResult } from "./services/manager.ts";
 import { packApplication } from "./packages/pack.ts";
-import { LOCAL_LABEL, LocalError, type LocalDeps, findRuntimes, localInstall, localPaths, localRemoveService, localStatus, localStop, localStart, renderLocalPlist, renderLocalRuntimes, readActivity } from "./local.ts";
+import { LOCAL_LABEL, LocalError, type LocalDeps, findRuntimes, isHarnessAppCli, localInstall, localPaths, localRemoveService, localStatus, localStop, localStart, renderLocalPlist, renderLocalRuntimes, readActivity } from "./local.ts";
 import { parseRuntimesYaml } from "./runtimes/config.ts";
 import { Database } from "bun:sqlite";
 
@@ -126,7 +126,7 @@ async function setup() {
     uid: 501,
     log: () => {},
     sleep: Bun.sleep,
-    runtimes: { claude, codex: null },
+    runtimes: { claude, codex: null, dsh: null },
   });
   // The port is the workspace's: written before the first install, as the app would pick a free one.
   await mkdir(workspace);
@@ -145,13 +145,13 @@ describe("agent CLIs", () => {
     await chmod(exe, 0o755);
     const plain = join(root, "codex.txt");
     await Bun.write(plain, "");
-    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: exe, codex: null })).toEqual({ claude: exe, codex: null });
-    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: "claude", codex: plain })).toEqual({ claude: null, codex: null });
-    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: null, codex: exe })).toEqual({ claude: null, codex: null });
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: exe, codex: null, dsh: null })).toEqual({ claude: exe, codex: null, dsh: null });
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: "claude", codex: plain, dsh: null })).toEqual({ claude: null, codex: null, dsh: null });
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: null, codex: exe, dsh: null })).toEqual({ claude: null, codex: null, dsh: null });
     await Bun.write(exe, "#!/bin/sh\necho 'codex-cli 0.100.0'\n");
-    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: exe, codex: exe })).toEqual({ claude: null, codex: exe });
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: exe, codex: exe, dsh: null })).toEqual({ claude: null, codex: exe, dsh: null });
     await Bun.write(exe, "#!/bin/sh\necho 'codex-cli 0.100.0'\nexit 1\n");
-    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: null, codex: exe })).toEqual({ claude: null, codex: null });
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: null, codex: exe, dsh: null })).toEqual({ claude: null, codex: null, dsh: null });
   });
 
   test("an unresponsive selected program times out", async () => {
@@ -160,18 +160,45 @@ describe("agent CLIs", () => {
     const exe = join(root, "hung-agent");
     await Bun.write(exe, "#!/bin/sh\nexec /bin/sleep 10\n");
     await chmod(exe, 0o755);
-    expect(await findRuntimes({ PATH: "/usr/bin:/bin" }, root, { claude: exe, codex: null })).toEqual({ claude: null, codex: null });
+    expect(await findRuntimes({ PATH: "/usr/bin:/bin" }, root, { claude: exe, codex: null, dsh: null })).toEqual({ claude: null, codex: null, dsh: null });
   });
 
-  test("runtimes.yaml names both CLIs by path, with no default runtime", () => {
-    const text = renderLocalRuntimes({ claude: "/Users/me/.local/bin/claude", codex: "/Applications/Codex Tools/codex" })!;
+  test("a chosen DeepSeek Harness CLI must answer with a version and name the harness", async () => {
+    const root = await mkdtemp(join(tmpdir(), "space-local-dsh-"));
+    roots.push(root);
+    const exe = join(root, "dsh");
+    await Bun.write(exe, "#!/bin/sh\ncase \"$1\" in --version) echo '0.2.1-rc.2';; --help) echo 'Usage: dsh --profile <name> — DeepSeek Harness profile';; esac\n");
+    await chmod(exe, 0o755);
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: null, codex: null, dsh: exe })).toEqual({ claude: null, codex: null, dsh: exe });
+    // A semver alone is not enough: another `dsh` may use the name.
+    await Bun.write(exe, "#!/bin/sh\ncase \"$1\" in --version) echo '1.2.3';; --help) echo 'a different tool';; esac\n");
+    expect(await findRuntimes({ PATH: "/nowhere" }, root, { claude: null, codex: null, dsh: exe })).toEqual({ claude: null, codex: null, dsh: null });
+    // The app's CLI is recognised through a symlink too, so its account route is written.
+    const app = join(root, "DeepSeek Harness.app", "Contents", "Resources", "runtime", "cli", "bin", "dsh");
+    await mkdir(join(app, ".."), { recursive: true });
+    await Bun.write(app, "");
+    const link = join(root, "linked-dsh");
+    await symlink(app, link);
+    expect(isHarnessAppCli(app)).toBe(true);
+    expect(isHarnessAppCli(link)).toBe(true);
+    expect(isHarnessAppCli("/Users/me/.local/bin/dsh")).toBe(false);
+  });
+
+  test("runtimes.yaml names each CLI by path, with no default runtime", () => {
+    const app = "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh";
+    const text = renderLocalRuntimes({ claude: "/Users/me/.local/bin/claude", codex: "/Applications/Codex Tools/codex", dsh: app })!;
     const { config } = parseRuntimesYaml(text, {});
     expect(config.default).toBeUndefined();
     expect(config.runtimes.map((r) => [r.name, r.kind, (r as { bin: string[] }).bin])).toEqual([
       ["claude", "claude-code", ["/Users/me/.local/bin/claude"]],
       ["codex", "codex-cli", ["/Applications/Codex Tools/codex"]],
+      ["dsh", "deepseek-harness", [app]],
     ]);
-    expect(renderLocalRuntimes({ claude: null, codex: null })).toBeUndefined();
+    // The desktop app's CLI is signed in through the app; a standalone one follows its own route.
+    expect(config.runtimes[2]).toMatchObject({ provider: "deepseek-account", liveProfile: "acp" });
+    const standalone = parseRuntimesYaml(renderLocalRuntimes({ claude: null, codex: null, dsh: "/Users/me/.local/bin/dsh" })!, {}).config;
+    expect(standalone.runtimes[0]).toMatchObject({ provider: "deepseek-official" });
+    expect(renderLocalRuntimes({ claude: null, codex: null, dsh: null })).toBeUndefined();
   });
 });
 
@@ -180,7 +207,7 @@ describe("space local", () => {
     const { root, workspace, deps } = await setup();
     await rm(workspace, { recursive: true });
     const v1 = await fakeRelease(join(root, "app1"), "0.1.0", "a".repeat(40));
-    const none = { ...deps(v1), runtimes: { claude: null, codex: null } };
+    const none = { ...deps(v1), runtimes: { claude: null, codex: null, dsh: null } };
     const refused = localInstall(none, { device: "This Mac" });
     await expect(refused).rejects.toMatchObject({ code: "no-runtime" });
     expect(await Bun.file(join(workspace, "installation.json")).exists()).toBe(false);
@@ -194,7 +221,7 @@ describe("space local", () => {
     await Bun.write(join(workspace, "runtimes.yaml"), mine);
     await Bun.write(join(workspace, ".env"), `SPACE_PORT=${port}\nANTHROPIC_API_KEY=sk-test\n`);
     const v1 = await fakeRelease(join(root, "app1"), "0.1.0", "a".repeat(40));
-    await localInstall({ ...deps(v1), runtimes: { claude: null, codex: null } });
+    await localInstall({ ...deps(v1), runtimes: { claude: null, codex: null, dsh: null } });
     expect(await Bun.file(join(workspace, "runtimes.yaml")).text()).toBe(mine);
   }, 60_000);
 

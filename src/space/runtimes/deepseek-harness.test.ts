@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TOOL_ROWS, buildPatch, createDeepseekHarness, dshCost, parseEvents, reasoningEffort, splitModel, translateEvent } from "./deepseek-harness.ts";
+import { TOOL_ROWS, buildPatch, createDeepseekHarness, defaultDshModel, dshCost, dshPermissionMode, parseEvents, reasoningEffort, splitModel, translateEvent } from "./deepseek-harness.ts";
 import { fakeDshBin } from "./testing-dsh.ts";
 import type { CompleteInput, DeepseekHarnessSpec } from "./types.ts";
 
@@ -25,6 +25,8 @@ describe("buildPatch", () => {
     const rows = Bun.YAML.parse(patch) as { id: string; config?: Record<string, unknown>; disabled?: boolean }[];
     expect(rows[0]).toEqual({ id: "system-prompt", config: { includeHarnessIdentity: false, includeRuntimeContext: false, personaPrefix: 'Say "hi"\nonly.', personaSuffix: "" } });
     expect(rows.filter((r) => r.disabled)).toHaveLength(TOOL_ROWS.length);
+    // The reasoning cap reaches the selection the account route also reads.
+    expect(rows.find((r) => r.id === "agent-default-model")).toMatchObject({ config: { provider: "deepseek-official", model: "deepseek-flash", reasoningEffort: "off" } });
   });
 
   test("web tools keep the web row; a chat persona keeps identity and tools; nothing asked gives an empty list", () => {
@@ -39,11 +41,30 @@ describe("buildPatch", () => {
     expect(buildPatch({ model: "zai:glm-5" })).toContain('provider: "zai"\n    model: "glm-5"');
   });
 
+  test("a signed-in account runtime turns the account rows back on and prices its models", () => {
+    const patch = buildPatch({ system: "s", model: "deepseek-flash", provider: "deepseek-account", leanTools: [] });
+    const rows = Bun.YAML.parse(patch) as { id: string; disabled?: boolean }[];
+    expect(rows.slice(0, 3)).toEqual([
+      { id: "authorization", disabled: false },
+      { id: "deepseek-account", disabled: false },
+      { id: "credentials", disabled: false },
+    ]);
+    expect(patch).toContain('provider: "deepseek-account"');
+    // A bare model takes the configured route; an explicit route still wins.
+    expect(splitModel("deepseek-v4-pro", "deepseek-account")).toEqual({ provider: "deepseek-account", model: "deepseek-v4-pro" });
+    expect(splitModel("zai:glm-5", "deepseek-account")).toEqual({ provider: "zai", model: "glm-5" });
+    expect(defaultDshModel("deepseek-account")).toBe("deepseek-flash");
+    expect(defaultDshModel("deepseek-official")).toBeUndefined();
+    // An explicit account route switches the rows on even when the runtime's default route is the API key.
+    expect(buildPatch({ model: "deepseek-account:deepseek-flash" })).toContain("- id: deepseek-account\n  disabled: false");
+  });
+
   test("helpers", () => {
     expect([undefined, 0, 1024, 4096, 20_000, 100_000].map(reasoningEffort)).toEqual([undefined, "off", "low", "low", "high", "max"]);
     expect(splitModel("deepseek-v4-pro")).toEqual({ provider: "deepseek-official", model: "deepseek-v4-pro" });
     expect(dshCost("deepseek-flash", { inputTokens: 1e6, cacheWriteTokens: 0, cacheReadTokens: 1e6, outputTokens: 1e6 })).toBeCloseTo(0.3 + 0.006 + 1.2);
     expect(dshCost("other", { inputTokens: 1, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 })).toBeUndefined();
+    expect([undefined, "plan", "acceptEdits", "bypassPermissions"].map(dshPermissionMode)).toEqual(["read-only", "read-only", "workspace-write", "danger-full-access"]);
   });
 });
 
@@ -87,6 +108,11 @@ describe("complete", () => {
     expect(web).toMatchObject({ ok: true, text: expect.not.stringContaining("tool-web") });
   });
 
+  test("a signed-in account runtime carries the account rows in the overlay", async () => {
+    const r = await createDeepseekHarness(spec({ provider: "deepseek-account" })).complete(input());
+    expect(r).toMatchObject({ ok: true, text: expect.stringContaining("[patch: authorization,deepseek-account,credentials,system-prompt,") });
+  });
+
   test("a failed turn, a crash and a timeout are failures with the reason", async () => {
     process.env.FAKE_DSH_MODE = "error";
     expect(await runtime.complete(input())).toMatchObject({ ok: false, error: "simulated model failure" });
@@ -116,6 +142,17 @@ describe("agent runs", () => {
     expect(r.costUsd).toBeCloseTo((32 * 1.32 + 640 * 0.044 + 2 * 3.96) / 1e6);
     const plain = await runtime.runAgent({ prompt: "x", cwd: process.cwd(), env: process.env, signal: new AbortController().signal });
     expect(plain.text).toContain("[args: --profile headless --json -] [patch: ]");
+    // The task's write tier becomes the harness's sandbox and approval preset.
+    expect(plain.text).toContain("[mode: read-only]");
+    const edits = await runtime.runAgent({ prompt: "x", cwd: process.cwd(), env: process.env, permissionMode: "acceptEdits", allowedTools: ["Bash(ls)"], signal: new AbortController().signal });
+    expect(edits).toMatchObject({ ok: true });
+    expect(edits.text).toContain("[mode: workspace-write]");
+    const full = await runtime.runAgent({ prompt: "x", cwd: process.cwd(), env: process.env, permissionMode: "bypassPermissions", signal: new AbortController().signal });
+    expect(full.text).toContain("[mode: danger-full-access]");
+    // An account runtime with no model named starts on the account's flash route.
+    const account = await createDeepseekHarness(spec({ provider: "deepseek-account" })).runAgent({ prompt: "x", cwd: process.cwd(), env: process.env, signal: new AbortController().signal });
+    expect(account.text).toContain("[patch: authorization,deepseek-account,credentials,agent-default-model]");
+    expect(account.text).toContain("[mode: read-only]");
     process.env.FAKE_DSH_MODE = "error";
     expect(await runtime.runAgent({ prompt: "x", cwd: process.cwd(), env: process.env, signal: new AbortController().signal })).toMatchObject({ ok: false, error: "simulated model failure", output: expect.stringContaining("MISSING_CREDENTIAL") });
   });
@@ -143,6 +180,15 @@ describe("chat", () => {
     // Resuming passes the id through.
     const again = await collect(runtime, { message: "more", cwd: process.cwd(), sessionId: "session-abc" });
     expect(again.sid).toBe("session-abc");
+  });
+
+  test("a signed-in account runtime starts the one-shot chat on its account route", async () => {
+    const runtime = createDeepseekHarness(spec({ provider: "deepseek-account" }));
+    const { events, error } = await collect(runtime, { message: "hi", cwd: process.cwd(), systemPrompt: "You are the librarian." });
+    expect(error).toBeNull();
+    const text = String((events[1] as { message: { content: { text: string }[] } }).message.content[0]!.text);
+    expect(text).toContain("[patch: authorization,deepseek-account,credentials,system-prompt,agent-default-model]");
+    expect(text).toContain("[mode: read-only]");
   });
 
   test("tool calls and failed results become tool_use and tool_result blocks; a failed turn is an error result", async () => {

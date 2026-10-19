@@ -24,7 +24,9 @@ import { MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type ModelTier, type 
  *       ssh: box                  # optional: answers run on that machine's harness
  *       bin: /home/me/.npm-global/bin/dsh   # optional: the CLI command; default dsh
  *       home: /home/me/.dsh       # optional: DSH_HOME; default the CLI's own
- *       profile: headless         # optional: default shown
+ *       profile: headless         # optional: answers and agent runs; default shown
+ *       liveProfile: acp          # optional: live chat; default shown
+ *       provider: deepseek-account   # optional: model route; default deepseek-official
  *
  * Keys stay in the environment, never in the file: `apiKeyEnv` names the
  * variable. A runtime whose key variable is empty is dropped with a warning
@@ -92,7 +94,7 @@ function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>
   const allowed: Record<RuntimeKind, string[]> = {
     "claude-code": ["kind", "ssh", "bin", "chatArgs"],
     "anthropic-api": ["kind", "apiKeyEnv", "url"],
-    "deepseek-harness": ["kind", "ssh", "bin", "home", "profile"],
+    "deepseek-harness": ["kind", "ssh", "bin", "home", "profile", "liveProfile", "provider"],
     "codex-cli": ["kind", "ssh", "bin", "streamCompletions"],
   };
   for (const key of Object.keys(raw)) if (key !== "models" && !allowed[kind].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
@@ -121,7 +123,14 @@ function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>
       const home = optionalString(raw.home, `${ctx}: home`);
       const profile = optionalString(raw.profile, `${ctx}: profile`) ?? "headless";
       if (!/^[a-z][a-z0-9-]*$/.test(profile)) throw new Error(`${ctx}: profile must be a profile name`);
-      return { name, kind, bin: command(raw.bin, `${ctx}: bin`), profile, ...(home ? { home } : {}), ...(sshHost ? { sshHost } : {}) };
+      const liveProfile = optionalString(raw.liveProfile, `${ctx}: liveProfile`) ?? "acp";
+      if (!/^[a-z][a-z0-9-]*$/.test(liveProfile)) throw new Error(`${ctx}: liveProfile must be a profile name`);
+      const provider = optionalString(raw.provider, `${ctx}: provider`) ?? "deepseek-official";
+      if (!/^[a-z][a-z0-9.-]*$/.test(provider)) throw new Error(`${ctx}: provider must be a provider name`);
+      return {
+        name, kind, bin: command(raw.bin, `${ctx}: bin`), profile, liveProfile, provider,
+        ...(home ? { home } : {}), ...(sshHost ? { sshHost } : {}),
+      };
     }
   }
 }

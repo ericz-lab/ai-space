@@ -50,13 +50,17 @@ All take `--json`; the app parses that. They work with ai-space down.
 
 | Command | Does |
 | --- | --- |
-| `space local status [--claude <path>] [--codex <path>]` | the app's release, the installed one, the workspace and its owner, the LaunchAgent, what answers on the port, `claude` and `codex` |
-| `space local install [--migrate] [--device <name>] [--default-model <runtime/tier>] [--wait | --now] [--claude <path>] [--codex <path>]` | refuse a workspace with no runtime when this Mac has no agent CLI (`no-runtime`), and a first install or takeover without a default model (`no-default-model`); store that model, copy the release out, switch `current`, `init` the workspace, write `runtimes.yaml` from the CLIs found when the workspace has none (see [First run](#first-run)), set `SPACE_EDITION=local`, `SPACE_AUTH=builtin`, `SPACE_SUPERVISOR=space`, `SPACE_DEFAULT_APPS=none` (other values stay; `SPACE_TERMINAL_ENABLED=1` and `SPACE_PACKAGE_PORT`, 8702 or a free port, only when the workspace has no value), mark it owned, write and start the LaunchAgent, wait for the service to answer as this version, install the bundled apps. A start that does not answer within a minute puts the previous release back. `--device` also makes a device credential and prints its token once |
+| `space local status [--claude <path>] [--codex <path>] [--dsh <path>]` | the app's release, the installed one, the workspace and its owner, the LaunchAgent, what answers on the port, `claude`, `codex` and `dsh` |
+| `space local install [--migrate] [--device <name>] [--default-model <runtime/tier>] [--wait | --now] [--claude <path>] [--codex <path>] [--dsh <path>]` | refuse a workspace with no runtime when this Mac has no agent CLI (`no-runtime`), and a first install or takeover without a default model (`no-default-model`); store that model, copy the release out, switch `current`, `init` the workspace, write `runtimes.yaml` from the CLIs found when the workspace has none (see [First run](#first-run)), set `SPACE_EDITION=local`, `SPACE_AUTH=builtin`, `SPACE_SUPERVISOR=space`, `SPACE_DEFAULT_APPS=none` (other values stay; `SPACE_TERMINAL_ENABLED=1` and `SPACE_PACKAGE_PORT`, 8702 or a free port, only when the workspace has no value), mark it owned, write and start the LaunchAgent, wait for the service to answer as this version, install the bundled apps. A start that does not answer within a minute puts the previous release back. `--device` also makes a device credential and prints its token once |
 | `space local start` / `stop` / `restart` | `launchctl enable`+`bootstrap` / `bootout`+`disable` (stays off at login until started) / both |
 | `space local remove-service` | stop and unregister the LaunchAgent and delete the program under Application Support; the workspace stays, still owned, so installing again picks it up |
 
-`--claude` and `--codex` point at a CLI installed where the search does not look (the app's
-Choose…); every command takes them, so the status it prints counts that CLI.
+`--claude`, `--codex` and `--dsh` point at a CLI installed where the search does not look (the
+app's Choose…); every command takes them, so the status it prints counts that CLI. DeepSeek
+Harness is also looked for in its desktop app's bundle
+(`/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`, and the same under
+`~/Applications`), where its CLI is not on `PATH`; a `dsh` on the user tool directories is used
+when it answers `--version` with a semver and names the harness in `--help`.
 
 Upgrading is `install` from a newer app. The default port 8700 taken by another program at the
 first install gives the workspace a free one in `SPACE_PORT`.
@@ -65,12 +69,15 @@ first install gives the workspace a free one in `SPACE_PORT`.
 
 Set Up (and Take It Over) stay off until both of these are done, on the same screen:
 
-1. **Agent CLIs.** The Space runs its agents and model calls through Claude Code or Codex, so the
-   app lists both: the path found (`~/.local/bin`, `/opt/homebrew/bin` and the other user tool
-   directories), or how to install it, or Choose… for one elsewhere. Install writes
-   `<workspace>/runtimes.yaml` naming each CLI by its absolute path, with **no `default` runtime**:
-   every model an app or agent asks for names its runtime (`claude/opus`, `codex/intermediate`), and a
-   bare one (`opus`) is an error that says so. Nothing is written when the workspace already has that
+1. **Agent CLIs.** The Space runs its agents and model calls through Claude Code, Codex or
+   DeepSeek Harness, so the app lists all three: the path found (`~/.local/bin`, `/opt/homebrew/bin`
+   and the other user tool directories, plus the DeepSeek Harness app's bundled CLI), or how to
+   install it, or Choose… for one elsewhere. Install writes `<workspace>/runtimes.yaml` naming each
+   CLI by its absolute path, with **no `default` runtime**: every model an app or agent asks for
+   names its runtime (`claude/opus`, `codex/intermediate`, `dsh/intermediate`), and a bare one
+   (`opus`) is an error that says so. The desktop app's `dsh` is written with
+   `provider: deepseek-account`, the login it already holds; a `dsh` installed another way follows
+   the route its own configuration names (an API key, normally). Nothing is written when the workspace already has that
    file or runtime variables (`SPACE_MODEL_BIN`, `SPACE_CHAT_BIN`, `SPACE_MODEL_SSH_HOST`,
    `SPACE_MODEL_API_KEY`) in `.env`. A failed upgrade removes a file it wrote.
 2. **Default model.** `space local status` lists, before install, every tier of every CLI found
@@ -99,6 +106,7 @@ the Mac; `space auth init` sets one later for a browser elsewhere ([auth.md](aut
 | Bun, a PTY helper | in the release |
 | `git` | a stub, never started: default apps are not cloned; bundled apps install from packages |
 | `claude`, `codex` | the user's own; the service adds `~/.local/bin`, `~/.claude/local`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and others to the bare PATH launchd gives it (`src/space/host-tools.ts`) |
+| `dsh` (DeepSeek Harness) | the desktop app's own CLI in its bundle, or one on the tool PATH; its signed-in account, or `DEEPSEEK_API_KEY` for an API-key installation |
 | `zstd` | needed only once backups are turned on (`SPACE_BACKUP_URL`); they are off by default |
 
 

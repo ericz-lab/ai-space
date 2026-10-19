@@ -456,7 +456,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   };
 
   // A message for the running turn: shown in its reply as waiting until the agent reads it (a
-  // `steer` event). A turn that cannot take it (runtime without live chat, the turn just ended)
+  // `steer` event). A turn that cannot take it (runtime without live chat or steering, the turn just ended)
   // gets it as the next message instead.
   const steer = async (k: string, a: Active, text: string, images: ChatImage[]) => {
     const label = text || `🖼 ×${images.length}`;
