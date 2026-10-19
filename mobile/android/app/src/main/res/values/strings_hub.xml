@@ -156,6 +156,17 @@
     <string name="chat_running">Running %1$s…</string>
     <string name="chat_stopped">Stopped.</string>
     <string name="chat_connection_lost">The connection was lost; the reply may still be running on the Space.</string>
+    <string name="chat_waiting_approval">Waiting for your approval…</string>
+    <string name="chat_waiting_state">Waiting for you</string>
+    <string name="chat_allowed">Allowed</string>
+    <string name="chat_denied">Denied</string>
+    <string name="chat_not_answered">Not answered</string>
+    <string name="chat_allow">Allow</string>
+    <string name="chat_deny">Deny</string>
+    <string name="chat_you">You</string>
+    <string name="chat_steer_pending">the agent reads it after its current step</string>
+    <string name="chat_answer_failed">The answer did not reach the agent: %1$s</string>
+    <string name="chat_no_turn">The answer did not reach the agent: no turn is running</string>
     <string name="terminal_title">Terminal</string>
     <string name="terminal_recent">Recent sessions</string>
     <string name="terminal_new_session">New session</string>

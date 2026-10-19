@@ -1,4 +1,4 @@
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { cp, mkdir, readdir, readlink, rename, rm, stat, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -128,28 +128,73 @@ export async function probe(port: number, fetcher: typeof fetch = fetch): Promis
   }
 }
 
-export type Runtimes = Record<"claude" | "codex", string | null>;
+export type Runtimes = Record<"claude" | "codex" | "dsh", string | null>;
+export type AgentName = keyof Runtimes;
+
+/** Where the DeepSeek Harness desktop app keeps the `dsh` CLI it ships; it is not on PATH. */
+const DSH_APP_CLI = "DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh";
+
+/** The desktop app's CLI, for the usual install locations. */
+export function dshAppCandidates(home: string): string[] {
+  return [`/Applications/${DSH_APP_CLI}`, join(home, "Applications", DSH_APP_CLI)];
+}
+
+/** Whether a path is the DeepSeek Harness app's own CLI, which is signed in through the app. */
+export function isHarnessAppCli(path: string): boolean {
+  if (path.endsWith(`/${DSH_APP_CLI}`)) return true;
+  try {
+    return realpathSync(path).endsWith(`/${DSH_APP_CLI}`);
+  } catch {
+    return false;
+  }
+}
 
 /**
- * The agent CLIs on this Mac. `chosen` is what the user pointed the app at (`--claude`, `--codex`):
- * it wins over the search when its version identifies the expected agent; null means "do not use this one".
+ * The agent CLIs on this Mac. `chosen` is what the user pointed the app at (`--claude`, `--codex`,
+ * `--dsh`): it wins over the search when its version identifies the expected agent; null means
+ * "do not use this one". DeepSeek Harness is also looked for in the desktop app's bundle, where its
+ * CLI lives off PATH.
  */
 export async function findRuntimes(env: Record<string, string | undefined> = process.env, home = homedir(), chosen: Partial<Runtimes> = {}): Promise<Runtimes> {
   const PATH = withUserToolDirs(env.PATH ?? "/usr/bin:/bin", home);
-  const one = async (name: "claude" | "codex") => {
+  const candidatesFor = (name: AgentName): string[] => {
     const c = chosen[name];
-    if (c === null) return null;
-    const path = c ?? whichUsable(name, { PATH });
-    if (!path || !executableFile(path)) return null;
-    try {
-      const result = await spawnRuntime([path, "--version"], { env: { ...env, HOME: home, PATH }, timeoutMs: 3000 });
-      const version = result.stdout.trim();
-      const matches = name === "claude" ? /^\d+\.\d+\.\d+[^\n]*\(Claude Code\)$/i.test(version) : /^codex-cli \d+\.\d+\.\d+[^\n]*$/i.test(version);
-      return result.code === 0 && !result.timedOut && matches ? path : null;
-    } catch { return null; }
+    if (c === null) return [];
+    if (c) return [c];
+    if (name === "dsh") {
+      const app = dshAppCandidates(home).filter(executableFile);
+      const onPath = whichUsable("dsh", { PATH });
+      return [...new Set([...app, ...(onPath ? [onPath] : [])])];
+    }
+    const found = whichUsable(name, { PATH });
+    return found ? [found] : [];
   };
-  const [claude, codex] = await Promise.all([one("claude"), one("codex")]);
-  return { claude, codex };
+  const one = async (name: AgentName) => {
+    for (const path of candidatesFor(name)) {
+      if (!executableFile(path)) continue;
+      try {
+        const timeoutMs = name === "dsh" ? 5000 : 3000;
+        const result = await spawnRuntime([path, "--version"], { env: { ...env, HOME: home, PATH }, timeoutMs });
+        const version = result.stdout.trim();
+        if (result.code !== 0 || result.timedOut) continue;
+        const matches = name === "claude" ? /^\d+\.\d+\.\d+[^\n]*\(Claude Code\)$/i.test(version)
+          : name === "codex" ? /^codex-cli \d+\.\d+\.\d+[^\n]*$/i.test(version)
+          : /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(version);
+        if (!matches) continue;
+        // The app bundle's path already identifies the harness; another `dsh` must name it in help.
+        if (name === "dsh" && !isHarnessAppCli(path)) {
+          const help = await spawnRuntime([path, "--help"], { env: { ...env, HOME: home, PATH }, timeoutMs });
+          if (help.code !== 0 || help.timedOut || !/DeepSeek Harness/i.test(help.stdout + help.stderr)) continue;
+        }
+        return path;
+      } catch {
+        /* try the next candidate */
+      }
+    }
+    return null;
+  };
+  const [claude, codex, dsh] = await Promise.all([one("claude"), one("codex"), one("dsh")]);
+  return { claude, codex, dsh };
 }
 
 function executableFile(path: string): boolean {
@@ -188,15 +233,21 @@ export async function localModelOptions(r: Runtimes, run?: CodexRun): Promise<Mo
 const RUNTIME_ENV = ["SPACE_MODEL_BIN", "SPACE_CHAT_BIN", "SPACE_MODEL_SSH_HOST", "SPACE_MODEL_API_KEY"];
 
 /**
- * `runtimes.yaml` for the agent CLIs found: Claude Code and Codex, each by its absolute path, so the
- * service runs them whatever PATH launchd gives it. No `default`: every model an app or agent asks
- * for names its runtime (`claude/opus`, `codex/intermediate`), and the Space's default model, set at
- * install, covers a request that names none.
+ * `runtimes.yaml` for the agent CLIs found: Claude Code, Codex and DeepSeek Harness, each by its
+ * absolute path, so the service runs them whatever PATH launchd gives it. No `default`: every model
+ * an app or agent asks for names its runtime (`claude/opus`, `codex/intermediate`,
+ * `dsh/intermediate`), and the Space's default model, set at install, covers a request that names
+ * none. The desktop app's CLI is written with `provider: deepseek-account`, the login that ships
+ * with it; a `dsh` installed elsewhere follows the configured route (an API key).
  */
 export function renderLocalRuntimes(r: Runtimes): string | undefined {
   const entries: string[] = [];
   if (r.claude) entries.push(`  claude:\n    kind: claude-code\n    bin: [${JSON.stringify(r.claude)}]`);
   if (r.codex) entries.push(`  codex:\n    kind: codex-cli\n    bin: [${JSON.stringify(r.codex)}]`);
+  if (r.dsh) {
+    const account = isHarnessAppCli(r.dsh) ? "\n    provider: deepseek-account" : "";
+    entries.push(`  dsh:\n    kind: deepseek-harness\n    bin: [${JSON.stringify(r.dsh)}]${account}`);
+  }
   if (!entries.length) return undefined;
   return [
     "# Written by the AI Space app at setup: the agent CLIs found on this Mac (docs/runtimes.md).",
@@ -559,7 +610,7 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
   const envBefore = await Bun.file(join(p.workspace, ".env")).text().catch(() => "");
   const needsRuntimes = !(await exists(runtimesFile)) && !RUNTIME_ENV.some((k) => new RegExp(`^\\s*${k}\\s*=\\s*\\S`, "m").test(envBefore));
   const runtimesText = needsRuntimes ? renderLocalRuntimes(status.runtimes) : undefined;
-  if (needsRuntimes && !runtimesText) throw new LocalError("no-runtime", "no agent CLI on this Mac: install Claude Code or Codex and sign in to it, or choose where it is (--claude, --codex)", status);
+  if (needsRuntimes && !runtimesText) throw new LocalError("no-runtime", "no agent CLI on this Mac: install Claude Code, Codex or DeepSeek Harness and sign in to it, or choose where it is (--claude, --codex, --dsh)", status);
   // A Space this app starts gets its default model now, so nothing ever runs on an implicit one.
   // An upgrade keeps the one it has (Settings changes it).
   if (status.state !== "managed" || opts.defaultModel !== undefined) {

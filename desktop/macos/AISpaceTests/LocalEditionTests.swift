@@ -7,13 +7,15 @@ import Testing
 /// The Local edition's contract with `space local --json` (src/space/local.ts) and the saved
 /// connection's `managed` flag.
 struct LocalEditionTests {
+    // Decoder fixtures are synthetic paths; no installed runtime is required.
+    static let dshPath = "/fixture/DeepSeek Harness.app/bin/dsh"
     static let statusJSON = """
     {"ok":true,"state":"managed","bundle":{"product":"ai-space","edition":"local","version":"0.2.0","commit":"bbbbbbbbbbbbbbbb"},
      "installed":{"product":"ai-space","edition":"local","version":"0.1.0","commit":"aaaaaaaaaaaaaaaa","path":"/x"},
      "ownership":{"managedBy":"ai-space-local"},"workspace":{"path":"/Users/u/.ai-space","exists":true,"locked":true},
      "port":8700,"url":"http://127.0.0.1:8700/","running":{"product":"ai-space","api":1,"version":"0.1.0","edition":"local","installation":"managed"},
      "service":{"label":"ai.space.local","plist":true,"loaded":true,"running":true,"disabled":false,"pid":42,"detail":"loaded/active/running"},
-     "runtimes":{"claude":"/Users/u/.local/bin/claude","codex":null}}
+     "runtimes":{"claude":"/Users/u/.local/bin/claude","codex":null,"dsh":"\(dshPath)"}}
     """
 
     @Test func decodesStatusAndSeesAnUpdate() throws {
@@ -24,7 +26,18 @@ struct LocalEditionTests {
         #expect(s.service.pid == 42)
         #expect(s.runtimes.claude == "/Users/u/.local/bin/claude")
         #expect(s.runtimes.codex == nil)
+        #expect(s.runtimes.dsh == Self.dshPath)
         #expect(s.runtimes.any)
+    }
+
+    @Test(arguments: [#"{"claude":"/fixture/bin/claude"}"#, #"{"claude":"/fixture/bin/claude","dsh":null}"#, #"{}"#, #"{"dsh":null}"#])
+    func decodesStatusWithoutDeepseek(runtimesJSON: String) throws {
+        var json = try #require(JSONSerialization.jsonObject(with: Data(Self.statusJSON.utf8)) as? [String: Any])
+        json["runtimes"] = try JSONSerialization.jsonObject(with: Data(runtimesJSON.utf8))
+        let s = try LocalOutput.decode(LocalStatus.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(s.runtimes.dsh == nil)
+        #expect(s.runtimes.codex == nil)
+        #expect(s.runtimes.any == (s.runtimes.claude != nil))
     }
 
     @Test func freshSetupDoesNotReuseADeletedWorkspacesKeychainToken() throws {

@@ -15,7 +15,7 @@ final class LocalManager: ObservableObject {
     @Published var failure: LocalFailure?
     /// Set once the managed Space answers without a default model: the first run asks for one.
     @Published var needsModelChoice = false
-    /// Agent CLIs the user pointed the app at, by name (`claude`, `codex`), when the search misses them.
+    /// Agent CLIs the user pointed the app at, by name (`claude`, `codex`, `dsh`), when the search misses them.
     @Published private(set) var chosenRuntimes: [String: String] = LocalManager.loadChosenRuntimes()
     @Published private(set) var checkingRuntime: String?
     @Published private(set) var lastApps: [LocalInstallResult.App] = []
@@ -74,9 +74,9 @@ final class LocalManager: ObservableObject {
         UserDefaults.standard.dictionary(forKey: chosenKey) as? [String: String] ?? [:]
     }
 
-    /// `--claude <path> --codex <path>`: what the user chose, for every `space local` command.
+    /// `--claude <path> --codex <path> --dsh <path>`: what the user chose, for every `space local` command.
     private var runtimeArgs: [String] {
-        ["claude", "codex"].flatMap { name in chosenRuntimes[name].map { ["--\(name)", $0] } ?? [] }
+        ["claude", "codex", "dsh"].flatMap { name in chosenRuntimes[name].map { ["--\(name)", $0] } ?? [] }
     }
 
     /// Lets the user pick the CLI's program file when it is installed where the search does not look.

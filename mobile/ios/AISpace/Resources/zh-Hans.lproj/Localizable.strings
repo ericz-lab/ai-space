@@ -437,3 +437,16 @@
 "Delete" = "删除";
 "Save or delete a pending picture before sharing another one." = "请先保存或删除一张待保存的图片，再分享新图片。";
 "The Space returned an unreadable response. Your picture is still pending." = "无法读取空间的响应，图片仍在待保存列表中。";
+
+/* Native chat: live turns, approvals and steering (docs/runtimes.md#live-chat) */
+"Waiting for your approval…" = "等你确认…";
+"Waiting for you" = "等你确认";
+"Allowed" = "已允许";
+"Denied" = "已拒绝";
+"Not answered" = "未作答";
+"Allow" = "允许";
+"Deny" = "拒绝";
+"The answer did not reach the agent: %@" = "答复没有送到智能体：%@";
+"The answer did not reach the agent: no turn is running" = "答复没有送到智能体：没有正在进行的回合";
+"You" = "你";
+"the agent reads it after its current step" = "智能体做完当前这一步后会看到";

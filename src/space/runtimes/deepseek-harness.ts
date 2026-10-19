@@ -1,13 +1,16 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { DshLive } from "./deepseek-live.ts";
+import { LivePool } from "./live.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { readDshTranscript } from "./transcripts.ts";
 import type { AgentOutcome, Backend, ChatCallbacks, ChatTurn, CompleteInput, CompleteOutcome, DeepseekHarnessSpec, RuntimeAdapter, Usage } from "./types.ts";
 
 /**
- * DeepSeek Harness (`dsh`) as a runtime. One command for all three operations,
- * `dsh --profile headless --json`, the task on stdin (`-`) or as the argument:
+ * DeepSeek Harness (`dsh`) as a runtime. Answers and agent tasks run
+ * `dsh --profile headless --json`, the task on stdin (`-`) or as the argument;
+ * an interactive chat runs the `acp` profile over stdio (`deepseek-live.ts`).
  *
  *   complete   a `--patch` overlay per call replaces the system prompt (the harness identity
  *              and runtime context off, the request's `system` as the persona), sets the
@@ -17,7 +20,8 @@ import type { AgentOutcome, Backend, ChatCallbacks, ChatTurn, CompleteInput, Com
  *              stdin, inside the app directory; a model overlay when the target names one
  *   chat       `--session-id` for continuity; the agent's prompt becomes the persona prefix
  *              (identity and tools kept); the harness's events are translated into the
- *              `stream-json` shapes the panel reads
+ *              `stream-json` shapes the panel reads. An interactive turn goes to a live
+ *              `dsh --profile acp` process instead (`deepseek-live.ts`)
  *
  * Events (`--json`): `session` (id, cwd) first; `thinking`, `text`, `tool_call`,
  * `tool_result` as steps commit; `status` with `phase: step_end` carrying the
@@ -26,8 +30,10 @@ import type { AgentOutcome, Backend, ChatCallbacks, ChatTurn, CompleteInput, Com
  * summed over the steps; cost is computed from DeepSeek's list prices below.
  *
  * The harness must have been prepared on its machine: the CLI installed, the
- * profile initialised, `DEEPSEEK_API_KEY` in its home's `.env`, and session
- * log upload and telemetry turned off (docs/runtimes.md).
+ * profile initialised, and session log upload and telemetry turned off
+ * (docs/runtimes.md). A `provider: deepseek-account` runtime uses the harness's
+ * signed-in account instead of an API key; the headless profile disables the
+ * account plugins, so the overlay turns them back on.
  */
 
 export const DEFAULT_PROFILE = "headless";
@@ -70,10 +76,26 @@ export function reasoningEffort(thinking: number | undefined): "off" | "low" | "
   return "max";
 }
 
-/** `provider:model` or a bare DeepSeek model id. */
-export function splitModel(model: string): { provider: string; model: string } {
+/** `provider:model` or a bare DeepSeek model id, with the configured route as the default provider. */
+export function splitModel(model: string, provider = DEFAULT_PROVIDER): { provider: string; model: string } {
   const i = model.indexOf(":");
-  return i > 0 ? { provider: model.slice(0, i), model: model.slice(i + 1) } : { provider: DEFAULT_PROVIDER, model };
+  return i > 0 ? { provider: model.slice(0, i), model: model.slice(i + 1) } : { provider, model };
+}
+
+/** A model to select when a call names none but the provider is not the profile's own. */
+export function defaultDshModel(provider: string): string | undefined {
+  return provider === "deepseek-account" ? "deepseek-flash" : undefined;
+}
+
+/** The headless profile disables the signed-in account; a `deepseek-account` runtime turns these rows back on. */
+const ACCOUNT_ROWS = ["authorization", "deepseek-account", "credentials"];
+
+/** The harness permission preset for the panel's write tier (absent is the panel's read-only default). */
+export type DshPermissionMode = "read-only" | "workspace-write" | "danger-full-access";
+export function dshPermissionMode(mode: string | undefined): DshPermissionMode {
+  if (mode === "bypassPermissions") return "danger-full-access";
+  if (mode === "acceptEdits") return "workspace-write";
+  return "read-only";
 }
 
 export type PatchOptions = {
@@ -82,6 +104,8 @@ export type PatchOptions = {
   /** Prepend this persona to the harness's own prompt (chat). */
   persona?: string;
   model?: string;
+  /** Provider route for a bare model; default `deepseek-official`. */
+  provider?: string;
   thinking?: number;
   /** Disable the tool rows; those web tools stay when named. */
   leanTools?: string[];
@@ -90,16 +114,23 @@ export type PatchOptions = {
 /** The `--patch` overlay for one run, as YAML. Free text goes in as JSON strings, which YAML reads verbatim. */
 export function buildPatch(o: PatchOptions): string {
   const rows: string[] = [];
+  const provider = o.provider ?? DEFAULT_PROVIDER;
+  // A bare model takes the configured route; an explicit `deepseek-account:model` route needs the account too.
+  const account = provider === "deepseek-account" || (o.model ? splitModel(o.model, provider).provider === "deepseek-account" : false);
+  if (account) for (const id of ACCOUNT_ROWS) rows.push(`- id: ${id}\n  disabled: false`);
   if (o.system !== undefined) {
     rows.push(`- id: system-prompt\n  config:\n    includeHarnessIdentity: false\n    includeRuntimeContext: false\n    personaPrefix: ${JSON.stringify(o.system)}\n    personaSuffix: ""`);
   } else if (o.persona !== undefined) {
-    rows.push(`- id: system-prompt\n  config:\n    personaPrefix: ${JSON.stringify(o.persona)}\n    personaSuffix: ${JSON.stringify("Your working directory is {{cwd}}.")}`);
+    // Identity and runtime context stay on; only the persona is added. (This harness version
+    // registers no `cwd` prompt variable, so the persona carries no suffix.)
+    rows.push(`- id: system-prompt\n  config:\n    personaPrefix: ${JSON.stringify(o.persona)}`);
   }
   const effort = reasoningEffort(o.thinking);
   if (effort) rows.push(`- id: llm-deepseek\n  config:\n    reasoningEffort: ${JSON.stringify(effort)}`);
   if (o.model) {
-    const m = splitModel(o.model);
-    rows.push(`- id: agent-default-model\n  config:\n    provider: ${JSON.stringify(m.provider)}\n    model: ${JSON.stringify(m.model)}`);
+    const m = splitModel(o.model, provider);
+    // The effective selection lives on agent-default-model; `llm-deepseek` carries the API adapter's own default.
+    rows.push(`- id: agent-default-model\n  config:\n    provider: ${JSON.stringify(m.provider)}\n    model: ${JSON.stringify(m.model)}${effort ? `\n    reasoningEffort: ${JSON.stringify(effort)}` : ""}`);
   }
   if (o.leanTools) {
     const keepWeb = o.leanTools.some((t) => WEB_TOOLS.has(t));
@@ -173,9 +204,12 @@ export function createDeepseekHarness(spec: DeepseekHarnessSpec): RuntimeAdapter
   if (sshHost && !/^[A-Za-z0-9._@-]+$/.test(sshHost)) throw new Error(`runtime ${spec.name}: ssh host is not a host name: ${sshHost}`);
   const bin = spec.bin.length ? spec.bin : ["dsh"];
   const profile = spec.profile || DEFAULT_PROFILE;
+  const liveProfile = spec.liveProfile || "acp";
+  const provider = spec.provider?.trim() || DEFAULT_PROVIDER;
   const backend: Backend = sshHost ? `ssh:${sshHost}` : "local";
   const localHome = spec.home?.trim() || join(homedir(), ".dsh");
   const env = (base: Record<string, string | undefined>): Record<string, string | undefined> => (spec.home ? { ...base, DSH_HOME: spec.home } : base);
+  const live = new LivePool();
 
   return {
     name: spec.name,
@@ -187,7 +221,7 @@ export function createDeepseekHarness(spec: DeepseekHarnessSpec): RuntimeAdapter
       if (input.files?.length) return { ok: false, error: "files need a runtime with a Read tool; dsh has none", backend };
       const foreign = input.tools.filter((t) => !WEB_TOOLS.has(t));
       if (foreign.length) return { ok: false, error: `tools not available on this runtime: ${foreign.join(", ")}`, backend };
-      const patch = buildPatch({ system: input.system, model: input.model, thinking: input.thinking, leanTools: input.tools });
+      const patch = buildPatch({ system: input.system, model: input.model, provider, thinking: input.thinking, leanTools: input.tools });
       if (sshHost) {
         const words = [...bin, "--profile", profile];
         const bad = words.find((w) => !SAFE_ARG.test(w));
@@ -202,12 +236,12 @@ export function createDeepseekHarness(spec: DeepseekHarnessSpec): RuntimeAdapter
     },
 
     async runAgent(run) {
-      // The profile decides the harness's tools and approvals; a task asking for its own cannot be honoured.
-      if (run.permissionMode || run.allowedTools?.length) return { ok: false, error: `runtime ${spec.name} takes tools and permissions from its profile, not from the task`, output: "", timedOut: false, backend: "local" };
-      const patch = run.model ? buildPatch({ model: run.model }) : undefined;
+      // The profile decides the tools; the tier becomes the harness's sandbox and approval preset.
+      const patch = run.model || defaultDshModel(provider) ? buildPatch({ model: run.model ?? defaultDshModel(provider), provider }) : undefined;
       const go = async (file?: string): Promise<AgentOutcome> => {
         const cmd = [...bin, "--profile", profile, ...(file ? ["--patch", file] : []), "--json", "-"];
-        const r = await spawnCollect(cmd, { cwd: run.cwd, env: env(run.env), stdin: run.prompt, signal: run.signal });
+        const agentEnv = { ...env(run.env), DSH_PERMISSION_MODE: dshPermissionMode(run.permissionMode) };
+        const r = await spawnCollect(cmd, { cwd: run.cwd, env: agentEnv, stdin: run.prompt, signal: run.signal });
         const output = joinOutput(r.stdout, r.stderr);
         if (r.timedOut || r.aborted) return { ok: false, error: "timed out", output, timedOut: true, backend: "local" };
         const parsed = parseEvents(r.stdout);
@@ -220,9 +254,17 @@ export function createDeepseekHarness(spec: DeepseekHarnessSpec): RuntimeAdapter
     },
 
     chat(turn, cb) {
-      const patch = buildPatch({ persona: turn.systemPrompt, model: turn.model });
-      return chatStream(bin, profile, patch, turn, cb, env(turn.env ?? process.env));
+      const turnEnv = { ...env(turn.env ?? process.env), DSH_PERMISSION_MODE: dshPermissionMode(turn.permissionMode) };
+      // An interactive turn keeps one ACP process for the conversation (deepseek-live.ts).
+      if (turn.interactive) {
+        const effective = { ...turn, env: turnEnv };
+        return live.run(effective, cb, () => new DshLive({ bin, profile: liveProfile, provider, turn: effective }));
+      }
+      const patch = buildPatch({ persona: turn.systemPrompt, model: turn.model ?? defaultDshModel(provider), provider });
+      return chatStream(bin, profile, patch, turn, cb, env(turnEnv));
     },
+
+    closeLive: () => live.closeAll(),
 
     transcript: (cwd, sid) => readDshTranscript(localHome, cwd, sid),
   };

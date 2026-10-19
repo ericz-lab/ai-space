@@ -60,8 +60,9 @@ struct LocalStatus: Codable, Equatable {
     struct Runtimes: Codable, Equatable {
         var claude: String?
         var codex: String?
+        var dsh: String?
 
-        var any: Bool { claude != nil || codex != nil }
+        var any: Bool { claude != nil || codex != nil || dsh != nil }
     }
 
     var state: State

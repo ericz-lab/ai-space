@@ -156,6 +156,17 @@
     <string name="chat_running">正在运行 %1$s…</string>
     <string name="chat_stopped">已停止。</string>
     <string name="chat_connection_lost">连接已断开，回复可能仍在 Space 上运行。</string>
+    <string name="chat_waiting_approval">等你确认…</string>
+    <string name="chat_waiting_state">等你确认</string>
+    <string name="chat_allowed">已允许</string>
+    <string name="chat_denied">已拒绝</string>
+    <string name="chat_not_answered">未作答</string>
+    <string name="chat_allow">允许</string>
+    <string name="chat_deny">拒绝</string>
+    <string name="chat_you">你</string>
+    <string name="chat_steer_pending">智能体做完当前这一步后会看到</string>
+    <string name="chat_answer_failed">答复没有送到智能体：%1$s</string>
+    <string name="chat_no_turn">答复没有送到智能体：没有正在进行的回合</string>
     <string name="terminal_title">终端</string>
     <string name="terminal_recent">最近的会话</string>
     <string name="terminal_new_session">新建会话</string>

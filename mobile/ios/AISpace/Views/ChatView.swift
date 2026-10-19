@@ -45,7 +45,9 @@ struct ChatPage: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         if store.bubbles.isEmpty { intro }
-                        ForEach(store.bubbles) { ChatBubble(bubble: $0) }
+                        ForEach(store.bubbles) { bubble in
+                            ChatBubble(bubble: bubble, answer: bubble.live ? { id, allow in await store.answer(id, allow: allow) } : nil)
+                        }
                         Color.clear.frame(height: 1).id("end")
                     }
                     .padding(.horizontal, 14).padding(.vertical, 12)
@@ -66,7 +68,10 @@ struct ChatPage: View {
                 if store.isRunning {
                     Button { store.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 32)) }
                         .foregroundStyle(Theme.danger).accessibilityLabel(Text("Stop"))
-                } else {
+                }
+                // A message written during a turn joins it; Send stays beside Stop while the field
+                // has something to add.
+                if !store.isRunning || !store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button { store.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }
                         .disabled(!store.canSend).accessibilityLabel(Text("Send"))
                 }
@@ -116,6 +121,11 @@ struct ChatPage: View {
 
 struct ChatBubble: View {
     let bubble: ChatStore.Bubble
+    /// Answers an approval of the running turn; nil once the turn is over.
+    let answer: ((String, Bool) async -> String?)?
+
+    private var approvals: [ChatStep] { bubble.isUser ? [] : bubble.steps.filter { $0.kind == .approval } }
+    private var steers: [ChatStep] { bubble.isUser ? [] : bubble.steps.filter { $0.kind == .steer } }
 
     var body: some View {
         HStack {
@@ -126,6 +136,18 @@ struct ChatBubble: View {
                 }
                 if !bubble.text.isEmpty {
                     Self.rendered(bubble.text).foregroundStyle(bubble.isUser ? Color.white : Theme.text).textSelection(.enabled)
+                }
+                ForEach(approvals) { step in
+                    ChatApprovalCard(step: step, answer: bubble.live ? answer : nil)
+                }
+                ForEach(steers) { step in
+                    ChatSteerLine(text: step.text)
+                }
+                ForEach(Array(bubble.pending.enumerated()), id: \.offset) { item in
+                    ChatSteerLine(text: item.element, pending: true)
+                }
+                if bubble.live, approvals.contains(where: { $0.state == .waiting }) {
+                    Text("Waiting for your approval…").font(.caption).foregroundStyle(.secondary)
                 }
                 if let activity = bubble.activity {
                     HStack(spacing: 8) {
@@ -155,5 +177,91 @@ struct ChatBubble: View {
         case .thinking(let model): return model.isEmpty ? String(localized: "Thinking…") : String(localized: "Thinking (\(model))…")
         case .running(let tool): return String(localized: "Running \(tool)…")
         }
+    }
+}
+
+/// An action the agent waits on (docs/runtimes.md#live-chat): what it wants to do, why, and the
+/// person's answer while the turn runs. Nothing is allowed without a tap here.
+private struct ChatApprovalCard: View {
+    let step: ChatStep
+    let answer: ((String, Bool) async -> String?)?
+    @State private var sending = false
+    @State private var error = ""
+
+    private var waiting: Bool { step.state == .waiting && answer != nil }
+
+    private var status: String {
+        switch step.state {
+        case .waiting: return String(localized: "Waiting for you")
+        case .allowed: return String(localized: "Allowed")
+        case .denied: return String(localized: "Denied")
+        case .cancelled: return String(localized: "Not answered")
+        default: return ""
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle.fill").foregroundStyle(Theme.accent)
+                Text(verbatim: step.title).font(.footnote.weight(.semibold))
+                Spacer(minLength: 6)
+                Text(status).font(.caption2).foregroundStyle(.secondary)
+            }
+            if !step.text.isEmpty {
+                Text(verbatim: step.text).font(.caption.monospaced()).lineLimit(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !step.output.isEmpty {
+                Text(verbatim: step.output).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if waiting {
+                HStack(spacing: 8) {
+                    Button("Allow") { reply(allow: true) }
+                        .buttonStyle(.borderedProminent)
+                    Button("Deny") { reply(allow: false) }
+                        .buttonStyle(.bordered)
+                }
+                .controlSize(.small)
+                .disabled(sending)
+            }
+            if !error.isEmpty {
+                Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.ground, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.hairline))
+    }
+
+    private func reply(allow: Bool) {
+        guard let answer else { return }
+        sending = true
+        error = ""
+        Task { @MainActor in
+            let requestID = String(step.id.dropFirst("approval:".count))
+            if let failed = await answer(requestID, allow) { error = failed }
+            sending = false
+        }
+    }
+}
+
+/// A message the person added while the turn ran, waiting for the agent to read it or already read.
+private struct ChatSteerLine: View {
+    let text: String
+    var pending = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text("You").font(.footnote.weight(.semibold))
+            if !text.isEmpty { Text(verbatim: text).font(.footnote) }
+            if pending {
+                Text("the agent reads it after its current step").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

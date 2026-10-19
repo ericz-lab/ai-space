@@ -29,7 +29,8 @@ struct ChatView: View {
                             MessageRow(message: message,
                                        retry: message.id == chat.messages.last?.id && chat.retryableMessage != nil ? { chat.retry() } : nil,
                                        grant: message.id == chat.messages.last?.id && !chat.busy ? { chat.grantAndRetry() } : nil,
-                                       grantPermission: preferences.chatPermission.granting(message.denied))
+                                       grantPermission: preferences.chatPermission.granting(message.denied),
+                                       answer: message.live ? { id, allow in await chat.answer(id, allow: allow) } : nil)
                         }
                         if let error = chat.error {
                             // An earlier chat that would not open; a failed turn shows in its own reply.
@@ -49,7 +50,7 @@ struct ChatView: View {
                     ForEach(ChatPermission.allCases) { permission in Text(permission.label).tag(permission) }
                 }
                 .fixedSize()
-                .help("The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval.")
+                .help("The choice is remembered and applies to new messages. Ask before changes lets the agent ask you before an edit or a command; All permissions allows commands and file changes without asking.")
                 Spacer(minLength: 0)
             }
             .font(.caption)
@@ -171,18 +172,25 @@ struct ChatView: View {
         }
     }
 
+    /// What the field says it takes: a message, or during a turn a message for that turn.
+    private var placeholder: String {
+        chat.busy
+            ? String(localized: "Add to the reply in progress…")
+            : String(localized: "Message \(chat.agent.displayTitle)")
+    }
+
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Button { chooseImages() } label: { Image(systemName: "photo.badge.plus").font(.system(size: 20)) }
                 .buttonStyle(.borderless).help("Add images").accessibilityLabel(Text("Add images"))
                 .disabled(chat.images.count >= 4)
             ChatTextInput(text: $chat.draft, focused: Binding(get: { focused }, set: { focused = $0 }),
-                          placeholder: String(localized: "Message \(chat.agent.displayTitle)"),
+                          placeholder: placeholder,
                           onImage: { appendImage($0, name: "Image") },
                           onImageFile: { importImage(url: $0) }, onSend: { chat.send() })
                 .overlay(alignment: .topLeading) {
                     if chat.draft.isEmpty {
-                        Text("Message \(chat.agent.displayTitle)").foregroundStyle(.tertiary)
+                        Text(placeholder).foregroundStyle(.tertiary)
                             .allowsHitTesting(false)
                     }
                 }
@@ -194,12 +202,15 @@ struct ChatView: View {
                 chat.draft = appendingTranscript(text, to: chat.draft)
                 focused = true
             }
+            // A message written during a turn joins it; Stop stays beside Send so the turn can
+            // still be ended while the field is in use.
+            let empty = (chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chat.images.isEmpty) || chat.pendingImageImports > 0
             if chat.busy {
                 Button { chat.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 26)) }
                     .buttonStyle(.borderless).foregroundStyle(Theme.danger)
                     .help("Stop").accessibilityLabel(Text("Stop"))
-            } else {
-                let empty = (chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chat.images.isEmpty) || chat.pendingImageImports > 0
+            }
+            if !chat.busy || !empty {
                 Button { chat.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 26)) }
                     .buttonStyle(.borderless).foregroundStyle(empty ? Color.secondary : Theme.accent)
                     .help("Send").accessibilityLabel(Text("Send"))
@@ -257,6 +268,8 @@ private struct MessageRow: View {
     let retry: (() -> Void)?
     let grant: (() -> Void)?
     let grantPermission: ChatPermission
+    /// Answers an approval of the running turn; nil once the turn is over.
+    let answer: ((String, Bool) async -> String?)?
 
     var body: some View {
         switch message.role {
@@ -276,10 +289,12 @@ private struct MessageRow: View {
             }
         case .agent:
             VStack(alignment: .leading, spacing: 8) {
-                if !message.tools.isEmpty || !message.text.isEmpty || message.activity != nil {
+                if !message.tools.isEmpty || !message.text.isEmpty || message.activity != nil || !message.steps.isEmpty || !message.pending.isEmpty {
                     reply
                 }
-                if !message.denied.isEmpty {
+                // With live chat a refusal is an approval card; the old banner is only for runtimes
+                // that cannot ask (and for a turn that was refused before the card could appear).
+                if !message.denied.isEmpty && !message.steps.contains(where: { $0.kind == .approval }) {
                     VStack(alignment: .leading, spacing: 6) {
                         Label("\(message.denied.joined(separator: ", ")) was refused for lack of permission", systemImage: "lock.fill")
                             .font(.callout).foregroundStyle(Theme.danger)
@@ -306,9 +321,14 @@ private struct MessageRow: View {
                 if !message.text.isEmpty { textBubble(message.text) }
             } else {
                 ForEach(message.steps) { step in
-                    if step.kind == .text {
+                    switch step.kind {
+                    case .text:
                         textBubble(step.text)
-                    } else {
+                    case .approval:
+                        ApprovalCard(step: step, answer: answer)
+                    case .steer:
+                        SteerRow(text: step.text)
+                    case .tool:
                         ChatWorkStep(step: step)
                     }
                 }
@@ -316,12 +336,18 @@ private struct MessageRow: View {
                     Text("(stopped)").font(.caption).foregroundStyle(.secondary)
                 }
             }
+            ForEach(Array(message.pending.enumerated()), id: \.offset) { item in
+                SteerRow(text: item.element, pending: true)
+            }
             if let activity = message.activity {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text(Self.label(activity)).font(.callout).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
+            }
+            if message.live, message.steps.contains(where: { $0.kind == .approval && $0.state == .waiting }) {
+                Text("Waiting for your approval…").font(.callout).foregroundStyle(.secondary)
             }
         }
         .padding(.trailing, 24)
@@ -343,6 +369,111 @@ private struct MessageRow: View {
     }
 }
 
+/// An action the agent waits on (docs/runtimes.md#live-chat): what it wants to do, why, and the
+/// person's answer while the turn runs. Nothing is allowed without an explicit choice here.
+private struct ApprovalCard: View {
+    let step: ChatStep
+    /// Nil when the turn is over; the card then only shows how the question ended.
+    let answer: ((String, Bool) async -> String?)?
+    @State private var sending = false
+    @State private var error = ""
+
+    private var waiting: Bool { step.state == .waiting && answer != nil }
+
+    private var color: Color {
+        switch step.state {
+        case .waiting: return Theme.accent
+        case .allowed: return Theme.success
+        case .denied: return Theme.danger
+        default: return .secondary
+        }
+    }
+
+    private var status: String {
+        switch step.state {
+        case .waiting: return String(localized: "Waiting for you")
+        case .allowed: return String(localized: "Allowed")
+        case .denied: return String(localized: "Denied")
+        case .cancelled: return String(localized: "Not answered")
+        default: return ""
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "questionmark.circle.fill").foregroundStyle(color)
+                Text(verbatim: step.title).font(.callout.weight(.semibold))
+                Spacer(minLength: 8)
+                Text(status).font(.caption).foregroundStyle(color)
+            }
+            if !step.text.isEmpty {
+                Text(verbatim: step.text).font(.caption.monospaced()).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !step.output.isEmpty {
+                Text(verbatim: step.output).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if waiting {
+                HStack(spacing: 8) {
+                    Button("Allow") { reply(allow: true) }
+                        .buttonStyle(.borderedProminent)
+                    Button("Deny") { reply(allow: false) }
+                        .buttonStyle(.bordered)
+                }
+                .controlSize(.small)
+                .disabled(sending)
+            }
+            if !error.isEmpty {
+                Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.3)))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func reply(allow: Bool) {
+        guard let answer else { return }
+        sending = true
+        error = ""
+        Task { @MainActor in
+            let requestID = String(step.id.dropFirst("approval:".count))
+            if let failed = await answer(requestID, allow) { error = failed }
+            sending = false
+        }
+    }
+}
+
+/// A message the person added while the turn ran: what they wrote, and while the agent has not
+/// read it yet, that it will after the current step.
+private struct SteerRow: View {
+    let text: String
+    var pending = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "arrow.turn.down.right").font(.caption).foregroundStyle(.secondary)
+            Text("You").font(.callout.weight(.semibold))
+            if !text.isEmpty {
+                Text(verbatim: text).font(.callout).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if pending {
+                Text("the agent reads it after its current step").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.solid.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
 /// Each operation keeps its own result instead of disappearing into a tool-name summary.
 private struct ChatWorkStep: View {
     let step: ChatStep
@@ -354,6 +485,10 @@ private struct ChatWorkStep: View {
         case .succeeded: return Theme.success
         case .failed: return Theme.danger
         case .incomplete: return .secondary
+        case .waiting: return Theme.accent
+        case .allowed: return Theme.success
+        case .denied: return Theme.danger
+        case .cancelled: return .secondary
         }
     }
 
@@ -363,6 +498,10 @@ private struct ChatWorkStep: View {
         case .succeeded: return String(localized: "Completed")
         case .failed: return String(localized: "Failed")
         case .incomplete: return String(localized: "No result received")
+        case .waiting: return String(localized: "Waiting for you")
+        case .allowed: return String(localized: "Allowed")
+        case .denied: return String(localized: "Denied")
+        case .cancelled: return String(localized: "Not answered")
         }
     }
 

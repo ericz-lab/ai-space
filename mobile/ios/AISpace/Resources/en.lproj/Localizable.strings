@@ -71,3 +71,16 @@
 "Delete" = "Delete";
 "Save or delete a pending picture before sharing another one." = "Save or delete a pending picture before sharing another one.";
 "The Space returned an unreadable response. Your picture is still pending." = "The Space returned an unreadable response. Your picture is still pending.";
+
+/* Native chat: live turns, approvals and steering (docs/runtimes.md#live-chat) */
+"Waiting for your approval…" = "Waiting for your approval…";
+"Waiting for you" = "Waiting for you";
+"Allowed" = "Allowed";
+"Denied" = "Denied";
+"Not answered" = "Not answered";
+"Allow" = "Allow";
+"Deny" = "Deny";
+"The answer did not reach the agent: %@" = "The answer did not reach the agent: %@";
+"The answer did not reach the agent: no turn is running" = "The answer did not reach the agent: no turn is running";
+"You" = "You";
+"the agent reads it after its current step" = "the agent reads it after its current step";

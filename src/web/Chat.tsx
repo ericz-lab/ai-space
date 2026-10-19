@@ -1,6 +1,7 @@
 import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
-import { ChatSteps, submitsChat, type ChatStep } from "./chat-steps.ts";
+import { ChatSteps, stepGroups, submitsChat, type ChatStep } from "./chat-steps.ts";
+import { Glyph, WorkStep } from "./ChatToolRow.tsx";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun } from "./api.ts";
@@ -456,7 +457,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   };
 
   // A message for the running turn: shown in its reply as waiting until the agent reads it (a
-  // `steer` event). A turn that cannot take it (runtime without live chat, the turn just ended)
+  // `steer` event). A turn that cannot take it (runtime without live chat or steering, the turn just ended)
   // gets it as the next message instead.
   const steer = async (k: string, a: Active, text: string, images: ChatImage[]) => {
     const label = text || `🖼 ×${images.length}`;
@@ -596,15 +597,15 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
             <b>{shown.title}</b>
             <span className="chat-sub">{conv.busy ? `${t("chat.thinking")}${conv.queued ? t("chat.queued", { n: conv.queued }) : ""}` : conv.sid ? t("chat.inSession") : t("chat.newSession")}</span>
             {conv.busy && (
-              <button className="chat-hbtn" title={t("chat.interrupt")} onClick={stop}>
-                ⏹
+              <button className="chat-hbtn" title={t("chat.interrupt")} aria-label={t("chat.interrupt")} onClick={stop}>
+                <Glyph name="stop" size={15} />
               </button>
             )}
-            <button className="chat-hbtn" title={t("chat.history")} onClick={toggleHist}>
-              🕘
+            <button className={`chat-hbtn${hist ? " on" : ""}`} title={t("chat.history")} aria-label={t("chat.history")} aria-pressed={!!hist} onClick={toggleHist}>
+              <Glyph name="history" size={16} weight={1.3} />
             </button>
-            <button className="chat-hbtn" title={t("chat.newConversation")} onClick={reset}>
-              ↺
+            <button className="chat-hbtn" title={t("chat.newConversation")} aria-label={t("chat.newConversation")} onClick={reset}>
+              <Glyph name="compose" size={16} weight={1.3} />
             </button>
             <button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
               ✕
@@ -663,13 +664,14 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           {conv.msgs.map((m, i) => (
             <div key={i} className={`msg ${m.role}`}>
               {m.role === "ai" ? <>
-                {m.steps?.length ? m.steps.map((step) => step.kind === "text" ?
+                {m.steps?.length ? stepGroups(m.steps).map((step) => Array.isArray(step) ?
+                  <div key={step[0]!.id} className="chat-tools">{step.map((tool) => <WorkStep key={tool.id} step={tool} />)}</div> :
+                  step.kind === "text" ?
                   <div key={step.id} className={`md ${step.state === "running" ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(step.text) }} /> :
                   step.kind === "approval" ? <ApprovalStep key={step.id} step={step} onAnswer={m.live ? (decision) => answer(key, step.id.slice("approval:".length), decision) : undefined} /> :
-                  step.kind === "steer" ? <div key={step.id} className="chat-steer"><b>↳ {t("chat.steerYou")}</b> {linkNodes(step.text)}</div> :
-                  <WorkStep key={step.id} step={step} />
+                  <div key={step.id} className="chat-steer"><b>↳ {t("chat.steerYou")}</b> {linkNodes(step.text)}</div>
                 ) : <>
-                  {m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}
+                  {m.tools.length > 0 && <div className="chat-tools">{m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}</div>}
                   <div className={`md ${m.live ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(m.text) }} />
                 </>}
                 {m.pending?.map((p, j) => <div key={`pending:${j}`} className="chat-steer pending"><b>↳ {t("chat.steerYou")}</b> {linkNodes(p)} <small>· {t("chat.steerPending")}</small></div>)}
@@ -686,8 +688,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           ))}
         </div>
         {!stick && conv.msgs.length > 0 && (
-          <button className="chat-down" title={t("chat.latest")} onClick={toLatest}>
-            ↓
+          <button className="chat-down" title={t("chat.latest")} aria-label={t("chat.latest")} onClick={toLatest}>
+            <Glyph name="down" size={18} weight={1.5} />
           </button>
         )}
         {imageError && <div className="msg-note" role="alert">{imageError}</div>}
@@ -699,7 +701,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           if (e.dataTransfer.files.length) { e.preventDefault(); void addImages(Array.from(e.dataTransfer.files)); }
         }}>
           <input ref={fileRef} type="file" hidden accept="image/png,image/jpeg,image/gif,image/webp" multiple onChange={(e) => { void addImages(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
-          <button className="chat-attach" title={t("chat.addImages")} aria-label={t("chat.addImages")} disabled={readingImages || images.length >= 4} onClick={() => fileRef.current?.click()}>＋</button>
+          <button className="chat-attach" title={t("chat.addImages")} aria-label={t("chat.addImages")} disabled={readingImages || images.length >= 4} onClick={() => fileRef.current?.click()}><Glyph name="attach" size={18} weight={1.3} /></button>
           <textarea
             ref={inputRef}
             rows={1}
@@ -720,8 +722,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
               }
             }}
           />
-          <button className="chat-send" disabled={readingImages || (!input.trim() && !images.length)} onClick={submit}>
-            ↑
+          <button className="chat-send" title={t("chat.send")} aria-label={t("chat.send")} disabled={readingImages || (!input.trim() && !images.length)} onClick={submit}>
+            <Glyph name="send" size={17} weight={1.9} />
           </button>
         </div>
       </div>
@@ -744,7 +746,7 @@ function ApprovalStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (decision
   };
   const waiting = step.state === "waiting" && !!onAnswer;
   return <section className={`chat-work chat-approval ${step.state}`} aria-label={step.name}>
-    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true">?</span><strong>{step.name}</strong><span className="chat-work-state">{t(`chat.step.${step.state}`)}</span></div>
+    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true"><Glyph name="shield" /></span><strong>{step.name}</strong><span className="chat-work-state">{t(`chat.step.${step.state}`)}</span></div>
     {step.text && <pre className="chat-work-input">{step.text}</pre>}
     {step.output && <p className="chat-approval-why">{step.output}</p>}
     {waiting && <div className="chat-approval-actions">
@@ -752,15 +754,5 @@ function ApprovalStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (decision
       <button disabled={sending} onClick={() => void reply("deny")}>{t("chat.approval.deny")}</button>
     </div>}
     {error && <small role="alert">{error}</small>}
-  </section>;
-}
-
-function WorkStep({ step }: { step: ChatStep }) {
-  const { t } = useLang();
-  const icon = /bash|exec|command/i.test(step.name) ? "⌘" : /read|edit|write|patch/i.test(step.name) ? "▤" : "⚙";
-  return <section className={`chat-work ${step.state}`} aria-label={step.name}>
-    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true">{icon}</span><strong>{step.name}</strong><span className="chat-work-state">{t(`chat.step.${step.state}`)}</span></div>
-    {step.text && <pre className="chat-work-input">{step.text}</pre>}
-    {step.output && <details><summary>{t("chat.step.details")}</summary><pre>{step.output}</pre>{step.output.length >= 12000 && <small>{t("chat.step.truncated")}</small>}</details>}
   </section>;
 }

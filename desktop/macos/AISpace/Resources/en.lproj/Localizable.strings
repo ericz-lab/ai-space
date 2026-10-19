@@ -47,15 +47,29 @@
 "Check for app updates" = "Check for app updates";
 
 /* Native chat permissions, matching the Web panel */
-"Read-only" = "Read-only";
+"Ask before changes" = "Ask before changes";
 "Edit files" = "Edit files";
 "All permissions" = "All permissions";
 "Write access (next message)" = "Write access (next message)";
-"The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval." = "The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval.";
+"The choice is remembered and applies to new messages. Ask before changes lets the agent ask you before an edit or a command; All permissions allows commands and file changes without asking." = "The choice is remembered and applies to new messages. Ask before changes lets the agent ask you before an edit or a command; All permissions allows commands and file changes without asking.";
 "%@ was refused for lack of permission" = "%@ was refused for lack of permission";
 "Next messages: %@" = "Next messages: %@";
 "Grant and retry" = "Grant and retry";
 "I have granted more permissions. Please finish the step that was refused for lack of permission." = "I have granted more permissions. Please finish the step that was refused for lack of permission.";
+
+/* Native chat: live turns, approvals and steering (docs/runtimes.md#live-chat) */
+"Waiting for your approval…" = "Waiting for your approval…";
+"Waiting for you" = "Waiting for you";
+"Allowed" = "Allowed";
+"Denied" = "Denied";
+"Not answered" = "Not answered";
+"Allow" = "Allow";
+"Deny" = "Deny";
+"The answer did not reach the agent: %@" = "The answer did not reach the agent: %@";
+"The answer did not reach the agent: no turn is running" = "The answer did not reach the agent: no turn is running";
+"You" = "You";
+"the agent reads it after its current step" = "the agent reads it after its current step";
+"Add to the reply in progress…" = "Add to the reply in progress…";
 
 "Detected" = "Detected";
 

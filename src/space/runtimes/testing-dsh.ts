@@ -16,6 +16,12 @@ export function fakeDshBin(): string[] {
 
 if (import.meta.main) {
   const args = process.argv.slice(2);
+  const profileAt = args.indexOf("--profile");
+  if (profileAt >= 0 && args[profileAt + 1] === "acp") {
+    const { runAcpStandIn } = await import("./testing-dsh-acp.ts");
+    await runAcpStandIn(args);
+    process.exit(0);
+  }
   const mode = process.env.FAKE_DSH_MODE ?? "ok";
   const last = args[args.length - 1] ?? "";
   const task = last === "-" ? await new Response(Bun.stdin.stream()).text() : last;
@@ -48,7 +54,7 @@ if (import.meta.main) {
     out({ type: "status", phase: "step_end", turn: 1, step: 1, usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 } });
     out({ type: "status", phase: "step_start", turn: 1, step: 2 });
   }
-  const text = `answer to: ${task.trim()} [args: ${args.filter((a) => a !== task).join(" ")}] [patch: ${rows.join(",")}] [env: ${process.env.DSH_HOME ?? "-"}]`;
+  const text = `answer to: ${task.trim()} [args: ${args.filter((a) => a !== task).join(" ")}] [patch: ${rows.join(",")}] [env: ${process.env.DSH_HOME ?? "-"}] [mode: ${process.env.DSH_PERMISSION_MODE ?? "-"}]`;
   out({ type: "text", text });
   out({ type: "status", phase: "step_end", turn: 1, step: mode === "tools" ? 2 : 1, usage: { inputTokens: 32, outputTokens: 2, cacheReadTokens: 640, cacheWriteTokens: 0, totalTokens: 674 } });
   out({ type: "status", phase: "turn_end", turn: 1, reason: { kind: "completed" } });

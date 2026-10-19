@@ -46,6 +46,20 @@ sealed class ChatActivity {
     data class Running(val tool: String) : ChatActivity()
 }
 
+enum class ChatApprovalState { Waiting, Allowed, Denied, Cancelled }
+
+/**
+ * An action the agent waits on (docs/runtimes.md#live-chat): what it wants to do and why. The
+ * person's answer travels through the run, not through the reply.
+ */
+data class ChatApproval(
+    val id: String,
+    val tool: String,
+    val title: String,
+    val detail: String = "",
+    val state: ChatApprovalState = ChatApprovalState.Waiting,
+)
+
 /**
  * One chat turn's reply, built from the run's events the way the panel's Chat.tsx reads them:
  * Claude-style stream-json, which every runtime adapter emits, followed by `error` and `done`.
@@ -60,6 +74,11 @@ data class ChatReply(
     val note: String? = null,
     val stopped: Boolean = false,
     val finished: Boolean = false,
+    val approvals: List<ChatApproval> = emptyList(),
+    /** Messages the agent has read that the person added while the turn ran, one per `steer` event. */
+    val consumedSteers: List<String> = emptyList(),
+    /** All messages the person added to the turn, for the reply to show after the text. */
+    val steers: List<String> = emptyList(),
     private val seenTools: Set<String> = emptySet(),
 ) {
     val text: String
@@ -74,6 +93,33 @@ data class ChatReply(
         val ev = Json.obj(line) ?: return this
         val type = ev.str("type") ?: return this
         return when (type) {
+            "approval_request" -> {
+                val id = ev.str("id") ?: return this
+                if (approvals.any { it.id == id }) this
+                else copy(
+                    approvals = approvals + ChatApproval(
+                        id = id,
+                        tool = ev.str("tool") ?: "tool",
+                        title = ev.str("title") ?: "",
+                        detail = ev.str("detail") ?: "",
+                    ),
+                    // The turn is not running anything now; it waits for the person's answer.
+                    activity = null,
+                )
+            }
+            "approval_resolved" -> {
+                val id = ev.str("id") ?: return this
+                val state = when (ev.str("decision")) {
+                    "allow" -> ChatApprovalState.Allowed
+                    "deny" -> ChatApprovalState.Denied
+                    else -> ChatApprovalState.Cancelled
+                }
+                copy(approvals = approvals.map { if (it.id == id) it.copy(state = state) else it })
+            }
+            "steer" -> {
+                val text = ev.str("text") ?: ""
+                copy(consumedSteers = consumedSteers + text, steers = steers + text)
+            }
             "system" -> if (ev.str("subtype") == "init") {
                 copy(sessionID = ev.str("session_id") ?: sessionID, activity = ChatActivity.Thinking(ev.str("model") ?: ""))
             } else this
@@ -118,6 +164,11 @@ data class ChatReply(
             else -> this
         }
     }
+
+    /** A turn that ended: an approval nobody answered is not left waiting. */
+    fun settled(): ChatReply = copy(
+        approvals = approvals.map { if (it.state == ChatApprovalState.Waiting) it.copy(state = ChatApprovalState.Cancelled) else it },
+    )
 
     private companion object {
         fun blocks(a: JSONArray?): List<JSONObject> {

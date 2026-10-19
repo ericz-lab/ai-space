@@ -18,6 +18,7 @@ function show(ctx: Ctx, s: LocalStatus): void {
     ["answers", s.running ? `${s.url} ${s.running.version} ${s.running.edition} ${s.running.installation ?? ""}` : "nothing"],
     ["claude", s.runtimes.claude ?? "not found"],
     ["codex", s.runtimes.codex ?? "not found"],
+    ["dsh", s.runtimes.dsh ?? "not found"],
     ...(s.models ? [["default models", s.models.map((m) => `${m.value} (${m.model})`).join(", ") || "none: no agent CLI"] as [string, string]] : []),
   ]);
 }
@@ -36,13 +37,13 @@ async function guarded(ctx: Ctx, work: () => Promise<unknown>, done: (v: never) 
   }
 }
 
-/** `--claude <path>` and `--codex <path>`: agent CLIs the user chose, over the search. */
-const RUNTIME_FLAGS = { claude: { kind: "value" }, codex: { kind: "value" } } as const;
+/** `--claude <path>`, `--codex <path>` and `--dsh <path>`: agent CLIs the user chose, over the search. */
+const RUNTIME_FLAGS = { claude: { kind: "value" }, codex: { kind: "value" }, dsh: { kind: "value" } } as const;
 
 const deps = (ctx: Ctx, flags: Record<string, unknown> = {}) => {
   const d = realLocalDeps(ctx.flags.json ? () => {} : (l) => ctx.io.err(`[local] ${l}`));
   const runtimes: Partial<Runtimes> = {};
-  for (const name of ["claude", "codex"] as const) if (typeof flags[name] === "string") runtimes[name] = flags[name] as string;
+  for (const name of ["claude", "codex", "dsh"] as const) if (typeof flags[name] === "string") runtimes[name] = flags[name] as string;
   return { ...d, runtimes };
 };
 

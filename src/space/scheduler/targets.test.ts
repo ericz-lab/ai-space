@@ -175,14 +175,19 @@ describe("agent target", () => {
     expect(await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, { appDir, signal: AbortSignal.timeout(1000) })).toMatchObject({ status: "error", error: expect.stringMatching(/not configured/) });
   });
 
-  test("the task's permission mode and tools reach the CLI; a runtime that cannot honour them refuses", async () => {
+  test("the task's permission mode and tools reach the CLI; the harness maps its tier to a sandbox", async () => {
     const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", permissionMode: "bypassPermissions", tools: ["Bash(sqlite3 *)", "Read"] }, ctx(5000, fakeModelBin()));
     expect(r.status).toBe("ok");
     expect(r.output).toContain("[args: -p --output-format json --permission-mode bypassPermissions --allowedTools Bash(sqlite3 *),Read]");
     const plain = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx(5000, fakeModelBin()));
     expect(plain.output).toContain("[args: -p --output-format json]");
-    const dsh = new RuntimeRegistry({ default: "dsh", runtimes: [{ name: "dsh", kind: "deepseek-harness", bin: ["sh", "-c", "cat"], profile: "headless" }] });
-    expect(await runTarget({ kind: "agent", runtime: "dsh", prompt: "prompt.md", permissionMode: "acceptEdits" }, { appDir, signal: AbortSignal.timeout(1000), runtimes: dsh })).toMatchObject({ status: "error", error: expect.stringMatching(/from its profile/) });
+    // DeepSeek Harness takes the tier as DSH_PERMISSION_MODE; no tier is the panel's read-only default.
+    const dsh = new RuntimeRegistry({ default: "dsh", runtimes: [{ name: "dsh", kind: "deepseek-harness", bin: ["sh", "-c", "cat >/dev/null; echo mode=$DSH_PERMISSION_MODE"], profile: "headless" }] });
+    const edits = await runTarget({ kind: "agent", runtime: "dsh", prompt: "prompt.md", permissionMode: "acceptEdits" }, { appDir, signal: AbortSignal.timeout(1000), runtimes: dsh });
+    expect(edits).toMatchObject({ status: "ok" });
+    expect(edits.output).toContain("mode=workspace-write");
+    const plainDsh = await runTarget({ kind: "agent", runtime: "dsh", prompt: "prompt.md" }, { appDir, signal: AbortSignal.timeout(1000), runtimes: dsh });
+    expect(plainDsh.output).toContain("mode=read-only");
   });
 
   test("missing prompt file is an error", async () => {
