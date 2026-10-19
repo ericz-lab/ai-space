@@ -65,8 +65,8 @@ runtimes:
 
   test("a deepseek-harness runtime takes its command, home, profile and ssh host", () => {
     const { config } = parseRuntimesYaml("runtimes:\n  claude: { kind: claude-code }\n  dsh: { kind: deepseek-harness, ssh: box, bin: /opt/dsh, home: /home/me/.dsh }\n", {});
-    expect(config.runtimes[1]).toEqual({ name: "dsh", kind: "deepseek-harness", bin: ["/opt/dsh"], profile: "headless", home: "/home/me/.dsh", sshHost: "box" });
-    expect(parseRuntimesYaml("runtimes:\n  dsh: { kind: deepseek-harness }\n", {}).config.runtimes[0]).toEqual({ name: "dsh", kind: "deepseek-harness", bin: [], profile: "headless" });
+    expect(config.runtimes[1]).toEqual({ name: "dsh", kind: "deepseek-harness", bin: ["/opt/dsh"], profile: "headless", liveProfile: "acp", provider: "deepseek-official", home: "/home/me/.dsh", sshHost: "box" });
+    expect(parseRuntimesYaml("runtimes:\n  dsh: { kind: deepseek-harness }\n", {}).config.runtimes[0]).toEqual({ name: "dsh", kind: "deepseek-harness", bin: [], profile: "headless", liveProfile: "acp", provider: "deepseek-official" });
   });
 });
 
@@ -153,7 +153,10 @@ runtimes:
       expect(() => parseRuntimesYaml(`runtimes:\n  codex: { kind: codex-cli, models: ${models} }`)).toThrow();
     }
     expect(() => parseRuntimesYaml("runtimes:\n  codex: { kind: codex-cli, ssh: '-bad' }")).toThrow();
-    const registry = new RuntimeRegistry({ default: "dsh", runtimes: [{ name: "dsh", kind: "deepseek-harness", bin: [], profile: "headless" }] });
-    expect(() => registry.resolve("advanced")).toThrow(/no model for tier/);
+    const dsh = new RuntimeRegistry({ default: "dsh", runtimes: [{ name: "dsh", kind: "deepseek-harness", bin: [], profile: "headless" }] });
+    expect(dsh.resolve("basic").model).toBe("deepseek-flash");
+    expect(dsh.resolve("advanced").model).toBe("deepseek-v4-pro");
+    const api = new RuntimeRegistry({ default: "api", runtimes: [{ name: "api", kind: "anthropic-api", apiKey: "k", apiUrl: "" }] });
+    expect(() => api.resolve("advanced")).toThrow(/no model for tier/);
   });
 });

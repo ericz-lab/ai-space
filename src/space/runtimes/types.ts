@@ -241,10 +241,11 @@ export type AnthropicApiSpec = {
 };
 
 /**
- * DeepSeek Harness (`dsh`): `dsh --profile headless --json` for all three
- * operations, `--session-id` for chat continuity, a `--patch` overlay per run
- * for the system prompt, model, thinking and tool set. Billed by the DeepSeek
- * API key the harness home holds.
+ * DeepSeek Harness (`dsh`): `dsh --profile headless --json` for answers and
+ * agent runs, `dsh --profile acp` (Agent Client Protocol over stdio) for live
+ * chat, a `--patch` overlay per run for the system prompt, model, thinking and
+ * tool set. Billed by the DeepSeek API key the harness home holds, or by the
+ * harness's signed-in account when `provider` names `deepseek-account`.
  */
 export type DeepseekHarnessSpec = {
   name: string;
@@ -253,8 +254,16 @@ export type DeepseekHarnessSpec = {
   bin: string[];
   /** The harness home (`DSH_HOME`); default the CLI's own (`~/.dsh`). Session logs are read from it. */
   home?: string;
-  /** Profile to boot; default `headless`. */
+  /** Profile for answers and agent runs; default `headless`. */
   profile: string;
+  /** Profile for live chat; default `acp` (the harness's Agent Client Protocol app). */
+  liveProfile?: string;
+  /**
+   * Provider route for a model without `provider:model`; default
+   * `deepseek-official`. `deepseek-account` uses the harness's signed-in
+   * account and needs no API key.
+   */
+  provider?: string;
   /** Machine whose harness `complete` uses over ssh; agent runs and chats stay local. */
   sshHost?: string;
 };

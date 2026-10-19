@@ -27,7 +27,7 @@ Every operation reports what the runtime said about the model call, token counts
 | kind | complete | agent | chat | login | notes |
 | --- | --- | --- | --- | --- | --- |
 | `claude-code` | yes, local or ssh | yes | yes | the CLI's own (`claude login`) | `claude -p --output-format json` for answers and agent runs, `stream-json` for chat, `--resume` for continuity. Answers over ssh: every argument validated, the system prompt base64-encoded. Files (chat attachments) are opened with `Read`; over ssh they travel with the prompt as one tar archive unpacked into a temporary directory. |
-| `deepseek-harness` | yes, local or ssh | yes | yes | a DeepSeek API key in the harness home | `dsh --profile headless --json` for everything, the task on stdin; `--session-id` for continuity. A `--patch` overlay per run sets the system prompt, model, thinking (`reasoningEffort`) and tool rows: an answer runs with the harness identity, runtime context and every tool off (6,872 input tokens as shipped → 32), a chat keeps them and adds the agent's prompt as persona. Usage from the `step_end` events, cost from DeepSeek's list prices at peak (off-peak is half). Chat events are translated into Claude Code's `stream-json`; transcripts read from the harness's session log. Files refused. |
+| `deepseek-harness` | yes, local or ssh | yes | yes, with ACP live chat | a DeepSeek API key in the harness home, or the harness's signed-in account | `dsh --profile headless --json` for answers and agent runs, the task on stdin; `--session-id` for continuity; `dsh --profile acp` (Agent Client Protocol over stdio) for live chat, approvals, resume and cancel (no steering). A `--patch` overlay per run sets the system prompt, model, thinking (`reasoningEffort`), tool rows and, for an agent task, the sandbox and approval preset: an answer runs with the harness identity, runtime context and every tool off (6,872 input tokens as shipped → 32), a chat keeps them and adds the agent's prompt as persona. `provider: deepseek-account` uses the signed-in account instead of an API key. Usage from the `step_end` events, cost from DeepSeek's list prices at peak (off-peak is half). Chat events are translated into Claude Code's `stream-json`; transcripts read from the harness's session log. Files refused. |
 | `codex-cli` | yes, local or ssh | yes | yes, local | the CLI’s own Codex login | Slim or full completions with per-request instructions; `codex exec` agent runs in the app directory; persistent full-context chat with `exec resume`; see below. |
 | `anthropic-api` | yes | no | no | an API key | `POST /v1/messages`. Tools and files refused. Cost from list prices for known models. |
 
@@ -52,7 +52,9 @@ runtimes:
     ssh: box                     # optional: answers run on that machine's harness
     bin: /home/me/.npm-global/bin/dsh   # optional; default dsh (must be on the login shell's PATH over ssh)
     home: /home/me/.dsh          # optional: DSH_HOME, where session logs are read; default the CLI's own
-    profile: headless            # optional; default shown
+    profile: headless            # optional: answers and agent runs; default shown
+    liveProfile: acp             # optional: live chat; default shown
+    provider: deepseek-official  # optional: model route; use deepseek-account for the signed-in account
 ```
 
 ### Preparing a DeepSeek Harness
@@ -60,11 +62,23 @@ runtimes:
 On the machine that runs it (Node 22.19 or newer):
 
 ```sh
-npm i -g @deepseek-ai/dsh@alpha            # the alpha channel has --json and --session-id
+npm i -g @deepseek-ai/dsh@alpha            # the alpha channel has --json, --session-id and ACP
 dsh --profile headless --help              # initialises ~/.dsh/profiles/headless
+dsh --profile acp --help                   # initialises the live-chat profile (Agent Client Protocol)
 ```
 
-Put the key in `~/.dsh/.env` as `DEEPSEEK_API_KEY=…` (mode 600). Then, in `~/.dsh/cordis.patch.yml`, keep session logs on the machine and readable by ai-space: the harness otherwise sends them to DeepSeek with each request, exports telemetry after feedback, and compresses them.
+The DeepSeek Harness desktop app ships the same CLI at
+`DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`; point `bin` at it
+when that is the installation to use.
+
+Put the key in `~/.dsh/.env` as `DEEPSEEK_API_KEY=…` (mode 600), or sign in to
+the desktop app and set `provider: deepseek-account`: the `headless` profile
+disables the account plugins, so an account runtime's overlay turns their rows
+back on (`authorization`, `deepseek-account`, `credentials`) and the harness
+uses the account grant in `~/.dsh/.credentials.yaml`. The `acp` profile keeps
+them enabled, so live chat uses the account with no extra rows.
+
+Then, in `~/.dsh/cordis.patch.yml`, keep session logs on the machine and readable by ai-space: the harness otherwise sends them to DeepSeek with each request, exports telemetry after feedback, and compresses them.
 
 ```yaml
 - id: session-log-deepseek
@@ -75,7 +89,7 @@ Put the key in `~/.dsh/.env` as `DEEPSEEK_API_KEY=…` (mode 600). Then, in `~/.
   config: { root: !!js dshHomePath("sessions"), compression: none }
 ```
 
-`dsh --profile headless --dump-config` shows the composed rows. Models are named as the harness names them (`deepseek-flash`, `deepseek-v4-pro`); `provider:model` selects another provider the harness has configured.
+`dsh --profile headless --dump-config` (and `dsh --profile acp --dump-config`) shows the composed rows. Models are named as the harness names them (`deepseek-flash`, `deepseek-v4-pro`); `provider:model` selects another provider the harness has configured.
 
 A runtime whose key variable is empty is skipped with a warning at boot rather than failing it, so a space keeps running when one login is missing. `default` must name a runtime that remains.
 
@@ -90,7 +104,7 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 
 ## Code
 
-`src/space/runtimes/`: `types.ts` (operations, specs, adapter interface), `process.ts` (spawn, collect, kill the process group on timeout), `claude-code.ts`, `live.ts` (live chat's process pool and events), `claude-live.ts` and `codex-live.ts` (live chat over each CLI's protocol), `deepseek-harness.ts`, `anthropic-api.ts`, `transcripts.ts` (past sessions from each runtime's records), `config.ts` (`runtimes.yaml` and the environment fallback), `registry.ts` (by name, `runtime/model` resolution), `testing.ts`, `testing-dsh.ts` and `testing-live.ts` (the fake CLIs tests use).
+`src/space/runtimes/`: `types.ts` (operations, specs, adapter interface), `process.ts` (spawn, collect, kill the process group on timeout), `claude-code.ts`, `live.ts` (live chat's process pool and events), `claude-live.ts`, `codex-live.ts` and `deepseek-live.ts` (live chat over each runtime's protocol), `deepseek-harness.ts`, `anthropic-api.ts`, `transcripts.ts` (past sessions from each runtime's records), `config.ts` (`runtimes.yaml` and the environment fallback), `registry.ts` (by name, `runtime/model` resolution), `testing.ts`, `testing-dsh.ts`, `testing-dsh-acp.ts` and `testing-live.ts` (the fake CLIs tests use).
 
 ## Follow-ups
 
@@ -103,14 +117,14 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 
 Use these four names consistently when discussing models or selecting them in requests:
 
-| Tier | Request alias | Claude Code | Codex CLI (fallback; the catalogue decides) |
-| --- | --- | --- | --- |
-| Basic | `basic` | Haiku (`haiku`) | Luna (`gpt-6-luna`) |
-| Junior | `junior` | Sonnet (`sonnet`) | Terra (`gpt-5.6-terra`) |
-| Intermediate | `intermediate` | Opus (`opus`) | Sol (`gpt-6.1-sol`) |
-| Advanced | `advanced` | Fable (`fable`) | Astra (`gpt-6-astra`) |
+| Tier | Request alias | Claude Code | Codex CLI (fallback; the catalogue decides) | DeepSeek Harness |
+| --- | --- | --- | --- | --- |
+| Basic | `basic` | Haiku (`haiku`) | Luna (`gpt-6-luna`) | `deepseek-flash` |
+| Junior | `junior` | Sonnet (`sonnet`) | Terra (`gpt-5.6-terra`) | `deepseek-flash` |
+| Intermediate | `intermediate` | Opus (`opus`) | Sol (`gpt-6.1-sol`) | `deepseek-v4-pro` |
+| Advanced | `advanced` | Fable (`fable`) | Astra (`gpt-6-astra`) | `deepseek-v4-pro` |
 
-These are operator-defined tiers, not a claim that two providers' models perform identically. Availability depends on the CLI and account. `codex/basic` selects Codex Luna; `claude/advanced` selects Claude Fable. A bare `advanced` uses the default runtime. Concrete model IDs still work. Unknown or unavailable models fail without silently switching provider or using a more expensive model. Other runtime kinds need explicit tier mappings.
+These are operator-defined tiers, not a claim that two providers' models perform identically. Availability depends on the CLI and account. `codex/basic` selects Codex Luna; `claude/advanced` selects Claude Fable. A bare `advanced` uses the default runtime. Concrete model IDs still work. Unknown or unavailable models fail without silently switching provider or using a more expensive model. The DeepSeek Harness tiers are defaults; a `models` mapping pins other names. The Anthropic API has no tier mapping.
 
 Each runtime may override versions with a `models` mapping. The ledger records the resolved concrete model, not the alias:
 
@@ -227,15 +241,15 @@ image-only calls retain their tool restrictions.
 
 Motivation: a one-shot chat turn (`claude -p`, `codex exec`) cannot ask before an action its permission tier does not cover, so the action was refused and the person had to raise the tier and ask again; and a message written while the agent worked waited for the whole turn to end. A turn that stays connected to its runtime can do both.
 
-A chat request with `interactive: true` (the web panel sends it) goes to a process the runtime keeps for the conversation instead of a CLI started for the turn. The process stays open after the turn; the conversation's next turn reuses it when it names the same session and matches the process's working directory, system prompt, tool list and environment (a different identity starts a new process with `--resume`). Model and tier may change from turn to turn: the process switches in place. An idle process is closed after 10 minutes, at most 6 idle ones are kept per runtime (oldest out first), and all of them close when ai-space shuts down. A request without the flag (the Mac, iPhone and Android clients today) keeps the one-shot path; a runtime without live chat (DeepSeek Harness) ignores it.
+A chat request with `interactive: true` (the web panel sends it) goes to a process the runtime keeps for the conversation instead of a CLI started for the turn. The process stays open after the turn; the conversation's next turn reuses it when it names the same session and matches the process's working directory, system prompt, tool list and environment (a different identity starts a new process with `--resume` or `session/resume`). Model and tier may change from turn to turn: the process switches in place. An idle process is closed after 10 minutes, at most 6 idle ones are kept per runtime (oldest out first), and all of them close when ai-space shuts down. A request without the flag (the Mac, iPhone and Android clients today) keeps the one-shot path.
 
-| | Claude Code | Codex CLI |
-| --- | --- | --- |
-| process | `claude -p --input-format stream-json --output-format stream-json --replay-user-messages --permission-prompt-tool stdio`, user messages on stdin | `codex app-server`, JSON-RPC over stdio; `thread/start`, or `thread/resume` for a session |
-| approvals | the CLI's `can_use_tool` control request; the answer allows with the input as asked or denies | `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` (`accept` / `decline`), `item/permissions/requestApproval` (the requested grant for the turn, or none) |
-| tier | `--permission-mode`: the read-only default becomes `default`, which asks before an edit or a command that changes files | read-only sandbox with `approvalPolicy: "on-request"`; edit files: `workspace-write`; all permissions: `danger-full-access` with `never`; plan: read-only with `never` |
-| message added to a running turn | a user message written to stdin; the CLI reads it once the running tool call ends. Written as the turn ends, it starts the CLI's next turn and the run lasts until that one ends too | `turn/steer` with the running turn's id; refused once the turn has ended |
-| stop | `interrupt` control request; with a message still waiting in the CLI, the process is ended instead | `turn/interrupt` |
+| | Claude Code | Codex CLI | DeepSeek Harness |
+| --- | --- | --- | --- |
+| process | `claude -p --input-format stream-json --output-format stream-json --replay-user-messages --permission-prompt-tool stdio`, user messages on stdin | `codex app-server`, JSON-RPC over stdio; `thread/start`, or `thread/resume` for a session | `dsh --profile acp`, JSON-RPC over stdio; `session/new`, or `session/resume` for a session; the persona and first route travel in a `--patch` overlay |
+| approvals | the CLI's `can_use_tool` control request; the answer allows with the input as asked or denies | `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` (`accept` / `decline`), `item/permissions/requestApproval` (the requested grant for the turn, or none) | `session/request_permission` with one-shot options; the answer selects `allow_once` or `reject_once` |
+| tier | `--permission-mode`: the read-only default becomes `default`, which asks before an edit or a command that changes files | read-only sandbox with `approvalPolicy: "on-request"`; edit files: `workspace-write`; all permissions: `danger-full-access` with `never`; plan: read-only with `never` | `DSH_PERMISSION_MODE`: read-only, workspace-write, or danger-full-access (approval `never`); plan is read-only |
+| message added to a running turn | a user message written to stdin; the CLI reads it once the running tool call ends. Written as the turn ends, it starts the CLI's next turn and the run lasts until that one ends too | `turn/steer` with the running turn's id; refused once the turn has ended | none: ACP carries one prompt at a time and has no way to add a message |
+| stop | `interrupt` control request; with a message still waiting in the CLI, the process is ended instead | `turn/interrupt` | `session/cancel`; the prompt settles `cancelled` and the process waits for the next turn |
 
 Claude Code's `AskUserQuestion` tool is turned off in live chat (`--disallowedTools`): the panel has no form for it, and the agent asks in its reply. Other requests either runtime sends that ai-space does not handle (MCP elicitation, dynamic tool calls) are refused rather than left waiting. A stop the runtime has not answered within 4 s kills the process.
 
@@ -249,7 +263,7 @@ The turn's events are the runtime's, translated into Claude Code's `stream-json`
 
 The answers and the added messages go through the run ([panel.md](panel.md#background-runs)). Nothing waits for an approval except the turn: an unanswered one lasts until the run's timeout, a stop or a shutdown, which deny it.
 
-Tested with Claude Code 2.1.302 and Codex 0.163: both protocols are the CLIs' own, Codex's app-server marked experimental. `src/space/runtimes/live.test.ts` runs both against stand-ins (`testing-live.ts`); approvals, steering, stop and reuse were also checked against the real CLIs.
+Tested with Claude Code 2.1.302, Codex 0.163 and DeepSeek Harness 0.2.1-rc.2: the protocols are the runtimes' own, Codex's app-server marked experimental and ACP's automation surface intended for programmatic clients. `src/space/runtimes/live.test.ts` runs Claude Code and Codex against stand-ins (`testing-live.ts`), `deepseek-live.test.ts` runs DeepSeek Harness against `testing-dsh-acp.ts`; approvals, steering where supported, stop and reuse were also checked against the real CLIs.
 
 ## Codex agent runs
 
