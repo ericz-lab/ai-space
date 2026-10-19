@@ -148,6 +148,7 @@ export class DshLive implements LiveProcess {
   private serial = 0;
   private stderr: { text: () => string } = { text: () => "" };
   private model: { provider: string; model: string };
+  private imageSupport = false;
 
   constructor(opts: DshLiveOptions) {
     this.first = opts.turn;
@@ -188,13 +189,18 @@ export class DshLive implements LiveProcess {
       cb.onSession?.(sid);
       cb.onEvent(JSON.stringify({ type: "system", subtype: "init", session_id: sid, model: `${this.model.provider}:${this.model.model}` }));
       if (t.stopping) return this.cancel();
+      if (turn.images?.length && !this.imageSupport) throw new Error("this model route does not support images");
       const want = acpModel(turn.model ?? defaultAcpModel(this.model.provider), this.model.provider);
       if (want.provider !== this.model.provider || want.model !== this.model.model) {
         await this.call("session/set_config_option", { sessionId: sid, configId: MODEL_CONFIG_ID, value: acpModelValue(want.provider, want.model) });
         if (this.current !== t) return;
         this.model = want;
       }
-      const result = await this.call("session/prompt", { sessionId: sid, prompt: [{ type: "text", text: turn.message }] });
+      const prompt = [
+        ...(turn.message ? [{ type: "text", text: turn.message }] : []),
+        ...(turn.images ?? []).map((image) => ({ type: "image", data: image.data, mimeType: image.mediaType })),
+      ];
+      const result = await this.call("session/prompt", { sessionId: sid, prompt });
       if (this.current !== t) return;
       const reason = String(result.stopReason ?? "end_turn");
       if (reason === "cancelled") {
@@ -264,7 +270,9 @@ export class DshLive implements LiveProcess {
 
   /** Handshake, then the conversation's session: resumed when the turn names one, else a new one. */
   private async open(): Promise<string> {
-    await this.call("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "ai-space", version: "1.0" } });
+    const init = await this.call("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "ai-space", version: "1.0" } });
+    const image = (init.agentCapabilities as { promptCapabilities?: { image?: unknown } } | undefined)?.promptCapabilities?.image;
+    this.imageSupport = image === true;
     const base = { cwd: this.first.cwd, mcpServers: [] };
     const result = this.first.sessionId
       ? await this.call("session/resume", { sessionId: this.first.sessionId, ...base })

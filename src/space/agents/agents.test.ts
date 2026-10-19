@@ -9,7 +9,7 @@ import { chatArgs } from "../runtimes/claude-code.ts";
 import { type RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
 import { loadManifest } from "../scheduler/manifest.ts";
 import { workspacePaths } from "../workspace.ts";
-import { createAgentRoutes } from "./api.ts";
+import { createAgentRoutes, supportsChatImages } from "./api.ts";
 import { runResponse } from "./runtime.ts";
 import { RunRegistry } from "./runs.ts";
 import { SessionStore } from "./sessions.ts";
@@ -71,6 +71,16 @@ const events = async (r: Response) =>
     .map((chunk) => chunk.split("\n").find((l) => l.startsWith("data: ")))
     .filter((l): l is string => !!l)
     .map((l) => JSON.parse(l.slice(6)) as Record<string, unknown>);
+
+describe("chat images", () => {
+  test("Claude Code and Codex take images on any turn; the harness needs its live process", () => {
+    expect(supportsChatImages("claude-code", false)).toBe(true);
+    expect(supportsChatImages("codex-cli", false)).toBe(true);
+    expect(supportsChatImages("deepseek-harness", true)).toBe(true);
+    expect(supportsChatImages("deepseek-harness", false)).toBe(false);
+    expect(supportsChatImages("anthropic-api", true)).toBe(false);
+  });
+});
 
 describe("chat runtime", () => {
   test("chatArgs builds the claude command line", () => {

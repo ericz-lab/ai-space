@@ -12,7 +12,8 @@ import { readFileSync } from "node:fs";
  *   `wait`               holds the turn until the client cancels
  *   `fail`               the turn ends with `stopReason: "refusal"`
  *   `model`              the current model route
- *   anything else        `echo: <text> [pid …] [model …] [mode …] [persona …] [rows …] [resumed …]`
+ *   an image block       `saw <n> image(s): <mime types>`
+ *   anything else        `echo: <text> [pid …] [model …] [mode …] [persona …] [rows …] [resumed …] [images <n>]`
  *
  * The echo carries what the runtime was started with, so a test can check the
  * `--patch` overlay, `DSH_PERMISSION_MODE`, and whether a process was reused.
@@ -70,7 +71,9 @@ export async function runAcpStandIn(args: string[]): Promise<void> {
   };
 
   const prompt = async (id: unknown, params: Record<string, unknown>) => {
-    const text = ((params.prompt as { type?: string; text?: string }[] | undefined) ?? []).map((b) => (b.type === "text" ? b.text ?? "" : "")).join("");
+    const blocks = (params.prompt as { type?: string; text?: string; mimeType?: string }[] | undefined) ?? [];
+    const text = blocks.map((b) => (b.type === "text" ? b.text ?? "" : "")).join("");
+    const images = blocks.filter((b) => b.type === "image");
     const stop = (stopReason: string) => result(id, { stopReason });
     if (text.startsWith("approve:")) {
       const command = text.slice("approve:".length).trim();
@@ -104,7 +107,11 @@ export async function runAcpStandIn(args: string[]): Promise<void> {
       message(`model: ${route[0]}:${route[1]}`);
       return stop("end_turn");
     }
-    message(`echo: ${text} [pid: ${process.pid}] [model: ${route[0]}:${route[1]}] [mode: ${mode}] [persona: ${persona}] [rows: ${rows.map((r) => r.id).join(",")}] [resumed: ${resumed}]`);
+    if (images.length) {
+      message(`saw ${images.length} image(s): ${images.map((i) => i.mimeType).join(",")}`);
+      return stop("end_turn");
+    }
+    message(`echo: ${text} [pid: ${process.pid}] [model: ${route[0]}:${route[1]}] [mode: ${mode}] [persona: ${persona}] [rows: ${rows.map((r) => r.id).join(",")}] [resumed: ${resumed}] [images ${images.length}]`);
     return stop("end_turn");
   };
 
@@ -141,7 +148,7 @@ export async function runAcpStandIn(args: string[]): Promise<void> {
         result(id, {
           protocolVersion: 1,
           agentInfo: { name: "deepseek-harness-acp", version: "test" },
-          agentCapabilities: { promptCapabilities: { image: false, audio: false, embeddedContext: false }, sessionCapabilities: { close: {}, list: {}, resume: {} } },
+          agentCapabilities: { promptCapabilities: { image: process.env.FAKE_DSH_ACP_IMAGES !== "0", audio: false, embeddedContext: false }, sessionCapabilities: { close: {}, list: {}, resume: {} } },
           authMethods: [],
         });
         continue;

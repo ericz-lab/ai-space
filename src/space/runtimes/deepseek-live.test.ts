@@ -94,6 +94,24 @@ describe("ACP live chat", () => {
     expect(events[2]).toMatchObject({ message: { content: [{ type: "tool_result", is_error: false, content: "hi" }] } });
   });
 
+  test("an image reaches the harness when its route advertises image prompts", async () => {
+    const runtime = make();
+    const data = Buffer.from("\x89PNG\r\n\x1a\n", "latin1").toString("base64");
+    const { done } = start(runtime, turn({ message: "look", images: [{ name: "probe.png", mediaType: "image/png", data }] }));
+    const { events, error } = await done;
+    expect(error).toBeNull();
+    expect(textOf(events)).toContain("saw 1 image(s): image/png");
+  });
+
+  test("a route without image prompts refuses the image", async () => {
+    const runtime = make();
+    const data = Buffer.from("\x89PNG\r\n\x1a\n", "latin1").toString("base64");
+    const env = { PATH: process.env.PATH, HOME: process.env.HOME, FAKE_DSH_ACP_IMAGES: "0" };
+    const { done } = start(runtime, turn({ message: "look", images: [{ name: "probe.png", mediaType: "image/png", data }], env }));
+    const { error } = await done;
+    expect(error).toContain("does not support images");
+  });
+
   test("an approval request allows the tool call and reports the decision", async () => {
     const runtime = make();
     const { done } = start(runtime, turn({ message: "approve:echo hi" }), (ev, handle) => {
