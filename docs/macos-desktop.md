@@ -295,7 +295,7 @@ The first build was a panel in a window: a browser that could only open ai-space
 | --- | --- | --- |
 | Main window | The iPhone client's layout (mobile/ios/README.md): pages side by side, moved through with a sideways trackpad swipe, the page dots in the toolbar or ⌥⌘← and ⌥⌘→. Home is the library of every app, agent and widget under the command box ([panel.md#omnibox](panel.md#omnibox)), which the first screen, where the window opens, carries too (⌘F focuses it there; while it holds a query that page shows the matches instead of the screen): what is typed filters the library, best names first (`OmniboxRules.swift`, the web panel's rules); Return opens the best match when its name holds the whole query and otherwise asks Space Assistant in a new native conversation, ⌘Return always asks, and a question asked while the assistant still answers waits in its message field; a microphone, shown when `GET /api/voice` says the Space can transcribe, records a clip (AAC, at most 90 s) and puts the transcript into the field, as it does in every chat's message field (`VoiceInput.swift`, `POST /api/voice/transcribe`); then the screens, copied from the panel once and kept on this Mac (right-click for Add to Panel, New Screen, Edit, Copy the Panel's Layout, Delete); then Settings (the saved Spaces, this Mac's appearance, theme and widgets, the Space's status, default model, pages, peers, services and backups, Sign Out). An app, a page of the Space or the web panel comes up over the launcher with Back to Space (⇧⌘H) in the toolbar; the window opens on the first screen | `/api/apps`, `/api/agents`, `/api/widgets`, `/api/peers`, the panel layout, `/api/router`, `/api/voice`, the settings routes |
 | Space pages | Inbox, chat (with earlier conversations), scheduled tasks, model and app usage, app models, events, packages and a terminal (SwiftTerm), drawn natively from the same files the iPhone client uses | the routes of each page, docs/terminal.md |
-| Agent chat | Native conversations, shared by the main window and Quick Chat, drawn as the iPhone's (replies on the solid surface, the person's in the accent, a column of about 72 characters); a dropped stream reattaches after the last event; Stop ends the run; a failed turn shows its reason in the thread (rate limit, sign-in, time-out, a runtime that exited without a word, with the Space's own text under it) and Try Again sends the message once more | `POST /api/agents/:app/:agent/chat`, `/runs/:id/events?after=`, `/runs/:id/stop`, `/api/agents/runs` |
+| Agent chat | Native conversations, shared by the main window and Quick Chat, drawn as the iPhone's (replies on the solid surface, the person's in the accent, a column of about 72 characters); a dropped stream reattaches after the last event; Stop ends the run; an action the permission tier does not cover waits as an approval card (Allow / Deny) and a message written during a turn joins it; a failed turn shows its reason in the thread (rate limit, sign-in, time-out, a runtime that exited without a word, with the Space's own text under it) and Try Again sends the message once more | `POST /api/agents/:app/:agent/chat` (`interactive: true`), `/runs/:id/events?after=`, `/runs/:id/stop`, `/runs/:id/steer`, `/runs/:id/approvals/:rid`, `/api/agents/runs` |
 | Quick Chat | A floating panel over any app on a global shortcut (⌥Space by default, Carbon hot key, no Accessibility permission): one 44-point header with the agent and its list (⌘J), New Conversation (⌘N), Open in Main Window (⌘O) and Close (Esc) | as above |
 | App tabs and windows | An app opens as a tab of the main window, over the launcher, shown as up to five app icons in their own toolbar group, separated from navigation and the grouped browser/window controls, with remaining tabs in an overflow menu and the active app kept visible and highlighted; right-click an icon to close it or all tabs. Page controls include back, forward and reload; Open in Browser, Open in New Window and Close share one toolbar group; Add to Panel remains in the launcher context menu; the mark stands in for the page until it has drawn; the operator can move any tab into its own window and back (⌥⌘T, toolbar or context menu) without reloading it; links to an app's origin from the panel, the inbox or a notification open in its tab or its window | `/api/apps` (`url`) |
 | Inbox | Native list with read and done; new unread threads become Mac notifications with Mark as Read and Done; the unread count is the Dock badge | `/api/inbox?filter=open`, `/api/inbox/mark` |
@@ -348,17 +348,29 @@ Validation: signed macOS build and 52 Xcode tests passed, including shared Keych
 ### Native chat permissions
 
 Mac chat and Quick Chat use the Web panel's permission flow (`src/web/Chat.tsx`). The composer
-offers Read-only (default), Edit files (`acceptEdits`) and All permissions (`bypassPermissions`).
-The choice is remembered on this Mac and captured when each new turn is sent; changing it during
-a run does not change that run or its reconnect request.
+offers Ask before changes (default), Edit files (`acceptEdits`) and All permissions
+(`bypassPermissions`). The choice is remembered on this Mac and captured when each new turn is
+sent; changing it during a run does not change that run or its reconnect request. Every turn is
+sent as interactive, so on Claude Code and Codex it runs on the conversation's live process
+([runtimes.md#live-chat](runtimes.md#live-chat)): Ask before changes lets the agent ask before an
+edit or a command instead of refusing it.
 
-A permission-denied tool result is shown beneath the reply with the refused tool names. Once the
-turn finishes, **Grant and retry** on the latest reply selects the next permission tier and asks
-the agent to finish the refused step in the same session, preserving any unsent draft. Bash needs
-All permissions; other tools first get Edit files and a further refusal can raise it to All
-permissions. The selected scope is shown beside the button and applies to subsequent messages.
-This retries a refused step; it is not a live per-command approval channel. Without clicking the
-button or changing the picker, permissions are not increased.
+An action the tier does not cover arrives as an approval card in the reply: what the agent wants to
+run, why, and **Allow** / **Deny**. Allow runs that one action as asked; Deny refuses it and the
+agent carries on without it. The card then reads Allowed, Denied or Not answered (the turn ended, or
+Stop denied it). An answer is sent only by a click; nothing is approved automatically. Several open
+cards can be answered in any order, and a card answered on another client shows the outcome here.
+
+A runtime without live chat, or an action refused anyway, still shows the refusal beneath the
+reply. Once the turn finishes, **Grant and retry** on the latest reply selects the next permission
+tier and asks the agent to finish the refused step in the same session, preserving any unsent draft.
+Bash needs All permissions; other tools first get Edit files and a further refusal can raise it to
+All permissions. The selected scope is shown beside the button and applies to subsequent messages.
+
+A message written while a turn runs joins that turn instead of waiting for it: the reply shows it
+waiting until the agent has read it after its current step. When the running turn cannot take it
+(the turn just ended, or the runtime has no live chat), it is sent as the next turn, in order, so no
+message is lost. All permissions skips the approval cards entirely.
 
 ### Native agent work messages
 

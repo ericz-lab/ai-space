@@ -83,12 +83,48 @@ struct ChatStreamTests {
         let original = ChatTurnRequest(message: "Check status", permission: selected)
         selected = .all
         #expect(original.body(sessionID: nil)["permissionMode"] == nil)
+        #expect(original.body(sessionID: nil)["interactive"] as? Bool == true)
         let retry = ChatTurnRequest(message: "Finish the refused step", permission: selected)
         let body = retry.body(sessionID: "same-session")
         #expect(body["permissionMode"] as? String == "bypassPermissions")
         #expect(body["sessionId"] as? String == "same-session")
         #expect(body["message"] as? String == "Finish the refused step")
         #expect(ChatTurnRequest(message: "edit", permission: .editFiles).body(sessionID: nil)["permissionMode"] as? String == "acceptEdits")
+        // The read-only tier keeps its old wire value: a Space without live chat reads it as before.
+        #expect(ChatPermission.readOnly.rawValue == "")
+    }
+
+    @Test func approvalsBecomeWaitingStepsAndResolve() {
+        var r = ChatReply()
+        r.apply(#"{"type":"approval_request","id":"req-1","tool":"Bash","title":"rm -rf build","detail":"wants to delete the build output"}"#)
+        #expect(r.steps.count == 1)
+        #expect(r.steps[0].kind == .approval && r.steps[0].state == .waiting)
+        #expect(r.steps[0].title == "Bash" && r.steps[0].text == "rm -rf build" && r.steps[0].output == "wants to delete the build output")
+        #expect(r.activity == nil)
+        r.apply(#"{"type":"approval_resolved","id":"req-1","decision":"allow"}"#)
+        #expect(r.steps[0].state == .allowed)
+        r.apply(#"{"type":"approval_request","id":"req-2","tool":"Edit","title":"notes.txt"}"#)
+        r.apply(#"{"type":"approval_resolved","id":"req-2","decision":"deny"}"#)
+        #expect(r.steps[1].state == .denied)
+        r.apply(#"{"type":"done"}"#)
+        #expect(r.steps.allSatisfy { $0.state != .waiting })
+    }
+
+    @Test func anUnansweredApprovalIsCancelledWhenTheTurnEnds() {
+        var r = ChatReply()
+        r.apply(#"{"type":"approval_request","id":"req-1","tool":"Bash","title":"make"}"#)
+        r.endSteps()
+        #expect(r.steps[0].state == .cancelled)
+    }
+
+    @Test func steerEventsReportTheMessagesTheAgentRead() {
+        var r = ChatReply()
+        r.apply(#"{"type":"steer","text":"check the logs"}"#)
+        #expect(r.consumedSteers == ["check the logs"])
+        #expect(r.steps.last?.kind == .steer && r.steps.last?.text == "check the logs")
+        // An image-only message replays with no text: the reply reports it without a title.
+        r.apply(#"{"type":"steer","text":""}"#)
+        #expect(r.consumedSteers == ["check the logs", ""])
     }
 
     @Test func tellsWhyATurnFailed() {

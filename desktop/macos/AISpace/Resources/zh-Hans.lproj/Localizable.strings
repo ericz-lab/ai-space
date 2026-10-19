@@ -457,15 +457,29 @@
 "Check for app updates" = "检查应用更新";
 
 /* Native chat permissions, matching the Web panel */
-"Read-only" = "只读";
+"Ask before changes" = "改动前询问";
 "Edit files" = "可改文件";
 "All permissions" = "全部权限";
 "Write access (next message)" = "写权限（下一条消息生效）";
-"The choice is remembered and applies to new messages. All permissions allows commands and file changes without further approval." = "此选择会被记住并应用于新消息。“全部权限”允许执行命令及修改文件，不再逐项请求批准。";
+"The choice is remembered and applies to new messages. Ask before changes lets the agent ask you before an edit or a command; All permissions allows commands and file changes without asking." = "此选择会被记住并应用于新消息。“改动前询问”会让智能体在修改文件或执行命令前先征得你同意；“全部权限”执行命令和修改文件时都不再询问。";
 "%@ was refused for lack of permission" = "%@ 因权限不足被拒绝";
 "Next messages: %@" = "后续消息权限：%@";
 "Grant and retry" = "授权并重试";
 "I have granted more permissions. Please finish the step that was refused for lack of permission." = "我已授予更多权限，请完成刚才因权限不足被拒绝的步骤。";
+
+/* Native chat: live turns, approvals and steering (docs/runtimes.md#live-chat) */
+"Waiting for your approval…" = "等你确认…";
+"Waiting for you" = "等你确认";
+"Allowed" = "已允许";
+"Denied" = "已拒绝";
+"Not answered" = "未作答";
+"Allow" = "允许";
+"Deny" = "拒绝";
+"The answer did not reach the agent: %@" = "答复没有送到智能体：%@";
+"The answer did not reach the agent: no turn is running" = "答复没有送到智能体：没有正在进行的回合";
+"You" = "你";
+"the agent reads it after its current step" = "智能体做完当前这一步后会看到";
+"Add to the reply in progress…" = "补充说明，会插入正在进行的回复…";
 
 /* Local edition first run: agent CLIs and the default model */
 "Agents on this Mac" = "此 Mac 上的 Agent";

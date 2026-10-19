@@ -11,6 +11,8 @@ struct ChatMessage: Identifiable, Equatable {
     var denied: [String] = []
     var activity: ChatActivity?
     var live = false
+    /// Messages added to the running turn that the agent has not read yet.
+    var pending: [String] = []
     /// Why the turn failed, shown in the thread under what the agent wrote, with a retry.
     var failure: ChatFailure?
 }
@@ -38,6 +40,15 @@ final class ChatController: ObservableObject {
     private var sessionID: String?
     private var runID: String?
     private var task: Task<Void, Never>?
+    /// Turns written while another one runs that the running turn could not take (`/steer` refused,
+    /// or none was open yet): sent in order once it ends.
+    private var queue: [ChatTurnRequest] = []
+    /// Messages added to the running turn that the agent has not read yet, and how many of the
+    /// reply's `steer` events have already taken one out.
+    private var pending: [String] = []
+    private var steersSeen = 0
+    /// Stop was asked for: a message written now must not be added to the turn being stopped.
+    private var stopRequested = false
 
     init(agent: AgentInfo, api: SpaceAPI) {
         self.agent = agent
@@ -53,13 +64,84 @@ final class ChatController: ObservableObject {
 
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (!text.isEmpty || !images.isEmpty), !busy, pendingImageImports == 0 else { return }
+        guard (!text.isEmpty || !images.isEmpty), pendingImageImports == 0 else { return }
         draft = ""
-        messages.append(ChatMessage(role: .user, text: text, images: images))
         let turn = ChatTurnRequest(message: text, permission: Preferences.shared.chatPermission, images: images)
         images = []
         imageError = nil
+        // A message written while a turn runs is added to that turn (docs/runtimes.md#live-chat):
+        // the agent reads it after its current step. A turn that cannot take it is queued and sent
+        // next, in order, so nothing is lost.
+        if busy {
+            if let runID, queue.isEmpty, !stopRequested { steer(turn, runID: runID) }
+            else { enqueue(turn) }
+            return
+        }
+        messages.append(ChatMessage(role: .user, text: text, images: turn.images))
         start(source: .new(turn))
+    }
+
+    /// The person's answer to one of the running turn's approvals (`allow` runs the action once).
+    /// Returns nil when it reached the Space, else what to show in the card.
+    func answer(_ requestID: String, allow: Bool) async -> String? {
+        guard let runID else { return String(localized: "The answer did not reach the agent: no turn is running") }
+        do {
+            _ = try await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/approvals/\(SpacePath.escape(requestID))", json: ["decision": allow ? "allow" : "deny"])
+            return nil
+        } catch {
+            return String(localized: "The answer did not reach the agent: \(HubStore.message(error))")
+        }
+    }
+
+    /// Hands the message to the running turn; when that is refused (the turn just ended, or its
+    /// runtime has no live chat) it becomes the next turn and is shown in the thread straight away.
+    private func steer(_ turn: ChatTurnRequest, runID: String) {
+        let label = turn.message.isEmpty ? "🖼 ×\(turn.images.count)" : turn.message
+        markPending(label, add: true)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                var body: [String: Any] = ["message": turn.message]
+                if !turn.images.isEmpty { body["images"] = turn.images.map(\.body) }
+                _ = try await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/steer", json: body)
+            } catch {
+                markPending(label, add: false)
+                enqueue(turn)
+                if !busy, let next = takeQueued() { start(source: .new(next)) }
+            }
+        }
+    }
+
+    /// Shows (or takes back) one message's "the agent has not read it yet" line in the live reply.
+    private func markPending(_ label: String, add: Bool) {
+        if add {
+            pending.append(label)
+        } else if let at = pending.lastIndex(of: label) {
+            pending.remove(at: at)
+        }
+        guard let index = messages.lastIndex(where: { $0.role == .agent && $0.live }) else { return }
+        messages[index].pending = pending
+    }
+
+    /// The reply took one added message in: its text names it, except for an image-only message,
+    /// which replays without text and takes the oldest waiting one.
+    private func takePending(_ text: String) {
+        let wanted = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let at = pending.firstIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == wanted }) {
+            pending.remove(at: at)
+        } else if !pending.isEmpty {
+            pending.removeFirst()
+        }
+    }
+
+    /// A message for after the running turn: kept in the thread and sent in order.
+    private func enqueue(_ turn: ChatTurnRequest) {
+        messages.append(ChatMessage(role: .user, text: turn.message, images: turn.images))
+        queue.append(turn)
+    }
+
+    private func takeQueued() -> ChatTurnRequest? {
+        queue.isEmpty ? nil : queue.removeFirst()
     }
 
     /// The message of the last turn when that turn failed: what Try Again sends once more.
@@ -87,6 +169,7 @@ final class ChatController: ObservableObject {
     }
 
     func stop() {
+        stopRequested = true
         guard let runID else { task?.cancel(); return }
         Task { try? await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/stop", json: [:]) }
     }
@@ -128,6 +211,9 @@ final class ChatController: ObservableObject {
     private func start(source: Source) {
         busy = true
         error = nil
+        stopRequested = false
+        pending = []
+        steersSeen = 0
         var first = ChatReply()
         if case .attach = source { first.activity = .reconnecting }
         let initial = first
@@ -178,9 +264,17 @@ final class ChatController: ObservableObject {
             reply.endSteps()
             update(index, reply)
             messages[index].live = false
-            busy = false
+            messages[index].pending = []
             runID = nil
             onTurnEnded()
+            // A message that could not join this turn goes now, in the order it was written.
+            if let next = takeQueued() {
+                start(source: .new(next))
+            } else {
+                pending = []
+                stopRequested = false
+                busy = false
+            }
         }
     }
 
@@ -193,6 +287,12 @@ final class ChatController: ObservableObject {
         messages[index].tools = reply.tools
         messages[index].steps = reply.steps
         messages[index].denied = reply.denied
+        // The reply says which added messages the agent has read; the rest still wait.
+        while steersSeen < reply.consumedSteers.count {
+            takePending(reply.consumedSteers[steersSeen])
+            steersSeen += 1
+        }
+        messages[index].pending = pending
         messages[index].activity = reply.activity
         if let failure = reply.failure { messages[index].failure = ChatFailure(failure) }
     }

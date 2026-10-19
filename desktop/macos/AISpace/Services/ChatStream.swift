@@ -37,7 +37,8 @@ struct SSEParser {
     }
 }
 
-/// The Web panel's three write-access choices (src/web/Chat.tsx).
+/// The Web panel's three write-access choices (src/web/Chat.tsx). On a live turn (docs/runtimes.md#live-chat)
+/// the read-only choice asks before an edit or a command instead of refusing it.
 enum ChatPermission: String, CaseIterable, Identifiable {
     case readOnly = ""
     case editFiles = "acceptEdits"
@@ -46,7 +47,7 @@ enum ChatPermission: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .readOnly: return String(localized: "Read-only")
+        case .readOnly: return String(localized: "Ask before changes")
         case .editFiles: return String(localized: "Edit files")
         case .all: return String(localized: "All permissions")
         }
@@ -65,7 +66,10 @@ struct ChatTurnRequest: Equatable {
     var images: [ChatImage] = []
 
     func body(sessionID: String?) -> [String: Any] {
-        var body: [String: Any] = ["message": message]
+        // Every turn is interactive: the conversation's live process can ask for an approval and
+        // take messages while it runs (docs/runtimes.md#live-chat). A runtime without live chat
+        // ignores the flag and runs the turn as before.
+        var body: [String: Any] = ["message": message, "interactive": true]
         if !images.isEmpty { body["images"] = images.map(\.body) }
         if permission != .readOnly { body["permissionMode"] = permission.rawValue }
         if let sessionID { body["sessionId"] = sessionID }
@@ -81,10 +85,12 @@ enum ChatActivity: Equatable {
     case running(tool: String)
 }
 
-/// Ordered, observable work in one turn. Tool IDs remain stable from start to result.
+/// Ordered, observable work in one turn. Tool IDs remain stable from start to result. A live turn
+/// adds two kinds: an action the agent waits for (`approval`: `title` the tool, `text` what it wants
+/// to do, `output` why) and a message the person added while it ran (`steer`).
 struct ChatStep: Identifiable, Equatable {
-    enum Kind: Equatable { case text, tool }
-    enum State: Equatable { case running, succeeded, failed, incomplete }
+    enum Kind: Equatable { case text, tool, approval, steer }
+    enum State: Equatable { case running, succeeded, failed, incomplete, waiting, allowed, denied, cancelled }
     var id: String
     var kind: Kind
     var title: String = ""
@@ -128,8 +134,12 @@ struct ChatReply: Equatable {
     }
 
     mutating func endSteps() {
-        for i in steps.indices where steps[i].state == .running {
-            steps[i].state = steps[i].kind == .text ? .succeeded : .incomplete
+        for i in steps.indices {
+            if steps[i].state == .running {
+                steps[i].state = steps[i].kind == .text ? .succeeded : .incomplete
+            }
+            // An approval nobody answered before the turn ended is not left waiting.
+            if steps[i].state == .waiting { steps[i].state = .cancelled }
         }
     }
 
@@ -141,6 +151,9 @@ struct ChatReply: Equatable {
     var stopped = false
     var finished = false
     var denied: [String] = []
+    /// The messages the agent has read that the person added while the turn ran, one per `steer`
+    /// event: the reply no longer shows them waiting.
+    var consumedSteers: [String] = []
     private var toolNames: [String: String] = [:]
 
     /// What the agent wrote, without any note.
@@ -159,6 +172,30 @@ struct ChatReply: Equatable {
               let type = ev["type"] as? String
         else { return }
         switch type {
+        case "approval_request":
+            guard let id = ev["id"] as? String else { return }
+            let step = ChatStep(
+                id: "approval:" + id,
+                kind: .approval,
+                title: ev["tool"] as? String ?? "tool",
+                text: ev["title"] as? String ?? "",
+                output: ev["detail"] as? String ?? "",
+                state: .waiting)
+            if !steps.contains(where: { $0.id == step.id }) { steps.append(step) }
+            // The turn is not running anything now; it waits for the person's answer.
+            activity = nil
+        case "approval_resolved":
+            guard let id = ev["id"] as? String,
+                  let i = steps.firstIndex(where: { $0.id == "approval:" + id }) else { return }
+            switch ev["decision"] as? String {
+            case "allow": steps[i].state = .allowed
+            case "deny": steps[i].state = .denied
+            default: steps[i].state = .cancelled
+            }
+        case "steer":
+            let text = ev["text"] as? String ?? ""
+            consumedSteers.append(text)
+            steps.append(ChatStep(id: "steer:" + UUID().uuidString, kind: .steer, text: text, state: .succeeded))
         case "system" where ev["subtype"] as? String == "init":
             sessionID = ev["session_id"] as? String ?? sessionID
             activity = .thinking(model: ev["model"] as? String ?? "")
