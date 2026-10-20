@@ -808,11 +808,34 @@ data class ChatSessionInfo(
     }
 }
 
-/** One message of a stored session. */
-data class ChatStored(val role: String, val text: String? = null) {
+/**
+ * One message of a stored session. An answer of the agent carries its work: `steps`, its text and
+ * tool calls in order with each call's input and output, from a Space that records them; else the
+ * flat `tools` list of names and hints.
+ */
+data class ChatStored(
+    val role: String,
+    val text: String? = null,
+    val steps: List<ChatStep> = emptyList(),
+    val tools: List<Tool> = emptyList(),
+) {
+    data class Tool(val name: String, val hint: String = "")
+
+    /** What the reply shows of its work: the recorded steps, or else the tools it called, without results. */
+    val work: List<ChatStep>
+        get() = steps.ifEmpty {
+            tools.mapIndexed { i, tool -> ChatStep("history-tool:$i", ChatStepKind.Tool, title = tool.name, text = tool.hint, state = ChatStepState.Incomplete) }
+        }
+
     companion object : JsonReader<ChatStored> {
         override fun from(o: JSONObject): ChatStored? {
-            return ChatStored(o.str("role") ?: return null, o.str("text"))
+            val tools = o.arr("tools")?.let { a ->
+                (0 until a.length()).mapNotNull { i ->
+                    val tool = a.opt(i) as? JSONObject ?: return@mapNotNull null
+                    Tool(tool.str("name") ?: return@mapNotNull null, tool.str("hint") ?: "")
+                }
+            } ?: emptyList()
+            return ChatStored(o.str("role") ?: return null, o.str("text"), ChatStep.history(o.arr("steps")), tools)
         }
     }
 }
