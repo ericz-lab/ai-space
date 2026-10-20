@@ -343,6 +343,8 @@ final class ChatStore: ObservableObject {
         var asks: [String: Ask] = [:]
         /// What the turn ended with besides the agent's words: an error, a lost connection, a stop.
         var note: String?
+        /// The pictures sent with the person's message.
+        var images: [ChatImage] = []
         var live = false
     }
 
@@ -354,6 +356,9 @@ final class ChatStore: ObservableObject {
     let api: SpaceAPI
     let base: String
     @Published var draft = ""
+    /// Pictures to go with the next message (docs/panel.md#agent-chat-images).
+    @Published var images: [ChatImage] = []
+    @Published var imageError: String?
     @Published private(set) var bubbles: [Bubble] = []
     @Published private(set) var isRunning = false
     @Published private(set) var sessions: [ChatSessionInfo] = []
@@ -371,6 +376,7 @@ final class ChatStore: ObservableObject {
     private struct QueuedTurn {
         let bubble: UUID
         let text: String
+        let images: [ChatImage]
         let intentID: String?
         let timezone: String?
     }
@@ -384,7 +390,19 @@ final class ChatStore: ObservableObject {
         self.base = base
     }
 
-    var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty }
+
+    /// Adds a picture to the next message within the Space's limits; false when it does not fit.
+    @discardableResult
+    func attach(_ image: ChatImage) -> Bool {
+        guard ChatImage.validate(images + [image]) else {
+            imageError = String(localized: "Add up to 4 images, 5 MB each and 10 MB in total.")
+            return false
+        }
+        images.append(image)
+        imageError = nil
+        return true
+    }
 
     func loadSessions() async {
         guard let data = try? await api.data("\(base)/sessions") else { return }
@@ -397,6 +415,7 @@ final class ChatStore: ObservableObject {
         conversation = UUID()
         bubbles = []
         error = nil
+        imageError = nil
     }
 
     /// Shows a stored conversation; the next message continues it.
@@ -422,23 +441,26 @@ final class ChatStore: ObservableObject {
 
     func send(intentID: String? = nil, timezone: String? = nil) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let images = self.images
+        guard !text.isEmpty || !images.isEmpty else { return }
         draft = ""
+        self.images = []
+        imageError = nil
         error = nil
         // A message written while a turn runs joins that turn (docs/runtimes.md#live-chat); a turn
         // that cannot take it is queued and sent next. An intent keeps its own route through chat,
         // so it is queued instead.
         if isRunning {
             if intentID != nil || !queue.isEmpty || stopRequested {
-                enqueue(text: text, intentID: intentID, timezone: timezone)
+                enqueue(text: text, images: images, intentID: intentID, timezone: timezone)
             } else {
-                steer(text: text, intentID: intentID, timezone: timezone)
+                steer(text: text, images: images, intentID: intentID, timezone: timezone)
             }
             return
         }
-        let bubble = Bubble(isUser: true, text: text)
+        let bubble = Bubble(isUser: true, text: text, images: images)
         bubbles.append(bubble)
-        start(QueuedTurn(bubble: bubble.id, text: text, intentID: intentID, timezone: timezone))
+        start(QueuedTurn(bubble: bubble.id, text: text, images: images, intentID: intentID, timezone: timezone))
     }
 
     /// The person's answer to one of the running turn's approvals, or to its questions (`answers`;
@@ -455,24 +477,28 @@ final class ChatStore: ObservableObject {
 
     /// Hands the message to the running turn; when that is refused (the turn just ended, or its
     /// runtime has no live chat) it becomes the next turn.
-    private func steer(text: String, intentID: String?, timezone: String?) {
+    private func steer(text: String, images: [ChatImage], intentID: String?, timezone: String?) {
         guard let runID else {
-            enqueue(text: text, intentID: intentID, timezone: timezone)
+            enqueue(text: text, images: images, intentID: intentID, timezone: timezone)
             drain()
             return
         }
         let conversation = self.conversation
-        markPending(text, add: true)
-        Task { [weak self] in
+        // A picture-only message reads as the panel's label for it (src/web/Chat.tsx).
+        let label = text.isEmpty ? "🖼 ×\(images.count)" : text
+        markPending(label, add: true)
+        var body: [String: Any] = ["message": text]
+        if !images.isEmpty { body["images"] = images.map(\.body) }
+        Task { [weak self, body] in
             guard let self else { return }
             do {
-                _ = try await api.send("POST", "\(base)/runs/\(SpacePath.escape(runID))/steer", json: ["message": text])
+                _ = try await api.send("POST", "\(base)/runs/\(SpacePath.escape(runID))/steer", json: body)
             } catch {
                 // The person moved to another thread while the answer was on its way: the message
                 // belongs to the one that is gone, not to the new one.
                 guard self.conversation == conversation else { return }
-                markPending(text, add: false)
-                enqueue(text: text, intentID: intentID, timezone: timezone)
+                markPending(label, add: false)
+                enqueue(text: text, images: images, intentID: intentID, timezone: timezone)
                 drain()
             }
         }
@@ -488,16 +514,17 @@ final class ChatStore: ObservableObject {
         bubbles[i].pending = pending
     }
 
-    /// The reply took one added message in: its text names it.
+    /// The reply took one added message in: its text names it. A picture-only message is named
+    /// by the Space's own words for it, so the oldest waiting one goes instead, as on the panel.
     private func takePending(_ text: String) {
-        guard let at = pending.firstIndex(of: text) else { return }
-        pending.remove(at: at)
+        guard !pending.isEmpty else { return }
+        pending.remove(at: pending.firstIndex(of: text) ?? 0)
     }
 
-    private func enqueue(text: String, intentID: String?, timezone: String?) {
-        let bubble = Bubble(isUser: true, text: text)
+    private func enqueue(text: String, images: [ChatImage], intentID: String?, timezone: String?) {
+        let bubble = Bubble(isUser: true, text: text, images: images)
         bubbles.append(bubble)
-        queue.append(QueuedTurn(bubble: bubble.id, text: text, intentID: intentID, timezone: timezone))
+        queue.append(QueuedTurn(bubble: bubble.id, text: text, images: images, intentID: intentID, timezone: timezone))
     }
 
     private func takeQueued() -> QueuedTurn? {
@@ -538,6 +565,7 @@ final class ChatStore: ObservableObject {
         var tries = 0
         var asks: [String: Ask] = [:]
         var body: [String: Any] = ["message": turn.text, "interactive": true]
+        if !turn.images.isEmpty { body["images"] = turn.images.map(\.body) }
         if let sessionID { body["sessionId"] = sessionID }
         if let intentID = turn.intentID {
             body["intentId"] = intentID

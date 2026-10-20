@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// The agents of the Space, each leading to its conversation.
@@ -38,6 +39,8 @@ struct ChatPage: View {
     let agent: CatalogueEntry
     @ObservedObject var store: ChatStore
     let icons: IconStore
+    @State private var picked: [PhotosPickerItem] = []
+    @State private var reading = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,6 +63,10 @@ struct ChatPage: View {
             if let error = store.error {
                 Text("Unavailable: \(error)").font(.footnote).foregroundStyle(Theme.danger).padding(.horizontal, 14).padding(.bottom, 6)
             }
+            if let error = store.imageError {
+                Text(verbatim: error).font(.footnote).foregroundStyle(Theme.danger).padding(.horizontal, 14).padding(.bottom, 6)
+            }
+            if !store.images.isEmpty { attachments }
             composer
         }
         .background(Theme.ground.ignoresSafeArea())
@@ -86,12 +93,22 @@ struct ChatPage: View {
                 .accessibilityLabel(Text("Chats"))
             }
         }
+        .onChange(of: picked) { _, items in
+            guard !items.isEmpty else { return }
+            picked = []
+            load(items)
+        }
         .task { await store.loadSessions() }
         .task(id: store.isRunning) { if !store.isRunning { await store.loadSessions() } }
     }
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            PhotosPicker(selection: $picked, maxSelectionCount: max(1, 4 - store.images.count), matching: .images) {
+                Image(systemName: "paperclip").font(.system(size: 20)).frame(width: 32, height: 36)
+            }
+            .disabled(store.images.count >= 4 || reading > 0)
+            .accessibilityLabel(Text("Add images"))
             TextField(text: $store.draft, prompt: Text("Message"), axis: .vertical) { Text("Message") }
                 .lineLimit(1...6)
                 .padding(.horizontal, 12).padding(.vertical, 9)
@@ -105,11 +122,56 @@ struct ChatPage: View {
             // has something to add.
             if !store.isRunning || store.canSend {
                 Button { store.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }
-                    .disabled(!store.canSend).accessibilityLabel(Text("Send"))
+                    .disabled(!store.canSend || reading > 0).accessibilityLabel(Text("Send"))
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.bar)
+    }
+
+    /// The pictures waiting to go with the next message, each with a button to take it off.
+    private var attachments: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(store.images) { image in
+                    ChatImageThumb(image: image)
+                        .overlay(alignment: .topTrailing) {
+                            Button { store.images.removeAll { $0.id == image.id } } label: {
+                                Image(systemName: "xmark.circle.fill").font(.system(size: 18))
+                                    .symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.6))
+                            }
+                            .buttonStyle(.plain).padding(3)
+                            .accessibilityLabel(Text("Remove image"))
+                        }
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 6)
+        }
+        .background(.bar)
+    }
+
+    /// Reads the chosen pictures in the order chosen. PNG, JPEG, GIF and WebP within 5 MB go as
+    /// they are; anything else (HEIC from the camera among them) is re-encoded as JPEG.
+    private func load(_ items: [PhotosPickerItem]) {
+        reading += 1
+        Task { @MainActor in
+            defer { reading -= 1 }
+            for item in items {
+                guard let data = try? await item.loadTransferable(type: Data.self), let image = Self.chatImage(data, number: store.images.count + 1) else {
+                    store.imageError = String(localized: "Could not read this image.")
+                    continue
+                }
+                if !store.attach(image) { break }
+            }
+        }
+    }
+
+    static func chatImage(_ data: Data, number: Int) -> ChatImage? {
+        if let type = ChatRows.imageType(of: data), data.count <= ChatRows.maxImageBytes {
+            return ChatImage(name: "Image \(number).\(type.ext)", mediaType: type.mime, bytes: data)
+        }
+        guard let picture = CapturePicture.prepare(data) else { return nil }
+        return ChatImage(name: "Image \(number).\(picture.kind.fileExtension)", mediaType: picture.kind.mimeType, bytes: picture.data)
     }
 
     private var intro: some View {
@@ -139,6 +201,9 @@ struct ChatBubble: View {
         HStack {
             Spacer(minLength: 40)
             VStack(alignment: .trailing, spacing: 6) {
+                if !bubble.images.isEmpty {
+                    HStack(spacing: 6) { ForEach(bubble.images) { ChatImageThumb(image: $0) } }
+                }
                 if !bubble.text.isEmpty {
                     Self.rendered(bubble.text).foregroundStyle(Color.white).textSelection(.enabled)
                 }
@@ -215,6 +280,20 @@ struct ChatBubble: View {
         case .reconnecting: return String(localized: "Reconnecting…")
         case .thinking(let model): return model.isEmpty ? String(localized: "Thinking…") : String(localized: "Thinking (\(model))…")
         case .running(let tool): return String(localized: "Running \(tool)…")
+        }
+    }
+}
+
+/// A picture of a message, small and square.
+private struct ChatImageThumb: View {
+    let image: ChatImage
+
+    var body: some View {
+        if let picture = CapturePicture.preview(image.bytes, maxPixelSize: 240) {
+            Image(uiImage: picture).resizable().scaledToFill()
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityLabel(Text(verbatim: image.name))
         }
     }
 }

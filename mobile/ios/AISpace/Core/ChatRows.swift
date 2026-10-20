@@ -96,6 +96,21 @@ enum ChatRows {
         return tools + (text.isEmpty ? [] : [ChatStep(id: "history-text", kind: .text, text: text, state: .succeeded)])
     }
 
+    // MARK: Pictures
+
+    /// The largest picture a message carries as it is (docs/panel.md#agent-chat-images).
+    static let maxImageBytes = 5 * 1024 * 1024
+
+    /// The formats the Space takes, by their first bytes; anything else has to be re-encoded.
+    static func imageType(of data: Data) -> (mime: String, ext: String)? {
+        let b = [UInt8](data.prefix(12))
+        if b.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return ("image/png", "png") }
+        if b.starts(with: [0xFF, 0xD8, 0xFF]) { return ("image/jpeg", "jpg") }
+        if b.starts(with: Array("GIF8".utf8)) { return ("image/gif", "gif") }
+        if b.count == 12, b.starts(with: Array("RIFF".utf8)), Array(b.suffix(4)) == Array("WEBP".utf8) { return ("image/webp", "webp") }
+        return nil
+    }
+
     // MARK: Questions
 
     /// A question the agent asks while its turn runs (docs/runtimes.md#live-chat): an

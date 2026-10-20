@@ -92,4 +92,13 @@ struct ChatRowsTests {
         #expect(ChatRows.approvalBody(allow: false, answers: nil)["answers"] == nil)
         #expect(ChatRows.approvalBody(allow: true)["decision"] as? String == "allow")
     }
+
+    @Test func recognizesThePictureFormatsTheSpaceTakes() {
+        #expect(ChatRows.imageType(of: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0]))?.mime == "image/png")
+        #expect(ChatRows.imageType(of: Data([0xFF, 0xD8, 0xFF, 0xE0]))?.mime == "image/jpeg")
+        #expect(ChatRows.imageType(of: Data("GIF89a".utf8))?.mime == "image/gif")
+        #expect(ChatRows.imageType(of: Data("RIFF\u{0}\u{0}\u{0}\u{0}WEBP".utf8))?.mime == "image/webp")
+        // HEIC, as the camera writes it, has to be re-encoded.
+        #expect(ChatRows.imageType(of: Data([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63])) == nil)
+    }
 }

@@ -476,3 +476,9 @@
 "Your answer" = "你的回答";
 "Or type your own answer" = "或者自己输入答案";
 "Waiting for your answer…" = "等你回答…";
+
+/* Native chat: pictures with a message (docs/panel.md#agent-chat-images) */
+"Add images" = "添加图片";
+"Remove image" = "移除图片";
+"Add up to 4 images, 5 MB each and 10 MB in total." = "最多添加 4 张图片，单张不超过 5 MB，总计不超过 10 MB。";
+"Could not read this image." = "无法读取这张图片。";
