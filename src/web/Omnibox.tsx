@@ -354,7 +354,13 @@ function IntentRow({ intent, on, onHover, onPick }: { intent: Intent; on: boolea
   return (
     <li role="option" aria-selected={on} className={`omni-intent${on ? " on" : ""}`} onMouseEnter={onHover} onMouseDown={(ev) => ev.preventDefault()} onClick={onPick}>
       <span className="omni-icon omni-glyph-icon" aria-hidden="true">
-        {intent.kind === "calc" ? "＝" : intent.kind === "convert" ? "¤" : intent.action.effect === "write" ? "＋" : intent.action.effect === "run" ? "▶" : "⌕"}
+        {intent.kind === "calc" ? (
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="5" y="2" width="14" height="20" rx="2" />
+            <rect x="8" y="5" width="8" height="4" rx=".5" />
+            <path d="M8 13h1m3 0h1m3 0v5M8 18h1m3 0h1" />
+          </svg>
+        ) : intent.kind === "convert" ? "¤" : intent.action.effect === "write" ? "＋" : intent.action.effect === "run" ? "▶" : "⌕"}
       </span>
       <span className="omni-title">{title}</span>
       <span className="omni-kind">{kind}</span>
