@@ -114,6 +114,9 @@ export const toolVariant = (name: string): ToolVariant => {
 /** The first non-empty line, so a long command or a patch still reads as one row. */
 export const toolSummary = (text: string): string => text.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
 
+/** Whether a run of calls is all commands, so a folded transcript's head can say what ran. */
+export const allCommands = (steps: ChatStep[]): boolean => steps.length > 0 && steps.every((step) => step.kind === "tool" && toolVariant(step.name) === "bash");
+
 /** Runs of consecutive tool calls become one group, so they stack as a tight list between paragraphs. */
 export const stepGroups = (steps: ChatStep[]): (ChatStep | ChatStep[])[] => steps.reduce<(ChatStep | ChatStep[])[]>((groups, step) => {
   const last = groups[groups.length - 1];

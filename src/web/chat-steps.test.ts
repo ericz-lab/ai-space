@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ChatSteps, historySteps, submitsChat, toolSummary, toolVariant } from "./chat-steps.ts";
+import { ChatSteps, allCommands, historySteps, submitsChat, toolSummary, toolVariant } from "./chat-steps.ts";
 
 const tool = (id: string) => ({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: "pwd" } }] } });
 test("Codex work preserves text order, repeated tools and separate results", () => {
@@ -84,4 +84,12 @@ test("tool rows pick a variant across runtimes and summarize to one line", () =>
   expect(toolVariant("space_notify")).toBe("other");
   expect(toolSummary("\n  for d in *; do\n  echo $d\ndone")).toBe("for d in *; do");
   expect(toolSummary("")).toBe("");
+});
+
+test("a folded run names commands only when every call in it is one", () => {
+  const run = (names: string[]) => historySteps(names.map((name) => ({ kind: "tool" as const, name, input: "x", output: "", failed: false })));
+  expect(allCommands(run(["Bash", "exec_command", "run_command"]))).toBe(true);
+  expect(allCommands(run(["Bash", "Read"]))).toBe(false);
+  expect(allCommands(run(["Read"]))).toBe(false);
+  expect(allCommands([])).toBe(false);
 });

@@ -645,6 +645,22 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 .chat-tool-cue { flex: none; margin-left: 8px; font-size: 11px; }
 .chat-tool.failed .chat-tool-summary, .chat-tool.failed .chat-tool-cue { color: var(--danger); }
 .chat-tool.incomplete .chat-tool-cue { opacity: 0.8; }
+/* A past session's run of calls folded to one line: what ran, how many, and any failure kept visible. */
+.chat-tool-group { min-width: 0; }
+.chat-tool-group-head {
+  display: flex; align-items: center; width: 100%; min-width: 0; height: 26px; padding: 0 6px 0 2px; margin: 0;
+  font: inherit; font-size: 12.5px; text-align: left; color: var(--muted); background: none; border: 0; border-radius: 6px;
+  cursor: pointer; transition: color 0.1s ease, background 0.1s ease;
+}
+.chat-tool-group-head:hover, .chat-tool-group.open .chat-tool-group-head { color: var(--text); background: color-mix(in srgb, var(--text) 5%, transparent); }
+.chat-tool-group-head:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.chat-tool-group-head .chat-tool-chevron { opacity: 1; transform: rotate(-90deg); }
+.chat-tool-group.open .chat-tool-chevron { transform: rotate(0deg); }
+.chat-tool-group-title { flex: none; font-weight: 500; }
+.chat-tool-group-count { flex: none; margin-left: 6px; font-size: 11px; opacity: 0.7; }
+.chat-tool-group-head .chat-tool-cue { margin-left: auto; }
+.chat-tool-group.failed .chat-tool-cue { color: var(--danger); }
+.chat-tool-group .chat-tools { margin: 2px 0 4px 22px; }
 /* A running call: a light sweep over its text, the way DeepSeek Harness marks work in progress. */
 .chat-tool.running :is(.chat-tool-title, .chat-tool-summary, .chat-tool-cue) {
   color: transparent; -webkit-background-clip: text; background-clip: text;

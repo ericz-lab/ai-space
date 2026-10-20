@@ -457,6 +457,9 @@ const en = {
   "chat.tool.code": "Code",
   "chat.tool.task": "Agent",
   "chat.tool.plan": "Plan",
+  "chat.tools.commands": "Ran commands",
+  "chat.tools.called": "Called tools",
+  "chat.tools.failed": "{n} failed",
   "chat.step.truncated": "Output limited to 12,000 characters.",
 
   "chat.permRead": "🔒 ask before changes",
@@ -1071,6 +1074,9 @@ const zh: Record<Key, string> = {
   "chat.tool.code": "代码",
   "chat.tool.task": "子代理",
   "chat.tool.plan": "计划",
+  "chat.tools.commands": "执行了命令",
+  "chat.tools.called": "调用了工具",
+  "chat.tools.failed": "{n} 个失败",
   "chat.step.truncated": "输出最多显示 12,000 个字符。",
 
   "chat.permRead": "🔒 改动前询问",

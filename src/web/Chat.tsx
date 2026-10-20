@@ -1,7 +1,7 @@
 import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
 import { ChatSteps, historySteps, stepGroups, submitsChat, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
-import { Glyph, WorkStep } from "./ChatToolRow.tsx";
+import { Glyph, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun } from "./api.ts";
@@ -14,7 +14,8 @@ import { localized, useLang } from "./i18n.ts";
 // - Mounted permanently (closing only slides it away) so conversations and session ids survive.
 // - Conversations are keyed by agent id and run in parallel: each has its own queue and in-flight turn;
 //   the bookmark bar on the left switches between them, a busy one shows a pulsing dot.
-// - Text and tool events render independently, in order, without collapsing repeated tools.
+// - Text and tool events render independently, in order; a turn being followed shows every call,
+//   while a past session restored from its transcript folds each run of calls into one line.
 // - A message sent while a turn runs goes into that turn (docs/runtimes.md#live-chat): the agent reads
 //   it after its current step. A runtime that cannot take it (no live chat, or the turn just ended)
 //   gets it queued in the page and sent next, in order. ⏹ stops the current run.
@@ -43,14 +44,14 @@ const toolHint = (input: Record<string, unknown> = {}) => {
 
 const Ava = ({ icon, fallback = "✨" }: { icon?: string; fallback?: string }) => (isImgIcon(icon) ? <img src={icon} alt="" /> : <>{icon || fallback}</>);
 
-type Msg = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean; pending?: string[] };
+type Msg = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean; pending?: string[]; historic?: boolean };
 type Conv = { agent: AgentInfo | null; msgs: Msg[]; sid: string | null; busy: boolean; queued: number };
 /** A message of a restored transcript; `steps` keeps the assistant's text and tool calls in order. */
 type HistoryMessage = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; steps?: HistoryStep[] };
 const fromHistory = (m: HistoryMessage): Msg => {
   if (m.role === "user") return m;
   const { steps, ...rest } = m;
-  return { ...rest, denied: [], ...(steps?.length ? { steps: historySteps(steps) } : {}) };
+  return { ...rest, denied: [], historic: true, ...(steps?.length ? { steps: historySteps(steps) } : {}) };
 };
 const EMPTY_CONV: Conv = { agent: null, msgs: [], sid: null, busy: false, queued: 0 };
 /** The turn a conversation is following: its run (once the server named it) and the stream's abort. */
@@ -672,6 +673,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
             <div key={i} className={`msg ${m.role}`}>
               {m.role === "ai" ? <>
                 {m.steps?.length ? stepGroups(m.steps).map((step) => Array.isArray(step) ?
+                  step.length > 1 && m.historic ?
+                  <ToolGroup key={step[0]!.id} steps={step} folded /> :
                   <div key={step[0]!.id} className="chat-tools">{step.map((tool) => <WorkStep key={tool.id} step={tool} />)}</div> :
                   step.kind === "text" ?
                   <div key={step.id} className={`md ${step.state === "running" ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(step.text) }} /> :

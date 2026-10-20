@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { toolSummary, toolVariant, type ChatStep, type ToolVariant } from "./chat-steps.ts";
+import { allCommands, toolSummary, toolVariant, type ChatStep, type ToolVariant } from "./chat-steps.ts";
 import { useLang } from "./i18n.ts";
 
 /** Line glyphs on a 16px grid, drawn in the row's text color (after DeepSeek Harness's tool rows). */
@@ -50,5 +50,25 @@ export function WorkStep({ step }: { step: ChatStep }) {
       {step.text && <div><span>{t("chat.step.in")}</span><pre>{step.text}</pre></div>}
       {step.output && <div className={step.state === "failed" ? "failed" : ""}><span>{t("chat.step.out")}</span><pre>{step.output}{step.output.length >= 12000 && <small>{"\n"}{t("chat.step.truncated")}</small>}</pre></div>}
     </div>}
+  </div>;
+}
+
+/**
+ * A run of tool calls from a past session, folded to one line: what kind of work ran and how many
+ * calls, with a failure kept on the fold and the calls themselves one click away. Following
+ * DeepSeek Harness's process fold, a transcript opens on its answers rather than on its commands.
+ */
+export function ToolGroup({ steps, folded }: { steps: ChatStep[]; folded: boolean }) {
+  const { t } = useLang();
+  const [open, setOpen] = useState(!folded);
+  const failed = steps.filter((step) => step.state === "failed" || step.state === "incomplete").length;
+  return <div className={`chat-tool-group${open ? " open" : ""}${failed ? " failed" : ""}`}>
+    <button type="button" className="chat-tool-group-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <span className="chat-tool-lead"><Glyph name="chevron" className="chat-tool-chevron" /></span>
+      <span className="chat-tool-group-title">{allCommands(steps) ? t("chat.tools.commands") : t("chat.tools.called")}</span>
+      <span className="chat-tool-group-count">{steps.length}</span>
+      {failed > 0 && <span className="chat-tool-cue">{t("chat.tools.failed", { n: failed })}</span>}
+    </button>
+    {open && <div className="chat-tools">{steps.map((step) => <WorkStep key={step.id} step={step} />)}</div>}
   </div>;
 }
