@@ -69,6 +69,8 @@ class CatalogueLoader(
     /** Not observed by views: a refresh changes it twice and nothing on screen depends on it. */
     var isRefreshing: Boolean = false
         private set
+    /** A refresh was asked for while one was on its way (a chat turn settled): read again after it. */
+    private var refreshAgain = false
     var onCatalogue: (Catalogue) -> Unit = {}
 
     /** Counts the sign-outs; see [forget]. */
@@ -84,7 +86,10 @@ class CatalogueLoader(
     }
 
     suspend fun refresh() {
-        if (isRefreshing) return
+        if (isRefreshing) {
+            refreshAgain = true
+            return
+        }
         isRefreshing = true
         // An answer counts only for the session that asked: forget() moves on to the next one.
         val session = this.session
@@ -137,6 +142,11 @@ class CatalogueLoader(
         if (lastKnownState.value != lastKnown) lastKnownState.value = lastKnown
         val catalogue = catalogueState.value
         if (outcome == LoaderStatus.Ok && catalogue != null) onCatalogue(catalogue)
+        // What changed while this one was on its way (an app an agent just installed) is read now.
+        if (refreshAgain) {
+            refreshAgain = false
+            scope.launch { refresh() }
+        }
     }
 
     private suspend fun optional(path: String): String? = try {
@@ -154,6 +164,7 @@ class CatalogueLoader(
     fun forget() {
         session += 1
         isRefreshing = false
+        refreshAgain = false
         cache.remove(connection.id)
         catalogueState.value = null
         lastKnownState.value = false

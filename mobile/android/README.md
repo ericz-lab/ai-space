@@ -2,11 +2,11 @@
 
 A native Android client of a Space that already runs, ported from the iPhone client (`mobile/ios/`, whose README is the specification this follows): a Compose launcher over the Space's own catalogue, the Space's pages drawn natively, a native terminal, and app pages and the web panel in `WebView`. Nothing is installed or started on the server, and the app carries no token or deployment secret.
 
-Status: builds with Gradle, 133 JVM tests pass, and runs on an Android 16 emulator (API 36) against a scratch Space and against a real Space behind Cloudflare Access. See [What was checked](#what-was-checked).
+Status: builds with Gradle, 167 JVM tests pass, and runs on an Android 16 emulator (API 36) against a scratch Space and against a real Space behind Cloudflare Access. See [What was checked](#what-was-checked).
 
 ## What it does
 
-The same as the iPhone client, area by area (see `mobile/ios/README.md` → What it does): saved Spaces; Home (the library with one search), this phone's screens copied from the panel once and kept on the phone, Settings, swiped side by side, opening on the first screen; widget state cards; reach and peer states with the last catalogue and its age; app pages in retained tabs with one draggable More button; the host list that keeps other sites in the browser; the Space's pages (inbox, chat, tasks, model and app usage, app models, events, apps and connections); the terminal; the web panel; `aispace://` links; and the first four apps of the home screen as launcher shortcuts that carry their Space.
+The same as the iPhone client, area by area (see `mobile/ios/README.md` → What it does): saved Spaces; Home (the library with one search), this phone's screens copied from the panel once and kept on the phone, Settings, swiped side by side, opening on the first screen, which carries universal search (the Space's resolver, calculations and conversions at once, action forms and runs, asking an agent, and streamed voice input); widget state cards; reach and peer states with the last catalogue and its age; app pages in retained tabs with one draggable More button; the host list that keeps other sites in the browser; the Space's pages (inbox, chat with the agent's work in order, questions to answer and attached images, tasks, model and app usage, app models, events, apps and connections); the terminal; the web panel; `aispace://` links; and the first four apps of the home screen as launcher shortcuts that carry their Space.
 
 Where Android differs:
 

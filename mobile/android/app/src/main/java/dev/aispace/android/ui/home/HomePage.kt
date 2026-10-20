@@ -315,21 +315,90 @@ private fun ScreenPage(env: HomeEnv, screenID: String, modifier: Modifier) {
     val showsWidgets = model.showsWidgets
     val screen = env.screens.firstOrNull { it.id == screenID }
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    Page(
-        env, top = statusTop + 12.dp, modifier = modifier,
-        longPress = {
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            model.showingScreenMenu = true
-        },
-    ) { columns ->
-        val catalogue = env.catalogue
-        val visible = showsStatus(env.status, catalogue)
-        remember(catalogue, screen, columns, visible, showsWidgets) {
-            PageRows(22.dp).apply {
-                if (visible) status()
-                if (catalogue != null && screen != null) screenRows(catalogue, screen, columns, showsWidgets)
-            }.items
+    // The first screen has universal search at its top (docs/shortcuts.md); the others start at once.
+    val first = env.screens.firstOrNull()?.id == screenID
+    val fieldTop = statusTop + 12.dp
+    val page = @Composable { m: Modifier ->
+        Page(
+            env, top = if (first) fieldTop + 48.dp + 12.dp + 12.dp else statusTop + 12.dp, modifier = m,
+            longPress = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                model.showingScreenMenu = true
+            },
+        ) { columns ->
+            val catalogue = env.catalogue
+            val visible = showsStatus(env.status, catalogue)
+            remember(catalogue, screen, columns, visible, showsWidgets) {
+                PageRows(22.dp).apply {
+                    if (visible) status()
+                    if (catalogue != null && screen != null) screenRows(catalogue, screen, columns, showsWidgets)
+                }.items
+            }
         }
+    }
+    if (!first) return page(modifier)
+    UniversalSearch(env, fieldTop, modifier, page)
+}
+
+/**
+ * The first screen under its universal search field. The results float under the field over the
+ * screen, so they neither push the tiles down nor sit beneath them.
+ */
+@Composable
+private fun UniversalSearch(env: HomeEnv, fieldTop: Dp, modifier: Modifier, page: @Composable (Modifier) -> Unit) {
+    val model = env.model
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val requester = remember { FocusRequester() }
+    var focused by remember { mutableStateOf(false) }
+    var query by remember(env.connection.id) { mutableStateOf("") }
+    var submit by remember { mutableStateOf(0) }
+    var voiceBusy by remember { mutableStateOf(false) }
+    val dismiss by rememberUpdatedState {
+        if (focused) {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+        }
+    }
+    LaunchedEffect(model.pager) { model.pager.id.drop(1).collect { dismiss() } }
+    LaunchedEffect(model.page?.id, model.hubPage, model.showingWebPanel) { dismiss() }
+    val bottom = WindowInsets.navigationBars.union(WindowInsets.ime).asPaddingValues().calculateBottomPadding()
+    Box(modifier.fillMaxSize()) {
+        page(
+            Modifier.pointerInput(Unit) {
+                // Watches without taking: tiles still open and the screen still scrolls under it.
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    dismiss()
+                }
+            },
+        )
+        OmniboxField(
+            query = query,
+            onQuery = { query = it },
+            api = env.loader.api,
+            focused = focused,
+            requester = requester,
+            onFocusChange = { focused = it },
+            onVoiceBusy = { voiceBusy = it },
+            onSubmit = { submit += 1 },
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = fieldTop),
+        )
+        val showing = query.isNotBlank()
+        OmniboxResults(
+            model = model,
+            query = query,
+            onQuery = { query = it },
+            connection = env.connection,
+            catalogue = env.catalogue,
+            store = model.omnibox(env.connection),
+            submit = submit,
+            enabled = !voiceBusy,
+            modifier = Modifier
+                .padding(top = fieldTop + 48.dp + 8.dp, start = 24.dp, end = 24.dp, bottom = bottom + 12.dp)
+                .fillMaxWidth()
+                .then(if (showing) Modifier.glass(24.dp).padding(8.dp) else Modifier),
+        )
     }
 }
 
@@ -406,6 +475,11 @@ private fun Page(
             BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))) {
                 val columns = columnsFor(maxWidth - 32.dp)
                 val pageItems = rows(columns)
+                // A status card that appears above a page at its top stays in view: the list would
+                // otherwise keep the first row it showed and leave the card scrolled off under the field.
+                LaunchedEffect(pageItems.firstOrNull()?.key) {
+                    if (listState.firstVisibleItemIndex == 1 && listState.firstVisibleItemScrollOffset == 0) listState.scrollToItem(0)
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),

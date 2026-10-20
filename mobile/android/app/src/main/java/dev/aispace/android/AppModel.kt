@@ -29,6 +29,7 @@ import dev.aispace.android.live.AppPaths
 import dev.aispace.android.live.BackdropStore
 import dev.aispace.android.live.CatalogueLoader
 import dev.aispace.android.live.ChatStore
+import dev.aispace.android.live.OmniboxStore
 import dev.aispace.android.live.IconStore
 import dev.aispace.android.live.LoaderStatus
 import dev.aispace.android.live.SettingsLoader
@@ -222,6 +223,7 @@ class AppModel(private val context: Context) {
     private val icons = HashMap<UUID, IconStore>()
     private val settings = HashMap<UUID, SettingsLoader>()
     private val chats = HashMap<String, ChatStore>()
+    private val omniboxes = HashMap<UUID, OmniboxStore>()
     private val terminals = HashMap<UUID, TerminalStore>()
     private val backdrops = HashMap<UUID, BackdropStore>()
     private val panels = HashMap<UUID, WebSession>()
@@ -388,7 +390,18 @@ class AppModel(private val context: Context) {
 
     /** An agent's conversation, kept while the app runs so leaving the page does not lose it. */
     fun chat(connection: Connection, base: String): ChatStore =
-        chats.getOrPut("${connection.id}|$base") { ChatStore(loader(connection).api, base, scope) }
+        chats.getOrPut("${connection.id}|$base") {
+            // A settled turn may have installed or changed an app: the library catches up without a pull.
+            ChatStore(loader(connection).api, base, scope) { loaders[connection.id]?.let { l -> scope.launch { l.refresh() } } }
+        }
+
+    /** Universal search of the Space's first screen; closing a sheet does not abandon a run it started. */
+    fun omnibox(connection: Connection): OmniboxStore {
+        val api = loader(connection).api
+        // A Space whose address changed has a new loader: its search asks the new address.
+        omniboxes[connection.id]?.let { if (it.api === api) return it }
+        return OmniboxStore(api).also { omniboxes[connection.id] = it }
+    }
 
     /** The Space's shells open on this phone, kept while the app runs as the chats are. */
     fun terminal(connection: Connection): TerminalStore =
@@ -501,6 +514,7 @@ class AppModel(private val context: Context) {
     fun signOut(connection: Connection) {
         val profile = profile(connection.id)
         forgetChats(connection.id)
+        omniboxes[connection.id]?.clear()
         icons[connection.id]?.clear()
         AppPaths.icons(connection.id).deleteRecursively()
         discardTabs(connection.id)
@@ -552,6 +566,7 @@ class AppModel(private val context: Context) {
 
     private fun discard(id: UUID) {
         discardTabs(id)
+        omniboxes.remove(id)?.clear()
         panels.remove(id)?.stop()
         loaders.remove(id)?.forget()
         settings.remove(id)

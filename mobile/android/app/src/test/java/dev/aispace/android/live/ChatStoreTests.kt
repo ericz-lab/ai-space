@@ -1,6 +1,8 @@
 package dev.aispace.android.live
 
 import dev.aispace.android.core.ChatApprovalState
+import dev.aispace.android.core.ChatImage
+import dev.aispace.android.core.ChatStepKind
 import dev.aispace.android.core.ChatSessionInfo
 import dev.aispace.android.core.CookieSource
 import dev.aispace.android.core.SpaceApi
@@ -244,5 +246,84 @@ class ChatStoreTests {
         delay(900)
         assertTrue(store.bubbles.isEmpty())
         assertEquals(2, server.requestCount)
+    }
+
+    @Test fun imagesGoWithTheTurnAndAnImageOnlyMessageCanBeSent() = runBlocking {
+        server.enqueue(done())
+        val store = store(this)
+        assertFalse(store.canSend)
+        assertTrue(store.addImage(ChatImage("a.png", "image/png", byteArrayOf(1, 2, 3))))
+        assertTrue(store.canSend)
+        store.send()
+        finished(store)
+        assertTrue(store.images.isEmpty())
+        assertEquals(1, store.bubbles.first().images.size)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("\"images\":[{"))
+        assertTrue(body.contains("\"data\":\"AQID\""))
+        // org.json writes a slash as `\/`.
+        assertTrue(body.contains("\"mediaType\":\"image\\/png\"") || body.contains("\"mediaType\":\"image/png\""))
+    }
+
+    @Test fun aFifthImageIsRefused() = runBlocking {
+        val store = store(this)
+        repeat(4) { assertTrue(store.addImage(ChatImage("a.png", "image/png", byteArrayOf(1)))) }
+        assertFalse(store.addImage(ChatImage("e.png", "image/png", byteArrayOf(1))))
+        assertEquals(4, store.images.size)
+    }
+
+    @Test fun aQuestionIsAnsweredWithTheChosenLabels() = runBlocking {
+        server.enqueue(turn(
+            "id: 1\ndata: {\"type\":\"approval_request\",\"id\":\"q1\",\"tool\":\"AskUserQuestion\",\"title\":\"Which?\",\"questions\":[{\"id\":\"pick\",\"header\":\"\",\"question\":\"Which?\",\"options\":[{\"label\":\"A\",\"description\":\"\"}],\"multiSelect\":false}]}\n\n" +
+                "id: 2\ndata: {\"type\":\"approval_resolved\",\"id\":\"q1\",\"decision\":\"allow\",\"answers\":{\"pick\":[\"A\"]}}\n\n" +
+                "id: 3\ndata: {\"type\":\"done\"}\n\n",
+            400,
+        ))
+        server.enqueue(MockResponse().setBody("{\"ok\":true}"))
+        val store = store(this)
+        store.draft.value = "hello"
+        store.send()
+        requests(1)
+        delay(100)
+        assertNull(store.answer("q1", allow = true, answers = mapOf("pick" to listOf("A"))))
+        requests(2)
+        finished(store)
+        server.takeRequest()
+        val answer = server.takeRequest().body.readUtf8()
+        assertTrue(answer.contains("\"answers\":{\"pick\":[\"A\"]}"))
+        val step = store.bubbles.last().steps.single()
+        assertEquals(mapOf("pick" to listOf("A")), step.answers)
+    }
+
+    @Test fun anEarlierChatShowsItsToolCallsInOrder() = runBlocking {
+        server.enqueue(MockResponse().setBody(
+            """{"messages":[{"role":"user","text":"list"},{"role":"ai","text":"","tools":[],"steps":[{"kind":"tool","name":"Bash","input":"ls","output":"a","failed":false}]}]}""",
+        ))
+        val store = store(this)
+        store.open(ChatSessionInfo("s"))
+        assertEquals(2, store.bubbles.size)
+        assertEquals(listOf(ChatStepKind.Tool), store.bubbles.last().steps.map { it.kind })
+        assertEquals(listOf("Bash"), store.bubbles.last().tools)
+    }
+
+    @Test fun aSettledTurnAsksForTheCatalogue() = runBlocking {
+        server.enqueue(done())
+        var settled = 0
+        val store = ChatStore(SpaceApi(server.url("/").toUri(), CookieSource.none), "/agent", this) { settled += 1 }
+        store.draft.value = "hello"
+        store.send()
+        finished(store)
+        assertEquals(1, settled)
+    }
+
+    @Test fun aTurnFromUniversalSearchCarriesItsIntent() = runBlocking {
+        server.enqueue(done())
+        val store = store(this)
+        store.draft.value = "today's news"
+        store.send(intentID = "news", timezone = "Asia/Tokyo")
+        finished(store)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("\"intentId\":\"news\""))
+        assertTrue(body.contains("\"timezone\":\"Asia\\/Tokyo\"") || body.contains("\"timezone\":\"Asia/Tokyo\""))
     }
 }
