@@ -367,6 +367,8 @@ final class ChatStore: ObservableObject {
     private var runID: String?
     private var task: Task<Void, Never>?
     private static let reconnects = 5
+    /// Called when a turn has settled, so the catalogue can show what the agent installed.
+    var onTurnSettled: (() -> Void)?
 
     /// One thread's identity: New Chat and opening an earlier chat start another one, so a late
     /// answer for a steer of the old thread cannot land in the new one.
@@ -641,6 +643,7 @@ final class ChatStore: ObservableObject {
             stopRequested = false
             isRunning = false
         }
+        onTurnSettled?()
     }
 
     /// What a reply drawn as its steps shows after them: the note the steps do not carry, and a stop.
