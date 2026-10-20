@@ -41,6 +41,8 @@ targets:
         group: Shared
       - path: ../../mobile/ios/AISpace/Core/CatalogueSearch.swift
         group: Shared
+      - path: ../../mobile/ios/AISpace/Core/ChatRows.swift
+        group: Shared
       - path: ../../mobile/ios/AISpace/Core/HubModels.swift
         group: Shared
       - path: ../../mobile/ios/AISpace/Core/IconSource.swift

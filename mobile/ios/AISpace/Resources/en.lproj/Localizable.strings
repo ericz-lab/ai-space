@@ -84,3 +84,8 @@
 "The answer did not reach the agent: no turn is running" = "The answer did not reach the agent: no turn is running";
 "You" = "You";
 "the agent reads it after its current step" = "the agent reads it after its current step";
+
+/* Native chat: tool rows, questions, pictures */
+"IN" = "IN";
+"OUT" = "OUT";
+"Waiting for your answer…" = "Waiting for your answer…";

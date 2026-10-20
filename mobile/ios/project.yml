@@ -48,6 +48,9 @@ targets:
       - path: ../../desktop/macos/AISpace/Services/OmniboxRules.swift
         group: Shared
       - path: ../../desktop/macos/AISpace/Services/ChatImage.swift
+        group: Shared
+      - path: ../../desktop/macos/AISpace/Services/ChatMarkdown.swift
+        group: Shared
       - path: ../../desktop/macos/AISpace/Services/ChatStream.swift
         group: Shared
       - path: ../../desktop/macos/AISpace/Services/DesktopRules.swift
@@ -95,6 +98,7 @@ targets:
       - path: ../../desktop/macos/AISpace/Services/SpaceCheck.swift
         group: Shared
       - path: ../../desktop/macos/AISpace/Services/ChatImage.swift
+        group: Shared
       - path: ../../desktop/macos/AISpace/Services/ChatStream.swift
         group: Shared
     settings:

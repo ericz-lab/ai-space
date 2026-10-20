@@ -339,7 +339,16 @@ final class ChatStore: ObservableObject {
         var steps: [ChatStep] = []
         /// Messages added to the running turn that the agent has not read yet.
         var pending: [String] = []
+        /// The questions among the approvals, by the approval step's id, with the answers once given.
+        var asks: [String: Ask] = [:]
+        /// What the turn ended with besides the agent's words: an error, a lost connection, a stop.
+        var note: String?
         var live = false
+    }
+
+    struct Ask: Equatable {
+        var questions: [ChatRows.Question]
+        var answers: [String: [String]]?
     }
 
     let api: SpaceAPI
@@ -398,7 +407,12 @@ final class ChatStore: ObservableObject {
         conversation = UUID()
         do {
             let stored = try Hub.rows(ChatStored.self, "messages", from: try await api.data("\(base)/sessions/\(SpacePath.escape(session.sid))"))
-            bubbles = stored.compactMap { m in (m.text ?? "").isEmpty ? nil : Bubble(isUser: m.role == "user", text: m.text ?? "") }
+            bubbles = stored.compactMap { m in
+                let isUser = m.role == "user"
+                let steps = isUser ? [] : ChatRows.steps(of: m)
+                guard !(m.text ?? "").isEmpty || !steps.isEmpty else { return nil }
+                return Bubble(isUser: isUser, text: m.text ?? "", steps: steps)
+            }
             sessionID = session.sid
             error = nil
         } catch {
@@ -427,12 +441,12 @@ final class ChatStore: ObservableObject {
         start(QueuedTurn(bubble: bubble.id, text: text, intentID: intentID, timezone: timezone))
     }
 
-    /// The person's answer to one of the running turn's approvals. Returns nil when it reached the
-    /// Space, else what the card shows.
-    func answer(_ requestID: String, allow: Bool) async -> String? {
+    /// The person's answer to one of the running turn's approvals, or to its questions (`answers`;
+    /// nil skips them). Returns nil when it reached the Space, else what the card shows.
+    func answer(_ requestID: String, allow: Bool, answers: [String: [String]]? = nil) async -> String? {
         guard let runID else { return String(localized: "The answer did not reach the agent: no turn is running") }
         do {
-            _ = try await api.send("POST", "\(base)/runs/\(SpacePath.escape(runID))/approvals/\(SpacePath.escape(requestID))", json: ["decision": allow ? "allow" : "deny"])
+            _ = try await api.send("POST", "\(base)/runs/\(SpacePath.escape(runID))/approvals/\(SpacePath.escape(requestID))", json: ChatRows.approvalBody(allow: allow, answers: answers))
             return nil
         } catch {
             return String(localized: "The answer did not reach the agent: \(HubStore.message(error))")
@@ -522,6 +536,7 @@ final class ChatStore: ObservableObject {
         var reply = ChatReply()
         var lastSeq = 0
         var tries = 0
+        var asks: [String: Ask] = [:]
         var body: [String: Any] = ["message": turn.text, "interactive": true]
         if let sessionID { body["sessionId"] = sessionID }
         if let intentID = turn.intentID {
@@ -531,8 +546,10 @@ final class ChatStore: ObservableObject {
         func show() {
             guard bubbles.indices.contains(index) else { return }
             bubbles[index].text = reply.stopped ? [reply.text, String(localized: "Stopped.")].filter { !$0.isEmpty }.joined(separator: "\n\n") : reply.text
+            bubbles[index].note = Self.note(of: reply)
             bubbles[index].tools = reply.tools
             bubbles[index].steps = reply.steps
+            bubbles[index].asks = asks
             bubbles[index].activity = reply.activity
             while steersSeen < reply.consumedSteers.count {
                 takePending(reply.consumedSteers[steersSeen])
@@ -548,6 +565,11 @@ final class ChatStore: ObservableObject {
                     for try await message in stream {
                         if let seq = message.id { lastSeq = seq }
                         reply.apply(message.data)
+                        switch ChatRows.questionEvent(message.data) {
+                        case .asked(let step, let questions)?: asks[step] = asks[step] ?? Ask(questions: questions)
+                        case .answered(let step, let answers)?: asks[step]?.answers = answers
+                        case nil: break
+                        }
                         show()
                         if reply.finished { break }
                     }
@@ -575,8 +597,10 @@ final class ChatStore: ObservableObject {
         runID = nil
         if bubbles.indices.contains(index) {
             bubbles[index].text = reply.stopped ? [reply.text, String(localized: "Stopped.")].filter { !$0.isEmpty }.joined(separator: "\n\n") : reply.text
+            bubbles[index].note = Self.note(of: reply)
             bubbles[index].tools = reply.tools
             bubbles[index].steps = reply.steps
+            bubbles[index].asks = asks
             bubbles[index].activity = nil
             bubbles[index].pending = []
             bubbles[index].live = false
@@ -589,6 +613,12 @@ final class ChatStore: ObservableObject {
             stopRequested = false
             isRunning = false
         }
+    }
+
+    /// What a reply drawn as its steps shows after them: the note the steps do not carry, and a stop.
+    private static func note(of reply: ChatReply) -> String? {
+        let parts = [reply.note, reply.stopped ? String(localized: "Stopped.") : nil].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }
 
     /// Stops the run on the Space; the stream then ends by itself.
