@@ -1,6 +1,6 @@
 import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
-import { ChatSteps, stepGroups, submitsChat, type ChatStep } from "./chat-steps.ts";
+import { ChatSteps, historySteps, stepGroups, submitsChat, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
 import { Glyph, WorkStep } from "./ChatToolRow.tsx";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -45,6 +45,13 @@ const Ava = ({ icon, fallback = "✨" }: { icon?: string; fallback?: string }) =
 
 type Msg = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean; pending?: string[] };
 type Conv = { agent: AgentInfo | null; msgs: Msg[]; sid: string | null; busy: boolean; queued: number };
+/** A message of a restored transcript; `steps` keeps the assistant's text and tool calls in order. */
+type HistoryMessage = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; steps?: HistoryStep[] };
+const fromHistory = (m: HistoryMessage): Msg => {
+  if (m.role === "user") return m;
+  const { steps, ...rest } = m;
+  return { ...rest, denied: [], ...(steps?.length ? { steps: historySteps(steps) } : {}) };
+};
 const EMPTY_CONV: Conv = { agent: null, msgs: [], sid: null, busy: false, queued: 0 };
 /** The turn a conversation is following: its run (once the server named it) and the stream's abort. */
 type Active = { ctrl: AbortController; typer: { target: string }; base: string; runId: string | null; stopRequested: boolean };
@@ -236,7 +243,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           return { ...x, pending: pending.filter((_, i) => i !== (at >= 0 ? at : 0)) };
         });
       } else if (ev.type === "approval_request") {
-        upd((x) => ({ ...x, status: tRef.current("chat.waitingApproval") }));
+        upd((x) => ({ ...x, status: tRef.current(ev.questions?.length ? "chat.waitingAnswer" : "chat.waitingApproval") }));
       } else if (ev.type === "system" && ev.subtype === "init") {
         setSid(ev.session_id);
         upd((x) => ({ ...x, status: tRef.current("chat.thinkingModel", { model: ev.model || "claude" }) }));
@@ -404,8 +411,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
       let history: Msg[] = [];
       if (run.sessionId) {
         try {
-          const j = await getJson<{ messages: ({ role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[] })[] }>(`${b}/sessions/${encodeURIComponent(run.sessionId)}`);
-          history = j.messages.map((m) => (m.role === "ai" ? { denied: [], ...m } : m));
+          const j = await getJson<{ messages: HistoryMessage[] }>(`${b}/sessions/${encodeURIComponent(run.sessionId)}`);
+          history = j.messages.map(fromHistory);
           // The transcript may already hold this turn: cut it at the run's own message.
           const last = history.findLastIndex((m) => m.role === "user");
           if (last >= 0 && history[last]!.text.trim() === run.message.trim()) history = history.slice(0, last);
@@ -488,12 +495,12 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     } else send(text, undefined, images);
   };
 
-  // The person's answer to an approval card of the running turn; the run's stream then reports it.
-  const answer = async (k: string, id: string, decision: "allow" | "deny"): Promise<string | null> => {
+  // The person's answer to an approval or question card of the running turn; the run's stream then reports it.
+  const answer = async (k: string, id: string, decision: "allow" | "deny", answers?: Record<string, string[]>): Promise<string | null> => {
     const a = runner(k).active;
     if (!a?.runId) return t("chat.approval.failed", { error: "no run" });
     try {
-      const r = await fetch(`${a.base}/runs/${encodeURIComponent(a.runId)}/approvals/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision }) });
+      const r = await fetch(`${a.base}/runs/${encodeURIComponent(a.runId)}/approvals/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision, ...(answers ? { answers } : {}) }) });
       if (r.ok) return null;
       const j = (await r.json().catch(() => ({}))) as { error?: string };
       return t("chat.approval.failed", { error: j.error || `HTTP ${r.status}` });
@@ -554,8 +561,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     leave(key);
     let msgs: Msg[];
     try {
-      const j = await getJson<{ messages: ({ role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[] })[] }>(`${base}/sessions/${encodeURIComponent(s.sid)}`);
-      msgs = j.messages.map((m) => (m.role === "ai" ? { denied: [], ...m } : m));
+      const j = await getJson<{ messages: HistoryMessage[] }>(`${base}/sessions/${encodeURIComponent(s.sid)}`);
+      msgs = j.messages.map(fromHistory);
     } catch (e) {
       msgs = [{ role: "ai", text: t("chat.transcriptUnavailable", { error: (e as Error).message }), tools: [], denied: [] }];
     }
@@ -668,6 +675,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
                   <div key={step[0]!.id} className="chat-tools">{step.map((tool) => <WorkStep key={tool.id} step={tool} />)}</div> :
                   step.kind === "text" ?
                   <div key={step.id} className={`md ${step.state === "running" ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(step.text) }} /> :
+                  step.kind === "approval" && step.questions ? <QuestionStep key={step.id} step={step} onAnswer={m.live ? (answers) => answer(key, step.id.slice("approval:".length), answers ? "allow" : "deny", answers ?? undefined) : undefined} /> :
                   step.kind === "approval" ? <ApprovalStep key={step.id} step={step} onAnswer={m.live ? (decision) => answer(key, step.id.slice("approval:".length), decision) : undefined} /> :
                   <div key={step.id} className="chat-steer"><b>↳ {t("chat.steerYou")}</b> {linkNodes(step.text)}</div>
                 ) : <>
@@ -752,6 +760,69 @@ function ApprovalStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (decision
     {waiting && <div className="chat-approval-actions">
       <button className="primary" disabled={sending} onClick={() => void reply("allow")}>{t("chat.approval.allow")}</button>
       <button disabled={sending} onClick={() => void reply("deny")}>{t("chat.approval.deny")}</button>
+    </div>}
+    {error && <small role="alert">{error}</small>}
+  </section>;
+}
+
+/**
+ * A question the agent asks while its turn runs: pick an option or type an answer. One question
+ * with one choice goes back on the click; otherwise the answers go back with Send. Skip answers
+ * nothing and the agent goes on without it.
+ */
+function QuestionStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (answers: Record<string, string[]> | null) => Promise<string | null> }) {
+  const { t } = useLang();
+  const questions = step.questions ?? [];
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const [typed, setTyped] = useState<Record<string, string>>({});
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const waiting = step.state === "waiting" && !!onAnswer;
+  const answerOf = (q: ChatQuestion, p = picked, ty = typed): string[] => {
+    const own = (ty[q.id] ?? "").trim();
+    if (!q.multiSelect) return own ? [own] : p[q.id] ?? [];
+    return [...(p[q.id] ?? []), ...(own ? [own] : [])];
+  };
+  const reply = async (answers: Record<string, string[]> | null) => {
+    setSending(true);
+    setError("");
+    const failed = await onAnswer!(answers);
+    setSending(false);
+    if (failed) setError(failed);
+  };
+  const all = (p: Record<string, string[]>, ty: Record<string, string>) => Object.fromEntries(questions.map((q) => [q.id, answerOf(q, p, ty)]));
+  const choose = (q: ChatQuestion, label: string) => {
+    const current = picked[q.id] ?? [];
+    const next = { ...picked, [q.id]: q.multiSelect ? (current.includes(label) ? current.filter((l) => l !== label) : [...current, label]) : [label] };
+    const nextTyped = q.multiSelect ? typed : { ...typed, [q.id]: "" };
+    setPicked(next);
+    setTyped(nextTyped);
+    if (questions.length === 1 && !q.multiSelect) void reply(all(next, nextTyped));
+  };
+  const ready = questions.every((q) => answerOf(q).length > 0);
+  const shown = step.answers ?? {};
+  return <section className={`chat-work chat-approval chat-question ${step.state}`} aria-label={t("chat.question.label")}>
+    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true"><Glyph name="question" /></span><strong>{t("chat.question.label")}</strong><span className="chat-work-state">{t(step.state === "allowed" ? "chat.question.answered" : step.state === "denied" ? "chat.question.skipped" : `chat.step.${step.state}`)}</span></div>
+    {questions.map((q) => <div key={q.id} className="chat-question-item">
+      {q.header && <small className="chat-question-header">{q.header}</small>}
+      <p>{q.question}</p>
+      {waiting ? <>
+        {q.options.length > 0 && <div className="chat-question-options" role={q.multiSelect ? "group" : "radiogroup"}>
+          {q.options.map((o) => {
+            const on = (picked[q.id] ?? []).includes(o.label) && !(!q.multiSelect && (typed[q.id] ?? "").trim());
+            return <button key={o.label} type="button" className={on ? "on" : ""} role={q.multiSelect ? "checkbox" : "radio"} aria-checked={on} disabled={sending} onClick={() => choose(q, o.label)}>
+              <b>{o.label}</b>{o.description && <small>{o.description}</small>}
+            </button>;
+          })}
+        </div>}
+        <input className="chat-question-own" value={typed[q.id] ?? ""} disabled={sending} placeholder={t(q.options.length ? "chat.question.other" : "chat.question.type")} aria-label={t("chat.question.type")}
+          onChange={(e) => setTyped({ ...typed, [q.id]: e.target.value })}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && ready) { e.preventDefault(); void reply(all(picked, typed)); } }} />
+      </> : shown[q.id]?.length ? <p className="chat-question-answer">→ {shown[q.id]!.join(", ")}</p> : null}
+    </div>)}
+    {waiting && <div className="chat-approval-actions">
+      {(questions.length > 1 || questions.some((q) => q.multiSelect) || questions.some((q) => (typed[q.id] ?? "").trim())) && <button className="primary" disabled={sending || !ready} onClick={() => void reply(all(picked, typed))}>{t("chat.question.send")}</button>}
+      <button disabled={sending} onClick={() => void reply(null)}>{t("chat.question.skip")}</button>
     </div>}
     {error && <small role="alert">{error}</small>}
   </section>;

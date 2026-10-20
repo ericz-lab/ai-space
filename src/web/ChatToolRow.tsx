@@ -3,7 +3,7 @@ import { toolSummary, toolVariant, type ChatStep, type ToolVariant } from "./cha
 import { useLang } from "./i18n.ts";
 
 /** Line glyphs on a 16px grid, drawn in the row's text color (after DeepSeek Harness's tool rows). */
-const GLYPHS: Record<ToolVariant | "chevron" | "shield" | "history" | "compose" | "stop" | "send" | "down" | "attach", ReactNode> = {
+const GLYPHS: Record<ToolVariant | "chevron" | "shield" | "question" | "history" | "compose" | "stop" | "send" | "down" | "attach", ReactNode> = {
   bash: <><path d="M3 4L7 8L3 12" /><path d="M9 12H13" /></>,
   read: <><path d="M4.9 5.9H11.1" /><path d="M4.9 9H8.3" /><rect x="2.5" y="1.8" width="11" height="12.4" rx="1.2" /></>,
   write: <><path d="M8.9 2.2H4.2C3.1 2.2 2.2 3.1 2.2 4.2V11.8C2.2 12.9 3.1 13.8 4.2 13.8H11.8C12.9 13.8 13.8 12.9 13.8 11.8V7.9" /><path d="M7.8 8.2L13.9 2.1" /></>,
@@ -21,6 +21,7 @@ const GLYPHS: Record<ToolVariant | "chevron" | "shield" | "history" | "compose" 
   send: <><path d="M8 13.2V3.2" /><path d="M3.6 7.4L8 3L12.4 7.4" /></>,
   down: <><path d="M8 2.8V12.8" /><path d="M3.6 8.6L8 13L12.4 8.6" /></>,
   attach: <path d="M13.2 7.6L8.1 12.7C6.7 14.1 4.5 14.1 3.1 12.7C1.7 11.3 1.7 9.1 3.1 7.7L8.4 2.4C9.3 1.5 10.8 1.5 11.7 2.4C12.6 3.3 12.6 4.8 11.7 5.7L6.6 10.8C6.1 11.3 5.4 11.3 4.9 10.8C4.4 10.3 4.4 9.6 4.9 9.1L9.6 4.4" />,
+  question: <><circle cx="8" cy="8" r="6.3" /><path d="M6.2 6.3C6.2 5.2 7 4.5 8 4.5S9.8 5.2 9.8 6.2C9.8 7.5 8 7.7 8 9.1" /><path d="M8 11.3V11.4" /></>,
   shield: <><path d="M6.8 2.1C7.7 1.8 8.7 1.8 9.6 2.1L14.1 3.8V7.1C14.1 11.6 10.8 13.6 8.2 14.6C5.6 13.6 2.3 11.6 2.3 7.1V3.8L6.8 2.1Z" /><path d="M8.2 5.5V8.6" /><path d="M8.2 10.6V10.7" /></>,
 };
 export const Glyph = ({ name, className, size = 14, weight = 1.1 }: { name: keyof typeof GLYPHS; className?: string; size?: number; weight?: number }) =>

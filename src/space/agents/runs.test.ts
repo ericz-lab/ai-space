@@ -321,6 +321,27 @@ describe("live turns over HTTP", () => {
     expect(liveRuns.get(id)!.status).toBe("done");
   });
 
+  test("a question is answered over HTTP with the chosen options", async () => {
+    const r = await post("/chat", { message: "ask:Which one?", interactive: true });
+    const id = r.headers.get("x-run-id")!;
+    let answers: Promise<number[]> | undefined;
+    const frames = await readFrames(r, (fs) => {
+      const request = fs.find(([, d]) => d.type === "approval_request");
+      if (request && !answers) {
+        const rid = encodeURIComponent(String(request[1].id));
+        const qid = (request[1].questions as { id: string }[])[0]!.id;
+        answers = (async () => [
+          (await post(`/runs/${id}/approvals/${rid}`, { decision: "allow", answers: { [qid]: "B" } })).status,
+          (await post(`/runs/${id}/approvals/${rid}`, { decision: "allow", answers: { [qid]: ["B"] } })).status,
+        ])();
+      }
+      return false;
+    });
+    expect(await answers).toEqual([400, 200]);
+    expect(frames.find(([, d]) => d.type === "approval_resolved")![1]).toMatchObject({ decision: "allow", answers: { q0: ["B"] } });
+    expect(liveRuns.get(id)!.status).toBe("done");
+  });
+
   test("a message steered into a running turn is read by it; a finished turn refuses one", async () => {
     const r = await post("/chat", { message: "wait", interactive: true });
     const id = r.headers.get("x-run-id")!;

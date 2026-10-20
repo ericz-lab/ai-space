@@ -1,8 +1,10 @@
 /**
  * Ordered work shared by Claude and Codex's normalized stream events. A live turn
  * (docs/runtimes.md#live-chat) adds two kinds: an approval the agent waits for (`name` the tool,
- * `text` what it wants to do, `output` why) and a message the person added while it ran.
+ * `text` what it wants to do, `output` why) and a message the person added while it ran. An
+ * approval with `questions` is a question the agent asks; `answers` is what the person chose.
  */
+export type ChatQuestion = { id: string; header: string; question: string; options: { label: string; description: string }[]; multiSelect: boolean };
 export type ChatStep = {
   id: string;
   kind: "text" | "tool" | "approval" | "steer";
@@ -10,9 +12,11 @@ export type ChatStep = {
   text: string;
   output: string;
   state: "running" | "completed" | "failed" | "incomplete" | "waiting" | "allowed" | "denied" | "cancelled";
+  questions?: ChatQuestion[];
+  answers?: Record<string, string[]>;
 };
 type Block = { type: string; id?: string; name?: string; text?: string; input?: unknown; tool_use_id?: string; content?: unknown; is_error?: boolean };
-type Event = { type: string; message?: { content?: Block[] }; event?: { delta?: { type?: string; text?: string } }; id?: string; tool?: string; title?: string; detail?: string; decision?: string; text?: string };
+type Event = { type: string; message?: { content?: Block[] }; event?: { delta?: { type?: string; text?: string } }; id?: string; tool?: string; title?: string; detail?: string; decision?: string; text?: string; questions?: ChatQuestion[]; answers?: Record<string, string[]> };
 const detail = (value: unknown): string => {
   if (value == null) return "";
   if (typeof value === "string") return value.slice(0, 12000);
@@ -43,11 +47,14 @@ export class ChatSteps {
 
   apply(event: Event) {
     if (event.type === "approval_request" && event.id) {
-      if (!this.steps.some((s) => s.id === `approval:${event.id}`)) this.steps.push({ id: `approval:${event.id}`, kind: "approval", name: event.tool ?? "tool", text: event.title ?? "", output: event.detail ?? "", state: "waiting" });
+      if (!this.steps.some((s) => s.id === `approval:${event.id}`)) this.steps.push({ id: `approval:${event.id}`, kind: "approval", name: event.tool ?? "tool", text: event.title ?? "", output: event.detail ?? "", state: "waiting", ...(event.questions?.length ? { questions: event.questions } : {}) });
     }
     if (event.type === "approval_resolved" && event.id) {
       const current = this.steps.find((s) => s.id === `approval:${event.id}`);
-      if (current) current.state = event.decision === "allow" ? "allowed" : event.decision === "deny" ? "denied" : "cancelled";
+      if (current) {
+        current.state = event.decision === "allow" ? "allowed" : event.decision === "deny" ? "denied" : "cancelled";
+        if (event.answers) current.answers = event.answers;
+      }
     }
     if (event.type === "steer") {
       this.steps.push({ id: `steer:${++this.serial}`, kind: "steer", name: "", text: event.text ?? "", output: "", state: "completed" });
@@ -80,6 +87,12 @@ export class ChatSteps {
 
   snapshot(): ChatStep[] { return this.steps.map((step) => ({ ...step })); }
 }
+
+/** A restored transcript's ordered steps (`TranscriptStep` on the server) as the panel draws them. */
+export type HistoryStep = { kind: "text"; text: string } | { kind: "tool"; name: string; input: string; output: string; failed: boolean };
+export const historySteps = (steps: HistoryStep[]): ChatStep[] => steps.map((step, i) => step.kind === "text"
+  ? { id: `history:${i}`, kind: "text", name: "", text: step.text, output: "", state: "completed" }
+  : { id: `history:${i}`, kind: "tool", name: step.name, text: step.input, output: step.output, state: step.failed ? "failed" : "completed" });
 
 /** How a tool row is drawn: its icon, its localized title, and the one-line summary beside it. */
 export type ToolVariant = "bash" | "read" | "write" | "edit" | "search" | "web" | "code" | "task" | "plan" | "other";

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { ApprovalDecision, ChatHandle, ChatTurn, RuntimeAdapter, SteerInput } from "../runtimes/types.ts";
+import type { ApprovalDecision, ChatHandle, ChatTurn, QuestionAnswers, RuntimeAdapter, SteerInput } from "../runtimes/types.ts";
 
 /**
  * Chat turns as background runs (docs/panel.md#chat). A turn belongs to the server, not to the
@@ -273,11 +273,11 @@ export class RunRegistry {
     }
   }
 
-  /** Answer an approval the running turn is waiting on; false when the run or the request is not open. */
-  respond(id: string, requestId: string, decision: ApprovalDecision): boolean {
+  /** Answer an approval or a question the running turn is waiting on; false when the run or the request is not open. */
+  respond(id: string, requestId: string, decision: ApprovalDecision, answers?: QuestionAnswers): boolean {
     const r = this.live.get(id);
     if (!r || r.info.status !== "running" || r.ending || !r.handle.respond) return false;
-    return r.handle.respond(requestId, decision);
+    return r.handle.respond(requestId, decision, answers);
   }
 
   /** Number of runs still going. */
