@@ -262,6 +262,12 @@ src/web/            index.html, main.tsx (language root), App.tsx, screens.ts (s
 
 `bun run dev` starts ai-space with `SPACE_DEV=1`, which turns on Bun's dev server for the page (hot reload); the default is one bundle at boot.
 
+## Widget visual preview
+
+Run `bun run preview:widgets` and open `http://127.0.0.1:18937`. This local-only page renders the production `Blocks` component and widget CSS against fixed demonstration data; it does not start Space services, read a workspace or contact apps. The search field and app icons are visual placeholders.
+
+Dark widgets default to 76% opacity. The 0–100% slider updates the preview immediately and keeps the value in `?opacity=76`, so a comparison can be bookmarked. `?theme=light` previews light surfaces, and `?lang=zh` previews Chinese controls. Slider changes are temporary and do not update the production default or the operator's saved theme. Set `WIDGET_PREVIEW_PORT` to use another port. Fixtures live in `src/web/widget-preview-fixtures.ts`; preview-only styles live in `src/web/widget-preview.css`.
+
 ## Migrating from a registry-based panel
 
 1. For every app that already is an ai-space app, fill in the identity fields (`title`, `description`, `icon`, `url`) and, where the registry had one, the `widgets` entry.

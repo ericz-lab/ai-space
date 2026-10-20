@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "SPACE_DEV=1 bun --hot src/index.ts",
+    "preview:widgets": "bun --hot src/web/widget-preview.tsx",
     "start": "bun src/index.ts",
     "test": "bun test",
     "init": "bun src/index.ts init",

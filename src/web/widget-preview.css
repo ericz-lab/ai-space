@@ -1,0 +1,30 @@
+/* The preview shell only; widget layout and glass come from the production stylesheet. */
+:root[data-theme="dark"] {
+  --bg: #04050e;
+  --panel: rgba(20, 24, 46, 0.97);
+  --accent: #93a4ff;
+  --solid: #1c2140;
+}
+:root[data-theme="dark"] .widget { --accent: #9ba8ff; }
+:root[data-theme="light"] .aurora { display: none; }
+:root[data-theme="light"] .widget { background: rgba(255, 255, 255, var(--widget-alpha)); }
+.shell { max-width: 1080px; }
+.preview-search {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 auto 40px; max-width: 640px; padding: 15px 20px;
+  border-radius: 30px; border: 1px solid transparent;
+  background: var(--panel); color: var(--accent); font-size: 14px;
+}
+.preview-search span { color: var(--muted); flex: 1; }
+.preview-search kbd { color: var(--muted); font: 11px system-ui; }
+.opacity-controls {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 20;
+  display: flex; align-items: center; gap: 6px; max-width: calc(100vw - 24px);
+  flex-wrap: wrap; justify-content: center; width: max-content; padding: 6px 10px;
+  border-radius: 30px; background: #202334; color: #c9cbd5; font: 12px system-ui;
+  box-shadow: 0 4px 16px #0004;
+}
+.opacity-controls input { width: clamp(100px, 35vw, 240px); accent-color: #93a4ff; cursor: pointer; margin: 4px 8px; }
+.opacity-controls output { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+.opacity-controls input:focus-visible { outline: 2px solid white; outline-offset: 4px; }
+@media (max-width: 640px) { .shell { padding-top: 100px; } }

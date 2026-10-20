@@ -100,6 +100,7 @@ function Spark({ b, lang, big }: { b: TrendBlock; lang: Lang; big?: boolean }) {
   const zero = y(0);
   const tip = (p: { t: string; v: number | null }) => `${new Date(p.t).toLocaleDateString(LOCALE[lang])} · ${p.v === null ? t("widget.noData") : fmt(p.v, b, lang, !!b.signed)}`;
   const cls = `wb-spark${big ? " big" : ""}`;
+  const latest = pts.findLastIndex((p) => p.v !== null);
   if (b.style === "bar") {
     return (
       <svg className={cls} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={txt(b.label, lang)}>
@@ -110,7 +111,7 @@ function Spark({ b, lang, big }: { b: TrendBlock; lang: Lang; big?: boolean }) {
           const h = p.v === null ? 0 : Math.max(Math.abs(y(p.v) - zero), 0.5);
           return (
             <g key={i}>
-              <rect x={i * 10 + 1.5} width={7} y={top} height={h} fill={fill} />
+              <rect className={`wb-spark-bar${i === latest ? " latest" : ""}`} x={i * 10 + 1.5} width={7} y={top} height={h} fill={fill} />
               <rect x={i * 10} width={10} y={0} height={H} fill="transparent">
                 <title>{tip(p)}</title>
               </rect>
@@ -190,7 +191,7 @@ function Hero({ b, lang }: { b: WidgetBlock; lang: Lang }) {
       {b.type === "status" ? (
         <>
           <span className="wb-hero-value wb-status-value">
-            <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />
+            {tone && tone !== "neutral" && <i className="wb-dot" style={{ background: TONE_VAR[tone] }} />}
             <span className="wb-v">{value}</span>
           </span>
           {b.time && <span className="wb-time">{relTime(b.time, lang)}</span>}
@@ -209,18 +210,18 @@ function Hero({ b, lang }: { b: WidgetBlock; lang: Lang }) {
   );
 }
 
-function Row({ b, lang }: { b: WidgetBlock; lang: Lang }) {
+function Row({ b, lang, grouped = false }: { b: WidgetBlock; lang: Lang; grouped?: boolean }) {
   const { t } = useLang();
   const value = shown(b, lang);
   const tone = b.type === "gauge" ? gaugeTone(b) : b.tone;
   const caption = txt(b.caption, lang);
   return (
-    <Box url={b.url} className={`wb-row wb-${b.type}`}>
+    <Box url={b.url} className={`wb-row wb-${b.type}${grouped ? " wb-grouped" : ""}`}>
       <span className="wb-row-head">
-        <span className="wb-label" title={[txt(b.label, lang), caption].filter(Boolean).join(" · ")}>
-          {b.type === "status" && <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />}
+        {!grouped && <span className="wb-label" title={[txt(b.label, lang), caption].filter(Boolean).join(" · ")}>
+          {b.type === "status" && tone && tone !== "neutral" && <i className="wb-dot" style={{ background: TONE_VAR[tone] }} />}
           <span className="wb-lt">{txt(b.label, lang)}</span>
-        </span>
+        </span>}
         <span className={`wb-row-value${value === undefined ? " missing" : ""}`} style={{ color: (b.type === "gauge" || b.type === "metric") && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}>
           <span className="wb-v" title={value}>
             {value ?? t("widget.noData")}
@@ -241,13 +242,18 @@ export function Blocks({ blocks, size }: { blocks: WidgetBlock[]; size: string }
   const [hero, ...rest] = blocks;
   if (!hero) return null;
   const rows = rest.slice(0, ROWS[size] ?? 2);
+  // Repeated neutral status labels describe the list once, leaving room for each headline.
+  const groupLabel = rows.length > 1 && rows.every((b) =>
+    b.type === "status" && (!b.tone || b.tone === "neutral") && !b.caption && txt(b.label, lang) === txt(rows[0]!.label, lang)
+  ) ? txt(rows[0]!.label, lang) : undefined;
   return (
     <div className={`wb wb-s${size}`}>
       <Hero b={hero} lang={lang} />
       {rows.length > 0 && (
         <div className="wb-rows">
+          {groupLabel && <span className="wb-group-label">{groupLabel}</span>}
           {rows.map((b, i) => (
-            <Row key={i} b={b} lang={lang} />
+            <Row key={i} b={b} lang={lang} grouped={!!groupLabel} />
           ))}
         </div>
       )}
