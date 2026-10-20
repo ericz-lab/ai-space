@@ -71,7 +71,7 @@
 "the agent reads it after its current step" = "the agent reads it after its current step";
 "Add to the reply in progress…" = "Add to the reply in progress…";
 
-/* Native chat: an agent's questions (src/web/Chat.tsx QuestionStep) */
+/* Native chat: an agent's questions and tool rows (src/web/Chat.tsx QuestionStep, ChatToolRow.tsx) */
 "Waiting for your answer…" = "Waiting for your answer…";
 "Question" = "Question";
 "Answered" = "Answered";
@@ -79,6 +79,17 @@
 "Or type your own answer" = "Or type your own answer";
 "Your answer" = "Your answer";
 "Skip" = "Skip";
+"IN" = "IN";
+"OUT" = "OUT";
+"Bash" = "Bash";
+"Read" = "Read";
+"Write" = "Write";
+"Edit" = "Edit";
+"Search" = "Search";
+"Web" = "Web";
+"Code" = "Code";
+"Agent" = "Agent";
+"Plan" = "Plan";
 
 "Detected" = "Detected";
 
@@ -97,10 +108,6 @@
 "No result received" = "No result received";
 
 "Output limited to 12,000 characters." = "Output limited to 12,000 characters.";
-
-"Details" = "Details";
-
-"Completed" = "Completed";
 
 "Failed" = "Failed";
 

@@ -481,7 +481,7 @@
 "the agent reads it after its current step" = "智能体做完当前这一步后会看到";
 "Add to the reply in progress…" = "补充说明，会插入正在进行的回复…";
 
-/* Native chat: an agent's questions (src/web/Chat.tsx QuestionStep) */
+/* Native chat: an agent's questions and tool rows (src/web/Chat.tsx QuestionStep, ChatToolRow.tsx) */
 "Waiting for your answer…" = "等你回答…";
 "Question" = "问题";
 "Answered" = "已回答";
@@ -489,6 +489,17 @@
 "Or type your own answer" = "或者自己输入答案";
 "Your answer" = "你的回答";
 "Skip" = "跳过";
+"IN" = "输入";
+"OUT" = "输出";
+"Bash" = "运行命令";
+"Read" = "读取";
+"Write" = "写入";
+"Edit" = "编辑";
+"Search" = "搜索";
+"Web" = "网页";
+"Code" = "代码";
+"Agent" = "子代理";
+"Plan" = "计划";
 
 /* Local edition first run: agent CLIs and the default model */
 "Agents on this Mac" = "此 Mac 上的 Agent";
@@ -523,10 +534,6 @@
 "No result received" = "未收到结果";
 
 "Output limited to 12,000 characters." = "输出最多显示 12,000 个字符。";
-
-"Details" = "详情";
-
-"Completed" = "已完成";
 
 "Failed" = "失败";
 

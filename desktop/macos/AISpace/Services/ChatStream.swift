@@ -175,6 +175,87 @@ struct ChatStep: Identifiable, Equatable {
     var answers: [String: [String]] = [:]
 }
 
+/// How a tool row is drawn, after the web panel's `toolVariant` and `toolSummary`
+/// (src/web/chat-steps.ts): one kind per family of tools across runtimes, and the call's first line.
+enum ChatToolKind: String, Equatable {
+    case bash, read, write, edit, search, web, code, task, plan, other
+
+    private static let families: [(ChatToolKind, Set<String>)] = [
+        (.bash, ["bash", "pwsh", "shell", "exec", "exec_command", "command", "command_execution", "local_shell", "run_command", "terminal"]),
+        (.read, ["read", "read_file", "read_image", "view", "notebookread", "cat"]),
+        (.write, ["write", "write_file", "create_file"]),
+        (.edit, ["edit", "multiedit", "notebookedit", "apply_patch", "patch", "file_change", "str_replace"]),
+        (.search, ["grep", "glob", "ls", "list", "search", "find", "toolsearch", "codebase_search"]),
+        (.web, ["webfetch", "websearch", "web_fetch", "web_search", "fetch", "browse"]),
+        (.code, ["run_code", "code"]),
+        (.task, ["task", "agent", "subagent", "spawn_agent", "send_message", "wait_agent"]),
+        (.plan, ["todowrite", "todo_write", "update_plan"]),
+    ]
+
+    init(tool name: String) {
+        var bare = name
+        // An MCP tool `mcp__server__tool` is known by its own name.
+        if bare.hasPrefix("mcp__"), let last = bare.range(of: "__", options: .backwards), last.lowerBound > bare.index(bare.startIndex, offsetBy: 3) {
+            bare = String(bare[last.upperBound...])
+        }
+        let key = bare.lowercased()
+        self = Self.families.first { $0.1.contains(key) }?.0 ?? .other
+    }
+
+    /// The row's title: the family's name, or an unknown tool's own (`mcp__a__b` as `a · b`).
+    static func title(_ name: String) -> String {
+        switch ChatToolKind(tool: name) {
+        case .bash: return String(localized: "Bash")
+        case .read: return String(localized: "Read")
+        case .write: return String(localized: "Write")
+        case .edit: return String(localized: "Edit")
+        case .search: return String(localized: "Search")
+        case .web: return String(localized: "Web")
+        case .code: return String(localized: "Code")
+        case .task: return String(localized: "Agent")
+        case .plan: return String(localized: "Plan")
+        case .other:
+            let bare = name.hasPrefix("mcp__") ? String(name.dropFirst(5)) : name
+            return bare.replacingOccurrences(of: "__", with: " · ")
+        }
+    }
+
+    /// The first non-empty line, so a long command or a patch still reads as one row.
+    static func summary(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? ""
+    }
+}
+
+/// Runs of consecutive tool calls become one group, so they stack as a tight list between
+/// paragraphs (src/web/chat-steps.ts `stepGroups`).
+enum ChatStepGroup: Identifiable, Equatable {
+    case single(ChatStep)
+    case tools([ChatStep])
+
+    var id: String {
+        switch self {
+        case .single(let step): return step.id
+        case .tools(let steps): return "tools:" + (steps.first?.id ?? "")
+        }
+    }
+
+    static func groups(_ steps: [ChatStep]) -> [ChatStepGroup] {
+        var groups: [ChatStepGroup] = []
+        for step in steps {
+            if step.kind != .tool {
+                groups.append(.single(step))
+            } else if case .tools(let run)? = groups.last {
+                groups[groups.count - 1] = .tools(run + [step])
+            } else {
+                groups.append(.tools([step]))
+            }
+        }
+        return groups
+    }
+}
+
 /// One message of a stored conversation (`GET …/sessions/:sid`): the person's text, or the agent's
 /// with the tools it called and, where the runtime's records have them, its text and tool calls in
 /// order (`TranscriptMessage` in src/space/runtimes/types.ts).

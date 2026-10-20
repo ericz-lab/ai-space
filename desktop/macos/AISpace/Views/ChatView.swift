@@ -320,18 +320,26 @@ private struct MessageRow: View {
             if message.steps.isEmpty {
                 if !message.text.isEmpty { textBubble(message.text) }
             } else {
-                ForEach(message.steps) { step in
-                    switch step.kind {
-                    case .text:
-                        textBubble(step.text)
-                    case .approval where !step.questions.isEmpty:
-                        QuestionCard(step: step, answer: answer)
-                    case .approval:
-                        ApprovalCard(step: step, answer: answer)
-                    case .steer:
-                        SteerRow(text: step.text)
-                    case .tool:
-                        ChatWorkStep(step: step)
+                ForEach(ChatStepGroup.groups(message.steps)) { group in
+                    switch group {
+                    case .tools(let tools):
+                        // Consecutive calls stack as one tight list between paragraphs.
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(tools) { ChatWorkStep(step: $0) }
+                        }
+                    case .single(let step):
+                        switch step.kind {
+                        case .text:
+                            textBubble(step.text)
+                        case .approval where !step.questions.isEmpty:
+                            QuestionCard(step: step, answer: answer)
+                        case .approval:
+                            ApprovalCard(step: step, answer: answer)
+                        case .steer:
+                            SteerRow(text: step.text)
+                        case .tool:
+                            ChatWorkStep(step: step)
+                        }
                     }
                 }
                 if !message.live && message.text.hasSuffix(String(localized: "(stopped)")) {
@@ -621,80 +629,149 @@ private struct QuestionCard: View {
     }
 }
 
-/// Each operation keeps its own result instead of disappearing into a tool-name summary.
+/// One tool call as a quiet single line (src/web/ChatToolRow.tsx `WorkStep`): glyph, title, the
+/// call's first line. A success stays muted, a failure turns red, a running call shimmers. A click
+/// opens the full input and output.
 private struct ChatWorkStep: View {
     let step: ChatStep
     @State private var expanded = false
+    @State private var hovering = false
 
-    private var color: Color {
-        switch step.state {
-        case .running: return Theme.accent
-        case .succeeded: return Theme.success
-        case .failed: return Theme.danger
-        case .incomplete: return .secondary
-        case .waiting: return Theme.accent
-        case .allowed: return Theme.success
-        case .denied: return Theme.danger
-        case .cancelled: return .secondary
-        }
-    }
-
-    private var status: String {
-        switch step.state {
-        case .running: return String(localized: "Running")
-        case .succeeded: return String(localized: "Completed")
-        case .failed: return String(localized: "Failed")
-        case .incomplete: return String(localized: "No result received")
-        case .waiting: return String(localized: "Waiting for you")
-        case .allowed: return String(localized: "Allowed")
-        case .denied: return String(localized: "Denied")
-        case .cancelled: return String(localized: "Not answered")
-        }
+    private var kind: ChatToolKind { ChatToolKind(tool: step.title) }
+    private var summary: String { ChatToolKind.summary(step.text) }
+    private var expandable: Bool {
+        !step.output.isEmpty || step.text.trimmingCharacters(in: .whitespacesAndNewlines) != summary
     }
 
     private var symbol: String {
-        switch step.title.lowercased() {
-        case "bash", "exec_command", "command_execution": return "terminal"
-        case "read", "read_file": return "doc.text.magnifyingglass"
-        case "edit", "write", "apply_patch": return "square.and.pencil"
-        case "websearch", "web_search", "webfetch": return "globe"
-        default: return "wrench.and.screwdriver"
+        switch kind {
+        case .bash: return "terminal"
+        case .read: return "doc.text"
+        case .write, .edit: return "square.and.pencil"
+        case .search: return "magnifyingglass"
+        case .web: return "globe"
+        case .code: return "number"
+        case .task: return "sparkle"
+        case .plan: return "list.bullet"
+        case .other: return "gearshape"
+        }
+    }
+
+    /// Only what needs attention is named: a failure, a missing result, a call still running.
+    private var cue: String {
+        switch step.state {
+        case .running: return String(localized: "Running")
+        case .failed: return String(localized: "Failed")
+        case .incomplete: return String(localized: "No result received")
+        default: return ""
         }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: symbol).foregroundStyle(color)
-                    .frame(width: 28, height: 28)
-                    .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
-                Text(verbatim: step.title).font(.callout.weight(.semibold))
-                Spacer()
-                if step.state == .running { ProgressView().controlSize(.small) }
-                else { Image(systemName: step.state == .succeeded ? "checkmark.circle.fill" : step.state == .failed ? "exclamationmark.circle.fill" : "minus.circle").foregroundStyle(color) }
-                Text(status).font(.caption).foregroundStyle(color)
+        VStack(alignment: .leading, spacing: 0) {
+            Button { if expandable { expanded.toggle() } } label: { row }
+                .buttonStyle(.plain)
+                .disabled(!expandable)
+                .onHover { hovering = $0 }
+                .help(step.text.isEmpty ? step.title : step.text)
+                .accessibilityLabel(Text(verbatim: step.title))
+                .accessibilityValue(Text(verbatim: summary))
+            if expanded {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !step.text.isEmpty { io("IN", step.text, failed: false) }
+                    if !step.text.isEmpty && !step.output.isEmpty { Divider() }
+                    if !step.output.isEmpty { io("OUT", step.output, failed: step.state == .failed) }
+                }
+                .background(Theme.solid.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.hairline))
+                .padding(.leading, 24).padding(.top, 4).padding(.bottom, 6)
             }
-            if !step.text.isEmpty {
-                Text(verbatim: step.text).font(.caption.monospaced()).textSelection(.enabled)
-                    .lineLimit(expanded ? nil : 3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// A failure's summary and cue turn red; otherwise they keep the row's color.
+    private var failed: AnyShapeStyle { step.state == .failed ? AnyShapeStyle(Theme.danger) : AnyShapeStyle(.foreground) }
+
+    private var row: some View {
+        let lit = expandable && (hovering || expanded)
+        return HStack(spacing: 0) {
+            ZStack {
+                Image(systemName: symbol).opacity(lit ? 0 : 1)
+                Image(systemName: "chevron.down").rotationEffect(.degrees(expanded ? 180 : 0)).opacity(lit ? 1 : 0)
             }
-            if !step.output.isEmpty || step.text.count > 180 {
-                DisclosureGroup("Details", isExpanded: $expanded) {
-                    if !step.output.isEmpty {
-                        Text(verbatim: step.output).font(.caption.monospaced()).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
-                    }
-                    if step.output.count >= 12000 {
+            .font(.system(size: 11))
+            .frame(width: 16, height: 16)
+            .padding(.trailing, 6)
+            HStack(spacing: 0) {
+                Text(verbatim: ChatToolKind.title(step.title)).font(.system(size: 12.5, weight: .medium)).layoutPriority(1)
+                if !summary.isEmpty {
+                    Circle().frame(width: 3, height: 3).opacity(0.6).padding(.horizontal, 8)
+                    Text(verbatim: summary).font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(failed)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+            }
+            .modifier(ToolShimmer(active: step.state == .running))
+            Spacer(minLength: 0)
+            if !cue.isEmpty {
+                Text(cue).font(.system(size: 11)).padding(.leading, 8)
+                    .foregroundStyle(failed)
+                    .opacity(step.state == .incomplete ? 0.8 : 1)
+                    .modifier(ToolShimmer(active: step.state == .running))
+            }
+        }
+        .foregroundStyle(lit ? AnyShapeStyle(Theme.text) : AnyShapeStyle(.secondary))
+        .frame(height: 26)
+        .padding(.leading, 2).padding(.trailing, 6)
+        .contentShape(Rectangle())
+        .background(lit ? Theme.text.opacity(0.05) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func io(_ label: LocalizedStringKey, _ text: String, failed: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(.system(size: 10.5, weight: .semibold)).tracking(0.4).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: text).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                        .foregroundStyle(failed ? Theme.danger : Theme.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if text.count >= 12000 {
                         Text("Output limited to 12,000 characters.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxHeight: 180)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+}
+
+/// A running call's text: a light sweep across it, the way the web panel marks work in progress.
+/// Still under Reduce Motion.
+private struct ToolShimmer: ViewModifier {
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        if !active {
+            content
+        } else if reduceMotion {
+            content.foregroundStyle(Theme.text)
+        } else {
+            TimelineView(.animation) { timeline in
+                let phase = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6) / 1.6
+                content.overlay {
+                    GeometryReader { geo in
+                        LinearGradient(colors: [.clear, Theme.text.opacity(0.9), .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: geo.size.width * 0.4)
+                            .offset(x: -geo.size.width * 0.4 + phase * geo.size.width * 1.4)
+                    }
+                    .mask(content)
+                    .allowsHitTesting(false)
+                }
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.solid.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

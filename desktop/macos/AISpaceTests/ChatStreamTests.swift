@@ -191,6 +191,27 @@ struct CodexWorkStepsTests {
         #expect(r.steps[1].state == .succeeded && r.steps[1].output.count == 12000)
     }
 
+    @Test func toolRowsPickAKindAcrossRuntimesAndSummarizeToOneLine() {
+        #expect(["Bash", "bash", "command_execution", "exec"].map { ChatToolKind(tool: $0) } == [.bash, .bash, .bash, .bash])
+        #expect(["Read", "Edit", "MultiEdit", "Write", "Grep", "Glob", "WebFetch", "web_search", "run_code", "Task", "TodoWrite"].map { ChatToolKind(tool: $0) }
+            == [.read, .edit, .edit, .write, .search, .search, .web, .web, .code, .task, .plan])
+        #expect(ChatToolKind(tool: "mcp__github__search") == .search)
+        #expect(ChatToolKind(tool: "mcp__github__create_issue") == .other)
+        #expect(ChatToolKind.title("mcp__github__create_issue") == "github · create_issue")
+        #expect(ChatToolKind.summary("\n  \n  git status\n  git diff") == "git status")
+        #expect(ChatToolKind.summary("") == "")
+    }
+
+    @Test func consecutiveToolCallsStackAsOneGroup() {
+        let steps = [
+            ChatStep(id: "a", kind: .text), ChatStep(id: "b", kind: .tool), ChatStep(id: "c", kind: .tool),
+            ChatStep(id: "d", kind: .text), ChatStep(id: "e", kind: .tool),
+        ]
+        #expect(ChatStepGroup.groups(steps).map(\.id) == ["a", "tools:b", "d", "tools:e"])
+        guard case .tools(let run) = ChatStepGroup.groups(steps)[1] else { Issue.record("not a tool group"); return }
+        #expect(run.map(\.id) == ["b", "c"])
+    }
+
     @Test func anAgentsQuestionKeepsItsOptionsAndOnceAnsweredTheAnswers() {
         var r = ChatReply()
         r.apply(#"{"type":"approval_request","id":"q1","tool":"AskUserQuestion","title":"Which one?","questions":[{"id":"pick","header":"Asset","question":"Which one?","options":[{"label":"Contract","description":"the signed one"},{"label":"Draft"}],"multiSelect":false}]}"#)
