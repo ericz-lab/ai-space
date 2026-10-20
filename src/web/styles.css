@@ -69,12 +69,12 @@ a { color: inherit; text-decoration: none; }
    headings on the open field get a halo in the ground color to stay readable over the artwork.
    A wide halo under every tile name reads as a smudge, so names are set like a phone's home
    screen instead: white with a soft dark shadow over the dark versions. The light versions are
-   too pale for white names; there the names keep the text color with a tight edge in the ground. */
+   too pale for white names; there the names keep the text color without a shadow. */
 :root[data-backdrop] .aurora { filter: none; }
 .aurora iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
-:root[data-backdrop] .tile-name { font-weight: 600; text-shadow: 0 0 1px var(--bg), 0 0 3px var(--bg), 0 1px 2px var(--bg); }
+:root[data-backdrop] .tile-name { font-weight: 600; }
 :root[data-theme="dark"][data-backdrop] .tile-name { color: #fff; text-shadow: 0 1px 2px rgba(15, 18, 60, 0.55), 0 0 5px rgba(15, 18, 60, 0.35); }
-:root[data-backdrop] .shell h2 { text-shadow: 0 0 6px var(--bg), 0 0 14px var(--bg), 0 1px 2px var(--bg); }
+:root[data-theme="dark"][data-backdrop] .shell h2 { text-shadow: 0 0 6px var(--bg), 0 0 14px var(--bg), 0 1px 2px var(--bg); }
 
 .shell { max-width: 1080px; margin: 0 auto; padding: clamp(40px, 8vh, 80px) clamp(24px, 5vw, 64px) 48px; }
 
@@ -91,7 +91,6 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
   background: var(--glass); -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
   border: 1px solid var(--glass-border); border-radius: 26px; box-shadow: var(--shadow);
 }
-.omni-bar:focus-within { outline: 2px solid color-mix(in srgb, var(--link) 40%, transparent); }
 .omni.open .omni-bar { border-radius: 26px 26px 0 0; }
 .omni-glyph { color: var(--accent); font-size: 18px; line-height: 32px; }
 .omni-field {
@@ -99,6 +98,12 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
   font: inherit; font-size: 16px; line-height: 22px; padding: 5px 0; max-height: 132px;
 }
 .omni-field::placeholder { color: var(--muted); }
+.omni-resolving { flex: none; display: flex; align-items: center; gap: 4px; height: 32px; color: var(--muted); }
+.omni-resolving i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: omni-bounce 1s ease-in-out infinite; }
+.omni-resolving i:nth-child(2) { animation-delay: .15s; }
+.omni-resolving i:nth-child(3) { animation-delay: .3s; }
+@keyframes omni-bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .omni-resolving i { animation: none; } }
 .omni-mic {
   display: grid; place-items: center;
   flex: none; width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer; font-size: 15px;

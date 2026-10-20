@@ -221,6 +221,12 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
           // A click on a row lands before the blur hides the list.
           onBlur={() => setTimeout(() => setFocused(false), 150)}
         />
+        {resolving && showList && (
+          <span className="omni-resolving" role="status">
+            <span className="sr-only">{t("omni.resolving")}</span>
+            <i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" />
+          </span>
+        )}
         {voice !== "off" && (
           <button className={`omni-mic ${voice}`} title={(voice === "recording" || voice === "connecting") ? t("omni.stop") : t("omni.voice")} aria-label={(voice === "recording" || voice === "connecting") ? t("omni.stop") : t("omni.voice")} disabled={voice === "transcribing"} onClick={toggleVoice}>
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
@@ -229,7 +235,6 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
           </button>
         )}
       </div>
-      {resolving && showList && <p className="sc-sub" role="status">{t("omni.resolving")}</p>}
       {agentError && <p className="omni-error" role="alert">{agentError}</p>}
       {voiceError && <p className="omni-error">{voiceError}</p>}
       {showList && ambiguous && <p className="sc-sub" role="status">{t("sc.pattern.choose")}</p>}
