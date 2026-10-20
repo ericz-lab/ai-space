@@ -32,6 +32,13 @@
   --glass-filter: blur(var(--blur)) saturate(180%);
   /* The status green as text: the token is bright enough for a dot, not for words (4.5:1). */
   --success-text: color-mix(in srgb, var(--success) 50%, var(--text));
+  /* A third text level under --muted, for times and footnotes. */
+  --faint: color-mix(in srgb, var(--muted) 70%, transparent);
+  /* Data tones in cards: the status colors pulled a little toward the text, so a green number
+     reads as a value rather than a light. */
+  --tone-positive: color-mix(in srgb, var(--success) 82%, var(--text));
+  --tone-negative: color-mix(in srgb, var(--danger) 84%, var(--text));
+  --tone-warning: color-mix(in srgb, var(--warning) 84%, var(--text));
 }
 :root[data-theme="dark"] {
   /* A lifted dark: slate ground, brighter aurora, glass that reads as a surface rather than a hole. */
@@ -75,6 +82,15 @@ a { color: inherit; text-decoration: none; }
 :root[data-backdrop] .tile-name { font-weight: 600; }
 :root[data-theme="dark"][data-backdrop] .tile-name { color: #fff; text-shadow: 0 1px 2px rgba(15, 18, 60, 0.55), 0 0 5px rgba(15, 18, 60, 0.35); }
 :root[data-theme="dark"][data-backdrop] .shell h2 { text-shadow: 0 0 6px var(--bg), 0 0 14px var(--bg), 0 1px 2px var(--bg); }
+/* The artwork is the setting, not the subject: a soft veil in the ground color sits over its middle,
+   where the tiles and cards are, so bright lines in the artwork stop crossing the content. */
+:root[data-backdrop] .aurora::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 62% 70% at 50% 58%, color-mix(in srgb, var(--bg) 68%, transparent), color-mix(in srgb, var(--bg) 25%, transparent) 72%, transparent);
+}
+:root[data-theme="light"][data-backdrop] .aurora::after {
+  background: radial-gradient(ellipse 62% 70% at 50% 58%, color-mix(in srgb, var(--bg) 42%, transparent), transparent 75%);
+}
 
 .shell { max-width: 1080px; margin: 0 auto; padding: clamp(40px, 8vh, 80px) clamp(24px, 5vw, 64px) 48px; }
 
@@ -939,16 +955,32 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
 .widget iframe { width: 100%; border: 0; border-radius: 10px; min-height: 160px; flex: 1; background: transparent; }
 .widget.s2x2 iframe { min-height: 340px; }
 .widget {
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-filter);
-  backdrop-filter: var(--glass-filter);
-  border: 1px solid var(--glass-border); border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 14px 16px; display: flex; flex-direction: column;
+  /* Cards are neutral: the glass is laid over a share of the ground color and saturates little, so
+     a colored backdrop does not tint every card alike. Color inside a card is data (see .wb). */
+  background: linear-gradient(var(--glass), var(--glass)), var(--card-ground);
+  -webkit-backdrop-filter: var(--card-filter);
+  backdrop-filter: var(--card-filter);
+  border: 1px solid var(--card-border); border-radius: var(--radius);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--card-highlight);
+  padding: 16px 18px; display: flex; flex-direction: column;
+  transition: border-color 0.2s ease;
 }
-.widget-head { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 8px; min-width: 0; }
-.widget-title { color: var(--muted); font-weight: 600; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+:root {
+  --card-ground: transparent;
+  --card-border: var(--glass-border);
+  --card-highlight: transparent;
+  --card-filter: var(--glass-filter);
+}
+:root[data-backdrop] { --card-ground: color-mix(in srgb, var(--bg) 40%, transparent); --card-filter: blur(calc(var(--blur) * 1.4)) saturate(115%); }
+:root[data-theme="dark"] { --card-border: rgba(255, 255, 255, 0.09); --card-highlight: rgba(255, 255, 255, 0.06); }
+:root[data-theme="dark"][data-backdrop] { --card-ground: color-mix(in srgb, var(--bg) 52%, transparent); }
+/* One card speaks up: the one whose lead value is a warning or a fault gets a tinted edge. */
+.widget:has(.wb-hero[data-tone="warning"]) { --card-border: color-mix(in srgb, var(--warning) 45%, transparent); box-shadow: var(--shadow), inset 0 1px 0 var(--card-highlight), 0 0 0 4px color-mix(in srgb, var(--warning) 8%, transparent); }
+.widget:has(.wb-hero[data-tone="negative"]) { --card-border: color-mix(in srgb, var(--danger) 45%, transparent); box-shadow: var(--shadow), inset 0 1px 0 var(--card-highlight), 0 0 0 4px color-mix(in srgb, var(--danger) 8%, transparent); }
+.widget-head { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 10px; min-width: 0; }
+.widget-title { color: var(--muted); font-weight: 500; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 a.widget-title:hover { color: var(--text); }
-.widget-asof { margin-left: auto; flex: none; font-size: 11px; color: var(--muted); }
+.widget-asof { margin-left: auto; flex: none; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .widget-asof.outdated { color: var(--warning); font-weight: 600; }
 .widget-asof + .widget-size { margin-left: 8px; }
 .widget-ico { width: 22px; height: 22px; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 16px; flex: none; }
@@ -970,39 +1002,42 @@ a.widget-title:hover { color: var(--text); }
 .wb a:hover { background: var(--glass-strong); }
 .wb-hero { display: flex; flex-direction: column; gap: 4px; padding: 4px 6px; min-width: 0; }
 .wb-label { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; display: flex; align-items: center; gap: 6px; }
-.wb-hero-value { font-size: 40px; line-height: 1.05; font-weight: 650; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.wb-hero-value { font-size: 40px; line-height: 1.05; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .wb-hero-value.missing, .wb-row-value.missing { color: var(--muted); font-size: 15px; font-weight: 500; letter-spacing: 0; }
 .wb-hero.wb-progress .wb-hero-value { font-size: 32px; }
 .wb-status-value { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.wb-hero.wb-status .wb-hero-value { font-size: 22px; line-height: 1.25; font-weight: 600; letter-spacing: 0; }
+.wb-hero.wb-status .wb-hero-value { font-size: 17px; line-height: 1.4; font-weight: 600; letter-spacing: 0; }
 .wb-status-value .wb-v { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.wb-caption { font-size: 12px; color: var(--muted); }
+.wb-caption { font-size: 12px; color: var(--faint); }
 .wb-delta { font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .wb-delta-label { font-weight: 400; }
-.wb-time { font-size: 11px; font-weight: 400; color: var(--muted); }
+.wb-time { font-size: 11px; font-weight: 400; color: var(--faint); font-variant-numeric: tabular-nums; }
 .wb-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
 .wb-missing { font-size: 12px; color: var(--muted); }
 .wb-spark { display: block; width: 100%; height: 28px; overflow: visible; }
 .wb-spark.big { height: 56px; margin-top: 4px; }
-.wb-zero { stroke: var(--hairline); stroke-width: 1; }
+.wb-zero { stroke: color-mix(in srgb, var(--text) 18%, transparent); stroke-width: 1; }
+.wb-spark .past { opacity: 0.6; }
+.wb-area { opacity: 0.14; }
 .wb-bar { position: relative; display: block; height: 6px; border-radius: 3px; background: var(--hairline); overflow: hidden; margin-top: 4px; }
 .wb-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: 3px; }
 .wb-scale { position: relative; display: block; height: 6px; margin: 8px 0 4px; }
-.wb-zone { position: absolute; top: 0; bottom: 0; opacity: 0.45; }
+.wb-zone { position: absolute; top: 0; bottom: 0; opacity: 0.42; }
 .wb-zone:first-child { border-radius: 3px 0 0 3px; }
 .wb-zone:last-of-type { border-radius: 0 3px 3px 0; }
-.wb-marker { position: absolute; top: -4px; width: 4px; height: 14px; margin-left: -2px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 2px var(--solid); }
+.wb-marker { position: absolute; top: -3px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 3px var(--solid), 0 1px 4px rgba(0, 0, 0, 0.3); }
 .wb-rows { display: grid; gap: 2px; align-content: start; min-width: 0; }
 .wb-row { display: flex; flex-direction: column; gap: 2px; padding: 5px 6px; min-width: 0; }
 .wb-row-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.wb-row-head .wb-label { flex: 1; font-size: 13px; color: var(--text); }
-.wb-row-value { flex: 0 1 auto; max-width: 62%; min-width: 0; display: flex; align-items: baseline; gap: 6px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wb-row-head .wb-label { flex: 1; font-size: 13px; color: color-mix(in srgb, var(--text) 78%, transparent); }
+.wb-row-value { flex: 0 1 auto; max-width: 62%; min-width: 0; display: flex; align-items: baseline; gap: 6px; font-size: 14px; font-weight: 550; font-variant-numeric: tabular-nums; }
 .wb-row-value .wb-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-row-value > :not(.wb-v) { flex: none; }
 .wb-row-head .wb-label { min-width: 3em; }
 .wb-lt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-row .wb-spark { height: 22px; }
 /* Wide cards: the hero on the left, rows beside it; a large card puts the rows in two columns. */
+.wb-s1x1 > .wb-rows, .wb-s1x2 > .wb-rows, .wb-s2x2 > .wb-rows { padding-top: 8px; border-top: 1px solid var(--hairline); }
 .wb-s2x1, .wb-s2x2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 18px; }
 .wb-s2x2 { grid-template-rows: auto 1fr; }
 .wb-s2x2 .wb-hero { grid-column: 1 / -1; }
