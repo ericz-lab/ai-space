@@ -28,12 +28,12 @@
   --shadow-o: .34;
   --caustic-o: .55;
   --beam: #ffffff;
-  --beam-o: .92;
-  --halo-o: .22;
-  --fan-o: .95;
+  --beam-o: .46;
+  --halo-o: .11;
+  --fan-o: .475;
   --rim-o: 1;
   --grain-o: .22;
-  --ray-o: .42; --inner-o: .9; --inner-blend: screen;
+  --ray-o: .21; --inner-o: .9; --inner-blend: screen;
   --grain-blend: soft-light;
   --vio-1: #b9a8ff; --vio-2: #5b3df5;
   --ros-1: #ffb3cf; --ros-2: #ff2d78;
@@ -59,12 +59,12 @@
   --shadow-o: .42;
   --caustic-o: .0;
   --beam: #ffffff;
-  --beam-o: 1;
-  --halo-o: .55;
-  --fan-o: .78;
+  --beam-o: .5;
+  --halo-o: .275;
+  --fan-o: .39;
   --rim-o: 1;
   --grain-o: .20;
-  --ray-o: .8; --inner-o: .75; --inner-blend: soft-light;
+  --ray-o: .4; --inner-o: .75; --inner-blend: soft-light;
   --grain-blend: multiply;
   --vio-1: #cfc6ff; --vio-2: #7257ff;
   --ros-1: #ffd0e0; --ros-2: #ff4f8f;
@@ -245,8 +245,8 @@ body {
       </g>
 
       <!-- where the beam meets the glass -->
-      <ellipse cx="600" cy="360" rx="190" ry="190" fill="url(#gHot)" style="mix-blend-mode:screen"/>
-      <ellipse cx="600" cy="360" rx="260" ry="5" fill="url(#gHot)" transform="rotate(-58 600 360)" opacity=".8"/>
+      <ellipse cx="600" cy="360" rx="190" ry="190" fill="url(#gHot)" style="mix-blend-mode:screen" opacity=".5"/>
+      <ellipse cx="600" cy="360" rx="260" ry="5" fill="url(#gHot)" transform="rotate(-58 600 360)" opacity=".4"/>
 
       <!-- rims -->
       <g class="rims" fill="none">
