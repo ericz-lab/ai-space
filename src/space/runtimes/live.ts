@@ -1,4 +1,4 @@
-import type { ApprovalDecision, ChatCallbacks, ChatHandle, ChatTurn } from "./types.ts";
+import type { AgentQuestion, ApprovalDecision, ChatCallbacks, ChatHandle, ChatTurn, QuestionAnswers } from "./types.ts";
 
 /**
  * Live chat (docs/runtimes.md#live-chat): a conversation keeps one runtime process across its
@@ -9,8 +9,11 @@ import type { ApprovalDecision, ChatCallbacks, ChatHandle, ChatTurn } from "./ty
  *
  * Events added to the runtime's stream (Claude Code's `stream-json` shapes otherwise):
  *
- *   {"type":"approval_request","id","tool","title","detail"?,"input"?}  the turn waits for an answer
- *   {"type":"approval_resolved","id","decision":"allow"|"deny"|"cancelled"}
+ *   {"type":"approval_request","id","tool","title","detail"?,"input"?,"questions"?}  the turn waits for an answer
+ *   {"type":"approval_resolved","id","decision":"allow"|"deny"|"cancelled","answers"?}
+ *
+ * A question the agent asks (`tool` "AskUserQuestion") is an approval request with `questions`;
+ * the person answers it with `allow` and `answers` (question id → chosen labels or typed text).
  *   {"type":"steer","text"}  the agent has read a message the person added to the turn
  */
 
@@ -111,17 +114,17 @@ export class PendingApprovals<T> {
 
   constructor(private readonly emit: (event: unknown) => void) {}
 
-  add(id: string, value: T, request: { tool: string; title: string; detail?: string; input?: unknown }): void {
+  add(id: string, value: T, request: { tool: string; title: string; detail?: string; input?: unknown; questions?: AgentQuestion[] }): void {
     this.map.set(id, value);
     this.emit({ type: "approval_request", id, ...request });
   }
 
   /** Take an open request out, telling the stream how it ended; undefined when it is not open. */
-  take(id: string, decision: ApprovalDecision | "cancelled"): T | undefined {
+  take(id: string, decision: ApprovalDecision | "cancelled", answers?: QuestionAnswers): T | undefined {
     const value = this.map.get(id);
     if (value === undefined) return undefined;
     this.map.delete(id);
-    this.emit({ type: "approval_resolved", id, decision });
+    this.emit({ type: "approval_resolved", id, decision, ...(answers && decision === "allow" ? { answers } : {}) });
     return value;
   }
 
@@ -168,6 +171,34 @@ export function tail(stream: ReadableStream<Uint8Array>, max = 4000): { text: ()
     for await (const chunk of chunks(stream)) text = (text + decoder.decode(chunk, { stream: true })).slice(-max);
   })().catch(() => {});
   return { text: () => text };
+}
+
+/**
+ * An agent's questions in the panel's shape, from Codex's `request_user_input` or Claude Code's
+ * `AskUserQuestion` input. A question without an id (Claude's) is `q<n>`.
+ */
+export function agentQuestions(raw: unknown): AgentQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 8).flatMap((q, i) => {
+    if (!q || typeof q !== "object") return [];
+    const r = q as { id?: unknown; header?: unknown; question?: unknown; options?: unknown; multiSelect?: unknown };
+    const options = (Array.isArray(r.options) ? r.options : []).slice(0, 12).flatMap((o) => {
+      const label = (o as { label?: unknown } | null)?.label;
+      return typeof label === "string" ? [{ label: label.slice(0, 200), description: String((o as { description?: unknown }).description ?? "").slice(0, 500) }] : [];
+    });
+    return [{ id: typeof r.id === "string" && r.id ? r.id : `q${i}`, header: String(r.header ?? "").slice(0, 80), question: String(r.question ?? ""), options, multiSelect: r.multiSelect === true }];
+  });
+}
+
+/** Answers that name only the asked questions; null when nothing was answered (the question is skipped). */
+export function questionAnswers(questions: AgentQuestion[], answers: QuestionAnswers | undefined): QuestionAnswers | null {
+  if (!answers) return null;
+  const out: QuestionAnswers = {};
+  for (const q of questions) {
+    const given = (answers[q.id] ?? []).map((a) => a.trim()).filter(Boolean);
+    if (given.length) out[q.id] = q.multiSelect ? given : given.slice(0, 1);
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 /** One line for an approval card: the command, the file, the URL, else the input as JSON. */

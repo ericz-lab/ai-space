@@ -233,7 +233,12 @@ describe("transcript", () => {
     const runtime = createDeepseekHarness(spec({ home: dir }));
     expect(await runtime.transcript!(cwd, sid)).toEqual([
       { role: "user", text: "hello" },
-      { role: "ai", text: "hi!", tools: [{ name: "web_search", hint: "rates" }] },
+      {
+        role: "ai",
+        text: "hi!",
+        tools: [{ name: "web_search", hint: "rates" }],
+        steps: [{ kind: "tool", name: "web_search", input: "rates", output: "", failed: false }, { kind: "text", text: "hi!" }],
+      },
     ]);
     expect(await runtime.transcript!(cwd, "session-nope0000")).toBeNull();
   });

@@ -5,6 +5,7 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { codexAgentArgs, codexArgs, codexChatArgs, codexImageArgs, codexRemoteCommand, createCodexCli, parseCodexOutput, splitImageOutput } from "./codex-cli.ts";
 import { spawnCollect } from "./process.ts";
+import { parseCodexTranscript } from "./transcripts.ts";
 import { fakeCodexBin } from "./testing-codex.ts";
 import type { ChatTurn, CompleteInput, ImageInput } from "./types.ts";
 
@@ -232,12 +233,67 @@ test("Codex transcript restores user text and assistant tools only for the match
       { type: "response_item", payload: { type: "function_call", name: "exec_command", arguments: '{"command":"pwd"}' } },
       { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "done" }] } },
     ].map((e) => JSON.stringify(e)).join("\n"));
-    expect(await readCodexTranscript("/workspace", sid, home)).toEqual([{ role: "user", text: "hello" }, { role: "ai", text: "done", tools: [{ name: "exec_command", hint: "pwd" }] }]);
+    expect(await readCodexTranscript("/workspace", sid, home)).toEqual([{ role: "user", text: "hello" }, { role: "ai", text: "done", tools: [{ name: "exec_command", hint: "pwd" }], steps: [{ kind: "tool", name: "exec_command", input: "pwd", output: "", failed: false }, { kind: "text", text: "done" }] }]);
     expect(await readCodexTranscript("/other", sid, home)).toBeNull();
     expect(await readCodexTranscript("/workspace", "missing-session", home)).toBeNull();
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 
+
+test("Codex history shows the commands, edits, searches and questions of the turn in order, with their output", () => {
+  const sid = "c0de0003-0000-4000-8000-000000000000";
+  const item = (item: unknown) => ({ type: "event_msg", payload: { type: "item_completed", item } });
+  const assistant = (text: string) => ({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] } });
+  const jsonl = [
+    { type: "session_meta", payload: { id: sid, cwd: "/workspace" } },
+    { type: "event_msg", payload: { type: "user_message", message: "add the assets" } },
+    assistant("Checking the groups first."),
+    // Code mode: one `exec` script runs the commands; the items below are what it ran.
+    { type: "response_item", payload: { type: "custom_tool_call", name: "exec", call_id: "c1", input: "text(await tools.exec_command({cmd:\"space status\"}))" } },
+    item({ type: "CommandExecution", id: "e1", command: ["/bin/bash", "-lc", "space status"], aggregated_output: "ok\n", exit_code: 0, status: "completed" }),
+    item({ type: "CommandExecution", id: "e2", command: ["/bin/bash", "-lc", "false"], aggregated_output: "", exit_code: 1, status: "failed" }),
+    item({ type: "Reasoning", id: "r1" }),
+    item({ type: "Extension", kind: "clock.sleep", id: "s1", durationMs: 1000 }),
+    { type: "response_item", payload: { type: "custom_tool_call_output", call_id: "c1", output: "ok" } },
+    item({ type: "FileChange", id: "f1", changes: { "/workspace/a.ts": { type: "update", unified_diff: "@@ -1 +1 @@\n-a\n+b\n" } }, status: "completed" }),
+    item({ type: "Extension", kind: "web.search", id: "w1", query: "", action: { type: "search", queries: ["okx minimax", "minimax hk"] }, results: [{ title: "MiniMax", domain: "okx.com" }] }),
+    { type: "response_item", payload: { type: "function_call", name: "request_user_input", call_id: "q1", arguments: JSON.stringify({ questions: [{ id: "pick", header: "Asset", question: "Which one?", options: [{ label: "Contract", description: "" }, { label: "Stock", description: "" }] }] }) } },
+    { type: "response_item", payload: { type: "function_call_output", call_id: "q1", output: JSON.stringify({ answers: { pick: { answers: ["Contract"] } } }) } },
+    assistant("Done."),
+  ].map((e) => JSON.stringify(e)).join("\n");
+  const [user, ai] = parseCodexTranscript(jsonl, "/workspace", sid)!;
+  expect(user).toEqual({ role: "user", text: "add the assets" });
+  if (ai?.role !== "ai") throw new Error("expected the assistant's message");
+  expect(ai.text).toBe("Checking the groups first.\n\nDone.");
+  expect(ai.tools.map((t) => t.name)).toEqual(["Bash", "Bash", "Edit", "WebSearch", "AskUserQuestion"]);
+  expect(ai.steps).toEqual([
+    { kind: "text", text: "Checking the groups first." },
+    { kind: "tool", name: "Bash", input: "space status", output: "ok\n", failed: false },
+    { kind: "tool", name: "Bash", input: "false", output: "", failed: true },
+    { kind: "tool", name: "Edit", input: "/workspace/a.ts", output: "@@ -1 +1 @@\n-a\n+b\n", failed: false },
+    { kind: "tool", name: "WebSearch", input: "okx minimax · minimax hk", output: "MiniMax — okx.com", failed: false },
+    { kind: "tool", name: "AskUserQuestion", input: "Which one?\n· Contract\n· Stock", output: "Contract", failed: false },
+    { kind: "text", text: "Done." },
+  ]);
+  expect(parseCodexTranscript(jsonl, "/other", sid)).toBeNull();
+});
+
+test("Codex history without completed items falls back to the raw tool calls and their output", () => {
+  const sid = "c0de0004-0000-4000-8000-000000000000";
+  const jsonl = [
+    { type: "session_meta", payload: { id: sid, cwd: "/workspace" } },
+    { type: "event_msg", payload: { type: "user_message", message: "patch it" } },
+    { type: "response_item", payload: { type: "function_call", name: "shell", call_id: "a", arguments: '{"command":["ls","-la"]}' } },
+    { type: "response_item", payload: { type: "function_call_output", call_id: "a", output: { content: "total 0" } } },
+    { type: "response_item", payload: { type: "custom_tool_call", name: "apply_patch", call_id: "b", input: "*** Begin Patch" } },
+    { type: "response_item", payload: { type: "custom_tool_call_output", call_id: "b", output: "Success" } },
+  ].map((e) => JSON.stringify(e)).join("\n");
+  const ai = parseCodexTranscript(jsonl, "/workspace", sid)![1];
+  expect(ai?.role === "ai" && ai.steps).toEqual([
+    { kind: "tool", name: "shell", input: "ls -la", output: "total 0", failed: false },
+    { kind: "tool", name: "apply_patch", input: "*** Begin Patch", output: "Success", failed: false },
+  ]);
+});
 
 test("Codex history reads current user records, hides injected context and deduplicates legacy pairs", async () => {
   const { mkdtemp, mkdir, rm } = await import("node:fs/promises");

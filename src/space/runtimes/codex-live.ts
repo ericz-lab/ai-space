@@ -1,8 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { liveFingerprint, LIVE_STOP_GRACE_MS, PendingApprovals, readLines, tail, type LiveProcess } from "./live.ts";
-import type { ApprovalDecision, ChatCallbacks, ChatHandle, ChatTurn, SteerInput } from "./types.ts";
+import { liveFingerprint, LIVE_STOP_GRACE_MS, agentQuestions, PendingApprovals, questionAnswers, readLines, tail, type LiveProcess } from "./live.ts";
+import type { AgentQuestion, ApprovalDecision, ChatCallbacks, ChatHandle, ChatTurn, QuestionAnswers, SteerInput } from "./types.ts";
 
 /**
  * Codex live chat (docs/runtimes.md#live-chat): one `codex app-server` process per conversation,
@@ -11,6 +11,8 @@ import type { ApprovalDecision, ChatCallbacks, ChatHandle, ChatTurn, SteerInput 
  *
  * - Approvals: the thread runs with `approvalPolicy: "on-request"` (unless the tier is "all
  *   permissions"), so a command or edit outside the sandbox becomes a request to the host.
+ * - Questions: `request_user_input`, which Codex otherwise offers only in plan mode, is enabled for
+ *   every turn; its questions reach the panel as an approval request with `questions`.
  * - Steering: `turn/steer` adds input to the running turn; it fails once the turn has ended.
  * - Stop: `turn/interrupt`; the thread stays open for the next turn.
  */
@@ -40,7 +42,10 @@ type Turn = {
   stopTimer?: ReturnType<typeof setTimeout>;
 };
 
-type Approval = { rpcId: number | string; kind: "command" | "file" | "permissions"; permissions?: unknown };
+type Approval = { rpcId: number | string; kind: "command" | "file" | "permissions" | "question"; permissions?: unknown; questions?: AgentQuestion[] };
+
+/** The process's command after the binary: live web search, and the question tool outside plan mode. */
+export const CODEX_LIVE_ARGS = ["app-server", "-c", 'web_search="live"', "--enable", "default_mode_request_user_input"];
 
 const TOOL_ITEMS = new Set(["commandExecution", "fileChange", "mcpToolCall", "webSearch"]);
 
@@ -52,6 +57,8 @@ export class CodexLive implements LiveProcess {
   private readonly ready: Promise<string>;
   private readonly calls = new Map<number, { resolve: (r: Record<string, unknown>) => void; reject: (e: Error) => void }>();
   private readonly fileChanges = new Map<string, string>();
+  /** Questions of the open question requests, by request id. */
+  private readonly questions = new Map<string, AgentQuestion[]>();
   private current: Turn | null = null;
   private approvals: PendingApprovals<Approval> | null = null;
   private serial = 0;
@@ -61,7 +68,7 @@ export class CodexLive implements LiveProcess {
   constructor(bin: string[], private readonly first: ChatTurn) {
     this.fingerprint = liveFingerprint(first);
     this.sid = first.sessionId ?? null;
-    this.proc = Bun.spawn([...bin, "app-server", "-c", 'web_search="live"'], { cwd: first.cwd, env: first.env ?? process.env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+    this.proc = Bun.spawn([...bin, ...CODEX_LIVE_ARGS], { cwd: first.cwd, env: first.env ?? process.env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     const proc = this.proc;
     this.stderr = tail(proc.stderr);
     void readLines(proc.stdout, (line) => this.line(line))
@@ -105,7 +112,7 @@ export class CodexLive implements LiveProcess {
     return {
       kill: () => this.stop(t),
       steer: (input) => this.steer(t, input),
-      respond: (id, decision) => this.respond(t, id, decision),
+      respond: (id, decision, answers) => this.respond(t, id, decision, answers),
     };
   }
 
@@ -121,10 +128,18 @@ export class CodexLive implements LiveProcess {
     await this.call("turn/steer", { threadId: this.sid, expectedTurnId: t.id, input: await this.input(input) });
   }
 
-  private respond(t: Turn, id: string, decision: ApprovalDecision): boolean {
+  private respond(t: Turn, id: string, decision: ApprovalDecision, answers?: QuestionAnswers): boolean {
     if (this.current !== t) return false;
-    const approval = this.approvals?.take(id, decision);
+    const questions = this.questions.get(id);
+    const given = questions && decision === "allow" ? questionAnswers(questions, answers) : null;
+    // A question without answers is skipped: Codex gets no answers and the agent goes on without them.
+    const approval = this.approvals?.take(id, questions && !given ? "deny" : decision, given ?? undefined);
     if (!approval) return false;
+    this.questions.delete(id);
+    if (approval.kind === "question") {
+      this.write({ id: approval.rpcId, result: { answers: Object.fromEntries(Object.entries(given ?? {}).map(([q, a]) => [q, { answers: a }])) } });
+      return true;
+    }
     const result = approval.kind === "permissions"
       ? { permissions: decision === "allow" ? approval.permissions ?? {} : {}, scope: "turn" }
       : { decision: decision === "allow" ? "accept" : "decline" };
@@ -211,14 +226,20 @@ export class CodexLive implements LiveProcess {
   private serverRequest(m: Rpc): void {
     const p = m.params ?? {};
     const t = this.current;
-    const kind = m.method === "item/commandExecution/requestApproval" ? "command" : m.method === "item/fileChange/requestApproval" ? "file" : m.method === "item/permissions/requestApproval" ? "permissions" : null;
+    const kind = m.method === "item/commandExecution/requestApproval" ? "command" : m.method === "item/fileChange/requestApproval" ? "file" : m.method === "item/permissions/requestApproval" ? "permissions" : m.method === "item/tool/requestUserInput" ? "question" : null;
     if (!kind || !t || t.stopping || !this.approvals || (t.id && p.turnId !== t.id)) {
       if (kind === "permissions") return this.write({ id: m.id, result: { permissions: {}, scope: "turn" } });
+      if (kind === "question") return this.write({ id: m.id, result: { answers: {} } });
       if (kind) return this.write({ id: m.id, result: { decision: "decline" } });
       return this.write({ id: m.id, error: { code: -32601, message: `ai-space does not handle ${m.method}` } });
     }
     const reason = typeof p.reason === "string" && p.reason ? { detail: p.reason.slice(0, 2000) } : {};
     const id = `codex-${String(m.id)}`;
+    if (kind === "question") {
+      const questions = agentQuestions(p.questions);
+      this.questions.set(id, questions);
+      return this.approvals.add(id, { rpcId: m.id!, kind }, { tool: "AskUserQuestion", title: questions.map((q) => q.question).join("\n").slice(0, 2000), questions });
+    }
     if (kind === "command") this.approvals.add(id, { rpcId: m.id!, kind }, { tool: "Bash", title: String(p.command ?? "").slice(0, 2000), ...reason, input: { command: p.command, cwd: p.cwd } });
     else if (kind === "file") this.approvals.add(id, { rpcId: m.id!, kind }, { tool: "Edit", title: this.fileChanges.get(String(p.itemId)) ?? String(p.grantRoot ?? ""), ...reason });
     else this.approvals.add(id, { rpcId: m.id!, kind, permissions: p.permissions }, { tool: "Permissions", title: JSON.stringify(p.permissions ?? {}).slice(0, 2000), ...reason });
@@ -229,7 +250,10 @@ export class CodexLive implements LiveProcess {
     if (!t || (this.sid && p.threadId !== undefined && p.threadId !== this.sid)) return;
     if (t.id && p.turnId !== undefined && p.turnId !== t.id) return;
     const emit = (event: unknown) => t.cb.onEvent(JSON.stringify(event));
-    if (method === "serverRequest/resolved") return void this.approvals?.take(`codex-${String(p.requestId)}`, "cancelled");
+    if (method === "serverRequest/resolved") {
+      this.questions.delete(`codex-${String(p.requestId)}`);
+      return void this.approvals?.take(`codex-${String(p.requestId)}`, "cancelled");
+    }
     if (method === "item/agentMessage/delta" && typeof p.delta === "string") {
       return emit({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: p.delta } } });
     }
@@ -269,6 +293,7 @@ export class CodexLive implements LiveProcess {
     if (!t) return;
     clearTimeout(t.stopTimer);
     for (const id of this.approvals?.ids() ?? []) this.approvals?.take(id, "cancelled");
+    this.questions.clear();
     this.current = null;
     this.approvals = null;
     t.cb.onFinish(error);

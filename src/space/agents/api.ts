@@ -16,7 +16,7 @@ import type { AppRegistry } from "../panel/registry.ts";
 import { type AgentView, agentView } from "../panel/view.ts";
 import type { PeerHub } from "../peers/hub.ts";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
-import { APPROVAL_DECISIONS, MODEL_TIERS, type ApprovalDecision, type RuntimeKind } from "../runtimes/types.ts";
+import { APPROVAL_DECISIONS, MODEL_TIERS, type ApprovalDecision, type QuestionAnswers, type RuntimeKind } from "../runtimes/types.ts";
 import type { Manifest, ManifestAgent } from "../scheduler/manifest.ts";
 import { loadAppEnv } from "../scheduler/targets.ts";
 import type { Workspace } from "../workspace.ts";
@@ -428,10 +428,12 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     "/api/agents/:app/:agent/runs/:id/approvals/:rid": {
       POST: wrap(async (req) => {
         const run = runOf(req);
-        const body = (await req.json().catch(() => null)) as { decision?: unknown } | null;
+        const body = (await req.json().catch(() => null)) as { decision?: unknown; answers?: unknown } | null;
         const decision = body?.decision;
         if (!(APPROVAL_DECISIONS as readonly unknown[]).includes(decision)) return error(400, `decision must be one of ${APPROVAL_DECISIONS.join(", ")}`);
-        const answered = runs.respond(run.id, req.params.rid ?? "", decision as ApprovalDecision);
+        const answers = parseAnswers(body?.answers);
+        if (answers === false) return error(400, "answers must map question ids to lists of strings");
+        const answered = runs.respond(run.id, req.params.rid ?? "", decision as ApprovalDecision, answers);
         return answered ? json({ ok: true }) : error(409, "this request is no longer waiting for an answer");
       }),
     },
@@ -486,6 +488,20 @@ async function realDir(path: string): Promise<string> {
 }
 
 class NotFound extends Error {}
+
+/** A question's answers from the client: absent → undefined, malformed → false. */
+export function parseAnswers(raw: unknown): QuestionAnswers | undefined | false {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) return false;
+  const entries = Object.entries(raw as Record<string, unknown>);
+  if (entries.length > 8) return false;
+  const answers: QuestionAnswers = {};
+  for (const [id, list] of entries) {
+    if (id.length > 200 || !Array.isArray(list) || list.length > 12 || !list.every((a) => typeof a === "string" && a.length <= MAX_MESSAGE)) return false;
+    answers[id] = list as string[];
+  }
+  return answers;
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });

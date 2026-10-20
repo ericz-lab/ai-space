@@ -5,6 +5,8 @@
  *
  * What a user message asks for (both):
  *   `approve:<command>`  the agent wants to run the command: an approval request, then the outcome
+ *   `ask:<question>`     the agent asks the question with the options `A` and `B`, then says
+ *                        `answered <answers as JSON>` or `skipped`
  *   `wait`               a long step: the turn waits for a steered message (answered with
  *                        `heard: <text>`) or a stop
  *   anything else        `echo: <text> [pid <pid>]`, so a test can tell whether a process was reused
@@ -39,7 +41,7 @@ async function claude(args: string[]): Promise<void> {
   let model = args.includes("--model") ? args[args.indexOf("--model") + 1]! : "default";
   let mode = args[args.indexOf("--permission-mode") + 1]!;
   // The running turn: what it waits for next.
-  let turn: { waiting: "approval" | "steer" | null; command?: string } | null = null;
+  let turn: { waiting: "approval" | "question" | "steer" | null; command?: string } | null = null;
   const text = (t: string) => out({ type: "assistant", message: { content: [{ type: "text", text: t }] }, session_id: sid });
   const result = (isError = false) => {
     out({ type: "result", subtype: isError ? "error_during_execution" : "success", is_error: isError, result: isError ? "" : "ok", session_id: sid });
@@ -58,7 +60,12 @@ async function claude(args: string[]): Promise<void> {
       continue;
     }
     if (m.type === "control_response") {
-      const r = (m.response as Json).response as { behavior: string; updatedInput?: { command?: string }; message?: string };
+      const r = (m.response as Json).response as { behavior: string; updatedInput?: { command?: string; answers?: unknown }; message?: string };
+      if (turn?.waiting === "question") {
+        text(r.behavior === "allow" ? `answered ${JSON.stringify(r.updatedInput?.answers)}` : "skipped");
+        result();
+        continue;
+      }
       if (!turn || turn.waiting !== "approval") continue;
       out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tool-1", is_error: r.behavior !== "allow", content: r.behavior === "allow" ? `ran ${r.updatedInput?.command}` : String(r.message) }] }, session_id: sid });
       text(`done ${r.behavior}`);
@@ -80,6 +87,12 @@ async function claude(args: string[]): Promise<void> {
       turn = { waiting: "approval", command };
       out({ type: "assistant", message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command } }] }, session_id: sid });
       out({ type: "control_request", request_id: "perm-1", request: { subtype: "can_use_tool", tool_name: "Bash", input: { command }, description: "Run it" } });
+    } else if (said.startsWith("ask:")) {
+      turn = { waiting: "question" };
+      const input = { questions: [{ question: said.slice("ask:".length), header: "Pick", options: [{ label: "A", description: "the first" }, { label: "B", description: "" }], multiSelect: false }] };
+      out({ type: "assistant", message: { content: [{ type: "tool_use", id: "tool-1", name: "AskUserQuestion", input }] }, session_id: sid });
+      // The CLI asks the host for this tool in every permission mode.
+      out({ type: "control_request", request_id: "perm-1", request: { subtype: "can_use_tool", tool_name: "AskUserQuestion", input, requires_user_interaction: true } });
     } else if (said === "wait") {
       turn = { waiting: "steer" };
       out({ type: "assistant", message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command: "sleep" } }] }, session_id: sid });
@@ -91,7 +104,9 @@ async function claude(args: string[]): Promise<void> {
   }
 }
 
-async function codex(): Promise<void> {
+async function codex(args: string[]): Promise<void> {
+  // Outside plan mode Codex offers its question tool only with this feature on.
+  const canAsk = args.some((a, i) => a === "--enable" && args[i + 1] === "default_mode_request_user_input");
   let thread = "";
   let serial = 0;
   let turn: { id: string; waiting: "approval" | "steer" | null } | null = null;
@@ -117,6 +132,9 @@ async function codex(): Promise<void> {
         const command = said.slice("approve:".length);
         note("item/started", { item: { type: "commandExecution", id: "cmd-1", command, status: "inProgress" } });
         out({ id: 100, method: "item/commandExecution/requestApproval", params: { threadId: thread, turnId: turn.id, itemId: "cmd-1", command, reason: "Run it" } });
+      } else if (said.startsWith("ask:") && canAsk) {
+        turn.waiting = "approval";
+        out({ id: 101, method: "item/tool/requestUserInput", params: { threadId: thread, turnId: turn.id, itemId: "ask-1", isBlocking: true, questions: [{ id: "pick", header: "Pick", question: said.slice("ask:".length), isOther: true, isSecret: false, options: [{ label: "A", description: "the first" }, { label: "B", description: "" }] }] } });
       } else if (said === "wait") {
         turn.waiting = "steer";
         note("item/started", { item: { type: "commandExecution", id: "cmd-1", command: "sleep", status: "inProgress" } });
@@ -138,6 +156,11 @@ async function codex(): Promise<void> {
     } else if (m.method === "turn/interrupt") {
       out({ id: m.id, result: {} });
       if (turn) complete("interrupted");
+    } else if (m.id === 101 && m.result) {
+      if (!turn) continue;
+      const answers = (m.result as { answers: Record<string, { answers: string[] }> }).answers;
+      say(Object.keys(answers).length ? `answered ${JSON.stringify(answers)}` : "skipped");
+      complete("completed");
     } else if (m.id === 100 && m.result) {
       const decision = (m.result as Json).decision;
       if (!turn) continue;
@@ -152,5 +175,5 @@ async function codex(): Promise<void> {
 if (import.meta.main) {
   const [which, ...args] = process.argv.slice(2);
   if (which === "claude") await claude(args);
-  else await codex();
+  else await codex(args);
 }

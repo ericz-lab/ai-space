@@ -252,15 +252,18 @@ A chat request with `interactive: true` (every client sends it: the panel, the M
 | tier | `--permission-mode`: the read-only default becomes `default`, which asks before an edit or a command that changes files | read-only sandbox with `approvalPolicy: "on-request"`; edit files: `workspace-write`; all permissions: `danger-full-access` with `never`; plan: read-only with `never` | `DSH_PERMISSION_MODE`: read-only, workspace-write, or danger-full-access (approval `never`); plan is read-only |
 | message added to a running turn | a user message written to stdin; the CLI reads it once the running tool call ends. Written as the turn ends, it starts the CLI's next turn and the run lasts until that one ends too | `turn/steer` with the running turn's id; refused once the turn has ended | none: ACP carries one prompt at a time and has no way to add a message |
 | stop | `interrupt` control request; with a message still waiting in the CLI, the process is ended instead | `turn/interrupt` | `session/cancel`; the prompt settles `cancelled` and the process waits for the next turn |
+| questions | `AskUserQuestion`, which asks the host through `can_use_tool` in every permission mode; the answer allows it with `answers` (question text → the chosen labels, comma-joined) added to its input, or denies it as skipped | `request_user_input` (`item/tool/requestUserInput`), enabled outside plan mode with `--enable default_mode_request_user_input`; the answer is `answers` (question id → labels), empty when skipped | none |
 
-Claude Code's `AskUserQuestion` tool is turned off in live chat (`--disallowedTools`): the panel has no form for it, and the agent asks in its reply. Other requests either runtime sends that ai-space does not handle (MCP elicitation, dynamic tool calls) are refused rather than left waiting. A stop the runtime has not answered within 4 s kills the process.
+Motivation for questions: an agent that needs a decision (which of two data sources, whether to keep a field) wrote the options as a list in its reply and ended the turn, so the person had to type the choice as a new message. A question now reaches the panel as an approval request with `questions`; the panel shows the options as buttons with a field for an answer of one's own, and the turn goes on with the answer. A client that does not know `questions` shows it as an ordinary approval: Allow without answers and Deny both skip it, so the turn never waits on a card it cannot answer.
+
+Other requests either runtime sends that ai-space does not handle (MCP elicitation, dynamic tool calls) are refused rather than left waiting. A stop the runtime has not answered within 4 s kills the process.
 
 The turn's events are the runtime's, translated into Claude Code's `stream-json` shapes as for one-shot chat, plus three:
 
 | event | meaning |
 | --- | --- |
-| `{"type":"approval_request","id","tool","title","detail"?,"input"?}` | the turn waits for an answer: `title` is what the agent wants to do (the command, the file), `detail` why |
-| `{"type":"approval_resolved","id","decision"}` | `allow`, `deny`, or `cancelled` when the turn ended or the runtime withdrew the request |
+| `{"type":"approval_request","id","tool","title","detail"?,"input"?,"questions"?}` | the turn waits for an answer: `title` is what the agent wants to do (the command, the file), `detail` why. A question has `tool` `AskUserQuestion`, `title` the question text and `questions`: `[{id, header, question, options: [{label, description}], multiSelect}]` |
+| `{"type":"approval_resolved","id","decision","answers"?}` | `allow`, `deny`, or `cancelled` when the turn ended or the runtime withdrew the request; an answered question carries `answers` (question id → labels or typed text), a skipped one is `deny` |
 | `{"type":"steer","text"}` | the agent has read a message the person added to the turn |
 
 The answers and the added messages go through the run ([panel.md](panel.md#background-runs)). Nothing waits for an approval except the turn: an unanswered one lasts until the run's timeout, a stop or a shutdown, which deny it.

@@ -50,6 +50,33 @@ const make = (which: keyof typeof runtimes) => {
 
 for (const which of ["claude", "codex"] as const) {
   describe(`${which} live chat`, () => {
+    test("a question waits for the person's answer; the answers reach the agent, a skip goes on without them", async () => {
+      const rt = make(which);
+      const answered = turn(rt, { message: "ask:Which one?", permissionMode: "bypassPermissions" }, (ev, h) => {
+        if (ev.type === "approval_request") {
+          const id = (ev.questions as { id: string }[])[0]!.id;
+          expect(h.respond!(String(ev.id), "allow", { [id]: ["B", "ignored second choice"], unknown: ["x"] })).toBe(true);
+        }
+      });
+      await answered.done;
+      expect(answered.error).toBeNull();
+      const [request] = ofType(answered, "approval_request");
+      expect(request).toMatchObject({ tool: "AskUserQuestion", title: "Which one?", questions: [{ header: "Pick", question: "Which one?", options: [{ label: "A", description: "the first" }, { label: "B", description: "" }], multiSelect: false }] });
+      const qid = (request!.questions as { id: string }[])[0]!.id;
+      expect(ofType(answered, "approval_resolved")).toEqual([{ type: "approval_resolved", id: request!.id, decision: "allow", answers: { [qid]: ["B"] } }]);
+      // Claude Code keys answers by the question's text, Codex by its id.
+      expect(texts(answered).at(-1)).toBe(which === "claude" ? 'answered {"Which one?":"B"}' : 'answered {"pick":{"answers":["B"]}}');
+
+      for (const skip of [(h: ChatHandle, id: string) => h.respond!(id, "deny"), (h: ChatHandle, id: string) => h.respond!(id, "allow", {})]) {
+        const skipped = turn(rt, { message: "ask:Which one?", sessionId: answered.sid }, (ev, h) => {
+          if (ev.type === "approval_request") expect(skip(h, String(ev.id))).toBe(true);
+        });
+        await skipped.done;
+        expect(ofType(skipped, "approval_resolved")).toMatchObject([{ decision: "deny" }]);
+        expect(texts(skipped).at(-1)).toBe("skipped");
+      }
+    });
+
     test("an approval waits for the person's answer; allow runs it, deny refuses it", async () => {
       const rt = make(which);
       const allowed = turn(rt, { message: "approve:rm a.txt" }, (ev, h) => {
@@ -133,12 +160,13 @@ for (const which of ["claude", "codex"] as const) {
   });
 }
 
-test("Claude Code live arguments: approvals over stdio, the tier as permission mode, no question tool", () => {
+test("Claude Code live arguments: approvals and questions over stdio, the tier as permission mode", () => {
   const args = claudeLiveArgs({ message: "x", cwd: "/", model: "opus", sessionId: "s1", systemPrompt: "be brief", allowedTools: ["Read"] }, ["--extra"]);
   expect(args).toEqual(expect.arrayContaining(["--input-format", "stream-json", "--permission-prompt-tool", "stdio", "--replay-user-messages"]));
   expect(args.slice(args.indexOf("--permission-mode"), args.indexOf("--permission-mode") + 2)).toEqual(["--permission-mode", "default"]);
   expect(args).toContain("--resume");
-  expect(args.slice(-3)).toEqual(["--disallowedTools", "AskUserQuestion", "--extra"]);
+  expect(args).not.toContain("--disallowedTools");
+  expect(args.at(-1)).toBe("--extra");
   expect(claudeLiveArgs({ message: "x", cwd: "/", permissionMode: "acceptEdits" })).toContain("acceptEdits");
 });
 

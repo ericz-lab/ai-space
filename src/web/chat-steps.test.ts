@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ChatSteps, submitsChat, toolSummary, toolVariant } from "./chat-steps.ts";
+import { ChatSteps, historySteps, submitsChat, toolSummary, toolVariant } from "./chat-steps.ts";
 
 const tool = (id: string) => ({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: "pwd" } }] } });
 test("Codex work preserves text order, repeated tools and separate results", () => {
@@ -58,6 +58,24 @@ test("a live turn's approvals and added messages are steps in order; an unanswer
     ["approval", "Edit", "b.txt", "", "cancelled"],
   ]);
 });
+test("an agent's question keeps its options and, once answered, the answers", () => {
+  const steps = new ChatSteps();
+  const questions = [{ id: "pick", header: "Asset", question: "Which one?", options: [{ label: "Contract", description: "" }], multiSelect: false }];
+  steps.apply({ type: "approval_request", id: "q1", tool: "AskUserQuestion", title: "Which one?", questions });
+  expect(steps.snapshot()[0]).toMatchObject({ kind: "approval", state: "waiting", questions });
+  steps.apply({ type: "approval_resolved", id: "q1", decision: "allow", answers: { pick: ["Contract"] } });
+  expect(steps.snapshot()[0]).toMatchObject({ state: "allowed", answers: { pick: ["Contract"] } });
+});
+
+test("a restored transcript's steps draw as finished text and tool rows in order", () => {
+  expect(historySteps([{ kind: "text", text: "Checking." }, { kind: "tool", name: "Bash", input: "ls", output: "a", failed: false }, { kind: "tool", name: "Bash", input: "false", output: "", failed: true }])
+    .map((s) => [s.kind, s.name, s.text, s.output, s.state])).toEqual([
+    ["text", "", "Checking.", "", "completed"],
+    ["tool", "Bash", "ls", "a", "completed"],
+    ["tool", "Bash", "false", "", "failed"],
+  ]);
+});
+
 test("tool rows pick a variant across runtimes and summarize to one line", () => {
   expect(["Bash", "bash", "command_execution", "exec"].map(toolVariant)).toEqual(["bash", "bash", "bash", "bash"]);
   expect(["Read", "Edit", "MultiEdit", "Write", "Grep", "Glob", "WebFetch", "web_search", "run_code", "Task", "TodoWrite"].map(toolVariant))

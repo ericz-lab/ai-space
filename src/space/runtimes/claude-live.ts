@@ -1,5 +1,5 @@
-import { approvalTitle, liveFingerprint, LIVE_STOP_GRACE_MS, PendingApprovals, readLines, tail, type LiveProcess } from "./live.ts";
-import { PERMISSION_MODES, type ApprovalDecision, type ChatCallbacks, type ChatHandle, type ChatTurn, type SteerInput } from "./types.ts";
+import { approvalTitle, liveFingerprint, LIVE_STOP_GRACE_MS, agentQuestions, PendingApprovals, questionAnswers, readLines, tail, type LiveProcess } from "./live.ts";
+import { PERMISSION_MODES, type AgentQuestion, type ApprovalDecision, type ChatCallbacks, type ChatHandle, type ChatTurn, type QuestionAnswers, type SteerInput } from "./types.ts";
 
 /**
  * Claude Code live chat (docs/runtimes.md#live-chat): one `claude -p` process per conversation,
@@ -7,6 +7,8 @@ import { PERMISSION_MODES, type ApprovalDecision, type ChatCallbacks, type ChatH
  *
  * - Approvals: with `--permission-prompt-tool stdio` the CLI asks the host before an action its
  *   permission mode does not allow (`control_request` `can_use_tool`) and waits for the answer.
+ * - Questions: `AskUserQuestion` always asks the host the same way, in every permission mode; the
+ *   answers go back in the tool's input (`answers`: question text → chosen labels).
  * - Steering: a user message written while a turn runs is read after the running tool call ends
  *   and the same turn goes on with it. One written as the turn ends starts another turn of the
  *   CLI's; the run then lasts until that one ends too, so the message is never lost.
@@ -26,8 +28,7 @@ export function claudeLiveArgs(t: ChatTurn, extra: string[] = []): string[] {
   if (t.sessionId) args.push("--resume", t.sessionId);
   if (t.systemPrompt) args.push("--append-system-prompt", t.systemPrompt);
   if (t.allowedTools?.length) args.push("--allowedTools", t.allowedTools.join(","));
-  // A question tool needs an answer form the panel does not have; the agent asks in its reply instead.
-  args.push("--disallowedTools", "AskUserQuestion", ...extra);
+  args.push(...extra);
   return args;
 }
 
@@ -50,7 +51,7 @@ type Turn = {
   stopTimer?: ReturnType<typeof setTimeout>;
 };
 
-type Approval = { input: unknown };
+type Approval = { input: unknown; questions?: AgentQuestion[] };
 
 export class ClaudeLive implements LiveProcess {
   readonly fingerprint: string;
@@ -59,6 +60,8 @@ export class ClaudeLive implements LiveProcess {
   private readonly proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
   private current: Turn | null = null;
   private approvals: PendingApprovals<Approval> | null = null;
+  /** Questions of the open `AskUserQuestion` requests, by request id. */
+  private readonly questionsOf = new Map<string, AgentQuestion[]>();
   private model: string | undefined;
   private mode: string;
   private stderr: { text: () => string } = { text: () => "" };
@@ -101,7 +104,7 @@ export class ClaudeLive implements LiveProcess {
     return {
       kill: () => this.stop(t),
       steer: (input) => this.steer(t, input),
-      respond: (id, decision) => this.respond(t, id, decision),
+      respond: (id, decision, answers) => this.respond(t, id, decision, answers),
     };
   }
 
@@ -124,11 +127,18 @@ export class ClaudeLive implements LiveProcess {
     this.raw(claudeUserLine(input));
   }
 
-  private respond(t: Turn, id: string, decision: ApprovalDecision): boolean {
+  private respond(t: Turn, id: string, decision: ApprovalDecision, answers?: QuestionAnswers): boolean {
     if (this.current !== t) return false;
-    const approval = this.approvals?.take(id, decision);
+    const questions = this.questionsOf.get(id);
+    const given = questions && decision === "allow" ? questionAnswers(questions, answers) : null;
+    const approval = this.approvals?.take(id, questions && !given ? "deny" : decision, given ?? undefined);
     if (!approval) return false;
-    const response = decision === "allow" ? { behavior: "allow", updatedInput: approval.input } : { behavior: "deny", message: "The user declined this action." };
+    this.questionsOf.delete(id);
+    const response = questions
+      ? given
+        ? { behavior: "allow", updatedInput: { ...(approval.input as object), answers: Object.fromEntries(questions.flatMap((q) => (given[q.id] ? [[q.question, given[q.id]!.join(", ")]] : []))) } }
+        : { behavior: "deny", message: "The user skipped the question. Go on with your best judgement, or ask again in your reply." }
+      : decision === "allow" ? { behavior: "allow", updatedInput: approval.input } : { behavior: "deny", message: "The user declined this action." };
     this.write({ type: "control_response", response: { subtype: "success", request_id: id, response } });
     return true;
   }
@@ -156,7 +166,10 @@ export class ClaudeLive implements LiveProcess {
     }
     const t = this.current;
     if (ev.type === "control_request") return this.controlRequest(ev as { request_id: string; request?: { subtype?: string; tool_name?: string; input?: unknown; description?: string; decision_reason?: string } });
-    if (ev.type === "control_cancel_request") return void this.approvals?.take(String(ev.request_id), "cancelled");
+    if (ev.type === "control_cancel_request") {
+      this.questionsOf.delete(String(ev.request_id));
+      return void this.approvals?.take(String(ev.request_id), "cancelled");
+    }
     if (ev.type === "control_response") return;
     if (!t) return; // between turns: nothing to report to
     if (typeof ev.session_id === "string") {
@@ -186,6 +199,12 @@ export class ClaudeLive implements LiveProcess {
 
   private controlRequest(ev: { request_id: string; request?: { subtype?: string; tool_name?: string; input?: unknown; description?: string; decision_reason?: string } }): void {
     const req = ev.request ?? {};
+    if (req.subtype === "can_use_tool" && req.tool_name === "AskUserQuestion" && this.current && !this.current.stopping && this.approvals) {
+      const questions = agentQuestions((req.input as { questions?: unknown } | undefined)?.questions);
+      this.questionsOf.set(ev.request_id, questions);
+      this.approvals.add(ev.request_id, { input: req.input, questions }, { tool: "AskUserQuestion", title: questions.map((q) => q.question).join("\n").slice(0, 2000), questions });
+      return;
+    }
     if (req.subtype === "can_use_tool" && this.current && !this.current.stopping && this.approvals) {
       this.approvals.add(ev.request_id, { input: req.input }, {
         tool: req.tool_name ?? "tool",
@@ -207,6 +226,7 @@ export class ClaudeLive implements LiveProcess {
     if (!t) return;
     clearTimeout(t.stopTimer);
     for (const id of this.approvals?.ids() ?? []) this.approvals?.take(id, "cancelled");
+    this.questionsOf.clear();
     this.current = null;
     this.approvals = null;
     t.cb.onFinish(error);

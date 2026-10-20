@@ -177,7 +177,7 @@ describe("agents api", () => {
     const t = (await (await fetch(`${base}/api/agents/notes/librarian/sessions/${sid}`)).json()) as { messages: unknown[] };
     expect(t.messages).toEqual([
       { role: "user", text: "hello" },
-      { role: "ai", text: "hi", tools: [] },
+      { role: "ai", text: "hi", tools: [], steps: [{ kind: "text", text: "hi" }] },
     ]);
   });
 });
@@ -187,14 +187,25 @@ describe("transcript", () => {
     const lines = [
       JSON.stringify({ type: "user", message: { content: "<command-name>x</command-name>" } }),
       JSON.stringify({ type: "user", message: { content: [{ type: "text", text: "read it" }] } }),
-      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "/a/b.md" } }] } }),
-      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", content: "..." }] } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Read", input: { file_path: "/a/b.md" } }] } }),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: "# B" }] }] } }),
+      JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t2", name: "Bash", input: { command: "false" } }] } }),
+      JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t2", is_error: true, content: "exit 1" }] } }),
       JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "done" }] } }),
       "not json",
     ];
     expect(parseTranscript(lines.join("\n"))).toEqual([
       { role: "user", text: "read it" },
-      { role: "ai", text: "done", tools: [{ name: "Read", hint: "/a/b.md" }] },
+      {
+        role: "ai",
+        text: "done",
+        tools: [{ name: "Read", hint: "/a/b.md" }, { name: "Bash", hint: "false" }],
+        steps: [
+          { kind: "tool", name: "Read", input: "/a/b.md", output: "# B", failed: false },
+          { kind: "tool", name: "Bash", input: "false", output: "exit 1", failed: true },
+          { kind: "text", text: "done" },
+        ],
+      },
     ]);
   });
 });

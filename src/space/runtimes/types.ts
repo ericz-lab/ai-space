@@ -141,6 +141,15 @@ export const APPROVAL_DECISIONS = ["allow", "deny"] as const;
 export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
 
 /**
+ * A question the agent asks the person while its turn runs (an `approval_request` whose `tool` is
+ * `AskUserQuestion`). The person picks options or types an answer of their own.
+ */
+export type AgentQuestion = { id: string; header: string; question: string; options: { label: string; description: string }[]; multiSelect: boolean };
+
+/** Answers to an agent's questions: question id → the chosen labels or the typed text. */
+export type QuestionAnswers = Record<string, string[]>;
+
+/**
  * A running chat turn. `kill` ends it: a one-shot turn's process is killed, a live turn is
  * interrupted and its process kept for the next one. Live turns also take messages and answers.
  */
@@ -148,8 +157,11 @@ export type ChatHandle = {
   kill: () => void;
   /** Hand a message to the running turn; rejects when the turn cannot take one now. */
   steer?: (input: SteerInput) => Promise<void>;
-  /** Answer an approval request (`approval_request` event); false for an unknown or settled one. */
-  respond?: (id: string, decision: ApprovalDecision) => boolean;
+  /**
+   * Answer an approval request (`approval_request` event); false for an unknown or settled one.
+   * A question is answered with `allow` and its `answers`; `deny`, or `allow` without answers, skips it.
+   */
+  respond?: (id: string, decision: ApprovalDecision, answers?: QuestionAnswers) => boolean;
 };
 
 export type ChatCallbacks = {
@@ -190,8 +202,14 @@ export type ImageOutcome =
   | { ok: true; text: string; images: GeneratedImage[]; usage?: Usage; costUsd?: number; backend: Backend }
   | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend };
 
-/** A past conversation as the chat panel shows it: the user's texts and the assistant's, with the tools it called. */
-export type TranscriptMessage = { role: "user"; text: string } | { role: "ai"; text: string; tools: { name: string; hint: string }[] };
+/**
+ * A past conversation as the chat panel shows it: the user's texts and the assistant's, with the
+ * tools it called. `steps` holds the assistant's text and tool calls in the order they happened,
+ * with each call's input and output, where the runtime's records have them.
+ */
+export type TranscriptMessage = { role: "user"; text: string } | { role: "ai"; text: string; tools: { name: string; hint: string }[]; steps?: TranscriptStep[] };
+
+export type TranscriptStep = { kind: "text"; text: string } | { kind: "tool"; name: string; input: string; output: string; failed: boolean };
 
 export type RuntimeAdapter = {
   readonly name: string;

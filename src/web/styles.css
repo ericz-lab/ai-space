@@ -674,6 +674,29 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 }
 .chat-approval-actions button.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
 .chat-approval-actions button:disabled { opacity: 0.5; cursor: default; }
+/* A question the agent asks: options to pick, or an answer of one's own. */
+.chat-question .chat-work-icon { color: var(--link); background: color-mix(in srgb, var(--link) 14%, transparent); }
+.msg.ai .chat-question.waiting { background: color-mix(in srgb, var(--link) 8%, var(--glass)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 35%, transparent); }
+.chat-question.waiting .chat-work-state { color: var(--link); }
+.chat-question-item { margin-top: 10px; }
+.chat-question-item p { margin: 2px 0 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.chat-question-header { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
+.chat-question-options { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.chat-question-options button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; font: inherit; font-size: 13px; cursor: pointer;
+  padding: 7px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--muted) 30%, transparent); background: transparent; color: var(--text);
+}
+.chat-question-options button:hover:not(:disabled) { border-color: var(--link); }
+.chat-question-options button.on { border-color: var(--link); background: color-mix(in srgb, var(--link) 14%, transparent); }
+.chat-question-options button b { font-weight: 600; }
+.chat-question-options button small { color: var(--muted); font-size: 12px; }
+.chat-question-options button:disabled { opacity: 0.5; cursor: default; }
+.chat-question-own {
+  width: 100%; box-sizing: border-box; margin-top: 8px; font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--muted) 30%, transparent); background: transparent; color: var(--text);
+}
+.chat-question-own:focus { outline: none; border-color: var(--link); }
+.chat-question-answer { color: var(--link); font-weight: 600; }
 /* A message the person added to the running turn. */
 .chat-steer { font-size: 12px; padding: 6px 10px; border-left: 2px solid var(--link); color: var(--text); white-space: pre-wrap; }
 .chat-steer b { color: var(--link); font-weight: 600; margin-right: 4px; }
