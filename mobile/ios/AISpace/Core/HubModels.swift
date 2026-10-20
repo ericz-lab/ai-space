@@ -551,10 +551,46 @@ struct ChatSessionInfo: Decodable, Hashable, Identifiable {
     var id: String { sid }
 }
 
-/// One message of a stored session.
+/// One message of a stored session. An assistant's message names the tools it called and, from
+/// Spaces that record them, its text and tool calls in order with their input and output (`steps`,
+/// `TranscriptStep` in src/space/runtimes/types.ts). Unreadable tools or steps are left out rather
+/// than losing the conversation.
 struct ChatStored: Decodable, Hashable {
+    struct Tool: Decodable, Hashable {
+        var name: String
+        var hint: String?
+    }
+    struct Step: Decodable, Hashable {
+        /// `text` or `tool`.
+        var kind: String
+        var text: String?
+        var name: String?
+        var input: String?
+        var output: String?
+        var failed: Bool?
+    }
+
     var role: String
     var text: String?
+    var tools: [Tool]?
+    var steps: [Step]?
+
+    private enum CodingKeys: String, CodingKey { case role, text, tools, steps }
+
+    init(role: String, text: String?, tools: [Tool]? = nil, steps: [Step]? = nil) {
+        self.role = role
+        self.text = text
+        self.tools = tools
+        self.steps = steps
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        role = try c.decode(String.self, forKey: .role)
+        text = try c.decodeIfPresent(String.self, forKey: .text)
+        tools = try? c.decodeIfPresent([Tool].self, forKey: .tools)
+        steps = try? c.decodeIfPresent([Step].self, forKey: .steps)
+    }
 }
 
 enum ChatRoute {

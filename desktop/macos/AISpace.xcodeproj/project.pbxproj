@@ -182,6 +182,7 @@
 		E7FAF74FB114A1698A31937A /* ChatTextInputTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D418CED61A0CA30D88F5091 /* ChatTextInputTests.swift */; };
 		E914D913DB8A4222521C928B /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B3FEE4069E0F3260B2C07B95 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		E9E1EDD73729F0AD27D37D30 /* CapturePicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA43B3319ABE83696CF9EF8D /* CapturePicture.swift */; };
+		EBCCF7984FD81942041A4F7C /* ChatRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2ED59FB343D89FB973A4694 /* ChatRows.swift */; };
 		EC36CA0F525586D538A7C2DE /* NavigationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52729B0ED8E899C5BA568374 /* NavigationPolicyTests.swift */; };
 		EE3F9459EB00124A3AB92A3F /* SwiftTermBuildInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAD273D0A93901E6150F37A1 /* SwiftTermBuildInfo.swift */; };
 		EF1DE367C7B34B5521BCA903 /* IconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D297180F250D02598F6BFA05 /* IconStore.swift */; };
@@ -369,6 +370,7 @@
 		BA43B3319ABE83696CF9EF8D /* CapturePicture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CapturePicture.swift; path = ../../mobile/ios/AISpace/Live/CapturePicture.swift; sourceTree = "<group>"; };
 		BB9987B5202F3879A0B6CA12 /* MetalTerminalRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalTerminalRenderer.swift; sourceTree = "<group>"; };
 		BD93F537EFEEEEC0864886FF /* SpaceAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceAPI.swift; sourceTree = "<group>"; };
+		C2ED59FB343D89FB973A4694 /* ChatRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ChatRows.swift; path = ../../mobile/ios/AISpace/Core/ChatRows.swift; sourceTree = "<group>"; };
 		BDD8C4F449893A2F322064B4 /* LocalProcess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalProcess.swift; sourceTree = "<group>"; };
 		C1A8644D66094462AFA556E5 /* iOSCaretView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSCaretView.swift; sourceTree = "<group>"; };
 		C3B7AD6171A3E6E6BD0B28C7 /* OmniboxRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmniboxRules.swift; sourceTree = "<group>"; };
@@ -752,6 +754,7 @@
 				1CC6A152933E121C6CE2823E /* CatalogueCache.swift */,
 				F7C6BDE09919E62F13EB98AD /* CatalogueLoader.swift */,
 				06DFC6F765EB79E225624240 /* CatalogueSearch.swift */,
+				C2ED59FB343D89FB973A4694 /* ChatRows.swift */,
 				A098773BFFBEE2E7F80DEC92 /* HubModels.swift */,
 				F0CD19F6BA1A1A4039715EFD /* HubStores.swift */,
 				E5EACC95EEC514964E466987 /* IconSource.swift */,
@@ -1002,6 +1005,7 @@
 				7EB16CBCB09DEB8FCA50B738 /* ChatImage.swift in Sources */,
 				87DCF065D5CC025AE8E4F64E /* ChatMarkdown.swift in Sources */,
 				B787F432115A8CCCC81A2280 /* ChatMarkdownView.swift in Sources */,
+				EBCCF7984FD81942041A4F7C /* ChatRows.swift in Sources */,
 				FD1B2FEF2ED4D379A2386F1E /* ChatStream.swift in Sources */,
 				06A006F888774D5D4A1676F9 /* ChatTextInput.swift in Sources */,
 				92359CF6B1AB227019AD3782 /* ChatView.swift in Sources */,

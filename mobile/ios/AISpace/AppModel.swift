@@ -272,7 +272,11 @@ final class AppModel: ObservableObject {
     func chat(for connection: Connection, base: String) -> ChatStore {
         let key = "\(connection.id)|\(base)"
         if let s = chats[key] { return s }
-        let s = ChatStore(api: loader(for: connection).api, base: base)
+        let loader = loader(for: connection)
+        let s = ChatStore(api: loader.api, base: base)
+        // An agent may have installed or changed an app: the catalogue catches up after each turn,
+        // as the panel's does (docs/panel.md).
+        s.onTurnSettled = { [weak loader] in Task { await loader?.refresh(afterCurrent: true) } }
         chats[key] = s
         return s
     }

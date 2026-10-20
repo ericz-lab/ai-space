@@ -450,3 +450,35 @@
 "The answer did not reach the agent: no turn is running" = "答复没有送到智能体：没有正在进行的回合";
 "You" = "你";
 "the agent reads it after its current step" = "智能体做完当前这一步后会看到";
+
+/* Native chat: a reply's tool calls as rows (src/web/ChatToolRow.tsx) */
+"Bash" = "运行命令";
+"Read" = "读取";
+"Write" = "写入";
+"Edit" = "编辑";
+"Web" = "网页";
+"Code" = "代码";
+"Agent" = "子代理";
+"Plan" = "计划";
+"Running" = "运行中";
+"No result received" = "未收到结果";
+"IN" = "输入";
+"OUT" = "输出";
+"Output limited to 12,000 characters." = "输出最多显示 12,000 个字符。";
+"Shows the input and output" = "显示输入和输出";
+"Hides the input and output" = "隐藏输入和输出";
+
+/* Native chat: questions the agent asks (docs/runtimes.md#live-chat) */
+"Question" = "问题";
+"Answered" = "已回答";
+"Skipped" = "已跳过";
+"Skip" = "跳过";
+"Your answer" = "你的回答";
+"Or type your own answer" = "或者自己输入答案";
+"Waiting for your answer…" = "等你回答…";
+
+/* Native chat: pictures with a message (docs/panel.md#agent-chat-images) */
+"Add images" = "添加图片";
+"Remove image" = "移除图片";
+"Add up to 4 images, 5 MB each and 10 MB in total." = "最多添加 4 张图片，单张不超过 5 MB，总计不超过 10 MB。";
+"Could not read this image." = "无法读取这张图片。";

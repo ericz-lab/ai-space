@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// The agents of the Space, each leading to its conversation.
@@ -38,6 +39,8 @@ struct ChatPage: View {
     let agent: CatalogueEntry
     @ObservedObject var store: ChatStore
     let icons: IconStore
+    @State private var picked: [PhotosPickerItem] = []
+    @State private var reading = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,7 +49,7 @@ struct ChatPage: View {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         if store.bubbles.isEmpty { intro }
                         ForEach(store.bubbles) { bubble in
-                            ChatBubble(bubble: bubble, answer: bubble.live ? { id, allow in await store.answer(id, allow: allow) } : nil)
+                            ChatBubble(bubble: bubble, answer: bubble.live ? { id, allow, answers in await store.answer(id, allow: allow, answers: answers) } : nil)
                         }
                         Color.clear.frame(height: 1).id("end")
                     }
@@ -54,30 +57,17 @@ struct ChatPage: View {
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: store.bubbles.last?.text) { _, _ in proxy.scrollTo("end") }
+                .onChange(of: store.bubbles.last?.steps.count) { _, _ in proxy.scrollTo("end") }
                 .onChange(of: store.bubbles.count) { _, _ in proxy.scrollTo("end") }
             }
             if let error = store.error {
                 Text("Unavailable: \(error)").font(.footnote).foregroundStyle(Theme.danger).padding(.horizontal, 14).padding(.bottom, 6)
             }
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(text: $store.draft, prompt: Text("Message"), axis: .vertical) { Text("Message") }
-                    .lineLimit(1...6)
-                    .padding(.horizontal, 12).padding(.vertical, 9)
-                    .background(Theme.solid, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.hairline))
-                if store.isRunning {
-                    Button { store.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 32)) }
-                        .foregroundStyle(Theme.danger).accessibilityLabel(Text("Stop"))
-                }
-                // A message written during a turn joins it; Send stays beside Stop while the field
-                // has something to add.
-                if !store.isRunning || !store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button { store.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }
-                        .disabled(!store.canSend).accessibilityLabel(Text("Send"))
-                }
+            if let error = store.imageError {
+                Text(verbatim: error).font(.footnote).foregroundStyle(Theme.danger).padding(.horizontal, 14).padding(.bottom, 6)
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(.bar)
+            if !store.images.isEmpty { attachments }
+            composer
         }
         .background(Theme.ground.ignoresSafeArea())
         .navigationTitle(Text(verbatim: agent.displayTitle()))
@@ -103,8 +93,85 @@ struct ChatPage: View {
                 .accessibilityLabel(Text("Chats"))
             }
         }
+        .onChange(of: picked) { _, items in
+            guard !items.isEmpty else { return }
+            picked = []
+            load(items)
+        }
         .task { await store.loadSessions() }
         .task(id: store.isRunning) { if !store.isRunning { await store.loadSessions() } }
+    }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            PhotosPicker(selection: $picked, maxSelectionCount: max(1, 4 - store.images.count), matching: .images) {
+                Image(systemName: "paperclip").font(.system(size: 20)).frame(width: 32, height: 36)
+            }
+            .disabled(store.images.count >= 4 || reading > 0)
+            .accessibilityLabel(Text("Add images"))
+            TextField(text: $store.draft, prompt: Text("Message"), axis: .vertical) { Text("Message") }
+                .lineLimit(1...6)
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(Theme.solid, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.hairline))
+            if store.isRunning {
+                Button { store.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 32)) }
+                    .foregroundStyle(Theme.danger).accessibilityLabel(Text("Stop"))
+            }
+            // A message written during a turn joins it; Send stays beside Stop while the field
+            // has something to add.
+            if !store.isRunning || store.canSend {
+                Button { store.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }
+                    .disabled(!store.canSend || reading > 0).accessibilityLabel(Text("Send"))
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    /// The pictures waiting to go with the next message, each with a button to take it off.
+    private var attachments: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(store.images) { image in
+                    ChatImageThumb(image: image)
+                        .overlay(alignment: .topTrailing) {
+                            Button { store.images.removeAll { $0.id == image.id } } label: {
+                                Image(systemName: "xmark.circle.fill").font(.system(size: 18))
+                                    .symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.6))
+                            }
+                            .buttonStyle(.plain).padding(3)
+                            .accessibilityLabel(Text("Remove image"))
+                        }
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 6)
+        }
+        .background(.bar)
+    }
+
+    /// Reads the chosen pictures in the order chosen. PNG, JPEG, GIF and WebP within 5 MB go as
+    /// they are; anything else (HEIC from the camera among them) is re-encoded as JPEG.
+    private func load(_ items: [PhotosPickerItem]) {
+        reading += 1
+        Task { @MainActor in
+            defer { reading -= 1 }
+            for item in items {
+                guard let data = try? await item.loadTransferable(type: Data.self), let image = Self.chatImage(data, number: store.images.count + 1) else {
+                    store.imageError = String(localized: "Could not read this image.")
+                    continue
+                }
+                if !store.attach(image) { break }
+            }
+        }
+    }
+
+    static func chatImage(_ data: Data, number: Int) -> ChatImage? {
+        if let type = ChatRows.imageType(of: data), data.count <= ChatRows.maxImageBytes {
+            return ChatImage(name: "Image \(number).\(type.ext)", mediaType: type.mime, bytes: data)
+        }
+        guard let picture = CapturePicture.prepare(data) else { return nil }
+        return ChatImage(name: "Image \(number).\(picture.kind.fileExtension)", mediaType: picture.kind.mimeType, bytes: picture.data)
     }
 
     private var intro: some View {
@@ -119,51 +186,88 @@ struct ChatPage: View {
     }
 }
 
+/// One message. The person's are in the accent; the agent's reply has no bubble, as on the panel:
+/// its text and its tool calls in the order they happened, approvals and questions as cards.
 struct ChatBubble: View {
     let bubble: ChatStore.Bubble
-    /// Answers an approval of the running turn; nil once the turn is over.
-    let answer: ((String, Bool) async -> String?)?
-
-    private var approvals: [ChatStep] { bubble.isUser ? [] : bubble.steps.filter { $0.kind == .approval } }
-    private var steers: [ChatStep] { bubble.isUser ? [] : bubble.steps.filter { $0.kind == .steer } }
+    /// Answers an approval or the questions of the running turn; nil once the turn is over.
+    let answer: ((String, Bool, [String: [String]]?) async -> String?)?
 
     var body: some View {
+        if bubble.isUser { user } else { reply }
+    }
+
+    private var user: some View {
         HStack {
-            if bubble.isUser { Spacer(minLength: 40) }
-            VStack(alignment: .leading, spacing: 6) {
-                if !bubble.tools.isEmpty {
-                    Text(verbatim: bubble.tools.suffix(6).joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+            Spacer(minLength: 40)
+            VStack(alignment: .trailing, spacing: 6) {
+                if !bubble.images.isEmpty {
+                    HStack(spacing: 6) { ForEach(bubble.images) { ChatImageThumb(image: $0) } }
                 }
                 if !bubble.text.isEmpty {
-                    Self.rendered(bubble.text).foregroundStyle(bubble.isUser ? Color.white : Theme.text).textSelection(.enabled)
-                }
-                ForEach(approvals) { step in
-                    ChatApprovalCard(step: step, answer: bubble.live ? answer : nil)
-                }
-                ForEach(steers) { step in
-                    ChatSteerLine(text: step.text)
-                }
-                ForEach(Array(bubble.pending.enumerated()), id: \.offset) { item in
-                    ChatSteerLine(text: item.element, pending: true)
-                }
-                if bubble.live, approvals.contains(where: { $0.state == .waiting }) {
-                    Text("Waiting for your approval…").font(.caption).foregroundStyle(.secondary)
-                }
-                if let activity = bubble.activity {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text(verbatim: Self.text(activity)).font(.footnote).foregroundStyle(.secondary)
-                    }
+                    Self.rendered(bubble.text).foregroundStyle(Color.white).textSelection(.enabled)
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(bubble.isUser ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Theme.solid), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(bubble.isUser ? Color.clear : Theme.hairline))
-            if !bubble.isUser { Spacer(minLength: 24) }
+            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
-    /// Inline Markdown (bold, code, links) with the line breaks kept; blocks stay as written.
+    private var waitingFor: String? {
+        guard bubble.live else { return nil }
+        let waiting = bubble.steps.filter { $0.kind == .approval && $0.state == .waiting }
+        if waiting.isEmpty { return nil }
+        return waiting.contains { bubble.asks[$0.id] != nil } ? String(localized: "Waiting for your answer…") : String(localized: "Waiting for your approval…")
+    }
+
+    private var reply: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if bubble.steps.isEmpty {
+                if !bubble.text.isEmpty { ChatMarkdownText(text: bubble.text) }
+            } else {
+                ForEach(ChatRows.groups(bubble.steps)) { group in
+                    switch group {
+                    case .tools(let steps):
+                        VStack(alignment: .leading, spacing: 2) { ForEach(steps) { ChatToolRow(step: $0) } }
+                    case .step(let step):
+                        switch step.kind {
+                        case .text:
+                            ChatMarkdownText(text: step.text)
+                        case .approval:
+                            if let ask = bubble.asks[step.id] {
+                                ChatQuestionCard(step: step, ask: ask, answer: bubble.live ? answer : nil)
+                            } else {
+                                ChatApprovalCard(step: step, answer: bubble.live ? answer : nil)
+                            }
+                        case .steer, .tool:
+                            ChatSteerLine(text: step.text)
+                        }
+                    }
+                }
+                if let note = bubble.note {
+                    Text(verbatim: note).font(.footnote).foregroundStyle(note.hasPrefix("⚠️") ? Theme.danger : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            ForEach(Array(bubble.pending.enumerated()), id: \.offset) { item in
+                ChatSteerLine(text: item.element, pending: true)
+            }
+            if let waitingFor {
+                Text(verbatim: waitingFor).font(.caption).foregroundStyle(.secondary)
+            }
+            if let activity = bubble.activity {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(verbatim: Self.text(activity)).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 2)
+        .padding(.trailing, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Inline Markdown (bold, code, links) with the line breaks kept, for the person's own words.
     static func rendered(_ text: String) -> Text {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         if let rich = try? AttributedString(markdown: text, options: options) { return Text(rich) }
@@ -180,11 +284,136 @@ struct ChatBubble: View {
     }
 }
 
+/// A picture of a message, small and square.
+private struct ChatImageThumb: View {
+    let image: ChatImage
+
+    var body: some View {
+        if let picture = CapturePicture.preview(image.bytes, maxPixelSize: 240) {
+            Image(uiImage: picture).resizable().scaledToFill()
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityLabel(Text(verbatim: image.name))
+        }
+    }
+}
+
+/// One tool call as a quiet single line (src/web/ChatToolRow.tsx): its glyph, title and first
+/// line, muted on success, red on failure; a tap opens the call's full input and output.
+private struct ChatToolRow: View {
+    let step: ChatStep
+    @State private var open = false
+
+    private var kind: ChatRows.Tool { ChatRows.tool(step.title) }
+    private var expandable: Bool { ChatRows.expandable(step) }
+    private var failed: Bool { step.state == .failed }
+
+    private var title: String {
+        switch kind {
+        case .bash: return String(localized: "Bash")
+        case .read: return String(localized: "Read")
+        case .write: return String(localized: "Write")
+        case .edit: return String(localized: "Edit")
+        case .search: return String(localized: "Search")
+        case .web: return String(localized: "Web")
+        case .code: return String(localized: "Code")
+        case .task: return String(localized: "Agent")
+        case .plan: return String(localized: "Plan")
+        case .other: return ChatRows.plainName(step.title)
+        }
+    }
+
+    private var symbol: String {
+        switch kind {
+        case .bash: return "terminal"
+        case .read: return "doc.text"
+        case .write, .edit: return "square.and.pencil"
+        case .search: return "magnifyingglass"
+        case .web: return "globe"
+        case .code: return "number"
+        case .task: return "sparkle"
+        case .plan: return "list.bullet"
+        case .other: return "gearshape"
+        }
+    }
+
+    /// Only what needs a look is said: a failure, a call without a result, one still running.
+    private var cue: String? {
+        switch step.state {
+        case .running: return String(localized: "Running")
+        case .failed: return String(localized: "Failed")
+        case .incomplete: return String(localized: "No result received")
+        default: return nil
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button { if expandable { open.toggle() } } label: { row }
+                .buttonStyle(.plain)
+                .disabled(!expandable)
+                .accessibilityLabel(Text(verbatim: [title, ChatRows.summary(step.text), cue ?? ""].filter { !$0.isEmpty }.joined(separator: ", ")))
+                .accessibilityHint(expandable ? Text(open ? "Hides the input and output" : "Shows the input and output") : Text(verbatim: ""))
+            if open { details }
+        }
+    }
+
+    private var row: some View {
+        HStack(spacing: 6) {
+            Image(systemName: open ? "chevron.up" : symbol).font(.caption).frame(width: 16)
+            Text(verbatim: title).font(.footnote.weight(.medium)).layoutPriority(1)
+            let summary = ChatRows.summary(step.text)
+            if !summary.isEmpty {
+                Text(verbatim: "·").font(.footnote)
+                Text(verbatim: summary).font(.caption.monospaced()).lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(failed ? Theme.danger : .secondary)
+            }
+            Spacer(minLength: 4)
+            if step.state == .running { ProgressView().controlSize(.mini) }
+            if let cue { Text(verbatim: cue).font(.caption2).foregroundStyle(failed ? Theme.danger : .secondary).layoutPriority(1) }
+        }
+        .foregroundStyle(open ? Theme.text : .secondary)
+        .padding(.vertical, 3).padding(.horizontal, 4)
+        .contentShape(Rectangle())
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !step.text.isEmpty { io(String(localized: "IN"), step.text, failed: false) }
+            if !step.text.isEmpty && !step.output.isEmpty { Divider().overlay(Theme.hairline) }
+            if !step.output.isEmpty {
+                io(String(localized: "OUT"), step.output, failed: failed)
+                if step.output.count >= 12000 {
+                    Text("Output limited to 12,000 characters.").font(.caption2).foregroundStyle(.secondary)
+                        .padding(.horizontal, 10).padding(.bottom, 8)
+                }
+            }
+        }
+        .background(Theme.solid, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.hairline))
+        .padding(.leading, 22)
+    }
+
+    private func io(_ label: String, _ text: String, failed: Bool) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(verbatim: label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).frame(minWidth: 26, alignment: .leading)
+            ScrollView(.vertical) {
+                Text(verbatim: text).font(.caption.monospaced()).foregroundStyle(failed ? Theme.danger : Theme.text)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 180)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+    }
+}
+
 /// An action the agent waits on (docs/runtimes.md#live-chat): what it wants to do, why, and the
 /// person's answer while the turn runs. Nothing is allowed without a tap here.
 private struct ChatApprovalCard: View {
     let step: ChatStep
-    let answer: ((String, Bool) async -> String?)?
+    let answer: ((String, Bool, [String: [String]]?) async -> String?)?
     @State private var sending = false
     @State private var error = ""
 
@@ -203,7 +432,7 @@ private struct ChatApprovalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Image(systemName: "questionmark.circle.fill").foregroundStyle(Theme.accent)
+                Image(systemName: "exclamationmark.shield").foregroundStyle(Theme.accent)
                 Text(verbatim: step.title).font(.footnote.weight(.semibold))
                 Spacer(minLength: 6)
                 Text(status).font(.caption2).foregroundStyle(.secondary)
@@ -231,10 +460,10 @@ private struct ChatApprovalCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(8)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.ground, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.hairline))
+        .background(Theme.solid, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline))
     }
 
     private func reply(allow: Bool) {
@@ -243,7 +472,145 @@ private struct ChatApprovalCard: View {
         error = ""
         Task { @MainActor in
             let requestID = String(step.id.dropFirst("approval:".count))
-            if let failed = await answer(requestID, allow) { error = failed }
+            if let failed = await answer(requestID, allow, nil) { error = failed }
+            sending = false
+        }
+    }
+}
+
+/// A question the agent asks while its turn runs (src/web/Chat.tsx `QuestionStep`): pick an
+/// option or type an answer. One question with one choice goes back on the tap; otherwise the
+/// answers go back with Send. Skip answers nothing and the agent goes on without it.
+private struct ChatQuestionCard: View {
+    let step: ChatStep
+    let ask: ChatStore.Ask
+    let answer: ((String, Bool, [String: [String]]?) async -> String?)?
+    @State private var picked: [String: [String]] = [:]
+    @State private var typed: [String: String] = [:]
+    @State private var sending = false
+    @State private var error = ""
+
+    private var questions: [ChatRows.Question] { ask.questions }
+    private var waiting: Bool { step.state == .waiting && answer != nil }
+
+    private var status: String {
+        switch step.state {
+        case .waiting: return String(localized: "Waiting for you")
+        case .allowed: return String(localized: "Answered")
+        case .denied: return String(localized: "Skipped")
+        case .cancelled: return String(localized: "Not answered")
+        default: return ""
+        }
+    }
+
+    private func answerOf(_ q: ChatRows.Question) -> [String] {
+        ChatRows.answer(to: q, picked: picked[q.id] ?? [], typed: typed[q.id] ?? "")
+    }
+
+    private var all: [String: [String]] {
+        Dictionary(uniqueKeysWithValues: questions.map { ($0.id, answerOf($0)) })
+    }
+
+    private var ready: Bool { questions.allSatisfy { !answerOf($0).isEmpty } }
+
+    /// Send is needed when a tap alone cannot finish the answer.
+    private var needsSend: Bool {
+        questions.count > 1 || questions.contains { $0.multiple } || questions.contains { !(typed[$0.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle").foregroundStyle(Theme.accent)
+                Text("Question").font(.footnote.weight(.semibold))
+                Spacer(minLength: 6)
+                Text(status).font(.caption2).foregroundStyle(.secondary)
+            }
+            ForEach(questions) { q in item(q) }
+            if waiting {
+                HStack(spacing: 8) {
+                    if needsSend {
+                        Button("Send") { reply(all) }
+                            .buttonStyle(.borderedProminent).disabled(!ready)
+                    }
+                    Button("Skip") { reply(nil) }
+                        .buttonStyle(.bordered)
+                }
+                .controlSize(.small)
+                .disabled(sending)
+            }
+            if !error.isEmpty {
+                Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.solid, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline))
+    }
+
+    @ViewBuilder private func item(_ q: ChatRows.Question) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let header = q.header, !header.isEmpty {
+                Text(verbatim: header).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            Text(verbatim: q.question).font(.subheadline).foregroundStyle(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            if waiting {
+                ForEach(q.options, id: \.label) { option in
+                    let on = (picked[q.id] ?? []).contains(option.label) && (q.multiple || (typed[q.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button { choose(q, option.label) } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: q.multiple ? (on ? "checkmark.square.fill" : "square") : (on ? "largecircle.fill.circle" : "circle"))
+                                .foregroundStyle(on ? Theme.accent : .secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(verbatim: option.label).font(.footnote.weight(.semibold)).foregroundStyle(Theme.text)
+                                if let d = option.description, !d.isEmpty {
+                                    Text(verbatim: d).font(.caption).foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .background(on ? Theme.accent.opacity(0.1) : Theme.ground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(on ? Theme.accent.opacity(0.5) : Theme.hairline))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(sending)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+                TextField(text: Binding(get: { typed[q.id] ?? "" }, set: { typed[q.id] = $0 }),
+                          prompt: Text(q.options.isEmpty ? "Your answer" : "Or type your own answer")) { Text("Your answer") }
+                    .font(.footnote)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(Theme.ground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.hairline))
+                    .disabled(sending)
+                    .submitLabel(.send)
+                    .onSubmit { if ready { reply(all) } }
+            } else if let shown = ask.answers?[q.id], !shown.isEmpty {
+                Text(verbatim: "→ " + shown.joined(separator: ", ")).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func choose(_ q: ChatRows.Question, _ label: String) {
+        let current = picked[q.id] ?? []
+        picked[q.id] = q.multiple ? (current.contains(label) ? current.filter { $0 != label } : current + [label]) : [label]
+        if !q.multiple { typed[q.id] = "" }
+        if questions.count == 1 && !q.multiple { reply(all) }
+    }
+
+    private func reply(_ answers: [String: [String]]?) {
+        guard let answer else { return }
+        sending = true
+        error = ""
+        Task { @MainActor in
+            let requestID = String(step.id.dropFirst("approval:".count))
+            if let failed = await answer(requestID, answers != nil, answers) { error = failed }
             sending = false
         }
     }
@@ -256,6 +623,7 @@ private struct ChatSteerLine: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Image(systemName: "arrow.turn.down.right").font(.caption2).foregroundStyle(.secondary)
             Text("You").font(.footnote.weight(.semibold))
             if !text.isEmpty { Text(verbatim: text).font(.footnote) }
             if pending {
