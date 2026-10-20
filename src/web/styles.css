@@ -297,6 +297,9 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .setrow input[type="checkbox"]:checked:active::before { transform: translateX(12px); }
 .setrow input[type="checkbox"]:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 35%, transparent); }
 :root[data-theme="dark"] .setrow input[type="checkbox"] { --switch-off: rgba(120, 120, 128, 0.4); }
+/* Selects here have a see-through background, and an open list takes its colors from the
+   select: light text on the browser's light popup in dark mode. Give every list a solid fill. */
+select option, select optgroup { background-color: var(--bg); color: var(--text); }
 /* The language row: a native select in the pill style of the chat's model picker. */
 .setselect {
   border: 1px solid var(--glass-border); background: var(--glass); color: var(--text);
