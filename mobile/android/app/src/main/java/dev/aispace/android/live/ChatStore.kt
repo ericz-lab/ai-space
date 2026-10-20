@@ -96,7 +96,14 @@ class ChatStore(
 
     /// Turns written while one runs that it could not take, each tied to the message it answers so
     /// its reply is inserted right after that message.
-    private data class QueuedTurn(val bubble: UUID, val text: String, val images: List<ChatImage> = emptyList())
+    /// A turn started from universal search carries the shortcut intent it was matched to.
+    private data class QueuedTurn(
+        val bubble: UUID,
+        val text: String,
+        val images: List<ChatImage> = emptyList(),
+        val intentID: String? = null,
+        val timezone: String? = null,
+    )
     private var queue = mutableListOf<QueuedTurn>()
     private var pending = emptyList<String>()
     private var steersSeen = 0
@@ -179,7 +186,12 @@ class ChatStore(
         }
     }
 
-    fun send() {
+    /**
+     * Sends the field (and its images). [intentID] and [timezone] name the shortcut intent universal
+     * search matched the text to (docs/shortcuts.md); such a turn keeps its own route, so while a
+     * turn runs it is queued rather than added to it.
+     */
+    fun send(intentID: String? = null, timezone: String? = null) {
         val text = draft.value.trim()
         val images = this.images
         if (isOpening || (text.isEmpty() && images.isEmpty())) return
@@ -187,11 +199,11 @@ class ChatStore(
         this.images = emptyList()
         imageError = null
         error = null
-        val turn = QueuedTurn(UUID.randomUUID(), text, images)
+        val turn = QueuedTurn(UUID.randomUUID(), text, images, intentID, timezone)
         // A message written while a turn runs joins that turn (docs/runtimes.md#live-chat); a turn
         // that cannot take it is queued and sent next.
         if (isRunning) {
-            if (queue.isNotEmpty() || stopRequested) enqueue(turn) else steer(turn)
+            if (intentID != null || queue.isNotEmpty() || stopRequested) enqueue(turn) else steer(turn)
             return
         }
         bubbles = bubbles + Bubble(isUser = true, text = text, images = images, id = turn.bubble)
@@ -302,6 +314,8 @@ class ChatStore(
         var tries = 0
         val body = JSONObject().put("message", turn.text).put("interactive", true)
         if (turn.images.isNotEmpty()) body.put("images", ChatImage.array(turn.images))
+        turn.intentID?.let { body.put("intentId", it) }
+        turn.timezone?.let { body.put("timezone", it) }
         sessionID?.let { body.put("sessionId", it) }
         fun entered(): String = shown(reply)
         fun show() {

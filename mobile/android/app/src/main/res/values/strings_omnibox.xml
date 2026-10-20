@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Universal search on the first screen (docs/shortcuts.md). -->
+<resources>
+    <string name="omnibox_universal_search">Universal Search</string>
+    <string name="omnibox_field_label">Search, run an action or ask an agent</string>
+    <string name="omnibox_voice">Voice Input</string>
+    <string name="omnibox_stop_recording">Stop Recording</string>
+    <string name="omnibox_choose_action">Choose an action</string>
+    <string name="omnibox_searching">Searching…</string>
+    <string name="omnibox_ask_assistant">Ask Space Assistant</string>
+    <string name="omnibox_agent_busy">This agent is still replying. Open its chat to continue.</string>
+    <string name="omnibox_result">Result</string>
+    <string name="omnibox_copied">Copied</string>
+    <string name="omnibox_retry">Retry</string>
+    <string name="omnibox_create">Create</string>
+    <string name="omnibox_run">Run</string>
+    <string name="omnibox_show_result">Show Result</string>
+    <string name="omnibox_done">Done</string>
+    <string name="omnibox_choose">Choose…</string>
+    <string name="omnibox_choose_date">Choose Date</string>
+    <string name="omnibox_choose_time">Choose Time</string>
+    <string name="omnibox_period_hint">Use today, this-week, or YYYY-MM-DD..YYYY-MM-DD</string>
+    <string name="omnibox_completed">Completed</string>
+    <string name="omnibox_running">Running…</string>
+    <string name="omnibox_unknown">Outcome unknown; check the app before trying again.</string>
+    <string name="omnibox_failed">Failed</string>
+    <string name="omnibox_cached">Cached result</string>
+    <string name="omnibox_ok">OK</string>
+    <string name="omnibox_voice_microphone">Allow microphone access in Settings to use voice input.</string>
+    <string name="omnibox_voice_record_failed">Could not record audio.</string>
+    <string name="omnibox_voice_failed">Voice transcription failed.</string>
+    <string name="omnibox_voice_slow">Voice connection is too slow.</string>
+    <string name="omnibox_voice_timed_out">Voice connection timed out.</string>
+</resources>

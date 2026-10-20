@@ -315,4 +315,15 @@ class ChatStoreTests {
         finished(store)
         assertEquals(1, settled)
     }
+
+    @Test fun aTurnFromUniversalSearchCarriesItsIntent() = runBlocking {
+        server.enqueue(done())
+        val store = store(this)
+        store.draft.value = "today's news"
+        store.send(intentID = "news", timezone = "Asia/Tokyo")
+        finished(store)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("\"intentId\":\"news\""))
+        assertTrue(body.contains("\"timezone\":\"Asia\\/Tokyo\"") || body.contains("\"timezone\":\"Asia/Tokyo\""))
+    }
 }
