@@ -54,6 +54,7 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: no
 .sc { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 8px; }
 .sc-bar { display: flex; gap: 6px; align-items: center; }
 .sc-bar select { flex: 1; min-width: 0; max-width: 100%; border-radius: 999px; padding: 4px 10px; font-size: 0.9em; background: var(--sc-surface); border: 1px solid var(--sc-border); text-overflow: ellipsis; }
+.sc-bar select option { background-color: var(--sc-menu-bg); color: var(--sc-fg); }
 .sc-btn { border-radius: 999px; padding: 4px 11px; font-size: 0.86em; color: var(--sc-muted); background: var(--sc-surface); border: 1px solid var(--sc-border); white-space: nowrap; }
 .sc-btn:hover { color: var(--sc-fg); background: var(--sc-surface-strong); }
 .sc-btn.sc-primary { color: var(--sc-on-accent); background: var(--sc-accent); border-color: transparent; }
