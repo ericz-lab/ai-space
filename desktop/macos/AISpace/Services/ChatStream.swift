@@ -95,9 +95,73 @@ enum ChatThread {
     }
 }
 
+/// A question the agent asks while its turn runs: an `approval_request` with `questions`
+/// (src/space/runtimes/types.ts `AgentQuestion`). The person picks options or types an answer.
+struct ChatQuestion: Decodable, Equatable, Identifiable {
+    struct Option: Decodable, Equatable {
+        var label: String
+        var description: String = ""
+
+        init(label: String, description: String = "") {
+            self.label = label
+            self.description = description
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            label = try c.decode(String.self, forKey: .label)
+            description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        }
+
+        private enum CodingKeys: String, CodingKey { case label, description }
+    }
+
+    var id: String
+    var header: String = ""
+    var question: String
+    var options: [Option] = []
+    var multiSelect = false
+
+    init(id: String, header: String = "", question: String, options: [Option] = [], multiSelect: Bool = false) {
+        self.id = id
+        self.header = header
+        self.question = question
+        self.options = options
+        self.multiSelect = multiSelect
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        header = try c.decodeIfPresent(String.self, forKey: .header) ?? ""
+        question = try c.decodeIfPresent(String.self, forKey: .question) ?? ""
+        options = try c.decodeIfPresent([Option].self, forKey: .options) ?? []
+        multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, header, question, options, multiSelect }
+
+    /// The questions of an `approval_request` event; empty for an ordinary approval.
+    static func list(_ raw: Any?) -> [ChatQuestion] {
+        guard let raw, JSONSerialization.isValidJSONObject(raw),
+              let data = try? JSONSerialization.data(withJSONObject: raw) else { return [] }
+        return (try? JSONDecoder().decode([ChatQuestion].self, from: data)) ?? []
+    }
+
+    /// What goes back for this question (QuestionStep `answerOf` in src/web/Chat.tsx): a single
+    /// choice is the typed answer when there is one, else the picked option; a multiple choice is
+    /// every picked option and the typed answer after them.
+    func answer(picked: [String], typed: String) -> [String] {
+        let own = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !multiSelect { return own.isEmpty ? Array(picked.prefix(1)) : [own] }
+        return picked + (own.isEmpty ? [] : [own])
+    }
+}
+
 /// Ordered, observable work in one turn. Tool IDs remain stable from start to result. A live turn
 /// adds two kinds: an action the agent waits for (`approval`: `title` the tool, `text` what it wants
-/// to do, `output` why) and a message the person added while it ran (`steer`).
+/// to do, `output` why) and a message the person added while it ran (`steer`). An approval with
+/// `questions` is a question the agent asks; `answers` is what the person chose.
 struct ChatStep: Identifiable, Equatable {
     enum Kind: Equatable { case text, tool, approval, steer }
     enum State: Equatable { case running, succeeded, failed, incomplete, waiting, allowed, denied, cancelled }
@@ -107,6 +171,130 @@ struct ChatStep: Identifiable, Equatable {
     var text: String = ""
     var output: String = ""
     var state: State = .running
+    var questions: [ChatQuestion] = []
+    var answers: [String: [String]] = [:]
+}
+
+/// How a tool row is drawn, after the web panel's `toolVariant` and `toolSummary`
+/// (src/web/chat-steps.ts): one kind per family of tools across runtimes, and the call's first line.
+enum ChatToolKind: String, Equatable {
+    case bash, read, write, edit, search, web, code, task, plan, other
+
+    private static let families: [(ChatToolKind, Set<String>)] = [
+        (.bash, ["bash", "pwsh", "shell", "exec", "exec_command", "command", "command_execution", "local_shell", "run_command", "terminal"]),
+        (.read, ["read", "read_file", "read_image", "view", "notebookread", "cat"]),
+        (.write, ["write", "write_file", "create_file"]),
+        (.edit, ["edit", "multiedit", "notebookedit", "apply_patch", "patch", "file_change", "str_replace"]),
+        (.search, ["grep", "glob", "ls", "list", "search", "find", "toolsearch", "codebase_search"]),
+        (.web, ["webfetch", "websearch", "web_fetch", "web_search", "fetch", "browse"]),
+        (.code, ["run_code", "code"]),
+        (.task, ["task", "agent", "subagent", "spawn_agent", "send_message", "wait_agent"]),
+        (.plan, ["todowrite", "todo_write", "update_plan"]),
+    ]
+
+    init(tool name: String) {
+        var bare = name
+        // An MCP tool `mcp__server__tool` is known by its own name.
+        if bare.hasPrefix("mcp__"), let last = bare.range(of: "__", options: .backwards), last.lowerBound > bare.index(bare.startIndex, offsetBy: 3) {
+            bare = String(bare[last.upperBound...])
+        }
+        let key = bare.lowercased()
+        self = Self.families.first { $0.1.contains(key) }?.0 ?? .other
+    }
+
+    /// The row's title: the family's name, or an unknown tool's own (`mcp__a__b` as `a · b`).
+    static func title(_ name: String) -> String {
+        switch ChatToolKind(tool: name) {
+        case .bash: return String(localized: "Bash")
+        case .read: return String(localized: "Read")
+        case .write: return String(localized: "Write")
+        case .edit: return String(localized: "Edit")
+        case .search: return String(localized: "Search")
+        case .web: return String(localized: "Web")
+        case .code: return String(localized: "Code")
+        case .task: return String(localized: "Agent")
+        case .plan: return String(localized: "Plan")
+        case .other:
+            let bare = name.hasPrefix("mcp__") ? String(name.dropFirst(5)) : name
+            return bare.replacingOccurrences(of: "__", with: " · ")
+        }
+    }
+
+    /// The first non-empty line, so a long command or a patch still reads as one row.
+    static func summary(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? ""
+    }
+}
+
+/// Runs of consecutive tool calls become one group, so they stack as a tight list between
+/// paragraphs (src/web/chat-steps.ts `stepGroups`).
+enum ChatStepGroup: Identifiable, Equatable {
+    case single(ChatStep)
+    case tools([ChatStep])
+
+    var id: String {
+        switch self {
+        case .single(let step): return step.id
+        case .tools(let steps): return "tools:" + (steps.first?.id ?? "")
+        }
+    }
+
+    static func groups(_ steps: [ChatStep]) -> [ChatStepGroup] {
+        var groups: [ChatStepGroup] = []
+        for step in steps {
+            if step.kind != .tool {
+                groups.append(.single(step))
+            } else if case .tools(let run)? = groups.last {
+                groups[groups.count - 1] = .tools(run + [step])
+            } else {
+                groups.append(.tools([step]))
+            }
+        }
+        return groups
+    }
+}
+
+/// One message of a stored conversation (`GET …/sessions/:sid`): the person's text, or the agent's
+/// with the tools it called and, where the runtime's records have them, its text and tool calls in
+/// order (`TranscriptMessage` in src/space/runtimes/types.ts).
+struct ChatHistoryMessage: Decodable, Equatable {
+    struct Tool: Decodable, Equatable {
+        var name: String
+        var hint: String?
+    }
+
+    struct Step: Decodable, Equatable {
+        var kind: String
+        var text: String?
+        var name: String?
+        var input: String?
+        var output: String?
+        var failed: Bool?
+    }
+
+    var role: String
+    var text: String?
+    var tools: [Tool]?
+    var steps: [Step]?
+
+    var isUser: Bool { role == "user" }
+
+    /// The steps drawn like a finished live turn (src/web/chat-steps.ts `historySteps`).
+    var chatSteps: [ChatStep] {
+        (steps ?? []).enumerated().compactMap { i, step in
+            switch step.kind {
+            case "text":
+                return ChatStep(id: "history:\(i)", kind: .text, text: step.text ?? "", state: .succeeded)
+            case "tool":
+                return ChatStep(id: "history:\(i)", kind: .tool, title: step.name ?? "tool", text: step.input ?? "",
+                                output: step.output ?? "", state: step.failed == true ? .failed : .succeeded)
+            default:
+                return nil
+            }
+        }
+    }
 }
 
 /// One chat turn's reply, built from the run's events the way the panel's Chat.tsx reads them:
@@ -190,7 +378,8 @@ struct ChatReply: Equatable {
                 title: ev["tool"] as? String ?? "tool",
                 text: ev["title"] as? String ?? "",
                 output: ev["detail"] as? String ?? "",
-                state: .waiting)
+                state: .waiting,
+                questions: ChatQuestion.list(ev["questions"]))
             if !steps.contains(where: { $0.id == step.id }) { steps.append(step) }
             // The turn is not running anything now; it waits for the person's answer.
             activity = nil
@@ -202,6 +391,7 @@ struct ChatReply: Equatable {
             case "deny": steps[i].state = .denied
             default: steps[i].state = .cancelled
             }
+            if let answers = ev["answers"] as? [String: [String]] { steps[i].answers = answers }
         case "steer":
             let text = ev["text"] as? String ?? ""
             consumedSteers.append(text)

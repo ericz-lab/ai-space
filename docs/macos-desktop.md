@@ -361,6 +361,12 @@ agent carries on without it. The card then reads Allowed, Denied or Not answered
 Stop denied it). An answer is sent only by a click; nothing is approved automatically. Several open
 cards can be answered in any order, and a card answered on another client shows the outcome here.
 
+A question the agent asks (Claude Code's AskUserQuestion, Codex's request_user_input) arrives as a
+question card: its options as buttons and a field for an answer of one's own. One question with one
+choice goes back on the click; several questions, a multiple choice or a typed answer go back with
+**Send**. **Skip** answers nothing and the agent goes on without it. The card then shows the answer,
+Skipped or Not answered.
+
 A runtime without live chat, or an action refused anyway, still shows the refusal beneath the
 reply. Once the turn finishes, **Grant and retry** on the latest reply selects the next permission
 tier and asks the agent to finish the refused step in the same session, preserving any unsent draft.
@@ -374,7 +380,7 @@ message is lost. All permissions skips the approval cards entirely.
 
 ### Native agent work messages
 
-A running turn previously collapsed tool names into one short line and omitted successful Codex results. Native chat and Quick Chat show assistant messages as borderless text and operations on subtly shaded, borderless cards in event order. Each operation retains its command or file, running/completed/failed state, and expandable result (up to 12,000 characters). An operation with no result is marked as such when the turn ends; it is never assumed successful. Replay uses event sequence numbers and stable tool IDs to avoid duplicate cards. Claude and Codex share the normalized tool-use/result contract; no private reasoning is displayed. Older saved transcripts still use their text-only view. The composer labels its access selector **Permission**.
+A running turn previously collapsed tool names into one short line and omitted successful Codex results. Native chat and Quick Chat show assistant messages as borderless text and, in event order, each operation as one quiet line after the web panel's tool rows (`src/web/ChatToolRow.tsx`): a glyph, the kind of tool (Bash, Read, Edit, Search, Web, …) and the first line of the call. A success stays muted, a failure turns red, a running call shimmers (still under Reduce Motion), and consecutive calls stack as one list. A click opens the full input and output (IN / OUT, up to 12,000 characters). An operation with no result is marked as such when the turn ends; it is never assumed successful. Replay uses event sequence numbers and stable tool IDs to avoid duplicate cards. Claude and Codex share the normalized tool-use/result contract; no private reasoning is displayed. An earlier chat opened from the history shows its text and tool calls in order, with each call's input and output, where the runtime's records have them; older records without steps show their text only. The composer labels its access selector **Permission**.
 
 Chat, Quick Chat and the home command box leave Return to the input method while it has marked text (for example, a Chinese candidate). After composition finishes, Return submits; Shift-Return inserts a newline.
 
