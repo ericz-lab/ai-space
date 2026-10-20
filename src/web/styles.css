@@ -641,11 +641,14 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 .chat-tool.open .chat-tool-chevron { transform: rotate(180deg); }
 .chat-tool-title { flex: none; font-weight: 500; }
 .chat-tool-sep { flex: none; width: 3px; height: 3px; border-radius: 50%; margin: 0 8px; background: currentColor; opacity: 0.6; }
+/* The dot beside a call says how it ended: red for a failure, green for a success. */
+.chat-tool.failed .chat-tool-sep { background: var(--danger); opacity: 1; }
+.chat-tool.completed .chat-tool-sep { background: var(--success); opacity: 1; }
 .chat-tool-summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px ui-monospace, "SF Mono", Menlo, monospace; }
 .chat-tool-cue { flex: none; margin-left: 8px; font-size: 11px; }
 .chat-tool.failed .chat-tool-summary, .chat-tool.failed .chat-tool-cue { color: var(--danger); }
 .chat-tool.incomplete .chat-tool-cue { opacity: 0.8; }
-/* A past session's run of calls folded to one line: what ran, how many, and any failure kept visible. */
+/* A past session's run of calls folded to one line: what ran and how many calls it held. */
 .chat-tool-group { min-width: 0; }
 .chat-tool-group-head {
   display: flex; align-items: center; width: 100%; min-width: 0; height: 26px; padding: 0 6px 0 2px; margin: 0;
@@ -658,8 +661,6 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 .chat-tool-group.open .chat-tool-chevron { transform: rotate(0deg); }
 .chat-tool-group-title { flex: none; font-weight: 500; }
 .chat-tool-group-count { flex: none; margin-left: 6px; font-size: 11px; opacity: 0.7; }
-.chat-tool-group-head .chat-tool-cue { margin-left: auto; }
-.chat-tool-group.failed .chat-tool-cue { color: var(--danger); }
 .chat-tool-group .chat-tools { margin: 2px 0 4px 22px; }
 /* A running call: a light sweep over its text, the way DeepSeek Harness marks work in progress. */
 .chat-tool.running :is(.chat-tool-title, .chat-tool-summary, .chat-tool-cue) {

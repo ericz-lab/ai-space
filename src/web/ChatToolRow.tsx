@@ -28,8 +28,9 @@ export const Glyph = ({ name, className, size = 14, weight = 1.1 }: { name: keyo
   <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={weight} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{GLYPHS[name]}</svg>;
 
 /**
- * One tool call as a quiet single line: glyph, title, the call's first line. A success stays muted,
- * a failure turns red, a running call shimmers. A click opens the full input and output.
+ * One tool call as a quiet single line: glyph, title, the call's first line. A running call
+ * shimmers; once it ends its dot says so, red for a failure and green for a success. A click opens
+ * the full input and output.
  */
 export function WorkStep({ step }: { step: ChatStep }) {
   const { t } = useLang();
@@ -55,19 +56,17 @@ export function WorkStep({ step }: { step: ChatStep }) {
 
 /**
  * A run of tool calls from a past session, folded to one line: what kind of work ran and how many
- * calls, with a failure kept on the fold and the calls themselves one click away. Following
- * DeepSeek Harness's process fold, a transcript opens on its answers rather than on its commands.
+ * calls, with the calls themselves one click away. Following DeepSeek Harness's process fold, a
+ * transcript opens on its answers rather than on its commands.
  */
 export function ToolGroup({ steps, folded }: { steps: ChatStep[]; folded: boolean }) {
   const { t } = useLang();
   const [open, setOpen] = useState(!folded);
-  const failed = steps.filter((step) => step.state === "failed" || step.state === "incomplete").length;
-  return <div className={`chat-tool-group${open ? " open" : ""}${failed ? " failed" : ""}`}>
+  return <div className={`chat-tool-group${open ? " open" : ""}`}>
     <button type="button" className="chat-tool-group-head" aria-expanded={open} onClick={() => setOpen(!open)}>
       <span className="chat-tool-lead"><Glyph name="chevron" className="chat-tool-chevron" /></span>
       <span className="chat-tool-group-title">{allCommands(steps) ? t("chat.tools.commands") : t("chat.tools.called")}</span>
       <span className="chat-tool-group-count">{steps.length}</span>
-      {failed > 0 && <span className="chat-tool-cue">{t("chat.tools.failed", { n: failed })}</span>}
     </button>
     {open && <div className="chat-tools">{steps.map((step) => <WorkStep key={step.id} step={step} />)}</div>}
   </div>;
