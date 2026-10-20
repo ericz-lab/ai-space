@@ -90,11 +90,14 @@ final class ChatController: ObservableObject {
     }
 
     /// The person's answer to one of the running turn's approvals (`allow` runs the action once).
+    /// A question is answered with `allow` and its `answers`; `deny` skips it.
     /// Returns nil when it reached the Space, else what to show in the card.
-    func answer(_ requestID: String, allow: Bool) async -> String? {
+    func answer(_ requestID: String, allow: Bool, answers: [String: [String]]? = nil) async -> String? {
         guard let runID else { return String(localized: "The answer did not reach the agent: no turn is running") }
+        var body: [String: Any] = ["decision": allow ? "allow" : "deny"]
+        if let answers { body["answers"] = answers }
         do {
-            _ = try await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/approvals/\(SpacePath.escape(requestID))", json: ["decision": allow ? "allow" : "deny"])
+            _ = try await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/approvals/\(SpacePath.escape(requestID))", json: body)
             return nil
         } catch {
             return String(localized: "The answer did not reach the agent: \(HubStore.message(error))")
@@ -197,9 +200,13 @@ final class ChatController: ObservableObject {
     func open(_ session: ChatSessionInfo) async {
         guard !busy, pendingImageImports == 0 else { return }
         do {
-            let stored = try Hub.rows(ChatStored.self, "messages", from: try await api.data("\(agent.base)/sessions/\(SpacePath.escape(session.sid))"))
+            let stored = try Hub.rows(ChatHistoryMessage.self, "messages", from: try await api.data("\(agent.base)/sessions/\(SpacePath.escape(session.sid))"))
+            // The agent's text and tool calls come back in order, drawn like a finished live turn.
             messages = stored.compactMap { m in
-                (m.text ?? "").isEmpty ? nil : ChatMessage(role: m.role == "user" ? .user : .agent, text: m.text ?? "")
+                let steps = m.isUser ? [] : m.chatSteps
+                guard !(m.text ?? "").isEmpty || !steps.isEmpty else { return nil }
+                return ChatMessage(role: m.isUser ? .user : .agent, text: m.text ?? "",
+                                   tools: (m.tools ?? []).map(\.name), steps: steps)
             }
             sessionID = session.sid
             conversation = UUID()

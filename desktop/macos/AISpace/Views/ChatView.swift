@@ -30,7 +30,7 @@ struct ChatView: View {
                                        retry: message.id == chat.messages.last?.id && chat.retryableMessage != nil ? { chat.retry() } : nil,
                                        grant: message.id == chat.messages.last?.id && !chat.busy ? { chat.grantAndRetry() } : nil,
                                        grantPermission: preferences.chatPermission.granting(message.denied),
-                                       answer: message.live ? { id, allow in await chat.answer(id, allow: allow) } : nil)
+                                       answer: message.live ? { id, allow, answers in await chat.answer(id, allow: allow, answers: answers) } : nil)
                         }
                         if let error = chat.error {
                             // An earlier chat that would not open; a failed turn shows in its own reply.
@@ -268,8 +268,8 @@ private struct MessageRow: View {
     let retry: (() -> Void)?
     let grant: (() -> Void)?
     let grantPermission: ChatPermission
-    /// Answers an approval of the running turn; nil once the turn is over.
-    let answer: ((String, Bool) async -> String?)?
+    /// Answers an approval or a question of the running turn; nil once the turn is over.
+    let answer: ChatAnswer?
 
     var body: some View {
         switch message.role {
@@ -324,6 +324,8 @@ private struct MessageRow: View {
                     switch step.kind {
                     case .text:
                         textBubble(step.text)
+                    case .approval where !step.questions.isEmpty:
+                        QuestionCard(step: step, answer: answer)
                     case .approval:
                         ApprovalCard(step: step, answer: answer)
                     case .steer:
@@ -346,8 +348,9 @@ private struct MessageRow: View {
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
             }
-            if message.live, message.steps.contains(where: { $0.kind == .approval && $0.state == .waiting }) {
-                Text("Waiting for your approval…").font(.callout).foregroundStyle(.secondary)
+            if message.live, let waiting = message.steps.first(where: { $0.kind == .approval && $0.state == .waiting }) {
+                Text(waiting.questions.isEmpty ? "Waiting for your approval…" : "Waiting for your answer…")
+                    .font(.callout).foregroundStyle(.secondary)
             }
         }
         .padding(.trailing, 24)
@@ -369,12 +372,16 @@ private struct MessageRow: View {
     }
 }
 
+/// Answers one approval of the running turn: the request id, allow or deny, and a question's
+/// answers. Returns nil when the answer reached the Space, else what to show in the card.
+typealias ChatAnswer = (String, Bool, [String: [String]]?) async -> String?
+
 /// An action the agent waits on (docs/runtimes.md#live-chat): what it wants to do, why, and the
 /// person's answer while the turn runs. Nothing is allowed without an explicit choice here.
 private struct ApprovalCard: View {
     let step: ChatStep
     /// Nil when the turn is over; the card then only shows how the question ended.
-    let answer: ((String, Bool) async -> String?)?
+    let answer: ChatAnswer?
     @State private var sending = false
     @State private var error = ""
 
@@ -443,7 +450,7 @@ private struct ApprovalCard: View {
         error = ""
         Task { @MainActor in
             let requestID = String(step.id.dropFirst("approval:".count))
-            if let failed = await answer(requestID, allow) { error = failed }
+            if let failed = await answer(requestID, allow, nil) { error = failed }
             sending = false
         }
     }
@@ -471,6 +478,146 @@ private struct SteerRow: View {
         .padding(.horizontal, 12).padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.solid.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// A question the agent asks while its turn runs (src/web/Chat.tsx `QuestionStep`): pick an option
+/// or type an answer. One question with one choice goes back on the click; otherwise the answers go
+/// back with Send. Skip answers nothing and the agent goes on without it.
+private struct QuestionCard: View {
+    let step: ChatStep
+    let answer: ChatAnswer?
+    @State private var picked: [String: [String]] = [:]
+    @State private var typed: [String: String] = [:]
+    @State private var sending = false
+    @State private var error = ""
+
+    private var waiting: Bool { step.state == .waiting && answer != nil }
+    private var questions: [ChatQuestion] { step.questions }
+
+    private var status: String {
+        switch step.state {
+        case .waiting: return String(localized: "Waiting for you")
+        case .allowed: return String(localized: "Answered")
+        case .denied: return String(localized: "Skipped")
+        case .cancelled: return String(localized: "Not answered")
+        default: return ""
+        }
+    }
+
+    private func answers(_ p: [String: [String]], _ t: [String: String]) -> [String: [String]] {
+        Dictionary(uniqueKeysWithValues: questions.map { ($0.id, $0.answer(picked: p[$0.id] ?? [], typed: t[$0.id] ?? "")) })
+    }
+
+    private var ready: Bool { answers(picked, typed).values.allSatisfy { !$0.isEmpty } }
+
+    /// Send shows when the answer is not given by one click: several questions, a multiple choice,
+    /// or an answer being typed.
+    private var needsSend: Bool {
+        questions.count > 1 || questions.contains(where: \.multiSelect)
+            || questions.contains { !(typed[$0.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "questionmark.circle").foregroundStyle(Theme.accent)
+                Text("Question").font(.callout.weight(.semibold))
+                Spacer(minLength: 8)
+                Text(status).font(.caption).foregroundStyle(step.state == .waiting ? Theme.accent : .secondary)
+            }
+            ForEach(questions) { q in
+                VStack(alignment: .leading, spacing: 6) {
+                    if !q.header.isEmpty {
+                        Text(verbatim: q.header).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                    Text(verbatim: q.question).font(.callout).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if waiting {
+                        ForEach(q.options, id: \.label) { option in
+                            optionButton(q, option)
+                        }
+                        TextField(q.options.isEmpty ? "Your answer" : "Or type your own answer", text: Binding(
+                            get: { typed[q.id] ?? "" },
+                            set: { typed[q.id] = $0 }))
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(sending)
+                            .onSubmit { if ready { reply(answers(picked, typed)) } }
+                            .accessibilityLabel(Text("Your answer"))
+                    } else if let shown = step.answers[q.id], !shown.isEmpty {
+                        Text(verbatim: "→ " + shown.joined(separator: ", "))
+                            .font(.callout.weight(.semibold)).foregroundStyle(Theme.accent)
+                    }
+                }
+            }
+            if waiting {
+                HStack(spacing: 8) {
+                    if needsSend {
+                        Button("Send") { reply(answers(picked, typed)) }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!ready)
+                    }
+                    Button("Skip") { reply(nil) }
+                        .buttonStyle(.bordered)
+                }
+                .controlSize(.small)
+                .disabled(sending)
+            }
+            if !error.isEmpty {
+                Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.accent.opacity(step.state == .waiting ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.accent.opacity(step.state == .waiting ? 0.35 : 0.15)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Question"))
+    }
+
+    private func optionButton(_ q: ChatQuestion, _ option: ChatQuestion.Option) -> some View {
+        let typing = !q.multiSelect && !(typed[q.id] ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        let on = (picked[q.id] ?? []).contains(option.label) && !typing
+        return Button { choose(q, option.label) } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: option.label).font(.callout.weight(.semibold))
+                if !option.description.isEmpty {
+                    Text(verbatim: option.description).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .background(on ? Theme.accent.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Theme.accent : Color.secondary.opacity(0.3)))
+        }
+        .buttonStyle(.plain)
+        .disabled(sending)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func choose(_ q: ChatQuestion, _ label: String) {
+        let current = picked[q.id] ?? []
+        var next = picked
+        next[q.id] = q.multiSelect ? (current.contains(label) ? current.filter { $0 != label } : current + [label]) : [label]
+        var nextTyped = typed
+        if !q.multiSelect { nextTyped[q.id] = "" }
+        picked = next
+        typed = nextTyped
+        if questions.count == 1 && !q.multiSelect { reply(answers(next, nextTyped)) }
+    }
+
+    private func reply(_ answers: [String: [String]]?) {
+        guard let answer else { return }
+        sending = true
+        error = ""
+        Task { @MainActor in
+            let requestID = String(step.id.dropFirst("approval:".count))
+            if let failed = await answer(requestID, answers != nil, answers) { error = failed }
+            sending = false
+        }
     }
 }
 

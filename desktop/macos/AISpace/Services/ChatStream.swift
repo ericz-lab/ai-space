@@ -95,9 +95,73 @@ enum ChatThread {
     }
 }
 
+/// A question the agent asks while its turn runs: an `approval_request` with `questions`
+/// (src/space/runtimes/types.ts `AgentQuestion`). The person picks options or types an answer.
+struct ChatQuestion: Decodable, Equatable, Identifiable {
+    struct Option: Decodable, Equatable {
+        var label: String
+        var description: String = ""
+
+        init(label: String, description: String = "") {
+            self.label = label
+            self.description = description
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            label = try c.decode(String.self, forKey: .label)
+            description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+        }
+
+        private enum CodingKeys: String, CodingKey { case label, description }
+    }
+
+    var id: String
+    var header: String = ""
+    var question: String
+    var options: [Option] = []
+    var multiSelect = false
+
+    init(id: String, header: String = "", question: String, options: [Option] = [], multiSelect: Bool = false) {
+        self.id = id
+        self.header = header
+        self.question = question
+        self.options = options
+        self.multiSelect = multiSelect
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        header = try c.decodeIfPresent(String.self, forKey: .header) ?? ""
+        question = try c.decodeIfPresent(String.self, forKey: .question) ?? ""
+        options = try c.decodeIfPresent([Option].self, forKey: .options) ?? []
+        multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, header, question, options, multiSelect }
+
+    /// The questions of an `approval_request` event; empty for an ordinary approval.
+    static func list(_ raw: Any?) -> [ChatQuestion] {
+        guard let raw, JSONSerialization.isValidJSONObject(raw),
+              let data = try? JSONSerialization.data(withJSONObject: raw) else { return [] }
+        return (try? JSONDecoder().decode([ChatQuestion].self, from: data)) ?? []
+    }
+
+    /// What goes back for this question (QuestionStep `answerOf` in src/web/Chat.tsx): a single
+    /// choice is the typed answer when there is one, else the picked option; a multiple choice is
+    /// every picked option and the typed answer after them.
+    func answer(picked: [String], typed: String) -> [String] {
+        let own = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !multiSelect { return own.isEmpty ? Array(picked.prefix(1)) : [own] }
+        return picked + (own.isEmpty ? [] : [own])
+    }
+}
+
 /// Ordered, observable work in one turn. Tool IDs remain stable from start to result. A live turn
 /// adds two kinds: an action the agent waits for (`approval`: `title` the tool, `text` what it wants
-/// to do, `output` why) and a message the person added while it ran (`steer`).
+/// to do, `output` why) and a message the person added while it ran (`steer`). An approval with
+/// `questions` is a question the agent asks; `answers` is what the person chose.
 struct ChatStep: Identifiable, Equatable {
     enum Kind: Equatable { case text, tool, approval, steer }
     enum State: Equatable { case running, succeeded, failed, incomplete, waiting, allowed, denied, cancelled }
@@ -107,6 +171,49 @@ struct ChatStep: Identifiable, Equatable {
     var text: String = ""
     var output: String = ""
     var state: State = .running
+    var questions: [ChatQuestion] = []
+    var answers: [String: [String]] = [:]
+}
+
+/// One message of a stored conversation (`GET …/sessions/:sid`): the person's text, or the agent's
+/// with the tools it called and, where the runtime's records have them, its text and tool calls in
+/// order (`TranscriptMessage` in src/space/runtimes/types.ts).
+struct ChatHistoryMessage: Decodable, Equatable {
+    struct Tool: Decodable, Equatable {
+        var name: String
+        var hint: String?
+    }
+
+    struct Step: Decodable, Equatable {
+        var kind: String
+        var text: String?
+        var name: String?
+        var input: String?
+        var output: String?
+        var failed: Bool?
+    }
+
+    var role: String
+    var text: String?
+    var tools: [Tool]?
+    var steps: [Step]?
+
+    var isUser: Bool { role == "user" }
+
+    /// The steps drawn like a finished live turn (src/web/chat-steps.ts `historySteps`).
+    var chatSteps: [ChatStep] {
+        (steps ?? []).enumerated().compactMap { i, step in
+            switch step.kind {
+            case "text":
+                return ChatStep(id: "history:\(i)", kind: .text, text: step.text ?? "", state: .succeeded)
+            case "tool":
+                return ChatStep(id: "history:\(i)", kind: .tool, title: step.name ?? "tool", text: step.input ?? "",
+                                output: step.output ?? "", state: step.failed == true ? .failed : .succeeded)
+            default:
+                return nil
+            }
+        }
+    }
 }
 
 /// One chat turn's reply, built from the run's events the way the panel's Chat.tsx reads them:
@@ -190,7 +297,8 @@ struct ChatReply: Equatable {
                 title: ev["tool"] as? String ?? "tool",
                 text: ev["title"] as? String ?? "",
                 output: ev["detail"] as? String ?? "",
-                state: .waiting)
+                state: .waiting,
+                questions: ChatQuestion.list(ev["questions"]))
             if !steps.contains(where: { $0.id == step.id }) { steps.append(step) }
             // The turn is not running anything now; it waits for the person's answer.
             activity = nil
@@ -202,6 +310,7 @@ struct ChatReply: Equatable {
             case "deny": steps[i].state = .denied
             default: steps[i].state = .cancelled
             }
+            if let answers = ev["answers"] as? [String: [String]] { steps[i].answers = answers }
         case "steer":
             let text = ev["text"] as? String ?? ""
             consumedSteers.append(text)

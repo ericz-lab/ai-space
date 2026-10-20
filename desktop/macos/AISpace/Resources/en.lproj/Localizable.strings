@@ -71,6 +71,15 @@
 "the agent reads it after its current step" = "the agent reads it after its current step";
 "Add to the reply in progress…" = "Add to the reply in progress…";
 
+/* Native chat: an agent's questions (src/web/Chat.tsx QuestionStep) */
+"Waiting for your answer…" = "Waiting for your answer…";
+"Question" = "Question";
+"Answered" = "Answered";
+"Skipped" = "Skipped";
+"Or type your own answer" = "Or type your own answer";
+"Your answer" = "Your answer";
+"Skip" = "Skip";
+
 "Detected" = "Detected";
 
 "Not detected" = "Not detected";

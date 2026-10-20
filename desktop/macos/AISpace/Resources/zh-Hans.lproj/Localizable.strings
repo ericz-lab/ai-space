@@ -481,6 +481,15 @@
 "the agent reads it after its current step" = "智能体做完当前这一步后会看到";
 "Add to the reply in progress…" = "补充说明，会插入正在进行的回复…";
 
+/* Native chat: an agent's questions (src/web/Chat.tsx QuestionStep) */
+"Waiting for your answer…" = "等你回答…";
+"Question" = "问题";
+"Answered" = "已回答";
+"Skipped" = "已跳过";
+"Or type your own answer" = "或者自己输入答案";
+"Your answer" = "你的回答";
+"Skip" = "跳过";
+
 /* Local edition first run: agent CLIs and the default model */
 "Agents on this Mac" = "此 Mac 上的 Agent";
 "Install at least one and sign in to it in Terminal, then check again." = "请至少安装一个，并在终端中登录，然后重新检测。";
