@@ -388,7 +388,10 @@ class AppModel(private val context: Context) {
 
     /** An agent's conversation, kept while the app runs so leaving the page does not lose it. */
     fun chat(connection: Connection, base: String): ChatStore =
-        chats.getOrPut("${connection.id}|$base") { ChatStore(loader(connection).api, base, scope) }
+        chats.getOrPut("${connection.id}|$base") {
+            // A settled turn may have installed or changed an app: the library catches up without a pull.
+            ChatStore(loader(connection).api, base, scope) { loaders[connection.id]?.let { l -> scope.launch { l.refresh() } } }
+        }
 
     /** The Space's shells open on this phone, kept while the app runs as the chats are. */
     fun terminal(connection: Connection): TerminalStore =
