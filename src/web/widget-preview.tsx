@@ -32,7 +32,7 @@ export function previewPage(url: URL): string {
   const scheme = url.searchParams.get("theme") === "light" ? "light" : "dark";
   const lang = url.searchParams.get("lang") === "zh" ? "zh" : "en";
   return `<!doctype html>
-<html lang="${lang}" data-theme="${scheme}" data-backdrop="orbit">
+<html lang="${lang}" data-theme="${scheme}" data-backdrop="orbit" data-preview="${url.searchParams.get("appearance") === "production" ? "production" : "custom"}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

@@ -5,9 +5,9 @@
   --accent: #93a4ff;
   --solid: #1c2140;
 }
-:root[data-theme="dark"] .widget { --accent: #9ba8ff; }
+:root[data-theme="dark"][data-preview="custom"] .widget { --accent: #9ba8ff; background: rgba(27, 29, 43, var(--widget-alpha)); }
 :root[data-theme="light"] .aurora { display: none; }
-:root[data-theme="light"] .widget { background: rgba(255, 255, 255, var(--widget-alpha)); }
+:root[data-theme="light"][data-preview="custom"] .widget { background: rgba(255, 255, 255, var(--widget-alpha)); }
 .shell { max-width: 1080px; }
 .preview-search {
   display: flex; align-items: center; gap: 10px;
@@ -28,3 +28,5 @@
 .opacity-controls output { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
 .opacity-controls input:focus-visible { outline: 2px solid white; outline-offset: 4px; }
 @media (max-width: 640px) { .shell { padding-top: 100px; } }
+
+:root[data-preview="production"] .opacity-controls { display: none; }

@@ -11,7 +11,7 @@ export type { WidgetBlock };
 /** Compact rows beside the hero, per card size. */
 const ROWS: Record<string, number> = { "1x1": 2, "2x1": 4, "1x2": 6, "2x2": 10 };
 
-const TONE_VAR: Record<Tone, string> = { positive: "var(--success)", negative: "var(--danger)", warning: "var(--warning)", neutral: "var(--muted)" };
+const TONE_VAR: Record<Tone, string> = { positive: "var(--tone-positive)", negative: "var(--tone-negative)", warning: "var(--tone-warning)", neutral: "var(--muted)" };
 
 export function txt(t: BlockText | undefined, lang: Lang): string {
   if (t === undefined) return "";
@@ -65,13 +65,15 @@ function shown(b: WidgetBlock, lang: Lang): string | undefined {
 }
 
 /** A link wrapper when the block has a target, a plain element otherwise. */
-function Box({ url, className, children }: { url?: string; className: string; children: React.ReactNode }) {
+function Box({ url, className, tone, children }: { url?: string; className: string; tone?: Tone; children: React.ReactNode }) {
   return url ? (
-    <a className={className} href={url} target="_blank" rel="noopener noreferrer">
+    <a className={className} data-tone={tone} href={url} target="_blank" rel="noopener noreferrer">
       {children}
     </a>
   ) : (
-    <div className={className}>{children}</div>
+    <div className={className} data-tone={tone}>
+      {children}
+    </div>
   );
 }
 
@@ -100,40 +102,50 @@ function Spark({ b, lang, big }: { b: TrendBlock; lang: Lang; big?: boolean }) {
   const zero = y(0);
   const tip = (p: { t: string; v: number | null }) => `${new Date(p.t).toLocaleDateString(LOCALE[lang])} · ${p.v === null ? t("widget.noData") : fmt(p.v, b, lang, !!b.signed)}`;
   const cls = `wb-spark${big ? " big" : ""}`;
-  const latest = pts.findLastIndex((p) => p.v !== null);
+  const last = pts.map((p) => p.v).findLastIndex((v) => v !== null);
   if (b.style === "bar") {
     return (
       <svg className={cls} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={txt(b.label, lang)}>
-        {b.signed && <line x1={0} x2={W} y1={zero} y2={zero} className="wb-zero" vectorEffect="non-scaling-stroke" />}
         {pts.map((p, i) => {
-          const fill = p.v === null ? "none" : b.signed ? (p.v >= 0 ? "var(--success)" : "var(--danger)") : "var(--accent)";
+          const fill = p.v === null ? "none" : b.signed ? (p.v >= 0 ? "var(--tone-positive)" : "var(--tone-negative)") : "var(--accent)";
           const top = p.v === null ? zero : Math.min(y(p.v), zero);
           const h = p.v === null ? 0 : Math.max(Math.abs(y(p.v) - zero), 0.5);
+          // The latest bar at full strength, the history behind it quieter: today reads at a glance.
           return (
             <g key={i}>
-              <rect className={`wb-spark-bar${i === latest ? " latest" : ""}`} x={i * 10 + 1.5} width={7} y={top} height={h} fill={fill} />
+              <rect x={i * 10 + 1.5} width={7} y={top} height={h} rx={1.2} fill={fill} className={i === last ? undefined : "past"} />
               <rect x={i * 10} width={10} y={0} height={H} fill="transparent">
                 <title>{tip(p)}</title>
               </rect>
             </g>
           );
         })}
+        <line x1={0} x2={W} y1={zero} y2={zero} className="wb-zero" vectorEffect="non-scaling-stroke" />
       </svg>
     );
   }
-  // A line breaks at a missing point rather than bridging it.
+  // A line breaks at a missing point rather than bridging it; each unbroken run gets a faint area
+  // down to the chart's floor.
   let d = "";
-  let pen = false;
+  let area = "";
+  let run: string[] = [];
+  const close = () => {
+    if (run.length > 1) area += `M${run[0]!.split(",")[0]},${H}L${run.join("L")}L${run[run.length - 1]!.split(",")[0]},${H}Z`;
+    run = [];
+  };
   pts.forEach((p, i) => {
     if (p.v === null) {
-      pen = false;
+      close();
       return;
     }
-    d += `${pen ? "L" : "M"}${i * 10 + 5},${y(p.v).toFixed(2)}`;
-    pen = true;
+    const xy = `${i * 10 + 5},${y(p.v).toFixed(2)}`;
+    d += `${run.length ? "L" : "M"}${xy}`;
+    run.push(xy);
   });
+  close();
   return (
     <svg className={cls} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={txt(b.label, lang)}>
+      {area && <path d={area} className="wb-area" fill="var(--accent)" />}
       <path d={d} fill="none" stroke="var(--accent)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
       {pts.map((p, i) => (
         <rect key={i} x={i * 10} width={10} y={0} height={H} fill="transparent">
@@ -186,12 +198,12 @@ function Hero({ b, lang }: { b: WidgetBlock; lang: Lang }) {
   const value = shown(b, lang);
   const tone = b.type === "gauge" ? gaugeTone(b) : b.tone;
   return (
-    <Box url={b.url} className={`wb-hero wb-${b.type}`}>
+    <Box url={b.url} className={`wb-hero wb-${b.type}`} tone={tone}>
       <span className="wb-label">{txt(b.label, lang)}</span>
       {b.type === "status" ? (
         <>
           <span className="wb-hero-value wb-status-value">
-            {tone && tone !== "neutral" && <i className="wb-dot" style={{ background: TONE_VAR[tone] }} />}
+            <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />
             <span className="wb-v">{value}</span>
           </span>
           {b.time && <span className="wb-time">{relTime(b.time, lang)}</span>}
@@ -210,18 +222,18 @@ function Hero({ b, lang }: { b: WidgetBlock; lang: Lang }) {
   );
 }
 
-function Row({ b, lang, grouped = false }: { b: WidgetBlock; lang: Lang; grouped?: boolean }) {
+function Row({ b, lang }: { b: WidgetBlock; lang: Lang }) {
   const { t } = useLang();
   const value = shown(b, lang);
   const tone = b.type === "gauge" ? gaugeTone(b) : b.tone;
   const caption = txt(b.caption, lang);
   return (
-    <Box url={b.url} className={`wb-row wb-${b.type}${grouped ? " wb-grouped" : ""}`}>
+    <Box url={b.url} className={`wb-row wb-${b.type}`}>
       <span className="wb-row-head">
-        {!grouped && <span className="wb-label" title={[txt(b.label, lang), caption].filter(Boolean).join(" · ")}>
-          {b.type === "status" && tone && tone !== "neutral" && <i className="wb-dot" style={{ background: TONE_VAR[tone] }} />}
+        <span className="wb-label" title={[txt(b.label, lang), caption].filter(Boolean).join(" · ")}>
+          {b.type === "status" && <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />}
           <span className="wb-lt">{txt(b.label, lang)}</span>
-        </span>}
+        </span>
         <span className={`wb-row-value${value === undefined ? " missing" : ""}`} style={{ color: (b.type === "gauge" || b.type === "metric") && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}>
           <span className="wb-v" title={value}>
             {value ?? t("widget.noData")}
@@ -242,18 +254,13 @@ export function Blocks({ blocks, size }: { blocks: WidgetBlock[]; size: string }
   const [hero, ...rest] = blocks;
   if (!hero) return null;
   const rows = rest.slice(0, ROWS[size] ?? 2);
-  // Repeated neutral status labels describe the list once, leaving room for each headline.
-  const groupLabel = rows.length > 1 && rows.every((b) =>
-    b.type === "status" && (!b.tone || b.tone === "neutral") && !b.caption && txt(b.label, lang) === txt(rows[0]!.label, lang)
-  ) ? txt(rows[0]!.label, lang) : undefined;
   return (
     <div className={`wb wb-s${size}`}>
       <Hero b={hero} lang={lang} />
       {rows.length > 0 && (
         <div className="wb-rows">
-          {groupLabel && <span className="wb-group-label">{groupLabel}</span>}
           {rows.map((b, i) => (
-            <Row key={i} b={b} lang={lang} grouped={!!groupLabel} />
+            <Row key={i} b={b} lang={lang} />
           ))}
         </div>
       )}

@@ -266,7 +266,7 @@ src/web/            index.html, main.tsx (language root), App.tsx, screens.ts (s
 
 Run `bun run preview:widgets` and open `http://127.0.0.1:18937`. This local-only page renders the production `Blocks` component and widget CSS against fixed demonstration data; it does not start Space services, read a workspace or contact apps. The search field and app icons are visual placeholders.
 
-Dark widgets default to 76% opacity. The 0–100% slider updates the preview immediately and keeps the value in `?opacity=76`, so a comparison can be bookmarked. `?theme=light` previews light surfaces, and `?lang=zh` previews Chinese controls. Slider changes are temporary and do not update the production default or the operator's saved theme. Set `WIDGET_PREVIEW_PORT` to use another port. Fixtures live in `src/web/widget-preview-fixtures.ts`; preview-only styles live in `src/web/widget-preview.css`.
+Use `?appearance=production` to inspect the current production card surface without experimental overrides or the slider. The experimental dark preview uses a gray-blue fill at 76% opacity; production cards retain their neutral layered glass. The 0–100% slider updates the preview immediately and keeps the value in `?opacity=76`, so a comparison can be bookmarked. `?theme=light` previews light surfaces, and `?lang=zh` previews Chinese controls. Slider changes are temporary and do not update the production default or the operator's saved theme. Set `WIDGET_PREVIEW_PORT` to use another port. Fixtures live in `src/web/widget-preview-fixtures.ts`; preview-only styles live in `src/web/widget-preview.css`.
 
 ## Migrating from a registry-based panel
 
