@@ -99,7 +99,7 @@ function Catalogue({ apps }: { apps: CapabilityApp[] }) {
   );
 }
 
-export default function Events({ open, onClose, onBack }: { open: boolean; onClose: () => void; onBack?: () => void }) {
+export default function Events({ open, onClose, onBack, embedded = false }: { open: boolean; onClose: () => void; onBack?: () => void; embedded?: boolean }) {
   const { lang, t } = useLang();
   const [events, setEvents] = useState<EventInfo[] | null>(null);
   const [apps, setApps] = useState<CapabilityApp[]>([]);
@@ -125,29 +125,29 @@ export default function Events({ open, onClose, onBack }: { open: boolean; onClo
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || embedded) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, embedded]);
 
   const providers = apps.filter((a) => a.provides.length).length;
   const publishers = apps.filter((a) => a.publishes.length).length;
 
   return (
-    <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="tasks" role="dialog" aria-label={t("events.title")}>
+    <div className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
+      <div className="tasks" role={embedded ? "region" : "dialog"} aria-label={t("events.title")}>
         <div className="task-head">
-          {onBack && (
+          {!embedded && onBack && (
             <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
               ‹
             </button>
           )}
           <b>{t("events.title")}</b>
           <span className="chat-sub">{events === null ? "" : t("events.summary", { n: events.length, providers, publishers })}</span>
-          <button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
+          {!embedded && (<button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
             ✕
-          </button>
+          </button>)}
         </div>
         <div className="task-body">
           <section className="task-group">

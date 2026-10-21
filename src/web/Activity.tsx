@@ -28,7 +28,7 @@ function Spark({ row, range }: { row: UsageRow; range: ReturnType<typeof activit
   );
 }
 
-export default function Activity({ open, onClose, onBack, nameOf }: { open: boolean; onClose: () => void; onBack?: () => void; nameOf: (kind: UsageKind, key: string) => string }) {
+export default function Activity({ open, onClose, onBack, embedded = false, nameOf }: { open: boolean; onClose: () => void; onBack?: () => void; embedded?: boolean; nameOf: (kind: UsageKind, key: string) => string }) {
   const { lang, t } = useLang();
   const [window, setWindow] = useState<Win>("30d");
   const [kind, setKind] = useState<UsageKind | "all">("all");
@@ -71,11 +71,11 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
   }, [open, window, kind]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || embedded) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, embedded]);
 
   const opens = rows?.reduce((n, r) => n + r.opens, 0) ?? 0;
   const timeMs = rows?.reduce((n, r) => n + (r.activeMs ?? 0), 0) ?? 0;
@@ -86,10 +86,10 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
   const dash = "—";
 
   return (
-    <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="tasks usage" role="dialog" aria-label={t("activity.title")}>
+    <div className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
+      <div className="tasks usage" role={embedded ? "region" : "dialog"} aria-label={t("activity.title")}>
         <div className="task-head">
-          {onBack && (
+          {!embedded && onBack && (
             <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
               ‹
             </button>
@@ -102,9 +102,9 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
               </button>
             ))}
           </span>
-          <button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
+          {!embedded && (<button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
             ✕
-          </button>
+          </button>)}
         </div>
         <div className="task-body">
           <section className="task-group">

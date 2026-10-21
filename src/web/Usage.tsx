@@ -171,7 +171,7 @@ function TokenCells({ t }: { t: { inputTokens?: number; cacheWriteTokens?: numbe
   );
 }
 
-export default function Usage({ open, onClose, onBack }: { open: boolean; onClose: () => void; onBack?: () => void }) {
+export default function Usage({ open, onClose, onBack, embedded = false }: { open: boolean; onClose: () => void; onBack?: () => void; embedded?: boolean }) {
   const { lang, t } = useLang();
   const [window, setWindow] = useState<(typeof WINDOWS)[number]>("24h");
   const [metric, setMetric] = useState<Metric>("tokens");
@@ -199,11 +199,11 @@ export default function Usage({ open, onClose, onBack }: { open: boolean; onClos
   }, [open, window]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || embedded) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, embedded]);
 
   const label = (app: string) => {
     const a = apps[app];
@@ -212,10 +212,10 @@ export default function Usage({ open, onClose, onBack }: { open: boolean; onClos
   const tot = usage?.totals;
 
   return (
-    <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="tasks usage" role="dialog" aria-label={t("usage.title")}>
+    <div className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
+      <div className="tasks usage" role={embedded ? "region" : "dialog"} aria-label={t("usage.title")}>
         <div className="task-head">
-          {onBack && (
+          {!embedded && onBack && (
             <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
               ‹
             </button>
@@ -229,9 +229,9 @@ export default function Usage({ open, onClose, onBack }: { open: boolean; onClos
               </button>
             ))}
           </span>
-          <button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
+          {!embedded && (<button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
             ✕
-          </button>
+          </button>)}
         </div>
         <div className="task-body">
           <p className="task-note">{t("usage.costNote")}</p>

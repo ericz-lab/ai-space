@@ -145,7 +145,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const setSections: SettingsSection[] = ["general", "appearance", "models", "automation", "usage", "status", "packages", ...(hasAccount ? ["account" as const] : [])];
   const [setSectionPicked, setSetSection] = useState<SettingsSection>(() => savedSection([...setSections, "account"]));
   const setSection = setSections.includes(setSectionPicked) ? setSectionPicked : "general";
+  const [settingsPage, setSettingsPage] = useState<"appModels" | "tasks" | "events" | "usage" | "activity" | null>(null);
   const pickSection = (s: SettingsSection) => {
+    setSettingsPage(null);
     setSetSection(s);
     saveSection(s);
   };
@@ -859,7 +861,17 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
             </div>
             <div className="setlayout">
               <SettingsNav sections={setSections} current={setSection} onPick={pickSection} t={t} />
-              <div className="setbody">
+              <div className="setbody" key={settingsPage ?? setSection}>
+                {settingsPage ? <>
+                  <button className="setpage-back" onClick={() => setSettingsPage(null)}>
+                    <span aria-hidden="true">‹</span> {t(SECTION_LABEL[setSection])}
+                  </button>
+                  {settingsPage === "usage" && <Usage open embedded onClose={close} />}
+                  {settingsPage === "activity" && <Activity open embedded onClose={close} nameOf={nameOf} />}
+                  {settingsPage === "appModels" && <AppModels open embedded onClose={close} />}
+                  {settingsPage === "tasks" && <Tasks open embedded onClose={close} />}
+                  {settingsPage === "events" && <Events open embedded onClose={close} />}
+                </> : <>
                 <h3 className="setpage-title">{t(SECTION_LABEL[setSection])}</h3>
                 {setSection === "general" && (
                   <div className="setcard">
@@ -910,7 +922,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                       }} />
                     </div>
                     <div className="setcard">
-                      <button className="setrow setlink" onClick={() => setPanel("appModels")}>
+                      <button className="setrow setlink" onClick={() => setSettingsPage("appModels")}>
                         {t("settings.appModels")}
                         <span>›</span>
                       </button>
@@ -919,11 +931,11 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 )}
                 {setSection === "automation" && (
                   <div className="setcard">
-                    <button className="setrow setlink" onClick={() => setPanel("tasks")}>
+                    <button className="setrow setlink" onClick={() => setSettingsPage("tasks")}>
                       {t("settings.tasks")}
                       <span>›</span>
                     </button>
-                    <button className="setrow setlink" onClick={() => setPanel("events")}>
+                    <button className="setrow setlink" onClick={() => setSettingsPage("events")}>
                       {t("settings.events")}
                       <span>›</span>
                     </button>
@@ -931,11 +943,11 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                 )}
                 {setSection === "usage" && (
                   <div className="setcard">
-                    <button className="setrow setlink" onClick={() => setPanel("usage")}>
+                    <button className="setrow setlink" onClick={() => setSettingsPage("usage")}>
                       {t("settings.usage")}
                       <span>›</span>
                     </button>
-                    <button className="setrow setlink" onClick={() => setPanel("activity")}>
+                    <button className="setrow setlink" onClick={() => setSettingsPage("activity")}>
                       {t("settings.activity")}
                       <span>›</span>
                     </button>
@@ -956,6 +968,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                     <AccountSettings />
                   </div>
                 )}
+                </>}
               </div>
             </div>
           </div>

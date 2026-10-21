@@ -169,7 +169,7 @@ function TaskRow({ t, open, onToggle, onSaved }: { t: TaskInfo; open: boolean; o
   );
 }
 
-export default function Tasks({ open, onClose, onBack }: { open: boolean; onClose: () => void; onBack?: () => void }) {
+export default function Tasks({ open, onClose, onBack, embedded = false }: { open: boolean; onClose: () => void; onBack?: () => void; embedded?: boolean }) {
   const { lang, t } = useLang();
   const [tasks, setTasks] = useState<TaskInfo[] | null>(null);
   const [apps, setApps] = useState<Record<string, AppLabel>>({});
@@ -194,11 +194,11 @@ export default function Tasks({ open, onClose, onBack }: { open: boolean; onClos
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || embedded) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, embedded]);
 
   const groups = useMemo(() => {
     const byApp = new Map<string, TaskInfo[]>();
@@ -217,10 +217,10 @@ export default function Tasks({ open, onClose, onBack }: { open: boolean; onClos
   const failing = tasks?.filter((t) => t.enabled && !t.orphaned && t.state.lastStatus === "error").length ?? 0;
 
   return (
-    <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="tasks" role="dialog" aria-label={t("tasks.title")}>
+    <div className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
+      <div className="tasks" role={embedded ? "region" : "dialog"} aria-label={t("tasks.title")}>
       <div className="task-head">
-        {onBack && (
+        {!embedded && onBack && (
           <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
             ‹
           </button>
@@ -229,9 +229,9 @@ export default function Tasks({ open, onClose, onBack }: { open: boolean; onClos
         <span className="chat-sub">
           {tasks === null ? "" : `${t("tasks.summary", { active, total })}${failing ? t("tasks.failing", { n: failing }) : ""}`}
         </span>
-        <button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
+        {!embedded && (<button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
           ✕
-        </button>
+        </button>)}
       </div>
       <div className="task-body">
         {err && <p className="task-note">{t("common.unavailable", { error: err })}</p>}

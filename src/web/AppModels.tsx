@@ -63,7 +63,7 @@ function ModelRow({ app, row, options, onSaved }: { app: string; row: Row; optio
   );
 }
 
-export default function AppModels({ open, onClose, onBack }: { open: boolean; onClose: () => void; onBack?: () => void }) {
+export default function AppModels({ open, onClose, onBack, embedded = false }: { open: boolean; onClose: () => void; onBack?: () => void; embedded?: boolean }) {
   const { lang, t } = useLang();
   const [data, setData] = useState<{ apps: AppRows[]; options: Option[] } | null>(null);
   const [labels, setLabels] = useState<Record<string, AppLabel>>({});
@@ -83,11 +83,11 @@ export default function AppModels({ open, onClose, onBack }: { open: boolean; on
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || embedded) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, embedded]);
 
   const groups = useMemo(() => {
     const label = (app: string) => (labels[app] ? localized(lang, labels[app]).title : app);
@@ -97,19 +97,19 @@ export default function AppModels({ open, onClose, onBack }: { open: boolean; on
   const replace = (next: AppRows) => setData((d) => (d ? { ...d, apps: d.apps.map((a) => (a.app === next.app ? { app: next.app, rows: next.rows } : a)) } : d));
 
   return (
-    <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="tasks" role="dialog" aria-label={t("appModels.title")}>
+    <div className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
+      <div className="tasks" role={embedded ? "region" : "dialog"} aria-label={t("appModels.title")}>
         <div className="task-head">
-          {onBack && (
+          {!embedded && onBack && (
             <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
               ‹
             </button>
           )}
           <b>{t("appModels.title")}</b>
           <span className="chat-sub">{t("appModels.summary")}</span>
-          <button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
+          {!embedded && (<button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
             ✕
-          </button>
+          </button>)}
         </div>
         <div className="task-body">
           {err && <p className="task-note">{t("common.unavailable", { error: err })}</p>}
