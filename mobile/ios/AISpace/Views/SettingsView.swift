@@ -106,10 +106,12 @@ struct SettingsView: View {
         }
     }
 
-    /// The Space's default model: the one setting here that changes the Space itself.
+    /// The Space's sections as the panel's settings has them (General, Models, Automation, Usage,
+    /// Status, Packages), one card each in the phone's single column: Models holds the default
+    /// model, the one setting here that changes the Space itself, and the app models.
     @ViewBuilder private var models: some View {
-        if let m = settings.settings?.models {
-            Section {
+        Section {
+            if let m = settings.settings?.models {
                 Picker("Default model", selection: Binding(get: { m.defaultModel ?? "" }, set: { value in
                     Task { await settings.setDefaultModel(value.isEmpty ? nil : value) }
                 })) {
@@ -124,9 +126,12 @@ struct SettingsView: View {
                     Label { Text("The change was not saved: \(reason)") } icon: { Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning) }
                         .font(.footnote)
                 }
-            } header: {
-                Text("Models")
-            } footer: {
+            }
+            pageRow("App models", "cpu", .appModels)
+        } header: {
+            Text("Models")
+        } footer: {
+            if let m = settings.settings?.models {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Shared by app requests and new Space Assistant chats. Changing it here changes the Space, for every device.")
                     if let apps = m.appDefault, let base = m.baseDefault {
@@ -137,16 +142,23 @@ struct SettingsView: View {
         }
     }
 
-    /// The Space's own pages, drawn by the app from the Space's routes.
-    private var more: some View {
+    /// The Space's own pages, drawn by the app from the Space's routes, in the panel's sections.
+    @ViewBuilder private var more: some View {
+        Section {
+            pageRow("Scheduled tasks", "calendar.badge.clock", .tasks)
+            pageRow("Events and calls", "bolt.horizontal", .events)
+        } header: {
+            Text("Automation")
+        }
+        Section {
+            pageRow("Model usage", "chart.bar", .modelUsage)
+            pageRow("App usage", "chart.line.uptrend.xyaxis", .appUsage)
+        } header: {
+            Text("Usage")
+        }
         Section {
             pageRow("Inbox", "tray", .inbox)
             pageRow("Chat", "bubble.left.and.text.bubble.right", .chat(agent: nil))
-            pageRow("Scheduled tasks", "calendar.badge.clock", .tasks)
-            pageRow("Model usage", "chart.bar", .modelUsage)
-            pageRow("App usage", "chart.line.uptrend.xyaxis", .appUsage)
-            pageRow("App models", "cpu", .appModels)
-            pageRow("Events and calls", "bolt.horizontal", .events)
             pageRow("Apps and connections", "shippingbox", .packages)
             pageRow("Terminal", "terminal", .terminal)
         } header: {

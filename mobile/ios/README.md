@@ -192,7 +192,7 @@ After changing the launcher layout, run these visual regression checks:
 
 - Home: the search field stays below the status bar, including while scrolling and pulling to refresh. The area around it uses the panel backdrop, with no solid header band or peer-status strip.
 - Panel: the first row starts below the cutout, and scrolling continues behind the frosted status area.
-- Settings: Spaces is the first section below the status bar, followed by Display and the current Space's settings; the last row can scroll above the home indicator. Home and Settings have no separate title bar. Space switching and adding a Space are in Settings → Spaces.
+- Settings: Spaces is the first section below the status bar, followed by Display and the current Space's settings in the panel's sections (status, Models with App models, Automation, Usage, then the Space's other pages); the last row can scroll above the home indicator. Home and Settings have no separate title bar. Space switching and adding a Space are in Settings → Spaces.
 - Swipe across Home, every Panel screen, and Settings; no bottom navigation obscures the last row. Watch the upper-left edge of Search while swiping and scrolling: no neighboring header glass should cross it or flash.
 - Home, Panel and Settings share a continuous background in each theme; Settings keeps readable grouped rows over it.
 - Rotate both ways on a notch or Dynamic Island phone: initial content stays clear of the side cutout, and swiping still lands on a full page. Repeat in light and dark appearance.
