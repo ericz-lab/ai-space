@@ -29,7 +29,7 @@ The tables below list what the panel knows about. It does not lay all of it out 
 
 | Services (in Settings) | every registered manifest with a `service` | One row per service: icon, title, loopback port, health. |
 | Language (in Settings) | the browser's preferences | English or Chinese for everything the panel owns; the browser's language is the default. Apps' titles and descriptions follow when their manifest has an `i18n:` section. Design in [i18n.md](i18n.md). |
-| Desk pet (in Settings) | the browser's preferences | A sprite walking along the bottom edge. Off by a switch; any pet from [petdex.dev](https://petdex.dev) by name: the name is looked up in petdex's public manifest, the sheet URL is kept in `localStorage` with the other preferences, and the bundled capybara stands in when the sheet no longer loads. Pets are user-submitted fan art; the browser talks to petdex directly and sends no Referer, which its hotlink protection rejects. |
+| Desk pet (in Settings) | the browser's preferences, `pets:` of every visible app | A sprite walking along the bottom edge. Off by a switch; any pet from [petdex.dev](https://petdex.dev) by name: the name is looked up in petdex's public manifest, the sheet URL is kept in `localStorage` with the other preferences, and the bundled capybara stands in when the sheet no longer loads. Pets are user-submitted fan art; the browser talks to petdex directly and sends no Referer, which its hotlink protection rejects. When apps declare [pets](app-spec.md#pets) a menu above the name offers them; the choice (`<app>/<name>`) is kept in the same preferences, the page reads the pet's mood through `/api/pets/:app/:name/mood` on its `refresh` while visible, rests in the mood's animation, stays put or roams as it says, shows its line in a bubble and opens its link on a click. An app pet that is gone falls back to the petdex or bundled pet. |
 | Terminal (a built-in tile next to Settings; a floating panel) | this machine, and every peer whose snapshot says `terminal: true` | A machine picker, one tab per session, xterm.js over a WebSocket to a pseudo-terminal running the operator's shell in the workspace root. Off unless the machine sets `SPACE_TERMINAL_ENABLED=1`; every session is opened with a same-origin check and a one-time ticket, optionally a passphrase; sessions close when idle. Design and trust boundary in [terminal.md](terminal.md). |
 | Tasks (inside Settings → Automation; also opened from Shortcuts) | every task the scheduler knows, grouped by app | One row per task: status dot, name, effective schedule and event triggers (`on <app>/<event>`, filter and debounce on hover), last outcome and duration, next run, queued events, target kind; `api` and `override` badges; disabled and orphaned tasks muted. A row expands to the last twenty runs with error text and captured output; a run started by hand or carrying events says so. Read-only: it uses the scheduler's `GET /api/tasks` and `GET /api/tasks/:id/runs`, which carry no token; running or toggling a task still goes through the token-guarded routes from the machine. |
 
@@ -214,6 +214,7 @@ Service supervision is not implemented yet, so the panel probes `GET 127.0.0.1:<
 | `DELETE /api/apps/:app[?force=1]` | uninstall: stop the service, take the directory out of the workspace, forget the app (see above); 409 while a task of the app is running, unless forced |
 | `GET /api/apps/:app/icon`, `GET /api/agents/:app/:agent/avatar` | icon files from the app directory; paths cannot escape it |
 | `GET /api/widgets`, `GET /api/widgets/:app/:name/embed` | widget payloads and embed pages |
+| `GET /api/pets`, `GET /api/pets/:app/:name/sheet`, `GET /api/pets/:app/:name/mood` | the pets apps declare, their sheets and moods ([app-spec.md](app-spec.md#pets)) |
 | `GET`/`PUT /api/panel/layout` | order, hidden apps, widget sizes, removed widgets and screens |
 | `GET /api/panel/appcolor?app=` | the app page's `theme-color`, for the phone shell |
 | `GET`/`PUT /api/panel/icons` | the icon packs with their files, and `{ active: <pack> \| null }` (Icon packs) |
@@ -247,7 +248,7 @@ An operator who wants a second factor puts it in front of the tunnel, not in ai-
 
 ```
 src/space/panel/    registry.ts (registered manifests), layout.ts (panel_kv), icons.ts (icon packs), health.ts,
-                    widgets.ts (feed + cache), view.ts (API shapes), links.ts (manifest-only apps), uninstall.ts (stop + directory),
+                    widgets.ts (feed + cache), pet-spec.ts + pets.ts (app pets), view.ts (API shapes), links.ts (manifest-only apps), uninstall.ts (stop + directory),
                     api.ts (routes)
 src/space/peers/    other machines' panels merged into this one, and this one served to a hub (peers.md)
 src/space/terminal/ the web terminal: PTY backends, tickets and sessions, audit rows, routes and the socket bridge to a peer (terminal.md)

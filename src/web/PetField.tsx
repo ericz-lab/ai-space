@@ -1,12 +1,38 @@
 import { useEffect, useState } from "react";
-import { useLang } from "./i18n.ts";
+import { localized, useLang } from "./i18n.ts";
+import type { AppPetInfo } from "./Pet.tsx";
 import { type PetChoice, type PetdexPet, loadPetdex, resolvePet, suggestPets } from "./petdex.ts";
 
 /**
- * The pet picker in the settings pop-over: type a name from petdex.dev, the sheet URL is looked up in
- * the public manifest and kept in the preferences. Empty means the bundled default.
+ * The pet picker in the settings pop-over. When apps offer pets (docs/app-spec.md#pets) a menu chooses
+ * between them and the petdex pet. For the latter: type a name from petdex.dev, the sheet URL is looked
+ * up in the public manifest and kept in the preferences. Empty means the bundled default.
  */
-export default function PetField({ pet, onChange }: { pet: PetChoice | undefined; onChange: (p: PetChoice | undefined) => void }) {
+export default function PetField(props: { pet: PetChoice | undefined; onChange: (p: PetChoice | undefined) => void; appPets: AppPetInfo[]; petApp: string | undefined; onPetApp: (app: string | undefined) => void }) {
+  const { appPets, petApp, onPetApp } = props;
+  const { lang, t } = useLang();
+  if (!appPets.length) return <PetdexField {...props} />;
+  return (
+    <>
+      <div className="setfield">
+        <div className="setinput">
+          <select aria-label={t("pet.kind")} value={petApp ?? ""} onChange={(e) => onPetApp(e.target.value || undefined)}>
+            <option value="">{t("pet.petdex")}</option>
+            {appPets.map((p) => (
+              <option key={p.id} value={p.id}>
+                {localized(lang, p).title}
+              </option>
+            ))}
+          </select>
+        </div>
+        {petApp && <p className="setnote">{t("pet.fromApp")}</p>}
+      </div>
+      {!petApp && <PetdexField {...props} />}
+    </>
+  );
+}
+
+function PetdexField({ pet, onChange }: { pet: PetChoice | undefined; onChange: (p: PetChoice | undefined) => void }) {
   const { t } = useLang();
   const [query, setQuery] = useState(pet?.slug || "");
   const [pets, setPets] = useState<PetdexPet[] | null>(null);

@@ -4,7 +4,7 @@ import { AddForm, UninstallForm } from "./AppForms.tsx";
 import ModelPreference from "./ModelPreference.tsx";
 import { AccountSettings, loadAuth } from "./Auth.tsx";
 import Chat, { type Ask } from "./Chat.tsx";
-import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
+import Pet, { AppPet, type AppPetInfo, DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
 import Usage from "./Usage.tsx";
@@ -38,7 +38,8 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 // Entries from peer machines say where they run in their hover details and are muted while that peer is down.
 // Every string the panel owns goes through `t` (i18n.ts); manifest text is picked with `localized`.
 
-type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetChoice };
+/** `petApp` is an app's pet as `<app>/<name>` (docs/app-spec.md#pets); it wins over `pet` while that app offers it. */
+type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetChoice; petApp?: string };
 
 /** Floating panels over the page; one at a time. */
 type Panel = "settings" | "chat" | "tasks" | "usage" | "activity" | "appModels" | "events" | "terminal" | "inbox" | "shortcuts";
@@ -116,6 +117,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   };
   const togglePref = (k: "noPop" | "noPet" | "noWidget") => setPrefs((p) => savePrefs({ ...p, [k]: !p[k] }));
   const setPet = (pet: PetChoice | undefined) => setPrefs((p) => savePrefs({ ...p, pet }));
+  const setPetApp = (petApp: string | undefined) => setPrefs((p) => savePrefs({ ...p, petApp }));
+  // The pets apps declare; read on load and again when the settings open, so a new app's pet shows up.
+  const [appPets, setAppPets] = useState<AppPetInfo[] | null>(null);
   // A chosen sheet that no longer loads (the pet was re-uploaded, or petdex is down): look the name up
   // again and keep the new URL; until then the default pet stands in. The choice itself is kept.
   const [petBroken, setPetBroken] = useState<string | null>(null);
@@ -131,6 +135,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       .catch(() => {});
   };
   const setsOpen = panel === "settings";
+  useEffect(() => {
+    getJson<{ pets?: AppPetInfo[] }>("/api/pets")
+      .then((j) => setAppPets(j.pets ?? []))
+      .catch(() => setAppPets((p) => p ?? []));
+  }, [setsOpen]);
+  const appPet = prefs.petApp ? appPets?.find((p) => p.id === prefs.petApp) : undefined;
+  // Until the list is read, a chosen app pet is not replaced by the default for a moment.
+  const petPending = !!prefs.petApp && appPets === null;
   useEffect(() => {
     if (!setsOpen) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPanel(null);
@@ -822,7 +834,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         ) : null}
       </div>
       {screens && !IN_PHONE_APP && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={() => openLibrary(HOME, true)} />}
-      {!prefs.noPet && <Pet sheet={petSheet} onError={onPetError} />}
+      {!prefs.noPet && !petPending && (appPet ? <AppPet pet={appPet} /> : <Pet sheet={petSheet} onError={onPetError} />)}
       {uninstalling && (
         <UninstallForm
           app={uninstalling}
@@ -883,7 +895,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                       {t("settings.pet")}
                       <input type="checkbox" role="switch" checked={!prefs.noPet} onChange={() => togglePref("noPet")} />
                     </label>
-                    {!prefs.noPet && <PetField pet={prefs.pet} onChange={setPet} />}
+                    {!prefs.noPet && <PetField pet={prefs.pet} onChange={setPet} appPets={appPets ?? []} petApp={appPet?.id} onPetApp={setPetApp} />}
                     <label className="setrow">
                       {t("settings.widgets")}
                       <input type="checkbox" role="switch" checked={!prefs.noWidget} onChange={() => togglePref("noWidget")} />
