@@ -1,0 +1,62 @@
+{
+  "fonts": [
+    "Inter",
+    "ui-monospace"
+  ],
+  "fontSizes": [
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    22,
+    40
+  ],
+  "typeRules": [],
+  "minControlSize": 15,
+  "controlSizeRules": [],
+  "minControlGap": 8,
+  "minControlInset": 8,
+  "controlContainers": [
+    "[data-ui-container]"
+  ],
+  "minLayoutGap": 8,
+  "bannedCopy": [
+    "unlock your potential",
+    "seamlessly",
+    "game-changing"
+  ],
+  "viewports": [
+    {
+      "width": 390,
+      "height": 844
+    },
+    {
+      "width": 1440,
+      "height": 900
+    }
+  ],
+  "colorSchemes": [
+    "light",
+    "dark"
+  ],
+  "exceptions": [
+    {
+      "selector": ".edge-btn, .chat-hbtn.back, .chat-attach, .chat-send, .omni-mic",
+      "rules": [
+        "font-size"
+      ],
+      "reason": "Glyph icons (arrows, plus, attach, send, mic) are sized as icons, not text; design guidelines section 8."
+    },
+    {
+      "selector": "input[type=checkbox], input[type=radio]",
+      "rules": [
+        "font-size"
+      ],
+      "reason": "Switches and checkboxes render no text; their size is set by width and height."
+    }
+  ]
+}

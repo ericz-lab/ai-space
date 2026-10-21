@@ -16,12 +16,14 @@ import {
   exportPreferences,
   importPreferences,
   loadPreferences,
+  luminance,
   parseColor,
   resolveScheme,
   resolveTokens,
   savePreferences,
   toCssVars,
   validatePreferences,
+  withAlpha,
 } from "./theme.ts";
 
 const memory = (init: Record<string, string> = {}): KV & { data: Record<string, string> } => {
@@ -55,6 +57,32 @@ describe("colors", () => {
   test("picks a readable color on an accent", () => {
     expect(contrastOn("#1d4ed8")).toBe("#ffffff");
     expect(contrastOn("#fde68a")).toBe("#0e1116");
+  });
+});
+
+// Design guidelines 9.2: ground = background under the brightest glow at --glow-opacity,
+// surface blended over the ground, muted blended over the surface.
+describe("muted text contrast", () => {
+  const over = (fg: string, bg: string) => {
+    const f = parseColor(fg)!, b = parseColor(bg)!;
+    const mix = (x: number, y: number) => Math.round(x * f.a + y * (1 - f.a));
+    return `rgb(${mix(f.r, b.r)}, ${mix(f.g, b.g)}, ${mix(f.b, b.b)})`;
+  };
+  const ratio = (a: string, b: string) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi! + 0.05) / (lo! + 0.05);
+  };
+  const cases = PRESETS.flatMap((p) => (["light", "dark"] as const).map((scheme) => [p.id, scheme] as const));
+
+  test.each(cases)("%s %s reaches 4.5:1 on every surface", (presetId, scheme) => {
+    const t = resolveTokens({ ...defaultPreferences(), presetId }, scheme);
+    const glow = Number(toCssVars(t)["--glow-opacity"]);
+    const grounds = [t.background, ...(glow ? [t.glowA, t.glowB, t.glowC].map((g) => over(withAlpha(g, glow), t.background)) : [])];
+    for (const ground of grounds)
+      for (const s of ["surface", "surfaceStrong", "panel", "solid"] as const) {
+        const surface = over(t[s], ground);
+        expect(ratio(over(t.muted, surface), surface), `${s} over ${ground}`).toBeGreaterThanOrEqual(4.5);
+      }
   });
 });
 

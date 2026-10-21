@@ -113,7 +113,7 @@ export const DEFAULT_THEME: ThemeDefinition & { light: ResolvedTokens; dark: Res
   dark: {
     background: "#1c2030",
     text: "#f1f4f8",
-    muted: "rgba(235, 235, 245, 0.62)",
+    muted: "rgba(235, 235, 245, 0.66)",
     surface: "rgba(255, 255, 255, 0.09)",
     surfaceStrong: "rgba(40, 45, 62, 0.88)",
     panel: "rgba(40, 45, 62, 0.97)",
@@ -189,7 +189,7 @@ export const PRESETS: ThemeDefinition[] = [
     light: {
       background: "#faf6f0",
       text: "#2b2118",
-      muted: "rgba(43, 33, 24, 0.58)",
+      muted: "rgba(43, 33, 24, 0.66)",
       surface: "rgba(255, 252, 247, 0.6)",
       surfaceStrong: "rgba(255, 250, 243, 0.86)",
       panel: "rgba(255, 251, 246, 0.96)",
@@ -211,7 +211,7 @@ export const PRESETS: ThemeDefinition[] = [
     dark: {
       background: "#211a15",
       text: "#f6ede4",
-      muted: "rgba(246, 237, 228, 0.6)",
+      muted: "rgba(246, 237, 228, 0.64)",
       surface: "rgba(255, 240, 225, 0.08)",
       surfaceStrong: "rgba(52, 42, 35, 0.9)",
       panel: "rgba(52, 42, 35, 0.97)",

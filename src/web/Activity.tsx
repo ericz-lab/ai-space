@@ -108,7 +108,7 @@ export default function Activity({ open, onClose, onBack, nameOf }: { open: bool
         </div>
         <div className="task-body">
           <section className="task-group">
-            <h3>{t("activity.devices")}</h3>
+            <h3 className="task-app"><span className="svc-name">{t("activity.devices")}</span></h3>
             <p className="task-note">{t("activity.devicesNote")}</p>
             {devices === null ? <p className="task-note">{t("activity.devicesUnavailable")}</p> : devices.length === 0 ? <p className="task-note">{t("activity.devicesEmpty")}</p> : (
               <div className="usage-scroll"><table className="usage-table device-usage-table">
