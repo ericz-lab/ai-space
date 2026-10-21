@@ -60,7 +60,10 @@ struct EntryIcon: View {
 struct EntryTile: View {
     let entry: CatalogueEntry
     let icons: IconStore
+    /// The library's tiles show their details under the pointer; a screen's show none.
+    var details = false
     let action: () -> Void
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Button(action: action) {
@@ -69,9 +72,12 @@ struct EntryTile: View {
                     .overlay(alignment: .topTrailing) { badge.offset(x: 4, y: -4) }
                     .opacity(dimmed ? 0.5 : 1)
                 Text(verbatim: entry.displayTitle())
-                    .font(.callout.weight(.medium)).foregroundStyle(Theme.text)
-                    // Over drawn artwork a name gets an edge in the ground colour to stay readable.
-                    .shadow(color: Theme.current.backdrop == nil ? .clear : Theme.ground.opacity(0.9), radius: 2)
+                    .font(.callout.weight(overArtwork ? .semibold : .medium))
+                    // Over drawn artwork a name is set like a phone's home screen: white with a soft
+                    // dark shadow over the dark versions, the text colour alone over the pale ones.
+                    .foregroundStyle(overArtwork && scheme == .dark ? Color.white : Theme.text)
+                    .shadow(color: overArtwork && scheme == .dark ? Color(hex: 0x0F123C).opacity(0.55) : .clear, radius: 1, y: 1)
+                    .shadow(color: overArtwork && scheme == .dark ? Color(hex: 0x0F123C).opacity(0.35) : .clear, radius: 2.5)
                     .multilineTextAlignment(.center).lineLimit(2)
                     .frame(maxWidth: .infinity)
                 if let note {
@@ -83,11 +89,21 @@ struct EntryTile: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(entry.displayDetail() ?? entry.displayTitle())
+        .help(details ? detailText : "")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: entry.displayTitle()))
         .accessibilityValue(Text(stateLabel))
         .accessibilityAddTraits(.isButton)
+    }
+
+    private var overArtwork: Bool { Theme.current.backdrop != nil }
+
+    /// What the pointer shows over a library tile: the name, its state and peer, its description.
+    private var detailText: String {
+        let state = [stateLabel, entry.reach == .up || entry.reach == .unknown || entry.reach == .link ? nil : entry.peer]
+            .compactMap { $0 }.filter { !$0.isEmpty }
+        return ([entry.displayTitle(), state.isEmpty ? nil : state.joined(separator: " · "), entry.displayDetail()].compactMap { $0 })
+            .joined(separator: "\n")
     }
 
     private var dimmed: Bool { entry.reach == .peerOffline || entry.reach == .paused }
@@ -139,20 +155,20 @@ struct WidgetCard: View {
             Button { open(nil) } label: {
                 HStack(spacing: 10) {
                     EntryIcon(icon: widget.icon, fallback: "rectangle.3.group", icons: icons, size: 26)
-                    Text(verbatim: Lang.pick(widget.title, widget.i18n, \.title)).font(.headline).foregroundStyle(Theme.text).lineLimit(1)
+                    Text(verbatim: Lang.pick(widget.title, widget.i18n, \.title)).font(.subheadline.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
                     if let peer = widget.peer { Text(verbatim: peer).font(.caption).foregroundStyle(.secondary) }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 14).padding(.vertical, 11)
+                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 4)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            Divider()
-            rows.padding(.horizontal, 14).padding(.vertical, 11)
+            rows.padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glass()
+        // The panel's cards are borderless glass; colour inside a card is data.
+        .glass(bordered: false)
         .opacity(widget.stale == true ? 0.6 : 1)
     }
 
@@ -168,7 +184,7 @@ struct WidgetCard: View {
                 if widget.stale == true {
                     Text("Last known; its machine is offline.").font(.caption).foregroundStyle(.secondary)
                 } else if WidgetLayout.isOutdated(asOf: widget.asOf, staleAfterMs: widget.staleAfterMs), let date = widget.asOf.flatMap(Times.parse) {
-                    Text("Updated \(Times.ago(date))").font(.caption).foregroundStyle(.secondary)
+                    Text("Updated \(Times.ago(date))").font(.caption).monospacedDigit().foregroundStyle(.tertiary)
                 }
             }
         } else if let items = widget.items, !items.isEmpty {

@@ -4,6 +4,8 @@ import SwiftUI
 /// web panel keeps under Settings, the inbox and the chat. The same pages as the iPhone client's.
 enum HubPage: Identifiable, Hashable {
     case inbox, tasks, modelUsage, appUsage, appModels, events, packages, terminal
+    /// Settings of the Space, opened from its tile (src/web/App.tsx `openSettings`).
+    case settings
     /// The agents to talk to, or one agent's conversation by its id (`<app>/<name>`, behind its peer).
     case chat(agent: String?)
 
@@ -17,6 +19,7 @@ enum HubPage: Identifiable, Hashable {
         case .events: return "events"
         case .packages: return "packages"
         case .terminal: return "terminal"
+        case .settings: return "settings"
         case .chat(let agent): return "chat:\(agent ?? "")"
         }
     }
@@ -56,10 +59,30 @@ struct HubContainer: View {
                 }
         }
         .id(page)
-        .background(Theme.ground)
+        .background {
+            // Settings keeps the Space's backdrop behind it, as when it was a page of the launcher.
+            if page == .settings {
+                SpaceBackdrop(space: connection.url, dataStore: model.dataStore(connection.id))
+            } else {
+                Theme.ground
+            }
+        }
     }
 
-    @ViewBuilder private var content: some View {
+    private var content: some View {
+        HubPageContent(model: model, connection: connection, page: page, loader: loader, icons: icons)
+    }
+}
+
+/// What a page of the Space shows: over the launcher in HubContainer, or inside Settings' pane.
+struct HubPageContent: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    let page: HubPage
+    @ObservedObject var loader: CatalogueLoader
+    let icons: IconStore
+
+    var body: some View {
         let api = loader.api
         switch page {
         case .inbox: InboxPage(model: model, api: api)
@@ -70,10 +93,17 @@ struct HubContainer: View {
         case .events: EventsPage(api: api)
         case .packages: PackagesPage(model: model, connection: connection, api: api)
         case .terminal: TerminalPage(store: model.terminal(for: connection))
+        case .settings:
+            SettingsPage(model: model, connection: connection, loader: loader, settings: model.settings(for: connection), icons: icons, prefs: model.prefs)
+                .navigationTitle(Text("Settings"))
         case .chat(let agent):
             if let agent, let chat = model.chat(AgentRef(connection: connection.id, agent: agent)) {
-                ChatView(chat: chat, icons: icons, compact: false)
-                    .navigationTitle(Text(verbatim: chat.agent.displayTitle))
+                HStack(spacing: 0) {
+                    ChatSidebar(model: model, connection: connection, loader: loader, icons: icons, chat: chat, current: agent)
+                    Divider()
+                    ChatView(chat: chat, icons: icons, compact: false)
+                }
+                .navigationTitle(Text(verbatim: chat.agent.displayTitle))
             } else if agent != nil, model.lives[connection.id]?.status == .unknown {
                 Connecting()
             } else {
@@ -120,5 +150,98 @@ struct AgentsPage: View {
         }
         .navigationTitle(Text("Chat"))
         .reloadable { await loader.refresh() }
+    }
+}
+
+/// Beside the main window's conversation (src/web/Chat.tsx `chat-side`): New Conversation, the
+/// agents to switch to (a busy one marked) and the shown agent's recent sessions, kept in view
+/// rather than behind a menu.
+struct ChatSidebar: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    @ObservedObject var loader: CatalogueLoader
+    let icons: IconStore
+    @ObservedObject var chat: ChatController
+    /// The agent on show, by its id.
+    let current: String
+
+    var body: some View {
+        let agents = loader.catalogue?.agents ?? []
+        let locked = chat.busy || chat.pendingImageImports > 0
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                Button { chat.newConversation() } label: {
+                    Label("New Conversation", systemImage: "square.and.pencil")
+                        .font(.callout.weight(.medium))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8).padding(.vertical, 7)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.text)
+                .disabled(locked)
+                .help("New Conversation")
+                if agents.count > 1 {
+                    heading("Agents")
+                    ForEach(agents) { agent in
+                        item(on: agent.ref == current, action: { model.destination = .hub(.chat(agent: agent.ref)) }) {
+                            EntryIcon(icon: agent.icon, fallback: "person.fill", icons: icons, size: 20, isRound: true)
+                            Text(verbatim: agent.displayTitle()).lineLimit(1)
+                            Spacer(minLength: 4)
+                            if busy(agent.ref) {
+                                Circle().fill(Theme.accent).frame(width: 7, height: 7).help("Working")
+                            }
+                        }
+                        .disabled(agent.reach == .peerOffline)
+                    }
+                }
+                heading("Recent")
+                if chat.sessions.isEmpty {
+                    Text("No earlier chats").font(.callout).foregroundStyle(.secondary).padding(.horizontal, 8)
+                }
+                ForEach(chat.sessions.prefix(30)) { session in
+                    let title = session.title.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "Untitled")
+                    item(on: session.sid == chat.sessionID, action: { Task { await chat.open(session) } }) {
+                        Text(verbatim: title).lineLimit(1)
+                        Spacer(minLength: 4)
+                        if let ts = session.ts {
+                            Text(verbatim: Times.ago(Date(timeIntervalSince1970: ts / 1000))).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .help(title)
+                    .disabled(locked)
+                }
+            }
+            .padding(10)
+        }
+        .frame(width: 230)
+        .background(.thinMaterial)
+    }
+
+    private func busy(_ ref: String) -> Bool {
+        if ref == current { return chat.busy }
+        if model.isChatBusy(AgentRef(connection: connection.id, agent: ref)) { return true }
+        let running = model.lives[connection.id]?.running ?? []
+        return running.contains { $0.agent == ref || ref.hasSuffix("/" + $0.agent) }
+    }
+
+    private func heading(_ title: LocalizedStringKey) -> some View {
+        Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.horizontal, 8).padding(.top, 14).padding(.bottom, 4)
+    }
+
+    private func item<Content: View>(on: Bool, action: @escaping () -> Void, @ViewBuilder _ content: () -> Content) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) { content() }
+                .font(.callout)
+                .foregroundStyle(Theme.text)
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(on ? Theme.text.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }

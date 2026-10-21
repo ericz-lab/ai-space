@@ -212,6 +212,15 @@ struct CodexWorkStepsTests {
         #expect(run.map(\.id) == ["b", "c"])
     }
 
+    @Test func aFoldedRunNamesCommandsOnlyWhenEveryCallInItIsOne() {
+        let run = { (names: [String]) in names.enumerated().map { ChatStep(id: "\($0.offset)", kind: .tool, title: $0.element) } }
+        #expect(ChatToolKind.allCommands(run(["Bash", "exec_command", "run_command"])))
+        #expect(!ChatToolKind.allCommands(run(["Bash", "Read"])))
+        #expect(!ChatToolKind.allCommands(run(["Read"])))
+        #expect(!ChatToolKind.allCommands([]))
+        #expect(!ChatToolKind.allCommands([ChatStep(id: "t", kind: .text, title: "Bash")]))
+    }
+
     @Test func anAgentsQuestionKeepsItsOptionsAndOnceAnsweredTheAnswers() {
         var r = ChatReply()
         r.apply(#"{"type":"approval_request","id":"q1","tool":"AskUserQuestion","title":"Which one?","questions":[{"id":"pick","header":"Asset","question":"Which one?","options":[{"label":"Contract","description":"the signed one"},{"label":"Draft"}],"multiSelect":false}]}"#)

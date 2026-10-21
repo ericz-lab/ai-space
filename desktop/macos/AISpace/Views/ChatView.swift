@@ -72,29 +72,6 @@ struct ChatView: View {
             if let error = chat.imageError { Text(error).font(.caption).foregroundStyle(Theme.danger) }
             composer
         }
-        .toolbar {
-            if !compact {
-                ToolbarItem {
-                    Menu {
-                        if chat.sessions.isEmpty { Text("No earlier chats") }
-                        ForEach(chat.sessions.prefix(20)) { session in
-                            Button { Task { await chat.open(session) } } label: {
-                                Text(verbatim: session.title.flatMap { $0.isEmpty ? nil : String($0.prefix(60)) } ?? session.sid)
-                            }
-                        }
-                    } label: {
-                        Label("Earlier chats", systemImage: "clock.arrow.circlepath")
-                    }
-                    .disabled(chat.busy || chat.pendingImageImports > 0)
-                    .help("Earlier chats")
-                }
-                ToolbarItem {
-                    Button { chat.newConversation() } label: { Label("New Conversation", systemImage: "square.and.pencil") }
-                        .disabled(chat.busy || chat.pendingImageImports > 0)
-                        .help("New Conversation")
-                }
-            }
-        }
         .onDrop(of: [UTType.image.identifier, UTType.fileURL.identifier], isTargeted: nil) { providers in
             importImages(providers)
             return true
@@ -323,9 +300,14 @@ private struct MessageRow: View {
                 ForEach(ChatStepGroup.groups(message.steps)) { group in
                     switch group {
                     case .tools(let tools):
-                        // Consecutive calls stack as one tight list between paragraphs.
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(tools) { ChatWorkStep(step: $0) }
+                        // Consecutive calls stack as one tight list between paragraphs; a past
+                        // session's run of two or more folds to one line, a live turn keeps them in view.
+                        if tools.count > 1 && message.historic {
+                            ChatToolFold(steps: tools)
+                        } else {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(tools) { ChatWorkStep(step: $0) }
+                            }
                         }
                     case .single(let step):
                         switch step.kind {
@@ -629,9 +611,52 @@ private struct QuestionCard: View {
     }
 }
 
+/// A run of tool calls from a past session folded to one line (src/web/ChatToolRow.tsx
+/// `ToolGroup`): what kind of work ran and how many calls, the calls one click away. A transcript
+/// opens on its answers rather than on its commands.
+private struct ChatToolFold: View {
+    let steps: [ChatStep]
+    @State private var open = false
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Button { open.toggle() } label: { head }
+                .buttonStyle(.plain)
+                .onHover { hovering = $0 }
+                .accessibilityValue(Text(open ? "Expanded" : "Collapsed"))
+            if open {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(steps) { ChatWorkStep(step: $0) }
+                }
+                .padding(.leading, 22).padding(.top, 2).padding(.bottom, 4)
+            }
+        }
+    }
+
+    private var head: some View {
+        let lit = hovering || open
+        return HStack(spacing: 0) {
+            Image(systemName: "chevron.down")
+                .rotationEffect(.degrees(open ? 0 : -90))
+                .font(.system(size: 11))
+                .frame(width: 16, height: 16)
+                .padding(.trailing, 6)
+            Text(ChatToolKind.allCommands(steps) ? "Ran commands" : "Called tools").font(.system(size: 12.5, weight: .medium))
+            Text(verbatim: "\(steps.count)").font(.system(size: 11)).monospacedDigit().opacity(0.7).padding(.leading, 6)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(lit ? AnyShapeStyle(Theme.text) : AnyShapeStyle(.secondary))
+        .frame(height: 26)
+        .padding(.leading, 2).padding(.trailing, 6)
+        .contentShape(Rectangle())
+        .background(lit ? Theme.text.opacity(0.05) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
 /// One tool call as a quiet single line (src/web/ChatToolRow.tsx `WorkStep`): glyph, title, the
-/// call's first line. A success stays muted, a failure turns red, a running call shimmers. A click
-/// opens the full input and output.
+/// call's first line. A running call shimmers; once it ends its dot says so, red for a failure and
+/// green for a success. A click opens the full input and output.
 private struct ChatWorkStep: View {
     let step: ChatStep
     @State private var expanded = false
@@ -689,6 +714,15 @@ private struct ChatWorkStep: View {
         }
     }
 
+    /// The dot beside the call says how it ended: red for a failure, green for a success.
+    @ViewBuilder private var dot: some View {
+        switch step.state {
+        case .failed: Circle().fill(Theme.danger)
+        case .succeeded: Circle().fill(Theme.success)
+        default: Circle().opacity(0.6)
+        }
+    }
+
     /// A failure's summary and cue turn red; otherwise they keep the row's color.
     private var failed: AnyShapeStyle { step.state == .failed ? AnyShapeStyle(Theme.danger) : AnyShapeStyle(.foreground) }
 
@@ -705,7 +739,7 @@ private struct ChatWorkStep: View {
             HStack(spacing: 0) {
                 Text(verbatim: ChatToolKind.title(step.title)).font(.system(size: 12.5, weight: .medium)).layoutPriority(1)
                 if !summary.isEmpty {
-                    Circle().frame(width: 3, height: 3).opacity(0.6).padding(.horizontal, 8)
+                    dot.frame(width: 3, height: 3).padding(.horizontal, 8)
                     Text(verbatim: summary).font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(failed)
                         .lineLimit(1).truncationMode(.tail)

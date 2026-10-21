@@ -85,6 +85,19 @@ enum Theme {
     static let hairline = Color(nsColor: NSColor(name: nil) { appearance in
         appearance.isDark ? NSColor(white: 1, alpha: 0.12) : NSColor(red: 14 / 255, green: 17 / 255, blue: 22 / 255, alpha: 0.08)
     })
+    /// Data tones in cards (`--tone-*`): the status colours pulled a little toward the text, so a
+    /// green number reads as a value rather than a light.
+    static let tonePositive = toward(text: 0x34C759, share: 0.82)
+    static let toneNegative = toward(text: 0xEF4444, share: 0.84)
+    static let toneWarning = toward(text: 0xFF9500, share: 0.84)
+
+    private static func toward(text base: UInt32, share: CGFloat) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let text = NSColor(hex: appearance.isDark ? current.dark.text : current.light.text)
+            return NSColor(hex: base).blended(withFraction: 1 - share, of: text) ?? NSColor(hex: base)
+        })
+    }
+
     /// `--radius` and the two radii derived from it.
     static var radius: CGFloat { current.radius }
     static var radiusSmall: CGFloat { max(current.radius - 4, 6) }
@@ -137,20 +150,22 @@ struct Backdrop: View {
 }
 
 /// A glass surface as the panel draws its cards: translucent, a hairline border, a soft shadow.
+/// A widget card goes without the border, as the panel's do.
 struct Glass: ViewModifier {
     var radius: CGFloat?
+    var bordered = true
 
     func body(content: Content) -> some View {
         let radius = radius ?? Theme.radius
         content
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.hairline))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(bordered ? Theme.hairline : .clear))
             .shadow(color: Color(hex: 0x1F2687).opacity(0.08), radius: 12, y: 4)
     }
 }
 
 extension View {
-    func glass(radius: CGFloat? = nil) -> some View { modifier(Glass(radius: radius)) }
+    func glass(radius: CGFloat? = nil, bordered: Bool = true) -> some View { modifier(Glass(radius: radius, bordered: bordered)) }
 }
 
 /// The ai-space mark (docs/logo.svg), shipped as a bitmap (scripts/icons.swift).
@@ -225,3 +240,4 @@ struct Connecting: View {
         .accessibilityElement(children: .combine)
     }
 }
+

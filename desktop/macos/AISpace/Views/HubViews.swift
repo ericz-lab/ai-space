@@ -113,15 +113,7 @@ struct ModelMenu<Label: View>: View {
 extension View {
     /// Read again on Reload in the toolbar (or ⌘R), as a pull reads a page again on the iPhone.
     func reloadable(_ action: @escaping @Sendable () async -> Void) -> some View {
-        refreshable(action: action)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { Task { await action() } } label: { Label("Reload", systemImage: "arrow.clockwise") }
-                        .help("Reload (⌘R)")
-                }
-            }
-            // Space > Reload (⌘R) reaches the page on show this way.
-            .onReceive(NotificationCenter.default.publisher(for: .reloadHubPage)) { _ in Task { await action() } }
+        modifier(Reloadable(action: action))
     }
 
     /// A page's list: read when it comes up, again on Reload.
@@ -342,4 +334,31 @@ struct RunRow: View {
             }
         }
     }
+}
+
+/// Reload for a page of the Space: a toolbar button over the launcher; inside Settings, where the
+/// window's toolbar belongs to the launcher, the pane's own header has the button instead.
+private struct Reloadable: ViewModifier {
+    let action: @Sendable () async -> Void
+    @Environment(\.hubEmbedded) private var embedded
+
+    func body(content: Content) -> some View {
+        content
+            .refreshable(action: action)
+            .toolbar {
+                if !embedded {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { Task { await action() } } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                            .help("Reload (⌘R)")
+                    }
+                }
+            }
+            // Space > Reload (⌘R), or the Settings pane's Reload, reaches the page on show this way.
+            .onReceive(NotificationCenter.default.publisher(for: .reloadHubPage)) { _ in Task { await action() } }
+    }
+}
+
+extension EnvironmentValues {
+    /// Whether a page of the Space is drawn inside the Settings page rather than over the launcher.
+    @Entry var hubEmbedded = false
 }
