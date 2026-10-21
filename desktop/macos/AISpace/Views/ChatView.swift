@@ -72,29 +72,6 @@ struct ChatView: View {
             if let error = chat.imageError { Text(error).font(.caption).foregroundStyle(Theme.danger) }
             composer
         }
-        .toolbar {
-            if !compact {
-                ToolbarItem {
-                    Menu {
-                        if chat.sessions.isEmpty { Text("No earlier chats") }
-                        ForEach(chat.sessions.prefix(20)) { session in
-                            Button { Task { await chat.open(session) } } label: {
-                                Text(verbatim: session.title.flatMap { $0.isEmpty ? nil : String($0.prefix(60)) } ?? session.sid)
-                            }
-                        }
-                    } label: {
-                        Label("Earlier chats", systemImage: "clock.arrow.circlepath")
-                    }
-                    .disabled(chat.busy || chat.pendingImageImports > 0)
-                    .help("Earlier chats")
-                }
-                ToolbarItem {
-                    Button { chat.newConversation() } label: { Label("New Conversation", systemImage: "square.and.pencil") }
-                        .disabled(chat.busy || chat.pendingImageImports > 0)
-                        .help("New Conversation")
-                }
-            }
-        }
         .onDrop(of: [UTType.image.identifier, UTType.fileURL.identifier], isTargeted: nil) { providers in
             importImages(providers)
             return true

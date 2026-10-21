@@ -734,6 +734,9 @@ final class AppModel: ObservableObject {
 
     // MARK: Conversations
 
+    /// Whether a conversation already open in this app is running a turn.
+    func isChatBusy(_ ref: AgentRef) -> Bool { chats[ref]?.busy == true }
+
     func chat(_ ref: AgentRef) -> ChatController? {
         if let c = chats[ref] { return c }
         guard let live = lives[ref.connection], let agent = live.agent(ref.agent) else { return nil }

@@ -39,7 +39,8 @@ final class ChatController: ObservableObject {
     /// A turn may install or change apps, even when it ends with an error or Stop.
     var onTurnEnded: () -> Void = {}
 
-    private var sessionID: String?
+    /// The stored conversation on show; nil for a new one until its first reply names it.
+    @Published private(set) var sessionID: String?
     private var runID: String?
     private var task: Task<Void, Never>?
     /// One thread's identity: New Conversation and opening an earlier chat start another one, so a
