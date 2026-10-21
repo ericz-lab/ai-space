@@ -33,80 +33,79 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-/// Settings as the panel's (src/web/App.tsx, SettingsNav.tsx) and the Mac's: the sections in
-/// their order, General, Appearance, Models, Automation, Usage, Status, Packages and Account, as
-/// the quiet rows of the section nav, on the translucent sheet the panel draws settings on. A
-/// section opens as a page of its own with its rows in bordered cards, and a row there that leads
-/// to a page of the Space opens it further in, as the panel shows those pages inside Settings.
+/// Settings as the panel's (src/web/App.tsx, SettingsNav.tsx) and the Mac's, opened from its tile
+/// over the pages: the sections in their order, General, Appearance, Models, Automation, Usage,
+/// Status, Packages and Account, each an icon and a title in one glass card, drawn as the panel
+/// draws its cards over the Space's backdrop. A section opens as a page of its own with its rows
+/// in such cards, and a row there that leads to a page of the Space opens it further in, as the
+/// panel shows those pages inside Settings.
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     let connection: Connection
     @ObservedObject var loader: CatalogueLoader
     @ObservedObject var settings: SettingsLoader
     let icons: IconStore
-    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack(path: $path) {
+        let backdrop = model.backdrops(for: connection)
+        NavigationStack(path: $model.settingsPath) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Settings").font(.title2.weight(.bold)).foregroundStyle(Theme.text)
-                        .padding(.horizontal, 12).padding(.bottom, 14)
-                        .accessibilityAddTraits(.isHeader)
-                    ForEach(SettingsSection.allCases) { section in
-                        NavigationLink(value: section) {
-                            HStack(spacing: 12) {
-                                Image(systemName: section.symbol).font(.body).foregroundStyle(.secondary)
-                                    .frame(width: 24)
-                                Text(section.title).foregroundStyle(Theme.text)
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsHeading("Settings")
+                    SettingsCard {
+                        ForEach(Array(SettingsSection.allCases.enumerated()), id: \.element) { index, section in
+                            if index > 0 { CardDivider() }
+                            NavigationLink(value: section) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: section.symbol).foregroundStyle(.secondary).frame(width: 22)
+                                    Text(section.title)
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                                }
                             }
+                            .buttonStyle(SettingsRowStyle())
                         }
-                        .buttonStyle(SectionNavStyle())
                     }
                     Text("Version \(Bundle.main.shortVersion)").font(.caption).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity).padding(.top, 24)
+                        .frame(maxWidth: .infinity).padding(.top, 12)
                 }
-                .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 40)
+                .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 40)
             }
-            .scrollClipDisabled()
-            .background { Sheet() }
-            .toolbar(.hidden, for: .navigationBar)
-            .navigationTitle(Text("Settings"))
+            .background { SpaceBackdrop(store: backdrop) }
+            .settingsChrome(Text("Settings"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { model.showingSettings = false } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel(Text("Close"))
+                }
+            }
             .navigationDestination(for: SettingsSection.self) { section in
                 SettingsSectionPage(model: model, connection: connection, loader: loader, settings: settings, icons: icons, section: section)
+                    .background { SpaceBackdrop(store: backdrop) }
             }
             .navigationDestination(for: HubPage.self) { page in
                 HubPageContent(model: model, connection: connection, page: page, loader: loader, icons: icons)
                     .scrollContentBackground(.hidden)
-                    .background { Sheet() }
+                    .background { SpaceBackdrop(store: backdrop) }
                     .navigationBarTitleDisplayMode(.inline)
             }
         }
         .tint(Theme.accent)
         #if DEBUG
-        .onAppear { DebugLaunch.settingsPath(&path) }
+        .onAppear { DebugLaunch.settingsPath(&model.settingsPath) }
         #endif
         .sheet(isPresented: Binding(get: { model.sharedCapture != nil }, set: { if !$0 { model.sharedCapture = nil } })) {
             if let sharedCapture = model.sharedCapture { SharedCaptureView(model: sharedCapture) { model.sharedCapture = nil } }
+        }
+        // A Space is added from here while Settings is up; RootView's sheet serves the pages.
+        .sheet(isPresented: Binding(get: { model.showingAdd && model.showingSettings }, set: { model.showingAdd = $0 })) {
+            NavigationStack { ConnectView(model: model, isFirst: false) }
         }
         .task(id: loader.status) { await settings.refresh() }
     }
 }
 
-/// A row of the section nav: quiet, with the faint rounded fill of the panel's nav while pressed.
-private struct SectionNavStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 12).padding(.vertical, 13)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .background(configuration.isPressed ? Theme.text.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-/// One section of Settings on a page of its own: its rows in bordered cards, as the panel shows
+/// One section of Settings on a page of its own: its rows in glass cards, as the panel shows
 /// the chosen section. What belongs to this phone joins the section it fits: the pages the panel
 /// has as tiles go under General, the saved Spaces and the sign-in under Account.
 struct SettingsSectionPage: View {
@@ -121,7 +120,8 @@ struct SettingsSectionPage: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsHeading(section.title)
                 switch section {
                 case .general: general
                 case .appearance: appearance
@@ -133,11 +133,9 @@ struct SettingsSectionPage: View {
                 case .account: account
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 40)
+            .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 40)
         }
-        .background { Sheet() }
-        .navigationTitle(Text(section.title))
-        .navigationBarTitleDisplayMode(.inline)
+        .settingsChrome(Text(section.title))
         .refreshable {
             await loader.refresh()
             await settings.refresh()
@@ -367,7 +365,7 @@ struct SettingsSectionPage: View {
                 }
                 if let target = s.backupTarget {
                     Text(verbatim: target).font(.caption).foregroundStyle(.secondary)
-                        .padding(.horizontal, 16).padding(.bottom, 12)
+                        .padding(.horizontal, 14).padding(.bottom, 12)
                 }
             }
         }
@@ -502,54 +500,61 @@ struct SettingsSectionPage: View {
     }
 }
 
-// MARK: The panel's settings surfaces
+// MARK: The panel's surfaces
 
-/// A section's cards and notes (`.setcard`s); the page's title names it (`.setpage-title`).
+/// A section's cards and notes; the page's heading names it.
 private struct SectionCards<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        // The page's title names the section; the cards follow each other.
         VStack(alignment: .leading, spacing: 12) { content }
     }
 }
 
-/// Rows in a bordered card: a hairline edge round a faint fill of the text colour (`.setcard`).
+/// A page's title, set as the library's section titles (Apps, Agents, Widgets on Home).
+private struct SettingsHeading: View {
+    let title: LocalizedStringKey
+
+    init(_ title: LocalizedStringKey) { self.title = title }
+
+    var body: some View {
+        Text(title).font(.title3.weight(.semibold)).foregroundStyle(Theme.text)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Rows on the glass of the panel's widget cards: no border, the theme's radius, the soft shadow.
 private struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         VStack(alignment: .leading, spacing: 0) { content }
+            .font(.subheadline)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.text.opacity(0.02), in: shape)
-            .clipShape(shape)
-            .overlay(shape.strokeBorder(Theme.hairline))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            .glass(bordered: false)
     }
 }
 
-/// The hairline between two rows of a card.
+/// The faint line between two rows of a card, in from its edges as the rows' text.
 private struct CardDivider: View {
-    var body: some View { Theme.hairline.frame(height: 1).accessibilityHidden(true) }
+    var body: some View { Theme.hairline.frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
 }
 
-/// A small heading inside a card, over a group of its rows (`.sethead.sub`).
+/// A heading inside a card over a group of its rows, set as a widget card's title.
 private struct CardHead: View {
     let title: LocalizedStringKey
 
     init(_ title: LocalizedStringKey) { self.title = title }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            CardDivider()
-            Text(title).font(.caption2.weight(.semibold)).textCase(.uppercase).kerning(0.4).foregroundStyle(.secondary)
-                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
-                .accessibilityAddTraits(.isHeader)
-        }
+        Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+            .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 2)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
-/// A line of explanation under a card (`.setnote`).
+/// A line of explanation under a card.
 private struct SettingsNote: View {
     let text: LocalizedStringKey
 
@@ -561,7 +566,7 @@ private struct SettingsNote: View {
     }
 }
 
-/// A row that is a button: the card's padding, and the faint fill the panel shows under the pointer while pressed.
+/// A row that is a button: the card's padding, and a faint fill while pressed.
 private struct SettingsRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -573,9 +578,17 @@ private struct SettingsRowStyle: ButtonStyle {
 }
 
 private extension View {
-    /// A card's row: 16 points in from its edges, at least 48 tall (`.setcard .setrow`).
+    /// A card's row: 14 points in from its edges as a widget card's, at least 44 tall.
     func settingsRow(vertical: CGFloat = 12) -> some View {
-        padding(.horizontal, 16).padding(.vertical, vertical)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        padding(.horizontal, 14).padding(.vertical, vertical)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    }
+
+    /// The navigation bar of a page of Settings: the page names itself in its heading, so the bar
+    /// carries only Back (labelled with the title) and Close, over the backdrop.
+    func settingsChrome(_ title: Text) -> some View {
+        navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1).accessibilityHidden(true) } }
     }
 }

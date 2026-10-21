@@ -111,7 +111,7 @@ enum Theme {
     static let codeBackground = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0, alpha: 0.3) : UIColor(red: 14 / 255, green: 17 / 255, blue: 22 / 255, alpha: 0.06) })
 }
 
-/// Settings and the agent chat as the panel draws them: a translucent sheet over the Space's
+/// The agent chat as the panel draws it: a translucent sheet over the Space's
 /// backdrop, which shows through a strong blur as colour. Under Reduce Transparency it is the
 /// opaque reading surface. On a phone the sheet fills the screen, so it has no border.
 struct Sheet: View {

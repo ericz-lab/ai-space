@@ -11,36 +11,39 @@ struct EventsPage: View {
 
     var body: some View {
         List {
-            Section {
-                HubNotice(store: store)
-                if store.loaded {
-                    StatCards(stats: [
-                        ("\(store.events.count)", String(localized: "recent events")),
-                        ("\(store.capabilities.filter { !($0.provides ?? []).isEmpty }.count)", String(localized: "apps providing")),
-                        ("\(store.capabilities.filter { !($0.publishes ?? []).isEmpty }.count)", String(localized: "apps publishing")),
-                    ])
-                    NavigationLink { CapabilitiesPage(store: store) } label: { Label("Capabilities and events", systemImage: "list.bullet.rectangle") }
-                }
-            }
-            Section {
-                if store.loaded && store.events.isEmpty { Text("No events yet.").foregroundStyle(.secondary) }
-                ForEach(store.events) { event in
-                    NavigationLink { EventDetail(store: store, event: event) } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 6) {
-                                Text(verbatim: event.name).foregroundStyle(Theme.text).lineLimit(1)
-                                if let peer = event.peer { Badge(text: peer) }
-                                Spacer(minLength: 8)
-                                if let date = ISO8601.parse(event.at) { Text(verbatim: HubFormat.relative(date)).font(.caption).foregroundStyle(.secondary) }
-                            }
-                            if !event.preview.isEmpty { Text(verbatim: event.preview).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-                        }
-                        .accessibilityElement(children: .combine)
+            Group {
+                Section {
+                    HubNotice(store: store)
+                    if store.loaded {
+                        StatCards(stats: [
+                            ("\(store.events.count)", String(localized: "recent events")),
+                            ("\(store.capabilities.filter { !($0.provides ?? []).isEmpty }.count)", String(localized: "apps providing")),
+                            ("\(store.capabilities.filter { !($0.publishes ?? []).isEmpty }.count)", String(localized: "apps publishing")),
+                        ])
+                        NavigationLink { CapabilitiesPage(store: store) } label: { Label("Capabilities and events", systemImage: "list.bullet.rectangle") }
                     }
                 }
-            } header: {
-                Text("Recent events")
+                Section {
+                    if store.loaded && store.events.isEmpty { Text("No events yet.").foregroundStyle(.secondary) }
+                    ForEach(store.events) { event in
+                        NavigationLink { EventDetail(store: store, event: event) } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(verbatim: event.name).foregroundStyle(Theme.text).lineLimit(1)
+                                    if let peer = event.peer { Badge(text: peer) }
+                                    Spacer(minLength: 8)
+                                    if let date = ISO8601.parse(event.at) { Text(verbatim: HubFormat.relative(date)).font(.caption).foregroundStyle(.secondary) }
+                                }
+                                if !event.preview.isEmpty { Text(verbatim: event.preview).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                } header: {
+                    Text("Recent events")
+                }
             }
+            .hubRows()
         }
         .hubPage("Events and calls", store)
     }
@@ -52,42 +55,45 @@ struct EventDetail: View {
 
     var body: some View {
         List {
-            Section {
-                if let app = event.app { LabeledContent("App") { Text(verbatim: app) } }
-                if let date = ISO8601.parse(event.at) { LabeledContent("Time") { Text(verbatim: date.formatted(date: .abbreviated, time: .standard)) } }
-                ForEach((event.data ?? [:]).sorted { $0.key < $1.key }, id: \.key) { key, value in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: key).font(.caption).foregroundStyle(.secondary)
-                        Text(verbatim: value.compact).font(.callout.monospaced()).foregroundStyle(Theme.text).textSelection(.enabled)
-                    }
-                }
-            }
-            Section {
-                if let rows = store.deliveries[event.id] {
-                    if rows.isEmpty { Text("Nobody consumes this event.").foregroundStyle(.secondary) }
-                    ForEach(rows) { d in
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 6) {
-                                Dot(color: color(d.status))
-                                Text(verbatim: d.app).foregroundStyle(Theme.text)
-                                if let kind = d.kind { Badge(text: kind) }
-                                Spacer(minLength: 8)
-                                Text(verbatim: status(d.status)).font(.subheadline).foregroundStyle(.secondary)
-                            }
-                            Text(verbatim: [d.path, d.attempts.map { String(localized: "\($0) attempts") }].compactMap { $0 }.joined(separator: " · "))
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            if let error = d.lastError, !error.isEmpty { Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger) }
+            Group {
+                Section {
+                    if let app = event.app { LabeledContent("App") { Text(verbatim: app) } }
+                    if let date = ISO8601.parse(event.at) { LabeledContent("Time") { Text(verbatim: date.formatted(date: .abbreviated, time: .standard)) } }
+                    ForEach((event.data ?? [:]).sorted { $0.key < $1.key }, id: \.key) { key, value in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: key).font(.caption).foregroundStyle(.secondary)
+                            Text(verbatim: value.compact).font(.callout.monospaced()).foregroundStyle(Theme.text).textSelection(.enabled)
                         }
-                        .accessibilityElement(children: .combine)
                     }
-                } else if let error = store.deliveryErrors[event.id] {
-                    Text("Unavailable: \(error)").font(.footnote).foregroundStyle(.secondary)
-                } else {
-                    ProgressView()
                 }
-            } header: {
-                Text("Deliveries")
+                Section {
+                    if let rows = store.deliveries[event.id] {
+                        if rows.isEmpty { Text("Nobody consumes this event.").foregroundStyle(.secondary) }
+                        ForEach(rows) { d in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Dot(color: color(d.status))
+                                    Text(verbatim: d.app).foregroundStyle(Theme.text)
+                                    if let kind = d.kind { Badge(text: kind) }
+                                    Spacer(minLength: 8)
+                                    Text(verbatim: status(d.status)).font(.subheadline).foregroundStyle(.secondary)
+                                }
+                                Text(verbatim: [d.path, d.attempts.map { String(localized: "\($0) attempts") }].compactMap { $0 }.joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                if let error = d.lastError, !error.isEmpty { Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger) }
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    } else if let error = store.deliveryErrors[event.id] {
+                        Text("Unavailable: \(error)").font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        ProgressView()
+                    }
+                } header: {
+                    Text("Deliveries")
+                }
             }
+            .hubRows()
         }
         .navigationTitle(Text(verbatim: event.name))
         .task { await store.loadDeliveries(event.id) }
@@ -122,22 +128,25 @@ struct CapabilitiesPage: View {
 
     var body: some View {
         List {
-            if store.capabilities.isEmpty { Text("No app declares a capability or an event.").foregroundStyle(.secondary) }
-            ForEach(store.capabilities) { app in
-                Section {
-                    ForEach(app.provides ?? [], id: \.self) { c in
-                        let stat = app.stats?.first { $0.capability == c.name }
-                        line(String(localized: "provides"), c.name, [c.description, stat.map { String(localized: "\($0.calls ?? 0) calls, \($0.failures ?? 0) failed") }].compactMap { $0 }.joined(separator: " · "))
+            Group {
+                if store.capabilities.isEmpty { Text("No app declares a capability or an event.").foregroundStyle(.secondary) }
+                ForEach(store.capabilities) { app in
+                    Section {
+                        ForEach(app.provides ?? [], id: \.self) { c in
+                            let stat = app.stats?.first { $0.capability == c.name }
+                            line(String(localized: "provides"), c.name, [c.description, stat.map { String(localized: "\($0.calls ?? 0) calls, \($0.failures ?? 0) failed") }].compactMap { $0 }.joined(separator: " · "))
+                        }
+                        ForEach(app.publishes ?? [], id: \.self) { p in line(String(localized: "publishes"), p.name, p.description ?? "") }
+                        ForEach(app.consumes ?? [], id: \.self) { c in
+                            line(String(localized: "consumes"), c.event,
+                                 c.kind == "task" ? String(localized: "runs task \(c.task ?? "")") : (c.kind == "http" ? "\(c.method ?? "") \(c.path ?? "")" : String(localized: "over a stream")))
+                        }
+                    } header: {
+                        Text(verbatim: app.peer.map { "\(app.app) · \($0)" } ?? app.app)
                     }
-                    ForEach(app.publishes ?? [], id: \.self) { p in line(String(localized: "publishes"), p.name, p.description ?? "") }
-                    ForEach(app.consumes ?? [], id: \.self) { c in
-                        line(String(localized: "consumes"), c.event,
-                             c.kind == "task" ? String(localized: "runs task \(c.task ?? "")") : (c.kind == "http" ? "\(c.method ?? "") \(c.path ?? "")" : String(localized: "over a stream")))
-                    }
-                } header: {
-                    Text(verbatim: app.peer.map { "\(app.app) · \($0)" } ?? app.app)
                 }
             }
+            .hubRows()
         }
         .navigationTitle(Text("Capabilities and events"))
     }
@@ -171,58 +180,61 @@ struct PackagesPage: View {
     var body: some View {
         let local = store.catalogue?.apps?.elements ?? []
         List {
-            Section {
-                HubNotice(store: store)
-                if store.loaded {
-                    if local.isEmpty { Text("No package is installed on this Space.").foregroundStyle(.secondary) }
-                    ForEach(local) { app in packageRow(app, opens: false) }
-                }
-            } header: {
-                Text("Installed here")
-            } footer: {
-                if let id = store.catalogue?.spaceId { Text("This Space: \(id)") }
-            }
-            ForEach(store.catalogue?.remotes?.elements ?? []) { remote in
+            Group {
                 Section {
-                    if (remote.apps?.elements ?? []).isEmpty { Text("Nothing is shared over this connection.").foregroundStyle(.secondary) }
-                    ForEach(remote.apps?.elements ?? []) { app in packageRow(app, opens: remote.available != false) }
-                } header: {
-                    Text("Shared by \(short(remote.spaceId ?? remote.connectionId))")
-                } footer: {
-                    if remote.available == false { Text("That Space is not answering.") }
-                }
-            }
-            ForEach(store.links) { link in
-                Section {
-                    LabeledContent("Status") {
-                        HStack(spacing: 6) {
-                            Dot(color: link.connected == true ? Theme.success : Color.secondary)
-                            Text(verbatim: link.connected == true ? String(localized: "connected") : String(localized: "not connected"))
-                        }
-                    }
-                    if let direction = link.direction {
-                        LabeledContent("Direction") { Text(verbatim: direction == "outgoing" ? String(localized: "this Space connects out") : String(localized: "that Space connects in")) }
-                    }
-                    if let url = link.url { LabeledContent("Address") { Text(verbatim: url).lineLimit(1) } }
-                    Toggle("Connection on", isOn: Binding(get: { link.enabled != false }, set: { on in Task { await store.setEnabled(link, on) } }))
-                        .disabled(store.isSaving)
-                    ForEach(local) { app in
-                        Toggle(isOn: Binding(get: { (link.apps ?? []).contains(app.app) }, set: { on in Task { await store.setShared(link, app: app.app, on) } })) {
-                            Text("Share \(app.title ?? app.app)")
-                        }
-                        .disabled(store.isSaving)
+                    HubNotice(store: store)
+                    if store.loaded {
+                        if local.isEmpty { Text("No package is installed on this Space.").foregroundStyle(.secondary) }
+                        ForEach(local) { app in packageRow(app, opens: false) }
                     }
                 } header: {
-                    Text("Connection to \(short(link.remoteSpaceId ?? link.id))")
+                    Text("Installed here")
                 } footer: {
-                    Text("Select which local apps this connection may access. Nothing is shared by default. Turning sharing off closes active remote requests.")
+                    if let id = store.catalogue?.spaceId { Text("This Space: \(id)") }
+                }
+                ForEach(store.catalogue?.remotes?.elements ?? []) { remote in
+                    Section {
+                        if (remote.apps?.elements ?? []).isEmpty { Text("Nothing is shared over this connection.").foregroundStyle(.secondary) }
+                        ForEach(remote.apps?.elements ?? []) { app in packageRow(app, opens: remote.available != false) }
+                    } header: {
+                        Text("Shared by \(short(remote.spaceId ?? remote.connectionId))")
+                    } footer: {
+                        if remote.available == false { Text("That Space is not answering.") }
+                    }
+                }
+                ForEach(store.links) { link in
+                    Section {
+                        LabeledContent("Status") {
+                            HStack(spacing: 6) {
+                                Dot(color: link.connected == true ? Theme.success : Color.secondary)
+                                Text(verbatim: link.connected == true ? String(localized: "connected") : String(localized: "not connected"))
+                            }
+                        }
+                        if let direction = link.direction {
+                            LabeledContent("Direction") { Text(verbatim: direction == "outgoing" ? String(localized: "this Space connects out") : String(localized: "that Space connects in")) }
+                        }
+                        if let url = link.url { LabeledContent("Address") { Text(verbatim: url).lineLimit(1) } }
+                        Toggle("Connection on", isOn: Binding(get: { link.enabled != false }, set: { on in Task { await store.setEnabled(link, on) } }))
+                            .disabled(store.isSaving)
+                        ForEach(local) { app in
+                            Toggle(isOn: Binding(get: { (link.apps ?? []).contains(app.app) }, set: { on in Task { await store.setShared(link, app: app.app, on) } })) {
+                                Text("Share \(app.title ?? app.app)")
+                            }
+                            .disabled(store.isSaving)
+                        }
+                    } header: {
+                        Text("Connection to \(short(link.remoteSpaceId ?? link.id))")
+                    } footer: {
+                        Text("Select which local apps this connection may access. Nothing is shared by default. Turning sharing off closes active remote requests.")
+                    }
+                }
+                Section {
+                    Button { model.webPanelFromHub() } label: { Label("Install, remove or connect in the web panel", systemImage: "safari") }
+                } footer: {
+                    Text("Installing a package file, rolling one back, removing one and making a new connection are done in the Space's web panel, under Settings.")
                 }
             }
-            Section {
-                Button { model.webPanelFromHub() } label: { Label("Install, remove or connect in the web panel", systemImage: "safari") }
-            } footer: {
-                Text("Installing a package file, rolling one back, removing one and making a new connection are done in the Space's web panel, under Settings.")
-            }
+            .hubRows()
         }
         .hubPage("Apps and connections", store)
     }
@@ -260,32 +272,35 @@ struct InboxPage: View {
 
     var body: some View {
         List {
-            Section {
-                Picker("Filter", selection: $store.filter) {
-                    Text("All").tag(InboxFilter.all)
-                    Text("Unread").tag(InboxFilter.unread)
-                    Text("To handle").tag(InboxFilter.handle)
-                    Text("Done").tag(InboxFilter.done)
+            Group {
+                Section {
+                    Picker("Filter", selection: $store.filter) {
+                        Text("All").tag(InboxFilter.all)
+                        Text("Unread").tag(InboxFilter.unread)
+                        Text("To handle").tag(InboxFilter.handle)
+                        Text("Done").tag(InboxFilter.done)
+                    }
+                    .pickerStyle(.segmented)
+                    HubNotice(store: store)
+                    if store.loaded && store.items.isEmpty {
+                        Text(verbatim: store.filter == .all ? String(localized: "Nothing has arrived yet.") : String(localized: "Nothing matches this filter.")).foregroundStyle(.secondary)
+                    }
+                } footer: {
+                    if let s = store.summary { Text("\(s.unread) unread · \(s.open) open") }
                 }
-                .pickerStyle(.segmented)
-                HubNotice(store: store)
-                if store.loaded && store.items.isEmpty {
-                    Text(verbatim: store.filter == .all ? String(localized: "Nothing has arrived yet.") : String(localized: "Nothing matches this filter.")).foregroundStyle(.secondary)
-                }
-            } footer: {
-                if let s = store.summary { Text("\(s.unread) unread · \(s.open) open") }
-            }
-            Section {
-                ForEach(store.items) { item in
-                    NavigationLink { InboxDetail(model: model, store: store, item: item) } label: { row(item) }
-                        .swipeActions(edge: .trailing) {
-                            Button { Task { await store.mark(item.thread, done: item.done != true) } } label: {
-                                Label(item.done == true ? String(localized: "Reopen") : String(localized: "Done"), systemImage: item.done == true ? "arrow.uturn.backward" : "checkmark")
+                Section {
+                    ForEach(store.items) { item in
+                        NavigationLink { InboxDetail(model: model, store: store, item: item) } label: { row(item) }
+                            .swipeActions(edge: .trailing) {
+                                Button { Task { await store.mark(item.thread, done: item.done != true) } } label: {
+                                    Label(item.done == true ? String(localized: "Reopen") : String(localized: "Done"), systemImage: item.done == true ? "arrow.uturn.backward" : "checkmark")
+                                }
+                                .tint(Theme.success)
                             }
-                            .tint(Theme.success)
-                        }
+                    }
                 }
             }
+            .hubRows()
         }
         .navigationTitle(Text("Inbox"))
         .toolbar {
@@ -328,29 +343,32 @@ struct InboxDetail: View {
     var body: some View {
         let now = store.item(item.thread) ?? item
         List {
-            Section {
-                if let title = now.title, !title.isEmpty { Text(verbatim: title).font(.headline).foregroundStyle(Theme.text) }
-                Text(verbatim: now.text).foregroundStyle(Theme.text).textSelection(.enabled)
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(verbatim: [now.app, now.lastAt.flatMap(ISO8601.parse)?.formatted(date: .abbreviated, time: .shortened)].compactMap { $0 }.joined(separator: " · "))
-                    if let n = now.count, n > 1, let first = now.firstAt.flatMap(ISO8601.parse) {
-                        Text("\(n) times since \(first.formatted(date: .abbreviated, time: .shortened))")
+            Group {
+                Section {
+                    if let title = now.title, !title.isEmpty { Text(verbatim: title).font(.headline).foregroundStyle(Theme.text) }
+                    Text(verbatim: now.text).foregroundStyle(Theme.text).textSelection(.enabled)
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(verbatim: [now.app, now.lastAt.flatMap(ISO8601.parse)?.formatted(date: .abbreviated, time: .shortened)].compactMap { $0 }.joined(separator: " · "))
+                        if let n = now.count, n > 1, let first = now.firstAt.flatMap(ISO8601.parse) {
+                            Text("\(n) times since \(first.formatted(date: .abbreviated, time: .shortened))")
+                        }
                     }
                 }
+                Section {
+                    if let url = now.url.flatMap({ URL(string: $0, relativeTo: store.api.base)?.absoluteURL }), let connection = model.selected {
+                        Button { model.openFromHub(url, title: now.heading, in: connection) } label: { Label("Open Link", systemImage: "arrow.up.right") }
+                    }
+                    Button { Task { await store.mark(now.thread, done: now.done != true) } } label: {
+                        Label(now.done == true ? String(localized: "Reopen") : String(localized: "Mark Done"), systemImage: now.done == true ? "arrow.uturn.backward" : "checkmark")
+                    }
+                    if now.done != true {
+                        Button { Task { await store.mark(now.thread, read: false) } } label: { Label("Mark Unread", systemImage: "circle.fill") }
+                    }
+                    if let reason = store.saveError { Text("The change was not saved: \(reason)").font(.footnote).foregroundStyle(Theme.danger) }
+                }
             }
-            Section {
-                if let url = now.url.flatMap({ URL(string: $0, relativeTo: store.api.base)?.absoluteURL }), let connection = model.selected {
-                    Button { model.openFromHub(url, title: now.heading, in: connection) } label: { Label("Open Link", systemImage: "arrow.up.right") }
-                }
-                Button { Task { await store.mark(now.thread, done: now.done != true) } } label: {
-                    Label(now.done == true ? String(localized: "Reopen") : String(localized: "Mark Done"), systemImage: now.done == true ? "arrow.uturn.backward" : "checkmark")
-                }
-                if now.done != true {
-                    Button { Task { await store.mark(now.thread, read: false) } } label: { Label("Mark Unread", systemImage: "circle.fill") }
-                }
-                if let reason = store.saveError { Text("The change was not saved: \(reason)").font(.footnote).foregroundStyle(Theme.danger) }
-            }
+            .hubRows()
         }
         .navigationTitle(Text(verbatim: now.app))
         .task { if item.unread == true { await store.mark(item.thread, read: true) } }

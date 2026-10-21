@@ -11,69 +11,72 @@ struct ModelUsagePage: View {
 
     var body: some View {
         List {
-            Section {
-                Picker("Window", selection: $store.window) {
-                    ForEach(ModelUsageStore.windows, id: \.self) { Text(verbatim: $0).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                HubNotice(store: store)
-                if let t = store.usage?.totals {
-                    StatCards(stats: [
-                        (HubFormat.count(t.calls) + ((t.errors ?? 0) > 0 ? " · \(Int(t.errors ?? 0))⚠︎" : ""), String(localized: "calls")),
-                        (HubFormat.tokens(t.tokens), String(localized: "tokens")),
-                        (HubFormat.cost(t.costUsd), String(localized: "cost")),
-                        (HubFormat.duration(ms: t.durationMs), String(localized: "time")),
-                    ])
-                    if (t.calls ?? 0) == 0 { Text("No calls in this window.").foregroundStyle(.secondary) }
-                }
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    if let backend = store.usage?.backend { Text("Backend: \(backend)") }
-                    Text("Costs include GPT estimates at standard API rates, not subscription charges. Unknown costs are excluded from totals.")
-                }
-            }
-
-            if let rows = store.usage?.byTag?.elements, !rows.isEmpty {
+            Group {
                 Section {
-                    ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
-                        usageRow(title: [r.app.map(store.title), r.tag].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), detail: r.model, r.totals)
+                    Picker("Window", selection: $store.window) {
+                        ForEach(ModelUsageStore.windows, id: \.self) { Text(verbatim: $0).tag($0) }
                     }
-                } header: {
-                    Text("By app and tag")
+                    .pickerStyle(.segmented)
+                    HubNotice(store: store)
+                    if let t = store.usage?.totals {
+                        StatCards(stats: [
+                            (HubFormat.count(t.calls) + ((t.errors ?? 0) > 0 ? " · \(Int(t.errors ?? 0))⚠︎" : ""), String(localized: "calls")),
+                            (HubFormat.tokens(t.tokens), String(localized: "tokens")),
+                            (HubFormat.cost(t.costUsd), String(localized: "cost")),
+                            (HubFormat.duration(ms: t.durationMs), String(localized: "time")),
+                        ])
+                        if (t.calls ?? 0) == 0 { Text("No calls in this window.").foregroundStyle(.secondary) }
+                    }
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let backend = store.usage?.backend { Text("Backend: \(backend)") }
+                        Text("Costs include GPT estimates at standard API rates, not subscription charges. Unknown costs are excluded from totals.")
+                    }
                 }
-            }
-            if let rows = store.usage?.byModel?.elements, !rows.isEmpty {
-                Section {
-                    ForEach(Array(rows.enumerated()), id: \.offset) { _, r in usageRow(title: r.model ?? "", detail: nil, r.totals) }
-                } header: {
-                    Text("By model")
-                }
-            }
-            history
-            if !store.calls.isEmpty {
-                Section {
-                    ForEach(store.calls) { call in
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 6) {
-                                Dot(color: call.status == "ok" ? Theme.success : Theme.danger)
-                                Text(verbatim: call.model ?? "").foregroundStyle(Theme.text).lineLimit(1)
-                                Spacer(minLength: 8)
-                                if let date = call.startedAt.flatMap(ISO8601.parse) {
-                                    Text(verbatim: HubFormat.relative(date)).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            Text(verbatim: [[store.title(call.app), call.tag].compactMap { $0 }.joined(separator: " · "),
-                                            call.usage.map { HubFormat.tokens($0.total) }, call.costUsd.map { HubFormat.cost($0) },
-                                            call.durationMs.map { HubFormat.duration(ms: $0) }].compactMap { $0 }.joined(separator: " · "))
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            if let error = call.error, !error.isEmpty { Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger).lineLimit(4) }
+    
+                if let rows = store.usage?.byTag?.elements, !rows.isEmpty {
+                    Section {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
+                            usageRow(title: [r.app.map(store.title), r.tag].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), detail: r.model, r.totals)
                         }
-                        .accessibilityElement(children: .combine)
+                    } header: {
+                        Text("By app and tag")
                     }
-                } header: {
-                    Text("Recent calls")
+                }
+                if let rows = store.usage?.byModel?.elements, !rows.isEmpty {
+                    Section {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, r in usageRow(title: r.model ?? "", detail: nil, r.totals) }
+                    } header: {
+                        Text("By model")
+                    }
+                }
+                history
+                if !store.calls.isEmpty {
+                    Section {
+                        ForEach(store.calls) { call in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Dot(color: call.status == "ok" ? Theme.success : Theme.danger)
+                                    Text(verbatim: call.model ?? "").foregroundStyle(Theme.text).lineLimit(1)
+                                    Spacer(minLength: 8)
+                                    if let date = call.startedAt.flatMap(ISO8601.parse) {
+                                        Text(verbatim: HubFormat.relative(date)).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Text(verbatim: [[store.title(call.app), call.tag].compactMap { $0 }.joined(separator: " · "),
+                                                call.usage.map { HubFormat.tokens($0.total) }, call.costUsd.map { HubFormat.cost($0) },
+                                                call.durationMs.map { HubFormat.duration(ms: $0) }].compactMap { $0 }.joined(separator: " · "))
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                if let error = call.error, !error.isEmpty { Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger).lineLimit(4) }
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    } header: {
+                        Text("Recent calls")
+                    }
                 }
             }
+            .hubRows()
         }
         .navigationTitle(Text("Model usage"))
         .refreshable { await store.refresh() }
@@ -143,98 +146,101 @@ struct AppUsagePage: View {
 
     var body: some View {
         List {
-            Section {
-                Picker("Window", selection: $store.window) {
-                    ForEach(AppUsageStore.windows, id: \.self) { w in
-                        if w == "all" { Text("All time").tag(w) } else { Text(verbatim: w).tag(w) }
-                    }
-                }
-                .pickerStyle(.segmented)
-                Picker("Kind", selection: $store.kind) {
-                    Text("All").tag("all")
-                    Text("Apps").tag("app")
-                    Text("Agents").tag("agent")
-                    Text("Panel").tag("builtin")
-                }
-                .pickerStyle(.segmented)
-                HubNotice(store: store)
-                if store.loaded {
-                    StatCards(stats: [
-                        (store.opens.formatted(), String(localized: "opens")),
-                        (store.activeMs > 0 ? HubFormat.duration(ms: store.activeMs) : "—", String(localized: "time in use")),
-                        (store.rows.first.map(name) ?? "—", String(localized: "most used")),
-                    ])
-                    if store.rows.isEmpty { Text("Nothing was opened in this window.").foregroundStyle(.secondary) }
-                }
-            } footer: {
-                Text("How often each app, agent and panel window was opened, and for how long. An app's time comes from its heartbeat script; one without it shows a dash. An agent's opens are chat turns.")
-            }
-            Section {
-                if let error = store.devicesError {
-                    Text("Device usage is unavailable on this Space.").foregroundStyle(.secondary)
-                    Text(verbatim: error).font(.caption).foregroundStyle(.secondary)
-                } else if !store.devicesLoaded {
-                    ProgressView()
-                } else if store.devices.isEmpty {
-                    Text("No device activity in this period. Updated clients report while in the foreground.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(store.devices) { device in
-                        DisclosureGroup {
-                            if let apps = device.apps {
-                                if apps.isEmpty { Text("No app activity recorded for this device.").foregroundStyle(.secondary) }
-                                ForEach(apps) { app in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(verbatim: catalogue?.apps.first { $0.ref == app.key }?.displayTitle() ?? app.key)
-                                        HStack {
-                                            Text("Opens: \(app.opens)")
-                                            Spacer()
-                                            if let ms = app.activeMs {
-                                                Text(verbatim: HubFormat.duration(ms: ms))
-                                            } else { Text("Time not measured") }
-                                        }.font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }
-                            } else {
-                                Text("This Space does not provide app activity by device yet.").foregroundStyle(.secondary)
-                            }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack(alignment: .firstTextBaseline) {
-                                    Text(verbatim: "\(device.clientName) · \(device.shortID)")
-                                    Spacer(minLength: 8)
-                                    Text(verbatim: HubFormat.duration(ms: device.activeMs)).monospacedDigit()
-                                }
-                                Text("Foreground visits: \(device.sessions)").font(.caption).foregroundStyle(.secondary)
-                                if let date = ISO8601.parse(device.lastAt) {
-                                    Text("Last used: \(date.formatted(date: .abbreviated, time: .shortened))")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Text(verbatim: device.deviceId).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
-                            }
-                        }
-                    }
-                }
-            } header: {
-                Text("Device usage")
-            } footer: {
-                Text("Foreground time in the Space client. Overlapping windows count once per device. App filters do not affect device usage.")
-            }
-            if !store.rows.isEmpty {
+            Group {
                 Section {
-                    ForEach(store.rows) { row in
-                        HStack(spacing: 10) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(verbatim: name(row)).foregroundStyle(Theme.text).lineLimit(1)
-                                Text(verbatim: detail(row)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            }
-                            Spacer(minLength: 8)
-                            MiniBars(values: (store.month[row.id] ?? row).spark()).frame(width: 90, height: 22)
+                    Picker("Window", selection: $store.window) {
+                        ForEach(AppUsageStore.windows, id: \.self) { w in
+                            if w == "all" { Text("All time").tag(w) } else { Text(verbatim: w).tag(w) }
                         }
-                        .accessibilityElement(children: .combine)
+                    }
+                    .pickerStyle(.segmented)
+                    Picker("Kind", selection: $store.kind) {
+                        Text("All").tag("all")
+                        Text("Apps").tag("app")
+                        Text("Agents").tag("agent")
+                        Text("Panel").tag("builtin")
+                    }
+                    .pickerStyle(.segmented)
+                    HubNotice(store: store)
+                    if store.loaded {
+                        StatCards(stats: [
+                            (store.opens.formatted(), String(localized: "opens")),
+                            (store.activeMs > 0 ? HubFormat.duration(ms: store.activeMs) : "—", String(localized: "time in use")),
+                            (store.rows.first.map(name) ?? "—", String(localized: "most used")),
+                        ])
+                        if store.rows.isEmpty { Text("Nothing was opened in this window.").foregroundStyle(.secondary) }
+                    }
+                } footer: {
+                    Text("How often each app, agent and panel window was opened, and for how long. An app's time comes from its heartbeat script; one without it shows a dash. An agent's opens are chat turns.")
+                }
+                Section {
+                    if let error = store.devicesError {
+                        Text("Device usage is unavailable on this Space.").foregroundStyle(.secondary)
+                        Text(verbatim: error).font(.caption).foregroundStyle(.secondary)
+                    } else if !store.devicesLoaded {
+                        ProgressView()
+                    } else if store.devices.isEmpty {
+                        Text("No device activity in this period. Updated clients report while in the foreground.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(store.devices) { device in
+                            DisclosureGroup {
+                                if let apps = device.apps {
+                                    if apps.isEmpty { Text("No app activity recorded for this device.").foregroundStyle(.secondary) }
+                                    ForEach(apps) { app in
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(verbatim: catalogue?.apps.first { $0.ref == app.key }?.displayTitle() ?? app.key)
+                                            HStack {
+                                                Text("Opens: \(app.opens)")
+                                                Spacer()
+                                                if let ms = app.activeMs {
+                                                    Text(verbatim: HubFormat.duration(ms: ms))
+                                                } else { Text("Time not measured") }
+                                            }.font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                } else {
+                                    Text("This Space does not provide app activity by device yet.").foregroundStyle(.secondary)
+                                }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text(verbatim: "\(device.clientName) · \(device.shortID)")
+                                        Spacer(minLength: 8)
+                                        Text(verbatim: HubFormat.duration(ms: device.activeMs)).monospacedDigit()
+                                    }
+                                    Text("Foreground visits: \(device.sessions)").font(.caption).foregroundStyle(.secondary)
+                                    if let date = ISO8601.parse(device.lastAt) {
+                                        Text("Last used: \(date.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Text(verbatim: device.deviceId).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Device usage")
+                } footer: {
+                    Text("Foreground time in the Space client. Overlapping windows count once per device. App filters do not affect device usage.")
+                }
+                if !store.rows.isEmpty {
+                    Section {
+                        ForEach(store.rows) { row in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(verbatim: name(row)).foregroundStyle(Theme.text).lineLimit(1)
+                                    Text(verbatim: detail(row)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                                Spacer(minLength: 8)
+                                MiniBars(values: (store.month[row.id] ?? row).spark()).frame(width: 90, height: 22)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
                     }
                 }
             }
+            .hubRows()
         }
         .navigationTitle(Text("App usage"))
         .refreshable { await store.refresh() }
@@ -279,30 +285,33 @@ struct AppModelsPage: View {
 
     var body: some View {
         List {
-            Section {
-                HubNotice(store: store)
-            } footer: {
-                Text("The model an app's calls run on when they name none. A choice here overrides what the app declares, for every device; “No override” returns to it.")
-            }
-            ForEach(store.sorted) { app in
+            Group {
                 Section {
-                    ForEach(app.rows) { row in
-                        ModelMenu(options: store.options, current: row.override, none: String(localized: "No override"), disabled: store.isSaving,
-                                  pick: { value in Task { await store.setModel(app: app.app, tag: row.tag, value) } }) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(verbatim: row.tag ?? String(localized: "All calls")).foregroundStyle(Theme.text)
-                                Text(verbatim: [row.model, source(row.source)].compactMap { $0 }.joined(separator: " · "))
-                                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    HubNotice(store: store)
+                } footer: {
+                    Text("The model an app's calls run on when they name none. A choice here overrides what the app declares, for every device; “No override” returns to it.")
+                }
+                ForEach(store.sorted) { app in
+                    Section {
+                        ForEach(app.rows) { row in
+                            ModelMenu(options: store.options, current: row.override, none: String(localized: "No override"), disabled: store.isSaving,
+                                      pick: { value in Task { await store.setModel(app: app.app, tag: row.tag, value) } }) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(verbatim: row.tag ?? String(localized: "All calls")).foregroundStyle(Theme.text)
+                                    Text(verbatim: [row.model, source(row.source)].compactMap { $0 }.joined(separator: " · "))
+                                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
                             }
                         }
-                    }
-                } header: {
-                    HStack(spacing: 8) {
-                        EntryIcon(icon: store.labels[app.app]?.icon, fallback: "shippingbox", icons: icons, size: 20)
-                        Text(verbatim: store.title(app.app))
+                    } header: {
+                        HStack(spacing: 8) {
+                            EntryIcon(icon: store.labels[app.app]?.icon, fallback: "shippingbox", icons: icons, size: 20)
+                            Text(verbatim: store.title(app.app))
+                        }
                     }
                 }
             }
+            .hubRows()
         }
         .hubPage("App models", store)
     }
