@@ -1355,3 +1355,21 @@ a.widget-title:hover { color: var(--text); }
 .chat-attach { align-self: flex-end; flex-shrink: 0; width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; font-size: 24px; display: flex; align-items: center; justify-content: center; }
 .chat-attach:hover { background: rgba(128,128,128,.12); color: var(--text); }
 .chat-attach:disabled { opacity: .4; cursor: default; }
+
+/* Settings and the agent chat are a translucent sheet: the page shows through a strong blur, and in
+   dark mode the fill is pulled toward black so text keeps its contrast over any backdrop. */
+.panel.settings, .chat {
+  --sheet: color-mix(in srgb, var(--panel) 80%, transparent);
+  background: var(--sheet);
+  -webkit-backdrop-filter: blur(28px) saturate(150%); backdrop-filter: blur(28px) saturate(150%);
+}
+:root[data-theme="dark"] :is(.panel.settings, .chat) {
+  --sheet: color-mix(in srgb, color-mix(in srgb, var(--panel) 40%, #05060a) 74%, transparent);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .panel.settings, .chat { background: var(--panel); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .panel.settings, .chat { background: var(--panel); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
