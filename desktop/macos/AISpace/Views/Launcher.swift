@@ -3,7 +3,7 @@ import SwiftUI
 /// The launcher, laid out as the iPhone client's: pages side by side, moved through with a
 /// sideways swipe on the trackpad, the dots in the toolbar or ⌥⌘← and ⌥⌘→. Home is the library
 /// of every app, agent and widget of the Space with one search; each screen of the panel is a
-/// page of its own; Settings is last. The screens are this Mac's (ScreenStore): copied from the
+/// page of its own; Settings opens over them from its tile. The screens are this Mac's (ScreenStore): copied from the
 /// panel once, then changed here without touching the Space.
 struct LauncherView: View {
     @ObservedObject var model: AppModel
@@ -26,9 +26,6 @@ struct LauncherView: View {
                             .frame(width: viewport.size.width, height: viewport.size.height)
                             .id(screen.id)
                     }
-                    SettingsPage(model: model, connection: connection, loader: loader, settings: model.settings(for: connection), icons: icons, prefs: model.prefs)
-                        .frame(width: viewport.size.width, height: viewport.size.height)
-                        .id(Pager.settings)
                 }
                 .scrollTargetLayout()
             }
@@ -159,7 +156,10 @@ struct LauncherPage: View {
     /// One screen: its tiles in one grid, its widget cards below, in the screen's order. A key
     /// whose entry is gone is skipped and kept, so it comes back with the entry.
     @ViewBuilder private func screen(_ screen: PanelScreen, _ catalogue: Catalogue) -> some View {
-        let tiles = screen.items.compactMap { catalogue.entry($0) }.filter { $0.kind != .widget }
+        let tiles: [LauncherTile] = screen.items.compactMap { key in
+            if let b = Builtin(key: key) { return .builtin(b) }
+            return catalogue.entry(key).flatMap { $0.kind == .widget ? nil : .entry($0) }
+        }
         // Settings can leave the widget cards off the screens; they stay pinned and stay in the library.
         let widgets = prefs.showsWidgets ? screen.items.compactMap { key in catalogue.widgets.first { "widget:\($0.id)" == key } } : []
         if !tiles.isEmpty { grid(tiles, on: screen.id) }
@@ -195,19 +195,20 @@ struct LauncherPage: View {
         let widgets = query.isEmpty ? catalogue.widgets : OmniboxRules.rank(query, catalogue.widgets.map(Catalogue.entry))
             .compactMap { e in catalogue.widgets.first { Catalogue.entry($0).key == e.key } }
 
-        if !apps.isEmpty {
+        let builtins = query.isEmpty ? Builtin.allCases : Builtin.allCases.filter { $0.matches(query) }
+        if !apps.isEmpty || !builtins.isEmpty {
             heading("Apps", first: true)
-            grid(apps, on: nil)
+            grid(apps.map { .entry($0) } + builtins.map { .builtin($0) }, on: nil)
         }
         if !agents.isEmpty {
-            heading("Agents", first: apps.isEmpty)
-            grid(agents, on: nil)
+            heading("Agents", first: apps.isEmpty && builtins.isEmpty)
+            grid(agents.map { .entry($0) }, on: nil)
         }
         if !widgets.isEmpty {
-            heading("Widgets", first: apps.isEmpty && agents.isEmpty)
+            heading("Widgets", first: apps.isEmpty && builtins.isEmpty && agents.isEmpty)
             widgetGrid(widgets, on: nil)
         }
-        if apps.isEmpty && agents.isEmpty && widgets.isEmpty {
+        if apps.isEmpty && builtins.isEmpty && agents.isEmpty && widgets.isEmpty {
             if query.isEmpty {
                 ContentUnavailableView("Nothing here yet", systemImage: "square.grid.2x2",
                                        description: Text("This Space has no apps with a page. Add one on the panel."))
@@ -223,11 +224,17 @@ struct LauncherPage: View {
             .padding(.top, first ? 0 : 12)
     }
 
-    private func grid(_ entries: [CatalogueEntry], on screen: String?) -> some View {
+    private func grid(_ tiles: [LauncherTile], on screen: String?) -> some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
-            ForEach(entries) { entry in
-                EntryTile(entry: current(entry), icons: icons, details: screen == nil) { model.open(entry) }
-                    .contextMenu { EntryMenu(model: model, connection: connection, store: store, entry: entry, screen: screen) }
+            ForEach(tiles) { tile in
+                switch tile {
+                case .entry(let entry):
+                    EntryTile(entry: current(entry), icons: icons, details: screen == nil) { model.open(entry) }
+                        .contextMenu { EntryMenu(model: model, connection: connection, store: store, entry: entry, screen: screen) }
+                case .builtin(let builtin):
+                    BuiltinTile(builtin: builtin, icons: icons) { model.openBuiltin(builtin) }
+                        .contextMenu { PinMenu(model: model, connection: connection, store: store, key: builtin.key, screen: screen) { model.openBuiltin(builtin) } }
+                }
             }
         }
     }
@@ -564,9 +571,6 @@ struct PageIndicator: View {
                 button(screen.id, label: Text(verbatim: Screens.title(at: index))) {
                     Circle().frame(width: 7, height: 7)
                 }
-            }
-            button(Pager.settings, label: Text("Settings")) {
-                Image(systemName: "gearshape").font(.system(size: 11, weight: .semibold))
             }
         }
         .padding(.horizontal, 6)

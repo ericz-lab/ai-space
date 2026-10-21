@@ -104,7 +104,7 @@ struct SettingsPage: View {
                 .help("Reload")
                 .accessibilityLabel(Text("Reload"))
             }
-            .padding(.horizontal, 16).padding(.top, 56).padding(.bottom, 6)
+            .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 6)
             NavigationStack {
                 HubPageContent(model: model, connection: connection, page: page, loader: loader, icons: icons)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -132,7 +132,7 @@ struct SettingsPage: View {
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(.horizontal, 12).padding(.top, 60)
+        .padding(.horizontal, 12).padding(.top, 22)
         .frame(width: 190, alignment: .leading)
     }
 

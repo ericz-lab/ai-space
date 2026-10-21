@@ -553,7 +553,7 @@ final class AppModel: ObservableObject {
     func movePage(by step: Int) {
         guard let c = selected else { return }
         if destination != .launcher { destination = .launcher }
-        let ids = [Pager.home] + screens.screens(c.id).map(\.id) + [Pager.settings]
+        let ids = [Pager.home] + screens.screens(c.id).map(\.id)
         let i = ids.firstIndex(of: pagerID) ?? 1
         pagerID = ids[max(0, min(ids.count - 1, i + step))]
     }
@@ -565,8 +565,24 @@ final class AppModel: ObservableObject {
     }
 
     func showPage(_ id: String) {
+        // Settings is not a page of the pager any more but opens over it, as on the web panel.
+        if id == Pager.settings { return openSettings() }
         pagerID = id
         destination = .launcher
+    }
+
+    /// Settings of the Space, over the launcher (src/web/App.tsx `openSettings`).
+    func openSettings() {
+        destination = .hub(.settings)
+    }
+
+    /// One of the panel's own windows (src/web/screens.ts `BUILTINS`), from its tile.
+    func openBuiltin(_ builtin: Builtin) {
+        switch builtin {
+        case .settings: openSettings()
+        case .inbox: destination = .hub(.inbox)
+        case .terminal: destination = .hub(.terminal)
+        }
     }
 
     /// The screens, at the one last shown.

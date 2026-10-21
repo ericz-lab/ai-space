@@ -4,6 +4,8 @@ import SwiftUI
 /// web panel keeps under Settings, the inbox and the chat. The same pages as the iPhone client's.
 enum HubPage: Identifiable, Hashable {
     case inbox, tasks, modelUsage, appUsage, appModels, events, packages, terminal
+    /// Settings of the Space, opened from its tile (src/web/App.tsx `openSettings`).
+    case settings
     /// The agents to talk to, or one agent's conversation by its id (`<app>/<name>`, behind its peer).
     case chat(agent: String?)
 
@@ -17,6 +19,7 @@ enum HubPage: Identifiable, Hashable {
         case .events: return "events"
         case .packages: return "packages"
         case .terminal: return "terminal"
+        case .settings: return "settings"
         case .chat(let agent): return "chat:\(agent ?? "")"
         }
     }
@@ -56,7 +59,14 @@ struct HubContainer: View {
                 }
         }
         .id(page)
-        .background(Theme.ground)
+        .background {
+            // Settings keeps the Space's backdrop behind it, as when it was a page of the launcher.
+            if page == .settings {
+                SpaceBackdrop(space: connection.url, dataStore: model.dataStore(connection.id))
+            } else {
+                Theme.ground
+            }
+        }
     }
 
     private var content: some View {
@@ -83,6 +93,9 @@ struct HubPageContent: View {
         case .events: EventsPage(api: api)
         case .packages: PackagesPage(model: model, connection: connection, api: api)
         case .terminal: TerminalPage(store: model.terminal(for: connection))
+        case .settings:
+            SettingsPage(model: model, connection: connection, loader: loader, settings: model.settings(for: connection), icons: icons, prefs: model.prefs)
+                .navigationTitle(Text("Settings"))
         case .chat(let agent):
             if let agent, let chat = model.chat(AgentRef(connection: connection.id, agent: agent)) {
                 HStack(spacing: 0) {
