@@ -86,7 +86,9 @@ class ChatStore(
     var images by mutableStateOf<List<ChatImage>>(emptyList())
     var imageError by mutableStateOf<String?>(null)
 
-    private var sessionID: String? = null
+    /** The session the next message continues; null for a new conversation. */
+    var sessionID by mutableStateOf<String?>(null)
+        private set
     private var runID: String? = null
     private var turn: Job? = null
     private var history: Job? = null

@@ -146,9 +146,6 @@
     <string name="chat_message">消息</string>
     <string name="chat_send">发送</string>
     <string name="chat_stop">停止</string>
-    <string name="chat_new">新对话</string>
-    <string name="chat_earlier">之前的对话</string>
-    <string name="chat_chats">对话记录</string>
     <string name="chat_starting">正在启动…</string>
     <string name="chat_reconnecting">正在重新连接…</string>
     <string name="chat_thinking">思考中…</string>
@@ -196,6 +193,13 @@
     <string name="chat_remove_image">移除图片</string>
     <string name="chat_image_unreadable">无法读取这张图片。</string>
     <string name="chat_image_limits">最多添加 4 张图片，每张不超过 5 MB，总计不超过 10 MB。</string>
+    <string name="chat_in_session">会话中</string>
+    <string name="chat_new_session">新会话</string>
+    <string name="chat_history">历史</string>
+    <string name="chat_new_conversation">新对话</string>
+    <string name="chat_no_sessions">没有历史会话</string>
+    <string name="chat_untitled">（无标题）</string>
+    <string name="chat_message_busy">补充说明，会插入正在进行的回复…</string>
     <string name="terminal_title">终端</string>
     <string name="terminal_recent">最近的会话</string>
     <string name="terminal_new_session">新建会话</string>
