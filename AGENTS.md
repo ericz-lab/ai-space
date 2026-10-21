@@ -97,6 +97,7 @@ An app is read and changed in its source checkout, never in a deployed copy. Thi
 - `.bun-version` - the Bun the pipeline builds and ships with.
 - `package.json` - scripts and dependencies; `bun.lock` is the lockfile.
 - `tsconfig.json` - TypeScript configuration (strict, bundler mode, noEmit).
+- `ui-policy.json` - lintapple policy for the panel's rendered UI: the fonts and type sizes of docs/design-guidelines.md section 7, with reasoned exceptions for glyph icons and text-free switches.
 - `AGENTS.md` - this file, the agent working guide.
 - `CLAUDE.md` - Bun usage conventions.
 - `.githooks/` - `pre-push` runs `bun run check`; enable it once per clone with `bun run hooks`.

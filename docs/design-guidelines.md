@@ -153,6 +153,8 @@ One token, `radius`, with two derived steps (implemented):
 
 **Implemented:** `500 16px/1.5 Inter, -apple-system, "PingFang SC", system-ui, sans-serif`; monospace `ui-monospace, "SF Mono", Menlo, monospace` for code, terminal output, and identifiers.
 
+Buttons, inputs, selects and text areas inherit the page font (the browser default would be Arial). `ui-policy.json` at the repository root states these fonts and the sizes in the table below for lintapple; glyph icons (edge arrows, attach, send, mic) and switches are exempt from its size rule.
+
 | Level | Size / weight | Used by |
 | --- | --- | --- |
 | Hero value | 40 px / 650, −0.02 em | widget hero number |
@@ -220,7 +222,7 @@ Measured this way on 2026-10-09 (lowest value over the three glows):
 | `success` as text on glass | **1.99** | 4.53 | 4.67 | 6.45 |
 | `danger` on panel | **3.70** | 3.63 | 5.46 | 6.23 |
 
-Bold values miss the 4.5:1 text target. Per D7, the Aurora fixes are a separate change: darken light `muted` to about 0.62 alpha, use text-safe `warning`/`success`/`danger` values for text (keep the bright ones for dots), and lighten the dark `link` and `accent`. Done since the table was measured: light `muted` is 0.62 alpha (5.2 on a library card, `#fbfbfd` as rendered, up from 4.14), and `success` as text goes through `--success-text` (the token mixed half with `text`: 6.2 on the same card, up from 2.14; the library's "on screen" line and its Added button). The table above has not been measured again. `warning`, `danger`, `link` and `accent` are still open. Simple and Warm inherit some of these values and must be rechecked after that change.
+Bold values miss the 4.5:1 text target. Per D7, the Aurora fixes are a separate change: darken light `muted` to about 0.62 alpha, use text-safe `warning`/`success`/`danger` values for text (keep the bright ones for dots), and lighten the dark `link` and `accent`. Done since the table was measured: light `muted` is 0.62 alpha (5.2 on a library card, `#fbfbfd` as rendered, up from 4.14), and `success` as text goes through `--success-text` (the token mixed half with `text`: 6.2 on the same card, up from 2.14; the library's "on screen" line and its Added button). Since 2026-10-21 `muted` reaches 4.5:1 in every preset and mode, measured this way over every surface token: dark `muted` is 0.66 alpha (from 0.62; Aurora 4.74, Papercut 4.62 at worst), Warm light 0.66 (from 0.58; 4.67) and Warm dark 0.64 (from 0.60; 4.86). `theme.test.ts` checks this for every preset. The other rows of the table have not been measured again. `warning`, `danger`, `link` and `accent` are still open. Simple and Warm inherit some of these values and must be rechecked after that change.
 
 ### 9.4 Keyboard, focus, motion
 
