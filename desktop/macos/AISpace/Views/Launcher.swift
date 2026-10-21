@@ -226,7 +226,7 @@ struct LauncherPage: View {
     private func grid(_ entries: [CatalogueEntry], on screen: String?) -> some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
             ForEach(entries) { entry in
-                EntryTile(entry: current(entry), icons: icons) { model.open(entry) }
+                EntryTile(entry: current(entry), icons: icons, details: screen == nil) { model.open(entry) }
                     .contextMenu { EntryMenu(model: model, connection: connection, store: store, entry: entry, screen: screen) }
             }
         }
@@ -366,8 +366,9 @@ struct OmniboxField: View {
             .foregroundStyle(Theme.text)
             .padding(.horizontal, 18).padding(.vertical, 10)
             .frame(minHeight: 44)
+            // Borderless glass, as the panel's box: the caret shows the focus.
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(focused ? Theme.accent.opacity(0.6) : Theme.hairline))
+            .shadow(color: Color(hex: 0x1F2687).opacity(0.08), radius: 12, y: 4)
             .contentShape(Rectangle())
             .onTapGesture { focused = true }
 

@@ -17,12 +17,32 @@ struct SpaceBackdrop: View {
                 Theme.ground
                 BackdropPage(space: space, name: name, dark: scheme == .dark, dataStore: dataStore)
                     .id("\(name)|\(scheme == .dark)")
+                ArtworkVeil(dark: scheme == .dark)
             }
             .ignoresSafeArea()
             .accessibilityHidden(true)
         } else {
             Backdrop()
         }
+    }
+}
+
+/// The artwork is the setting, not the subject (src/web/styles.css `.aurora::after`): a soft veil
+/// in the ground colour over its middle, where the tiles and cards are, so bright lines in the
+/// artwork stop crossing the content.
+private struct ArtworkVeil: View {
+    let dark: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            let stops: [Gradient.Stop] = dark
+                ? [.init(color: Theme.ground.opacity(0.68), location: 0), .init(color: Theme.ground.opacity(0.25), location: 0.72), .init(color: .clear, location: 1)]
+                : [.init(color: Theme.ground.opacity(0.42), location: 0), .init(color: .clear, location: 0.75)]
+            EllipticalGradient(stops: stops, center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5)
+                .frame(width: geo.size.width * 1.24, height: geo.size.height * 1.4)
+                .position(x: geo.size.width / 2, y: geo.size.height * 0.58)
+        }
+        .allowsHitTesting(false)
     }
 }
 

@@ -11,7 +11,7 @@ struct WidgetBlocksView: View {
     var body: some View {
         if let hero = blocks.first {
             let rows = Array(blocks.dropFirst().prefix(WidgetLayout.rows(size: size)))
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 16) {
                 linked(hero) { BlockHero(block: hero) }
                 if !rows.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
@@ -36,9 +36,9 @@ struct WidgetBlocksView: View {
 extension BlockTone {
     var color: Color {
         switch self {
-        case .positive: return Theme.success
-        case .negative: return Theme.danger
-        case .warning: return Theme.warning
+        case .positive: return Theme.tonePositive
+        case .negative: return Theme.toneNegative
+        case .warning: return Theme.toneWarning
         case .neutral: return .secondary
         }
     }
@@ -58,10 +58,10 @@ struct BlockHero: View {
             if block.type == .status {
                 HStack(spacing: 8) {
                     Circle().fill(tone?.color ?? Color.secondary).frame(width: 10, height: 10)
-                    Text(verbatim: value ?? "").font(.title3.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(2)
+                    Text(verbatim: value ?? "").font(.system(size: 17, weight: .semibold)).lineSpacing(2).foregroundStyle(Theme.text).lineLimit(2)
                 }
                 if let date = block.time.flatMap(Times.parse) {
-                    Text(verbatim: Times.ago(date)).font(.caption).foregroundStyle(.secondary)
+                    Text(verbatim: Times.ago(date)).font(.caption).monospacedDigit().foregroundStyle(.tertiary)
                 }
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -79,7 +79,7 @@ struct BlockHero: View {
             default: EmptyView()
             }
             if let caption = block.caption?.text(), !caption.isEmpty {
-                Text(verbatim: caption).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(verbatim: caption).font(.caption).foregroundStyle(.tertiary).lineLimit(2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -100,7 +100,7 @@ struct BlockRow: View {
                 if block.type == .status {
                     Circle().fill(tone?.color ?? Color.secondary).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
                 }
-                Text(verbatim: block.label.text()).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(verbatim: block.label.text()).font(.subheadline).foregroundStyle(Theme.text.opacity(0.78)).lineLimit(1)
                 Spacer(minLength: 8)
                 Text(verbatim: value ?? missing())
                     .font(.subheadline.weight(.medium)).monospacedDigit()
@@ -108,7 +108,7 @@ struct BlockRow: View {
                     .lineLimit(1).layoutPriority(1)
                 if block.type == .metric, let delta = block.delta { BlockDelta(delta: delta, showsLabel: false) }
                 if block.type == .status, let date = block.time.flatMap(Times.parse) {
-                    Text(verbatim: Times.ago(date)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(verbatim: Times.ago(date)).font(.caption).monospacedDigit().foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
             switch block.type {
@@ -138,9 +138,11 @@ struct BlockDelta: View {
     }
 }
 
-/// A trend's points as a line or bars. A line breaks at a missing point rather than bridging it;
-/// a signed or bar trend is drawn from zero. Each part is one shape: a view per bar made a card
-/// with a chart many times heavier to lay out and to scroll than one without.
+/// A trend's points as a line or bars. A line breaks at a missing point rather than bridging it,
+/// each unbroken run with a faint area down to the floor; a signed or bar trend is drawn from zero,
+/// the latest bar at full strength and the history behind it quieter, so today reads at a glance.
+/// Each part is one shape: a view per bar made a card with a chart many times heavier to lay out
+/// and to scroll than one without.
 struct Spark: View {
     let block: WidgetBlock
 
@@ -156,15 +158,22 @@ struct Spark: View {
             let scale = SparkScale(points: points, lo: lo, span: hi - lo == 0 ? 1 : hi - lo)
             Group {
                 if block.style != "bar" {
-                    SparkLine(scale: scale).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                } else if block.signed == true {
                     ZStack {
-                        SparkBaseline(scale: scale).stroke(Theme.hairline, lineWidth: 1)
-                        SparkBars(scale: scale, positive: true).fill(Theme.success)
-                        SparkBars(scale: scale, positive: false).fill(Theme.danger)
+                        SparkLine(scale: scale, area: true).fill(Theme.accent.opacity(0.14))
+                        SparkLine(scale: scale).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     }
                 } else {
-                    SparkBars(scale: scale).fill(Theme.accent)
+                    let last = points.lastIndex { $0.v != nil }
+                    let positive: Color = block.signed == true ? Theme.tonePositive : Theme.accent
+                    ZStack {
+                        SparkBars(scale: scale, positive: block.signed == true ? true : nil, latest: last, past: true).fill(positive.opacity(0.6))
+                        SparkBars(scale: scale, positive: block.signed == true ? true : nil, latest: last, past: false).fill(positive)
+                        if block.signed == true {
+                            SparkBars(scale: scale, positive: false, latest: last, past: true).fill(Theme.toneNegative.opacity(0.6))
+                            SparkBars(scale: scale, positive: false, latest: last, past: false).fill(Theme.toneNegative)
+                        }
+                        SparkBaseline(scale: scale).stroke(Theme.text.opacity(0.18), lineWidth: 1)
+                    }
                 }
             }
             .accessibilityHidden(true)
@@ -186,14 +195,21 @@ private struct SparkBars: Shape {
     let scale: SparkScale
     /// The bars at or above zero, those below it, or all of them for nil.
     var positive: Bool?
+    /// The index of the latest point with a value, and whether to draw the bars before it (true)
+    /// or that bar alone (false); nil draws every bar.
+    var latest: Int?
+    var past: Bool?
 
     func path(in rect: CGRect) -> Path {
         let step = scale.step(in: rect), zero = scale.y(0, in: rect)
         var path = Path()
         for (i, point) in scale.points.enumerated() {
             guard let v = point.v, positive == nil || (v >= 0) == positive else { continue }
+            if let past, (i == latest) == past { continue }
             let y = scale.y(v, in: rect)
-            path.addRect(CGRect(x: CGFloat(i) * step + step * 0.15, y: min(y, zero), width: max(step * 0.7, 1), height: max(abs(y - zero), 1)))
+            let width = max(step * 0.7, 1)
+            path.addRoundedRect(in: CGRect(x: CGFloat(i) * step + step * 0.15, y: min(y, zero), width: width, height: max(abs(y - zero), 1)),
+                                cornerSize: CGSize(width: width * 0.17, height: width * 0.17))
         }
         return path
     }
@@ -212,20 +228,33 @@ private struct SparkBaseline: Shape {
 
 private struct SparkLine: Shape {
     let scale: SparkScale
+    /// The area under each unbroken run of two or more points, down to the chart's floor, instead
+    /// of the line itself.
+    var area = false
 
     func path(in rect: CGRect) -> Path {
         let step = scale.step(in: rect)
         var path = Path()
-        var pen = false
+        var run: [CGPoint] = []
+        func close() {
+            if area, run.count > 1, let first = run.first, let last = run.last {
+                path.move(to: CGPoint(x: first.x, y: rect.height))
+                run.forEach { path.addLine(to: $0) }
+                path.addLine(to: CGPoint(x: last.x, y: rect.height))
+                path.closeSubpath()
+            }
+            run = []
+        }
         for (i, point) in scale.points.enumerated() {
             guard let v = point.v else {
-                pen = false
+                close()
                 continue
             }
             let at = CGPoint(x: CGFloat(i) * step + step / 2, y: scale.y(v, in: rect))
-            if pen { path.addLine(to: at) } else { path.move(to: at) }
-            pen = true
+            if !area { if run.isEmpty { path.move(to: at) } else { path.addLine(to: at) } }
+            run.append(at)
         }
+        close()
         return path
     }
 }
@@ -272,9 +301,11 @@ struct GaugeScale: View {
             .clipShape(Capsule())
             .overlay(alignment: .leading) {
                 if let value = block.value {
-                    Capsule().fill(Theme.text).frame(width: 3, height: 12)
-                        .overlay(Capsule().strokeBorder(Theme.solid, lineWidth: 0.5))
-                        .offset(x: geo.size.width * block.position(value) - 1.5)
+                    // A round marker ringed in the card's surface, so it stands off the zones.
+                    Circle().fill(Theme.text).frame(width: 12, height: 12)
+                        .padding(3).background(Theme.solid, in: Circle())
+                        .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
+                        .offset(x: geo.size.width * block.position(value) - 9)
                 }
             }
             .frame(height: 12)
