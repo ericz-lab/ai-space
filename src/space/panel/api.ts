@@ -14,6 +14,7 @@ import type { ManifestCheck } from "../checks/spec.ts";
 export type CheckView = ManifestCheck & { id: string; app: string; appTitle: string; url: string; i18n?: Record<string, { appTitle?: string; title?: string; description?: string }> };
 import { retireAppDir } from "./uninstall.ts";
 import { type WidgetFeed, sourceUrl } from "./widgets.ts";
+import { NoPet, type PetFeed } from "./pets.ts";
 
 /**
  * HTTP surface for the panel, shaped as a Bun.serve `routes` table.
@@ -29,6 +30,9 @@ import { type WidgetFeed, sourceUrl } from "./widgets.ts";
  *   GET    /api/checks                   every active app's declared checks (docs/app-spec.md#checks), with the URL to read; this space only
  *   GET    /api/widgets                  every widget's latest payload
  *   GET    /api/widgets/:app/:name/embed the page of a `kind: embed` widget, proxied from its source
+ *   GET    /api/pets                     the desk pets apps declare (docs/app-spec.md#pets)
+ *   GET    /api/pets/:app/:name/sheet    a pet's sprite sheet, proxied from its source
+ *   GET    /api/pets/:app/:name/mood     what the pet does now, from its mood source
  *   GET    /api/panel/layout             order + hidden
  *   PUT    /api/panel/layout             { order?: { apps?, agents?, widgets? }, hidden?, sizes?, hiddenWidgets? }
  *   GET    /api/panel/appcolor?app=      <meta name="theme-color"> of the app's entry page
@@ -60,6 +64,8 @@ export type PanelApiOptions = {
   registry: AppRegistry;
   layout: LayoutStore;
   widgets: WidgetFeed;
+  /** Desk pets apps declare; absent = none are offered. */
+  pets?: PetFeed;
   health: HealthProbe;
   /** Sync a newly created app directory into the space (provision, schedule, register). */
   onCreate: (dir: string) => Promise<void>;
@@ -121,7 +127,7 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
       try {
         return await h(req);
       } catch (e) {
-        return e instanceof NotFound || e instanceof IconNotFound ? error(404, e.message) : error(400, (e as Error).message ?? String(e));
+        return e instanceof NotFound || e instanceof IconNotFound || e instanceof NoPet ? error(404, e.message) : error(400, (e as Error).message ?? String(e));
       }
     };
 
@@ -329,6 +335,31 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
           return error(502, `widget page unavailable: ${String((e as Error).message ?? e).slice(0, 200)}`);
         }
         return new Response(upstream.body, { status: upstream.status, headers: { "content-type": upstream.headers.get("content-type") ?? "text/html; charset=utf-8", "cache-control": "no-store" } });
+      }),
+    },
+
+    "/api/pets": {
+      GET: wrap(async () => json({ ok: true, pets: opts.pets?.list(new Set(layout.read().hidden)) ?? [] })),
+    },
+
+    "/api/pets/:app/:name/sheet": {
+      GET: wrap(async (req) => {
+        if (!opts.pets) throw new NotFound("no pets");
+        let sheet: { type: string; bytes: Uint8Array };
+        try {
+          sheet = await opts.pets.sheet(name(req.params.app), name(req.params.name));
+        } catch (e) {
+          if (e instanceof NoPet) throw e;
+          return error(502, String((e as Error).message ?? e).slice(0, 200));
+        }
+        return new Response(sheet.bytes as BodyInit, { headers: { "content-type": sheet.type, "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff" } });
+      }),
+    },
+
+    "/api/pets/:app/:name/mood": {
+      GET: wrap(async (req) => {
+        if (!opts.pets) throw new NotFound("no pets");
+        return json(await opts.pets.mood(name(req.params.app), name(req.params.name)));
       }),
     },
 

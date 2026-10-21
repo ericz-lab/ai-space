@@ -382,6 +382,9 @@ const en = {
   "pet.by": "{name} · by {by}",
   "pet.default": "Capybara (built in)",
   "pet.clickMe": "Click me",
+  "pet.kind": "Which pet",
+  "pet.petdex": "Capybara or a petdex.dev pet",
+  "pet.fromApp": "From an app: it shows what the app reports",
 
   "term.title": "Terminal",
   "term.blurb": "A shell on this machine and on the peers that offer one.",
@@ -1007,6 +1010,9 @@ const zh: Record<Key, string> = {
   "pet.by": "{name} · 作者 {by}",
   "pet.default": "水豚（内置）",
   "pet.clickMe": "点我",
+  "pet.kind": "选择宠物",
+  "pet.petdex": "水豚或 petdex.dev 上的宠物",
+  "pet.fromApp": "来自 app：它的样子反映 app 报告的状态",
 
   "term.title": "终端",
   "term.blurb": "本机以及开放了终端的 peer 机器上的 shell。",

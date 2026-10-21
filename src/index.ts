@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
 import { RunRegistry, SessionStore, createAgentRoutes } from "./space/agents/index.ts";
-import { AppRegistry, HealthProbe, IconPacks, LayoutStore, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
+import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
 import { ModelService, ModelStore, createModelRoutes, recordAgentRun } from "./space/model/index.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
@@ -377,6 +377,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     registry,
     layout,
     widgets,
+    pets: new PetFeed(registry),
     health,
     peers,
     icons,

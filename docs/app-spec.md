@@ -90,9 +90,9 @@ i18n:                              # translations of the display text, by langua
 | `url` | string | Public entry URL; the panel shows a tile only for apps that have one. Widget and agent links are resolved relative to it. A `{lang}` placeholder in its query (`https://my-app.example.com/?lang={lang}`) is replaced by the panel's language when the tile is opened; without one the app sees only the browser's language. See [i18n](i18n.md#apps). A **path** (`/`, `/docs?lang={lang}`) means "my page, on the hostname the space assigns": it resolves to `https://<name>.<SPACE_DOMAIN><path>` on a space with a domain and to `http://127.0.0.1:<service.port><path>` on one without, so a public app writes `url: /` and is right on every machine; it needs a `service` with a `port`. See [router](router.md). An operator overrides either form per machine with `SPACE_APP_URL_<NAME>` in the workspace `.env` (the app name uppercased, `-` and `.` as `_`). |
 | `status` | enum | `paused` keeps the app listed but stops its tasks and service; `archived` hides it and stops everything. Storage is never dropped by a status change. |
 | `repo` | string | The origin URL. |
-| `i18n` | mapping | Translations of `title` and `description`, and by name of the agents', widgets' and checks' text, keyed by language tag (`zh`, `zh-Hant`, `pt-BR`). The panel shows the reader's language when the manifest has it and the plain field otherwise; names are never translated. Only declared agent, widget and check names may appear. See [i18n](i18n.md). |
+| `i18n` | mapping | Translations of `title` and `description`, and by name of the agents', widgets', checks' and pets' text, keyed by language tag (`zh`, `zh-Hant`, `pt-BR`). The panel shows the reader's language when the manifest has it and the plain field otherwise; names are never translated. Only declared agent, widget, check and pet names may appear. See [i18n](i18n.md). |
 
-Sections: `service`, `agents`, `widgets`, `skills`, `tasks`, `events`, `provides`, `storage`, `backup`, `model`, `checks`, `notify`, `deploy`. Each is optional.
+Sections: `service`, `agents`, `widgets`, `pets`, `skills`, `tasks`, `events`, `provides`, `storage`, `backup`, `model`, `checks`, `notify`, `deploy`. Each is optional.
 
 ```yaml
 i18n:
@@ -236,6 +236,40 @@ Fields every block may carry: `label` (required), `caption` (a short line under 
 Honesty applies to every block. A value the app could not obtain is `null` and the panel shows it as missing; a series has the points the app recorded and no others, a missing day is `null` and never interpolated. `asOf` (ISO 8601) says when the data was produced; with `staleAfter` (seconds) the panel marks the card as out of date once `asOf` is older than that. The panel never parses numbers out of `text`.
 
 Contract for `kind: embed`. `source` is a page the app serves; the panel loads it in a sandboxed iframe of the declared size, in the viewer's theme and language (the page receives `?theme=light|dark&lang=<tag>`, `lang` being the panel's language such as `en` or `zh`; a page may ignore it). ai-space proxies the page (`/api/widgets/:app/:name/embed`), so it must be self-contained: inline styles and scripts, or absolute public URLs. It must work without cookies and without a public origin.
+
+### `pets`
+
+A desk pet walks along the bottom of the panel's page, on every screen. The panel has one of its own (a capybara, or any pet from petdex.dev); an app can offer more, and through a mood it can make the pet show how the app sees the world: lie down when all is well, sit up when something is off. The operator picks one pet in Settings → General. The panel draws and moves the pet with its own code: the app supplies a picture and a few words of state, and nothing from the app runs in the page.
+
+```yaml
+pets:
+  - name: dog                      # unique within the app; the panel's id is <app>/<name>
+    title: Dog                     # shown in the pet menu; translate it under i18n.<lang>.pets.<name>.title
+    sheet: /pets/dog.png           # path on the app's service, or an https URL; PNG, WebP or GIF, at most 2 MB
+    grid: 4x4                      # cells across x down the sheet, each at most 16; all cells the same size
+    width: 80                      # width on the page in CSS pixels, 24-160; default 70
+    pixelated: true                # draw without smoothing (pixel art); default false
+    animations:                    # by name: row (from 0), frames (from the left), ms for one loop
+      walk: { row: 0, frames: 4, ms: 560 }   # required, facing right; mirrored for walking left
+      lie: { row: 1, frames: 2, ms: 2400 }
+      sit: { row: 2, frames: 2, ms: 1400 }
+      bark: { row: 3, frames: 4, ms: 900 }
+    rest: lie                      # the animation it rests in while no mood is known; default the first after walk
+    mood: /api/pets/dog/mood       # optional: path on the service, or an https URL
+    refresh: 30s                   # how often the mood is read; default 30s, minimum 15s
+```
+
+The pet walks to a random spot, rests a while, and walks again; resting facing left after a walk to the left, the sheet is mirrored. With an animation named `jump`, a click plays it once.
+
+Contract for `mood`. `GET <mood>` returns:
+
+```json
+{ "ok": true, "animation": "bark", "move": "stay", "say": { "en": "Woof! seoul: api-center down", "zh": "汪汪！seoul：api-center 不可用" }, "link": "https://ops.example.com/#incidents", "asOf": "2026-10-21T08:40:00Z" }
+```
+
+`animation` must be one the pet declares other than `walk`; it is what the pet rests in. `move` is `roam` (default: it still wanders between rests, and rests longer than a pet without a mood) or `stay` (it stops where it is). `say` is a short line in a bubble over the pet, a string or a map by language tag, at most 80 characters; absent means the pet says nothing. `link` is where a click on the pet goes (in a new tab), resolved against the app's `url` like a widget's `link`; only http(s) passes. Any other field is dropped. A failed read, `{ "ok": false }` or an animation the pet does not declare leaves the pet resting in `rest`; the panel never invents a mood.
+
+ai-space reads the sheet and the mood (`/api/pets`, `/api/pets/:app/:name/sheet`, `/api/pets/:app/:name/mood`), so both may be loopback addresses and never reach the browser. It caches the sheet for an hour and the mood for `refresh`, and only ever calls URLs a manifest declares. A path needs a `service`. Pets are local to a machine: a hub does not list its peers' pets. Package (spec 2) manifests do not take `pets` yet.
 
 ### `skills`
 
@@ -620,6 +654,7 @@ notify:
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |
 | Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |
 | `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |
+| `pets`, `/api/pets` | Implemented (`src/space/panel/pet-spec.ts`, `src/space/panel/pets.ts`, `src/web/Pet.tsx`); this space only, not across peers; not in package manifests |
 | `checks`, `/api/checks` | Implemented (`src/space/checks/`, `src/space/panel/api.ts`); the inspection page is space-ops |
 | Panel (web UI, layout, manifest-only apps) | Implemented ([panel.md](panel.md)) |
 | `skills`, shared skills under `skills/` | Linked into `<workspace>/.claude/skills/` for sessions started by hand (`src/space/skills.ts`); per-agent mounting planned |

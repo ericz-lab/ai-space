@@ -7,3 +7,5 @@ export { AppRegistry, type RegisteredApp } from "./registry.ts";
 export { retireAppDir, runStopCommand, type DirOutcome } from "./uninstall.ts";
 export { agentView, appView, avatarUrl, iconUrl, resolveLink, type AgentView, type AppView } from "./view.ts";
 export { WidgetFeed, sourceUrl, type WidgetItem, type WidgetView } from "./widgets.ts";
+export { PetFeed, type PetMood, type PetView } from "./pets.ts";
+export { parsePetSpec, type ManifestPet, type PetAnimation } from "./pet-spec.ts";

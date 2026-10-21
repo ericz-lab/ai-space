@@ -407,6 +407,11 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
   width: 100%; border: 1px solid var(--glass-border); background: var(--glass);
   border-radius: 9px; padding: 7px 28px 7px 10px; font-family: inherit; font-size: 13px; color: var(--text);
 }
+.setinput select {
+  width: 100%; border: 1px solid var(--glass-border); background: var(--glass);
+  border-radius: 9px; padding: 7px 10px; font-family: inherit; font-size: 13px; color: var(--text);
+}
+.setfield + .setfield { padding-top: 4px; }
 .setinput input::placeholder { color: var(--muted); opacity: 1; }
 .setinput input:focus { outline: 2px solid color-mix(in srgb, var(--link) 40%, transparent); }
 .setinput button {
@@ -902,7 +907,9 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 .chat-send:disabled { cursor: default; background: color-mix(in srgb, var(--text) 9%, transparent); color: var(--muted); box-shadow: none; }
 
 /* Size and scale are set inline by Pet.tsx from the sheet's cell size. */
-.pet { position: fixed; bottom: 0; left: 0; z-index: 25; cursor: pointer; overflow: hidden; }
+.pet { position: fixed; bottom: 0; left: 0; z-index: 25; cursor: pointer; }
+.pet-say { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); max-width: 220px; width: max-content; padding: 4px 9px; border-radius: 10px; background: var(--glass-strong, rgba(255, 255, 255, 0.92)); color: var(--text); border: 1px solid var(--hairline, rgba(0, 0, 0, 0.08)); box-shadow: var(--shadow); font-size: 12px; line-height: 1.35; text-align: center; pointer-events: none; backdrop-filter: blur(12px); }
+.pet-say::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -5px; border: 5px solid transparent; border-top-color: var(--glass-strong, rgba(255, 255, 255, 0.92)); }
 .pet i { display: block; position: relative; overflow: hidden; transform-origin: top left; }
 .pet img { position: absolute; left: 0; top: 0; max-width: none; display: block; }
 @media (prefers-reduced-motion: reduce) { .pet { display: none; } }
