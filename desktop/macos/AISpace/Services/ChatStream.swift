@@ -226,6 +226,12 @@ enum ChatToolKind: String, Equatable {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty } ?? ""
     }
+
+    /// Whether a run of calls is all commands, so a folded transcript's head can say what ran
+    /// (src/web/chat-steps.ts `allCommands`).
+    static func allCommands(_ steps: [ChatStep]) -> Bool {
+        !steps.isEmpty && steps.allSatisfy { $0.kind == .tool && ChatToolKind(tool: $0.title) == .bash }
+    }
 }
 
 /// Runs of consecutive tool calls become one group, so they stack as a tight list between

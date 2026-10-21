@@ -15,6 +15,8 @@ struct ChatMessage: Identifiable, Equatable {
     var pending: [String] = []
     /// Why the turn failed, shown in the thread under what the agent wrote, with a retry.
     var failure: ChatFailure?
+    /// Restored from a past session's transcript: its runs of tool calls fold to one line.
+    var historic = false
 }
 
 /// One native conversation with an agent, shared by the main window and Quick Chat. Each turn is
@@ -206,7 +208,7 @@ final class ChatController: ObservableObject {
                 let steps = m.isUser ? [] : m.chatSteps
                 guard !(m.text ?? "").isEmpty || !steps.isEmpty else { return nil }
                 return ChatMessage(role: m.isUser ? .user : .agent, text: m.text ?? "",
-                                   tools: (m.tools ?? []).map(\.name), steps: steps)
+                                   tools: (m.tools ?? []).map(\.name), steps: steps, historic: !m.isUser)
             }
             sessionID = session.sid
             conversation = UUID()

@@ -543,3 +543,7 @@
 "Remove image" = "移除图片";
 "Could not read this image." = "无法读取这张图片。";
 "Add up to 4 images, 5 MB each and 10 MB in total." = "最多添加 4 张图片，单张不超过 5 MB，总计不超过 10 MB。";
+"Ran commands" = "执行了命令";
+"Called tools" = "调用了工具";
+"Expanded" = "已展开";
+"Collapsed" = "已折叠";
