@@ -17,7 +17,10 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -80,10 +83,50 @@ fun SpaceBackdrop(artwork: Bitmap?, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize().background(t.ground).clearAndSetSemantics {}) {
         AnimatedVisibility(visible = artwork != null, enter = fadeIn(), exit = fadeOut()) {
             if (artwork != null) {
-                Image(artwork.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize()) {
+                    Image(artwork.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    ArtworkVeil()
+                }
             }
         }
     }
+}
+
+/**
+ * The artwork is the setting, not the subject: a soft veil in the ground colour over its middle, where
+ * the tiles and cards are, so bright lines in it stop crossing the content (src/web/styles.css
+ * `[data-backdrop] .aurora::after`, an ellipse of 62 % × 70 % of the page centred at 50 % / 58 %).
+ */
+@Composable
+private fun ArtworkVeil() {
+    val t = AiTheme.tokens
+    Box(
+        Modifier.fillMaxSize().drawWithCache {
+            val w = size.width
+            val h = size.height
+            val rx = w * 0.62f
+            val ry = h * 0.70f
+            val center = Offset(w * 0.5f, h * 0.58f)
+            val ground = t.ground
+            val brush = if (t.dark) {
+                Brush.radialGradient(
+                    0f to ground.copy(alpha = 0.68f), 0.72f to ground.copy(alpha = 0.25f), 1f to Color.Transparent,
+                    center = center, radius = rx,
+                )
+            } else {
+                Brush.radialGradient(0f to ground.copy(alpha = 0.42f), 0.75f to Color.Transparent, center = center, radius = rx)
+            }
+            // The gradient is a circle of radius rx, stretched vertically into the ellipse.
+            val stretch = ry / rx
+            val top = center.y - center.y / stretch
+            val bottom = center.y + (h - center.y) / stretch
+            onDrawBehind {
+                scale(1f, stretch, pivot = center) {
+                    drawRect(brush, topLeft = Offset(0f, top), size = Size(w, bottom - top))
+                }
+            }
+        },
+    )
 }
 
 /**
@@ -104,4 +147,18 @@ fun Modifier.glass(radius: Dp, fill: Color, hairline: Color, elevation: Dp = 6.d
 fun Modifier.glass(radius: Dp? = null): Modifier {
     val t = AiTheme.tokens
     return glass(radius ?: t.radius, t.glass, t.hairline)
+}
+
+/**
+ * [glass] without a visible border, as the panel now draws its widget cards and search fields
+ * (src/web/styles.css `.widget`, `.omni-bar`, `.lib-search`). A widget card ([neutral]) is laid over a
+ * share of the ground colour when the theme has artwork, so a coloured backdrop does not tint every
+ * card alike.
+ */
+@Composable
+fun Modifier.borderlessGlass(radius: Dp? = null, neutral: Boolean = false): Modifier {
+    val t = AiTheme.tokens
+    val ground = neutral && t.preset.backdrop != null
+    val fill = if (ground) t.glass.compositeOver(t.ground.copy(alpha = if (t.dark) 0.52f else 0.40f)) else t.glass
+    return glass(radius ?: t.radius, fill, Color.Transparent)
 }

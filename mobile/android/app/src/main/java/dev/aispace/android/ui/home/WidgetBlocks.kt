@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
@@ -96,11 +97,14 @@ private fun Linked(block: WidgetBlock, open: (String) -> Unit, onLongPress: () -
     }
 }
 
-/** A tone's colour; neutral is the secondary text. */
+/**
+ * A tone's colour; neutral is the secondary text. The status colours are pulled a little toward the
+ * text, so a green number reads as a value rather than a light (src/web/styles.css `--tone-*`).
+ */
 internal fun BlockTone.color(t: ThemeTokens): Color = when (this) {
-    BlockTone.positive -> ThemeTokens.success
-    BlockTone.negative -> ThemeTokens.danger
-    BlockTone.warning -> ThemeTokens.warning
+    BlockTone.positive -> lerp(t.text, ThemeTokens.success, 0.82f)
+    BlockTone.negative -> lerp(t.text, ThemeTokens.danger, 0.84f)
+    BlockTone.warning -> lerp(t.text, ThemeTokens.warning, 0.84f)
     BlockTone.neutral -> t.secondaryText
 }
 
@@ -118,10 +122,10 @@ internal fun BlockHero(block: WidgetBlock) {
         if (block.type == WidgetBlock.Kind.status) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.size(10.dp).background(tone?.color(t) ?: t.secondaryText, CircleShape))
-                Text(value ?: "", style = HomeType.title3, fontWeight = FontWeight.SemiBold, color = t.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(value ?: "", style = HomeType.headline, color = t.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             block.time?.let { Times.parse(it) }?.let { date ->
-                Text(Times.ago(date), style = HomeType.caption, color = t.secondaryText)
+                Text(Times.ago(date), style = HomeType.caption.tabular(), color = t.faint)
             }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -149,7 +153,7 @@ internal fun BlockHero(block: WidgetBlock) {
         }
         val caption = block.caption?.text()
         if (!caption.isNullOrEmpty()) {
-            Text(caption, style = HomeType.caption, color = t.secondaryText, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(caption, style = HomeType.caption, color = t.faint, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -167,7 +171,7 @@ internal fun BlockRow(block: WidgetBlock) {
                 Box(Modifier.size(7.dp).background(tone?.color(t) ?: t.secondaryText, CircleShape))
             }
             Text(
-                block.label.text(), style = HomeType.subheadline, color = t.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                block.label.text(), style = HomeType.subheadline, color = t.text.copy(alpha = 0.78f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(end = 2.dp),
             )
             Text(
@@ -180,7 +184,7 @@ internal fun BlockRow(block: WidgetBlock) {
             if (block.type == WidgetBlock.Kind.metric && delta != null) BlockDelta(delta, showsLabel = false)
             if (block.type == WidgetBlock.Kind.status) {
                 block.time?.let { Times.parse(it) }?.let { date ->
-                    Text(Times.ago(date), style = HomeType.caption, color = t.secondaryText, maxLines = 1)
+                    Text(Times.ago(date), style = HomeType.caption.tabular(), color = t.faint, maxLines = 1)
                 }
             }
         }
@@ -227,8 +231,10 @@ private fun ShrinkingText(text: String, style: TextStyle, minScale: Float, color
 }
 
 /**
- * A trend's points as a line or bars. A line breaks at a missing point rather than bridging it; a
- * signed or bar trend is drawn from zero. One path per colour, built once per size.
+ * A trend's points as a line or bars. A line breaks at a missing point rather than bridging it, and
+ * each unbroken run has a faint area down to the floor; a signed or bar trend is drawn from zero, on a
+ * zero line, with the latest bar at full strength and the ones before it quieter. One path per colour
+ * and strength, built once per size.
  */
 @Composable
 internal fun Spark(block: WidgetBlock, height: Dp) {
@@ -246,7 +252,10 @@ internal fun Spark(block: WidgetBlock, height: Dp) {
     val hi = if (fromZero) max(0.0, values.max()) else values.max()
     val span = if (hi - lo == 0.0) 1.0 else hi - lo
     val accent = t.accent
-    val hairline = t.hairline
+    val baselineColor = t.text.copy(alpha = 0.18f)
+    val positive = BlockTone.positive.color(t)
+    val negative = BlockTone.negative.color(t)
+    val latest = points.indexOfLast { it.v != null }
     Spacer(
         Modifier
             .fillMaxWidth()
@@ -259,54 +268,71 @@ internal fun Spark(block: WidgetBlock, height: Dp) {
                 fun y(v: Double): Float = h - ((v - lo) / span).toFloat() * h
                 if (!bar) {
                     val line = Path()
-                    var pen = false
+                    val area = Path()
+                    var run = ArrayList<Offset>()
+                    fun close() {
+                        if (run.size > 1) {
+                            area.moveTo(run.first().x, h)
+                            run.forEach { area.lineTo(it.x, it.y) }
+                            area.lineTo(run.last().x, h)
+                            area.close()
+                        }
+                        run = ArrayList()
+                    }
                     points.forEachIndexed { i, point ->
                         val v = point.v
                         if (v == null) {
-                            pen = false
+                            close()
                         } else {
-                            val x = i * step + step / 2
-                            if (pen) line.lineTo(x, y(v)) else line.moveTo(x, y(v))
-                            pen = true
+                            val at = Offset(i * step + step / 2, y(v))
+                            if (run.isNotEmpty()) line.lineTo(at.x, at.y) else line.moveTo(at.x, at.y)
+                            run.add(at)
                         }
                     }
+                    close()
                     val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-                    onDrawBehind { drawPath(line, accent, style = stroke) }
+                    onDrawBehind {
+                        drawPath(area, accent.copy(alpha = 0.14f))
+                        drawPath(line, accent, style = stroke)
+                    }
                 } else {
                     val zero = y(0.0)
                     val minimum = 1.dp.toPx()
-                    // The bars at or above zero, those below it, or all of them for null.
-                    fun bars(positive: Boolean?): Path {
+                    val corner = CornerRadius(step * 0.12f)
+                    // The bars at or above zero, those below it, or all of them for null; the latest
+                    // bar alone, or every bar before it.
+                    fun bars(positive: Boolean?, last: Boolean): Path {
                         val path = Path()
                         points.forEachIndexed { i, point ->
                             val v = point.v ?: return@forEachIndexed
                             if (positive != null && (v >= 0) != positive) return@forEachIndexed
+                            if ((i == latest) != last) return@forEachIndexed
                             val top = y(v)
-                            path.addRect(
-                                Rect(
-                                    offset = Offset(i * step + step * 0.15f, min(top, zero)),
-                                    size = Size(max(step * 0.7f, minimum), max(abs(top - zero), minimum)),
+                            path.addRoundRect(
+                                RoundRect(
+                                    Rect(
+                                        offset = Offset(i * step + step * 0.15f, min(top, zero)),
+                                        size = Size(max(step * 0.7f, minimum), max(abs(top - zero), minimum)),
+                                    ),
+                                    corner,
                                 ),
                             )
                         }
                         return path
                     }
-                    if (signed) {
-                        val up = bars(true)
-                        val down = bars(false)
-                        val baseline = Path().apply {
-                            moveTo(0f, zero)
-                            lineTo(w, zero)
-                        }
-                        val hairStroke = Stroke(width = 1.dp.toPx())
-                        onDrawBehind {
-                            drawPath(baseline, hairline, style = hairStroke)
-                            drawPath(up, ThemeTokens.success)
-                            drawPath(down, ThemeTokens.danger)
-                        }
+                    val baseline = Path().apply {
+                        moveTo(0f, zero)
+                        lineTo(w, zero)
+                    }
+                    val hairStroke = Stroke(width = 1.dp.toPx())
+                    val fills = if (signed) {
+                        listOf(bars(true, false) to positive.copy(alpha = 0.6f), bars(false, false) to negative.copy(alpha = 0.6f), bars(true, true) to positive, bars(false, true) to negative)
                     } else {
-                        val all = bars(null)
-                        onDrawBehind { drawPath(all, accent) }
+                        listOf(bars(null, false) to accent.copy(alpha = 0.6f), bars(null, true) to accent)
+                    }
+                    onDrawBehind {
+                        for ((path, color) in fills) drawPath(path, color)
+                        drawPath(baseline, baselineColor, style = hairStroke)
                     }
                 }
             },
@@ -350,7 +376,7 @@ internal fun GaugeScale(block: WidgetBlock) {
     val marker = t.text
     val edge = t.solid
     val position = block.value?.let { block.position(it).toFloat() }
-    Canvas(Modifier.fillMaxWidth().height(12.dp).clearAndSetSemantics {}) {
+    Canvas(Modifier.fillMaxWidth().height(18.dp).clearAndSetSemantics {}) {
         val w = size.width
         val barTop = (size.height - 6.dp.toPx()) / 2
         val barHeight = 6.dp.toPx()
@@ -369,14 +395,10 @@ internal fun GaugeScale(block: WidgetBlock) {
             }
         }
         if (position != null) {
-            val mw = 3.dp.toPx()
-            val mh = size.height
-            val x = w * position - mw / 2
-            drawRoundRect(marker, topLeft = Offset(x, 0f), size = Size(mw, mh), cornerRadius = CornerRadius(mw / 2))
-            drawRoundRect(
-                edge, topLeft = Offset(x, 0f), size = Size(mw, mh), cornerRadius = CornerRadius(mw / 2),
-                style = Stroke(width = 0.5.dp.toPx()),
-            )
+            // A round marker ringed in the card's colour, so it stands off the zone under it.
+            val center = Offset(w * position, size.height / 2)
+            drawCircle(edge, radius = 6.dp.toPx() + 3.dp.toPx(), center = center)
+            drawCircle(marker, radius = 6.dp.toPx(), center = center)
         }
     }
 }

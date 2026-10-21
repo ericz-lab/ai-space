@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.outlined.CropSquare
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Widgets
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,7 +59,7 @@ import dev.aispace.android.live.IconImages
 import dev.aispace.android.ui.common.EntryIcon
 import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.ThemeTokens
-import dev.aispace.android.ui.theme.glass
+import dev.aispace.android.ui.theme.borderlessGlass
 
 /** The symbol an entry shows while its icon loads: a person for an agent, a tile for anything else. */
 internal fun fallbackIcon(kind: EntryKind): ImageVector = when (kind) {
@@ -88,8 +87,10 @@ internal fun EntryTile(
     val note = tileNote(entry)
     val state = tileState(entry, note)
     val dimmed = entry.reach == Reach.peerOffline || entry.reach == Reach.paused
-    // Over drawn artwork a name gets an edge in the ground colour to stay readable.
-    val edge = if (t.preset.backdrop != null) {
+    // Over the dark versions of drawn artwork a name gets an edge in the ground colour to stay
+    // readable; the light versions are pale enough for the text colour alone (design-guidelines.md
+    // section 3).
+    val edge = if (t.preset.backdrop != null && t.dark) {
         Shadow(color = t.ground.copy(alpha = 0.9f), offset = Offset.Zero, blurRadius = with(LocalDensity.current) { 2.dp.toPx() })
     } else {
         null
@@ -194,7 +195,7 @@ internal fun WidgetCard(
         modifier
             .fillMaxWidth()
             .alpha(if (widget.stale == true) 0.6f else 1f)
-            .glass()
+            .borderlessGlass(neutral = true)
             // The parts of the card that are not buttons take the long press too.
             .pointerInput(Unit) { detectTapGestures(onLongPress = { longPress() }) },
     ) {
@@ -203,7 +204,7 @@ internal fun WidgetCard(
                 Modifier
                     .fillMaxWidth()
                     .combinedClickable(onLongClick = onLongPress, onClick = { open(null) })
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -214,8 +215,8 @@ internal fun WidgetCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        Lang.pick(widget.title, widget.i18n, Lang.title), style = HomeType.subheadline, fontWeight = FontWeight.SemiBold,
-                        color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                        Lang.pick(widget.title, widget.i18n, Lang.title), style = HomeType.subheadline, fontWeight = FontWeight.Medium,
+                        color = t.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                     )
                     widget.peer?.let { Text(it, style = HomeType.caption, color = t.secondaryText, maxLines = 1) }
                 }
@@ -226,8 +227,8 @@ internal fun WidgetCard(
             }
             menu()
         }
-        HorizontalDivider(color = t.hairline, thickness = 1.dp)
-        Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+        // The head and the body are set apart by space alone, without a rule between them.
+        Box(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp)) {
             WidgetRows(widget, open, onLongPress)
         }
     }

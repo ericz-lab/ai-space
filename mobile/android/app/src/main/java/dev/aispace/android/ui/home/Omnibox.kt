@@ -2,6 +2,20 @@
 
 package dev.aispace.android.ui.home
 
+import android.provider.Settings
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import kotlin.math.PI
+import kotlin.math.sin
 import android.Manifest
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
@@ -114,6 +128,7 @@ import dev.aispace.android.live.ShortcutExecution
 import dev.aispace.android.live.zone
 import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.ThemeTokens
+import dev.aispace.android.ui.theme.borderlessGlass
 import dev.aispace.android.ui.theme.glass
 import java.text.DateFormat
 import java.text.SimpleDateFormat
@@ -137,6 +152,8 @@ internal fun OmniboxField(
     onVoiceBusy: (Boolean) -> Unit,
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Actions are being resolved for the text: three dots beside the microphone say so. */
+    resolving: Boolean = false,
 ) {
     val t = AiTheme.tokens
     val context = LocalContext.current
@@ -177,7 +194,7 @@ internal fun OmniboxField(
             .padding(horizontal = 24.dp)
             .fillMaxWidth()
             .height(48.dp)
-            .glass(24.dp)
+            .borderlessGlass(24.dp)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { requester.requestFocus() }
             .padding(start = 18.dp, end = 12.dp),
         contentAlignment = Alignment.CenterStart,
@@ -210,6 +227,7 @@ internal fun OmniboxField(
                     }
                 },
             )
+            if (resolving) ResolvingDots(t.secondaryText)
             val listening = voice.recording || voice.starting
             if (voice.transcribing) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = t.secondaryText)
@@ -249,6 +267,38 @@ internal fun OmniboxField(
             title = { Text(stringResource(R.string.omnibox_voice)) },
             text = { Text(message) },
         )
+    }
+}
+
+/**
+ * Three dots bouncing in turn while actions are resolved (src/web/Omnibox.tsx `omni-resolving`). They
+ * stay still when the system turns animations off; the status still reaches TalkBack.
+ */
+@Composable
+private fun ResolvingDots(color: Color) {
+    val context = LocalContext.current
+    val searching = stringResource(R.string.omnibox_searching)
+    val still = remember {
+        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    }
+    val transition = rememberInfiniteTransition(label = "resolving")
+    val phase by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(1000, easing = LinearEasing)), label = "phase")
+    Row(
+        Modifier.height(32.dp).semantics { contentDescription = searching; liveRegion = LiveRegionMode.Polite },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for (i in 0 until 3) {
+            // Each dot rises 4 dp a third of the way into its cycle, 0.15 s after the one before.
+            val local = if (still) 0f else ((phase - i * 0.15f) % 1f + 1f) % 1f
+            val lift = if (local < 0.6f) sin(local / 0.6f * PI.toFloat()) else 0f
+            Box(
+                Modifier.size(4.dp)
+                    .graphicsLayer { translationY = -4.dp.toPx() * lift }
+                    .clip(CircleShape)
+                    .background(color),
+            )
+        }
     }
 }
 
@@ -393,12 +443,6 @@ internal fun OmniboxResults(
             }
         }
         for (intent in loose) ActionRow(intent, store, enabled, ::copy, { selection = it }, ::open)
-        if (store.resolving) {
-            val searching = stringResource(R.string.omnibox_searching)
-            Box(Modifier.fillMaxWidth().padding(12.dp).semantics { contentDescription = searching }) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = t.secondaryText)
-            }
-        }
         ResultRow(stringResource(R.string.omnibox_ask_assistant), null, Icons.Outlined.AutoAwesome, enabled = enabled) { ask(null) }
         store.error?.let { Text(it, style = HomeType.footnote, color = ThemeTokens.danger, modifier = Modifier.padding(horizontal = 12.dp)) }
         chatError?.let { Text(it, style = HomeType.footnote, color = ThemeTokens.danger, modifier = Modifier.padding(horizontal = 12.dp)) }

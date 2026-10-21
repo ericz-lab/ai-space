@@ -39,17 +39,19 @@ data class ThemePreset(
         val glowA: Long = 0,
         val glowB: Long = 0,
         val glowC: Long = 0,
+        /** The secondary text's alpha over [text], at least 4.5:1 on the surfaces (src/web/theme.ts `muted`). */
+        val muted: Float = 0.62f,
     )
 
     companion object {
         private val lightGlow = Triple(0xC7D2FEL, 0xFBCFE8L, 0xA5F3FCL)
         private val darkGlow = Triple(0x2A2872L, 0x5F1642L, 0x134354L)
 
-        private fun light(ground: Long, accent: Long, text: Long = 0x0E1116, solid: Long = 0xFFFFFF, glow: Triple<Long, Long, Long> = lightGlow) =
-            Palette(ground, text, solid, accent, glow.first, glow.second, glow.third)
+        private fun light(ground: Long, accent: Long, text: Long = 0x0E1116, solid: Long = 0xFFFFFF, glow: Triple<Long, Long, Long> = lightGlow, muted: Float = 0.62f) =
+            Palette(ground, text, solid, accent, glow.first, glow.second, glow.third, muted)
 
-        private fun dark(ground: Long, accent: Long, text: Long = 0xF1F4F8, solid: Long = 0x2C3145, glow: Triple<Long, Long, Long> = darkGlow) =
-            Palette(ground, text, solid, accent, glow.first, glow.second, glow.third)
+        private fun dark(ground: Long, accent: Long, text: Long = 0xF1F4F8, solid: Long = 0x2C3145, glow: Triple<Long, Long, Long> = darkGlow, muted: Float = 0.66f) =
+            Palette(ground, text, solid, accent, glow.first, glow.second, glow.third, muted)
 
         val aurora = ThemePreset("aurora", "Aurora", light(0xF6F7FB, accent = 0x8B5CF6), dark(0x1C2030, accent = 0x8B5CF6))
 
@@ -58,8 +60,8 @@ data class ThemePreset(
             ThemePreset("simple", "Simple", light(0xF4F5F7, accent = 0x2563EB),
                 dark(0x16181D, accent = 0x3B82F6, text = 0xECEEF2, solid = 0x2A2D35), glow = false, radius = 10.dp),
             ThemePreset("warm", "Warm",
-                light(0xFAF6F0, accent = 0xC2410C, text = 0x2B2118, solid = 0xFFFAF3, glow = Triple(0xFDE3C4L, 0xFBD0C0L, 0xFEF3C7L)),
-                dark(0x211A15, accent = 0xF0A46B, text = 0xF6EDE4, solid = 0x3A2F27, glow = Triple(0x5A3418L, 0x5C1F2AL, 0x4A3C12L)), radius = 20.dp),
+                light(0xFAF6F0, accent = 0xC2410C, text = 0x2B2118, solid = 0xFFFAF3, glow = Triple(0xFDE3C4L, 0xFBD0C0L, 0xFEF3C7L), muted = 0.66f),
+                dark(0x211A15, accent = 0xF0A46B, text = 0xF6EDE4, solid = 0x3A2F27, glow = Triple(0x5A3418L, 0x5C1F2AL, 0x4A3C12L), muted = 0.64f), radius = 20.dp),
             ThemePreset("orbit", "Orbit", light(0xD3D2F6, accent = 0x5550B8), dark(0x04050E, accent = 0x93A4FF, solid = 0x1C2140), backdrop = "orbit"),
             ThemePreset("northern", "Northern Lights", light(0xF3F1FA, accent = 0x0B7FC9), dark(0x040816, accent = 0x4BE3A8, solid = 0x182540), backdrop = "northern"),
             ThemePreset("papercut", "Paper Cut", light(0xF8F5EF, accent = 0x4D79DE), dark(0x1A2337, accent = 0x7CC4EA, solid = 0x26324C), backdrop = "papercut"),
@@ -86,7 +88,9 @@ data class ThemeTokens(
     val accent: Color get() = rgb(p.accent)
     val ground: Color get() = rgb(p.ground)
     val text: Color get() = rgb(p.text)
-    val secondaryText: Color get() = rgb(p.text).copy(alpha = 0.62f)
+    val secondaryText: Color get() = rgb(p.text).copy(alpha = p.muted)
+    /** A third text level under [secondaryText], for times and footnotes in cards (`--faint`). */
+    val faint: Color get() = rgb(p.text).copy(alpha = p.muted * 0.7f)
     val solid: Color get() = rgb(p.solid)
     val glowA: Color get() = rgb(p.glowA)
     val glowB: Color get() = rgb(p.glowB)

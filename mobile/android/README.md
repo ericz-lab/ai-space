@@ -2,7 +2,7 @@
 
 A native Android client of a Space that already runs, ported from the iPhone client (`mobile/ios/`, whose README is the specification this follows): a Compose launcher over the Space's own catalogue, the Space's pages drawn natively, a native terminal, and app pages and the web panel in `WebView`. Nothing is installed or started on the server, and the app carries no token or deployment secret.
 
-Status: builds with Gradle, 167 JVM tests pass, and runs on an Android 16 emulator (API 36) against a scratch Space and against a real Space behind Cloudflare Access. See [What was checked](#what-was-checked).
+Status: builds with Gradle, 169 JVM tests pass, and runs on an Android 16 emulator (API 36) against a scratch Space and against a real Space behind Cloudflare Access. See [What was checked](#what-was-checked).
 
 ## What it does
 
