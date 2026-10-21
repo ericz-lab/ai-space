@@ -68,6 +68,9 @@ const CODEX: Omit<Sprite, "src"> = {
   click: "jump",
 };
 const SPEED = 55; // px/s
+// The bubble comes and goes: shown this long, then hidden this long, again while the line stays.
+const SAY_SHOW_MS = 6_000;
+const SAY_HIDE_MS = 14_000;
 
 type Cell = { w: number; h: number };
 
@@ -143,6 +146,24 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
     onMood.current?.();
   }, [moodKey]);
 
+  // A new line shows at once; then the bubble comes and goes. Pointing at the pet shows it too.
+  const say = mood?.say ? pickLine(mood.say, lang) : "";
+  const [bubble, setBubble] = useState(false);
+  const [hover, setHover] = useState(false);
+  useEffect(() => {
+    setBubble(!!say);
+    if (!say) return;
+    let on = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const flip = () => {
+      on = !on;
+      setBubble(on);
+      timer = setTimeout(flip, on ? SAY_SHOW_MS : SAY_HIDE_MS);
+    };
+    timer = setTimeout(flip, SAY_SHOW_MS);
+    return () => clearTimeout(timer);
+  }, [say]);
+
   // Load the sheet off-screen to learn its cell size; the previous pet stays until the new one is ready.
   const { src, columns, rows } = sprite;
   useEffect(() => {
@@ -196,6 +217,8 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
       const mirror = !sp().left && facing === "left";
       clip.current.style.transform = mirror ? `translateX(${W}px) scale(${-scale}, ${scale})` : `scale(${scale})`;
       box.current.style.transform = `translate3d(${x}px,0,0)`;
+      // The bubble opens towards the middle of the page, so it never runs off an edge.
+      box.current.dataset.side = x + W / 2 > innerWidth / 2 ? "right" : "left";
     };
     const setState = (s: string) => {
       const a = sp().anims[s];
@@ -226,18 +249,27 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
       }
       return sp().rests[0]![0];
     };
-    // Walk somewhere, or rest; a mood that says "stay" keeps the pet where it is, in its animation.
+    // Where a pet that stays waits: the bottom-right corner, clear of the dock, easy to find.
+    const corner = () => Math.max(0, innerWidth - W - 24);
+    const walkTo = (to: number) => {
+      target = to;
+      facing = target > x ? "right" : "left";
+      setState(facing === "right" || !sp().left ? sp().right : sp().left!);
+    };
+    // Walk somewhere, or rest; a mood that says "stay" sends the pet to its corner and keeps it there,
+    // facing into the page.
     const behave = () => {
       clearTimeout(behaveTimer);
       oneShot = null;
       const m = moodRef.current;
-      if (m?.move === "stay") return setState(pickRest());
+      if (m?.move === "stay") {
+        if (Math.abs(x - corner()) > 2) return walkTo(corner());
+        facing = "left";
+        return setState(pickRest());
+      }
       const calm = !!m; // a pet with a mood rests longer between walks
-      if (Math.random() < (calm ? 0.3 : 0.45)) {
-        target = Math.random() * Math.max(0, innerWidth - W);
-        facing = target > x ? "right" : "left";
-        setState(facing === "right" || !sp().left ? sp().right : sp().left!);
-      } else {
+      if (Math.random() < (calm ? 0.3 : 0.45)) walkTo(Math.random() * Math.max(0, innerWidth - W));
+      else {
         setState(pickRest());
         behaveTimer = setTimeout(behave, calm ? 6000 + Math.random() * 10_000 : 1800 + Math.random() * 3500);
       }
@@ -264,6 +296,11 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
       }
     };
     el.addEventListener("click", click);
+    // A resized window moves the corner: a pet that stays follows it.
+    const onResize = () => {
+      if (moodRef.current?.move === "stay" && !walking()) behave();
+    };
+    addEventListener("resize", onResize);
 
     behave();
     return () => {
@@ -272,15 +309,15 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
       clearInterval(mover);
       clearTimeout(behaveTimer);
       el.removeEventListener("click", click);
+      removeEventListener("resize", onResize);
     };
   }, [ok, CW, CH, W, scale]);
 
   if (!loaded) return null;
-  const say = mood?.say ? pickLine(mood.say, lang) : "";
   return (
-    <div className="pet" ref={box} title={say || (mood?.link ? "" : t("pet.clickMe"))} style={{ width: W, height: Math.round(CH * scale) }}>
+    <div className="pet" ref={box} title={say || mood?.link ? undefined : t("pet.clickMe")} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ width: W, height: Math.round(CH * scale) }}>
       {say && (
-        <span className="pet-say" role="status">
+        <span className={`pet-say${bubble || hover ? " on" : ""}`} role="status">
           {say}
         </span>
       )}
