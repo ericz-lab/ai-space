@@ -182,6 +182,8 @@
     <string name="chat_tool_code">Code</string>
     <string name="chat_tool_task">Agent</string>
     <string name="chat_tool_plan">Plan</string>
+    <string name="chat_tools_commands">Ran commands</string>
+    <string name="chat_tools_called">Called tools</string>
     <string name="chat_waiting_answer">Waiting for your answer…</string>
     <string name="chat_question">Question</string>
     <string name="chat_question_answered">Answered</string>

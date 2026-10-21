@@ -304,6 +304,9 @@ class ChatStoreTests {
         assertEquals(2, store.bubbles.size)
         assertEquals(listOf(ChatStepKind.Tool), store.bubbles.last().steps.map { it.kind })
         assertEquals(listOf("Bash"), store.bubbles.last().tools)
+        // A restored reply opens its runs of calls folded; the person's message is not a reply.
+        assertTrue(store.bubbles.last().historic)
+        assertFalse(store.bubbles.first().historic)
     }
 
     @Test fun aSettledTurnAsksForTheCatalogue() = runBlocking {

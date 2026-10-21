@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Search
@@ -382,7 +384,8 @@ private fun ChatBubble(bubble: ChatStore.Bubble, answer: (suspend (String, Boole
                 for (group in ChatTools.groups(steps)) {
                     val step = group.first()
                     when (step.kind) {
-                        ChatStepKind.Tool -> ToolRows(group)
+                        // A past session opens on its answers: a run of calls folds to one line.
+                        ChatStepKind.Tool -> if (bubble.historic && group.size > 1) ToolGroup(group) else ToolRows(group)
                         ChatStepKind.Text -> if (step.text.isNotEmpty()) RichText(step.text, t.text, ThemeTokens.link)
                         ChatStepKind.Approval -> {
                             val approval = step.approval ?: continue
@@ -441,13 +444,46 @@ private fun ImageThumb(image: ChatImage, size: androidx.compose.ui.unit.Dp) {
 }
 
 /**
- * A run of tool calls as quiet single lines: symbol, title, the call's first line. A success stays
- * muted, a failure turns red, an unfinished call says so; a tap opens the full input and output.
+ * A run of tool calls as quiet single lines: symbol, title, the call's first line. A failure turns
+ * red, an unfinished call says so, and once a call ends its dot says how, red for a failure and
+ * green for a success; a tap opens the full input and output.
  */
 @Composable
 private fun ToolRows(steps: List<ChatStep>) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         for (step in steps) ToolRow(step)
+    }
+}
+
+/**
+ * A run of calls from a past session folded to one line: what kind of work ran and how many calls,
+ * with the calls one tap away (src/web/ChatToolRow.tsx `ToolGroup`).
+ */
+@Composable
+private fun ToolGroup(steps: List<ChatStep>) {
+    val t = AiTheme.tokens
+    var open by remember(steps.first().id) { mutableStateOf(false) }
+    val tint = if (open) t.text else t.secondaryText
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .clickable { open = !open }
+                .padding(vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                if (open) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight,
+                contentDescription = null, tint = tint, modifier = Modifier.size(15.dp),
+            )
+            Text(
+                stringResource(if (ChatTools.allCommands(steps)) R.string.chat_tools_commands else R.string.chat_tools_called),
+                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = tint, maxLines = 1,
+            )
+            Text("${steps.size}", style = MaterialTheme.typography.labelSmall, color = t.secondaryText.copy(alpha = 0.7f), maxLines = 1)
+        }
+        if (open) Box(Modifier.padding(start = 21.dp)) { ToolRows(steps) }
     }
 }
 
@@ -479,6 +515,12 @@ private fun ToolRow(step: ChatStep) {
             Icon(toolIcon(variant), contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
             Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = tint, maxLines = 1)
             if (summary.isNotEmpty()) {
+                val dot = when (step.state) {
+                    ChatStepState.Failed -> ThemeTokens.danger
+                    ChatStepState.Succeeded -> ThemeTokens.success
+                    else -> tint.copy(alpha = 0.6f)
+                }
+                Box(Modifier.size(3.dp).clip(CircleShape).background(dot))
                 Text(
                     summary, style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = tint,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),

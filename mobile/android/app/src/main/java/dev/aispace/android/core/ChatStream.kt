@@ -191,6 +191,10 @@ object ChatTools {
     /** The first non-empty line, so a long command or a patch still reads as one row. */
     fun summary(text: String): String = text.split("\n").map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: ""
 
+    /** Whether a run of calls is all commands, so a folded transcript's head can say what ran. */
+    fun allCommands(steps: List<ChatStep>): Boolean =
+        steps.isNotEmpty() && steps.all { it.kind == ChatStepKind.Tool && variant(it.title) == ToolVariant.Bash }
+
     /** Runs of consecutive tool calls become one group, so they stack as a tight list between paragraphs. */
     fun groups(steps: List<ChatStep>): List<List<ChatStep>> {
         val out = ArrayList<MutableList<ChatStep>>()

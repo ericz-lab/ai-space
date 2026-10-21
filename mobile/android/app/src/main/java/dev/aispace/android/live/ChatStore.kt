@@ -64,6 +64,8 @@ class ChatStore(
         /** The images the person sent with the message. */
         val images: List<ChatImage> = emptyList(),
         val live: Boolean = false,
+        /** A reply restored from a past session's transcript: its runs of calls open folded. */
+        val historic: Boolean = false,
         val id: UUID = UUID.randomUUID(),
     ) {
         val approvals: List<ChatApproval> get() = steps.mapNotNull { it.approval }
@@ -170,7 +172,7 @@ class ChatStore(
                 val user = m.role == "user"
                 val work = if (user) emptyList() else m.work
                 if (m.text.isNullOrEmpty() && work.isEmpty()) null
-                else Bubble(isUser = user, text = m.text ?: "", tools = work.filter { it.kind == ChatStepKind.Tool }.map { it.title }, steps = work)
+                else Bubble(isUser = user, text = m.text ?: "", tools = work.filter { it.kind == ChatStepKind.Tool }.map { it.title }, steps = work, historic = !user)
             }
             sessionID = session.sid
             error = null

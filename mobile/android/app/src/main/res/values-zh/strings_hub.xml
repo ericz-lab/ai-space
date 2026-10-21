@@ -182,6 +182,8 @@
     <string name="chat_tool_code">代码</string>
     <string name="chat_tool_task">子代理</string>
     <string name="chat_tool_plan">计划</string>
+    <string name="chat_tools_commands">执行了命令</string>
+    <string name="chat_tools_called">调用了工具</string>
     <string name="chat_waiting_answer">等你回答…</string>
     <string name="chat_question">问题</string>
     <string name="chat_question_answered">已回答</string>
