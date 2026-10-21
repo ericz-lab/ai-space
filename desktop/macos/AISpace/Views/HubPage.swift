@@ -56,14 +56,7 @@ struct HubContainer: View {
                 }
         }
         .id(page)
-        .background {
-            // The chat floats as a sheet over the Space's backdrop, as on the web panel.
-            if case .chat(let agent?) = page, model.chat(AgentRef(connection: connection.id, agent: agent)) != nil {
-                SpaceBackdrop(space: connection.url, dataStore: model.dataStore(connection.id))
-            } else {
-                Theme.ground
-            }
-        }
+        .background(Theme.ground)
     }
 
     private var content: some View {
@@ -94,12 +87,9 @@ struct HubPageContent: View {
             if let agent, let chat = model.chat(AgentRef(connection: connection.id, agent: agent)) {
                 HStack(spacing: 0) {
                     ChatSidebar(model: model, connection: connection, loader: loader, icons: icons, chat: chat, current: agent)
-                    Rectangle().fill(Theme.hairline).frame(width: 1)
+                    Divider()
                     ChatView(chat: chat, icons: icons, compact: false)
                 }
-                .sheetSurface()
-                .frame(maxWidth: 1100, maxHeight: 880)
-                .padding(16)
                 .navigationTitle(Text(verbatim: chat.agent.displayTitle))
             } else if agent != nil, model.lives[connection.id]?.status == .unknown {
                 Connecting()
@@ -170,10 +160,8 @@ struct ChatSidebar: View {
                 Button { chat.newConversation() } label: {
                     Label("New Conversation", systemImage: "square.and.pencil")
                         .font(.callout.weight(.medium))
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(Theme.text.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.hairline))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8).padding(.vertical, 7)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -213,8 +201,8 @@ struct ChatSidebar: View {
             }
             .padding(10)
         }
-        .frame(width: 236)
-        .background(Theme.text.opacity(0.025))
+        .frame(width: 230)
+        .background(.thinMaterial)
     }
 
     private func busy(_ ref: String) -> Bool {

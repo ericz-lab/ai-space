@@ -55,18 +55,13 @@ struct SettingsPage: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             nav
-            Rectangle().fill(Theme.hairline).frame(width: 1)
             Group {
                 if let detail { detailPane(detail) } else { sectionPane }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        // A translucent sheet over the backdrop, as the web panel's Settings (src/web/styles.css
-        // `.panel.settings`).
-        .sheetSurface()
-        .frame(maxWidth: 960, maxHeight: 760)
-        .padding(.top, 56).padding(.horizontal, 24).padding(.bottom, 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: 900)
+        .frame(maxWidth: .infinity)
         .task(id: loader.status) { await settings.refresh() }
         .onChange(of: picked) { _, _ in detail = nil }
     }
@@ -75,13 +70,13 @@ struct SettingsPage: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(section.title).font(.title2.weight(.semibold)).foregroundStyle(Theme.text)
                 .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 20).padding(.top, 20)
+                .padding(.horizontal, 20).padding(.top, 22)
             Form { content }
                 .formStyle(.grouped)
                 .scrollContentBackground(.hidden)
                 .id(section)
         }
-        .frame(maxWidth: 700, alignment: .leading)
+        .frame(maxWidth: 680, alignment: .leading)
     }
 
     /// A page of the Space inside the pane (src/web/App.tsx, 1361ec1): Back returns to its section,
@@ -107,7 +102,7 @@ struct SettingsPage: View {
                 .help("Reload")
                 .accessibilityLabel(Text("Reload"))
             }
-            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
+            .padding(.horizontal, 16).padding(.top, 56).padding(.bottom, 6)
             NavigationStack {
                 HubPageContent(model: model, connection: connection, page: page, loader: loader, icons: icons)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -135,7 +130,7 @@ struct SettingsPage: View {
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(.horizontal, 12).padding(.top, 20)
+        .padding(.horizontal, 12).padding(.top, 60)
         .frame(width: 190, alignment: .leading)
     }
 

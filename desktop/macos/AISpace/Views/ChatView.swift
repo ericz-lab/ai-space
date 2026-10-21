@@ -203,8 +203,8 @@ struct ChatView: View {
         }
         .frame(maxWidth: Self.column + 32)
         .frame(maxWidth: .infinity)
-        .background(compact ? AnyShapeStyle(.bar) : AnyShapeStyle(Color.clear))
-        .overlay(alignment: .top) { compact ? AnyView(Divider()) : AnyView(Rectangle().fill(Theme.hairline).frame(height: 1)) }
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 }
 
