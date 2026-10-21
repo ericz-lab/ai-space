@@ -206,6 +206,45 @@ export default function Library({
     }
   };
 
+  /**
+   * An app, built-in or agent as a home-screen tile: the icon and the name, nothing else. Outside add
+   * mode it opens the entry; in add mode a badge on the icon adds it to the target screen, or once
+   * added takes it off again. No hover details here; those are the home screen's.
+   */
+  const tile = (e: Entry) => {
+    const pinnedHere = !!targetScreen?.items.includes(e.key);
+    const body = (
+      <>
+        <span className={`tile-icon${isImgIcon(e.icon) ? "" : " solid"}`}>
+          <Icon icon={e.icon} fallback={e.fallback} />
+          {addMode && <span className={`lib-pick${pinnedHere ? " done" : ""}`} aria-hidden="true" />}
+        </span>
+        <span className="tile-name">{e.title}</span>
+      </>
+    );
+    if (addMode)
+      return (
+        <button
+          key={e.key}
+          className={`tile lib-tile ${e.kind}${pinnedHere ? " pinned" : ""}`}
+          aria-label={`${pinnedHere ? t("library.remove") : t("library.add")}: ${e.title}`}
+          onClick={() => (pinnedHere ? remove(e) : add(e))}
+        >
+          {body}
+        </button>
+      );
+    const o = opener(e);
+    return o ? (
+      <a key={e.key} className={`tile lib-tile ${e.kind}`} {...o}>
+        {body}
+      </a>
+    ) : (
+      <div key={e.key} className={`tile lib-tile off ${e.kind}`}>
+        {body}
+      </div>
+    );
+  };
+
   return (
     <div className="library">
       <div className="lib-bar">
@@ -260,47 +299,19 @@ export default function Library({
           </button>
         </div>
       </div>
-      <div className="lib-grid">
-        {shown.filter((e) => e.kind !== "widget").map((e) => {
-          const pinnedHere = !!targetScreen?.items.includes(e.key);
-          const on = screens.filter((s) => s.items.includes(e.key)).map(screenName);
-          const body = (
-            <>
-              <span className={`tile-icon${isImgIcon(e.icon) ? "" : " solid"}`}>
-                <Icon icon={e.icon} fallback={e.fallback} />
-              </span>
-              <span className="lib-text">
-                <b>{e.title}</b>
-                <span className="lib-kind">
-                  {e.kindLabel}
-                  {e.peer && <span className="widget-peer">{e.peer}</span>}
-                  {on.length > 0 && <span className="lib-on">{t("library.onScreens", { screens: on.join(lang === "zh" ? "、" : ", ") })}</span>}
-                </span>
-              </span>
-            </>
-          );
-          if (!addMode) {
-            const o = opener(e);
-            return o ? (
-              <a key={e.key} className={`lib-card lib-link ${e.kind}`} title={t("library.open")} {...o}>
-                {body}
-              </a>
-            ) : (
-              <div key={e.key} className={`lib-card off ${e.kind}`}>
-                {body}
-              </div>
-            );
-          }
-          return (
-            <div key={e.key} className={`lib-card ${e.kind}${pinnedHere ? " pinned" : ""}`}>
-              {body}
-              <div className="lib-act">
-                {addButton(e, pinnedHere)}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {(
+        [
+          ["library.apps", shown.filter((e) => e.kind === "app" || e.kind === "builtin")],
+          ["library.agents", shown.filter((e) => e.kind === "agent")],
+        ] as const
+      ).map(([title, list]) =>
+        list.length ? (
+          <section key={title} className="lib-group">
+            {filter === "all" && <h3 className="lib-section">{t(title)}</h3>}
+            <div className="launcher lib-tiles">{list.map(tile)}</div>
+          </section>
+        ) : null,
+      )}
       {shownWidgets.length > 0 && (
         <>
           {filter === "all" && <h3 className="lib-section">{t("library.widgets")}</h3>}

@@ -292,7 +292,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     editingRef.current = editing;
   }, [editing]);
   useEffect(() => {
-    const blank = (e: MouseEvent) => e.button === 0 && !(e.target as Element).closest(".tile, .modal, .overlay, .pop, .empty, .pet, .widget, .lib-card, .screens-hint, .lib-toast, a, button, input, select, textarea");
+    const blank = (e: MouseEvent) => e.button === 0 && !(e.target as Element).closest(".tile, .modal, .overlay, .pop, .empty, .pet, .widget, .screens-hint, .lib-toast, a, button, input, select, textarea");
     let timer: ReturnType<typeof setTimeout> | undefined;
     let sx = 0;
     let sy = 0;
