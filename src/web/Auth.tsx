@@ -145,7 +145,6 @@ export function AccountSettings() {
 
   return (
     <>
-      <p className="sethead">{t("auth.account")}</p>
       <button className="setrow setlink" onClick={() => setChanging((v) => !v)}>
         {t("auth.changePassword")}
         <span>{changing ? "−" : "›"}</span>

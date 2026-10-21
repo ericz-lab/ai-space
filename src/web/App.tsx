@@ -2,7 +2,7 @@ import type { AgentIntentView } from "../space/shortcuts/agent-intents.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddForm, UninstallForm } from "./AppForms.tsx";
 import ModelPreference from "./ModelPreference.tsx";
-import { AccountSettings } from "./Auth.tsx";
+import { AccountSettings, loadAuth } from "./Auth.tsx";
 import Chat, { type Ask } from "./Chat.tsx";
 import Pet, { DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
@@ -22,6 +22,7 @@ import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n
 import PetField from "./PetField.tsx";
 import { type PetChoice, resolvePet } from "./petdex.ts";
 import SettingsStatus from "./SettingsStatus.tsx";
+import { SECTION_LABEL, type SettingsSection, SettingsNav, saveSection, savedSection } from "./SettingsNav.tsx";
 import Packages from "./Packages.tsx";
 import { backdropOf, useAppearance } from "./theme.ts";
 import ThemeSettings from "./ThemeSettings.tsx";
@@ -136,6 +137,18 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [setsOpen]);
+  // The account section exists only under built-in sign-in (docs/auth.md).
+  const [hasAccount, setHasAccount] = useState(false);
+  useEffect(() => {
+    if (setsOpen) void loadAuth().then((s) => setHasAccount(s.mode === "builtin" && !!s.signedIn)).catch(() => {});
+  }, [setsOpen]);
+  const setSections: SettingsSection[] = ["general", "appearance", "models", "automation", "usage", "status", "packages", ...(hasAccount ? ["account" as const] : [])];
+  const [setSectionPicked, setSetSection] = useState<SettingsSection>(() => savedSection([...setSections, "account"]));
+  const setSection = setSections.includes(setSectionPicked) ? setSectionPicked : "general";
+  const pickSection = (s: SettingsSection) => {
+    setSetSection(s);
+    saveSection(s);
+  };
   const openSettings = () => setPanel("settings");
   const openTerminal = () => setPanel("terminal");
   const openInbox = () => setPanel("inbox");
@@ -813,71 +826,110 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
           <div className="panel settings" role="dialog" aria-label={t("settings.title")} onClick={(e) => e.stopPropagation()}>
             <div className="panel-head">
               <b>{t("settings.title")}</b>
-              <button className="chat-hbtn" title={t("common.close")} onClick={close}>
+              <button className="set-close" title={t("common.close")} aria-label={t("common.close")} onClick={close}>
                 ✕
               </button>
             </div>
-            <div className="setbody">
-              <label className="setrow">
-                {t("settings.hover")}
-                <input type="checkbox" role="switch" checked={!prefs.noPop} onChange={() => togglePref("noPop")} />
-              </label>
-              <label className="setrow">
-                {t("settings.pet")}
-                <input type="checkbox" role="switch" checked={!prefs.noPet} onChange={() => togglePref("noPet")} />
-              </label>
-              {!prefs.noPet && <PetField pet={prefs.pet} onChange={setPet} />}
-              <label className="setrow">
-                {t("settings.widgets")}
-                <input type="checkbox" role="switch" checked={!prefs.noWidget} onChange={() => togglePref("noWidget")} />
-              </label>
-              {hiddenWidgets.length > 0 && (
-                <button className="setrow setlink" onClick={showHiddenWidgets}>
-                  {t("settings.hiddenWidgets", { n: hiddenWidgets.length })}
-                  <span>{t("settings.showAgain")}</span>
-                </button>
-              )}
-              <ThemeSettings />
-              <label className="setrow">
-                {t("settings.language")}
-                <select className="setselect" value={lang} onChange={pickLang}>
-                  {LANGS.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <ModelPreference onSaved={() => {
-                void getJson<{ agents: AgentInfo[] }>("/api/agents").then((d) => {
-                  setAgents(d.agents);
-                  setChatAgent((current) => d.agents.find((a) => a.id === current.id) ?? current);
-                }).catch(() => {});
-              }} />
-              <p className="sethead">{t("settings.scheduler")}</p>
-              <button className="setrow setlink" onClick={() => setPanel("tasks")}>
-                {t("settings.tasks")}
-                <span>›</span>
-              </button>
-              <button className="setrow setlink" onClick={() => setPanel("usage")}>
-                {t("settings.usage")}
-                <span>›</span>
-              </button>
-              <button className="setrow setlink" onClick={() => setPanel("activity")}>
-                {t("settings.activity")}
-                <span>›</span>
-              </button>
-              <button className="setrow setlink" onClick={() => setPanel("appModels")}>
-                {t("settings.appModels")}
-                <span>›</span>
-              </button>
-              <button className="setrow setlink" onClick={() => setPanel("events")}>
-                {t("settings.events")}
-                <span>›</span>
-              </button>
-              <SettingsStatus />
-              <Packages onChange={reload} />
-              <AccountSettings />
+            <div className="setlayout">
+              <SettingsNav sections={setSections} current={setSection} onPick={pickSection} t={t} />
+              <div className="setbody">
+                <h3 className="setpage-title">{t(SECTION_LABEL[setSection])}</h3>
+                {setSection === "general" && (
+                  <div className="setcard">
+                    <label className="setrow">
+                      {t("settings.hover")}
+                      <input type="checkbox" role="switch" checked={!prefs.noPop} onChange={() => togglePref("noPop")} />
+                    </label>
+                    <label className="setrow">
+                      {t("settings.pet")}
+                      <input type="checkbox" role="switch" checked={!prefs.noPet} onChange={() => togglePref("noPet")} />
+                    </label>
+                    {!prefs.noPet && <PetField pet={prefs.pet} onChange={setPet} />}
+                    <label className="setrow">
+                      {t("settings.widgets")}
+                      <input type="checkbox" role="switch" checked={!prefs.noWidget} onChange={() => togglePref("noWidget")} />
+                    </label>
+                    {hiddenWidgets.length > 0 && (
+                      <button className="setrow setlink" onClick={showHiddenWidgets}>
+                        {t("settings.hiddenWidgets", { n: hiddenWidgets.length })}
+                        <span>{t("settings.showAgain")}</span>
+                      </button>
+                    )}
+                    <label className="setrow">
+                      {t("settings.language")}
+                      <select className="setselect" value={lang} onChange={pickLang}>
+                        {LANGS.map((l) => (
+                          <option key={l.code} value={l.code}>
+                            {l.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+                {setSection === "appearance" && (
+                  <div className="setcard">
+                    <ThemeSettings />
+                  </div>
+                )}
+                {setSection === "models" && (
+                  <>
+                    <div className="setcard">
+                      <ModelPreference onSaved={() => {
+                        void getJson<{ agents: AgentInfo[] }>("/api/agents").then((d) => {
+                          setAgents(d.agents);
+                          setChatAgent((current) => d.agents.find((a) => a.id === current.id) ?? current);
+                        }).catch(() => {});
+                      }} />
+                    </div>
+                    <div className="setcard">
+                      <button className="setrow setlink" onClick={() => setPanel("appModels")}>
+                        {t("settings.appModels")}
+                        <span>›</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+                {setSection === "automation" && (
+                  <div className="setcard">
+                    <button className="setrow setlink" onClick={() => setPanel("tasks")}>
+                      {t("settings.tasks")}
+                      <span>›</span>
+                    </button>
+                    <button className="setrow setlink" onClick={() => setPanel("events")}>
+                      {t("settings.events")}
+                      <span>›</span>
+                    </button>
+                  </div>
+                )}
+                {setSection === "usage" && (
+                  <div className="setcard">
+                    <button className="setrow setlink" onClick={() => setPanel("usage")}>
+                      {t("settings.usage")}
+                      <span>›</span>
+                    </button>
+                    <button className="setrow setlink" onClick={() => setPanel("activity")}>
+                      {t("settings.activity")}
+                      <span>›</span>
+                    </button>
+                  </div>
+                )}
+                {setSection === "status" && (
+                  <div className="setcard">
+                    <SettingsStatus />
+                  </div>
+                )}
+                {setSection === "packages" && (
+                  <div className="setcard">
+                    <Packages onChange={reload} />
+                  </div>
+                )}
+                {setSection === "account" && (
+                  <div className="setcard">
+                    <AccountSettings />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

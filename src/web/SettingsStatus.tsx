@@ -44,7 +44,8 @@ export default function SettingsStatus() {
       })
       .catch(() => setBackups([]));
   }, []);
-  const [statusOpen, setStatusOpen] = useState(false);
+  // The status section has a page of its own, so its rows start shown.
+  const [statusOpen, setStatusOpen] = useState(true);
   const statusLoaded = services !== null && backups !== null;
   const problems = statusLoaded
     ? services.services.filter((s) => s.status === "active" && s.health === "down").length +
@@ -62,7 +63,6 @@ export default function SettingsStatus() {
     : t("common.loading");
   return (
     <>
-      <p className="sethead">{t("settings.status")}</p>
       <button className="setrow setlink" aria-expanded={statusOpen} onClick={() => setStatusOpen((o) => !o)}>
         <span className="svc-name">{statusSummary}</span>
         {statusLoaded && (
