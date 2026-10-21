@@ -7,7 +7,6 @@
     <string name="settings_add_space">添加 Space</string>
     <string name="settings_spaces_footer">在这里移除 Space，只会让这台手机忘记它的地址、登录状态和屏幕布局，服务器上不会有任何变化。</string>
 
-    <string name="settings_display">显示</string>
     <string name="settings_appearance">外观</string>
     <string name="settings_system">跟随系统</string>
     <string name="settings_light">浅色</string>
@@ -16,7 +15,6 @@
     <string name="settings_language">语言</string>
     <string name="settings_display_footer">这些选项只属于这台手机，就像面板上的同类选项只属于各自的浏览器。主题取自面板的主题。语言跟随系统设置里这个应用的语言，或手机的语言。</string>
 
-    <string name="settings_status">状态</string>
     <string name="settings_services">服务</string>
     <string name="settings_peers">对等节点</string>
     <string name="settings_backups">备份</string>
@@ -70,7 +68,6 @@
         <item quantity="other">%d 个快照</item>
     </plurals>
 
-    <string name="settings_session">会话</string>
     <string name="settings_open_web_panel">打开网页面板</string>
     <string name="settings_sign_out">退出登录</string>
     <string name="settings_sign_out_title">要退出 %1$s 吗？</string>
@@ -80,4 +77,12 @@
 
     <string name="settings_about">关于</string>
     <string name="settings_version">版本</string>
+
+    <!-- The panel's settings sections (src/web/SettingsNav.tsx), in its order. -->
+    <string name="settings_section_general">通用</string>
+    <string name="settings_section_automation">自动化</string>
+    <string name="settings_section_usage">用量</string>
+    <string name="settings_section_status">运行状态</string>
+    <string name="settings_section_packages">安装包</string>
+    <string name="settings_section_account">账户</string>
 </resources>

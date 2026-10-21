@@ -27,11 +27,13 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -61,7 +63,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MenuDefaults
@@ -123,15 +124,17 @@ import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.Appearance
 import dev.aispace.android.ui.theme.ThemePreset
 import dev.aispace.android.ui.theme.ThemeTokens
+import dev.aispace.android.ui.theme.cardPiece
 import dev.aispace.android.ui.theme.rgb
 import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
- * Settings, as one page of the pager: first what belongs to this phone that is most often wanted (the
- * saved Spaces, its display), then the Space's own settings as its panel shows them (status, the default
- * model, its pages, peers, services, backups), read from the Space, and last the session and the app.
- * No title bar: the Spaces section is the first thing below the status bar.
+ * Settings, as one page of the pager, on the translucent sheet the pager draws behind it: first this
+ * phone's saved Spaces, then the panel's settings sections in the panel's order (General, Appearance,
+ * Models, Automation, Usage, Status, Packages, Account), each a title over bordered cards as the panel
+ * shows one section at a time on a phone, here one after another in a single column; last the Space's
+ * other pages and the app. No title bar: the Spaces section is the first thing below the status bar.
  */
 @Composable
 fun SettingsPage(
@@ -188,16 +191,20 @@ fun SettingsPage(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = top, bottom = bottom),
         ) {
             spaces(model, connection, connections, strings)
-            display(model)
+            general(model)
+            appearance(model)
+            models(model, space?.models, status, saving, saveError) { value -> scope.launch { settings.setDefaultModel(value) } }
+            automation(model)
+            usage(model)
             spaceStatus(connection, status, space, loading, peers)
-            space?.models?.let { models(it, status, saving, saveError) { value -> scope.launch { settings.setDefaultModel(value) } } }
-            pages(model)
             if (peers.isNotEmpty()) peerRows(peers)
             space?.let { s ->
                 if (s.services.isNotEmpty()) serviceRows(s.services, icons)
                 if (s.backups.isNotEmpty()) backupRows(s)
             }
-            session(model)
+            packages(model)
+            account(model)
+            pages(model)
             about()
         }
     }
@@ -230,12 +237,12 @@ private class SettingsStrings(val selected: String) {
 
 // Sections
 
-/** One row of a grouped section. */
+/** One row of a card. */
 private class SettingsRow(val key: String, val content: @Composable RowScope.() -> Unit, val onClick: (() -> Unit)? = null)
 
 /**
- * A grouped section as iOS draws one: a header, its rows on one rounded surface with lines between them,
- * and a footer. Each row is an item of the page's LazyColumn, so a long list of services is lazy too.
+ * A section as the panel's settings draws one (src/web/styles.css `.setpage-title`, `.setcard`): a
+ * title over its cards. [title] is null for a card that continues the section above it.
  */
 private fun LazyListScope.section(
     key: String,
@@ -243,18 +250,39 @@ private fun LazyListScope.section(
     footer: (@Composable () -> Unit)? = null,
     rows: List<SettingsRow>,
 ) {
-    if (header != null) {
-        item(key = "$key-header") {
-            val t = AiTheme.tokens
-            Text(
-                header(), style = HomeType.footnote, color = t.secondaryText,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp, bottom = 6.dp).semantics { heading() },
-            )
-        }
+    if (header != null) sectionTitle(key, header)
+    card(key, rows = rows, footer = footer)
+}
+
+private fun LazyListScope.sectionTitle(key: String, title: @Composable () -> String) {
+    item(key = "$key-title") {
+        Text(
+            title(), style = HomeType.footnote, fontWeight = FontWeight.Medium, color = AiTheme.tokens.secondaryText,
+            modifier = Modifier.padding(start = 2.dp, end = 2.dp, top = 26.dp, bottom = 12.dp).semantics { heading() },
+        )
     }
-    rows.forEachIndexed { i, row ->
+}
+
+/**
+ * The rows of one bordered card, a hairline between them, with a small [subhead] inside its top
+ * (`.sethead`) and a footer under it. Each row is an item of the page's LazyColumn, so a long list
+ * of services is lazy too.
+ */
+private fun LazyListScope.card(
+    key: String,
+    subhead: (@Composable () -> String)? = null,
+    footer: (@Composable () -> Unit)? = null,
+    rows: List<SettingsRow>,
+    spaced: Boolean = false,
+) {
+    if (rows.isEmpty()) return
+    if (spaced) item(key = "$key-gap") { Spacer(Modifier.height(12.dp)) }
+    val all = if (subhead == null) rows else listOf(SettingsRow("subhead", content = {
+        Text(subhead(), style = HomeType.footnote, fontWeight = FontWeight.Medium, color = AiTheme.tokens.secondaryText, modifier = Modifier.semantics { heading() })
+    })) + rows
+    all.forEachIndexed { i, row ->
         item(key = "$key-${row.key}") {
-            GroupedRow(first = i == 0, last = i == rows.size - 1, onClick = row.onClick, content = row.content)
+            CardRow(first = i == 0, last = i == all.size - 1, compact = subhead != null && i == 0, onClick = row.onClick, content = row.content)
         }
     }
     if (footer != null) {
@@ -265,26 +293,21 @@ private fun LazyListScope.section(
 }
 
 @Composable
-private fun GroupedRow(first: Boolean, last: Boolean, onClick: (() -> Unit)?, content: @Composable RowScope.() -> Unit) {
+private fun CardRow(first: Boolean, last: Boolean, compact: Boolean, onClick: (() -> Unit)?, content: @Composable RowScope.() -> Unit) {
     val t = AiTheme.tokens
-    val r = t.radiusMedium
-    val shape = RoundedCornerShape(
-        topStart = if (first) r else 0.dp, topEnd = if (first) r else 0.dp,
-        bottomEnd = if (last) r else 0.dp, bottomStart = if (last) r else 0.dp,
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .cardPiece(first, last, 12.dp, t.text.copy(alpha = 0.02f), t.hairline)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(
+                if (compact) Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp)
+                else Modifier.heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 10.dp),
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        content = content,
     )
-    Box(Modifier.fillMaxWidth().background(t.glass, shape)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-                .heightIn(min = 48.dp)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            content = content,
-        )
-        if (!first) HorizontalDivider(color = t.hairline, thickness = 1.dp, modifier = Modifier.padding(start = 16.dp))
-    }
 }
 
 @Composable
@@ -359,7 +382,36 @@ private fun RowScope.SpaceRow(model: AppModel, c: Connection, selected: Boolean,
 
 // This phone's display
 
-private fun LazyListScope.display(model: AppModel) {
+/** General: what the panel's General section has that a phone has too (widgets, the language). */
+private fun LazyListScope.general(model: AppModel) {
+    section(
+        "general",
+        header = { stringResource(R.string.settings_section_general) },
+        rows = listOf(
+            SettingsRow("widgets", onClick = { model.updateShowsWidgets(!model.showsWidgets) }, content = {
+                val t = AiTheme.tokens
+                Text(stringResource(R.string.settings_widgets), style = HomeType.body, color = t.text, modifier = Modifier.weight(1f))
+                Switch(checked = model.showsWidgets, onCheckedChange = { model.updateShowsWidgets(it) })
+            }),
+            SettingsRow("language", content = {
+                val context = LocalContext.current
+                val name = remember(Lang.current) {
+                    val locale = Locale.forLanguageTag(Lang.current)
+                    locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }
+                }
+                Row(
+                    Modifier.weight(1f).clickable { openLanguageSettings(context) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Labeled(stringResource(R.string.settings_language), name)
+                }
+            }),
+        ),
+    )
+}
+
+/** Appearance: light or dark, and the panel's themes. */
+private fun LazyListScope.appearance(model: AppModel) {
     val rows = ArrayList<SettingsRow>()
     rows += SettingsRow("appearance", content = {
         val t = AiTheme.tokens
@@ -383,27 +435,9 @@ private fun LazyListScope.display(model: AppModel) {
             if (on) Icon(Icons.Filled.Check, contentDescription = stringResource(R.string.settings_selected), tint = t.accent, modifier = Modifier.size(22.dp))
         })
     }
-    rows += SettingsRow("widgets", onClick = { model.updateShowsWidgets(!model.showsWidgets) }, content = {
-        val t = AiTheme.tokens
-        Text(stringResource(R.string.settings_widgets), style = HomeType.body, color = t.text, modifier = Modifier.weight(1f))
-        Switch(checked = model.showsWidgets, onCheckedChange = { model.updateShowsWidgets(it) })
-    })
-    rows += SettingsRow("language", content = {
-        val context = LocalContext.current
-        val name = remember(Lang.current) {
-            val locale = Locale.forLanguageTag(Lang.current)
-            locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }
-        }
-        Row(
-            Modifier.weight(1f).clickable { openLanguageSettings(context) },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Labeled(stringResource(R.string.settings_language), name)
-        }
-    })
     section(
-        "display",
-        header = { stringResource(R.string.settings_display) },
+        "appearance",
+        header = { stringResource(R.string.settings_appearance) },
         footer = { Footer(stringResource(R.string.settings_display_footer)) },
         rows = rows,
     )
@@ -484,7 +518,7 @@ private fun LazyListScope.spaceStatus(
     peers: List<PeerStatus>,
 ) {
     val rows = ArrayList<SettingsRow>()
-    rows += SettingsRow("status", content = { Labeled(stringResource(R.string.settings_status), statusText(status)) })
+    rows += SettingsRow("status", content = { Labeled(connection.name, statusText(status)) })
     if (space != null) {
         rows += SettingsRow("services", content = {
             Labeled(
@@ -513,7 +547,7 @@ private fun LazyListScope.spaceStatus(
     }
     section(
         "space",
-        header = { connection.name },
+        header = { stringResource(R.string.settings_section_status) },
         footer = { Footer(connection.url.toString()) },
         rows = rows,
     )
@@ -531,8 +565,24 @@ private fun statusText(status: LoaderStatus): String = stringResource(
     },
 )
 
-/** The Space's default model: the one setting here that changes the Space itself. */
+/**
+ * Models: the Space's default model, the one setting here that changes the Space itself, on its card
+ * once the Space has sent it; the app models on a card of their own.
+ */
 private fun LazyListScope.models(
+    model: AppModel,
+    m: ModelPreferences?,
+    status: LoaderStatus,
+    saving: Boolean,
+    saveError: String?,
+    choose: (String?) -> Unit,
+) {
+    sectionTitle("models") { stringResource(R.string.settings_models) }
+    if (m != null) defaultModel(m, status, saving, saveError, choose)
+    card("app-models", rows = listOf(pageRow("app-models", R.string.settings_app_models, Icons.Outlined.Memory, HubPage.AppModels, model)), spaced = m != null)
+}
+
+private fun LazyListScope.defaultModel(
     m: ModelPreferences,
     status: LoaderStatus,
     saving: Boolean,
@@ -584,9 +634,8 @@ private fun LazyListScope.models(
             Text(stringResource(R.string.settings_not_saved, saveError), style = HomeType.footnote, color = AiTheme.tokens.text)
         })
     }
-    section(
+    card(
         "models",
-        header = { stringResource(R.string.settings_models) },
         footer = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Footer(stringResource(R.string.settings_models_footer))
@@ -612,36 +661,66 @@ private fun ModelChoice(label: String, on: Boolean, onClick: () -> Unit) {
     )
 }
 
-/** The Space's own pages, drawn by the app from the Space's routes. */
+/** A row that opens one of the Space's pages, drawn by the app from the Space's routes. */
+private fun pageRow(key: String, title: Int, icon: ImageVector, page: HubPage, model: AppModel) = SettingsRow(key, onClick = { model.hubPage = page }, content = {
+    val t = AiTheme.tokens
+    Icon(icon, contentDescription = null, tint = t.accent, modifier = Modifier.size(22.dp))
+    Text(stringResource(title), style = HomeType.body, color = t.text, modifier = Modifier.weight(1f))
+    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = t.secondaryText.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
+})
+
+/** Automation: the scheduled tasks and the events and calls. */
+private fun LazyListScope.automation(model: AppModel) {
+    section(
+        "automation",
+        header = { stringResource(R.string.settings_section_automation) },
+        rows = listOf(
+            pageRow("tasks", R.string.settings_tasks, Icons.Outlined.Schedule, HubPage.Tasks, model),
+            pageRow("events", R.string.settings_events, Icons.Outlined.Bolt, HubPage.Events, model),
+        ),
+    )
+}
+
+/** Usage: by model and by app. */
+private fun LazyListScope.usage(model: AppModel) {
+    section(
+        "usage",
+        header = { stringResource(R.string.settings_section_usage) },
+        rows = listOf(
+            pageRow("model-usage", R.string.settings_model_usage, Icons.Outlined.BarChart, HubPage.ModelUsage, model),
+            pageRow("app-usage", R.string.settings_app_usage, Icons.Outlined.Timeline, HubPage.AppUsage, model),
+        ),
+    )
+}
+
+/** Packages: the Space's apps and connections. */
+private fun LazyListScope.packages(model: AppModel) {
+    section(
+        "packages",
+        header = { stringResource(R.string.settings_section_packages) },
+        rows = listOf(pageRow("packages", R.string.settings_packages, Icons.Outlined.Inventory2, HubPage.Packages, model)),
+    )
+}
+
+/** The Space's pages the panel keeps outside its settings (tiles on its home): inbox, chat, terminal. */
 private fun LazyListScope.pages(model: AppModel) {
-    fun row(key: String, title: Int, icon: ImageVector, page: HubPage) = SettingsRow(key, onClick = { model.hubPage = page }, content = {
-        val t = AiTheme.tokens
-        Icon(icon, contentDescription = null, tint = t.accent, modifier = Modifier.size(22.dp))
-        Text(stringResource(title), style = HomeType.body, color = t.text, modifier = Modifier.weight(1f))
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = t.secondaryText.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
-    })
     section(
         "pages",
         header = { stringResource(R.string.settings_space) },
         footer = { Footer(stringResource(R.string.settings_pages_footer)) },
         rows = listOf(
-            row("inbox", R.string.settings_inbox, Icons.Outlined.Inbox, HubPage.Inbox),
-            row("chat", R.string.settings_chat, Icons.Outlined.Forum, HubPage.Chat(null)),
-            row("tasks", R.string.settings_tasks, Icons.Outlined.Schedule, HubPage.Tasks),
-            row("model-usage", R.string.settings_model_usage, Icons.Outlined.BarChart, HubPage.ModelUsage),
-            row("app-usage", R.string.settings_app_usage, Icons.Outlined.Timeline, HubPage.AppUsage),
-            row("app-models", R.string.settings_app_models, Icons.Outlined.Memory, HubPage.AppModels),
-            row("events", R.string.settings_events, Icons.Outlined.Bolt, HubPage.Events),
-            row("packages", R.string.settings_packages, Icons.Outlined.Inventory2, HubPage.Packages),
-            row("terminal", R.string.settings_terminal, Icons.Outlined.Terminal, HubPage.Terminal),
+            pageRow("inbox", R.string.settings_inbox, Icons.Outlined.Inbox, HubPage.Inbox, model),
+            pageRow("chat", R.string.settings_chat, Icons.Outlined.Forum, HubPage.Chat(null), model),
+            pageRow("terminal", R.string.settings_terminal, Icons.Outlined.Terminal, HubPage.Terminal, model),
         ),
     )
 }
 
 private fun LazyListScope.peerRows(peers: List<PeerStatus>) {
-    section(
+    card(
         "peers",
-        header = { stringResource(R.string.settings_peers) },
+        spaced = true,
+        subhead = { stringResource(R.string.settings_peers) },
         rows = peers.map { peer ->
             SettingsRow("peer-${peer.name}", content = {
                 StateRow(
@@ -656,9 +735,10 @@ private fun LazyListScope.peerRows(peers: List<PeerStatus>) {
 }
 
 private fun LazyListScope.serviceRows(services: List<SpaceService>, icons: IconStore) {
-    section(
+    card(
         "services",
-        header = { stringResource(R.string.settings_services) },
+        spaced = true,
+        subhead = { stringResource(R.string.settings_services) },
         rows = services.distinctBy { it.id }.map { service ->
             SettingsRow("service-${service.id}", content = {
                 val t = AiTheme.tokens
@@ -677,9 +757,10 @@ private fun LazyListScope.serviceRows(services: List<SpaceService>, icons: IconS
 private fun LazyListScope.backupRows(s: SpaceSettings) {
     val target = s.backupTarget
     val footer: (@Composable () -> Unit)? = target?.let { t -> @Composable { Footer(t) } }
-    section(
+    card(
         "backups",
-        header = { stringResource(R.string.settings_backups) },
+        spaced = true,
+        subhead = { stringResource(R.string.settings_backups) },
         footer = footer,
         rows = s.backups.distinctBy { it.id }.map { backup ->
             SettingsRow("backup-${backup.id}", content = {
@@ -759,10 +840,11 @@ private fun backupDetail(backup: SpaceBackup): String {
 
 // The session and the app
 
-private fun LazyListScope.session(model: AppModel) {
+/** Account: the sign-in to this Space, and the web panel that manages it. */
+private fun LazyListScope.account(model: AppModel) {
     section(
-        "session",
-        header = { stringResource(R.string.settings_session) },
+        "account",
+        header = { stringResource(R.string.settings_section_account) },
         footer = { Footer(stringResource(R.string.settings_session_footer)) },
         rows = listOf(
             SettingsRow("web-panel", onClick = { model.openWebPanel() }, content = {
