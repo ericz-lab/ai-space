@@ -495,3 +495,18 @@
 "new session" = "新会话";
 "No earlier chats" = "还没有之前的对话";
 "Add to the reply in progress…" = "补充说明，会插入正在进行的回复…";
+
+/* Settings in the panel's sections */
+"General" = "通用";
+"Account" = "账户";
+"Packages" = "安装包";
+"Version %@" = "版本 %@";
+"all ok" = "全部正常";
+"%lld issues" = "%lld 项异常";
+"%lld services" = "%lld 个服务";
+"%lld backups" = "%lld 个备份";
+"%lld peers" = "%lld 个对等节点";
+"No services" = "没有服务";
+"Shown" = "已展开";
+"Hidden" = "已收起";
+"Touch and hold a Space to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server." = "按住一个 Space 可以移除它。在这里移除 Space，只会让这台 iPhone 忘记它的地址、登录状态和屏幕布局，服务器上不会有任何变化。";
