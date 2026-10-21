@@ -106,6 +106,15 @@ class ChatStepsTests {
         assertEquals(listOf(listOf("1"), listOf("2", "3"), listOf("4"), listOf("5")), ChatTools.groups(steps).map { g -> g.map { it.id } })
     }
 
+    @Test fun aFoldedRunNamesCommandsOnlyWhenEveryCallInItIsOne() {
+        fun run(vararg names: String) = names.mapIndexed { i, name -> ChatStep("$i", ChatStepKind.Tool, title = name, state = ChatStepState.Succeeded) }
+        assertTrue(ChatTools.allCommands(run("Bash", "exec_command", "run_command")))
+        assertFalse(ChatTools.allCommands(run("Bash", "Read")))
+        assertFalse(ChatTools.allCommands(run("Read")))
+        assertFalse(ChatTools.allCommands(emptyList()))
+        assertFalse(ChatTools.allCommands(listOf(ChatStep("t", ChatStepKind.Text))))
+    }
+
     @Test fun chatImagesAreCheckedByTheirSignatureAndTheSpacesLimits() {
         fun bytes(vararg b: Int) = ByteArray(b.size) { b[it].toByte() }
         assertEquals("image/png", ChatImage.mediaType(bytes(137, 80, 78, 71, 13, 10, 26, 10, 0)))

@@ -304,6 +304,28 @@ class ChatStoreTests {
         assertEquals(2, store.bubbles.size)
         assertEquals(listOf(ChatStepKind.Tool), store.bubbles.last().steps.map { it.kind })
         assertEquals(listOf("Bash"), store.bubbles.last().tools)
+        // A restored reply opens its runs of calls folded; the person's message is not a reply.
+        assertTrue(store.bubbles.last().historic)
+        assertFalse(store.bubbles.first().historic)
+    }
+
+    /** As the panel: a turn followed live keeps every call in view once it ends; only a reopened session folds. */
+    @Test fun aFinishedLiveTurnKeepsItsCallsUnfolded() = runBlocking {
+        fun call(id: String) = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"$id\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}}]}}"
+        fun result(id: String) = "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"$id\",\"content\":\"a\",\"is_error\":false}]}}"
+        server.enqueue(turn(
+            "id: 1\ndata: ${call("t1")}\n\n" + "id: 2\ndata: ${result("t1")}\n\n" +
+                "id: 3\ndata: ${call("t2")}\n\n" + "id: 4\ndata: ${result("t2")}\n\n" +
+                "id: 5\ndata: {\"type\":\"done\"}\n\n",
+        ))
+        val store = store(this)
+        store.draft.value = "list"
+        store.send()
+        finished(store)
+        val reply = store.bubbles.last()
+        assertEquals(2, reply.steps.count { it.kind == ChatStepKind.Tool })
+        assertFalse(reply.live)
+        assertFalse(reply.historic)
     }
 
     @Test fun aSettledTurnAsksForTheCatalogue() = runBlocking {

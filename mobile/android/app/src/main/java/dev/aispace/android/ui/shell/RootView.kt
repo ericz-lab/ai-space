@@ -33,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -42,16 +43,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -67,9 +72,11 @@ import dev.aispace.android.ui.hub.HubCover
 import dev.aispace.android.ui.settings.SettingsPage
 import dev.aispace.android.ui.theme.AISpaceTheme
 import dev.aispace.android.ui.theme.AiTheme
+import dev.aispace.android.ui.theme.Sheet
 import dev.aispace.android.ui.theme.SpaceBackdrop
 import dev.aispace.android.ui.theme.ThemeTokens
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlin.math.abs
 
 /** The app: the connect page while no Space is saved, else the Space's pages and what lies over them. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -170,6 +177,23 @@ fun MainTabs(model: AppModel, connection: Connection) {
             backdrops.image(name, t.dark, windowSize.width, windowSize.height)
         } else null
         SpaceBackdrop(artwork)
+        // Settings is a translucent sheet over the backdrop (as the panel's settings): drawn behind the
+        // pager where the Settings page is, so the blur stays still while the page slides over it.
+        val settingsAt = pages.lastIndex
+        val settingsNear by remember(settingsAt) {
+            derivedStateOf { abs(state.currentPage + state.currentPageOffsetFraction - settingsAt) < 1f }
+        }
+        if (settingsNear) {
+            val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+            Sheet(
+                artwork,
+                Modifier.drawWithContent {
+                    val edge = (settingsAt - state.currentPage - state.currentPageOffsetFraction) * size.width
+                    if (rtl) clipRect(right = size.width - edge) { this@drawWithContent.drawContent() }
+                    else clipRect(left = edge) { this@drawWithContent.drawContent() }
+                },
+            )
+        }
         HorizontalPager(
             state = state,
             beyondViewportPageCount = 1,
@@ -197,7 +221,7 @@ fun MainTabs(model: AppModel, connection: Connection) {
         var lastHub by remember { mutableStateOf<HubPage?>(null) }
         model.hubPage?.let { if (lastHub != it) lastHub = it }
         AnimatedVisibility(model.hubPage != null, enter = coverIn(), exit = coverOut()) {
-            lastHub?.let { page -> HubCover(model, connection, page, loader, icons, onClose = { model.hubPage = null }) }
+            lastHub?.let { page -> HubCover(model, connection, page, loader, icons, artwork, onClose = { model.hubPage = null }) }
         }
         AnimatedVisibility(model.showingWebPanel, enter = coverIn(), exit = coverOut()) {
             WebPanelView(model, connection, remember(connection) { model.panel(connection) })

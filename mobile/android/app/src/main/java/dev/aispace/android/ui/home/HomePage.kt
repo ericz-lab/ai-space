@@ -124,6 +124,7 @@ import dev.aispace.android.live.LoaderStatus
 import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.ConnectingMark
 import dev.aispace.android.ui.theme.ThemeTokens
+import dev.aispace.android.ui.theme.borderlessGlass
 import dev.aispace.android.ui.theme.glass
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -383,6 +384,7 @@ private fun UniversalSearch(env: HomeEnv, fieldTop: Dp, modifier: Modifier, page
             onVoiceBusy = { voiceBusy = it },
             onSubmit = { submit += 1 },
             modifier = Modifier.align(Alignment.TopCenter).padding(top = fieldTop),
+            resolving = query.isNotBlank() && model.omnibox(env.connection).resolving,
         )
         val showing = query.isNotBlank()
         OmniboxResults(
@@ -397,7 +399,7 @@ private fun UniversalSearch(env: HomeEnv, fieldTop: Dp, modifier: Modifier, page
             modifier = Modifier
                 .padding(top = fieldTop + 48.dp + 8.dp, start = 24.dp, end = 24.dp, bottom = bottom + 12.dp)
                 .fillMaxWidth()
-                .then(if (showing) Modifier.glass(24.dp).padding(8.dp) else Modifier),
+                .then(if (showing) Modifier.borderlessGlass(24.dp).padding(8.dp) else Modifier),
         )
     }
 }
@@ -723,7 +725,7 @@ private fun SearchField(
             .padding(horizontal = 24.dp)
             .fillMaxWidth()
             .height(48.dp)
-            .glass(24.dp)
+            .borderlessGlass(24.dp)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { requester.requestFocus() }
             .padding(horizontal = 18.dp),
         contentAlignment = Alignment.CenterStart,

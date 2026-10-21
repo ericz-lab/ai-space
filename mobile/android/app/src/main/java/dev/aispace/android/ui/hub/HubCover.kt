@@ -1,5 +1,6 @@
 package dev.aispace.android.ui.hub
 
+import android.graphics.Bitmap
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -92,6 +93,8 @@ import dev.aispace.android.live.IconStore
 import dev.aispace.android.ui.common.EntryIcon
 import dev.aispace.android.ui.terminal.TerminalPage
 import dev.aispace.android.ui.theme.AiTheme
+import dev.aispace.android.ui.theme.Sheet
+import dev.aispace.android.ui.theme.cardPiece
 import dev.aispace.android.ui.theme.ThemeTokens
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -108,13 +111,17 @@ import java.util.Locale
  * stack, then closes the cover through [onClose].
  */
 @Composable
-fun HubCover(model: AppModel, connection: Connection, page: HubPage, loader: CatalogueLoader, icons: IconStore, onClose: () -> Unit) {
+fun HubCover(model: AppModel, connection: Connection, page: HubPage, loader: CatalogueLoader, icons: IconStore, artwork: Bitmap?, onClose: () -> Unit) {
     HubText.bind(LocalContext.current)
     val nav = remember(page) { HubNav() }
     nav.onClose = onClose
     BackHandler { nav.back() }
-    CompositionLocalProvider(LocalHubNav provides nav) {
-        Box(Modifier.fillMaxSize().background(AiTheme.tokens.ground)) {
+    // The chat and the pages the panel keeps inside its settings sit on the same translucent sheet;
+    // the inbox and the terminal are panels of their own, on the ground.
+    val sheet = page != HubPage.Inbox && page != HubPage.Terminal
+    CompositionLocalProvider(LocalHubNav provides nav, LocalOnSheet provides sheet) {
+        Box(Modifier.fillMaxSize().then(if (sheet) Modifier else Modifier.background(AiTheme.tokens.ground))) {
+            if (sheet) Sheet(artwork)
             val api = loader.api
             when (page) {
                 HubPage.Inbox -> InboxListPage(model, connection, api)
@@ -176,6 +183,20 @@ internal class HubNav {
 
 internal val LocalHubNav = staticCompositionLocalOf { HubNav() }
 
+/** Whether the page is drawn on the translucent sheet, where cards are outlined rather than filled. */
+internal val LocalOnSheet = staticCompositionLocalOf { false }
+
+/**
+ * A card's surface: on the sheet a faint fill with a hairline edge, as the panel's settings cards
+ * (`.setcard`); elsewhere the solid card.
+ */
+@Composable
+internal fun Modifier.card(shape: Shape): Modifier {
+    val t = AiTheme.tokens
+    return if (LocalOnSheet.current) clip(shape).background(t.text.copy(alpha = 0.02f)).border(1.dp, t.hairline, shape)
+    else clip(shape).background(t.solid)
+}
+
 // Page frame
 
 /** A page's bar: Close on the cover's first page, Back further in; its own actions at the end. */
@@ -189,7 +210,7 @@ internal fun HubScaffold(
     val nav = LocalHubNav.current
     val t = AiTheme.tokens
     Scaffold(
-        containerColor = t.ground,
+        containerColor = Color.Transparent,
         contentColor = t.text,
         topBar = {
             TopAppBar(
@@ -205,8 +226,8 @@ internal fun HubScaffold(
                 },
                 actions = actions,
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = t.ground,
-                    scrolledContainerColor = t.ground,
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
                     titleContentColor = t.text,
                     navigationIconContentColor = t.accent,
                     actionIconContentColor = t.accent,
@@ -267,7 +288,7 @@ internal fun LazyListScope.group(
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             SectionHeader(header, headerContent)
             Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(AiTheme.tokens.solid),
+                Modifier.fillMaxWidth().card(RoundedCornerShape(12.dp)),
                 content = content,
             )
             if (footer != null) SectionFooter(footer)
@@ -296,13 +317,17 @@ internal fun <T> LazyListScope.groupItems(
             topStart = if (first) 12.dp else 0.dp, topEnd = if (first) 12.dp else 0.dp,
             bottomStart = if (last) 12.dp else 0.dp, bottomEnd = if (last) 12.dp else 0.dp,
         )
+        val t = AiTheme.tokens
+        val outlined = LocalOnSheet.current
         Column(
             Modifier.fillMaxWidth()
                 .padding(start = 16.dp, end = 16.dp, top = if (first && header == null && headerContent == null) 8.dp else 0.dp, bottom = if (last) 8.dp else 0.dp)
-                .clip(shape)
-                .background(AiTheme.tokens.solid),
+                .then(
+                    if (outlined) Modifier.cardPiece(first, last, 12.dp, t.text.copy(alpha = 0.02f), t.hairline)
+                    else Modifier.clip(shape).background(t.solid),
+                ),
         ) {
-            if (!first) HorizontalDivider(Modifier.padding(start = 16.dp), color = AiTheme.tokens.hairline)
+            if (!first && !outlined) HorizontalDivider(Modifier.padding(start = 16.dp), color = t.hairline)
             row(item)
         }
     }

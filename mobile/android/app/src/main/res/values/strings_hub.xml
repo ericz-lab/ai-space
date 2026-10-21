@@ -146,9 +146,6 @@
     <string name="chat_message">Message</string>
     <string name="chat_send">Send</string>
     <string name="chat_stop">Stop</string>
-    <string name="chat_new">New Chat</string>
-    <string name="chat_earlier">Earlier chats</string>
-    <string name="chat_chats">Chats</string>
     <string name="chat_starting">Starting…</string>
     <string name="chat_reconnecting">Reconnecting…</string>
     <string name="chat_thinking">Thinking…</string>
@@ -182,6 +179,8 @@
     <string name="chat_tool_code">Code</string>
     <string name="chat_tool_task">Agent</string>
     <string name="chat_tool_plan">Plan</string>
+    <string name="chat_tools_commands">Ran commands</string>
+    <string name="chat_tools_called">Called tools</string>
     <string name="chat_waiting_answer">Waiting for your answer…</string>
     <string name="chat_question">Question</string>
     <string name="chat_question_answered">Answered</string>
@@ -194,6 +193,13 @@
     <string name="chat_remove_image">Remove image</string>
     <string name="chat_image_unreadable">Could not read this image.</string>
     <string name="chat_image_limits">Add up to 4 images, 5 MB each and 10 MB in total.</string>
+    <string name="chat_in_session">in session</string>
+    <string name="chat_new_session">new session</string>
+    <string name="chat_history">History</string>
+    <string name="chat_new_conversation">New conversation</string>
+    <string name="chat_no_sessions">No past sessions</string>
+    <string name="chat_untitled">(untitled)</string>
+    <string name="chat_message_busy">Add to the reply in progress…</string>
     <string name="terminal_title">Terminal</string>
     <string name="terminal_recent">Recent sessions</string>
     <string name="terminal_new_session">New session</string>

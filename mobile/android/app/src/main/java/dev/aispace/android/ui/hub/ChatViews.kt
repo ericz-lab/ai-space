@@ -1,6 +1,45 @@
 package dev.aispace.android.ui.hub
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.sp
+import dev.aispace.android.core.ChatSessionInfo
+import dev.aispace.android.core.Times
+import dev.aispace.android.ui.shell.rememberReduceMotion
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -15,11 +54,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,16 +64,12 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowCircleUp
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Code
@@ -44,6 +77,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Search
@@ -51,16 +85,12 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -155,8 +185,11 @@ internal fun AgentsPage(model: AppModel, connection: Connection, loader: Catalog
 }
 
 /**
- * One agent's conversation: the messages, the reply as it streams in, and the field to write in.
- * The model and the permission mode are the agent's defaults; the web panel's chat can pick them.
+ * One agent's conversation, as the panel's chat on a phone (src/web/Chat.tsx, styles.css `.chat`): a
+ * head with the agent, whether the conversation is new, in a session or thinking, and Stop, History and
+ * New conversation; the messages, the reply as it streams in, and the field to write in, on the
+ * translucent sheet. The model and the permission mode are the agent's defaults; the web panel's chat
+ * can pick them.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -167,7 +200,7 @@ internal fun ChatPage(agent: CatalogueEntry, store: ChatStore, icons: IconImages
     val bubbles = store.bubbles
     val running = store.isRunning
     val listState = rememberLazyListState()
-    var menu by remember { mutableStateOf(false) }
+    var history by remember { mutableStateOf(false) }
     val context = LocalContext.current
     // Photos being read: Send waits for them, so a message never leaves without its pictures.
     var reading by remember { mutableStateOf(0) }
@@ -198,155 +231,248 @@ internal fun ChatPage(agent: CatalogueEntry, store: ChatStore, icons: IconImages
         listState.scrollToItem((if (bubbles.isEmpty()) 1 else 0) + bubbles.size)
     }
 
-    HubScaffold(
-        agent.displayTitle(),
-        actions = {
-            Box {
-                IconButton(onClick = { menu = true }, enabled = !running && reading == 0) {
-                    Icon(Icons.Filled.History, contentDescription = stringResource(R.string.chat_chats))
-                }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_new)) },
-                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                        onClick = {
-                            menu = false
-                            store.newChat()
-                        },
-                    )
-                    val sessions = store.sessions
-                    if (sessions.isNotEmpty()) {
-                        HorizontalDivider()
-                        Text(
-                            stringResource(R.string.chat_earlier),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = t.secondaryText,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        )
-                        for (session in sessions.take(20)) {
-                            DropdownMenuItem(
-                                text = { Text(session.title?.takeIf { it.isNotEmpty() }?.take(60) ?: session.sid, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                onClick = {
-                                    menu = false
-                                    scope.launch { store.open(session) }
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-        },
-    ) { padding ->
-        Column(
-            Modifier.fillMaxSize()
-                .padding(padding)
-                .consumeWindowInsets(padding)
-                .imePadding(),
+    Column(
+        Modifier.fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom)),
+    ) {
+        ChatHead(
+            agent, icons, store, running,
+            history = history,
+            onHistory = { history = !history },
+            onNew = {
+                history = false
+                store.newChat()
+            },
+            onPick = { session ->
+                history = false
+                scope.launch { store.open(session) }
+            },
+        )
+        LazyColumn(
+            Modifier.weight(1f).fillMaxWidth(),
+            state = listState,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            LazyColumn(
-                Modifier.weight(1f).fillMaxWidth(),
-                state = listState,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (bubbles.isEmpty()) item(key = "intro") { Intro(agent, icons) }
-                items(bubbles, key = { it.id }) {
-                    ChatBubble(it, answer = if (it.live) { id, allow, answers -> store.answer(id, allow, answers) } else null)
-                }
-                item(key = "end") { Spacer(Modifier.height(1.dp)) }
+            if (bubbles.isEmpty()) item(key = "intro") { Intro(agent, icons) }
+            items(bubbles, key = { it.id }) {
+                ChatBubble(it, answer = if (it.live) { id, allow, answers -> store.answer(id, allow, answers) } else null)
             }
-            store.error?.let {
-                Text(
-                    stringResource(R.string.hub_unavailable, it),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ThemeTokens.danger,
-                    modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 6.dp),
-                )
-            }
-            store.imageError?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ThemeTokens.danger,
-                    modifier = Modifier.padding(horizontal = 14.dp).padding(bottom = 6.dp),
-                )
-            }
-            if (store.images.isNotEmpty()) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    for (image in store.images) {
-                        Box {
-                            ImageThumb(image, 64.dp)
-                            val remove = stringResource(R.string.chat_remove_image)
-                            Icon(
-                                Icons.Filled.Cancel, contentDescription = remove, tint = t.text,
-                                modifier = Modifier.align(Alignment.TopEnd).padding(2.dp).size(20.dp)
-                                    .clip(RoundedCornerShape(10.dp)).background(t.solid)
-                                    .clickable(enabled = reading == 0) { store.removeImage(image.id) },
-                            )
-                        }
-                    }
-                }
-            }
+            item(key = "end") { Spacer(Modifier.height(1.dp)) }
+        }
+        store.error?.let {
+            Text(
+                stringResource(R.string.hub_unavailable, it),
+                style = MaterialTheme.typography.bodySmall,
+                color = ThemeTokens.danger,
+                modifier = Modifier.padding(horizontal = 18.dp).padding(bottom = 6.dp),
+            )
+        }
+        store.imageError?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = t.secondaryText,
+                modifier = Modifier.padding(horizontal = 18.dp).padding(bottom = 6.dp),
+            )
+        }
+        if (store.images.isNotEmpty()) {
             Row(
-                Modifier.fillMaxWidth().background(t.solid.copy(alpha = 0.9f)).padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.Bottom,
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                IconButton(
-                    onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                    enabled = reading == 0 && store.images.size < ChatImage.MAX_COUNT,
-                ) {
-                    Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = stringResource(R.string.chat_add_images), tint = t.secondaryText)
-                }
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { store.draft.value = it },
-                    placeholder = { Text(stringResource(R.string.chat_message)) },
-                    maxLines = 6,
-                    shape = RoundedCornerShape(18.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = t.solid,
-                        unfocusedContainerColor = t.solid,
-                        focusedBorderColor = t.accent,
-                        unfocusedBorderColor = t.hairline,
-                    ),
-                    modifier = Modifier.weight(1f),
-                )
-                if (running) {
-                    IconButton(onClick = { store.stop() }) {
-                        Icon(Icons.Filled.StopCircle, contentDescription = stringResource(R.string.chat_stop), tint = ThemeTokens.danger, modifier = Modifier.size(32.dp))
-                    }
-                }
-                // A message written during a turn joins it; Send stays beside Stop while the field
-                // has something to add.
-                if (!running || draft.isNotBlank() || store.images.isNotEmpty()) {
-                    val canSend = store.canSend && reading == 0
-                    IconButton(onClick = { store.send() }, enabled = canSend) {
+                for (image in store.images) {
+                    Box {
+                        ImageThumb(image, 64.dp)
+                        val remove = stringResource(R.string.chat_remove_image)
                         Icon(
-                            Icons.Filled.ArrowCircleUp,
-                            contentDescription = stringResource(R.string.chat_send),
-                            tint = if (canSend) t.accent else t.secondaryText,
-                            modifier = Modifier.size(32.dp),
+                            Icons.Filled.Cancel, contentDescription = remove, tint = t.text,
+                            modifier = Modifier.align(Alignment.TopEnd).padding(2.dp).size(20.dp)
+                                .clip(RoundedCornerShape(10.dp)).background(t.solid)
+                                .clickable(enabled = reading == 0) { store.removeImage(image.id) },
                         )
                     }
                 }
             }
         }
+        // The composer (`.chat-input`): a hairline above, the attach button, the field on glass, and
+        // the round send button in the accent's gradient.
+        HorizontalDivider(color = t.hairline)
+        Row(
+            Modifier.fillMaxWidth().padding(start = 10.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            IconButton(
+                onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                enabled = reading == 0 && store.images.size < ChatImage.MAX_COUNT,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(Icons.Outlined.AttachFile, contentDescription = stringResource(R.string.chat_add_images), tint = t.secondaryText, modifier = Modifier.size(20.dp))
+            }
+            val shape = RoundedCornerShape(t.radiusSmall)
+            BasicTextField(
+                value = draft,
+                onValueChange = { store.draft.value = it },
+                maxLines = 6,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = t.text),
+                cursorBrush = SolidColor(t.accent),
+                modifier = Modifier.weight(1f).heightIn(min = 40.dp),
+                decorationBox = { field ->
+                    Box(
+                        Modifier.clip(shape).background(t.sheetGlass).border(1.dp, t.hairline, shape).padding(horizontal = 12.dp, vertical = 9.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        if (draft.isEmpty()) {
+                            Text(
+                                stringResource(if (running) R.string.chat_message_busy else R.string.chat_message),
+                                style = MaterialTheme.typography.bodyLarge, color = t.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        field()
+                    }
+                },
+            )
+            // A message written during a turn joins it, so Send stays while the turn runs; Stop is in the head.
+            val canSend = store.canSend && reading == 0
+            SendButton(enabled = canSend) { store.send() }
+        }
+    }
+}
+
+/** The chat's head (`.chat-head`): back or close, the agent, the conversation's state, and its buttons. */
+@Composable
+private fun ChatHead(
+    agent: CatalogueEntry,
+    icons: IconImages,
+    store: ChatStore,
+    running: Boolean,
+    history: Boolean,
+    onHistory: () -> Unit,
+    onNew: () -> Unit,
+    onPick: (ChatSessionInfo) -> Unit,
+) {
+    val nav = LocalHubNav.current
+    val t = AiTheme.tokens
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (nav.depth == 0) {
+                IconButton(onClick = { nav.close() }) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.hub_close), tint = t.accent) }
+            } else {
+                IconButton(onClick = { nav.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.hub_back), tint = t.accent) }
+            }
+            EntryIcon(agent.icon, Icons.Filled.Person, icons, size = 26.dp, isRound = true)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                agent.displayTitle(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = t.text,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                stringResource(
+                    when {
+                        running -> R.string.chat_thinking
+                        store.sessionID != null -> R.string.chat_in_session
+                        else -> R.string.chat_new_session
+                    },
+                ),
+                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Normal, color = t.secondaryText, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            )
+            if (running) HeadButton(Icons.Filled.Stop, stringResource(R.string.chat_stop)) { store.stop() }
+            HeadButton(Icons.Outlined.History, stringResource(R.string.chat_history), on = history, enabled = !running) { onHistory() }
+            HeadButton(Icons.Outlined.EditNote, stringResource(R.string.chat_new_conversation), enabled = !running) { onNew() }
+        }
+        // The history button opens the past sessions under the head (`.chat-hist`).
+        if (history) {
+            val sessions = store.sessions
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 260.dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp).padding(bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                if (sessions.isEmpty()) {
+                    Text(
+                        stringResource(R.string.chat_no_sessions), style = MaterialTheme.typography.labelMedium, color = t.secondaryText,
+                        textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    )
+                }
+                for (session in sessions) {
+                    val on = session.sid == store.sessionID
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .background(if (on) t.text.copy(alpha = 0.10f) else Color.Transparent)
+                            .clickable { onPick(session) }
+                            .padding(horizontal = 10.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            session.title?.takeIf { it.isNotEmpty() } ?: stringResource(R.string.chat_untitled),
+                            style = MaterialTheme.typography.bodyMedium, color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        session.ts?.let {
+                            Text(Times.ago(Times.fromMillis(it)), style = MaterialTheme.typography.labelSmall, color = t.secondaryText, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalDivider(color = t.hairline)
+    }
+}
+
+/** A flat round button of the head (`.chat-hbtn`): muted, the link colour while [on]. */
+@Composable
+private fun HeadButton(icon: ImageVector, label: String, on: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    val t = AiTheme.tokens
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(40.dp)) {
+        Box(
+            Modifier.size(32.dp).clip(RoundedCornerShape(8.dp))
+                .background(if (on) ThemeTokens.link.copy(alpha = 0.14f) else Color.Transparent),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon, contentDescription = label, modifier = Modifier.size(18.dp),
+                tint = when {
+                    !enabled -> t.secondaryText.copy(alpha = 0.4f)
+                    on -> ThemeTokens.link
+                    else -> t.secondaryText
+                },
+            )
+        }
+    }
+}
+
+/** The send button (`.chat-send`): a 36 dp circle in the accent's gradient toward the link colour. */
+@Composable
+private fun SendButton(enabled: Boolean, onClick: () -> Unit) {
+    val t = AiTheme.tokens
+    Box(
+        Modifier.size(40.dp).alpha(if (enabled) 1f else 0.4f).clip(CircleShape)
+            .background(Brush.linearGradient(listOf(t.accent, ThemeTokens.link)))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Filled.ArrowUpward, contentDescription = stringResource(R.string.chat_send), tint = Color.White, modifier = Modifier.size(20.dp))
     }
 }
 
 @Composable
 private fun Intro(agent: CatalogueEntry, icons: IconImages) {
+    // `.chat-hello`: the agent's picture, its name and what it does, quiet and centred.
     Column(
-        Modifier.fillMaxWidth().padding(top = 40.dp, start = 20.dp, end = 20.dp),
+        Modifier.fillMaxWidth().padding(top = 28.dp, start = 20.dp, end = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        EntryIcon(agent.icon, Icons.Filled.Person, icons, size = 64.dp, isRound = true)
-        Text(agent.displayTitle(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = AiTheme.tokens.text)
+        EntryIcon(agent.icon, Icons.Filled.Person, icons, size = 52.dp, isRound = true)
+        Spacer(Modifier.height(4.dp))
+        Text(agent.displayTitle(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = AiTheme.tokens.text)
         agent.displayDetail()?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = AiTheme.tokens.secondaryText, textAlign = TextAlign.Center)
         }
@@ -356,25 +482,39 @@ private fun Intro(agent: CatalogueEntry, icons: IconImages) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChatBubble(bubble: ChatStore.Bubble, answer: (suspend (String, Boolean, Map<String, List<String>>?) -> String?)?) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) { BubbleRow(bubble, answer, widest = maxWidth * 0.88f) }
+}
+
+/**
+ * The person's message is a light bubble in the link colour, its lower trailing corner tucked in
+ * (`.msg.user`); the reply has no bubble and runs at [widest], 88 % of the width (`.msg.ai`).
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BubbleRow(bubble: ChatStore.Bubble, answer: (suspend (String, Boolean, Map<String, List<String>>?) -> String?)?, widest: androidx.compose.ui.unit.Dp) {
     val t = AiTheme.tokens
-    val shape = RoundedCornerShape(16.dp)
+    val r = t.radiusSmall
+    val shape = RoundedCornerShape(topStart = r, topEnd = r, bottomEnd = 4.dp, bottomStart = r)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (bubble.isUser) Arrangement.End else Arrangement.Start) {
-        if (bubble.isUser) Spacer(Modifier.size(40.dp, 1.dp))
         Column(
-            Modifier.weight(1f, fill = false)
-                .clip(shape)
-                .background(if (bubble.isUser) t.accent else t.solid)
-                .then(if (bubble.isUser) Modifier else Modifier.hairline(t.hairline, shape))
-                .padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            if (bubble.isUser) {
+                Modifier.widthIn(max = widest)
+                    .clip(shape)
+                    .background(ThemeTokens.link.copy(alpha = 0.14f))
+                    .border(1.dp, ThemeTokens.link.copy(alpha = 0.20f), shape)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            } else {
+                Modifier.width(widest).padding(horizontal = 4.dp, vertical = 8.dp)
+            },
+            verticalArrangement = Arrangement.spacedBy(if (bubble.isUser) 6.dp else 14.dp),
         ) {
             if (bubble.isUser) {
                 if (bubble.images.isNotEmpty()) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (image in bubble.images) ImageThumb(image, 88.dp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (image in bubble.images) ImageThumb(image, 96.dp)
                     }
                 }
-                if (bubble.text.isNotEmpty()) RichText(bubble.text, Color.White, Color.White)
+                if (bubble.text.isNotEmpty()) RichText(bubble.text, t.text, ThemeTokens.link)
             } else {
                 // The reply's work in the order it happened: text, runs of tool calls, approvals and
                 // questions, messages added while it ran (src/web/Chat.tsx).
@@ -382,7 +522,8 @@ private fun ChatBubble(bubble: ChatStore.Bubble, answer: (suspend (String, Boole
                 for (group in ChatTools.groups(steps)) {
                     val step = group.first()
                     when (step.kind) {
-                        ChatStepKind.Tool -> ToolRows(group)
+                        // A past session opens on its answers: a run of calls folds to one line.
+                        ChatStepKind.Tool -> if (bubble.historic && group.size > 1) ToolGroup(group) else ToolRows(group)
                         ChatStepKind.Text -> if (step.text.isNotEmpty()) RichText(step.text, t.text, ThemeTokens.link)
                         ChatStepKind.Approval -> {
                             val approval = step.approval ?: continue
@@ -401,8 +542,12 @@ private fun ChatBubble(bubble: ChatStore.Bubble, answer: (suspend (String, Boole
                 }
                 // Without text among the steps (a reply restored without them, or none yet), the
                 // words follow the work; with it, only how the turn ended does.
-                val words = if (steps.any { it.kind == ChatStepKind.Text }) bubble.note else bubble.text
-                if (!words.isNullOrEmpty()) RichText(words, t.text, ThemeTokens.link)
+                // How the turn ended is a quiet note (`.msg-note`); the agent's own words are text.
+                if (steps.any { it.kind == ChatStepKind.Text }) {
+                    bubble.note?.takeIf { it.isNotEmpty() }?.let { RichText(it, t.secondaryText, ThemeTokens.link) }
+                } else if (bubble.text.isNotEmpty()) {
+                    RichText(bubble.text, t.text, ThemeTokens.link)
+                }
                 for (text in bubble.pending) SteerLine(text, pending = true)
                 val waiting = steps.filter { it.kind == ChatStepKind.Approval && it.state == ChatStepState.Waiting }
                 if (bubble.live && waiting.isNotEmpty()) {
@@ -412,42 +557,84 @@ private fun ChatBubble(bubble: ChatStore.Bubble, answer: (suspend (String, Boole
                     )
                 }
             }
-            bubble.activity?.let { activity ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = t.secondaryText)
-                    Text(activityText(activity), style = MaterialTheme.typography.bodySmall, color = t.secondaryText)
-                }
-            }
+            bubble.activity?.let { activity -> ActivityLine(activityText(activity)) }
         }
-        if (!bubble.isUser) Spacer(Modifier.size(24.dp, 1.dp))
+    }
+}
+
+/** What the turn is doing (`.msg-status`): muted words and a small dot pulsing after them. */
+@Composable
+private fun ActivityLine(text: String) {
+    val t = AiTheme.tokens
+    val still = rememberReduceMotion()
+    val pulse = rememberInfiniteTransition(label = "status")
+    val alpha by pulse.animateFloat(0.25f, 1f, infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "dot")
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Normal, color = t.secondaryText)
+        Box(Modifier.size(4.dp).alpha(if (still) 1f else alpha).clip(CircleShape).background(t.secondaryText))
     }
 }
 
 @Composable
 private fun RichText(text: String, color: Color, link: Color) {
     val t = AiTheme.tokens
-    val rendered = remember(text, color, link) { inlineMarkdown(text, link = link, code = t.hairline) }
-    SelectionContainer { Text(rendered, color = color) }
+    val rendered = remember(text, color, link, t.dark) { inlineMarkdown(text, link = link, code = ThemeTokens.link.copy(alpha = 0.10f)) }
+    // The panel's chat text: 13 px at 1.65 on a desktop; a phone reads it a little larger.
+    SelectionContainer { Text(rendered, color = color, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 24.sp)) }
 }
 
 @Composable
 private fun ImageThumb(image: ChatImage, size: androidx.compose.ui.unit.Dp) {
     val t = AiTheme.tokens
     val bitmap = remember(image.id) { ChatImages.thumbnail(image, 256)?.asImageBitmap() }
-    val shape = RoundedCornerShape(8.dp)
-    Box(Modifier.size(size).clip(shape).background(t.hairline).semantics { contentDescription = image.name }) {
+    val shape = RoundedCornerShape(10.dp)
+    Box(Modifier.size(size).clip(shape).background(Color(0x1F808080)).semantics { contentDescription = image.name }) {
         if (bitmap != null) Image(bitmap, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
 }
 
 /**
- * A run of tool calls as quiet single lines: symbol, title, the call's first line. A success stays
- * muted, a failure turns red, an unfinished call says so; a tap opens the full input and output.
+ * A run of tool calls as quiet single lines: symbol, title, the call's first line. A failure turns
+ * red, an unfinished call says so, and once a call ends its dot says how, red for a failure and
+ * green for a success; a tap opens the full input and output.
  */
 @Composable
 private fun ToolRows(steps: List<ChatStep>) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         for (step in steps) ToolRow(step)
+    }
+}
+
+/**
+ * A run of calls from a past session folded to one line: what kind of work ran and how many calls,
+ * with the calls one tap away (src/web/ChatToolRow.tsx `ToolGroup`).
+ */
+@Composable
+private fun ToolGroup(steps: List<ChatStep>) {
+    val t = AiTheme.tokens
+    var open by remember(steps.first().id) { mutableStateOf(false) }
+    val tint = if (open) t.text else t.secondaryText
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            Modifier.fillMaxWidth()
+                .height(28.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(if (open) t.text.copy(alpha = 0.05f) else Color.Transparent)
+                .clickable { open = !open }
+                .padding(start = 2.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (open) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight,
+                contentDescription = null, tint = tint, modifier = Modifier.padding(end = 6.dp).size(16.dp),
+            )
+            Text(
+                stringResource(if (ChatTools.allCommands(steps)) R.string.chat_tools_commands else R.string.chat_tools_called),
+                fontSize = 13.sp, fontWeight = FontWeight.Medium, color = tint, maxLines = 1,
+            )
+            Text("${steps.size}", fontSize = 11.sp, color = tint.copy(alpha = tint.alpha * 0.7f), maxLines = 1, modifier = Modifier.padding(start = 6.dp))
+        }
+        if (open) Box(Modifier.padding(start = 22.dp, top = 2.dp, bottom = 4.dp)) { ToolRows(steps) }
     }
 }
 
@@ -460,48 +647,67 @@ private fun ToolRow(step: ChatStep) {
     val summary = ChatTools.summary(step.text)
     val expandable = step.output.isNotEmpty() || step.text.trim() != summary
     val failed = step.state == ChatStepState.Failed
-    val tint = if (failed) ThemeTokens.danger else t.secondaryText
     val cue = when (step.state) {
         ChatStepState.Failed -> stringResource(R.string.chat_step_failed)
         ChatStepState.Incomplete -> stringResource(R.string.chat_step_incomplete)
         ChatStepState.Running -> stringResource(R.string.chat_step_running)
         else -> null
     }
+    // `.chat-tool-row`: a 26 px line, glyph, title, dot and the call's first line; an open call's
+    // line is lifted and its glyph turns into the chevron (on a touch screen there is no hover).
+    val lead = if (open) t.text else t.secondaryText
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth()
+                .height(28.dp)
                 .clip(RoundedCornerShape(6.dp))
+                .background(if (open) t.text.copy(alpha = 0.05f) else Color.Transparent)
                 .clickable(enabled = expandable) { open = !open }
-                .padding(vertical = 3.dp),
+                .padding(start = 2.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Icon(toolIcon(variant), contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
-            Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = tint, maxLines = 1)
+            Icon(
+                if (open) Icons.Outlined.ExpandLess else toolIcon(variant), contentDescription = null, tint = lead,
+                modifier = Modifier.padding(end = 6.dp).size(16.dp),
+            )
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = lead, maxLines = 1)
             if (summary.isNotEmpty()) {
+                val dot = when (step.state) {
+                    ChatStepState.Failed -> ThemeTokens.danger
+                    ChatStepState.Succeeded -> ThemeTokens.success
+                    else -> lead.copy(alpha = lead.alpha * 0.6f)
+                }
+                Box(Modifier.padding(horizontal = 8.dp).size(3.dp).clip(CircleShape).background(dot))
                 Text(
-                    summary, style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = tint,
+                    summary, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = if (failed) ThemeTokens.danger else lead,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                 )
             }
-            if (cue != null) Text(cue, style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 1)
-            Spacer(Modifier.weight(1f))
-            if (expandable) {
-                Icon(if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null, tint = t.secondaryText, modifier = Modifier.size(16.dp))
+            if (cue != null) {
+                Text(
+                    cue, fontSize = 11.sp, maxLines = 1, modifier = Modifier.padding(start = 8.dp),
+                    color = when {
+                        failed -> ThemeTokens.danger
+                        step.state == ChatStepState.Incomplete -> lead.copy(alpha = lead.alpha * 0.8f)
+                        else -> lead
+                    },
+                )
             }
         }
         if (open) {
-            val shape = RoundedCornerShape(8.dp)
+            // `.chat-tool-io`: IN and OUT side by side with their labels, on the code colour in a hairline box.
+            val shape = RoundedCornerShape(10.dp)
             Column(
-                Modifier.fillMaxWidth().clip(shape).background(t.ground).padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                Modifier.fillMaxWidth().padding(start = 24.dp, top = 4.dp, bottom = 6.dp)
+                    .clip(shape).background(t.codeBackground).border(1.dp, t.hairline, shape),
             ) {
                 if (step.text.isNotEmpty()) ToolIO(stringResource(R.string.chat_step_in), step.text, t.text)
                 if (step.output.isNotEmpty()) {
-                    ToolIO(stringResource(R.string.chat_step_out), step.output, if (failed) ThemeTokens.danger else t.text)
-                    if (step.output.length >= 12000) {
-                        Text(stringResource(R.string.chat_step_truncated), style = MaterialTheme.typography.labelSmall, color = t.secondaryText)
-                    }
+                    if (step.text.isNotEmpty()) HorizontalDivider(color = t.hairline)
+                    ToolIO(
+                        stringResource(R.string.chat_step_out), step.output, if (failed) ThemeTokens.danger else t.text,
+                        note = if (step.output.length >= 12000) stringResource(R.string.chat_step_truncated) else null,
+                    )
                 }
             }
         }
@@ -509,12 +715,18 @@ private fun ToolRow(step: ChatStep) {
 }
 
 @Composable
-private fun ToolIO(label: String, text: String, color: Color) {
+private fun ToolIO(label: String, text: String, color: Color, note: String? = null) {
     val t = AiTheme.tokens
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = t.secondaryText)
-        SelectionContainer {
-            Text(text, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = color)
+    Row(
+        Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(label, fontSize = 10.5.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp, color = t.secondaryText)
+        Column(Modifier.weight(1f)) {
+            SelectionContainer {
+                Text(text, fontSize = 12.sp, lineHeight = 19.sp, fontFamily = FontFamily.Monospace, color = color)
+            }
+            if (note != null) Text(note, fontSize = 11.sp, color = t.secondaryText)
         }
     }
 }
@@ -590,19 +802,8 @@ private fun QuestionCard(step: ChatStep, answer: (suspend (Boolean, Map<String, 
         ChatStepState.Waiting -> stringResource(R.string.chat_waiting_state)
         else -> stringResource(R.string.chat_not_answered)
     }
-    val shape = RoundedCornerShape(10.dp)
-    Column(
-        Modifier.fillMaxWidth().clip(shape).background(t.ground)
-            .then(Modifier.hairline(if (waiting) ThemeTokens.link.copy(alpha = 0.5f) else t.hairline, shape))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(Icons.Outlined.HelpOutline, contentDescription = null, tint = ThemeTokens.link, modifier = Modifier.size(16.dp))
-            Text(stringResource(R.string.chat_question), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = t.text)
-            Spacer(Modifier.weight(1f))
-            Text(status, style = MaterialTheme.typography.labelSmall, color = if (waiting) ThemeTokens.link else t.secondaryText)
-        }
+    WorkCard(tone = ThemeTokens.link, waiting = waiting, fill = 0.08f, edge = 0.35f) {
+        WorkHead(Icons.Outlined.HelpOutline, ThemeTokens.link, stringResource(R.string.chat_question), status, if (waiting) ThemeTokens.link else t.secondaryText)
         for (q in questions) {
             Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (q.header.isNotEmpty()) Text(q.header, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = t.secondaryText)
@@ -662,18 +863,14 @@ private fun ApprovalCard(approval: ChatApproval, answer: (suspend (Boolean) -> S
     val waiting = approval.state == ChatApprovalState.Waiting
     // Only a waiting request takes an answer, and only while its turn runs.
     val permit = if (waiting) answer else null
-    val shape = RoundedCornerShape(10.dp)
-    Column(
-        Modifier.fillMaxWidth().clip(shape).background(t.ground).then(Modifier.hairline(t.hairline, shape))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(Icons.Outlined.Shield, contentDescription = null, tint = t.accent, modifier = Modifier.size(16.dp))
-            Text(approval.tool, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = t.text)
-            Spacer(Modifier.weight(1f))
-            Text(approvalStateText(approval.state), style = MaterialTheme.typography.labelSmall, color = t.secondaryText)
-        }
+    val stateColor = when (approval.state) {
+        ChatApprovalState.Waiting -> ThemeTokens.warning
+        ChatApprovalState.Allowed -> ThemeTokens.success
+        ChatApprovalState.Denied -> ThemeTokens.danger
+        ChatApprovalState.Cancelled -> t.secondaryText
+    }
+    WorkCard(tone = ThemeTokens.warning, waiting = waiting, fill = 0.10f, edge = 0.40f) {
+        WorkHead(Icons.Outlined.Shield, ThemeTokens.warning, approval.tool, approvalStateText(approval.state), stateColor)
         if (approval.title.isNotEmpty()) {
             Text(approval.title, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = t.text, maxLines = 4, overflow = TextOverflow.Ellipsis)
         }
@@ -718,19 +915,65 @@ private fun approvalStateText(state: ChatApprovalState): String = when (state) {
     ChatApprovalState.Cancelled -> stringResource(R.string.chat_not_answered)
 }
 
-/** A message the person added while the turn ran, waiting for the agent to read it or already read. */
+/**
+ * A card of the agent's work that waits on the person (`.chat-work`): glass without a border; while it
+ * waits, tinted with [tone] and ringed in it.
+ */
+@Composable
+private fun WorkCard(tone: Color, waiting: Boolean, fill: Float, edge: Float, content: @Composable ColumnScope.() -> Unit) {
+    val t = AiTheme.tokens
+    val shape = RoundedCornerShape(t.radiusSmall)
+    Column(
+        Modifier.fillMaxWidth().clip(shape)
+            .background(if (waiting) tone.copy(alpha = fill).compositeOver(t.sheetGlass) else t.sheetGlass)
+            .then(if (waiting) Modifier.border(1.dp, tone.copy(alpha = edge), shape) else Modifier)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        content = content,
+    )
+}
+
+/** The head of a work card (`.chat-work-head`): its icon on a tinted square, its name, its state. */
+@Composable
+private fun WorkHead(icon: ImageVector, tone: Color, title: String, state: String, stateColor: Color) {
+    val t = AiTheme.tokens
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.clip(RoundedCornerShape(6.dp)).background(tone.copy(alpha = 0.14f)).padding(4.dp)) {
+            Icon(icon, contentDescription = null, tint = tone, modifier = Modifier.size(14.dp))
+        }
+        Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Spacer(Modifier.weight(1f))
+        Text(state, fontSize = 11.sp, color = stateColor, maxLines = 1)
+    }
+}
+
+/**
+ * A message the person added while the turn ran (`.chat-steer`): a line in the link colour on its
+ * leading edge, dashed and faded while the agent has not read it yet.
+ */
 @Composable
 private fun SteerLine(text: String, pending: Boolean = false) {
     val t = AiTheme.tokens
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Top) {
-        Text(stringResource(R.string.chat_you), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = t.text)
-        if (text.isNotEmpty()) {
-            Text(text, style = MaterialTheme.typography.bodySmall, color = t.text)
-        }
-        if (pending) {
-            Text(stringResource(R.string.chat_steer_pending), style = MaterialTheme.typography.labelSmall, color = t.secondaryText)
-        }
+    val you = stringResource(R.string.chat_you)
+    val later = stringResource(R.string.chat_steer_pending)
+    val line = buildAnnotatedString {
+        withStyle(SpanStyle(color = ThemeTokens.link, fontWeight = FontWeight.SemiBold)) { append("↳ $you ") }
+        append(text)
+        if (pending) withStyle(SpanStyle(color = t.secondaryText)) { append(" · $later") }
     }
+    Text(
+        line, fontSize = 13.sp, lineHeight = 19.sp, color = t.text,
+        modifier = Modifier.fillMaxWidth().alpha(if (pending) 0.6f else 1f)
+            .drawBehind {
+                val w = 2.dp.toPx()
+                val x = if (layoutDirection == LayoutDirection.Rtl) size.width - w / 2 else w / 2
+                drawLine(
+                    ThemeTokens.link, Offset(x, 0f), Offset(x, size.height), strokeWidth = w,
+                    pathEffect = if (pending) PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())) else null,
+                )
+            }
+            .padding(start = 12.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+    )
 }
 
 @Composable

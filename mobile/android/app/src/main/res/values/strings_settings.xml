@@ -8,7 +8,6 @@
     <string name="settings_add_space">Add a Space</string>
     <string name="settings_spaces_footer">Removing a Space here forgets its address, sign-in and screens on this phone. Nothing changes on the server.</string>
 
-    <string name="settings_display">Display</string>
     <string name="settings_appearance">Appearance</string>
     <string name="settings_system">System</string>
     <string name="settings_light">Light</string>
@@ -17,7 +16,6 @@
     <string name="settings_language">Language</string>
     <string name="settings_display_footer">These belong to this phone, as the same choices on the panel belong to each browser. The theme is one of the panel\'s. The language follows the app\'s language in the system settings, or the phone\'s.</string>
 
-    <string name="settings_status">Status</string>
     <string name="settings_services">Services</string>
     <string name="settings_peers">Peers</string>
     <string name="settings_backups">Backups</string>
@@ -75,7 +73,6 @@
         <item quantity="other">%d snapshots</item>
     </plurals>
 
-    <string name="settings_session">Session</string>
     <string name="settings_open_web_panel">Open Web Panel</string>
     <string name="settings_sign_out">Sign Out</string>
     <string name="settings_sign_out_title">Sign out of %1$s?</string>
@@ -85,4 +82,12 @@
 
     <string name="settings_about">About</string>
     <string name="settings_version">Version</string>
+
+    <!-- The panel's settings sections (src/web/SettingsNav.tsx), in its order. -->
+    <string name="settings_section_general">General</string>
+    <string name="settings_section_automation">Automation</string>
+    <string name="settings_section_usage">Usage</string>
+    <string name="settings_section_status">Status</string>
+    <string name="settings_section_packages">Packages</string>
+    <string name="settings_section_account">Account</string>
 </resources>
