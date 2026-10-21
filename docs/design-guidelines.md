@@ -112,7 +112,7 @@ Tokens not listed (`code`, `terminal`, `terminalText`, `inverse`, `scrim`) keep 
 ### 5.3 Rules
 
 - **No glass on glass.** A `backdrop-filter` surface never sits inside another one. Inside glass, use a flat fill (`surfaceStrong` for hover, `hairline` for dividers). The tile pop-over is a sibling layer, not nested glass.
-- **Reading surfaces are nearly opaque.** `panel` alpha stays at or above 0.94 in every preset. Chat, settings, and forms are read for minutes, not glanced at.
+- **Reading surfaces are nearly opaque.** `panel` alpha stays at or above 0.94 in every preset. Chat, settings, and forms are read for minutes, not glanced at. The settings and the agent chat are the exception: a sheet of `panel` at 80% (in dark mode first pulled 60% toward near-black) over a 28 px blur, so the page shows through as color while text keeps its contrast; it falls back to the opaque `panel` without backdrop effects or under `prefers-reduced-transparency`.
 - **Text and icons are always fully opaque.** Only fills are translucent. The one exception is `muted`, whose alpha is part of its color and is covered by the contrast check.
 - **The operator's opacity slider applies to `surface` only** (implemented: `surfaceAlpha`). It never changes `panel`, so reading surfaces stay readable at any slider value.
 - **Proposed: fallback without backdrop effects.** Under `@supports not (backdrop-filter: blur(1px))` and under `prefers-reduced-transparency: reduce`, glass uses `surfaceStrong` and the blur is dropped. Today there is no fallback; without `backdrop-filter`, glass shows the field through a pale fill.
