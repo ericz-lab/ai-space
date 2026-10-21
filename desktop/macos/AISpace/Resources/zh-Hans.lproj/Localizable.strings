@@ -549,3 +549,8 @@
 "Collapsed" = "已折叠";
 "Recent" = "最近";
 "Untitled" = "未命名";
+"Automation" = "自动化";
+"Usage" = "用量";
+"Packages" = "安装包";
+"Account" = "账户";
+"These belong to this Mac, as the same choices on the panel belong to each browser." = "这些设置只属于这台 Mac，就像面板上的同类选项只属于各个浏览器。";

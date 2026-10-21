@@ -1,8 +1,44 @@
 import SwiftUI
 
-/// The launcher's last page, as the iPhone client's Settings: the saved Spaces, this Mac's
-/// display, the Space's own settings as its panel shows them (status, the default model, its
-/// pages, peers, services, backups), then the session and the app.
+/// The Settings page's sections (src/web/SettingsNav.tsx): listed on the left, the chosen one's
+/// rows on the right. The last one shown is remembered on this Mac.
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case general, appearance, models, automation, usage, status, packages, account
+
+    var id: String { rawValue }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .general: return "General"
+        case .appearance: return "Appearance"
+        case .models: return "Models"
+        case .automation: return "Automation"
+        case .usage: return "Usage"
+        case .status: return "Status"
+        case .packages: return "Packages"
+        case .account: return "Account"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: return "gearshape"
+        case .appearance: return "circle.lefthalf.filled"
+        case .models: return "cylinder.split.1x2"
+        case .automation: return "clock"
+        case .usage: return "chart.bar"
+        case .status: return "waveform.path.ecg"
+        case .packages: return "shippingbox"
+        case .account: return "person.crop.circle"
+        }
+    }
+}
+
+/// The launcher's last page, sectioned as the web panel's Settings: General (the saved Spaces,
+/// this Mac's install, widgets, language, the Space's pages), Appearance, Models, Automation,
+/// Usage, Status (the Space, its peers, services and backups), Packages and Account (the session,
+/// the app). A row that leads to a page of the Space opens it over the launcher; Back to Space
+/// comes back here, on the same section.
 struct SettingsPage: View {
     @ObservedObject var model: AppModel
     let connection: Connection
@@ -10,13 +46,77 @@ struct SettingsPage: View {
     @ObservedObject var settings: SettingsLoader
     let icons: IconStore
     @ObservedObject var prefs: Preferences
+    @AppStorage("settingsSection") private var picked = SettingsSection.general.rawValue
+
+    private var section: SettingsSection { SettingsSection(rawValue: picked) ?? .general }
 
     var body: some View {
-        Form {
+        HStack(alignment: .top, spacing: 0) {
+            nav
+            VStack(alignment: .leading, spacing: 0) {
+                Text(section.title).font(.title2.weight(.semibold)).foregroundStyle(Theme.text)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.horizontal, 20).padding(.top, 22)
+                Form { content }
+                    .formStyle(.grouped)
+                    .scrollContentBackground(.hidden)
+                    .id(section)
+            }
+            .frame(maxWidth: 680, alignment: .leading)
+        }
+        .frame(maxWidth: 900)
+        .frame(maxWidth: .infinity)
+        .task(id: loader.status) { await settings.refresh() }
+    }
+
+    private var nav: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(SettingsSection.allCases) { s in
+                let on = s == section
+                Button { picked = s.rawValue } label: {
+                    Label { Text(s.title) } icon: { Image(systemName: s.symbol).frame(width: 18) }
+                        .font(.callout.weight(on ? .semibold : .regular))
+                        .foregroundStyle(on ? AnyShapeStyle(Theme.text) : AnyShapeStyle(.secondary))
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(on ? Theme.text.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 12).padding(.top, 60)
+        .frame(width: 190, alignment: .leading)
+    }
+
+    @ViewBuilder private var content: some View {
+        switch section {
+        case .general:
             spaces
             if model.local.available { LocalSettingsSection(model: model, local: model.local) }
-            display
+            general
+            more
+        case .appearance:
+            appearance
+        case .models:
+            models
+            pages("Apps", [("App models", "cpu", .appModels)])
+        case .automation:
+            pages("Automation", [("Scheduled tasks", "calendar.badge.clock", .tasks), ("Events and calls", "bolt.horizontal", .events)])
+        case .usage:
+            pages("Usage", [("Model usage", "chart.bar", .modelUsage), ("App usage", "chart.line.uptrend.xyaxis", .appUsage)])
+        case .status:
             space
+        case .packages:
+            pages("Packages", [("Apps and connections", "shippingbox", .packages)])
+        case .account:
+            account
+        }
+    }
+
+    private var account: some View {
+        Group {
             Section {
                 Button("Sign Out…", role: .destructive) { model.confirmingSignOut = true }
                     .confirmationDialog(Text("Sign out of \(connection.name)?"), isPresented: $model.confirmingSignOut) {
@@ -37,11 +137,27 @@ struct SettingsPage: View {
                 Text("About")
             }
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .frame(maxWidth: 680)
-        .frame(maxWidth: .infinity)
-        .task(id: loader.status) { await settings.refresh() }
+    }
+
+    /// Rows that open a page of the Space over the launcher.
+    private func pages(_ header: LocalizedStringKey, _ rows: [(title: LocalizedStringKey, symbol: String, page: HubPage)]) -> some View {
+        Section {
+            ForEach(rows, id: \.page) { row in
+                Button { model.destination = .hub(row.page) } label: {
+                    HStack {
+                        Label(row.title, systemImage: row.symbol).foregroundStyle(Theme.text)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        } header: {
+            Text(header)
+        } footer: {
+            Text("Read from the Space each time a page opens.").font(.footnote).foregroundStyle(.secondary)
+        }
     }
 
     // MARK: Spaces
@@ -73,7 +189,24 @@ struct SettingsPage: View {
 
     // MARK: This Mac's display
 
-    private var display: some View {
+    private var general: some View {
+        Section {
+            Toggle("Widgets", isOn: $prefs.showsWidgets)
+            LabeledContent("Language") {
+                Button(Locale.current.localizedString(forLanguageCode: Lang.current) ?? Lang.current) {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.Localization-Settings.extension") { NSWorkspace.shared.open(url) }
+                }
+                .buttonStyle(.link)
+            }
+        } header: {
+            Text("This Mac")
+        } footer: {
+            Text("These belong to this Mac, as the same choices on the panel belong to each browser. The language follows the app's language in System Settings.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    private var appearance: some View {
         Section {
             Picker("Appearance", selection: $prefs.appearance) {
                 Text("System").tag(Appearance.system)
@@ -83,17 +216,10 @@ struct SettingsPage: View {
             Picker("Theme", selection: $prefs.themeID) {
                 ForEach(ThemePreset.all) { Text(verbatim: $0.name).tag($0.id) }
             }
-            Toggle("Widgets", isOn: $prefs.showsWidgets)
-            LabeledContent("Language") {
-                Button(Locale.current.localizedString(forLanguageCode: Lang.current) ?? Lang.current) {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.Localization-Settings.extension") { NSWorkspace.shared.open(url) }
-                }
-                .buttonStyle(.link)
-            }
         } header: {
             Text("Display")
         } footer: {
-            Text("These belong to this Mac, as the same choices on the panel belong to each browser. The language follows the app's language in System Settings.")
+            Text("These belong to this Mac, as the same choices on the panel belong to each browser.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }
@@ -132,10 +258,13 @@ struct SettingsPage: View {
         }
     }
 
+    /// The pages General leads to; the others sit under their own sections.
+    private static let spacePages: Set<HubPage> = [.inbox, .chat(agent: nil), .terminal]
+
     /// The Space's own pages, drawn by the app from the Space's routes.
     private var more: some View {
         Section {
-            ForEach(HubPage.rows, id: \.page) { row in
+            ForEach(HubPage.rows.filter { Self.spacePages.contains($0.page) }, id: \.page) { row in
                 Button { model.destination = .hub(row.page) } label: {
                     HStack {
                         Label(row.title, systemImage: row.symbol).foregroundStyle(Theme.text)
@@ -188,9 +317,6 @@ struct SettingsPage: View {
         } footer: {
             Text(verbatim: connection.url.absoluteString).font(.footnote).foregroundStyle(.secondary)
         }
-
-        models
-        more
 
         if !peers.isEmpty {
             Section {
