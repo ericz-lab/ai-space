@@ -1,6 +1,12 @@
 package dev.aispace.android.ui.theme
 
 import android.graphics.Bitmap
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.RenderEffect
+import android.graphics.Shader
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -11,17 +17,27 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -161,4 +177,80 @@ fun Modifier.borderlessGlass(radius: Dp? = null, neutral: Boolean = false): Modi
     val ground = neutral && t.preset.backdrop != null
     val fill = if (ground) t.glass.compositeOver(t.ground.copy(alpha = if (t.dark) 0.52f else 0.40f)) else t.glass
     return glass(radius ?: t.radius, fill, Color.Transparent)
+}
+
+/**
+ * The translucent sheet Settings and the agent chat are drawn on (src/web/styles.css 92f32d5): the
+ * Space's backdrop again, blurred by 28 dp and saturated by half, under [ThemeTokens.sheet], so the
+ * page shows through as colour while text keeps its contrast. Before Android 12 there is no blur to
+ * draw, and with animations off (the phone's nearest to "reduce transparency") the sheet is opaque.
+ */
+@Composable
+fun Sheet(artwork: Bitmap?, modifier: Modifier = Modifier) {
+    val t = AiTheme.tokens
+    if (!rememberSheetBlur()) {
+        Box(modifier.fillMaxSize().background(t.sheetSolid).clearAndSetSemantics {})
+        return
+    }
+    Box(modifier.fillMaxSize().clearAndSetSemantics {}) {
+        SpaceBackdrop(
+            artwork,
+            Modifier.graphicsLayer {
+                // CSS blur() takes a standard deviation; Android's blur takes a radius, sigma = 0.57735 r + 0.5.
+                val radius = ((28.dp.toPx() - 0.5f) / 0.57735f).coerceAtLeast(1f)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) renderEffect = sheetEffect(radius)
+                clip = true
+            },
+        )
+        Box(Modifier.fillMaxSize().background(t.sheet))
+    }
+}
+
+/** Whether the sheet is translucent over a blur: Android 12 or later, with animations on. */
+@Composable
+fun rememberSheetBlur(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
+    }
+}
+
+@androidx.annotation.RequiresApi(Build.VERSION_CODES.S)
+private fun sheetEffect(radius: Float) = RenderEffect.createColorFilterEffect(
+    ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(1.5f) }),
+    // Clamped at the edges, so the blur does not darken toward the screen's sides.
+    RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP),
+).asComposeRenderEffect()
+
+/**
+ * One row of an outlined card drawn row by row (src/web/styles.css `.setcard`): a faint fill, a
+ * hairline round the card, and a hairline across the top of every row after the first. Each row
+ * draws its own piece, so a card can be the rows of a lazy list.
+ */
+fun Modifier.cardPiece(first: Boolean, last: Boolean, radius: Dp, fill: Color, edge: Color): Modifier {
+    val shape = RoundedCornerShape(
+        topStart = if (first) radius else 0.dp, topEnd = if (first) radius else 0.dp,
+        bottomEnd = if (last) radius else 0.dp, bottomStart = if (last) radius else 0.dp,
+    )
+    return this
+        .drawWithCache {
+            val stroke = 1.dp.toPx()
+            val outline = shape.createOutline(Size(size.width - stroke, size.height - stroke), layoutDirection, this)
+            val path = Path().apply { addOutline(outline) }
+            onDrawBehind {
+                translate(stroke / 2, stroke / 2) { drawPath(path, fill) }
+                // The next row draws the line between the two, across its own top.
+                clipRect(bottom = if (last) size.height else size.height - stroke) {
+                    translate(stroke / 2, stroke / 2) { drawPath(path, edge, style = Stroke(stroke)) }
+                }
+                // The sides go on through that last pixel, so the card's edge has no notch at each line.
+                if (!last) {
+                    val y = size.height - stroke
+                    drawLine(edge, Offset(stroke / 2, y), Offset(stroke / 2, size.height), stroke)
+                    drawLine(edge, Offset(size.width - stroke / 2, y), Offset(size.width - stroke / 2, size.height), stroke)
+                }
+            }
+        }
+        .clip(shape)
 }

@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -41,31 +42,33 @@ data class ThemePreset(
         val glowC: Long = 0,
         /** The secondary text's alpha over [text], at least 4.5:1 on the surfaces (src/web/theme.ts `muted`). */
         val muted: Float = 0.62f,
+        /** The reading surface, 0xAARRGGBB (src/web/theme.ts `panel`): what the sheet of Settings and the chat is made of. */
+        val panel: Long = 0xF0FFFFFF,
     )
 
     companion object {
         private val lightGlow = Triple(0xC7D2FEL, 0xFBCFE8L, 0xA5F3FCL)
         private val darkGlow = Triple(0x2A2872L, 0x5F1642L, 0x134354L)
 
-        private fun light(ground: Long, accent: Long, text: Long = 0x0E1116, solid: Long = 0xFFFFFF, glow: Triple<Long, Long, Long> = lightGlow, muted: Float = 0.62f) =
-            Palette(ground, text, solid, accent, glow.first, glow.second, glow.third, muted)
+        private fun light(ground: Long, accent: Long, text: Long = 0x0E1116, solid: Long = 0xFFFFFF, glow: Triple<Long, Long, Long> = lightGlow, muted: Float = 0.62f, panel: Long = 0xF0FFFFFF) =
+            Palette(ground, text, solid, accent, glow.first, glow.second, glow.third, muted, panel)
 
-        private fun dark(ground: Long, accent: Long, text: Long = 0xF1F4F8, solid: Long = 0x2C3145, glow: Triple<Long, Long, Long> = darkGlow, muted: Float = 0.66f) =
-            Palette(ground, text, solid, accent, glow.first, glow.second, glow.third, muted)
+        private fun dark(ground: Long, accent: Long, text: Long = 0xF1F4F8, solid: Long = 0x2C3145, glow: Triple<Long, Long, Long> = darkGlow, muted: Float = 0.66f, panel: Long = 0xF7282D3E) =
+            Palette(ground, text, solid, accent, glow.first, glow.second, glow.third, muted, panel)
 
         val aurora = ThemePreset("aurora", "Aurora", light(0xF6F7FB, accent = 0x8B5CF6), dark(0x1C2030, accent = 0x8B5CF6))
 
         val all: List<ThemePreset> = listOf(
             aurora,
-            ThemePreset("simple", "Simple", light(0xF4F5F7, accent = 0x2563EB),
-                dark(0x16181D, accent = 0x3B82F6, text = 0xECEEF2, solid = 0x2A2D35), glow = false, radius = 10.dp),
+            ThemePreset("simple", "Simple", light(0xF4F5F7, accent = 0x2563EB, panel = 0xFFFFFFFF),
+                dark(0x16181D, accent = 0x3B82F6, text = 0xECEEF2, solid = 0x2A2D35, panel = 0xFF1F2228), glow = false, radius = 10.dp),
             ThemePreset("warm", "Warm",
-                light(0xFAF6F0, accent = 0xC2410C, text = 0x2B2118, solid = 0xFFFAF3, glow = Triple(0xFDE3C4L, 0xFBD0C0L, 0xFEF3C7L), muted = 0.66f),
-                dark(0x211A15, accent = 0xF0A46B, text = 0xF6EDE4, solid = 0x3A2F27, glow = Triple(0x5A3418L, 0x5C1F2AL, 0x4A3C12L), muted = 0.64f), radius = 20.dp),
-            ThemePreset("orbit", "Orbit", light(0xD3D2F6, accent = 0x5550B8), dark(0x04050E, accent = 0x93A4FF, solid = 0x1C2140), backdrop = "orbit"),
-            ThemePreset("northern", "Northern Lights", light(0xF3F1FA, accent = 0x0B7FC9), dark(0x040816, accent = 0x4BE3A8, solid = 0x182540), backdrop = "northern"),
-            ThemePreset("papercut", "Paper Cut", light(0xF8F5EF, accent = 0x4D79DE), dark(0x1A2337, accent = 0x7CC4EA, solid = 0x26324C), backdrop = "papercut"),
-            ThemePreset("prism", "Prism", light(0xE6E8ED, accent = 0x7257FF), dark(0x12141C, accent = 0xA394FF, solid = 0x242838), backdrop = "prism"),
+                light(0xFAF6F0, accent = 0xC2410C, text = 0x2B2118, solid = 0xFFFAF3, glow = Triple(0xFDE3C4L, 0xFBD0C0L, 0xFEF3C7L), muted = 0.66f, panel = 0xF5FFFBF6),
+                dark(0x211A15, accent = 0xF0A46B, text = 0xF6EDE4, solid = 0x3A2F27, glow = Triple(0x5A3418L, 0x5C1F2AL, 0x4A3C12L), muted = 0.64f, panel = 0xF7342A23), radius = 20.dp),
+            ThemePreset("orbit", "Orbit", light(0xD3D2F6, accent = 0x5550B8), dark(0x04050E, accent = 0x93A4FF, solid = 0x1C2140, panel = 0xF714182E), backdrop = "orbit"),
+            ThemePreset("northern", "Northern Lights", light(0xF3F1FA, accent = 0x0B7FC9), dark(0x040816, accent = 0x4BE3A8, solid = 0x182540, panel = 0xF710182C), backdrop = "northern"),
+            ThemePreset("papercut", "Paper Cut", light(0xF8F5EF, accent = 0x4D79DE), dark(0x1A2337, accent = 0x7CC4EA, solid = 0x26324C, panel = 0xF71E283E), backdrop = "papercut"),
+            ThemePreset("prism", "Prism", light(0xE6E8ED, accent = 0x7257FF), dark(0x12141C, accent = 0xA394FF, solid = 0x242838, panel = 0xF71C1F2C), backdrop = "prism"),
         )
 
         fun named(id: String?): ThemePreset = all.firstOrNull { it.id == id } ?: aurora
@@ -99,6 +102,22 @@ data class ThemeTokens(
     /** The fill of a glass surface. Android has no material blur under arbitrary views before API 31, and
      *  a live blur is what made the iPhone's launcher drop frames, so glass is a translucent solid. */
     val glass: Color get() = if (dark) rgb(p.solid).copy(alpha = 0.72f) else Color.White.copy(alpha = 0.72f)
+    /** The reading surface (`--panel`), translucent in most presets. */
+    val panel: Color get() = Color(p.panel)
+    /**
+     * The sheet Settings and the agent chat are drawn on (src/web/styles.css `.panel.settings, .chat`):
+     * the panel at 80 % over the blurred backdrop, and in dark mode first pulled 60 % toward near-black
+     * (#05060a) and kept at 74 %, so text keeps its contrast over any artwork.
+     */
+    val sheet: Color get() = if (dark) mix(panel, Color(0xFF05060A), 0.4f).let { it.copy(alpha = it.alpha * 0.74f) } else panel.copy(alpha = panel.alpha * 0.8f)
+    /** The sheet where nothing can be blurred behind it (before Android 12, or with animations off): opaque. */
+    val sheetSolid: Color get() = sheet.compositeOver(ground)
+    /** The sheet's edge in dark mode (`rgba(255,255,255,.09)`); light mode keeps [hairline]. */
+    val sheetEdge: Color get() = if (dark) Color.White.copy(alpha = 0.09f) else hairline
+    /** Behind code and a tool call's input and output (`--code-bg`). */
+    val codeBackground: Color get() = if (dark) Color.Black.copy(alpha = 0.3f) else Color(14, 17, 22).copy(alpha = 0.06f)
+    /** `--glass` as the web draws it on a sheet: the fill of the chat's cards and its composer. */
+    val sheetGlass: Color get() = if (dark) Color.White.copy(alpha = 0.09f) else Color.White.copy(alpha = 0.55f)
     /** `--radius` and the two radii derived from it. */
     val radius: Dp get() = preset.radius
     val radiusMedium: Dp get() = maxOf(preset.radius - 2.dp, 6.dp)
@@ -109,6 +128,14 @@ data class ThemeTokens(
         val success = Color(0xFF34C759)
         val warning = Color(0xFFFF9500)
         val danger = Color(0xFFEF4444)
+
+        /** CSS `color-mix(in srgb, a p, b)`: the two mixed with premultiplied alpha. */
+        fun mix(a: Color, b: Color, p: Float): Color {
+            val alpha = a.alpha * p + b.alpha * (1 - p)
+            if (alpha == 0f) return Color.Transparent
+            fun c(x: Float, y: Float) = ((x * a.alpha * p + y * b.alpha * (1 - p)) / alpha).coerceIn(0f, 1f)
+            return Color(c(a.red, b.red), c(a.green, b.green), c(a.blue, b.blue), alpha)
+        }
     }
 }
 
