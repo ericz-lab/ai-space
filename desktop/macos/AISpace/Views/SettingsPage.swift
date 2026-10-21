@@ -68,12 +68,14 @@ struct SettingsPage: View {
 
     private var sectionPane: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(section.title).font(.title2.weight(.semibold)).foregroundStyle(Theme.text)
+            Text(section.title).font(.title.weight(.semibold)).foregroundStyle(Theme.text)
                 .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, 20).padding(.top, 22)
             Form { content }
                 .formStyle(.grouped)
                 .scrollContentBackground(.hidden)
+                .font(.system(size: 15))
+                .controlSize(.large)
                 .id(section)
         }
         .frame(maxWidth: 680, alignment: .leading)
@@ -119,7 +121,7 @@ struct SettingsPage: View {
                 let on = s == section
                 Button { picked = s.rawValue } label: {
                     Label { Text(s.title) } icon: { Image(systemName: s.symbol).frame(width: 18) }
-                        .font(.callout.weight(on ? .semibold : .regular))
+                        .font(.system(size: 15, weight: on ? .semibold : .regular))
                         .foregroundStyle(on ? AnyShapeStyle(Theme.text) : AnyShapeStyle(.secondary))
                         .padding(.horizontal, 10).padding(.vertical, 7)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -147,13 +149,15 @@ struct SettingsPage: View {
             models
             pages("Apps", [("App models", "cpu", .appModels)])
         case .automation:
-            pages("Automation", [("Scheduled tasks", "calendar.badge.clock", .tasks), ("Events and calls", "bolt.horizontal", .events)])
+            TasksOverview(api: loader.api) { detail = .tasks }
+            EventsOverview(api: loader.api) { detail = .events }
         case .usage:
-            pages("Usage", [("Model usage", "chart.bar", .modelUsage), ("App usage", "chart.line.uptrend.xyaxis", .appUsage)])
+            ModelUsageOverview(api: loader.api) { detail = .modelUsage }
+            AppUsageOverview(api: loader.api, catalogue: loader.catalogue) { detail = .appUsage }
         case .status:
             space
         case .packages:
-            pages("Packages", [("Apps and connections", "shippingbox", .packages)])
+            pages(nil, [("Apps and connections", "shippingbox", .packages)])
         case .account:
             account
         }
@@ -172,7 +176,7 @@ struct SettingsPage: View {
                 Text("Session")
             } footer: {
                 Text("The sign-in belongs to whatever stands in front of your Space (for example Cloudflare Access). The app stores no password or token; the session lives in this Space's own web data, apart from your browser.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(.secondary)
             }
             Section {
                 LabeledContent("Version") { Text(verbatim: Bundle.main.shortVersion) }
@@ -184,7 +188,7 @@ struct SettingsPage: View {
     }
 
     /// Rows that open a page of the Space over the launcher.
-    private func pages(_ header: LocalizedStringKey, _ rows: [(title: LocalizedStringKey, symbol: String, page: HubPage)]) -> some View {
+    private func pages(_ header: LocalizedStringKey?, _ rows: [(title: LocalizedStringKey, symbol: String, page: HubPage)]) -> some View {
         Section {
             ForEach(rows, id: \.page) { row in
                 Button { detail = row.page } label: {
@@ -198,9 +202,9 @@ struct SettingsPage: View {
                 .buttonStyle(.plain)
             }
         } header: {
-            Text(header)
+            if let header { Text(header) }
         } footer: {
-            Text("Read from the Space each time a page opens.").font(.footnote).foregroundStyle(.secondary)
+            Text("Read from the Space each time a page opens.").font(.callout).foregroundStyle(.secondary)
         }
     }
 
@@ -213,7 +217,7 @@ struct SettingsPage: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(verbatim: c.name).foregroundStyle(Theme.text)
-                            Text(verbatim: c.url.absoluteString).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                            Text(verbatim: c.url.absoluteString).font(.callout).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer()
                         if c.id == connection.id { Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityLabel(Text("Selected")) }
@@ -227,7 +231,7 @@ struct SettingsPage: View {
             Text("Spaces")
         } footer: {
             Text("Removing a Space forgets its address, sign-in and screens on this Mac. Nothing changes on the server.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(.secondary)
         }
     }
 
@@ -246,13 +250,13 @@ struct SettingsPage: View {
             Text("This Mac")
         } footer: {
             Text("These belong to this Mac, as the same choices on the panel belong to each browser. The language follows the app's language in System Settings.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(.secondary)
         }
     }
 
     private var appearance: some View {
         Section {
-            Picker("Appearance", selection: $prefs.appearance) {
+            Picker("Mode", selection: $prefs.appearance) {
                 Text("System").tag(Appearance.system)
                 Text("Light").tag(Appearance.light)
                 Text("Dark").tag(Appearance.dark)
@@ -264,7 +268,7 @@ struct SettingsPage: View {
             Text("Display")
         } footer: {
             Text("These belong to this Mac, as the same choices on the panel belong to each browser.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(.secondary)
         }
     }
 
@@ -297,7 +301,7 @@ struct SettingsPage: View {
                         Text("Apps: \(apps) · Space Assistant: \(base)")
                     }
                 }
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(.secondary)
             }
         }
     }
@@ -334,7 +338,7 @@ struct SettingsPage: View {
         } header: {
             Text("Space")
         } footer: {
-            Text("Read from the Space each time a page opens.").font(.footnote).foregroundStyle(.secondary)
+            Text("Read from the Space each time a page opens.").font(.callout).foregroundStyle(.secondary)
         }
     }
 
@@ -359,7 +363,7 @@ struct SettingsPage: View {
         } header: {
             Text(verbatim: connection.name)
         } footer: {
-            Text(verbatim: connection.url.absoluteString).font(.footnote).foregroundStyle(.secondary)
+            Text(verbatim: connection.url.absoluteString).font(.callout).foregroundStyle(.secondary)
         }
 
         if !peers.isEmpty {
@@ -401,7 +405,7 @@ struct SettingsPage: View {
                 } header: {
                     Text("Backups")
                 } footer: {
-                    if let target = s.backupTarget { Text(verbatim: target).font(.footnote).foregroundStyle(.secondary) }
+                    if let target = s.backupTarget { Text(verbatim: target).font(.callout).foregroundStyle(.secondary) }
                 }
             }
         }

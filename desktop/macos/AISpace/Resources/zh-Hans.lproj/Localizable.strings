@@ -554,3 +554,12 @@
 "Packages" = "安装包";
 "Account" = "账户";
 "These belong to this Mac, as the same choices on the panel belong to each browser." = "这些设置只属于这台 Mac，就像面板上的同类选项只属于各个浏览器。";
+
+/* Settings overviews */
+"Mode" = "模式";
+"Model usage · last 24 hours" = "模型用量 · 最近 24 小时";
+"App usage · last 7 days" = "应用使用 · 最近 7 天";
+"No calls in the last 24 hours." = "最近 24 小时没有调用。";
+"Nothing was opened in the last 7 days." = "最近 7 天没有打开记录。";
+"No scheduled tasks." = "没有定时任务。";
+"No recent events." = "没有最近的事件。";
