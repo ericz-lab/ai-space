@@ -108,6 +108,7 @@ struct CatalogueTests {
         #expect(c.screens?.map(\.id) == ["home", "s2"])
         #expect(c.screens?.last?.items == ["app:docs"])
         #expect(c.domain == "example.com")
+        #expect(c.builtinIcons == ["inbox": "/inbox.svg"])
         let bare = try Catalogue.decode(Fixture.payload(peers: nil, layout: "{\"ok\":true,\"layout\":{\"screens\":null}}", router: "{\"ok\":true,\"domain\":\"\"}"))
         // A Space that has stored no screens yet shows the home screen its panel would seed.
         #expect(bare.screens == nil)

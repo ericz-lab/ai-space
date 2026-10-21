@@ -346,6 +346,8 @@ final class ChatStore: ObservableObject {
         /// The pictures sent with the person's message.
         var images: [ChatImage] = []
         var live = false
+        /// A reply of a stored conversation, opened from the history: its runs of calls open folded.
+        var historic = false
     }
 
     struct Ask: Equatable {
@@ -393,6 +395,8 @@ final class ChatStore: ObservableObject {
     }
 
     var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty }
+    /// Whether the next message continues a conversation the Space keeps, or starts a new one.
+    var inSession: Bool { sessionID != nil }
 
     /// Adds a picture to the next message within the Space's limits; false when it does not fit.
     @discardableResult
@@ -432,7 +436,7 @@ final class ChatStore: ObservableObject {
                 let isUser = m.role == "user"
                 let steps = isUser ? [] : ChatRows.steps(of: m)
                 guard !(m.text ?? "").isEmpty || !steps.isEmpty else { return nil }
-                return Bubble(isUser: isUser, text: m.text ?? "", steps: steps)
+                return Bubble(isUser: isUser, text: m.text ?? "", steps: steps, historic: !isUser)
             }
             sessionID = session.sid
             error = nil

@@ -35,22 +35,46 @@ struct EntryIcon: View {
     }
 }
 
+/// The panel's Settings tile (src/web/screens.ts BUILTINS): with the Space's own icon for it
+/// when it sends one, a gear otherwise. It is pinned by the panel's key, `builtin:settings`.
+extension Catalogue {
+    var settingsTile: CatalogueEntry {
+        CatalogueEntry(kind: .app, ref: "builtin/settings", title: "Settings", i18n: ["zh": LocalizedText(title: "设置")],
+                       icon: builtinIcons["settings"], reach: .link)
+    }
+
+    /// The entry a screen's key stands for, the Settings tile among them.
+    func tile(_ key: String) -> CatalogueEntry? { key == Screens.settingsKey ? settingsTile : entry(key) }
+}
+
+extension CatalogueEntry {
+    var isSettingsTile: Bool { kind == .app && ref == "builtin/settings" }
+    /// The key a screen pins it by: the panel's for a built-in tile.
+    var pinKey: String { isSettingsTile ? Screens.settingsKey : key }
+    var fallbackSymbol: String { isSettingsTile ? "gearshape.fill" : (kind == .agent ? "person.fill" : "app") }
+}
+
 struct EntryTile: View {
     let entry: CatalogueEntry
     let icons: IconStore
     let peer: PeerStatus?
     let action: () -> Void
+    @Environment(\.colorScheme) private var scheme
+
+    private var artwork: Bool { Theme.current.backdrop != nil }
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                EntryIcon(icon: entry.icon, fallback: entry.kind == .agent ? "person.fill" : "app", icons: icons, isRound: entry.kind == .agent)
+                EntryIcon(icon: entry.icon, fallback: entry.fallbackSymbol, icons: icons, isRound: entry.kind == .agent)
                     .overlay(alignment: .topTrailing) { badge.offset(x: 4, y: -4) }
                     .opacity(dimmed ? 0.5 : 1)
                 Text(verbatim: entry.displayTitle())
-                    .font(.caption.weight(.medium)).foregroundStyle(Theme.text)
-                    // Over drawn artwork a name gets an edge in the ground colour to stay readable.
-                    .shadow(color: Theme.current.backdrop == nil ? .clear : Theme.ground.opacity(0.9), radius: 2)
+                    .font(.caption.weight(artwork ? .semibold : .medium))
+                    // Over drawn artwork a name is set like a phone's home screen: white with a soft
+                    // dark shadow on the dark versions, the text color without a shadow on the pale light ones.
+                    .foregroundStyle(artwork && scheme == .dark ? Color.white : Theme.text)
+                    .shadow(color: artwork && scheme == .dark ? Color(hex: 0x0F123C).opacity(0.55) : .clear, radius: 1, y: 1)
                     .multilineTextAlignment(.center).lineLimit(2)
                     .frame(maxWidth: .infinity)
                 if let note {
@@ -130,10 +154,10 @@ struct WidgetCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            Divider()
-            rows.padding(.horizontal, 14).padding(.vertical, 10)
+            // The head and the rows are apart by space alone, without a rule between them.
+            rows.padding(.horizontal, 14).padding(.top, 2).padding(.bottom, 12)
         }
-        .glass()
+        .glass(bordered: false)
         .opacity(widget.stale == true ? 0.6 : 1)
     }
 

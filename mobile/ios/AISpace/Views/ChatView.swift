@@ -14,7 +14,7 @@ struct AgentsPage: View {
             if agents.isEmpty { Text("This Space has no agents.").foregroundStyle(.secondary) }
             ForEach(agents) { agent in
                 if let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) {
-                    NavigationLink { ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons) } label: {
+                    NavigationLink { ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons, backdrop: model.backdrops(for: connection)) } label: {
                         HStack(spacing: 12) {
                             EntryIcon(icon: agent.icon, fallback: "person.fill", icons: icons, size: 40, isRound: true)
                             VStack(alignment: .leading, spacing: 2) {
@@ -25,7 +25,16 @@ struct AgentsPage: View {
                         .accessibilityElement(children: .combine)
                     }
                     .disabled(agent.reach == .peerOffline)
+                    .listRowBackground(Theme.glass)
                 }
+            }
+        }
+        // The chat's sheet, as the conversations it leads to.
+        .scrollContentBackground(.hidden)
+        .background {
+            ZStack {
+                SpaceBackdrop(store: model.backdrops(for: connection))
+                Sheet()
             }
         }
         .navigationTitle(Text("Chat"))
@@ -35,10 +44,14 @@ struct AgentsPage: View {
 
 /// One agent's conversation: the messages, the reply as it streams in, and the field to write in.
 /// The model and the permission mode are the agent's defaults; the web panel's chat can pick them.
+/// It is drawn as the panel's chat on a phone (src/web/Chat.tsx): a translucent sheet over the
+/// Space's backdrop, the agent and the state of the conversation in the head, the composer on
+/// the sheet under a hairline.
 struct ChatPage: View {
     let agent: CatalogueEntry
     @ObservedObject var store: ChatStore
     let icons: IconStore
+    let backdrop: BackdropStore
     @State private var picked: [PhotosPickerItem] = []
     @State private var reading = 0
 
@@ -69,13 +82,25 @@ struct ChatPage: View {
             if !store.images.isEmpty { attachments }
             composer
         }
-        .background(Theme.ground.ignoresSafeArea())
+        .background {
+            ZStack {
+                SpaceBackdrop(store: backdrop)
+                Sheet()
+            }
+        }
         .navigationTitle(Text(verbatim: agent.displayTitle()))
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(placement: .principal) { head }
+            // As the head of the panel's chat on a phone: Stop while a turn runs, the history, a new conversation.
+            ToolbarItemGroup(placement: .primaryAction) {
+                if store.isRunning {
+                    Button { store.stop() } label: { Image(systemName: "stop.fill") }
+                        .accessibilityLabel(Text("Stop"))
+                }
                 Menu {
-                    Button { store.newChat() } label: { Label("New Chat", systemImage: "square.and.pencil") }
-                    if !store.sessions.isEmpty {
+                    if store.sessions.isEmpty {
+                        Text("No earlier chats")
+                    } else {
                         Section {
                             ForEach(store.sessions.prefix(20)) { session in
                                 Button { Task { await store.open(session) } } label: {
@@ -91,6 +116,9 @@ struct ChatPage: View {
                 }
                 .disabled(store.isRunning)
                 .accessibilityLabel(Text("Chats"))
+                Button { store.newChat() } label: { Image(systemName: "square.and.pencil") }
+                    .disabled(store.isRunning)
+                    .accessibilityLabel(Text("New Chat"))
             }
         }
         .onChange(of: picked) { _, items in
@@ -102,31 +130,40 @@ struct ChatPage: View {
         .task(id: store.isRunning) { if !store.isRunning { await store.loadSessions() } }
     }
 
+    /// The agent, its name and where the conversation stands, as the head of the panel's chat.
+    private var head: some View {
+        HStack(spacing: 8) {
+            EntryIcon(icon: agent.icon, fallback: "person.fill", icons: icons, size: 26, isRound: true)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(verbatim: agent.displayTitle()).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(1)
+                Text(store.isRunning ? "Thinking…" : store.inSession ? "in session" : "new session")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The panel's composer: the attach button, the field on the sheet's glass, and the round Send.
+    /// A message written during a turn joins it (docs/runtimes.md#live-chat), so Send stays.
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
             PhotosPicker(selection: $picked, maxSelectionCount: max(1, 4 - store.images.count), matching: .images) {
-                Image(systemName: "paperclip").font(.system(size: 20)).frame(width: 32, height: 36)
+                Image(systemName: "paperclip").font(.system(size: 18)).frame(width: 36, height: 36)
+                    .foregroundStyle(.secondary)
             }
+            .foregroundStyle(.secondary)
             .disabled(store.images.count >= 4 || reading > 0)
             .accessibilityLabel(Text("Add images"))
-            TextField(text: $store.draft, prompt: Text("Message"), axis: .vertical) { Text("Message") }
+            TextField(text: $store.draft, prompt: Text(store.isRunning ? "Add to the reply in progress…" : "Message"), axis: .vertical) { Text("Message") }
                 .lineLimit(1...6)
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(Theme.solid, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.hairline))
-            if store.isRunning {
-                Button { store.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 32)) }
-                    .foregroundStyle(Theme.danger).accessibilityLabel(Text("Stop"))
-            }
-            // A message written during a turn joins it; Send stays beside Stop while the field
-            // has something to add.
-            if !store.isRunning || store.canSend {
-                Button { store.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }
-                    .disabled(!store.canSend || reading > 0).accessibilityLabel(Text("Send"))
-            }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .frame(minHeight: 36)
+                .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous).strokeBorder(Theme.glassBorder))
+            ChatSendButton(enabled: store.canSend && reading == 0) { store.send() }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.bar)
+        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 10)
+        .overlay(alignment: .top) { Theme.hairline.frame(height: 1) }
     }
 
     /// The pictures waiting to go with the next message, each with a button to take it off.
@@ -145,9 +182,8 @@ struct ChatPage: View {
                         }
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, 6)
+            .padding(.horizontal, 16).padding(.vertical, 8)
         }
-        .background(.bar)
     }
 
     /// Reads the chosen pictures in the order chosen. PNG, JPEG, GIF and WebP within 5 MB go as
@@ -175,14 +211,39 @@ struct ChatPage: View {
     }
 
     private var intro: some View {
-        VStack(spacing: 10) {
-            EntryIcon(icon: agent.icon, fallback: "person.fill", icons: icons, size: 64, isRound: true)
-            Text(verbatim: agent.displayTitle()).font(.headline).foregroundStyle(Theme.text)
+        VStack(spacing: 6) {
+            EntryIcon(icon: agent.icon, fallback: "person.fill", icons: icons, size: 52, isRound: true)
+                .padding(.bottom, 2)
+            Text(verbatim: agent.displayTitle()).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
             if let detail = agent.displayDetail() {
-                Text(verbatim: detail).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text(verbatim: detail).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
         }
-        .frame(maxWidth: .infinity).padding(.top, 40).padding(.horizontal, 20)
+        .frame(maxWidth: .infinity).padding(.top, 28).padding(.horizontal, 20)
+    }
+}
+
+/// The panel's Send: a round button in the accent's gradient, grey while there is nothing to send.
+private struct ChatSendButton: View {
+    let enabled: Bool
+    let send: () -> Void
+
+    var body: some View {
+        Button(action: send) {
+            Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold))
+                .foregroundStyle(enabled ? Color.white : Color.secondary)
+                .frame(width: 36, height: 36)
+                .background {
+                    if enabled {
+                        Circle().fill(LinearGradient(colors: [Theme.accent, Theme.link], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    } else {
+                        Circle().fill(Theme.text.opacity(0.09))
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(Text("Send"))
     }
 }
 
@@ -205,12 +266,19 @@ struct ChatBubble: View {
                     HStack(spacing: 6) { ForEach(bubble.images) { ChatImageThumb(image: $0) } }
                 }
                 if !bubble.text.isEmpty {
-                    Self.rendered(bubble.text).foregroundStyle(Color.white).textSelection(.enabled)
+                    Self.rendered(bubble.text).foregroundStyle(Theme.text).textSelection(.enabled)
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(Theme.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            // The panel's `.msg.user`: the link colour faintly, its corner by the edge drawn in.
+            .background(Theme.link.opacity(0.14), in: Self.userShape)
+            .overlay(Self.userShape.strokeBorder(Theme.link.opacity(0.2)))
         }
+    }
+
+    private static var userShape: UnevenRoundedRectangle {
+        let r = Theme.radiusSmall
+        return UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: 4, topTrailingRadius: r, style: .continuous)
     }
 
     private var waitingFor: String? {
@@ -228,7 +296,11 @@ struct ChatBubble: View {
                 ForEach(ChatRows.groups(bubble.steps)) { group in
                     switch group {
                     case .tools(let steps):
-                        VStack(alignment: .leading, spacing: 2) { ForEach(steps) { ChatToolRow(step: $0) } }
+                        if ChatRows.folds(steps, historic: bubble.historic) {
+                            ChatToolGroup(steps: steps)
+                        } else {
+                            VStack(alignment: .leading, spacing: 2) { ForEach(steps) { ChatToolRow(step: $0) } }
+                        }
                     case .step(let step):
                         switch step.kind {
                         case .text:
@@ -298,8 +370,45 @@ private struct ChatImageThumb: View {
     }
 }
 
+/// A run of calls of a past conversation folded to one line (src/web/ChatToolRow.tsx): what kind
+/// of work ran and how many calls, so a reopened chat reads as its answers; a tap opens the calls.
+private struct ChatToolGroup: View {
+    let steps: [ChatStep]
+    @State private var open = false
+
+    private var title: String {
+        ChatRows.allCommands(steps) ? String(localized: "Ran commands") : String(localized: "Called tools")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Button { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).frame(width: 16)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                    Text(verbatim: title).font(.footnote.weight(.medium))
+                    Text(verbatim: "\(steps.count)").font(.caption2).monospacedDigit().opacity(0.7)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(open ? Theme.text : .secondary)
+                .padding(.vertical, 4).padding(.horizontal, 4)
+                .background(open ? Theme.text.opacity(0.05) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(verbatim: "\(title), \(steps.count)"))
+            .accessibilityHint(Text(open ? "Hides the calls" : "Shows the calls"))
+            if open {
+                VStack(alignment: .leading, spacing: 2) { ForEach(steps) { ChatToolRow(step: $0) } }
+                    .padding(.leading, 22)
+            }
+        }
+    }
+}
+
 /// One tool call as a quiet single line (src/web/ChatToolRow.tsx): its glyph, title and first
-/// line, muted on success, red on failure; a tap opens the call's full input and output.
+/// line; a running call spins, and once it ends its dot says how, red for a failure and green
+/// for a success. A tap opens the call's full input and output.
 private struct ChatToolRow: View {
     let step: ChatStep
     @State private var open = false
@@ -337,6 +446,15 @@ private struct ChatToolRow: View {
         }
     }
 
+    /// The dot between title and line: how the call ended, or the row's own color before that.
+    private var dot: AnyShapeStyle {
+        switch step.state {
+        case .failed: return AnyShapeStyle(Theme.danger)
+        case .succeeded: return AnyShapeStyle(Theme.success)
+        default: return AnyShapeStyle(.secondary)
+        }
+    }
+
     /// Only what needs a look is said: a failure, a call without a result, one still running.
     private var cue: String? {
         switch step.state {
@@ -364,7 +482,7 @@ private struct ChatToolRow: View {
             Text(verbatim: title).font(.footnote.weight(.medium)).layoutPriority(1)
             let summary = ChatRows.summary(step.text)
             if !summary.isEmpty {
-                Text(verbatim: "·").font(.footnote)
+                Circle().fill(dot).frame(width: 3, height: 3).padding(.horizontal, 2)
                 Text(verbatim: summary).font(.caption.monospaced()).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(failed ? Theme.danger : .secondary)
             }
@@ -373,7 +491,8 @@ private struct ChatToolRow: View {
             if let cue { Text(verbatim: cue).font(.caption2).foregroundStyle(failed ? Theme.danger : .secondary).layoutPriority(1) }
         }
         .foregroundStyle(open ? Theme.text : .secondary)
-        .padding(.vertical, 3).padding(.horizontal, 4)
+        .padding(.vertical, 4).padding(.horizontal, 4)
+        .background(open ? Theme.text.opacity(0.05) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .contentShape(Rectangle())
     }
 
@@ -389,7 +508,7 @@ private struct ChatToolRow: View {
                 }
             }
         }
-        .background(Theme.solid, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Theme.codeBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.hairline))
         .padding(.leading, 22)
     }
@@ -431,11 +550,11 @@ private struct ChatApprovalCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.shield").foregroundStyle(Theme.accent)
+            HStack(spacing: 8) {
+                ChatWorkIcon(symbol: "exclamationmark.shield", tint: Theme.warning)
                 Text(verbatim: step.title).font(.footnote.weight(.semibold))
                 Spacer(minLength: 6)
-                Text(status).font(.caption2).foregroundStyle(.secondary)
+                Text(status).font(.caption2).foregroundStyle(stateColor)
             }
             if !step.text.isEmpty {
                 Text(verbatim: step.text).font(.caption.monospaced()).lineLimit(4)
@@ -453,6 +572,7 @@ private struct ChatApprovalCard: View {
                         .buttonStyle(.bordered)
                 }
                 .controlSize(.small)
+                .buttonBorderShape(.capsule)
                 .disabled(sending)
             }
             if !error.isEmpty {
@@ -460,10 +580,18 @@ private struct ChatApprovalCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(10)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.solid, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline))
+        .chatWork(tint: step.state == .waiting ? Theme.warning : nil, fill: 0.10, edge: 0.40)
+    }
+
+    private var stateColor: Color {
+        switch step.state {
+        case .waiting: return Theme.warning
+        case .allowed: return Theme.success
+        case .denied: return Theme.danger
+        default: return .secondary
+        }
     }
 
     private func reply(allow: Bool) {
@@ -520,11 +648,11 @@ private struct ChatQuestionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "questionmark.circle").foregroundStyle(Theme.accent)
+            HStack(spacing: 8) {
+                ChatWorkIcon(symbol: "questionmark.circle", tint: Theme.link)
                 Text("Question").font(.footnote.weight(.semibold))
                 Spacer(minLength: 6)
-                Text(status).font(.caption2).foregroundStyle(.secondary)
+                Text(status).font(.caption2).foregroundStyle(step.state == .waiting ? Theme.link : .secondary)
             }
             ForEach(questions) { q in item(q) }
             if waiting {
@@ -537,6 +665,7 @@ private struct ChatQuestionCard: View {
                         .buttonStyle(.bordered)
                 }
                 .controlSize(.small)
+                .buttonBorderShape(.capsule)
                 .disabled(sending)
             }
             if !error.isEmpty {
@@ -544,10 +673,9 @@ private struct ChatQuestionCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(10)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.solid, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline))
+        .chatWork(tint: step.state == .waiting ? Theme.link : nil, fill: 0.08, edge: 0.35)
     }
 
     @ViewBuilder private func item(_ q: ChatRows.Question) -> some View {
@@ -563,7 +691,7 @@ private struct ChatQuestionCard: View {
                     Button { choose(q, option.label) } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Image(systemName: q.multiple ? (on ? "checkmark.square.fill" : "square") : (on ? "largecircle.fill.circle" : "circle"))
-                                .foregroundStyle(on ? Theme.accent : .secondary)
+                                .foregroundStyle(on ? Theme.link : .secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(verbatim: option.label).font(.footnote.weight(.semibold)).foregroundStyle(Theme.text)
                                 if let d = option.description, !d.isEmpty {
@@ -574,8 +702,8 @@ private struct ChatQuestionCard: View {
                             Spacer(minLength: 0)
                         }
                         .padding(.horizontal, 10).padding(.vertical, 8)
-                        .background(on ? Theme.accent.opacity(0.1) : Theme.ground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(on ? Theme.accent.opacity(0.5) : Theme.hairline))
+                        .background(on ? Theme.link.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(on ? Theme.link : Color.secondary.opacity(0.3)))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -586,13 +714,12 @@ private struct ChatQuestionCard: View {
                           prompt: Text(q.options.isEmpty ? "Your answer" : "Or type your own answer")) { Text("Your answer") }
                     .font(.footnote)
                     .padding(.horizontal, 10).padding(.vertical, 8)
-                    .background(Theme.ground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.hairline))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.secondary.opacity(0.3)))
                     .disabled(sending)
                     .submitLabel(.send)
                     .onSubmit { if ready { reply(all) } }
             } else if let shown = ask.answers?[q.id], !shown.isEmpty {
-                Text(verbatim: "→ " + shown.joined(separator: ", ")).font(.footnote).foregroundStyle(.secondary)
+                Text(verbatim: "→ " + shown.joined(separator: ", ")).font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
             }
         }
     }
@@ -621,15 +748,58 @@ private struct ChatSteerLine: View {
     let text: String
     var pending = false
 
+    /// The panel's `.chat-steer`: a line in the link colour down its edge, dashed while it waits.
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Image(systemName: "arrow.turn.down.right").font(.caption2).foregroundStyle(.secondary)
-            Text("You").font(.footnote.weight(.semibold))
-            if !text.isEmpty { Text(verbatim: text).font(.footnote) }
+            Text(verbatim: "↳ " + String(localized: "You")).font(.footnote.weight(.semibold)).foregroundStyle(Theme.link)
+            if !text.isEmpty { Text(verbatim: text).font(.footnote).foregroundStyle(Theme.text) }
             if pending {
-                Text("the agent reads it after its current step").font(.caption2).foregroundStyle(.secondary)
+                Text(verbatim: "· " + String(localized: "the agent reads it after its current step")).font(.caption2).foregroundStyle(.secondary)
             }
         }
+        .padding(.horizontal, 10).padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .leading) {
+            Line().stroke(Theme.link, style: StrokeStyle(lineWidth: 2, dash: pending ? [4, 3] : []))
+                .frame(width: 2)
+        }
+        .opacity(pending ? 0.6 : 1)
+    }
+
+    private struct Line: Shape {
+        func path(in rect: CGRect) -> Path {
+            Path { p in
+                p.move(to: CGPoint(x: rect.midX, y: rect.minY))
+                p.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+            }
+        }
+    }
+}
+
+/// The small glyph at the head of an approval or a question, on a tile of its own colour.
+private struct ChatWorkIcon: View {
+    let symbol: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: symbol).font(.caption.weight(.semibold)).foregroundStyle(tint)
+            .frame(width: 22, height: 22)
+            .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+private extension View {
+    /// The panel's `.chat-work` card: the sheet's glass without a border, tinted and edged in the
+    /// colour of what it waits for while it waits.
+    func chatWork(tint: Color?, fill: Double, edge: Double) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous)
+        return background {
+            ZStack {
+                shape.fill(Theme.glass)
+                if let tint { shape.fill(tint.opacity(fill)) }
+            }
+        }
+        .overlay { if let tint { shape.strokeBorder(tint.opacity(edge)) } }
     }
 }

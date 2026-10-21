@@ -33,7 +33,7 @@ struct HubCover: View {
 
     var body: some View {
         NavigationStack {
-            content
+            HubPageContent(model: model, connection: connection, page: page, loader: loader, icons: icons)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -44,8 +44,17 @@ struct HubCover: View {
         }
         .tint(Theme.accent)
     }
+}
 
-    @ViewBuilder private var content: some View {
+/// One page of the Space, in a cover (HubCover) or pushed from a section of Settings.
+struct HubPageContent: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    let page: HubPage
+    @ObservedObject var loader: CatalogueLoader
+    let icons: IconStore
+
+    var body: some View {
         let api = loader.api
         switch page {
         case .inbox: InboxPage(model: model, api: api)
@@ -58,7 +67,7 @@ struct HubCover: View {
         case .terminal: TerminalPage(store: model.terminal(for: connection))
         case .chat(let key):
             if let agent = loader.catalogue?.agents.first(where: { $0.key == key }), let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) {
-                ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons)
+                ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons, backdrop: model.backdrops(for: connection))
             } else {
                 AgentsPage(model: model, connection: connection, loader: loader, icons: icons)
             }
@@ -174,6 +183,12 @@ struct ModelMenu<Label: View>: View {
 }
 
 extension View {
+    /// A page's rows on the glass of the panel's cards, so a page reads as the panel over the
+    /// Space's backdrop when Settings opens it (and as plain cards in a cover of its own).
+    func hubRows() -> some View {
+        listRowBackground(Rectangle().fill(.regularMaterial))
+    }
+
     /// A page's list: read when it comes up, again when pulled down.
     func hubPage(_ title: LocalizedStringKey, _ store: HubStore) -> some View {
         navigationTitle(Text(title))
@@ -231,31 +246,34 @@ struct TasksPage: View {
 
     var body: some View {
         List {
-            Section {
-                HubNotice(store: store)
-                if store.loaded {
-                    let active = store.tasks.filter(\.isActive).count
-                    let failing = store.tasks.filter(\.isFailing).count
-                    StatCards(stats: [
-                        ("\(active)", String(localized: "active")),
-                        ("\(store.tasks.count)", String(localized: "tasks")),
-                        ("\(failing)", String(localized: "failing")),
-                    ])
-                    if store.tasks.isEmpty { Text("No tasks yet.").foregroundStyle(.secondary) }
-                }
-            }
-            ForEach(store.groups, id: \.app) { group in
+            Group {
                 Section {
-                    ForEach(group.tasks) { task in
-                        NavigationLink { TaskDetail(store: store, id: task.id) } label: { TaskRow(task: task) }
+                    HubNotice(store: store)
+                    if store.loaded {
+                        let active = store.tasks.filter(\.isActive).count
+                        let failing = store.tasks.filter(\.isFailing).count
+                        StatCards(stats: [
+                            ("\(active)", String(localized: "active")),
+                            ("\(store.tasks.count)", String(localized: "tasks")),
+                            ("\(failing)", String(localized: "failing")),
+                        ])
+                        if store.tasks.isEmpty { Text("No tasks yet.").foregroundStyle(.secondary) }
                     }
-                } header: {
-                    HStack(spacing: 8) {
-                        EntryIcon(icon: store.labels[group.app]?.icon, fallback: "shippingbox", icons: icons, size: 20)
-                        Text(verbatim: store.title(group.app))
+                }
+                ForEach(store.groups, id: \.app) { group in
+                    Section {
+                        ForEach(group.tasks) { task in
+                            NavigationLink { TaskDetail(store: store, id: task.id) } label: { TaskRow(task: task) }
+                        }
+                    } header: {
+                        HStack(spacing: 8) {
+                            EntryIcon(icon: store.labels[group.app]?.icon, fallback: "shippingbox", icons: icons, size: 20)
+                            Text(verbatim: store.title(group.app))
+                        }
                     }
                 }
             }
+            .hubRows()
         }
         .hubPage("Scheduled tasks", store)
     }
@@ -302,61 +320,64 @@ struct TaskDetail: View {
 
     var body: some View {
         List {
-            if let task = store.task(id) {
-                Section {
-                    if let d = task.description, !d.isEmpty { Text(verbatim: d).font(.subheadline).foregroundStyle(.secondary) }
-                    LabeledContent("Status") {
-                        HStack(spacing: 6) {
-                            Dot(color: task.status.color)
-                            Text(verbatim: task.status.text)
+            Group {
+                if let task = store.task(id) {
+                    Section {
+                        if let d = task.description, !d.isEmpty { Text(verbatim: d).font(.subheadline).foregroundStyle(.secondary) }
+                        LabeledContent("Status") {
+                            HStack(spacing: 6) {
+                                Dot(color: task.status.color)
+                                Text(verbatim: task.status.text)
+                            }
+                        }
+                        LabeledContent("Schedule") { Text(verbatim: task.schedule.text) }
+                        ForEach(task.triggers ?? [], id: \.self) { trigger in
+                            LabeledContent("Trigger") { Text(verbatim: trigger.event) }
+                        }
+                        if let kind = task.target?.kind { LabeledContent("Kind") { Text(verbatim: kind) } }
+                        if let last = task.state?.lastRunAt.flatMap(ISO8601.parse) {
+                            LabeledContent("Last run") { Text(verbatim: [HubFormat.relative(last), task.state?.lastDurationMs.map { HubFormat.duration(ms: $0) }].compactMap { $0 }.joined(separator: " · ")) }
+                        }
+                        if task.isActive, let next = task.state?.nextRunAt.flatMap(ISO8601.parse) {
+                            LabeledContent("Next run") { Text(verbatim: next.timeIntervalSinceNow < 30 ? String(localized: "due now") : HubFormat.relative(next)) }
+                        }
+                        if let pending = task.state?.pending { LabeledContent("Events waiting") { Text(verbatim: "\(pending.events)") } }
+                        if let error = task.state?.lastError, task.state?.lastStatus == "error" {
+                            Text(verbatim: error).font(.footnote).foregroundStyle(Theme.danger)
                         }
                     }
-                    LabeledContent("Schedule") { Text(verbatim: task.schedule.text) }
-                    ForEach(task.triggers ?? [], id: \.self) { trigger in
-                        LabeledContent("Trigger") { Text(verbatim: trigger.event) }
-                    }
-                    if let kind = task.target?.kind { LabeledContent("Kind") { Text(verbatim: kind) } }
-                    if let last = task.state?.lastRunAt.flatMap(ISO8601.parse) {
-                        LabeledContent("Last run") { Text(verbatim: [HubFormat.relative(last), task.state?.lastDurationMs.map { HubFormat.duration(ms: $0) }].compactMap { $0 }.joined(separator: " · ")) }
-                    }
-                    if task.isActive, let next = task.state?.nextRunAt.flatMap(ISO8601.parse) {
-                        LabeledContent("Next run") { Text(verbatim: next.timeIntervalSinceNow < 30 ? String(localized: "due now") : HubFormat.relative(next)) }
-                    }
-                    if let pending = task.state?.pending { LabeledContent("Events waiting") { Text(verbatim: "\(pending.events)") } }
-                    if let error = task.state?.lastError, task.state?.lastStatus == "error" {
-                        Text(verbatim: error).font(.footnote).foregroundStyle(Theme.danger)
-                    }
-                }
-                Section {
-                    if task.modelSelectable == true {
-                        ModelMenu(options: task.eligible(store.options), current: task.overrides?.model,
-                                  none: String(localized: "Default (\(task.base?.model ?? String(localized: "the Space's")))"),
-                                  disabled: store.isSaving || task.orphaned == true,
-                                  pick: { value in Task { await store.setModel(id, value) } }) { Text("Model") }
-                        if let reason = store.saveError {
-                            Text("The change was not saved: \(reason)").font(.footnote).foregroundStyle(Theme.danger)
+                    Section {
+                        if task.modelSelectable == true {
+                            ModelMenu(options: task.eligible(store.options), current: task.overrides?.model,
+                                      none: String(localized: "Default (\(task.base?.model ?? String(localized: "the Space's")))"),
+                                      disabled: store.isSaving || task.orphaned == true,
+                                      pick: { value in Task { await store.setModel(id, value) } }) { Text("Model") }
+                            if let reason = store.saveError {
+                                Text("The change was not saved: \(reason)").font(.footnote).foregroundStyle(Theme.danger)
+                            }
+                        } else {
+                            Text("This task does not support model selection.").font(.footnote).foregroundStyle(.secondary)
                         }
-                    } else {
-                        Text("This task does not support model selection.").font(.footnote).foregroundStyle(.secondary)
+                    } header: {
+                        Text("Model")
+                    } footer: {
+                        if task.modelSelectable == true { Text("Used from the task's next run. Changing it here changes the Space, for every device.") }
                     }
-                } header: {
-                    Text("Model")
-                } footer: {
-                    if task.modelSelectable == true { Text("Used from the task's next run. Changing it here changes the Space, for every device.") }
-                }
-                Section {
-                    if let runs = store.runs[id] {
-                        if runs.isEmpty { Text("No runs yet.").foregroundStyle(.secondary) }
-                        ForEach(runs) { RunRow(run: $0) }
-                    } else if let error = store.runErrors[id] {
-                        Text("Unavailable: \(error)").font(.footnote).foregroundStyle(.secondary)
-                    } else {
-                        ProgressView()
+                    Section {
+                        if let runs = store.runs[id] {
+                            if runs.isEmpty { Text("No runs yet.").foregroundStyle(.secondary) }
+                            ForEach(runs) { RunRow(run: $0) }
+                        } else if let error = store.runErrors[id] {
+                            Text("Unavailable: \(error)").font(.footnote).foregroundStyle(.secondary)
+                        } else {
+                            ProgressView()
+                        }
+                    } header: {
+                        Text("Runs")
                     }
-                } header: {
-                    Text("Runs")
                 }
             }
+            .hubRows()
         }
         .navigationTitle(Text(verbatim: store.task(id)?.name ?? ""))
         .refreshable {

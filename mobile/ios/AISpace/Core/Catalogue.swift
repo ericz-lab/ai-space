@@ -172,6 +172,8 @@ struct Catalogue: Equatable {
     var screens: [PanelScreen]?
     /// `SPACE_DOMAIN` when the Space routes app hostnames itself (docs/router.md).
     var domain: String?
+    /// The icons of the panel's own tiles by name (`builtins` of `/api/apps`: inbox, terminal, settings, …).
+    var builtinIcons: [String: String] = [:]
     var fetchedAt = Date.distantPast
 
     var entries: [CatalogueEntry] { apps + agents + widgets.map(Self.entry) }
@@ -202,6 +204,7 @@ struct Catalogue: Equatable {
         var layout: Layout
     }
     private struct RouterBody: Decodable { var domain: String? }
+    private struct BuiltinsBody: Decodable { var builtins: [String: String]? }
 
     static func decode(_ payload: CataloguePayload) throws -> Catalogue {
         let decoder = JSONDecoder()
@@ -220,6 +223,8 @@ struct Catalogue: Equatable {
             .filter { $0.hidden != true && $0.status != "archived" && !($0.url ?? "").isEmpty }
             .map { entry($0, offlinePeers: offline) }
         out.agents = agentsBody.agents.elements.map { entry($0, offlinePeers: offline) }
+        // Read apart: an older Space, or one whose icons are not strings, still has its apps.
+        out.builtinIcons = (try? decoder.decode(BuiltinsBody.self, from: payload.apps))?.builtins ?? [:]
         out.widgets = widgetsBody.widgets.elements
         if let data = payload.layout, let body = try? decoder.decode(LayoutBody.self, from: data) {
             out.screens = body.layout.screens?.elements

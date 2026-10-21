@@ -15,7 +15,7 @@ struct OmniboxView: View {
     private var resolution: ShortcutResolution? { store.resolvedText == query ? store.resolution : nil }
     private var entries: [CatalogueEntry] {
         guard let c = loader.catalogue else { return [] }
-        return Array(OmniboxRules.rank(query, (c.entries + builtinEntries)).prefix(6))
+        return Array(OmniboxRules.rank(query, (c.entries + builtinEntries + [c.settingsTile])).prefix(6))
     }
     private var builtinPages: [(String, String, String, HubPage)] {
         [("inbox", "Inbox", "收件箱", .inbox), ("tasks", "Tasks", "任务", .tasks),
@@ -29,7 +29,8 @@ struct OmniboxView: View {
         }
     }
     private func openEntry(_ entry: CatalogueEntry) {
-        if let builtin = builtinPages.first(where: { "builtin/" + $0.0 == entry.ref }) { model.hubPage = builtin.3 }
+        if entry.isSettingsTile { model.showingSettings = true }
+        else if let builtin = builtinPages.first(where: { "builtin/" + $0.0 == entry.ref }) { model.hubPage = builtin.3 }
         else { model.open(entry) }
         query = ""
     }
@@ -55,7 +56,6 @@ struct OmniboxView: View {
                     }
                 }
                 ForEach(loose) { intent in actionRow(intent) }
-                if store.resolving { ProgressView().controlSize(.small).padding(12).accessibilityLabel(Text("Searching…")) }
                 Button { ask(nil) } label: { Label("Ask Space Assistant", systemImage: "sparkles").frame(maxWidth: .infinity, alignment: .leading) }
                     .padding(12).background(Theme.solid, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 if let error = store.error { Text(verbatim: error).foregroundStyle(Theme.danger).font(.footnote).padding(.horizontal, 12) }
@@ -71,6 +71,9 @@ struct OmniboxView: View {
             }
         }
     }
+
+    /// An arithmetic result's icon: a calculator, as on the panel.
+    private static let calculator = "plus.forwardslash.minus"
 
     private func row(_ title: String, detail: String?, icon: String) -> some View {
         HStack(spacing: 12) {
@@ -88,10 +91,14 @@ struct OmniboxView: View {
             else { selection = intent }
         } label: {
             if (intent.kind == "calc" || intent.kind == "convert"), let preview = store.preview {
-                ShortcutResultView(result: preview, open: open).padding(12).background(Theme.solid, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                HStack(alignment: .top, spacing: 12) {
+                    if intent.kind == "calc" { Image(systemName: Self.calculator).foregroundStyle(Theme.accent).padding(.top, 3) }
+                    ShortcutResultView(result: preview, open: open)
+                }
+                .padding(12).background(Theme.solid, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
                 row(intent.action?.displayTitle ?? intent.expression ?? "", detail: intent.action?.reason ?? intent.action?.peer,
-                    icon: intent.kind == "calc" ? "equal" : intent.action?.effect == "write" ? "plus.circle" : "bolt.circle")
+                    icon: intent.kind == "calc" ? Self.calculator : intent.action?.effect == "write" ? "plus.circle" : "bolt.circle")
             }
         }.disabled(intent.action?.available == false)
     }

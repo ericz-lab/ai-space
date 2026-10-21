@@ -7,7 +7,7 @@ import WebKit
 /// environment of a debug build only (`simctl launch` and `open --env` can set them):
 ///   AISPACE_DATA_DIR   keep saved Spaces and screens there instead of the app's own folders
 ///   AISPACE_CONNECT    add this Space on a first launch
-///   AISPACE_TAB        home | panel | settings, or web for the Space's web panel over them
+///   AISPACE_TAB        home | panel, settings for Settings over them, or web for the Space's web panel over them
 ///   AISPACE_SCROLL_Y   scroll the visible native page to this offset for safe-area checks
 ///   AISPACE_SCROLL_BENCH seconds to drive the visible page up and down, then the pager across,
 ///                      logging the frames the main thread dropped (see ScrollBench)
@@ -17,12 +17,15 @@ import WebKit
 ///                      server draws off screen first (see LayerAudit)
 ///   AISPACE_SEARCH     the search text on Home
 ///   AISPACE_CHAT_SEND  with AISPACE_HUB=chat:<agent key>: this message is sent three seconds after launch
+///   AISPACE_CHAT_OPEN  with AISPACE_HUB=chat:<agent key>: this stored session (its sid) is opened three seconds after launch
 ///   AISPACE_HUB        a page of the Space over the tabs: inbox | tasks | modelUsage | appUsage |
 ///                      appModels | events | packages | terminal | chat, or chat:<agent key> for one agent
 ///   AISPACE_TERMINAL_RUN with AISPACE_HUB=terminal: a shell opens on the Space's own machine three seconds
 ///                      after launch (on the peer AISPACE_TERMINAL_PEER names, when set) and this line
 ///                      is typed into it two seconds later
 ///   AISPACE_OPEN_URL   an aispace:// link, handled as if another app had opened it
+///   AISPACE_SETTINGS_SECTION a section of Settings (general … account) pushed on its page,
+///                      AISPACE_SETTINGS_PAGE a page of the Space (tasks, appModels, …) pushed after it
 ///   AISPACE_SCREEN     the screen on show on the Panel tab, by id
 ///   AISPACE_EDIT_SCREEN 1 opens the sheet that rearranges that screen
 ///   AISPACE_SCREEN_MENU 1 opens the actions a long press on a screen brings up
@@ -65,6 +68,13 @@ enum DebugLaunch {
                 chat.send()
             }
         }
+        if let sid = env["AISPACE_CHAT_OPEN"], let key = env["AISPACE_HUB"].flatMap({ $0.hasPrefix("chat:") ? String($0.dropFirst(5)) : nil }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                guard let c = model.selected, let agent = model.loader(for: c).catalogue?.agents.first(where: { $0.key == key }),
+                      let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) else { return }
+                Task { await model.chat(for: c, base: base).open(ChatSessionInfo(sid: sid)) }
+            }
+        }
         if let line = env["AISPACE_TERMINAL_RUN"], env["AISPACE_HUB"] == "terminal" {
             // The machines come with the page's first read; a first launch can take a few seconds to get there.
             func open(tries: Int) {
@@ -88,7 +98,7 @@ enum DebugLaunch {
         switch env["AISPACE_TAB"] {
         case "home": model.tab = .home
         case "panel": model.tab = .panel
-        case "settings": model.tab = .settings
+        case "settings": model.showingSettings = true
         case "web": model.openWebPanel()
         default: break
         }
@@ -134,6 +144,16 @@ enum DebugLaunch {
                 }
             }
         }
+    }
+
+    /// The pages Settings opens on, from AISPACE_SETTINGS_SECTION and AISPACE_SETTINGS_PAGE.
+    @MainActor static func settingsPath(_ path: inout NavigationPath) {
+        let env = ProcessInfo.processInfo.environment
+        guard path.isEmpty, let section = env["AISPACE_SETTINGS_SECTION"].flatMap(SettingsSection.init(rawValue:)) else { return }
+        path.append(section)
+        let pages: [String: HubPage] = ["inbox": .inbox, "tasks": .tasks, "modelUsage": .modelUsage, "appUsage": .appUsage,
+                                        "appModels": .appModels, "events": .events, "packages": .packages, "terminal": .terminal, "chat": .chat(agent: nil)]
+        if let page = env["AISPACE_SETTINGS_PAGE"].flatMap({ pages[$0] }) { path.append(page) }
     }
 
     @MainActor private static func scrollVisiblePage(in view: UIView, window: UIWindow, offset: CGFloat) {

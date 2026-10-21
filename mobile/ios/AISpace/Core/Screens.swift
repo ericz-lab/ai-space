@@ -30,6 +30,9 @@ enum Screens {
     static let limit = 20
     /// The panel's own tiles, in the order a seeded home screen has them.
     static let builtins = ["inbox", "terminal", "settings"]
+    /// The one built-in tile the phone draws: Settings, which opens over the pages as on the panel.
+    /// The other built-ins are the panel's own windows; the phone has their pages under Settings.
+    static let settingsKey = "builtin:settings"
     /// How many entries of each kind a first home screen takes (SEED in screens.ts).
     static let seedApps = 8, seedAgents = 4, seedWidgets = 4
 

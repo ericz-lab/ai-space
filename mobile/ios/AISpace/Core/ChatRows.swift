@@ -61,6 +61,15 @@ enum ChatRows {
         }
     }
 
+    /// Whether a run of calls is all commands, so a folded run's line can say what ran.
+    static func allCommands(_ steps: [ChatStep]) -> Bool {
+        !steps.isEmpty && steps.allSatisfy { $0.kind == .tool && tool($0.title) == .bash }
+    }
+
+    /// Whether a run of calls opens folded to one line: two or more calls of a past conversation.
+    /// A turn being followed keeps every call in view as it runs.
+    static func folds(_ run: [ChatStep], historic: Bool) -> Bool { historic && run.count > 1 }
+
     static func groups(_ steps: [ChatStep]) -> [Group] {
         var out: [Group] = []
         for step in steps {

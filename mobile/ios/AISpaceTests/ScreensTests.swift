@@ -67,17 +67,18 @@ struct ScreenStoreTests {
     let b = UUID()
     let panel = [
         PanelScreen(id: "home", items: ["app:todo", "builtin:inbox", "agent:space/assistant", "app:todo", "widget:todo/today", "app:gone"]),
-        PanelScreen(id: "s2", items: ["app:docs", "builtin:terminal"]),
+        PanelScreen(id: "s2", items: ["app:docs", "builtin:terminal", "builtin:settings"]),
     ]
 
     @Test func copiesThePanelOnceAndKeepsItsOwnFromThenOn() {
         let store = ScreenStore(fileURL: file)
         #expect(store.screens(a) == [PanelScreen(id: "home")])
         store.seed(a, from: panel)
-        // Built-in tiles are the panel's own windows; a pin whose entry is gone is kept for when it returns.
+        // Built-in tiles are the panel's own windows, but for Settings, which the phone draws too;
+        // a pin whose entry is gone is kept for when it returns.
         #expect(store.screens(a) == [
             PanelScreen(id: "home", items: ["app:todo", "agent:space/assistant", "widget:todo/today", "app:gone"]),
-            PanelScreen(id: "s2", items: ["app:docs"]),
+            PanelScreen(id: "s2", items: ["app:docs", "builtin:settings"]),
         ])
         // The panel changes later; the phone does not follow.
         store.seed(a, from: [PanelScreen(id: "home", items: ["app:reader"])])

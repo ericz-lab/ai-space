@@ -70,30 +70,33 @@ private struct TerminalStart: View {
 
     var body: some View {
         List {
-            Section {
-                HubNotice(store: store)
-                ForEach(store.machines) { machine in
-                    Button { store.open(on: machine) } label: {
-                        HStack(spacing: 12) {
-                            Dot(color: machine.canOpen ? Theme.success : .secondary)
-                            Text(verbatim: machine.name).foregroundStyle(Theme.text)
-                            Spacer()
-                            Text(verbatim: Self.state(machine)).font(.subheadline).foregroundStyle(Color.secondary)
+            Group {
+                Section {
+                    HubNotice(store: store)
+                    ForEach(store.machines) { machine in
+                        Button { store.open(on: machine) } label: {
+                            HStack(spacing: 12) {
+                                Dot(color: machine.canOpen ? Theme.success : .secondary)
+                                Text(verbatim: machine.name).foregroundStyle(Theme.text)
+                                Spacer()
+                                Text(verbatim: Self.state(machine)).font(.subheadline).foregroundStyle(Color.secondary)
+                            }
                         }
+                        .disabled(!machine.canOpen)
                     }
-                    .disabled(!machine.canOpen)
-                }
-            } header: {
-                Text("Open a shell on")
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    if store.loaded, !store.machines.contains(where: \.canOpen) {
-                        Text("No machine of this Space offers a terminal. It is off until SPACE_TERMINAL_ENABLED=1 is set in a machine's workspace .env.")
+                } header: {
+                    Text("Open a shell on")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if store.loaded, !store.machines.contains(where: \.canOpen) {
+                            Text("No machine of this Space offers a terminal. It is off until SPACE_TERMINAL_ENABLED=1 is set in a machine's workspace .env.")
+                        }
+                        Text("The shell runs on that machine as the Space's own user. A session ends when its connection does, and the phone drops it in the background: run tmux inside for work that must outlive it. The Space records when a session ran, never what was typed or shown.")
                     }
-                    Text("The shell runs on that machine as the Space's own user. A session ends when its connection does, and the phone drops it in the background: run tmux inside for work that must outlive it. The Space records when a session ran, never what was typed or shown.")
                 }
+                TerminalRecentRows(store: store)
             }
-            TerminalRecentRows(store: store)
+            .hubRows()
         }
         .refreshable { await store.refresh() }
     }
