@@ -80,6 +80,8 @@ them enabled, so live chat uses the account with no extra rows.
 
 Then, in `~/.dsh/cordis.patch.yml`, keep session logs on the machine and readable by ai-space: the harness otherwise sends them to DeepSeek with each request, exports telemetry after feedback, and compresses them.
 
+History reads plain `session.v4.jsonl` logs, falling back to `session.v3.jsonl` for older sessions. When both exist, v4 takes precedence; no log migration is needed.
+
 The `acp` app advertises `promptCapabilities.image` for an image-capable route; ai-space sends image blocks only when it does, and the chat API accepts images for an interactive DeepSeek Harness turn only (a one-shot turn has no image path).
 
 ```yaml

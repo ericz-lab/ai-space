@@ -216,11 +216,11 @@ describe("transcript", () => {
   let dir: string;
   afterEach(() => rm(dir, { recursive: true, force: true }));
 
-  test("reads the session log under the harness home by the harness's own path encoding", async () => {
+  test.each([3, 4])("reads the v%i session log under the harness home by the harness's own path encoding", async (version) => {
     dir = await mkdtemp(join(tmpdir(), "space-dsh-home-"));
     const cwd = "/srv/apps/notes";
     const sid = "session-11111111-2222-4333-8444-555555555555";
-    const file = join(dir, "sessions", "--srv-apps-notes--", sid, "session.v3.jsonl");
+    const file = join(dir, "sessions", "--srv-apps-notes--", sid, `session.v${version}.jsonl`);
     await Bun.write(file, "");
     const lines = [
       { type: "session", id: sid, cwd },
@@ -241,5 +241,19 @@ describe("transcript", () => {
       },
     ]);
     expect(await runtime.transcript!(cwd, "session-nope0000")).toBeNull();
+    expect(await runtime.transcript!("/srv/apps/other", sid)).toBeNull();
+    await expect(runtime.transcript!(cwd, "../invalid-session")).rejects.toThrow("invalid session id");
+  });
+
+  test("prefers v4 over a retained v3 log without combining duplicate messages", async () => {
+    dir = await mkdtemp(join(tmpdir(), "space-dsh-home-"));
+    const cwd = "/srv/apps/notes";
+    const sid = "session-11111111-2222-4333-8444-555555555555";
+    const folder = join(dir, "sessions", "--srv-apps-notes--", sid);
+    const message = (text: string) => JSON.stringify({ type: "user/message", data: { content: [{ type: "text", text }], source: { kind: "user" } } });
+    await Bun.write(join(folder, "session.v3.jsonl"), message("old message"));
+    await Bun.write(join(folder, "session.v4.jsonl"), message("current message"));
+    const runtime = createDeepseekHarness(spec({ home: dir }));
+    expect(await runtime.transcript!(cwd, sid)).toEqual([{ role: "user", text: "current message" }]);
   });
 });

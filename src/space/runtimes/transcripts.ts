@@ -10,7 +10,7 @@ import type { TranscriptMessage, TranscriptStep } from "./types.ts";
  * tool calls (with their results where recorded) in order.
  *
  *   Claude Code       ~/.claude/projects/<cwd encoded>/<sid>.jsonl
- *   DeepSeek Harness  $DSH_HOME/sessions/<cwd encoded>/<sid>/session.v3.jsonl (plain JSONL; the
+ *   DeepSeek Harness  $DSH_HOME/sessions/<cwd encoded>/<sid>/session.v{4,3}.jsonl (plain JSONL; the
  *                     harness must be configured with `compression: none`, see docs/runtimes.md)
  *   Codex             $CODEX_HOME/sessions/<date>/rollout-<time>-<sid>.jsonl
  */
@@ -96,15 +96,18 @@ export function dshProjectKey(cwd: string): string {
   return `--${slug.slice(0, 251)}--`;
 }
 
-export function dshTranscriptPath(home: string, cwd: string, sid: string): string {
+export function dshTranscriptPath(home: string, cwd: string, sid: string, version: 3 | 4 = 3): string {
   if (!SESSION_ID_RE.test(sid)) throw new Error("invalid session id");
-  return join(home, "sessions", dshProjectKey(cwd), sid, "session.v3.jsonl");
+  return join(home, "sessions", dshProjectKey(cwd), sid, `session.v${version}.jsonl`);
 }
 
 export async function readDshTranscript(home: string, cwd: string, sid: string): Promise<TranscriptMessage[] | null> {
-  const file = Bun.file(dshTranscriptPath(home, cwd, sid));
-  if (!(await file.exists())) return null;
-  return parseDshTranscript(await file.text());
+  // The harness may retain v3 after migrating a session; v4 is authoritative.
+  for (const version of [4, 3] as const) {
+    const file = Bun.file(dshTranscriptPath(home, cwd, sid, version));
+    if (await file.exists()) return parseDshTranscript(await file.text());
+  }
+  return null;
 }
 
 type DshBlock = { type?: string; text?: string };
