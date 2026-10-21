@@ -119,7 +119,7 @@ struct HomeView: View {
     /// One screen: its tiles in one grid, its widget cards below, in the screen's order. A key
     /// whose entry is gone is skipped and kept, so it comes back with the entry.
     @ViewBuilder private func screen(_ screen: PanelScreen, _ catalogue: Catalogue, _ layout: TileLayout) -> some View {
-        let tiles = screen.items.compactMap { catalogue.entry($0) }.filter { $0.kind != .widget }
+        let tiles = screen.items.compactMap { catalogue.tile($0) }.filter { $0.kind != .widget }
         // Settings can leave the widget cards off the screens; they stay pinned and stay in the library.
         let widgets = model.showsWidgets ? screen.items.compactMap { key in catalogue.widgets.first { "widget:\($0.id)" == key } } : []
         if !tiles.isEmpty { grid(tiles, catalogue, layout, on: screen.id) }
@@ -141,7 +141,8 @@ struct HomeView: View {
     /// them made at once is what the page then carries on every frame of a scroll.
     @ViewBuilder private func library(_ catalogue: Catalogue, _ layout: TileLayout) -> some View {
         let query = model.query
-        let apps = CatalogueSearch.filter(catalogue.apps, query: query)
+        // The panel's built-in tiles follow the apps in their section (src/web/Library.tsx).
+        let apps = CatalogueSearch.filter(catalogue.apps + [catalogue.settingsTile], query: query)
         let agents = CatalogueSearch.filter(catalogue.agents, query: query)
         let widgets = catalogue.widgets.filter { CatalogueSearch.matches(Catalogue.entry($0), query: query) }
 
@@ -185,7 +186,9 @@ struct HomeView: View {
         ForEach(rows, id: \.first!.id) { row in
             LazyVGrid(columns: layout.columns, alignment: .leading) {
                 ForEach(row) { entry in
-                    EntryTile(entry: current(entry), icons: icons, peer: catalogue.peer(entry.peer)) { model.open(entry) }
+                    EntryTile(entry: current(entry), icons: icons, peer: catalogue.peer(entry.peer)) {
+                        if entry.isSettingsTile { model.showingSettings = true } else { model.open(entry) }
+                    }
                         .contextMenu { menu(entry, on: screen) }
                 }
             }
@@ -221,24 +224,25 @@ struct HomeView: View {
     /// What a long press offers: the screens the entry is on, and the ways out to the browser.
     @ViewBuilder private func menu(_ entry: CatalogueEntry, on screen: String?) -> some View {
         let screens = self.screens
+        let key = entry.pinKey
         Group {
             if let screen {
-                Button(role: .destructive) { model.togglePin(entry.key, screen: screen, in: connection) } label: {
+                Button(role: .destructive) { model.togglePin(key, screen: screen, in: connection) } label: {
                     Label("Remove from This Screen", systemImage: "minus.circle")
                 }
             }
             if screens.count <= 1 {
                 if screen == nil {
-                    let on = Screens.isPinned(screens, Screens.home, entry.key)
-                    Button { model.togglePin(entry.key, screen: Screens.home, in: connection) } label: {
+                    let on = Screens.isPinned(screens, Screens.home, key)
+                    Button { model.togglePin(key, screen: Screens.home, in: connection) } label: {
                         Label(on ? "Remove from Panel" : "Add to Panel", systemImage: on ? "minus.rectangle" : "plus.rectangle.on.rectangle")
                     }
                 }
             } else {
                 Menu {
                     ForEach(Array(screens.enumerated()), id: \.element.id) { index, s in
-                        Button { model.togglePin(entry.key, screen: s.id, in: connection) } label: {
-                            if s.items.contains(entry.key) { Label(Screens.title(at: index), systemImage: "checkmark") } else { Text(verbatim: Screens.title(at: index)) }
+                        Button { model.togglePin(key, screen: s.id, in: connection) } label: {
+                            if s.items.contains(key) { Label(Screens.title(at: index), systemImage: "checkmark") } else { Text(verbatim: Screens.title(at: index)) }
                         }
                     }
                 } label: {
@@ -425,7 +429,7 @@ struct ScreenEditor: View {
         let catalogue = loader.catalogue
         let screens = store.screens(connection.id)
         let items = screens.first { $0.id == screen }?.items ?? []
-        let entries = items.compactMap { catalogue?.entry($0) }
+        let entries = items.compactMap { catalogue?.tile($0) }
         let tiles = entries.filter { $0.kind != .widget }
         let widgets = entries.filter { $0.kind == .widget }
         NavigationStack {
@@ -450,11 +454,11 @@ struct ScreenEditor: View {
     }
 
     private func group(_ title: LocalizedStringKey, _ entries: [CatalogueEntry]) -> some View {
-        let keys = entries.map(\.key)
+        let keys = entries.map(\.pinKey)
         return Section {
             ForEach(entries) { entry in
                 HStack(spacing: 12) {
-                    EntryIcon(icon: entry.icon, fallback: entry.kind == .agent ? "person.fill" : "app", icons: icons, size: 32, isRound: entry.kind == .agent)
+                    EntryIcon(icon: entry.icon, fallback: entry.fallbackSymbol, icons: icons, size: 32, isRound: entry.kind == .agent)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(verbatim: entry.displayTitle())
                         if let peer = entry.peer { Text(verbatim: peer).font(.caption).foregroundStyle(.secondary) }

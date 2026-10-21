@@ -35,6 +35,25 @@ struct EntryIcon: View {
     }
 }
 
+/// The panel's Settings tile (src/web/screens.ts BUILTINS): with the Space's own icon for it
+/// when it sends one, a gear otherwise. It is pinned by the panel's key, `builtin:settings`.
+extension Catalogue {
+    var settingsTile: CatalogueEntry {
+        CatalogueEntry(kind: .app, ref: "builtin/settings", title: "Settings", i18n: ["zh": LocalizedText(title: "设置")],
+                       icon: builtinIcons["settings"], reach: .link)
+    }
+
+    /// The entry a screen's key stands for, the Settings tile among them.
+    func tile(_ key: String) -> CatalogueEntry? { key == Screens.settingsKey ? settingsTile : entry(key) }
+}
+
+extension CatalogueEntry {
+    var isSettingsTile: Bool { kind == .app && ref == "builtin/settings" }
+    /// The key a screen pins it by: the panel's for a built-in tile.
+    var pinKey: String { isSettingsTile ? Screens.settingsKey : key }
+    var fallbackSymbol: String { isSettingsTile ? "gearshape.fill" : (kind == .agent ? "person.fill" : "app") }
+}
+
 struct EntryTile: View {
     let entry: CatalogueEntry
     let icons: IconStore
@@ -47,7 +66,7 @@ struct EntryTile: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                EntryIcon(icon: entry.icon, fallback: entry.kind == .agent ? "person.fill" : "app", icons: icons, isRound: entry.kind == .agent)
+                EntryIcon(icon: entry.icon, fallback: entry.fallbackSymbol, icons: icons, isRound: entry.kind == .agent)
                     .overlay(alignment: .topTrailing) { badge.offset(x: 4, y: -4) }
                     .opacity(dimmed ? 0.5 : 1)
                 Text(verbatim: entry.displayTitle())

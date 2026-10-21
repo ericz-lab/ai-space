@@ -3,10 +3,10 @@ import SwiftUI
 import UIKit
 import WebKit
 
-/// Home is everything the Space has; Panel is this phone's screens; Settings is the Space's
-/// settings and the phone's own.
+/// Home is everything the Space has; Panel is this phone's screens. Settings is not a page of
+/// them: as on the panel, it is a tile that opens over them (`showingSettings`).
 enum MainTab: Hashable {
-    case home, panel, settings
+    case home, panel
 }
 
 /// How the app is drawn on this phone, whatever the panel in a browser is set to.
@@ -14,11 +14,10 @@ enum Appearance: String, CaseIterable {
     case system, light, dark
 }
 
-/// The pages the app swipes through, left to right: Home, each screen, Settings. A screen's
-/// page is its id; these two are not screen ids (those are letters, digits, - and _ only).
+/// The pages the app swipes through, left to right: Home, then each screen. A screen's page is
+/// its id; Home's is not a screen id (those are letters, digits, - and _ only).
 enum Pager {
     static let home = "#home"
-    static let settings = "#settings"
 }
 
 /// The page on show in the pager, as an object of its own. A published property of AppModel
@@ -28,7 +27,7 @@ enum Pager {
 final class PagerPosition: ObservableObject {
     @Published var id = Screens.home {
         didSet {
-            if id != Pager.home, id != Pager.settings { lastScreenID = id }
+            if id != Pager.home { lastScreenID = id }
         }
     }
     var lastScreenID = Screens.home
@@ -59,7 +58,7 @@ final class AppModel: ObservableObject {
     }
     /// Where the pager stands, observed by the pager alone (PagerPosition).
     let pager = PagerPosition()
-    /// The page on show: `Pager.home`, a screen's id, or `Pager.settings`. The app opens on the
+    /// The page on show: `Pager.home` or a screen's id. The app opens on the
     /// first screen of the panel; the library is one swipe to its left.
     var pagerID: String {
         get { pager.id }
@@ -102,6 +101,13 @@ final class AppModel: ObservableObject {
     /// Retained web pages, isolated by Space; returning home does not close a tab.
     @Published private(set) var appTabs: [OpenPage] = []
     @Published var showingAdd = false
+    /// Settings over the pages, opened from its tile as the panel opens it (App.tsx openSettings).
+    @Published var showingSettings = false {
+        didSet { if !showingSettings { settingsPath = NavigationPath() } }
+    }
+    /// Where Settings stands (a section, a page in it), kept here so a theme picked in it, which
+    /// draws every view again, brings Settings back where it was.
+    @Published var settingsPath = NavigationPath()
     @Published var confirmingSignOut = false
     /// Set when the web panel was opened to sign in, so a finished sign-in closes it again.
     private var closeWebPanelAfterSignIn = false
@@ -167,11 +173,10 @@ final class AppModel: ObservableObject {
 
     /// The tab the page on show belongs to; choosing Panel returns to the screen last shown.
     var tab: MainTab {
-        get { pagerID == Pager.home ? .home : (pagerID == Pager.settings ? .settings : .panel) }
+        get { pagerID == Pager.home ? .home : .panel }
         set {
             switch newValue {
             case .home: pagerID = Pager.home
-            case .settings: pagerID = Pager.settings
             case .panel: pagerID = selected.map { c in screens.screens(c.id).contains { $0.id == homePage } } == true ? homePage : Screens.home
             }
         }
@@ -327,6 +332,7 @@ final class AppModel: ObservableObject {
     func select(_ id: UUID) {
         guard store.connection(id) != nil else { return }
         page = nil
+        showingSettings = false
         selectedID = id
         query = ""
         homePage = Screens.home
@@ -524,7 +530,7 @@ final class AppModel: ObservableObject {
     func returnToSpace() {
         if let page {
             let origin = page.originPage
-            pagerID = origin == Pager.home || origin == Pager.settings || screens.screens(page.connection).contains { $0.id == origin }
+            pagerID = origin == Pager.home || screens.screens(page.connection).contains { $0.id == origin }
                 ? origin : Screens.home
         }
         page = nil
@@ -568,6 +574,8 @@ final class AppModel: ObservableObject {
     /// cannot send a message or change the Space, since any web page can open one.
     func handle(_ link: DeepLink) {
         guard let connection = selected else { return }
+        // What a link shows comes up over the pages, not under Settings.
+        showingSettings = false
         switch link {
         case .show:
             page = nil

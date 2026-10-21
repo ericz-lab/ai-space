@@ -7,7 +7,7 @@ import WebKit
 /// environment of a debug build only (`simctl launch` and `open --env` can set them):
 ///   AISPACE_DATA_DIR   keep saved Spaces and screens there instead of the app's own folders
 ///   AISPACE_CONNECT    add this Space on a first launch
-///   AISPACE_TAB        home | panel | settings, or web for the Space's web panel over them
+///   AISPACE_TAB        home | panel, settings for Settings over them, or web for the Space's web panel over them
 ///   AISPACE_SCROLL_Y   scroll the visible native page to this offset for safe-area checks
 ///   AISPACE_SCROLL_BENCH seconds to drive the visible page up and down, then the pager across,
 ///                      logging the frames the main thread dropped (see ScrollBench)
@@ -98,7 +98,7 @@ enum DebugLaunch {
         switch env["AISPACE_TAB"] {
         case "home": model.tab = .home
         case "panel": model.tab = .panel
-        case "settings": model.tab = .settings
+        case "settings": model.showingSettings = true
         case "web": model.openWebPanel()
         default: break
         }

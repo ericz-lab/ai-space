@@ -18,7 +18,8 @@ struct RootView: View {
         .id(model.themeID)
         .tint(Theme.accent)
         .preferredColorScheme(model.appearance == .system ? nil : (model.appearance == .dark ? .dark : .light))
-        .sheet(isPresented: $model.showingAdd) {
+        // Settings adds a Space from its own cover; this one serves the pages.
+        .sheet(isPresented: Binding(get: { model.showingAdd && !model.showingSettings }, set: { model.showingAdd = $0 })) {
             NavigationStack {
                 ConnectView(model: model, isFirst: false)
             }
@@ -26,8 +27,9 @@ struct RootView: View {
     }
 }
 
-/// The pages side by side, swiped through as on an iPhone's home screen: Home, each screen of
-/// the panel, Settings. Swipe horizontally to move between them; no dock covers the content.
+/// The pages side by side, swiped through as on an iPhone's home screen: Home, then each screen
+/// of the panel. Swipe horizontally to move between them; no dock covers the content. Settings
+/// is a tile, as on the panel, and opens over them.
 struct MainTabs: View {
     @ObservedObject var model: AppModel
     let connection: Connection
@@ -55,16 +57,13 @@ struct MainTabs: View {
                             .frame(width: viewport.size.width, height: viewport.size.height)
                             .id(screen.id)
                     }
-                    SettingsView(model: model, connection: connection, loader: loader, settings: model.settings(for: connection), icons: icons)
-                        .frame(width: viewport.size.width, height: viewport.size.height)
-                        .id(Pager.settings)
                 }
                 .scrollTargetLayout()
             }
         }
         // Keep one status effect outside the pager so adjacent pages never overlap their glass.
         .modifier(LauncherHeaderBlur())
-        // One continuous backdrop for Home, Panel and Settings, including the status bar.
+        // One continuous backdrop for Home and the screens, including the status bar.
         .background { SpaceBackdrop(store: model.backdrops(for: connection)) }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .confirmationDialog(Text(verbatim: Screens.title(at: all.firstIndex { $0.id == model.homePage } ?? 0)), isPresented: $model.showingScreenMenu, titleVisibility: .visible) {
@@ -99,6 +98,12 @@ struct MainTabs: View {
         .background {
             Color.clear.fullScreenCover(isPresented: $model.showingWebPanel) {
                 WebPanelView(model: model, connection: connection, session: model.panel(for: connection))
+            }
+        }
+        .background {
+            Color.clear.fullScreenCover(isPresented: $model.showingSettings) {
+                SettingsView(model: model, connection: connection, loader: loader, settings: model.settings(for: connection), icons: icons)
+                    .preferredColorScheme(model.appearance == .system ? nil : (model.appearance == .dark ? .dark : .light))
             }
         }
         .background {

@@ -15,7 +15,7 @@ struct OmniboxView: View {
     private var resolution: ShortcutResolution? { store.resolvedText == query ? store.resolution : nil }
     private var entries: [CatalogueEntry] {
         guard let c = loader.catalogue else { return [] }
-        return Array(OmniboxRules.rank(query, (c.entries + builtinEntries)).prefix(6))
+        return Array(OmniboxRules.rank(query, (c.entries + builtinEntries + [c.settingsTile])).prefix(6))
     }
     private var builtinPages: [(String, String, String, HubPage)] {
         [("inbox", "Inbox", "收件箱", .inbox), ("tasks", "Tasks", "任务", .tasks),
@@ -29,7 +29,8 @@ struct OmniboxView: View {
         }
     }
     private func openEntry(_ entry: CatalogueEntry) {
-        if let builtin = builtinPages.first(where: { "builtin/" + $0.0 == entry.ref }) { model.hubPage = builtin.3 }
+        if entry.isSettingsTile { model.showingSettings = true }
+        else if let builtin = builtinPages.first(where: { "builtin/" + $0.0 == entry.ref }) { model.hubPage = builtin.3 }
         else { model.open(entry) }
         query = ""
     }

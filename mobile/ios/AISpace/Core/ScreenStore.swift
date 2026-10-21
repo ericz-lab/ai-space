@@ -53,13 +53,15 @@ final class ScreenStore: ObservableObject {
     }
 
     /// The panel's screens as the phone keeps them: only entries of a kind the phone shows
-    /// (`builtin:` tiles are the panel's own windows), each once per screen. A key whose entry
-    /// is gone is kept, so it comes back with the entry.
+    /// (of the `builtin:` tiles, the panel's own windows, only Settings), each once per screen.
+    /// A key whose entry is gone is kept, so it comes back with the entry.
     static func copy(_ panel: [PanelScreen]) -> [PanelScreen] {
         let kinds = EntryKind.allCases.map { $0.rawValue + ":" }
         return normalized(panel.map { s in
             var seen = Set<String>()
-            return PanelScreen(id: s.id, name: s.name, items: s.items.filter { key in kinds.contains { key.hasPrefix($0) } && seen.insert(key).inserted })
+            return PanelScreen(id: s.id, name: s.name, items: s.items.filter { key in
+                (key == Screens.settingsKey || kinds.contains { key.hasPrefix($0) }) && seen.insert(key).inserted
+            })
         })
     }
 
