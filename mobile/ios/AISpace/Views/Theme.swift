@@ -76,6 +76,20 @@ enum Theme {
     static var radiusSmall: CGFloat { max(current.radius - 4, 6) }
 }
 
+extension Theme {
+    /// `color-mix(in srgb, a share, b)`, resolved for the light or dark appearance on show.
+    static func mix(_ a: Color, _ b: Color, _ share: CGFloat) -> Color {
+        Color(UIColor { traits in
+            var (r1, g1, b1, a1): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+            var (r2, g2, b2, a2): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+            UIColor(a).resolvedColor(with: traits).getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+            UIColor(b).resolvedColor(with: traits).getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+            let t = 1 - share
+            return UIColor(red: r1 * share + r2 * t, green: g1 * share + g2 * t, blue: b1 * share + b2 * t, alpha: a1 * share + a2 * t)
+        })
+    }
+}
+
 extension Color {
     init(hex: UInt32) {
         self.init(.sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255, opacity: 1)
@@ -141,14 +155,16 @@ struct SpaceBackdrop: View {
 /// The shadow is a picture of its own behind the surface. Cast by the card with `.shadow`, it
 /// made the render server draw everything in the card again off screen on every frame of a
 /// scroll; cast by the material fill alone, the material stops blurring what is behind it.
+/// A widget card has no border at all, as on the panel: its edge is the glass and the shadow.
 struct Glass: ViewModifier {
     var radius: CGFloat?
+    var bordered = true
 
     func body(content: Content) -> some View {
         let radius = radius ?? Theme.radius
         content
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.hairline))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(bordered ? Theme.hairline : .clear))
             .background { GlassShadow(radius: radius) }
     }
 }
@@ -175,7 +191,7 @@ private struct GlassShadow: View {
 }
 
 extension View {
-    func glass(radius: CGFloat? = nil) -> some View { modifier(Glass(radius: radius)) }
+    func glass(radius: CGFloat? = nil, bordered: Bool = true) -> some View { modifier(Glass(radius: radius, bordered: bordered)) }
 }
 
 /// The ai-space mark (docs/logo.svg), shipped as a bitmap.
@@ -281,8 +297,8 @@ struct LauncherCapsuleGlass: ViewModifier {
         if #available(iOS 26.0, *) {
             content.glassEffect(.regular.tint(nil), in: Capsule())
         } else {
+            // No outer border, as the panel's command box has none.
             content.background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(Theme.hairline))
         }
     }
 }

@@ -34,11 +34,13 @@ struct WidgetBlocksView: View {
 }
 
 extension BlockTone {
+    /// A tone in a card: the status color pulled a little toward the text, so a green number
+    /// reads as a value rather than a light (src/web/styles.css, `--tone-*`).
     var color: Color {
         switch self {
-        case .positive: return Theme.success
-        case .negative: return Theme.danger
-        case .warning: return Theme.warning
+        case .positive: return Theme.mix(Theme.success, Theme.text, 0.82)
+        case .negative: return Theme.mix(Theme.danger, Theme.text, 0.84)
+        case .warning: return Theme.mix(Theme.warning, Theme.text, 0.84)
         case .neutral: return .secondary
         }
     }
@@ -58,7 +60,7 @@ struct BlockHero: View {
             if block.type == .status {
                 HStack(spacing: 8) {
                     Circle().fill(tone?.color ?? Color.secondary).frame(width: 10, height: 10)
-                    Text(verbatim: value ?? "").font(.title3.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(2)
+                    Text(verbatim: value ?? "").font(.headline).foregroundStyle(Theme.text).lineLimit(2)
                 }
                 if let date = block.time.flatMap(Times.parse) {
                     Text(verbatim: Times.ago(date)).font(.caption).foregroundStyle(.secondary)
@@ -100,7 +102,7 @@ struct BlockRow: View {
                 if block.type == .status {
                     Circle().fill(tone?.color ?? Color.secondary).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
                 }
-                Text(verbatim: block.label.text()).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(verbatim: block.label.text()).font(.subheadline).foregroundStyle(Theme.text.opacity(0.78)).lineLimit(1)
                 Spacer(minLength: 8)
                 Text(verbatim: value ?? missing())
                     .font(.subheadline.weight(.medium)).monospacedDigit()
@@ -138,8 +140,9 @@ struct BlockDelta: View {
     }
 }
 
-/// A trend's points as a line or bars. A line breaks at a missing point rather than bridging it;
-/// a signed or bar trend is drawn from zero. Each part is one shape: a view per bar made a card
+/// A trend's points as a line or bars. A line breaks at a missing point rather than bridging it,
+/// with a faint area under each unbroken run; bars stand on a zero line, the latest at full
+/// strength and the history behind it quieter, so today reads at a glance. Each part is one shape: a view per bar made a card
 /// with a chart many times heavier to lay out and to scroll than one without.
 struct Spark: View {
     let block: WidgetBlock
@@ -154,17 +157,26 @@ struct Spark: View {
             let lo = fromZero ? min(0, values.min() ?? 0) : (values.min() ?? 0)
             let hi = fromZero ? max(0, values.max() ?? 0) : (values.max() ?? 0)
             let scale = SparkScale(points: points, lo: lo, span: hi - lo == 0 ? 1 : hi - lo)
+            let last = points.lastIndex { $0.v != nil }
             Group {
                 if block.style != "bar" {
-                    SparkLine(scale: scale).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                } else if block.signed == true {
                     ZStack {
-                        SparkBaseline(scale: scale).stroke(Theme.hairline, lineWidth: 1)
-                        SparkBars(scale: scale, positive: true).fill(Theme.success)
-                        SparkBars(scale: scale, positive: false).fill(Theme.danger)
+                        SparkLine(scale: scale, area: true).fill(Theme.accent.opacity(0.14))
+                        SparkLine(scale: scale).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     }
                 } else {
-                    SparkBars(scale: scale).fill(Theme.accent)
+                    ZStack {
+                        if block.signed == true {
+                            SparkBars(scale: scale, positive: true, only: last).fill(BlockTone.positive.color)
+                            SparkBars(scale: scale, positive: true, except: last).fill(BlockTone.positive.color.opacity(0.6))
+                            SparkBars(scale: scale, positive: false, only: last).fill(BlockTone.negative.color)
+                            SparkBars(scale: scale, positive: false, except: last).fill(BlockTone.negative.color.opacity(0.6))
+                        } else {
+                            SparkBars(scale: scale, only: last).fill(Theme.accent)
+                            SparkBars(scale: scale, except: last).fill(Theme.accent.opacity(0.6))
+                        }
+                        SparkBaseline(scale: scale).stroke(Theme.text.opacity(0.18), lineWidth: 1)
+                    }
                 }
             }
             .accessibilityHidden(true)
@@ -186,14 +198,20 @@ private struct SparkBars: Shape {
     let scale: SparkScale
     /// The bars at or above zero, those below it, or all of them for nil.
     var positive: Bool?
+    /// Only the bar at this index, or every bar but it.
+    var only: Int?
+    var except: Int?
 
     func path(in rect: CGRect) -> Path {
         let step = scale.step(in: rect), zero = scale.y(0, in: rect)
         var path = Path()
         for (i, point) in scale.points.enumerated() {
             guard let v = point.v, positive == nil || (v >= 0) == positive else { continue }
+            if let only, i != only { continue }
+            if let except, i == except { continue }
             let y = scale.y(v, in: rect)
-            path.addRect(CGRect(x: CGFloat(i) * step + step * 0.15, y: min(y, zero), width: max(step * 0.7, 1), height: max(abs(y - zero), 1)))
+            let bar = CGRect(x: CGFloat(i) * step + step * 0.15, y: min(y, zero), width: max(step * 0.7, 1), height: max(abs(y - zero), 1))
+            path.addRoundedRect(in: bar, cornerSize: CGSize(width: min(1.2, bar.width / 2), height: min(1.2, bar.height / 2)))
         }
         return path
     }
@@ -210,22 +228,34 @@ private struct SparkBaseline: Shape {
     }
 }
 
+/// The line through the points, or with `area` the region under each unbroken run of it down to
+/// the chart's floor.
 private struct SparkLine: Shape {
     let scale: SparkScale
+    var area = false
 
     func path(in rect: CGRect) -> Path {
         let step = scale.step(in: rect)
         var path = Path()
-        var pen = false
+        var run: [CGPoint] = []
+        func close() {
+            defer { run = [] }
+            guard area, run.count > 1, let first = run.first, let last = run.last else { return }
+            path.move(to: CGPoint(x: first.x, y: rect.height))
+            run.forEach { path.addLine(to: $0) }
+            path.addLine(to: CGPoint(x: last.x, y: rect.height))
+            path.closeSubpath()
+        }
         for (i, point) in scale.points.enumerated() {
             guard let v = point.v else {
-                pen = false
+                close()
                 continue
             }
             let at = CGPoint(x: CGFloat(i) * step + step / 2, y: scale.y(v, in: rect))
-            if pen { path.addLine(to: at) } else { path.move(to: at) }
-            pen = true
+            if !area { if run.isEmpty { path.move(to: at) } else { path.addLine(to: at) } }
+            run.append(at)
         }
+        close()
         return path
     }
 }
@@ -272,9 +302,10 @@ struct GaugeScale: View {
             .clipShape(Capsule())
             .overlay(alignment: .leading) {
                 if let value = block.value {
-                    Capsule().fill(Theme.text).frame(width: 3, height: 12)
-                        .overlay(Capsule().strokeBorder(Theme.solid, lineWidth: 0.5))
-                        .offset(x: geo.size.width * block.position(value) - 1.5)
+                    // A round marker ringed in the surface color, lifted off the zones by a soft shadow.
+                    Circle().fill(Theme.text).frame(width: 12, height: 12)
+                        .background(Circle().fill(Theme.solid).padding(-3).shadow(color: .black.opacity(0.3), radius: 2, y: 1))
+                        .offset(x: geo.size.width * block.position(value) - 6)
                 }
             }
             .frame(height: 12)

@@ -26,7 +26,7 @@ struct HomeView: View {
             if let screenID {
                 page(longPress: { model.showingScreenMenu = true }) { layout in
                     if screenID == screens.first?.id {
-                        OmniboxField(query: $commandText, api: loader.api, voiceBusy: $searchVoiceBusy, focused: $searchFocused, submit: { searchSubmit += 1 })
+                        OmniboxField(query: $commandText, api: loader.api, store: model.omnibox(for: connection), voiceBusy: $searchVoiceBusy, focused: $searchFocused, submit: { searchSubmit += 1 })
                             .anchorPreference(key: OmniboxFieldBounds.self, value: .bounds) { $0 }
                     }
                     if let catalogue = loader.catalogue, let screen = screens.first(where: { $0.id == screenID }) {
@@ -109,7 +109,6 @@ struct HomeView: View {
                 if showing {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .fill(.ultraThinMaterial)
-                        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Theme.hairline))
                         .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
                 }
             }
@@ -316,6 +315,8 @@ private struct OmniboxFieldBounds: PreferenceKey {
 struct OmniboxField: View {
     @Binding var query: String
     let api: SpaceAPI
+    /// The results' store, for the dots that say actions are still being resolved.
+    let store: OmniboxStore
     @StateObject private var voice = OmniboxVoice()
     @Environment(\.scenePhase) private var scenePhase
     @Binding var voiceBusy: Bool
@@ -333,6 +334,7 @@ struct OmniboxField: View {
                 .focused(focused)
                 .onSubmit { if !voice.busy { submit() } }
                 .disabled(voice.busy)
+            OmniboxResolving(store: store, shown: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Group {
                 Button { voice.toggle(api: api, prefix: query) { text in
                     query = text
@@ -373,6 +375,39 @@ struct OmniboxField: View {
         .alert("Voice Input", isPresented: Binding(get: { voice.error != nil }, set: { if !$0 { voice.error = nil } })) {
             Button("OK") { voice.error = nil }
         } message: { Text(verbatim: voice.error ?? "") }
+    }
+}
+
+/// Three dots bouncing at the right of the field, beside the microphone, while the box is still
+/// resolving actions for the text (docs/panel.md#omnibox); still under Reduce Motion.
+private struct OmniboxResolving: View {
+    @ObservedObject var store: OmniboxStore
+    let shown: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        if store.resolving && shown {
+            TimelineView(.animation(paused: reduceMotion)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                HStack(spacing: 4) {
+                    ForEach(0..<3) { i in
+                        Circle().frame(width: 4, height: 4)
+                            .offset(y: reduceMotion ? 0 : Self.lift(t - Double(i) * 0.15))
+                    }
+                }
+            }
+            .foregroundStyle(.secondary)
+            .frame(height: 32)
+            .accessibilityElement()
+            .accessibilityLabel(Text("Searching…"))
+        }
+    }
+
+    /// The panel's bounce: up 4 pt in the first third of each second, then at rest.
+    private static func lift(_ t: Double) -> CGFloat {
+        let phase = t.truncatingRemainder(dividingBy: 1).magnitude
+        guard phase < 0.6 else { return 0 }
+        return -4 * CGFloat(sin(phase / 0.6 * .pi))
     }
 }
 
