@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { isImgIcon, recordOpen, type AgentInfo, type AppInfo, type BuiltinIcons, type UsageRow, type WidgetInfo } from "./api.ts";
 import { type Key, type Lang, localized, searchKeyText, searchText, useLang, withLang } from "./i18n.ts";
 import { BUILTINS, type Builtin, WIDGET_SIZES, type EntryKind, type Screen, entryKey, matches, parseKey } from "./screens.ts";
-import { Icon, Widget } from "./Tiles.tsx";
+import { Icon, Tile, Widget } from "./Tiles.tsx";
 
 // The library: the screen left of home, with every app, agent and widget whether pinned or not.
 // One search over the three kinds and a filter by kind. By default a card opens its entry, like a
@@ -74,6 +74,7 @@ export default function Library({
   onAddLink,
   focusSignal,
   theme,
+  details,
 }: {
   apps: AppInfo[];
   agents: AgentInfo[];
@@ -100,6 +101,8 @@ export default function Library({
   focusSignal: number;
   /** The resolved color scheme, for embedded widget previews. */
   theme: string;
+  /** An entry's details for the pop-over under the pointer; none when the operator turned them off. */
+  details?: (key: string) => ReactNode;
 }) {
   const { lang, t } = useLang();
   const [q, setQ] = useState("");
@@ -179,18 +182,6 @@ export default function Library({
   const use = (e: Entry) => {
     if (e.kind === "app" || e.kind === "builtin") recordOpen(e.kind, parseKey(e.key)!.id, "library");
   };
-  /** Agents and the panel's own tiles open in the page; apps and widgets are links in a new tab. */
-  const opener = (e: Entry) =>
-    e.kind === "agent" || e.kind === "builtin"
-      ? {
-          onClick: () => {
-            use(e);
-            onOpen(e.key);
-          },
-        }
-      : e.href
-        ? { href: e.href, target: "_blank", rel: "noopener noreferrer", onClick: () => use(e) }
-        : null;
   // Enter in the search acts on the only match left: opens it, or in add mode adds it.
   const onSearchKey = (ev: React.KeyboardEvent) => {
     if (ev.key !== "Enter" || shown.length !== 1) return;
@@ -209,7 +200,7 @@ export default function Library({
   /**
    * An app, built-in or agent as a home-screen tile: the icon and the name, nothing else. Outside add
    * mode it opens the entry; in add mode a badge on the icon adds it to the target screen, or once
-   * added takes it off again. No hover details here; those are the home screen's.
+   * added takes it off again. Outside add mode the pointer shows the entry's details; the screens' tiles do not.
    */
   const tile = (e: Entry) => {
     const pinnedHere = !!targetScreen?.items.includes(e.key);
@@ -233,15 +224,23 @@ export default function Library({
           {body}
         </button>
       );
-    const o = opener(e);
-    return o ? (
-      <a key={e.key} className={`tile lib-tile ${e.kind}`} {...o}>
-        {body}
-      </a>
-    ) : (
-      <div key={e.key} className={`tile lib-tile off ${e.kind}`}>
-        {body}
-      </div>
+    // Agents and built-ins open in the page, apps are links in a new tab; an app without a page opens nothing.
+    const opens = e.kind === "agent" || e.kind === "builtin";
+    return (
+      <Tile
+        key={e.key}
+        icon={e.icon}
+        fallback={e.fallback}
+        name={e.title}
+        href={opens ? undefined : e.href}
+        editing={false}
+        onOpen={opens ? () => onOpen(e.key) : undefined}
+        onUse={() => use(e)}
+        showPop={!!details}
+        className={`lib-tile ${e.kind}${!opens && !e.href ? " off" : ""}`}
+      >
+        {details?.(e.key)}
+      </Tile>
     );
   };
 

@@ -535,11 +535,85 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     } else if (e?.kind === "builtin") setPanel(e.id === "settings" ? "settings" : e.id === "inbox" ? "inbox" : e.id === "shortcuts" ? "shortcuts" : "terminal");
   };
 
+  // The details under the pointer: shown on the library's tiles (Home, left of the screens), not on
+  // the screens' own tiles, and not in add mode.
+  const builtinText = (b: Builtin) =>
+    b === "inbox" ? { title: t("inbox.title"), blurb: t("inbox.blurb"), fallback: "📥" } : b === "shortcuts" ? { title: t("sc.title"), blurb: t("sc.blurb"), fallback: "⚡" } : b === "terminal" ? { title: t("term.title"), blurb: t("term.blurb"), fallback: "⌨️" } : { title: t("settings.title"), blurb: t("settings.blurb"), fallback: "⚙️" };
+  const details = (key: string): React.ReactNode => {
+    const e = parseKey(key);
+    if (e?.kind === "builtin") {
+      const b = e.id as Builtin;
+      const text = builtinText(b);
+      return (
+        <>
+          <p className="pop-title">
+            {text.title}
+            <span className="status">
+              <i />
+              {t("status.builtIn")}
+            </span>
+          </p>
+          {b === "inbox" && inbox && <p className="pop-hint">{t("inbox.summary", { unread: inbox.unread, open: inbox.open })}</p>}
+          <p className="pop-body">{text.blurb}</p>
+          {usageHint(key)}
+        </>
+      );
+    }
+    if (e?.kind === "app") {
+      const p = apps.find((x) => x.id === e.id);
+      if (!p) return null;
+      const shown = localized(lang, p);
+      const statusKey = p.service ? HEALTH[p.service.health] ?? STATUS[p.status] : STATUS[p.status];
+      return (
+        <>
+          <p className="pop-title">
+            {shown.title}
+            <span className={`status ${p.service?.health ?? p.status}`}>
+              <i />
+              {statusKey ? t(statusKey) : p.status}
+            </span>
+          </p>
+          {p.peer && <p className="pop-hint">{t(p.stale ? "common.onPeerStale" : "common.onPeer", { peer: p.peer })}</p>}
+          {shown.description && <p className="pop-body">{shown.description}</p>}
+          {usageHint(key)}
+          {p.repo && (
+            <p className="pop-entry">
+              <a href={repoUrl(p.repo)} target="_blank" rel="noopener noreferrer">
+                {t("apps.repo")}
+              </a>
+            </p>
+          )}
+        </>
+      );
+    }
+    if (e?.kind === "agent") {
+      const a = agents.find((x) => x.id === e.id);
+      if (!a) return null;
+      const shown = localized(lang, a);
+      return (
+        <>
+          <p className="pop-title">
+            {shown.title}
+            <span className="status">
+              <i />
+              {a.app === "space" ? t("status.base") : a.id}
+            </span>
+          </p>
+          {a.peer && <p className="pop-hint">{t("common.onPeer", { peer: a.peer })}</p>}
+          {shown.description && <p className="pop-body">{shown.description}</p>}
+          {usageHint(key)}
+          <p className="pop-hint">{t("agents.clickToChat")}</p>
+        </>
+      );
+    }
+    return null;
+  };
+
   // One screen: its tiles (apps, agents, the panel's own) in a grid, then its widget cards. A key
   // whose entry is gone (uninstalled, a peer that left) is skipped and stays in the layout.
   const builtinTile = (b: Builtin, key: string, onRemove: () => void, drag: DragProps) => {
     const open = b === "inbox" ? openInbox : b === "shortcuts" ? openShortcuts : b === "terminal" ? openTerminal : openSettings;
-    const text = b === "inbox" ? { title: t("inbox.title"), blurb: t("inbox.blurb"), fallback: "📥" } : b === "shortcuts" ? { title: t("sc.title"), blurb: t("sc.blurb"), fallback: "⚡" } : b === "terminal" ? { title: t("term.title"), blurb: t("term.blurb"), fallback: "⌨️" } : { title: t("settings.title"), blurb: t("settings.blurb"), fallback: "⚙️" };
+    const text = builtinText(b);
     return (
       <Tile
         key={key}
@@ -551,93 +625,45 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         onUse={() => recordOpen("builtin", b, "panel")}
         onRemove={onRemove}
         removeTitle={t("screens.unpin")}
-        showPop={!prefs.noPop}
+        showPop={false}
         dragProps={drag}
         className="builtin"
         badge={b === "inbox" && inbox ? { n: inbox.unread, title: t("inbox.badge", { n: inbox.unread }) } : undefined}
-      >
-        <p className="pop-title">
-          {text.title}
-          <span className="status">
-            <i />
-            {t("status.builtIn")}
-          </span>
-        </p>
-        {b === "inbox" && inbox && <p className="pop-hint">{t("inbox.summary", { unread: inbox.unread, open: inbox.open })}</p>}
-        <p className="pop-body">{text.blurb}</p>
-        {usageHint(key)}
-      </Tile>
+      />
     );
   };
-  const appTile = (p: AppInfo, key: string, onRemove: () => void, drag: DragProps) => {
-    const shown = localized(lang, p);
-    const statusKey = p.service ? HEALTH[p.service.health] ?? STATUS[p.status] : STATUS[p.status];
-    return (
-      <Tile
-        key={key}
-        icon={p.icon}
-        fallback="📦"
-        name={shown.title}
-        href={p.url ? withLang(p.url, lang) : undefined}
-        onUse={p.url ? () => recordOpen("app", p.id, "panel") : undefined}
-        editing={editing}
-        onRemove={onRemove}
-        removeTitle={t("screens.unpin")}
-        showPop={!prefs.noPop}
-        dragProps={drag}
-        stale={p.stale}
-      >
-        <p className="pop-title">
-          {shown.title}
-          <span className={`status ${p.service?.health ?? p.status}`}>
-            <i />
-            {statusKey ? t(statusKey) : p.status}
-          </span>
-        </p>
-        {p.peer && <p className="pop-hint">{t(p.stale ? "common.onPeerStale" : "common.onPeer", { peer: p.peer })}</p>}
-        {shown.description && <p className="pop-body">{shown.description}</p>}
-        {usageHint(key)}
-        {p.repo && (
-          <p className="pop-entry">
-            <a href={repoUrl(p.repo)} target="_blank" rel="noopener noreferrer">
-              {t("apps.repo")}
-            </a>
-          </p>
-        )}
-      </Tile>
-    );
-  };
-  const agentTile = (a: AgentInfo, key: string, onRemove: () => void, drag: DragProps) => {
-    const shown = localized(lang, a);
-    return (
-      <Tile
-        key={key}
-        icon={a.avatar}
-        fallback="🦾"
-        name={shown.title}
-        editing={editing}
-        onOpen={() => openChat(a)}
-        onRemove={onRemove}
-        removeTitle={t("screens.unpin")}
-        showPop={!prefs.noPop}
-        dragProps={drag}
-        corner={a.app !== "space" && a.appIcon !== a.avatar ? a.appIcon : undefined}
-        className="agent"
-      >
-        <p className="pop-title">
-          {shown.title}
-          <span className="status">
-            <i />
-            {a.app === "space" ? t("status.base") : a.id}
-          </span>
-        </p>
-        {a.peer && <p className="pop-hint">{t("common.onPeer", { peer: a.peer })}</p>}
-        {shown.description && <p className="pop-body">{shown.description}</p>}
-        {usageHint(key)}
-        <p className="pop-hint">{t("agents.clickToChat")}</p>
-      </Tile>
-    );
-  };
+  const appTile = (p: AppInfo, key: string, onRemove: () => void, drag: DragProps) => (
+    <Tile
+      key={key}
+      icon={p.icon}
+      fallback="📦"
+      name={localized(lang, p).title}
+      href={p.url ? withLang(p.url, lang) : undefined}
+      onUse={p.url ? () => recordOpen("app", p.id, "panel") : undefined}
+      editing={editing}
+      onRemove={onRemove}
+      removeTitle={t("screens.unpin")}
+      showPop={false}
+      dragProps={drag}
+      stale={p.stale}
+    />
+  );
+  const agentTile = (a: AgentInfo, key: string, onRemove: () => void, drag: DragProps) => (
+    <Tile
+      key={key}
+      icon={a.avatar}
+      fallback="🦾"
+      name={localized(lang, a).title}
+      editing={editing}
+      onOpen={() => openChat(a)}
+      onRemove={onRemove}
+      removeTitle={t("screens.unpin")}
+      showPop={false}
+      dragProps={drag}
+      corner={a.app !== "space" && a.appIcon !== a.avatar ? a.appIcon : undefined}
+      className="agent"
+    />
+  );
   const renderScreen = (s: Screen) => {
     const appOf = new Map(apps.map((a) => [a.id, a]));
     const agentOf = new Map(agents.map((a) => [a.id, a]));
@@ -774,6 +800,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               onAddLink={() => setAdding({ pinTo: null })}
               focusSignal={libFocus}
               theme={scheme}
+              details={prefs.noPop ? undefined : details}
             />
           </section>
         ) : screen ? (

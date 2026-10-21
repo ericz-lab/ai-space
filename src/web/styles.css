@@ -1296,7 +1296,8 @@ a.widget-title:hover { color: var(--text); }
 .lib-group .lib-section { margin: 0 0 14px; }
 .lib-group + .lib-group { margin-top: 28px; }
 .lib-tile { color: inherit; text-decoration: none; background: none; border: 0; padding: 0; font: inherit; }
-.lib-tile.off { opacity: 0.6; cursor: default; }
+.lib-tile.off { cursor: default; }
+.lib-tile.off :is(.tile-icon, .tile-name) { opacity: 0.6; }
 .lib-tile.off .tile-icon { transform: none; }
 /* Add mode: a badge on the icon, + to add, ✓ once on the target screen (− under the pointer to take it off). */
 .lib-pick {
