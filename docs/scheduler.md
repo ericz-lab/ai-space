@@ -227,7 +227,8 @@ A restart is the most common way for work to vanish, because every deploy, every
 that changes the workspace `.env`, and every operator `systemctl restart` is one. The shutdown
 is therefore a drain, not a stop:
 
-1. The clock stops and no new run is launched; the bus, notify and peers stop too.
+1. The clock stops and no new run is launched, not even when a run ends and frees a slot; the bus,
+   notify and peers stop too.
 2. The runs in flight, and the model calls apps are blocked on (`POST /api/model/run`), get
    `SPACE_DRAIN_SECONDS` (300 by default) to finish. The HTTP server keeps serving while they do,
    because a command task in flight may still be calling back into the space.

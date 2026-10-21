@@ -536,6 +536,26 @@ describe("shutdown", () => {
     expect(after.state.consecutiveErrors).toBe(0);
   });
 
+  test("a run ending during the drain does not start the tasks that came due meanwhile", async () => {
+    const h = harness({
+      maxConcurrency: 1,
+      runner: (task, ctx) =>
+        new Promise((resolve) => {
+          h.calls.push(task.name);
+          ctx.signal.addEventListener("abort", () => resolve({ status: "error", error: "timed out" }));
+        }),
+    });
+    h.s.syncManifest(h.manifest([mt("a"), mt("b")]));
+    await h.s.start();
+    expect(h.calls).toEqual(["a"]);
+
+    expect(await h.s.drain(10)).toEqual({ finished: 0, aborted: 1 });
+    await h.s.tick();
+    expect(h.calls).toEqual(["a"]);
+    expect(h.s.running()).toEqual([]);
+    expect(h.store.findTask("demo", "b")!.state.runningAt).toBeUndefined();
+  });
+
   test("a run the process never finished is recorded as interrupted on the next start", async () => {
     const h = harness();
     h.s.syncManifest(h.manifest([mt("a", { enabled: false })]));

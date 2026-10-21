@@ -101,6 +101,8 @@ export class Scheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private ticking = false;
+  /** Set for good by drain(): a run ending during shutdown must not start the next one. */
+  private draining = false;
 
   constructor(opts: SchedulerOptions) {
     this.store = opts.store;
@@ -158,6 +160,7 @@ export class Scheduler {
    * then are aborted so their failure is recorded. Returns what happened, for the log.
    */
   async drain(graceMs: number): Promise<{ finished: number; aborted: number }> {
+    this.draining = true;
     this.stop();
     const started = this.inflight.size;
     if (started && graceMs > 0) await Promise.race([this.idle(), sleep(graceMs)]);
@@ -254,7 +257,7 @@ export class Scheduler {
   // ---------------------------------------------------------------- tick
 
   async tick(): Promise<void> {
-    if (this.ticking) return;
+    if (this.ticking || this.draining) return;
     this.ticking = true;
     try {
       const now = this.now();
