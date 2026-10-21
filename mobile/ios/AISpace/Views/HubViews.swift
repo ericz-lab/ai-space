@@ -33,7 +33,7 @@ struct HubCover: View {
 
     var body: some View {
         NavigationStack {
-            content
+            HubPageContent(model: model, connection: connection, page: page, loader: loader, icons: icons)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -44,8 +44,17 @@ struct HubCover: View {
         }
         .tint(Theme.accent)
     }
+}
 
-    @ViewBuilder private var content: some View {
+/// One page of the Space, in a cover (HubCover) or pushed from a section of Settings.
+struct HubPageContent: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    let page: HubPage
+    @ObservedObject var loader: CatalogueLoader
+    let icons: IconStore
+
+    var body: some View {
         let api = loader.api
         switch page {
         case .inbox: InboxPage(model: model, api: api)

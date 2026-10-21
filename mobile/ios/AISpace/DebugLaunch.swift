@@ -24,6 +24,8 @@ import WebKit
 ///                      after launch (on the peer AISPACE_TERMINAL_PEER names, when set) and this line
 ///                      is typed into it two seconds later
 ///   AISPACE_OPEN_URL   an aispace:// link, handled as if another app had opened it
+///   AISPACE_SETTINGS_SECTION a section of Settings (general … account) pushed on its page,
+///                      AISPACE_SETTINGS_PAGE a page of the Space (tasks, appModels, …) pushed after it
 ///   AISPACE_SCREEN     the screen on show on the Panel tab, by id
 ///   AISPACE_EDIT_SCREEN 1 opens the sheet that rearranges that screen
 ///   AISPACE_SCREEN_MENU 1 opens the actions a long press on a screen brings up
@@ -142,6 +144,16 @@ enum DebugLaunch {
                 }
             }
         }
+    }
+
+    /// The pages Settings opens on, from AISPACE_SETTINGS_SECTION and AISPACE_SETTINGS_PAGE.
+    @MainActor static func settingsPath(_ path: inout NavigationPath) {
+        let env = ProcessInfo.processInfo.environment
+        guard path.isEmpty, let section = env["AISPACE_SETTINGS_SECTION"].flatMap(SettingsSection.init(rawValue:)) else { return }
+        path.append(section)
+        let pages: [String: HubPage] = ["inbox": .inbox, "tasks": .tasks, "modelUsage": .modelUsage, "appUsage": .appUsage,
+                                        "appModels": .appModels, "events": .events, "packages": .packages, "terminal": .terminal, "chat": .chat(agent: nil)]
+        if let page = env["AISPACE_SETTINGS_PAGE"].flatMap({ pages[$0] }) { path.append(page) }
     }
 
     @MainActor private static func scrollVisiblePage(in view: UIView, window: UIWindow, offset: CGFloat) {

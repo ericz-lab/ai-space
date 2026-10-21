@@ -1,57 +1,154 @@
 import SwiftUI
 
-/// Settings as the panel's has them on a phone (src/web/App.tsx, SettingsNav.tsx): one column of
-/// its sections in its order, General, Appearance, Models, Automation, Usage, Status, Packages and
-/// Account, each a small title over its rows in bordered cards, on the translucent sheet the panel
-/// draws settings on. What belongs to this phone joins the section it fits: the pages the panel
-/// has as tiles go under General, the saved Spaces and the sign-in under Account. The panel shows
-/// one section at a time beside a row of them; the phone already swipes sideways between its
-/// pages, so its sections follow each other down the page.
+/// A section of Settings, as the panel's section nav and the Mac's have them.
+enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
+    case general, appearance, models, automation, usage, status, packages, account
+
+    var id: String { rawValue }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .general: return "General"
+        case .appearance: return "Appearance"
+        case .models: return "Models"
+        case .automation: return "Automation"
+        case .usage: return "Usage"
+        case .status: return "Status"
+        case .packages: return "Packages"
+        case .account: return "Account"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: return "gearshape"
+        case .appearance: return "circle.lefthalf.filled"
+        case .models: return "cylinder.split.1x2"
+        case .automation: return "clock"
+        case .usage: return "chart.bar"
+        case .status: return "waveform.path.ecg"
+        case .packages: return "shippingbox"
+        case .account: return "person.crop.circle"
+        }
+    }
+}
+
+/// Settings as the panel's (src/web/App.tsx, SettingsNav.tsx) and the Mac's: the sections in
+/// their order, General, Appearance, Models, Automation, Usage, Status, Packages and Account, as
+/// the quiet rows of the section nav, on the translucent sheet the panel draws settings on. A
+/// section opens as a page of its own with its rows in bordered cards, and a row there that leads
+/// to a page of the Space opens it further in, as the panel shows those pages inside Settings.
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     let connection: Connection
     @ObservedObject var loader: CatalogueLoader
     @ObservedObject var settings: SettingsLoader
     let icons: IconStore
+    @State private var path = NavigationPath()
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Settings").font(.title2.weight(.bold)).foregroundStyle(Theme.text)
+                        .padding(.horizontal, 12).padding(.bottom, 14)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(SettingsSection.allCases) { section in
+                        NavigationLink(value: section) {
+                            HStack(spacing: 12) {
+                                Image(systemName: section.symbol).font(.body).foregroundStyle(.secondary)
+                                    .frame(width: 24)
+                                Text(section.title).foregroundStyle(Theme.text)
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                            }
+                        }
+                        .buttonStyle(SectionNavStyle())
+                    }
+                    Text("Version \(Bundle.main.shortVersion)").font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).padding(.top, 24)
+                }
+                .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 40)
+            }
+            .scrollClipDisabled()
+            .background { Sheet() }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationTitle(Text("Settings"))
+            .navigationDestination(for: SettingsSection.self) { section in
+                SettingsSectionPage(model: model, connection: connection, loader: loader, settings: settings, icons: icons, section: section)
+            }
+            .navigationDestination(for: HubPage.self) { page in
+                HubPageContent(model: model, connection: connection, page: page, loader: loader, icons: icons)
+                    .scrollContentBackground(.hidden)
+                    .background { Sheet() }
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .tint(Theme.accent)
+        #if DEBUG
+        .onAppear { DebugLaunch.settingsPath(&path) }
+        #endif
+        .sheet(isPresented: Binding(get: { model.sharedCapture != nil }, set: { if !$0 { model.sharedCapture = nil } })) {
+            if let sharedCapture = model.sharedCapture { SharedCaptureView(model: sharedCapture) { model.sharedCapture = nil } }
+        }
+        .task(id: loader.status) { await settings.refresh() }
+    }
+}
+
+/// A row of the section nav: quiet, with the faint rounded fill of the panel's nav while pressed.
+private struct SectionNavStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 12).padding(.vertical, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(configuration.isPressed ? Theme.text.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+/// One section of Settings on a page of its own: its rows in bordered cards, as the panel shows
+/// the chosen section. What belongs to this phone joins the section it fits: the pages the panel
+/// has as tiles go under General, the saved Spaces and the sign-in under Account.
+struct SettingsSectionPage: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    @ObservedObject var loader: CatalogueLoader
+    @ObservedObject var settings: SettingsLoader
+    let icons: IconStore
+    let section: SettingsSection
     /// The status rows, shown first as on the panel, where the section has a page of its own.
     @State private var statusOpen = true
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                Text("Settings").font(.title2.weight(.bold)).foregroundStyle(Theme.text)
-                    .padding(.horizontal, 4)
-                    .accessibilityAddTraits(.isHeader)
-                general
-                appearance
-                models
-                automation
-                usage
-                status
-                packages
-                account
-                Text("Version \(Bundle.main.shortVersion)").font(.caption).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
+                switch section {
+                case .general: general
+                case .appearance: appearance
+                case .models: models
+                case .automation: automation
+                case .usage: usage
+                case .status: status
+                case .packages: packages
+                case .account: account
+                }
             }
             .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 40)
         }
         .background { Sheet() }
-        .sheet(isPresented: Binding(get: { model.sharedCapture != nil }, set: { if !$0 { model.sharedCapture = nil } })) {
-            if let sharedCapture = model.sharedCapture { SharedCaptureView(model: sharedCapture) { model.sharedCapture = nil } }
-        }
-        .scrollClipDisabled()
+        .navigationTitle(Text(section.title))
+        .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await loader.refresh()
             await settings.refresh()
         }
-        .task(id: loader.status) { await settings.refresh() }
     }
 
     // MARK: General
 
     /// The panel's General holds the browser's preferences; here they are this phone's.
     private var general: some View {
-        SettingsSection("General") {
+        SectionCards {
             SettingsCard {
                 Toggle("Widgets", isOn: $model.showsWidgets).settingsRow()
                 CardDivider()
@@ -90,7 +187,7 @@ struct SettingsView: View {
     // MARK: Appearance
 
     private var appearance: some View {
-        SettingsSection("Appearance") {
+        SectionCards {
             SettingsCard {
                 LabeledContent("Appearance") {
                     Picker("Appearance", selection: $model.appearance) {
@@ -118,7 +215,7 @@ struct SettingsView: View {
     /// The default model, the one setting here that changes the Space itself, then the app models
     /// in a card of their own, as on the panel.
     private var models: some View {
-        SettingsSection("Models") {
+        SectionCards {
             if let m = settings.settings?.models {
                 SettingsCard {
                     LabeledContent("Default model") {
@@ -160,7 +257,7 @@ struct SettingsView: View {
     // MARK: Automation, Usage, Packages
 
     private var automation: some View {
-        SettingsSection("Automation") {
+        SectionCards {
             SettingsCard {
                 pageRow("Scheduled tasks", "calendar.badge.clock", .tasks)
                 CardDivider()
@@ -170,7 +267,7 @@ struct SettingsView: View {
     }
 
     private var usage: some View {
-        SettingsSection("Usage") {
+        SectionCards {
             SettingsCard {
                 pageRow("Model usage", "chart.bar", .modelUsage)
                 CardDivider()
@@ -180,7 +277,7 @@ struct SettingsView: View {
     }
 
     private var packages: some View {
-        SettingsSection("Packages") {
+        SectionCards {
             SettingsCard {
                 pageRow("Apps and connections", "shippingbox", .packages)
             }
@@ -188,7 +285,7 @@ struct SettingsView: View {
     }
 
     private func pageRow(_ title: LocalizedStringKey, _ symbol: String, _ page: HubPage) -> some View {
-        Button { model.hubPage = page } label: { link(title, symbol) }
+        NavigationLink(value: page) { link(title, symbol) }
             .buttonStyle(SettingsRowStyle())
     }
 
@@ -206,7 +303,7 @@ struct SettingsView: View {
     /// tally of what is wrong (a service or peer down, a backup gone stale), their rows under it.
     @ViewBuilder private var status: some View {
         let peers = loader.catalogue?.peers ?? []
-        SettingsSection("Status") {
+        SectionCards {
             SettingsCard {
                 Button { withAnimation(.easeOut(duration: 0.15)) { statusOpen.toggle() } } label: {
                     HStack(spacing: 8) {
@@ -291,7 +388,7 @@ struct SettingsView: View {
     /// The Spaces saved on this phone and the sign-in of the one on show: on the panel, Account
     /// is the sign-in of the Space it is served from.
     private var account: some View {
-        SettingsSection("Account") {
+        SectionCards {
             SettingsCard {
                 ForEach(model.store.connections) { c in
                     Button { model.select(c.id) } label: {
@@ -407,23 +504,13 @@ struct SettingsView: View {
 
 // MARK: The panel's settings surfaces
 
-/// A section: its title over its cards and notes (`.setpage-title`, then `.setcard`s).
-private struct SettingsSection<Content: View>: View {
-    let title: LocalizedStringKey
+/// A section's cards and notes (`.setcard`s); the page's title names it (`.setpage-title`).
+private struct SectionCards<Content: View>: View {
     @ViewBuilder let content: Content
 
-    init(_ title: LocalizedStringKey, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.footnote.weight(.medium)).foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
-                .accessibilityAddTraits(.isHeader)
-            content
-        }
+        // The page's title names the section; the cards follow each other.
+        VStack(alignment: .leading, spacing: 12) { content }
     }
 }
 
