@@ -2,7 +2,7 @@
 
 A native Android client of a Space that already runs, ported from the iPhone client (`mobile/ios/`, whose README is the specification this follows): a Compose launcher over the Space's own catalogue, the Space's pages drawn natively, a native terminal, and app pages and the web panel in `WebView`. Nothing is installed or started on the server, and the app carries no token or deployment secret.
 
-Status: builds with Gradle, 169 JVM tests pass, and runs on an Android 16 emulator (API 36) against a scratch Space and against a real Space behind Cloudflare Access. See [What was checked](#what-was-checked).
+Status: builds with Gradle, 172 JVM tests pass, and runs on an Android 16 emulator (API 36) against a scratch Space and against a real Space behind Cloudflare Access. See [What was checked](#what-was-checked).
 
 ## What it does
 
@@ -60,7 +60,7 @@ A debug build reads launch switches from intent extras, so screens can be reache
 
 ## Lessons carried over from the iPhone client
 
-These came from the iOS commits and hold here too: an answer arriving after sign-out or removal is dropped (the loader counts sessions); cookies are read only after the profile is initialized; a redirect, 401 or 403 means sign in and is never followed natively; writes send the Space's `Origin`; icons on another site load without the Space's cookies and their failure is not a sign-in failure; a chart is one path per colour in one Canvas; library pages are lazy; the theme's glows are drawn once per size, not as a live blur; the pager's position lives apart from the model so a swipe recomposes the pager only; icon updates reach only the views showing that icon; a theme's artwork is cached on disk and shown at once; the app page reaches the bottom edge; the mark stands in for a blank page through an access layer's redirects.
+These came from the iOS commits and hold here too: an answer arriving after sign-out or removal is dropped (the loader counts sessions); cookies are read only after the profile is initialized; a redirect, 401 or 403 means sign in and is never followed natively; writes send the Space's `Origin`; icons on another site load without the Space's cookies and their failure is not a sign-in failure; a chart is one path per colour in one Canvas; library pages are lazy; the theme's glows are drawn once per size, not as a live blur (the one blur is the sheet under Settings and the chat: the backdrop drawn again through a RenderEffect on Android 12 and later, an opaque fill before that or with animations off); the pager's position lives apart from the model so a swipe recomposes the pager only; icon updates reach only the views showing that icon; a theme's artwork is cached on disk and shown at once; the app page reaches the bottom edge; the mark stands in for a blank page through an access layer's redirects.
 
 One of Android's own: WebView loads on the main thread and takes seconds the first time. Pruning the web profiles in `AppModel`'s constructor held the first frame back 8 s; it now waits until the first frame is up (`SpaceProfile.schedule` / `warmUp`), and cookie reads wait for it. A release build starts in about a second; a debug build on the emulator still takes about ten.
 
@@ -69,9 +69,10 @@ One of Android's own: WebView loads on the main thread and takes seconds the fir
 On the emulator (Pixel 7, API 36), by screenshots from the debug launch switches and `adb input`:
 
 - Against a scratch Space (`SPACE_TERMINAL_ENABLED=1`) with a stand-in app: connecting, the first screen, the library and its search (Chinese too), Settings, every Space page, the web panel (Ready, dock hidden, cookies in the Space's own profile), the terminal (a real shell, colours, typing), the widget card blocks, `aispace://open`, the More menu with its full-screen scrim, links inside an app and out to the browser, retained tabs keeping their draft, dark mode, a theme's artwork from its disk cache, the Chinese locale.
+- Against a scratch Space in dark and light mode with Orbit and Northern Lights: Settings in the panel's sections on the translucent sheet, the blur staying put while the page is swiped; the agent chat on the sheet with its head, a turn sent and streamed, its two calls left unfolded when it ended, the same session reopened from History with the calls folded, opened, and one call's input and output.
 - Against a real Space behind Cloudflare Access: signing in through Access in the web panel; the catalogue, icons and widget cards over native calls with the profile's cookie; the same after a force-stop (the cookie survives the process); an app on another subdomain opening signed in; the terminal socket through Access to a peer's shell; the chat agents, their earlier chats and a long Markdown answer; swiping between screens, a long press on an app, landscape.
 
-Not checked yet: sending a chat turn and its stream; signing out and in again; dragging the More button; TalkBack; downloads and file inputs; Google as an identity provider inside WebView (refused in an embedded view on iOS); a phone without WebView's multi-profile feature.
+Not checked yet: a question or approval card in a live turn; the sheet before Android 12; signing out and in again; dragging the More button; TalkBack; downloads and file inputs; Google as an identity provider inside WebView (refused in an embedded view on iOS); a phone without WebView's multi-profile feature.
 
 ### Async regression checks
 
