@@ -13,7 +13,8 @@ import { localized, useLang } from "./i18n.ts";
 //   does not stop it. On load, each agent's running or recently ended run is restored and followed.
 // - Mounted permanently (closing only slides it away) so conversations and session ids survive.
 // - Conversations are keyed by agent id and run in parallel: each has its own queue and in-flight turn;
-//   the bookmark bar on the left switches between them, a busy one shows a pulsing dot.
+//   the sidebar lists the agents (a busy one shows a pulsing dot) and the shown agent's recent sessions;
+//   on a phone it gives way to the avatar bar and the history button.
 // - Text and tool events render independently, in order; a turn being followed shows every call,
 //   while a past session restored from its transcript folds each run of calls into one line.
 // - A message sent while a turn runs goes into that turn (docs/runtimes.md#live-chat): the agent reads
@@ -101,6 +102,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   };
   const [perm, setPerm] = useState(localStorage.getItem("chat-perm") || ""); // '' read-only | acceptEdits | bypassPermissions
   const [hist, setHist] = useState<ChatSession[] | null>(null); // null = history panel closed
+  // The sidebar's recent sessions of the shown agent; refreshed when it changes and when a turn ends.
+  const [recent, setRecent] = useState<ChatSession[] | null>(null);
   const modelRef = useRef(model);
   const permRef = useRef(perm);
   useEffect(() => {
@@ -542,6 +545,15 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     send(t("chat.retryMessage"));
   };
 
+  useEffect(() => {
+    if (!open || conv.busy) return;
+    let live = true;
+    getJson<{ sessions: ChatSession[] }>(`${base}/sessions`)
+      .then((j) => live && setRecent(j.sessions))
+      .catch(() => live && setRecent([]));
+    return () => { live = false; };
+  }, [open, key, base, conv.busy, conv.sid]);
+
   const toggleHist = async () => {
     if (hist) return setHist(null);
     try {
@@ -573,6 +585,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   };
 
   const tabs = Object.entries(convs);
+  // Every agent the sidebar can switch to: the catalogue, plus any open conversation's agent outside it.
+  const sideAgents = [...agents, ...tabs.flatMap(([k, v]) => (v.agent && !agents.some((a) => a.id === k) ? [v.agent] : []))];
   const shown = localized(lang, agent);
 
   return (
@@ -596,6 +610,36 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           ))}
         </div>
       )}
+      <nav className="chat-side" aria-label={t("chat.recent")}>
+        <button className="chat-new" onClick={reset}>
+          <Glyph name="compose" size={15} weight={1.3} />
+          {t("chat.newConversation")}
+        </button>
+        {sideAgents.length > 1 && (
+          <>
+            <p className="chat-side-head">{t("chat.agents")}</p>
+            <div className="chat-side-agents">
+              {sideAgents.map((a) => (
+                <button key={a.id} className={`chat-side-item${a.id === key ? " on" : ""}`} aria-current={a.id === key ? "true" : undefined} onClick={() => { if (a.id !== key) onSwitch?.(a); }}>
+                  <span className="chat-side-ava"><Ava icon={a.avatar} /></span>
+                  <span className="chat-side-title">{localized(lang, a).title}</span>
+                  {convs[a.id]?.busy && <i className="side-busy" aria-label={t("chat.thinking")} />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        <p className="chat-side-head">{t("chat.recent")}</p>
+        <div className="chat-side-sessions">
+          {recent?.length === 0 && <p className="hist-empty">{t("chat.noSessions")}</p>}
+          {recent?.map((s) => (
+            <button key={s.sid} className={`chat-side-item${s.sid === conv.sid ? " on" : ""}`} title={s.title || t("chat.untitled")} onClick={() => pickSession(s)}>
+              <span className="chat-side-title">{s.title || t("chat.untitled")}</span>
+              <span className="hist-time">{relTime(s.ts, lang)}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
       <div className="chat-main">
         <div className="chat-head">
           <div className="chat-head-top">
@@ -609,10 +653,10 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
                 <Glyph name="stop" size={15} />
               </button>
             )}
-            <button className={`chat-hbtn${hist ? " on" : ""}`} title={t("chat.history")} aria-label={t("chat.history")} aria-pressed={!!hist} onClick={toggleHist}>
+            <button className={`chat-hbtn chat-narrow${hist ? " on" : ""}`} title={t("chat.history")} aria-label={t("chat.history")} aria-pressed={!!hist} onClick={toggleHist}>
               <Glyph name="history" size={16} weight={1.3} />
             </button>
-            <button className="chat-hbtn" title={t("chat.newConversation")} aria-label={t("chat.newConversation")} onClick={reset}>
+            <button className="chat-hbtn chat-narrow" title={t("chat.newConversation")} aria-label={t("chat.newConversation")} onClick={reset}>
               <Glyph name="compose" size={16} weight={1.3} />
             </button>
             <button className="chat-hbtn" title={t("common.close")} onClick={onClose}>

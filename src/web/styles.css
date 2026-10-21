@@ -290,7 +290,50 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
   border: 1px solid var(--glass-border); border-radius: var(--radius); box-shadow: var(--shadow);
   overflow: hidden;
 }
-.panel.settings { width: min(560px, 94vw); }
+/* Settings: sections listed on the left, the picked one's rows in bordered cards on the right. */
+.panel.settings { width: min(860px, 96vw); height: min(640px, calc(100vh - clamp(40px, 8vh, 80px) - 20px)); }
+.panel.settings .panel-head { border-bottom: none; padding: 16px 18px 8px 20px; }
+.set-close {
+  width: 28px; height: 28px; border: none; border-radius: 8px; background: none; color: var(--muted);
+  font-size: 14px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.set-close:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.set-close:focus-visible, .setnav button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.setlayout { flex: 1; min-height: 0; display: grid; grid-template-columns: 196px minmax(0, 1fr); }
+.setnav { display: flex; flex-direction: column; gap: 2px; padding: 4px 10px 16px 12px; overflow-y: auto; }
+.setnav button {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px;
+  border: none; border-radius: 9px; background: none; color: var(--muted);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer; white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.setnav button svg { flex: none; }
+.setnav button:hover { color: var(--text); background: color-mix(in srgb, var(--text) 5%, transparent); }
+.setnav button.on { color: var(--text); background: color-mix(in srgb, var(--text) 10%, transparent); font-weight: 500; }
+.panel.settings .setbody { padding: 4px 20px calc(20px + env(safe-area-inset-bottom)) 8px; }
+.setpage-title { margin: 6px 2px 12px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.setcard {
+  border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden;
+  background: color-mix(in srgb, var(--text) 2%, transparent);
+}
+.setcard + .setcard { margin-top: 12px; }
+.setcard .setrow { border-radius: 0; padding: 12px 16px; min-height: 48px; }
+.setcard .setrow:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.setcard > .setrow:not(:first-child), .setcard .sethead { border-top: 1px solid var(--hairline); }
+.setcard .sethead { margin: 0; padding: 14px 16px 6px; }
+.setcard .sethead.sub { border-top: 1px solid var(--hairline); padding-top: 14px; }
+.setcard .setnote { margin: 4px 16px 10px; }
+.setcard .setfield { padding: 0 16px 12px; }
+.setcard .svcrow { border-radius: 0; padding: 8px 16px; }
+.setcard .setgroup { margin: 0 16px 8px; }
+.setcard .setbtns { padding: 8px 16px 12px; }
+.setcard .package-settings, .setcard .auth-change { padding: 0 16px 12px; }
+@media (max-width: 640px) {
+  .setlayout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .setnav { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 0 12px 8px; border-bottom: 1px solid var(--hairline); scrollbar-width: none; }
+  .setnav button { width: auto; flex: none; }
+  .panel.settings .setbody { padding: 4px 12px calc(20px + env(safe-area-inset-bottom)); }
+}
 .panel-head {
   flex: none; display: flex; align-items: center; justify-content: space-between;
   padding: 14px 16px; border-bottom: 1px solid var(--glass-border); font-size: 15px;
@@ -570,13 +613,58 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 .term-state { position: absolute; right: 10px; top: 8px; font-size: 11px; color: var(--muted); }
 .term-note { flex: none; margin: 0; padding: 6px 14px calc(8px + env(safe-area-inset-bottom)); font-size: 11px; color: var(--muted); }
 
-/* Chat: a floating panel in the middle of the page; the agent tabs sit along its left edge. */
+/* Chat: a floating panel in the middle of the page. A sidebar on its left holds New session, the agents
+   and the recent sessions; on a phone the avatar bar and the history button take its place. */
 .chat {
-  position: relative; width: min(720px, 94vw); height: min(82vh, 800px); display: flex; flex-direction: row;
+  position: relative; width: min(1000px, 96vw); height: min(82vh, 800px); display: flex; flex-direction: row;
   background: var(--panel);
   border: 1px solid var(--glass-border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
 }
 .chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.chat-side {
+  flex: none; width: 236px; display: flex; flex-direction: column; min-height: 0;
+  padding: 14px 10px 12px; border-right: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--text) 2.5%, transparent);
+}
+.chat-new {
+  flex: none; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+  padding: 9px 12px; border: 1px solid var(--hairline); border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.12s ease;
+}
+.chat-new:hover { background: color-mix(in srgb, var(--text) 13%, transparent); }
+.chat-side-head { flex: none; margin: 18px 10px 6px; font-size: 12px; color: var(--muted); }
+.chat-side-agents { flex: none; display: flex; flex-direction: column; gap: 1px; max-height: 40%; overflow-y: auto; }
+.chat-side-sessions { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; overscroll-behavior: contain; }
+.chat-side-item {
+  display: flex; align-items: center; gap: 9px; width: 100%; min-height: 34px; padding: 7px 10px;
+  border: none; border-radius: 9px; background: none; color: var(--text);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background 0.12s ease;
+}
+.chat-side-item:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.chat-side-item.on { background: color-mix(in srgb, var(--text) 10%, transparent); }
+.chat-side-item:focus-visible, .chat-new:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.chat-side-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-side-ava {
+  width: 20px; height: 20px; flex: none; border-radius: 50%; overflow: hidden; font-size: 13px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.chat-side-ava img { width: 100%; height: 100%; object-fit: cover; }
+.side-busy { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--success); animation: tabPulse 1.2s ease-in-out infinite; }
+.chat-side .hist-empty { padding: 6px 10px; text-align: left; }
+/* The avatar bar and the head's history and new-session buttons serve the phone layout only. */
+.chat-tabs, .chat-narrow { display: none !important; }
+/* The head and the composer sit on the reading surface with hairlines; header buttons are flat. */
+.chat .chat-head { border-bottom-color: var(--hairline); padding: 14px 18px 12px; }
+.chat .chat-input { border-top-color: var(--hairline); padding: 12px 18px 16px; }
+.chat .chat-hbtn { border-color: transparent; background: none; border-radius: 8px; }
+.chat .chat-hbtn:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.chat .chat-body { padding: 20px 22px; }
+@media (max-width: 640px) {
+  .chat-side { display: none; }
+  .chat-tabs { display: flex !important; }
+  .chat-narrow { display: flex !important; }
+}
 
 .chat-tabs {
   flex: none; width: 48px; padding: 12px 0; overflow-y: auto;

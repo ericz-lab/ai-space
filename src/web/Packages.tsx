@@ -86,7 +86,6 @@ export default function Packages({ onChange }: { onChange?: () => void }) {
     </div>
   ));
   return <>
-    <p className="sethead">{t("packages.title")}</p>
     <button className="setrow setlink" aria-expanded={open} onClick={() => setOpen(!open)}><span>{t("packages.manage")}</span><span className={`setchev${open ? " open" : ""}`}>›</span></button>
     {open && <div className="package-settings">
       {error && <p role="alert" className="setnote">{error}</p>}
