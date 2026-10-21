@@ -209,16 +209,21 @@ export default function Library({
   return (
     <div className="library">
       <div className="lib-bar">
-        <input
-          ref={search}
-          className="lib-search"
-          type="search"
-          value={q}
-          placeholder={t("library.search")}
-          aria-label={t("library.search")}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={onSearchKey}
-        />
+        <label className="lib-search">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+          <input
+            ref={search}
+            type="search"
+            value={q}
+            placeholder={t("library.search")}
+            aria-label={t("library.search")}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={onSearchKey}
+          />
+        </label>
         <div className="lib-filters" role="tablist">
           {FILTERS.map((f) => (
             <button key={f.value} role="tab" aria-selected={filter === f.value} className={`lib-chip${filter === f.value ? " on" : ""}`} onClick={() => setFilter(f.value)}>
@@ -269,8 +274,8 @@ export default function Library({
                 <span className="lib-kind">
                   {e.kindLabel}
                   {e.peer && <span className="widget-peer">{e.peer}</span>}
+                  {on.length > 0 && <span className="lib-on">{t("library.onScreens", { screens: on.join(lang === "zh" ? "、" : ", ") })}</span>}
                 </span>
-                {on.length > 0 && <span className="lib-on">{t("library.onScreens", { screens: on.join(lang === "zh" ? "、" : ", ") })}</span>}
               </span>
             </>
           );

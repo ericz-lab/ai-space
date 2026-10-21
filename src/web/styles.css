@@ -1260,48 +1260,61 @@ a.widget-title:hover { color: var(--text); }
 .screens-hint .btn2 { flex: none; padding: 5px 14px; font-size: 13px; }
 
 /* The library: search, kind filter, target screen, then one card per entry. */
-.lib-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 20px; }
+.lib-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 14px; }
+/* The search: the home box's borderless glass at panel-row height, with a magnifier. */
 .lib-search {
-  flex: 1 1 280px; min-width: 0; border: 1px solid var(--glass-border); background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
-  border-radius: 999px; padding: 10px 18px; font: inherit; font-size: 15px; color: var(--text);
+  flex: 1 1 260px; min-width: 0; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px;
+  background: linear-gradient(var(--glass), var(--glass)), var(--card-ground);
+  -webkit-backdrop-filter: var(--card-filter); backdrop-filter: var(--card-filter);
+  border: 1px solid transparent; border-radius: 999px; box-shadow: var(--shadow); cursor: text;
+  transition: border-color 0.15s ease;
 }
-.lib-search:focus { outline: 2px solid color-mix(in srgb, var(--link) 40%, transparent); }
-.lib-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.lib-search:focus-within { border-color: color-mix(in srgb, var(--link) 45%, transparent); }
+.lib-search svg { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
+.lib-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; padding: 0; }
+.lib-search input::placeholder { color: var(--muted); }
+.lib-search input::-webkit-search-cancel-button { cursor: pointer; }
+.lib-filters { display: flex; gap: 4px; flex-wrap: wrap; }
 .lib-chip {
-  border: 1px solid var(--glass-border); background: var(--glass); color: var(--muted); cursor: pointer;
-  border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; display: inline-flex; gap: 6px; align-items: center;
+  border: 0; background: var(--glass); color: var(--muted); cursor: pointer;
+  border-radius: 999px; padding: 5px 10px; font: inherit; font-size: 12px; display: inline-flex; gap: 5px; align-items: center;
 }
-.lib-chip span { font-size: 11px; font-variant-numeric: tabular-nums; }
-.lib-chip.on { background: var(--text); color: var(--inverse); border-color: transparent; }
-.lib-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-left: auto; }
-.lib-tools .btn2 { padding: 6px 14px; font-size: 13px; }
-.lib-target { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
-.lib-section { margin: 32px 0 14px; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
-.lib-grid + .lib-widgets { margin-top: 24px; }
+.lib-chip:hover { color: var(--text); }
+.lib-chip span { font-size: 11px; opacity: 0.75; font-variant-numeric: tabular-nums; }
+.lib-chip.on { background: var(--text); color: var(--inverse); }
+.lib-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.lib-tools .btn2 { padding: 4px 12px; font-size: 12px; }
+.lib-target { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.lib-section { margin: 24px 0 10px; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+.lib-grid + .lib-widgets { margin-top: 16px; }
 .lib-widgets { grid-auto-flow: dense; }
 .widget-extra { margin-left: auto; flex: none; display: inline-flex; gap: 6px; align-items: center; }
 .widget-asof + .widget-extra { margin-left: 8px; }
 .widget-extra .btn2 { padding: 4px 12px; font-size: 12px; }
 .widget-extra .lib-on { font-size: 11px; }
-.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 8px; }
+/* Cards at the density of a panel's rows: the widgets' neutral borderless glass, a smaller icon,
+   kind and screens on one line. */
 .lib-card {
-  display: flex; align-items: center; gap: 14px; padding: 12px 14px; min-width: 0;
-  background: var(--glass); border: 1px solid var(--glass-border); border-radius: var(--radius-md);
-  -webkit-backdrop-filter: var(--glass-filter); backdrop-filter: var(--glass-filter);
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; min-width: 0;
+  background: linear-gradient(var(--glass), var(--glass)), var(--card-ground);
+  -webkit-backdrop-filter: var(--card-filter); backdrop-filter: var(--card-filter);
+  border: 1px solid transparent; border-radius: var(--radius-sm);
 }
-.lib-card > .tile-icon { flex: none; width: 48px; height: 48px; font-size: 24px; box-shadow: none; }
-.lib-link { color: inherit; text-decoration: none; cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease; }
-.lib-link:hover { border-color: color-mix(in srgb, var(--text) 30%, transparent); transform: translateY(-1px); }
+.lib-card > .tile-icon { flex: none; width: 36px; height: 36px; font-size: 19px; border-radius: 10px; box-shadow: none; }
+.lib-link { color: inherit; text-decoration: none; cursor: pointer; transition: background-color 0.15s ease, border-color 0.15s ease; }
+.lib-link:hover { background: linear-gradient(color-mix(in srgb, var(--text) 8%, transparent), color-mix(in srgb, var(--text) 8%, transparent)), linear-gradient(var(--glass), var(--glass)), var(--card-ground); }
 .lib-link:hover .tile-icon { transform: scale(1.05); }
 .lib-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .lib-card.off { opacity: 0.6; }
-.lib-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.lib-text b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lib-kind, .lib-on { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.lib-text b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-kind, .lib-on { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-kind { display: flex; align-items: center; gap: 6px; }
+.lib-kind .lib-on::before { content: "·"; margin-right: 6px; color: var(--muted); }
 .lib-on { color: var(--success-text); }
 .lib-act { flex: none; display: flex; gap: 6px; align-items: center; }
-.lib-act .btn2 { padding: 5px 14px; font-size: 13px; }
+.lib-act .btn2 { padding: 4px 12px; font-size: 12px; }
 :is(.lib-act, .widget-extra) .btn2.done { background: transparent; color: var(--success-text); border-color: color-mix(in srgb, var(--success) 40%, transparent); opacity: 1; }
 /* "Added" turns into "Remove" under the pointer; a click takes the entry off the target screen. */
 .btn2.done .undo, .btn2.done:hover .on, .btn2.done:focus-visible .on { display: none; }
@@ -1318,7 +1331,6 @@ a.widget-title:hover { color: var(--text); }
 .lib-toast button:hover { background: color-mix(in srgb, var(--inverse) 16%, transparent); }
 @media (max-width: 520px) {
   .lib-tools { margin-left: 0; }
-  .lib-card { padding: 10px 12px; gap: 10px; }
 }
 
 .package-settings { padding: 0 12px 16px; overflow-wrap: anywhere; }
