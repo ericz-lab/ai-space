@@ -98,6 +98,19 @@ enum Theme {
         })
     }
 
+    /// The fill of Settings and the agent chat (src/web/styles.css `.panel.settings, .chat`): the
+    /// panel colour at 80% over a blur in light mode; in dark mode pulled toward black (40% of the
+    /// panel in #05060a) at 74%, so text keeps its contrast over any artwork.
+    static let sheetFill = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor(srgbRed: 19 / 255, green: 22 / 255, blue: 31 / 255, alpha: 0.74)
+            : NSColor(white: 1, alpha: 0.75)
+    })
+    /// `--glass-border` over a sheet: a faint light edge in dark mode.
+    static let sheetBorder = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.isDark ? NSColor(white: 1, alpha: 0.09) : NSColor(white: 1, alpha: 0.65)
+    })
+
     /// `--radius` and the two radii derived from it.
     static var radius: CGFloat { current.radius }
     static var radiusSmall: CGFloat { max(current.radius - 4, 6) }
@@ -239,4 +252,24 @@ struct Connecting: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
     }
+}
+
+/// A translucent sheet over the Space's backdrop, as the web panel draws Settings and the agent
+/// chat: the backdrop blurred behind a darker fill, a faint edge and a soft shadow. Under Reduce
+/// Transparency the material turns opaque by itself.
+struct SheetSurface: ViewModifier {
+    var radius: CGFloat = Theme.radius
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        content
+            .clipShape(shape)
+            .background { ZStack { Rectangle().fill(.ultraThinMaterial); Theme.sheetFill }.clipShape(shape) }
+            .overlay { shape.strokeBorder(Theme.sheetBorder) }
+            .shadow(color: .black.opacity(0.28), radius: 24, y: 10)
+    }
+}
+
+extension View {
+    func sheetSurface(radius: CGFloat = Theme.radius) -> some View { modifier(SheetSurface(radius: radius)) }
 }

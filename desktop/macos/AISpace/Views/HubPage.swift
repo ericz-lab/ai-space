@@ -56,10 +56,30 @@ struct HubContainer: View {
                 }
         }
         .id(page)
-        .background(Theme.ground)
+        .background {
+            // The chat floats as a sheet over the Space's backdrop, as on the web panel.
+            if case .chat(let agent?) = page, model.chat(AgentRef(connection: connection.id, agent: agent)) != nil {
+                SpaceBackdrop(space: connection.url, dataStore: model.dataStore(connection.id))
+            } else {
+                Theme.ground
+            }
+        }
     }
 
-    @ViewBuilder private var content: some View {
+    private var content: some View {
+        HubPageContent(model: model, connection: connection, page: page, loader: loader, icons: icons)
+    }
+}
+
+/// What a page of the Space shows: over the launcher in HubContainer, or inside Settings' pane.
+struct HubPageContent: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    let page: HubPage
+    @ObservedObject var loader: CatalogueLoader
+    let icons: IconStore
+
+    var body: some View {
         let api = loader.api
         switch page {
         case .inbox: InboxPage(model: model, api: api)
@@ -74,9 +94,12 @@ struct HubContainer: View {
             if let agent, let chat = model.chat(AgentRef(connection: connection.id, agent: agent)) {
                 HStack(spacing: 0) {
                     ChatSidebar(model: model, connection: connection, loader: loader, icons: icons, chat: chat, current: agent)
-                    Divider()
+                    Rectangle().fill(Theme.hairline).frame(width: 1)
                     ChatView(chat: chat, icons: icons, compact: false)
                 }
+                .sheetSurface()
+                .frame(maxWidth: 1100, maxHeight: 880)
+                .padding(16)
                 .navigationTitle(Text(verbatim: chat.agent.displayTitle))
             } else if agent != nil, model.lives[connection.id]?.status == .unknown {
                 Connecting()
@@ -147,8 +170,10 @@ struct ChatSidebar: View {
                 Button { chat.newConversation() } label: {
                     Label("New Conversation", systemImage: "square.and.pencil")
                         .font(.callout.weight(.medium))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 8).padding(.vertical, 7)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(Theme.text.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.hairline))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -188,8 +213,8 @@ struct ChatSidebar: View {
             }
             .padding(10)
         }
-        .frame(width: 230)
-        .background(.thinMaterial)
+        .frame(width: 236)
+        .background(Theme.text.opacity(0.025))
     }
 
     private func busy(_ ref: String) -> Bool {

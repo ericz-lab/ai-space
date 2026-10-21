@@ -37,8 +37,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 /// The launcher's last page, sectioned as the web panel's Settings: General (the saved Spaces,
 /// this Mac's install, widgets, language, the Space's pages), Appearance, Models, Automation,
 /// Usage, Status (the Space, its peers, services and backups), Packages and Account (the session,
-/// the app). A row that leads to a page of the Space opens it over the launcher; Back to Space
-/// comes back here, on the same section.
+/// the app). A section's row that leads to a page of the Space opens it inside the pane, as the
+/// web panel does; Inbox, Chat and Terminal open over the launcher.
 struct SettingsPage: View {
     @ObservedObject var model: AppModel
     let connection: Connection
@@ -47,26 +47,75 @@ struct SettingsPage: View {
     let icons: IconStore
     @ObservedObject var prefs: Preferences
     @AppStorage("settingsSection") private var picked = SettingsSection.general.rawValue
+    /// The page of the Space shown inside the pane in place of the section's rows.
+    @State private var detail: HubPage?
 
     private var section: SettingsSection { SettingsSection(rawValue: picked) ?? .general }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             nav
-            VStack(alignment: .leading, spacing: 0) {
-                Text(section.title).font(.title2.weight(.semibold)).foregroundStyle(Theme.text)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.horizontal, 20).padding(.top, 22)
-                Form { content }
-                    .formStyle(.grouped)
-                    .scrollContentBackground(.hidden)
-                    .id(section)
+            Rectangle().fill(Theme.hairline).frame(width: 1)
+            Group {
+                if let detail { detailPane(detail) } else { sectionPane }
             }
-            .frame(maxWidth: 680, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: 900)
-        .frame(maxWidth: .infinity)
+        // A translucent sheet over the backdrop, as the web panel's Settings (src/web/styles.css
+        // `.panel.settings`).
+        .sheetSurface()
+        .frame(maxWidth: 960, maxHeight: 760)
+        .padding(.top, 56).padding(.horizontal, 24).padding(.bottom, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: loader.status) { await settings.refresh() }
+        .onChange(of: picked) { _, _ in detail = nil }
+    }
+
+    private var sectionPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(section.title).font(.title2.weight(.semibold)).foregroundStyle(Theme.text)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 20).padding(.top, 20)
+            Form { content }
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .id(section)
+        }
+        .frame(maxWidth: 700, alignment: .leading)
+    }
+
+    /// A page of the Space inside the pane (src/web/App.tsx, 1361ec1): Back returns to its section,
+    /// Reload reads it again, and the page's own rows lead further in within the pane.
+    private func detailPane(_ page: HubPage) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Button { detail = nil } label: {
+                    Label { Text(section.title) } icon: { Image(systemName: "chevron.left") }
+                        .font(.callout)
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(Theme.text.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.text)
+                .help("Back to \(Text(section.title))")
+                Spacer()
+                Button { NotificationCenter.default.post(name: .reloadHubPage, object: nil) } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Reload")
+                .accessibilityLabel(Text("Reload"))
+            }
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
+            NavigationStack {
+                HubPageContent(model: model, connection: connection, page: page, loader: loader, icons: icons)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .scrollContentBackground(.hidden)
+            }
+            .environment(\.hubEmbedded, true)
+            .id(page)
+        }
     }
 
     private var nav: some View {
@@ -86,7 +135,7 @@ struct SettingsPage: View {
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
-        .padding(.horizontal, 12).padding(.top, 60)
+        .padding(.horizontal, 12).padding(.top, 20)
         .frame(width: 190, alignment: .leading)
     }
 
@@ -143,7 +192,7 @@ struct SettingsPage: View {
     private func pages(_ header: LocalizedStringKey, _ rows: [(title: LocalizedStringKey, symbol: String, page: HubPage)]) -> some View {
         Section {
             ForEach(rows, id: \.page) { row in
-                Button { model.destination = .hub(row.page) } label: {
+                Button { detail = row.page } label: {
                     HStack {
                         Label(row.title, systemImage: row.symbol).foregroundStyle(Theme.text)
                         Spacer()
