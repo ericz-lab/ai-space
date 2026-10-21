@@ -12,6 +12,9 @@ struct ThemePreset: Identifiable, Equatable {
         var solid: UInt32
         var accent: UInt32
         var glowA: UInt32 = 0, glowB: UInt32 = 0, glowC: UInt32 = 0
+        /// `--panel`, the reading surface of settings and the chat, and its alpha.
+        var panel: UInt32 = 0xFFFFFF
+        var panelAlpha: CGFloat = 0.94
     }
 
     var id: String
@@ -27,26 +30,28 @@ struct ThemePreset: Identifiable, Equatable {
     private static let lightGlow: (UInt32, UInt32, UInt32) = (0xC7D2FE, 0xFBCFE8, 0xA5F3FC)
     private static let darkGlow: (UInt32, UInt32, UInt32) = (0x2A2872, 0x5F1642, 0x134354)
 
-    private static func light(_ ground: UInt32, accent: UInt32, text: UInt32 = 0x0E1116, solid: UInt32 = 0xFFFFFF, glow: (UInt32, UInt32, UInt32) = lightGlow) -> Palette {
-        Palette(ground: ground, text: text, solid: solid, accent: accent, glowA: glow.0, glowB: glow.1, glowC: glow.2)
+    private static func light(_ ground: UInt32, accent: UInt32, text: UInt32 = 0x0E1116, solid: UInt32 = 0xFFFFFF, glow: (UInt32, UInt32, UInt32) = lightGlow,
+                              panel: (UInt32, CGFloat) = (0xFFFFFF, 0.94)) -> Palette {
+        Palette(ground: ground, text: text, solid: solid, accent: accent, glowA: glow.0, glowB: glow.1, glowC: glow.2, panel: panel.0, panelAlpha: panel.1)
     }
 
-    private static func dark(_ ground: UInt32, accent: UInt32, text: UInt32 = 0xF1F4F8, solid: UInt32 = 0x2C3145, glow: (UInt32, UInt32, UInt32) = darkGlow) -> Palette {
-        Palette(ground: ground, text: text, solid: solid, accent: accent, glowA: glow.0, glowB: glow.1, glowC: glow.2)
+    private static func dark(_ ground: UInt32, accent: UInt32, text: UInt32 = 0xF1F4F8, solid: UInt32 = 0x2C3145, glow: (UInt32, UInt32, UInt32) = darkGlow,
+                             panel: (UInt32, CGFloat) = (0x282D3E, 0.97)) -> Palette {
+        Palette(ground: ground, text: text, solid: solid, accent: accent, glowA: glow.0, glowB: glow.1, glowC: glow.2, panel: panel.0, panelAlpha: panel.1)
     }
 
     static let aurora = ThemePreset(id: "aurora", name: "Aurora", light: light(0xF6F7FB, accent: 0x8B5CF6), dark: dark(0x1C2030, accent: 0x8B5CF6))
     static let all: [ThemePreset] = [
         aurora,
-        ThemePreset(id: "simple", name: "Simple", light: light(0xF4F5F7, accent: 0x2563EB),
-                    dark: dark(0x16181D, accent: 0x3B82F6, text: 0xECEEF2, solid: 0x2A2D35), glow: false, radius: 10),
+        ThemePreset(id: "simple", name: "Simple", light: light(0xF4F5F7, accent: 0x2563EB, panel: (0xFFFFFF, 1)),
+                    dark: dark(0x16181D, accent: 0x3B82F6, text: 0xECEEF2, solid: 0x2A2D35, panel: (0x1F2228, 1)), glow: false, radius: 10),
         ThemePreset(id: "warm", name: "Warm",
-                    light: light(0xFAF6F0, accent: 0xC2410C, text: 0x2B2118, solid: 0xFFFAF3, glow: (0xFDE3C4, 0xFBD0C0, 0xFEF3C7)),
-                    dark: dark(0x211A15, accent: 0xF0A46B, text: 0xF6EDE4, solid: 0x3A2F27, glow: (0x5A3418, 0x5C1F2A, 0x4A3C12)), radius: 20),
-        ThemePreset(id: "orbit", name: "Orbit", light: light(0xD3D2F6, accent: 0x5550B8), dark: dark(0x04050E, accent: 0x93A4FF, solid: 0x1C2140), backdrop: "orbit"),
-        ThemePreset(id: "northern", name: "Northern Lights", light: light(0xF3F1FA, accent: 0x0B7FC9), dark: dark(0x040816, accent: 0x4BE3A8, solid: 0x182540), backdrop: "northern"),
-        ThemePreset(id: "papercut", name: "Paper Cut", light: light(0xF8F5EF, accent: 0x4D79DE), dark: dark(0x1A2337, accent: 0x7CC4EA, solid: 0x26324C), backdrop: "papercut"),
-        ThemePreset(id: "prism", name: "Prism", light: light(0xE6E8ED, accent: 0x7257FF), dark: dark(0x12141C, accent: 0xA394FF, solid: 0x242838), backdrop: "prism"),
+                    light: light(0xFAF6F0, accent: 0xC2410C, text: 0x2B2118, solid: 0xFFFAF3, glow: (0xFDE3C4, 0xFBD0C0, 0xFEF3C7), panel: (0xFFFBF6, 0.96)),
+                    dark: dark(0x211A15, accent: 0xF0A46B, text: 0xF6EDE4, solid: 0x3A2F27, glow: (0x5A3418, 0x5C1F2A, 0x4A3C12), panel: (0x342A23, 0.97)), radius: 20),
+        ThemePreset(id: "orbit", name: "Orbit", light: light(0xD3D2F6, accent: 0x5550B8), dark: dark(0x04050E, accent: 0x93A4FF, solid: 0x1C2140, panel: (0x14182E, 0.97)), backdrop: "orbit"),
+        ThemePreset(id: "northern", name: "Northern Lights", light: light(0xF3F1FA, accent: 0x0B7FC9), dark: dark(0x040816, accent: 0x4BE3A8, solid: 0x182540, panel: (0x10182C, 0.97)), backdrop: "northern"),
+        ThemePreset(id: "papercut", name: "Paper Cut", light: light(0xF8F5EF, accent: 0x4D79DE), dark: dark(0x1A2337, accent: 0x7CC4EA, solid: 0x26324C, panel: (0x1E283E, 0.97)), backdrop: "papercut"),
+        ThemePreset(id: "prism", name: "Prism", light: light(0xE6E8ED, accent: 0x7257FF), dark: dark(0x12141C, accent: 0xA394FF, solid: 0x242838, panel: (0x1C1F2C, 0.97)), backdrop: "prism"),
     ]
 
     static func named(_ id: String) -> ThemePreset { all.first { $0.id == id } ?? aurora }
@@ -74,6 +79,57 @@ enum Theme {
     static var radius: CGFloat { current.radius }
     static var radiusMedium: CGFloat { max(current.radius - 2, 6) }
     static var radiusSmall: CGFloat { max(current.radius - 4, 6) }
+    /// `--panel`: the reading surface, nearly opaque.
+    static var panel: Color {
+        Color(UIColor { traits in
+            let p = traits.userInterfaceStyle == .dark ? current.dark : current.light
+            return UIColor(Color(hex: p.panel)).withAlphaComponent(p.panelAlpha)
+        })
+    }
+    /// The sheet of settings and the agent chat (src/web/styles.css, `.panel.settings, .chat`):
+    /// `--panel` at 80% over the blur, and in dark mode first pulled 60% toward near-black, then at
+    /// 74%, so the backdrop shows through as colour while text keeps its contrast.
+    static var sheet: Color {
+        Color(UIColor { traits in
+            if traits.userInterfaceStyle == .dark {
+                let p = current.dark
+                let ink = UIColor(Color(hex: 0x05060A)), panel = UIColor(Color(hex: p.panel))
+                var (r1, g1, b1, r2, g2, b2, a): (CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0, 0, 0, 0)
+                panel.getRed(&r1, green: &g1, blue: &b1, alpha: &a)
+                ink.getRed(&r2, green: &g2, blue: &b2, alpha: &a)
+                // color-mix weighs each colour by its alpha; the ink is opaque.
+                let wp = 0.4 * p.panelAlpha, wi: CGFloat = 0.6, sum = wp + wi
+                return UIColor(red: (r1 * wp + r2 * wi) / sum, green: (g1 * wp + g2 * wi) / sum, blue: (b1 * wp + b2 * wi) / sum, alpha: sum * 0.74)
+            }
+            return UIColor(Color(hex: current.light.panel)).withAlphaComponent(current.light.panelAlpha * 0.8)
+        })
+    }
+    /// `--glass` and `--glass-border`: a field or a card on a surface.
+    static let glass = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.09) : UIColor(white: 1, alpha: 0.55) })
+    static let glassBorder = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.16) : UIColor(white: 1, alpha: 0.65) })
+    /// `--code-bg`: a block of code or a call's input and output.
+    static let codeBackground = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0, alpha: 0.3) : UIColor(red: 14 / 255, green: 17 / 255, blue: 22 / 255, alpha: 0.06) })
+}
+
+/// Settings and the agent chat as the panel draws them: a translucent sheet over the Space's
+/// backdrop, which shows through a strong blur as colour. Under Reduce Transparency it is the
+/// opaque reading surface. On a phone the sheet fills the screen, so it has no border.
+struct Sheet: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        Group {
+            if reduceTransparency {
+                Theme.ground.overlay(Theme.panel)
+            } else {
+                // The thinnest material is the blur with the least tint of its own; the sheet's
+                // colour over it does the darkening, as the panel's fill does over its blur.
+                Rectangle().fill(.ultraThinMaterial).overlay(Theme.sheet)
+            }
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
 }
 
 extension Theme {

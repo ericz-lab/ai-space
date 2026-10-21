@@ -395,6 +395,8 @@ final class ChatStore: ObservableObject {
     }
 
     var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty }
+    /// Whether the next message continues a conversation the Space keeps, or starts a new one.
+    var inSession: Bool { sessionID != nil }
 
     /// Adds a picture to the next message within the Space's limits; false when it does not fit.
     @discardableResult

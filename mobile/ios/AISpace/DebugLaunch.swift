@@ -17,6 +17,7 @@ import WebKit
 ///                      server draws off screen first (see LayerAudit)
 ///   AISPACE_SEARCH     the search text on Home
 ///   AISPACE_CHAT_SEND  with AISPACE_HUB=chat:<agent key>: this message is sent three seconds after launch
+///   AISPACE_CHAT_OPEN  with AISPACE_HUB=chat:<agent key>: this stored session (its sid) is opened three seconds after launch
 ///   AISPACE_HUB        a page of the Space over the tabs: inbox | tasks | modelUsage | appUsage |
 ///                      appModels | events | packages | terminal | chat, or chat:<agent key> for one agent
 ///   AISPACE_TERMINAL_RUN with AISPACE_HUB=terminal: a shell opens on the Space's own machine three seconds
@@ -63,6 +64,13 @@ enum DebugLaunch {
                 let chat = model.chat(for: c, base: base)
                 chat.draft = message
                 chat.send()
+            }
+        }
+        if let sid = env["AISPACE_CHAT_OPEN"], let key = env["AISPACE_HUB"].flatMap({ $0.hasPrefix("chat:") ? String($0.dropFirst(5)) : nil }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                guard let c = model.selected, let agent = model.loader(for: c).catalogue?.agents.first(where: { $0.key == key }),
+                      let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) else { return }
+                Task { await model.chat(for: c, base: base).open(ChatSessionInfo(sid: sid)) }
             }
         }
         if let line = env["AISPACE_TERMINAL_RUN"], env["AISPACE_HUB"] == "terminal" {

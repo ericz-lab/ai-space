@@ -488,3 +488,10 @@
 "Could not read this image." = "无法读取这张图片。";
 "Automation" = "自动化";
 "Usage" = "用量";
+
+
+/* Native chat: the head and the composer on the panel's sheet */
+"in session" = "会话中";
+"new session" = "新会话";
+"No earlier chats" = "还没有之前的对话";
+"Add to the reply in progress…" = "补充说明，会插入正在进行的回复…";

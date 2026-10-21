@@ -58,7 +58,7 @@ struct HubCover: View {
         case .terminal: TerminalPage(store: model.terminal(for: connection))
         case .chat(let key):
             if let agent = loader.catalogue?.agents.first(where: { $0.key == key }), let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) {
-                ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons)
+                ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons, backdrop: model.backdrops(for: connection))
             } else {
                 AgentsPage(model: model, connection: connection, loader: loader, icons: icons)
             }
