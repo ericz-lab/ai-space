@@ -467,6 +467,10 @@
 "Output limited to 12,000 characters." = "输出最多显示 12,000 个字符。";
 "Shows the input and output" = "显示输入和输出";
 "Hides the input and output" = "隐藏输入和输出";
+"Ran commands" = "执行了命令";
+"Called tools" = "调用了工具";
+"Hides the calls" = "隐藏这些调用";
+"Shows the calls" = "显示这些调用";
 
 /* Native chat: questions the agent asks (docs/runtimes.md#live-chat) */
 "Question" = "问题";

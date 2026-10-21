@@ -228,7 +228,11 @@ struct ChatBubble: View {
                 ForEach(ChatRows.groups(bubble.steps)) { group in
                     switch group {
                     case .tools(let steps):
-                        VStack(alignment: .leading, spacing: 2) { ForEach(steps) { ChatToolRow(step: $0) } }
+                        if ChatRows.folds(steps, historic: bubble.historic) {
+                            ChatToolGroup(steps: steps)
+                        } else {
+                            VStack(alignment: .leading, spacing: 2) { ForEach(steps) { ChatToolRow(step: $0) } }
+                        }
                     case .step(let step):
                         switch step.kind {
                         case .text:
@@ -298,8 +302,44 @@ private struct ChatImageThumb: View {
     }
 }
 
+/// A run of calls of a past conversation folded to one line (src/web/ChatToolRow.tsx): what kind
+/// of work ran and how many calls, so a reopened chat reads as its answers; a tap opens the calls.
+private struct ChatToolGroup: View {
+    let steps: [ChatStep]
+    @State private var open = false
+
+    private var title: String {
+        ChatRows.allCommands(steps) ? String(localized: "Ran commands") : String(localized: "Called tools")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Button { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).frame(width: 16)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                    Text(verbatim: title).font(.footnote.weight(.medium))
+                    Text(verbatim: "\(steps.count)").font(.caption2).monospacedDigit().opacity(0.7)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(open ? Theme.text : .secondary)
+                .padding(.vertical, 3).padding(.horizontal, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(verbatim: "\(title), \(steps.count)"))
+            .accessibilityHint(Text(open ? "Hides the calls" : "Shows the calls"))
+            if open {
+                VStack(alignment: .leading, spacing: 2) { ForEach(steps) { ChatToolRow(step: $0) } }
+                    .padding(.leading, 22)
+            }
+        }
+    }
+}
+
 /// One tool call as a quiet single line (src/web/ChatToolRow.tsx): its glyph, title and first
-/// line, muted on success, red on failure; a tap opens the call's full input and output.
+/// line; a running call spins, and once it ends its dot says how, red for a failure and green
+/// for a success. A tap opens the call's full input and output.
 private struct ChatToolRow: View {
     let step: ChatStep
     @State private var open = false
@@ -337,6 +377,15 @@ private struct ChatToolRow: View {
         }
     }
 
+    /// The dot between title and line: how the call ended, or the row's own color before that.
+    private var dot: AnyShapeStyle {
+        switch step.state {
+        case .failed: return AnyShapeStyle(Theme.danger)
+        case .succeeded: return AnyShapeStyle(Theme.success)
+        default: return AnyShapeStyle(.secondary)
+        }
+    }
+
     /// Only what needs a look is said: a failure, a call without a result, one still running.
     private var cue: String? {
         switch step.state {
@@ -364,7 +413,7 @@ private struct ChatToolRow: View {
             Text(verbatim: title).font(.footnote.weight(.medium)).layoutPriority(1)
             let summary = ChatRows.summary(step.text)
             if !summary.isEmpty {
-                Text(verbatim: "·").font(.footnote)
+                Circle().fill(dot).frame(width: 3, height: 3).padding(.horizontal, 2)
                 Text(verbatim: summary).font(.caption.monospaced()).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(failed ? Theme.danger : .secondary)
             }

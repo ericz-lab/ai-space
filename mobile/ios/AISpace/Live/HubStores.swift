@@ -346,6 +346,8 @@ final class ChatStore: ObservableObject {
         /// The pictures sent with the person's message.
         var images: [ChatImage] = []
         var live = false
+        /// A reply of a stored conversation, opened from the history: its runs of calls open folded.
+        var historic = false
     }
 
     struct Ask: Equatable {
@@ -432,7 +434,7 @@ final class ChatStore: ObservableObject {
                 let isUser = m.role == "user"
                 let steps = isUser ? [] : ChatRows.steps(of: m)
                 guard !(m.text ?? "").isEmpty || !steps.isEmpty else { return nil }
-                return Bubble(isUser: isUser, text: m.text ?? "", steps: steps)
+                return Bubble(isUser: isUser, text: m.text ?? "", steps: steps, historic: !isUser)
             }
             sessionID = session.sid
             error = nil

@@ -28,6 +28,17 @@ struct ChatRowsTests {
         #expect(ChatRows.expandable(ChatStep(id: "tool:2", kind: .tool, title: "Edit", text: "*** Begin Patch\n+x", state: .succeeded)))
     }
 
+    @Test func foldsAPastConversationsRunsOfCalls() {
+        let call = { (name: String) in ChatStep(id: name, kind: .tool, title: name, text: "x", state: .succeeded) }
+        #expect(ChatRows.allCommands([call("Bash"), call("exec_command"), call("run_command")]))
+        #expect(!ChatRows.allCommands([call("Bash"), call("Read")]))
+        #expect(!ChatRows.allCommands([call("Read")]))
+        #expect(!ChatRows.allCommands([]))
+        #expect(ChatRows.folds([call("Bash"), call("Read")], historic: true))
+        #expect(!ChatRows.folds([call("Bash")], historic: true))
+        #expect(!ChatRows.folds([call("Bash"), call("Read")], historic: false))
+    }
+
     @Test func stacksConsecutiveToolCalls() {
         let steps = [
             ChatStep(id: "t1", kind: .text, text: "Looking", state: .succeeded),
