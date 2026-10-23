@@ -5,6 +5,7 @@ import { BusStore } from "../bus/store.ts";
 import { Store } from "../scheduler/store.ts";
 import type { Run as TaskRun, Task } from "../scheduler/types.ts";
 import { createShortcutRoutes } from "./api.ts";
+import { intents } from "./resolve.ts";
 import { Shortcuts, normalize } from "./service.ts";
 import { ShortcutStore } from "./store.ts";
 
@@ -88,6 +89,26 @@ describe("catalogue", () => {
       expect(ids).toEqual(["space/calc:true", "space/convert:true", "space/run-task:false", "feed/news:true", "todo/create:true", "todo/note:true", "space/calendar:false"]);
       const calendar = h.shortcuts.catalogue().find((a) => a.id === "space/calendar")!;
       expect(calendar.reason).toContain("template: calendar");
+    } finally {
+      h.close();
+    }
+  });
+
+  test("backup tasks are offered after the other tasks", () => {
+    // The scheduler lists tasks by app and name, which puts "backup" ahead of most of an app's tasks.
+    const tasks = [
+      { id: "b1", app: "news", name: "backup", state: {} },
+      { id: "t1", app: "news", name: "fetch", state: {} },
+      { id: "b2", app: "space", name: "backup", state: {} },
+      { id: "v1", app: "space", name: "backup-verify", state: {} },
+      { id: "t2", app: "space", name: "digest", state: {} },
+    ] as unknown as Task[];
+    const h = harness(() => ok({}), { tasks });
+    try {
+      const actions = h.shortcuts.catalogue();
+      const runTask = actions.find((a) => a.id === "space/run-task")!;
+      expect(runTask.inputs[0]!.options!.map((o) => o.value)).toEqual(["t1", "t2", "b1", "b2", "v1"]);
+      expect(intents("news", actions, TZ, NOW).map((i) => i.key).filter((k) => k.startsWith("task:"))).toEqual(["task:t1", "task:b1"]);
     } finally {
       h.close();
     }

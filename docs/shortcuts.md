@@ -212,7 +212,7 @@ financial-news agent intent.
 
 - **Calculator** (`space/calc`, `src/space/shortcuts/calc.ts`, shared with the page): numbers (decimals, `1,234.5` grouping, full-width digits), `+ - * / × ÷`, `^` or `**` (right-associative; `-2^2` is −4), postfix `%` (÷100), parentheses. A recursive-descent parser, never `eval`. Results are rounded to 12 significant digits and shown with up to 10 decimals; division by zero and non-finite results are errors. The box treats text as arithmetic only when it parses and holds an operator.
 - **Convert** (`space/convert`): amount, from, to (ISO codes; the box also reads 美元, 人民币, 港币, 欧元, 日元, 韩元, 英镑, $, ¥, €, £, ₩ …). Rates come from the rates capability (default `fx-desk/rates`, here or on one peer) and are reused for ten minutes; the cross rate is `to/from` against the base. The value is rounded to the target currency's minor units (2 for CNY, 0 for JPY and KRW). The card shows the rate, source, quote time and a stale mark. The box's live preview is cached a minute per input.
-- **Run task** (`space/run-task`): starts a scheduler task now (`Scheduler.runNow`, so a task already running is refused, not started twice) and reads its status from the scheduler's run record: running until the run that started then is recorded, then its status, error and output.
+- **Run task** (`space/run-task`): starts a scheduler task now (`Scheduler.runNow`, so a task already running is refused, not started twice) and reads its status from the scheduler's run record: running until the run that started then is recorded, then its status, error and output. Its task choices, and the tasks the box offers for a name, list the backup tasks (`backup`, `backup-verify`) after every other task, since each app has one.
 
 ## Runs and execution rules
 

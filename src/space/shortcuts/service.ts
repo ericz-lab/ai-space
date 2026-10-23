@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AppCapabilities, CallRequest, CallResult } from "../bus/bus.ts";
 import type { Capability } from "../bus/types.ts";
 import type { Run as TaskRun, Task } from "../scheduler/types.ts";
+import { BACKUP_TASK, VERIFY_TASK } from "../storage/backup/tasks.ts";
 import { CalcError, evaluate, format } from "./calc.ts";
 import type { ShortcutStore } from "./store.ts";
 import { isDate, isTime, isTimezone, localInstant, resolveDate, resolvePeriod } from "./time.ts";
@@ -122,7 +123,10 @@ export class Shortcuts {
   }
 
   private builtins(): Action[] {
-    const tasks = this.opts.scheduler?.listTasks() ?? [];
+    // Backup tasks go last: every app has one, and they would crowd out the tasks the operator runs by hand.
+    const backup = (t: Task) => t.name === BACKUP_TASK || t.name === VERIFY_TASK;
+    const all = this.opts.scheduler?.listTasks() ?? [];
+    const tasks = [...all.filter((t) => !backup(t)), ...all.filter(backup)];
     const ratesHere = !!this.opts.bus.capability(this.rates.app, this.rates.capability);
     const ratesPeer = (this.opts.peers?.capabilities() ?? []).some((a) => a.app === this.rates.app && a.provides.some((c) => c.name === this.rates.capability));
     return [
