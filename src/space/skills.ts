@@ -157,3 +157,83 @@ export function describeSkillLinks(r: SkillLinkResult): string {
   for (const x of r.renamed) parts.push(`${x.owner}/${x.skill} linked as ${x.name} (name taken)`);
   return parts.join("; ");
 }
+
+// ---- skills of one agent (docs/app-spec.md#skills)
+
+export type AgentSkill = { name: string; description: string; file: string; owner: string };
+
+/** `name` and `description` from a SKILL.md's frontmatter; the directory name when absent. */
+export function skillMeta(text: string, fallback: string): { name: string; description: string } {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] ?? "";
+  const field = (key: string) => {
+    const m = new RegExp(`^${key}:[ \\t]*(.*)$`, "m").exec(fm);
+    return (m?.[1] ?? "").trim().replace(/^(["'])([\s\S]*)\1$/, "$2");
+  };
+  return { name: field("name") || fallback, description: field("description") };
+}
+
+export type AgentSkillContext = {
+  /** The agent's app and its directory: `./…` references resolve inside it. */
+  app: string;
+  appDir: string;
+  /** ai-space's shared skills (`space:<skill>`). */
+  shared?: string;
+  /** Another app's directory (`<app>:<skill>`), undefined when the space has no such app. */
+  appDirOf: (app: string) => string | undefined;
+};
+
+/**
+ * An agent's `skills:` list resolved to SKILL.md files: `./skills` (every skill under it), `./skills/x`
+ * (one), `space:x` (shared), `<app>:x` (another app's skill, from its `skills/` or `.claude/skills/`).
+ * A reference that resolves to nothing is reported in `missing`, never an error: a skill an app
+ * drops must not stop its agents.
+ */
+export async function resolveAgentSkills(refs: string[], ctx: AgentSkillContext): Promise<{ skills: AgentSkill[]; missing: string[] }> {
+  const skills: AgentSkill[] = [];
+  const missing: string[] = [];
+  const seen = new Set<string>();
+  const add = async (dir: string, owner: string) => {
+    const file = join(dir, SKILL_FILE);
+    if (seen.has(file)) return;
+    const f = Bun.file(file);
+    if (!(await f.exists())) return;
+    seen.add(file);
+    const meta = skillMeta(await f.text(), basename(dir));
+    skills.push({ ...meta, file, owner });
+  };
+  const SKILL_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+  for (const ref of refs) {
+    const before = skills.length;
+    const colon = ref.indexOf(":");
+    if (ref.startsWith(".") || ref.startsWith("/") || colon < 0) {
+      const root = resolve(ctx.appDir);
+      const dir = resolve(root, ref);
+      if (dir !== root && !dir.startsWith(root + "/")) { missing.push(ref); continue; }
+      if (await Bun.file(join(dir, SKILL_FILE)).exists()) await add(dir, ctx.app);
+      else for (const d of await listSkills(dir)) await add(d, ctx.app);
+    } else {
+      const owner = ref.slice(0, colon), name = ref.slice(colon + 1);
+      if (!SKILL_NAME.test(name)) { missing.push(ref); continue; }
+      if (owner === "space") { if (ctx.shared) await add(join(ctx.shared, name), "space"); }
+      else {
+        const dir = ctx.appDirOf(owner);
+        const found = dir ? (await appSkills(dir)).find((d) => basename(d) === name) : undefined;
+        if (found) await add(found, owner);
+      }
+    }
+    if (skills.length === before) missing.push(ref);
+  }
+  return { skills, missing };
+}
+
+/** The part of an agent's system prompt that lists its skills; empty when it has none. */
+export function agentSkillsPrompt(r: { skills: AgentSkill[]; missing: string[] }): string {
+  if (!r.skills.length && !r.missing.length) return "";
+  const lines = [
+    "--- Skills ---",
+    "These skills are yours. Each is a SKILL.md holding a workflow. When a request matches a skill's description, read its file first and follow it; read only the ones you need. A skill gives a workflow, not extra authorization.",
+    ...r.skills.map((s) => `- ${s.name}${s.owner ? ` (${s.owner})` : ""}: ${s.description || "(no description)"}\n  File: ${s.file}`),
+  ];
+  if (r.missing.length) lines.push(`Not available on this space: ${r.missing.join(", ")}. Say so if a request needs them.`);
+  return lines.join("\n");
+}
