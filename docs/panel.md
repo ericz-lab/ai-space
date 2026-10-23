@@ -148,6 +148,10 @@ A conversation runs one turn at a time: a chat request that resumes a session wi
 
 Transcripts are read back from the runtime's own store (Claude Code: `~/.claude/projects/<cwd>/<sid>.jsonl`; Codex: `$CODEX_HOME/sessions/**/rollout-*-<sid>.jsonl`; DeepSeek Harness: its session log), so restoring a past session costs no extra storage. Every agent accepts a `runtime/tier` or `runtime/model` in the request's `model` field ([Agent models](#agent-models)). A resumed session stays on its recorded runtime; changing runtimes requires a new conversation. A requested runtime the space lacks, or one without chat, answers 501. The browser reads Claude Code's `stream-json` events; another runtime's adapter translates its own events into that shape.
 
+### Apps and their agents
+
+An app's page can hold a conversation with the app's own agent, as the panel does: the app's server proxies the agent routes to ai-space with its `SPACE_APP_TOKEN`, and the page reads the same stream. The routes an app may reach this way are its agents' `chat`, `runs`, `runs/:id`, `runs/:id/events`, `runs/:id/stop`, `runs/:id/steer`, `runs/:id/approvals/:rid`, `sessions` and `sessions/:sid` (policy `app` in the route table); an app's token on another app's agent, or on a route without `:app` such as `/api/agents/runs`, is a 403. The proxy should pin the agent (`/api/agents/<app>/<agent>/…`) rather than pass any path through, and it decides the permission mode, since the agent works in the app's own directory with the app's own variables. Nothing else changes: the run is a background run, the model is chosen as below, the turn is in the ledger, and the conversation shows in the panel's history for that agent.
+
 ### Agent models
 
 The model is the space's choice, not the app's, so every agent's chat menu offers the same configured chat runtimes and tiers as Space Assistant (`modelOptions` in `GET /api/agents`), and the menu's "default model" names the runtime a new chat starts on (`runtime`). The pick is remembered per agent in the browser; switching runtimes starts a new conversation, as for Space Assistant.

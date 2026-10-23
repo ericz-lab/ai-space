@@ -5,6 +5,7 @@ import { matchAgentIntents, parseAgentIntent, type AgentIntentView } from "../sh
 import type { ShortcutStore } from "../shortcuts/store.ts";
 import { isTimezone } from "../shortcuts/time.ts";
 import { skillContext } from "./skill-context.ts";
+import { agentSkillsPrompt, resolveAgentSkills } from "../skills.ts";
 import { Database } from "bun:sqlite";
 import { realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -73,6 +74,14 @@ export type AgentsApiOptions = {
   icons?: IconPacks;
   /** The bus catalogue (local apps and peers'), appended to every agent's system prompt (docs/events.md). */
   capabilities?: () => (AppCapabilities & { peer?: string })[];
+  /** ai-space's shared skills directory, for agents' `space:<skill>` references. */
+  sharedSkills?: string;
+  /**
+   * Who is calling, for the routes an app may reach with its own token (docs/panel.md#apps-and-their-agents):
+   * `null` for the owner (a session, a device, the operator token, or no gate at all), an app's name for its
+   * token, `""` for any other credential. Absent: everyone is the owner.
+   */
+  callerApp?: (req: Request) => Promise<string | null>;
   /** Chat turns as background runs; default: a registry over an in-memory database. */
   runs?: RunRegistry;
   /** SSE keepalive interval (tests). */
@@ -201,6 +210,11 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     (h: Handler): Handler =>
     async (req) => {
       try {
+        // An app's token reaches only its own agents; an agent route without `:app` stays the owner's.
+        if (opts.callerApp) {
+          const caller = await opts.callerApp(req);
+          if (caller !== null && (!caller || caller !== req.params?.app)) return error(403, "an app may reach only its own agents");
+        }
         return await h(req);
       } catch (e) {
         return e instanceof NotFound ? error(404, e.message) : error(400, (e as Error).message ?? String(e));
@@ -227,7 +241,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
       // The real path: the runtime files its transcripts under the directory it actually runs in,
       // and an app directory may be a symlink into the repository checkout.
       cwd: await realDir(resolve(entry.manifest.dir, a.cwd)),
-      systemPrompt: withCatalogue(await systemPromptFor(entry.manifest, a), app),
+      systemPrompt: [withCatalogue(await systemPromptFor(entry.manifest, a), app), agentSkillsPrompt(await resolveAgentSkills(a.skills, { app, appDir: entry.manifest.dir, ...(opts.sharedSkills ? { shared: opts.sharedSkills } : {}), appDirOf: (other) => registry.get(other)?.manifest.dir }))].filter(Boolean).join("\n\n"),
       tools: a.tools,
       app,
     };

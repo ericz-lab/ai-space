@@ -20,7 +20,7 @@ Goals:
 
 Non-goals, for now:
 
-- Tools that touch the machine. A page reaches the turn route through its app's proxy, so a turn may ask for `Read`, `WebSearch` and `WebFetch` and nothing else. Agents with tools in an app directory are the panel's agent chat (`docs/panel.md`).
+- Tools that touch the machine. A page reaches the turn route through its app's proxy, so a turn may ask for `Read`, `WebSearch` and `WebFetch` and nothing else. Agents with tools and skills in an app directory are the agent chat, which an app's page can also reach with its token (`docs/panel.md#apps-and-their-agents`).
 - Files other than images.
 - Peers: an app talks to the ai-space on its own machine.
 - A panel view over every app's threads; the data is there for it.

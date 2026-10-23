@@ -46,7 +46,7 @@ import { PackageLifecycle } from "./space/packages/lifecycle.ts";
 import { createPackagePanelRoutes } from "./space/packages/panel.ts";
 import { type Config, SHARED_SKILLS, SPACE_ROOT, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
-import { guardBrowserWrites } from "./space/auth.ts";
+import { bearer, guardBrowserWrites, tokenEquals } from "./space/auth.ts";
 import { AUTH_PUBLIC, AUTH_SELF, AuthService, AuthStore, composeRoutes, createAuthRoutes, ensureOperatorToken, gateRoutes } from "./space/auth/index.ts";
 import { ShortcutStore, Shortcuts, createShortcutRoutes } from "./space/shortcuts/index.ts";
 
@@ -404,7 +404,12 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) }
         : {}),
   });
-  const agentRoutes = createAgentRoutes({ actionCatalogue: () => shortcuts.catalogue(), shortcuts: shortcutStore, holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()] });
+  const agentRoutes = createAgentRoutes({ actionCatalogue: () => shortcuts.catalogue(), shortcuts: shortcutStore, holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()], sharedSkills: SHARED_SKILLS,
+    callerApp: async (req) => {
+      const t = bearer(req);
+      if (!t || tokenEquals(t, config.apiToken) || auth.verifyDevice(t)) return null;
+      return (await storage.appForToken(t)) ?? "";
+    } });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");
@@ -490,6 +495,17 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       "/api/services": "app-read",
       "/api/peers": "app-read",
       "/api/agents": "app-read",
+      // An app runs its own agents from its page through its own proxy, with its token (docs/panel.md#apps-and-their-agents);
+      // the routes refuse another app's agents.
+      "/api/agents/:app/:agent/chat": "app",
+      "/api/agents/:app/:agent/runs": "app",
+      "/api/agents/:app/:agent/runs/:id": "app",
+      "/api/agents/:app/:agent/runs/:id/events": "app",
+      "/api/agents/:app/:agent/runs/:id/stop": "app",
+      "/api/agents/:app/:agent/runs/:id/steer": "app",
+      "/api/agents/:app/:agent/runs/:id/approvals/:rid": "app",
+      "/api/agents/:app/:agent/sessions": "app",
+      "/api/agents/:app/:agent/sessions/:sid": "app",
       "/api/checks": "app-read",
       "/api/panel/packages/apps/:app/checks/:check": "app-read",
       // An app's /api/ paths on a peer, as an app on this machine reaches another app's port directly (space-ops, ai-usage, asset-center).
