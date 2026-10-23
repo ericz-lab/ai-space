@@ -109,6 +109,10 @@ describe("catalogue", () => {
       const runTask = actions.find((a) => a.id === "space/run-task")!;
       expect(runTask.inputs[0]!.options!.map((o) => o.value)).toEqual(["t1", "t2", "b1", "b2", "v1"]);
       expect(intents("news", actions, TZ, NOW).map((i) => i.key).filter((k) => k.startsWith("task:"))).toEqual(["task:t1", "task:b1"]);
+      // Typing an app's name never puts its backup above the app: backup tasks are loose matches, after the library's entries.
+      const backups = intents("new", actions, TZ, NOW).filter((i) => i.key === "task:b1" || i.key === "task:b2");
+      expect(backups.map((i) => i.kind === "action" && i.strong)).toEqual([false]);
+      expect(intents("fet", actions, TZ, NOW).find((i) => i.key === "task:t1")).toMatchObject({ strong: true });
     } finally {
       h.close();
     }

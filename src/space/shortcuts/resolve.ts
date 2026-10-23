@@ -3,6 +3,7 @@ import { isExpression } from "./calc.ts";
 import { addDays, dateIn, isDate, isTime, resolveDate, resolvePeriod } from "./time.ts";
 import type { Action, ActionInput } from "./types.ts";
 import { SCORE, score } from "./ranking.ts";
+import { BACKUP_TASK, VERIFY_TASK } from "../storage/backup/tasks.ts";
 
 export const actionKey = (a: { id: string; peer?: string }) => (a.peer ? `${a.peer}:${a.id}` : a.id);
 
@@ -160,9 +161,16 @@ export function intents(query: string, actions: Action[], tz: string, now = Date
         .filter((x) => x.s >= 50)
         .sort((x, y) => y.s - x.s)
         .slice(0, 3)
-        .map(({ o, s }): Intent => ({ kind: "action", key: `task:${o.value}`, action: runTask, args: { task: o.value }, strong: s >= SCORE.prefix }))
+        // A backup task is never strong: every app has one, and typing an app's name means the app, not its backup.
+        .map(({ o, s }): Intent => ({ kind: "action", key: `task:${o.value}`, action: runTask, args: { task: o.value }, strong: s >= SCORE.prefix && !isBackup(o.label) }))
     : [];
   return [...strong, ...tasks.filter((t) => t.kind === "action" && t.strong), ...weak.sort((x, y) => y.s - x.s).map((w) => w.i), ...tasks.filter((t) => t.kind === "action" && !t.strong)];
+}
+
+/** A run-task option whose task is an app's backup or the space's backup check (label `app · name`). */
+function isBackup(label: string): boolean {
+  const name = label.split(" · ")[1];
+  return name === BACKUP_TASK || name === VERIFY_TASK;
 }
 
 /** The arguments a strong match opens with: defaults, the dates read from the text, the text itself. */
