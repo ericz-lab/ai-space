@@ -33,7 +33,8 @@ import { CAPTURE_KINDS, type Capability, type CaptureKind, type CaptureSpec, DEF
  */
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]*$/i;
-const APP_RE = /^[a-z0-9][a-z0-9._-]*$/i;
+// A caller is an app on this space, or `<hub>/<app>` for a call a hub forwards (docs/events.md#across-machines-peers).
+const CALLER_RE = /^(?:[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i;
 const CONSUME_KEYS = ["event", "filter", "debounce", "maxWait", "task", "http"];
 
 export const EMPTY_EVENTS_SPEC: EventsSpec = { publishes: [], consumes: [] };
@@ -125,7 +126,7 @@ export function parseProvidesSpec(raw: unknown, ctx = "provides"): Capability[] 
     if (timeoutMs < 1_000 || timeoutMs > MAX_CALL_TIMEOUT_MS) throw new Error(`${where}: timeout must be between 1s and 15m`);
     let callers: string[] | undefined;
     if (item.callers !== undefined) {
-      if (!Array.isArray(item.callers) || !item.callers.length || !item.callers.every((x) => typeof x === "string" && APP_RE.test(x))) throw new Error(`${where}: callers must be a non-empty list of app names`);
+      if (!Array.isArray(item.callers) || !item.callers.length || !item.callers.every((x) => typeof x === "string" && CALLER_RE.test(x))) throw new Error(`${where}: callers must be a non-empty list of app names (<app> or <hub>/<app>)`);
       callers = [...new Set(item.callers as string[])];
     }
     // A user-facing action (docs/shortcuts.md#app-actions); the operator runs it, so `callers` must let `space` in.

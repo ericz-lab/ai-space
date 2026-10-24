@@ -355,7 +355,7 @@ provides:
     description: Research a symbol and return a verdict.
     http: { method: POST, path: /api/research }
     timeout: 2m
-    callers: [portfolio]                             # default: every app on this space
+    callers: [portfolio]                             # default: every app on this space; <hub>/<app> admits a call a hub forwards
   create:
     http: { method: POST, path: /api/capabilities/create }
     action:                                          # optional: offered in the command box and the Shortcuts panel
