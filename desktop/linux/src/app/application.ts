@@ -79,6 +79,7 @@ export class Application {
     act("quit", () => this.app.quit(), ["<Control>q"]);
     act("quick-chat", () => this.quick.toggle(), ["<Control><Shift>space"]);
     act("settings", () => showSettings(this.window().window, this.model, this.local), ["<Control>comma"]);
+    act("peer-settings", () => showSettings(this.window().window, this.model, this.local, "peer"));
     act("about", () => this.about());
 
     if (this.local.available) {

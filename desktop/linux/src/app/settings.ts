@@ -4,13 +4,15 @@ import Gtk from "gi://Gtk?version=4.0";
 import { APP_ID, APP_ROOT, exists, logError, path, prefs, savePrefs, t, writeText } from "./env.ts";
 import type { LocalManager } from "./local-manager.ts";
 import { LocalPanel } from "./local-view.ts";
+import { PeerPage } from "./peer-view.ts";
 import type { AppModel } from "./model.ts";
 import { connectForm } from "./welcome.ts";
 
 /**
  * Settings, as one preferences dialog: the saved Spaces (switch, make default, remove, add), how
  * the app behaves (keep running for notifications, start at login, notifications, the Quick Chat
- * shortcut), and, in the Local edition, AI Space on this computer. A Space's own settings stay on
+ * shortcut), in the Local edition AI Space on this computer, and this computer as a peer of a
+ * Space used elsewhere (peer-view.ts). A Space's own settings stay on
  * its panel page.
  */
 
@@ -30,7 +32,7 @@ export function setAutostart(on: boolean): void {
   void writeText(AUTOSTART, text).catch((e) => logError(e, "autostart"));
 }
 
-export function showSettings(parent: any, model: AppModel, local: LocalManager, page?: "local"): void {
+export function showSettings(parent: any, model: AppModel, local: LocalManager, page?: "local" | "peer"): void {
   const dialog = new Adw.PreferencesDialog({ title: t("settings"), search_enabled: false });
 
   // General
@@ -105,7 +107,7 @@ export function showSettings(parent: any, model: AppModel, local: LocalManager, 
 
   /** A command shown to copy into a terminal or the desktop's settings. */
   const commandRow = (command: string) => {
-    const row = new Adw.ActionRow({ title: command, title_selectable: true, css_classes: ["monospace"] });
+    const row = new Adw.ActionRow({ title: command, title_selectable: true, use_markup: false, css_classes: ["monospace"] });
     const copy = new Gtk.Button({ icon_name: "edit-copy-symbolic", valign: Gtk.Align.CENTER, css_classes: ["flat"] });
     copy.connect("clicked", () => {
       row.get_clipboard().set(command);
@@ -136,5 +138,10 @@ export function showSettings(parent: any, model: AppModel, local: LocalManager, 
     if (page === "local") dialog.set_visible_page(localPage);
     void local.refresh();
   }
+
+  // This computer as a peer of a Space used elsewhere
+  const peer = new PeerPage(local, model, { toast: (title) => dialog.add_toast(new Adw.Toast({ title, timeout: 3 })), copyRow: commandRow });
+  dialog.add(peer.widget);
+  if (page === "peer") dialog.set_visible_page(peer.widget);
   dialog.present(parent);
 }

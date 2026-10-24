@@ -15,7 +15,7 @@ where Linux allows, and says below where it does less.
 | Terminal | Shells on the Space's machine and its peers, one tab each: xterm.js in a web view whose page counts as the Space's origin, speaking the panel's protocol ([terminal.md](terminal.md)); a passphrase is asked natively and kept in memory |
 | Apps | The Space's pages in tabs: apps, the web panel, links from the inbox or a chat. A link to another app opens in that app's tab, a link off the Space in the browser. A tab moves to a window of its own and back |
 | Quick Chat | A small window with one conversation: `ai-space --quick-chat` shows it or hides it. GNOME and KDE let no app register a global shortcut, so Settings shows the command to bind under Keyboard › Custom Shortcuts |
-| Settings | The saved Spaces (switch, make default, remove, add), keep running when the window is closed, start at login, notifications, the Quick Chat command; in the Local edition, AI Space on This Computer |
+| Settings | The saved Spaces (switch, make default, remove, add), keep running when the window is closed, start at login, notifications, the Quick Chat command; in the Local edition, AI Space on This Computer; Peer, this computer as a peer of a Space used elsewhere ([below](#peer)) |
 
 The window has Home, Chat, Inbox, Terminal and Apps in the header (in a bar at the bottom on a
 narrow window), the Space menu at the start of the header, and a banner when the Space needs a
@@ -98,6 +98,18 @@ What the app keeps:
 | `~/.local/share/ai-space/desktop/<connection>/` | each Space's web data: cookies (its sign-in), storage, cache |
 | `~/.cache/ai-space/catalogue-<connection>.json` | the last catalogue, shown marked as such while the Space cannot be reached |
 | `~/.config/autostart/dev.ai_space.Desktop.desktop` | Start at login (`ai-space --background`) |
+| `~/.config/systemd/user/ai-space-peer-tunnel.service` | the peer tunnel, when one was started in Settings › Peer (remove it there) |
+
+## Peer
+
+Settings › Peer makes this computer's Space a peer of a Space used elsewhere, the hub
+([peers.md](peers.md)), in three groups:
+
+| Group | What it does |
+| --- | --- |
+| This Computer as a Peer | Writes `SPACE_HUB_TOKEN` (32 random bytes, hex; copy, or make a new one), `SPACE_NAME` (suggested from the host name; letters, digits and `-`, so the hub reads it back unchanged) and `SPACE_TERMINAL_ENABLED` into this Space's workspace `.env`, edited as `space setup` edits it (`core/peer.ts`, tested against `src/space/setup.ts`), mode 0600. The workspace is the Local edition's, else `SPACE_HOME`, else `~/.ai-space`. Save restarts the Local edition's service; another Space on this computer has to be restarted by hand. Turning it off empties the token, which removes `/api/peer/*` |
+| How the Hub Reaches This Computer | An SSH tunnel: the app writes `~/.config/systemd/user/ai-space-peer-tunnel.service`, which runs `ssh -N -R 127.0.0.1:<port>:127.0.0.1:<SPACE_PORT> <user@host>` with key login only (`BatchMode`), reconnects after a drop and starts at login; Start, Stop and Remove, and the last line ssh logged when it is not connected. The hub's machine needs this computer's key (`ssh-copy-id`); its own `127.0.0.1:<port>` then leads here, and nothing is published. Or an address of the person's own (a Cloudflare tunnel's hostname) with optional headers for its access layer |
+| On the Hub | The lines for the hub's `.env` (`SPACE_PEER_<NAME>`, `_TOKEN`, `_HEADERS`), to copy, and a check that asks a saved Space's `GET /api/peers` how it sees this computer |
 
 ## Trust boundary
 

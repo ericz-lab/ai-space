@@ -74,7 +74,9 @@ export function readTextSync(file: string): string | undefined {
 export async function writeText(file: string, text: string, mode?: number): Promise<void> {
   GLib.mkdir_with_parents(GLib.path_get_dirname(file), 0o700);
   const f = Gio.File.new_for_path(file);
-  await f.replace_contents_bytes_async(textToBytes(text), null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
+  // A file only its owner may read is never readable by others, not even while it is written.
+  const flags = Gio.FileCreateFlags.REPLACE_DESTINATION | (mode !== undefined && !(mode & 0o077) ? Gio.FileCreateFlags.PRIVATE : 0);
+  await f.replace_contents_bytes_async(textToBytes(text), null, false, flags, null);
   if (mode !== undefined) GLib.chmod(file, mode);
 }
 
@@ -131,6 +133,8 @@ export type Prefs = {
   chosenRuntimes: Record<string, string>;
   window: { width: number; height: number; maximized: boolean };
   lastAgent?: string;
+  /** Settings › Peer: how the hub reaches this computer (the tunnel itself lives in its unit file). */
+  peer?: { reach: "ssh" | "address"; target: string; hubPort: number; address: string; headers: string };
 };
 
 const PREFS_FILE = path(dirs.config, "preferences.json");
