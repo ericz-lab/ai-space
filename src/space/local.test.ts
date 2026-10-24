@@ -286,6 +286,25 @@ describe("space local", () => {
     expect(await Bun.file(join(workspace, "runtimes.yaml")).text()).toBe(mine);
   }, 60_000);
 
+  test("the activity check sends the token the service accepts", async () => {
+    const { deps, workspace } = await setup();
+    await mkdir(join(workspace, "run"), { recursive: true });
+    await Bun.write(join(workspace, "run", "operator-token"), "file-token\n");
+    const sent: (string | null)[] = [];
+    const fakeFetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      sent.push(new Headers(init?.headers).get("authorization"));
+      return Response.json({ ok: true, busy: false, items: [] });
+    }) as typeof fetch;
+    // An empty SPACE_API_TOKEN= (the starter .env) must not read the next line as the token.
+    for (const env of ["SPACE_API_TOKEN=\nSPACE_MAX_CONCURRENCY=2\n", "SPACE_API_TOKEN=  \nSPACE_PORT=8700\n", "SPACE_PORT=8700\n"]) {
+      await Bun.write(join(workspace, ".env"), env);
+      await readActivity({ ...deps("/unused"), fetch: fakeFetch }, workspace, 1);
+    }
+    await Bun.write(join(workspace, ".env"), 'SPACE_PORT=8700\nSPACE_API_TOKEN="env-token"\n');
+    await readActivity({ ...deps("/unused"), fetch: fakeFetch }, workspace, 1);
+    expect(sent).toEqual(["Bearer file-token", "Bearer file-token", "Bearer file-token", "Bearer env-token"]);
+  });
+
   test("activity failures do not silently become idle", async () => {
     const { deps, workspace } = await setup();
     for (const code of [401, 500]) {
