@@ -40,10 +40,13 @@ export type Widget = {
   peer?: string;
   stale?: boolean;
   size?: string;
+  /** `items` (the default: a list, maybe blocks) or `embed` (the app's own page). */
+  kind?: "items" | "embed";
   ok?: boolean;
   items?: { text: string; url?: string; time?: string }[];
   blocks?: WidgetBlock[];
   asOf?: string;
+  staleAfterMs?: number;
   error?: string;
 };
 
@@ -134,7 +137,7 @@ export function decodeCatalogue(raw: { apps: unknown; agents: unknown; widgets: 
     if (!id || !app || !name || title === undefined) continue;
     const items = Array.isArray(w.items) ? w.items.filter(isObj).filter((i) => typeof i.text === "string").map((i) => ({ text: i.text as string, url: str(i.url), time: str(i.time) })) : undefined;
     const blocks = Array.isArray(w.blocks) ? (w.blocks.filter((b) => isObj(b) && typeof b.type === "string") as WidgetBlock[]) : undefined;
-    widgets.push({ id, app, name, title, i18n: i18nOf(w.i18n), icon: str(w.icon), link: str(w.link), peer: str(w.peer), stale: w.stale === true, size: str(w.size), ok: typeof w.ok === "boolean" ? w.ok : undefined, items, blocks, asOf: str(w.asOf), error: str(w.error) });
+    widgets.push({ id, app, name, title, i18n: i18nOf(w.i18n), icon: str(w.icon), link: str(w.link), peer: str(w.peer), stale: w.stale === true, size: str(w.size), ...(w.kind === "embed" || w.kind === "items" ? { kind: w.kind } : {}), ...(typeof w.staleAfterMs === "number" ? { staleAfterMs: w.staleAfterMs } : {}), ok: typeof w.ok === "boolean" ? w.ok : undefined, items, blocks, asOf: str(w.asOf), error: str(w.error) });
   }
 
   let screens: Screen[] | undefined;

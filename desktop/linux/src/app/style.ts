@@ -13,8 +13,22 @@ const CSS = `
 .unread-dot { background: @accent_bg_color; }
 .reach-peer-offline { background: alpha(@window_fg_color, 0.35); }
 .section-title { font-weight: 700; font-size: 1.05em; margin: 18px 6px 6px; }
-.widget-card { padding: 14px 16px; border-radius: 16px; min-width: 240px; }
-.widget-line { font-size: 0.95em; }
+.widget-card { padding: 8px 10px 14px; border-radius: 18px; min-width: 280px; }
+.wb-head { padding: 6px 6px; border-radius: 12px; }
+.wb-title { font-weight: 500; }
+.wb-link { padding: 4px 6px; margin: -4px -6px; border-radius: 10px; font-weight: normal; }
+.wb-hero { font-size: 1.9em; font-weight: 600; font-feature-settings: "tnum"; }
+.wb-status { font-size: 1.15em; font-weight: 600; }
+.wb-row-label { color: alpha(@window_fg_color, 0.78); }
+.wb-row-value { font-weight: 600; font-feature-settings: "tnum"; }
+.wb-delta { font-weight: 600; font-feature-settings: "tnum"; }
+.wb-item { font-size: 0.97em; }
+.wb-embed { border-radius: 10px; }
+.tone-positive { color: #2ea043; }
+.tone-negative { color: @error_color; }
+.tone-warning { color: @warning_color; }
+.pager-dot { min-width: 22px; min-height: 22px; padding: 0 4px; border-radius: 99px; font-size: 0.6em; color: alpha(@window_fg_color, 0.3); }
+.pager-dot.active { color: @window_fg_color; }
 .home-search { min-height: 44px; font-size: 1.1em; border-radius: 22px; padding: 0 14px; }
 .ask-row { padding: 10px 14px; border-radius: 12px; }
 .user-bubble { background: @accent_bg_color; color: @accent_fg_color; border-radius: 18px 18px 6px 18px; padding: 8px 14px; }

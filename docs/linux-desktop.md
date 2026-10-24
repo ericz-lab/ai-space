@@ -9,7 +9,7 @@ where Linux allows, and says below where it does less.
 
 | Part | What it does |
 | --- | --- |
-| Home | The command box over the library ([panel.md](panel.md#omnibox)): typing filters every app, agent and widget, best names first (the web panel's ranking, `src/space/shortcuts/ranking.ts`). Return opens the best match when its name holds the whole query, otherwise asks Space Assistant in a new conversation; Ctrl+Return always asks. Below it: the panel's home screen (its apps, agents, widgets and the panel's own tiles, `builtin:<name>`), the widgets, the apps with Inbox, Shortcuts, Terminal, Panel and Settings, and the agents. Right-click an app for Open in Browser |
+| Home | Pages side by side, as on the Mac ([macos-desktop.md](macos-desktop.md)): a sideways swipe on the touchpad, the dots above them, or Ctrl+Page Up and Ctrl+Page Down. The first page is the **Library**: every app (with the panel's own tiles, `builtin:<name>`), agent and widget under the command box ([panel.md](panel.md#omnibox)). Then the **screens**, one page each; the window opens on the first, which carries the command box too. Typing filters every app, agent and widget, best names first (the web panel's ranking, `src/space/shortcuts/ranking.ts`), and while the box holds a query that page shows the matches. Return opens the best match when its name holds the whole query, otherwise asks Space Assistant in a new conversation; Ctrl+Return always asks. A screen shows its tiles, then its **widget cards**, drawn as the panel draws them (`core/widgets.ts`, from `src/web/WidgetBlocks.tsx`): the first block large (value, change, line or bar chart, progress bar, gauge), the next ones as rows, as many as the card's size holds; a list widget its items with their age; an `embed` widget the app's own page in a web view. The screens are this computer's (`~/.config/ai-space/screens.json`, `core/screens.ts`): copied from the panel's once, then changed here and never written to the Space. Right-click a tile or a card for Open, the screens it is on, Remove from This Screen, Open in Browser and Copy Link; the ⋯ button, or a right-click on a screen's empty part, for New Screen, Rename, Edit (reorder and remove), Copy the Panel's Layout and Delete |
 | Chat | Native conversations with the Space's agents: the agents and recent conversations in a sidebar, messages drawn natively (Markdown, one quiet row per tool call that opens to its input and output, approval and question cards, a failed turn with its reason and Try Again, Grant and retry after a refusal for lack of permission), the permission picker, pictures attached by button, paste or drop, Stop. A message sent while a turn runs joins it (steering) or waits its turn. A turn survives a dropped connection (it reattaches from the last event) and an app restart (running turns are picked up again). The logic is the Mac's `ChatController`, ported to `core/conversation.ts` |
 | Inbox | The Space's open threads; opening one marks it read and goes to its page; Mark as Read, Done, Mark All as Read. New unread threads arrive as desktop notifications with Mark as Read and Done, from every saved Space |
 | Terminal | Shells on the Space's machine and its peers, one tab each: xterm.js in a web view whose page counts as the Space's origin, speaking the panel's protocol ([terminal.md](terminal.md)); a passphrase is asked natively and kept in memory |
@@ -26,7 +26,7 @@ Space is saved it shows the welcome screen: an address to connect to, a Space al
 `aispace://` links work as on the Mac (`core/desktop.ts`, `parseDeepLink`): `chat?agent=&text=`,
 `open?app=`, `inbox`, `show`. A link may fill in a message but never sends it.
 
-Shortcuts: Ctrl+1…5 for the views, Ctrl+F or Ctrl+L for the command box, Ctrl+N for a new
+Shortcuts: Ctrl+1…5 for the views, Ctrl+Page Up and Ctrl+Page Down for Home's pages, Ctrl+F or Ctrl+L for the command box, Ctrl+N for a new
 conversation, Ctrl+Shift+T for a terminal, Ctrl+Shift+P for the web panel, F5 to look at the Space
 again, Ctrl+Shift+Space for Quick Chat while the app has focus, Ctrl+, for Settings, Ctrl+Q to quit.
 
@@ -41,7 +41,8 @@ dialogs.
 desktop/linux/
   src/core/       runtime-neutral logic, typed and tested with bun test: URLs, connections,
                   the catalogue and search, Space checks, SSE, chat turns and conversations,
-                  the inbox, deep links, Markdown to Pango markup, navigation rules, strings (en, zh)
+                  the inbox, deep links, Markdown to Pango markup, navigation rules, Home's screens
+                  and widget cards, strings (en, zh)
   src/app/        GTK glue (GJS only): window, views, HTTP (libsoup), web views (WebKit),
                   the Local manager, notifications
   src/main.ts     the entry point (`gjs -m main.js`)
@@ -94,6 +95,7 @@ What the app keeps:
 | Path | What |
 | --- | --- |
 | `~/.config/ai-space/connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
+| `~/.config/ai-space/screens.json` | Home's screens, per saved Space |
 | `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand |
 | `~/.local/share/ai-space/desktop/<connection>/` | each Space's web data: cookies (its sign-in), storage, cache |
 | `~/.cache/ai-space/catalogue-<connection>.json` | the last catalogue, shown marked as such while the Space cannot be reached |
@@ -133,15 +135,15 @@ all, and Settings shows the command that turns it on.
 
 `AISPACE_DEBUG=1` logs state changes and enables WebKit's inspector. Hidden options for checks
 without a person at the screen: `--page <home|chat|inbox|terminal>`, `--action <name>` (a window
-action such as `new-terminal`, `panel` or `search`, an app action as `app.settings`, or
-`ask=<text>`; repeatable) and `--screenshot <file.png>`, which saves the window after
+action such as `new-terminal`, `panel`, `search` or `next-screen`, an app action as
+`app.settings`, `ask=<text>`, or `query=<text>` to type into the command box; repeatable) and `--screenshot <file.png>`, which saves the window after
 `AISPACE_SCREENSHOT_DELAY` milliseconds (4000) and quits. `AISPACE_LOCAL_BUNDLE` points the Local
 manager at another release tree.
 
 ## What the Mac client has and this one does not (yet)
 
 - Voice input in the message field.
-- Editing the home screens (pin, new screen, copy the panel's layout); Home shows the panel's own.
+- Dragging tiles and cards into order (Edit This Screen moves them with buttons), and a card two columns wide.
 - The native Settings sections beyond the app's own (Appearance, Models, Usage, Status,
   Packages, Account); the web panel's Settings has them.
 - Updating the app itself; the Local edition updates its service from the release the app carries.

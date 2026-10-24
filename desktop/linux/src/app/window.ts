@@ -69,6 +69,7 @@ export class MainWindow {
         const url = pageUrl(entry.link, space.client.base, lang);
         if (url) openExternally(url);
       },
+      openLink: (space, url) => this.openUrl(space, url),
     });
     this.chat = new ChatPage(model, openLink);
     this.inbox = new InboxPage(model, (space, url) => this.openUrl(space, url));
@@ -176,6 +177,9 @@ export class MainWindow {
       const space = this.model.current;
       if (space) void this.model.refresh(space);
     }, ["F5", "<Control>r"]);
+    // Home's pages: the library, then the screens.
+    act("previous-screen", () => this.stack.get_visible_child_name() === "home" && this.home.step(-1), ["<Control>Page_Up"]);
+    act("next-screen", () => this.stack.get_visible_child_name() === "home" && this.home.step(1), ["<Control>Page_Down"]);
     act("panel", () => this.model.current && this.openPanel(this.model.current), ["<Control><Shift>p"]);
     act("new-terminal", () => {
       this.show("terminal");

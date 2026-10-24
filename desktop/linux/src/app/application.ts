@@ -134,6 +134,7 @@ export class Application {
         for (const a of actions) {
           const [name, arg] = a.split("=", 2) as [string, string | undefined];
           if (name === "ask" && arg && this.model.current) main.ask(this.model.current, arg);
+          else if (name === "query" && arg !== undefined) main.home.setQuery(arg);
           else (name.startsWith("app.") ? this.app.lookup_action(name.slice(4)) : main.window.lookup_action(name))?.activate(null);
         }
         return GLib.SOURCE_REMOVE;
@@ -154,20 +155,25 @@ export class Application {
 
   /** Debug: the window as a PNG after it has had time to load, then quit. */
   private screenshot(window: any, file: string): void {
-    GLib.timeout_add(GLib.PRIORITY_DEFAULT, Number(GLib.getenv("AISPACE_SCREENSHOT_DELAY") ?? "4000"), () => {
+    let tries = 0;
+    const shoot = () => {
       try {
         const paintable = new Gtk.WidgetPaintable({ widget: window });
-        const [w, h] = [window.get_width(), window.get_height()];
         const snapshot = Gtk.Snapshot.new();
-        paintable.snapshot(snapshot, w, h);
+        paintable.snapshot(snapshot, window.get_width(), window.get_height());
         const node = snapshot.to_node();
-        const texture = window.get_renderer().render_texture(node, null);
-        texture.save_to_png(file);
+        // A frame in the middle of being drawn can come back empty: try again shortly.
+        if (!node && ++tries < 10) return true;
+        window.get_renderer().render_texture(node, null).save_to_png(file);
         log("screenshot", file);
       } catch (e) {
         logError(e, "screenshot");
       }
       this.app.quit();
+      return GLib.SOURCE_REMOVE;
+    };
+    GLib.timeout_add(GLib.PRIORITY_DEFAULT, Number(GLib.getenv("AISPACE_SCREENSHOT_DELAY") ?? "4000"), () => {
+      GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, shoot);
       return GLib.SOURCE_REMOVE;
     });
   }
