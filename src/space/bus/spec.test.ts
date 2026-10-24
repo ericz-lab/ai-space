@@ -57,11 +57,18 @@ describe("provides spec", () => {
     ]);
   });
 
+  test("accepts a hub's caller form in callers", () => {
+    const [cap] = parseProvidesSpec({ capture: { http: { path: "/c" }, callers: ["space", "seoul/space"], capture: { kinds: ["image"], title: "x" } } });
+    expect(cap!.callers).toEqual(["space", "seoul/space"]);
+  });
+
   test("rejects bad capabilities", () => {
     expect(() => parseProvidesSpec({ "bad name": { http: { path: "/x" } } })).toThrow(/not a capability name/);
     expect(() => parseProvidesSpec({ a: { description: "no http" } })).toThrow(/http is required/);
     expect(() => parseProvidesSpec({ a: { http: { path: "/x" }, timeout: "1h" } })).toThrow(/between 1s and 15m/);
     expect(() => parseProvidesSpec({ a: { http: { path: "/x" }, callers: [] } })).toThrow(/callers must be/);
+    expect(() => parseProvidesSpec({ a: { http: { path: "/x" }, callers: ["hub/app/extra"] } })).toThrow(/callers must be/);
+    expect(() => parseProvidesSpec({ a: { http: { path: "/x" }, callers: ["/app"] } })).toThrow(/callers must be/);
     expect(() => parseProvidesSpec({ a: { http: { path: "/x" }, secret: 1 } })).toThrow(/unknown key "secret"/);
     expect(() => parseProvidesSpec([1])).toThrow(/must map capability names/);
     expect(parseProvidesSpec(undefined)).toEqual([]);
