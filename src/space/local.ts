@@ -599,11 +599,15 @@ async function waitHealthy(d: LocalDeps, port: number, version: string, ms = 60_
   return undefined;
 }
 
-/** The operator token of the workspace: SPACE_API_TOKEN in its .env, else run/operator-token (builtin). */
+/**
+ * The operator token of the workspace: SPACE_API_TOKEN in its .env, else run/operator-token (builtin).
+ * Spaces and tabs only around `=`: `\s` would cross the line break of an empty `SPACE_API_TOKEN=`
+ * and take the next line as the token. An empty value falls back to the file, as the service does.
+ */
 async function operatorToken(workspace: string): Promise<string> {
   const env = await Bun.file(join(workspace, ".env")).text().catch(() => "");
-  const m = /^\s*SPACE_API_TOKEN\s*=\s*["']?([^"'\s]+)/m.exec(env);
-  return m?.[1] ?? (await readOperatorToken(workspace));
+  const m = /^[ \t]*SPACE_API_TOKEN[ \t]*=[ \t]*["']?([^"'\s]*)/m.exec(env);
+  return m?.[1] || (await readOperatorToken(workspace));
 }
 
 /**
