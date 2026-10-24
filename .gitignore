@@ -36,3 +36,6 @@ data/
 
 # Independent app source checkouts
 .ai-space/app-src
+
+# Hallmark design skill output
+.hallmark/
