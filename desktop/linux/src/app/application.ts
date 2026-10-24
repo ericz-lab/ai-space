@@ -46,6 +46,8 @@ export class Application {
     this.app.connect("activate", () => this.window().present());
     this.app.connect("command-line", (_a: unknown, cmd: any) => {
       this.commandLine(cmd);
+      // Lets a second `ai-space …` return now, not when GJS collects `cmd` (GLib 2.80+).
+      cmd.done?.();
       return 0;
     });
   }
