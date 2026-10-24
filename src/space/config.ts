@@ -59,6 +59,11 @@ export type Config = {
   eventRetentionMs: number;
   /** Chat model when neither the request nor the manifest names one (SPACE_CHAT_MODEL). */
   chatModel: string;
+  /**
+   * Apps whose own token may chat with other apps' agents (SPACE_AGENT_CALLERS, comma-separated; docs/panel.md#apps-and-their-agents).
+   * Empty: an app reaches only its own agents. Never Space Assistant.
+   */
+  agentCallers: string[];
   /** A panel chat turn still running after this long is stopped (SPACE_CHAT_TIMEOUT_MINUTES, 60; 0 = never). */
   chatTimeoutMs: number;
   /**
@@ -151,6 +156,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     notifyTasks: env.SPACE_NOTIFY_TASKS?.trim() ?? "",
     eventRetentionMs: Math.max(1, Number(env.SPACE_EVENTS_RETENTION_DAYS ?? 30) || 30) * 24 * 3600_000,
     chatModel: env.SPACE_CHAT_MODEL?.trim() ?? "sonnet",
+    agentCallers: (env.SPACE_AGENT_CALLERS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     chatTimeoutMs: Math.max(0, Number(env.SPACE_CHAT_TIMEOUT_MINUTES ?? 60) || 0) * 60_000,
     supervisor,
     serviceStop: env.SPACE_SERVICE_STOP?.trim() ?? "",

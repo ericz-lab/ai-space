@@ -82,6 +82,8 @@ export type AgentsApiOptions = {
    * token, `""` for any other credential. Absent: everyone is the owner.
    */
   callerApp?: (req: Request) => Promise<string | null>;
+  /** Apps the operator lets reach every app's agents with their own token (SPACE_AGENT_CALLERS); not Space Assistant. */
+  agentCallers?: readonly string[];
   /** Chat turns as background runs; default: a registry over an in-memory database. */
   runs?: RunRegistry;
   /** SSE keepalive interval (tests). */
@@ -210,10 +212,13 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     (h: Handler): Handler =>
     async (req) => {
       try {
-        // An app's token reaches only its own agents; an agent route without `:app` stays the owner's.
+        // An app's token reaches only its own agents, or every app's when the operator lists it in SPACE_AGENT_CALLERS;
+        // an agent route without `:app` stays the owner's.
         if (opts.callerApp) {
           const caller = await opts.callerApp(req);
-          if (caller !== null && (!caller || caller !== req.params?.app)) return error(403, "an app may reach only its own agents");
+          const target = req.params?.app;
+          const granted = !!caller && !!target && target !== SPACE_APP && !!opts.agentCallers?.includes(caller);
+          if (caller !== null && (!caller || (caller !== target && !granted))) return error(403, "an app may reach only its own agents");
         }
         return await h(req);
       } catch (e) {
