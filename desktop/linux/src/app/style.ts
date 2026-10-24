@@ -54,6 +54,18 @@ const CSS = `
 .attachment { border-radius: 8px; }
 .pending-line, .activity-line { font-size: 0.92em; }
 .inbox-time { font-size: 0.9em; }
+.status-dot { min-width: 8px; min-height: 8px; border-radius: 99px; background: alpha(@window_fg_color, 0.3); }
+.status-ok { background: @success_color; }
+.status-down { background: @error_color; }
+.status-paused { background: @warning_color; }
+.status-running { background: @accent_bg_color; }
+.status-off { background: alpha(@window_fg_color, 0.18); }
+.usage-card { padding: 10px 14px; }
+.usage-figure { font-size: 1.4em; font-weight: 600; font-feature-settings: "tnum"; }
+.table-cell, .numeric { font-feature-settings: "tnum"; }
+.small-toggle { padding: 2px 10px; min-height: 24px; font-size: 0.9em; }
+.run-output { font-size: 0.88em; padding: 8px 12px; }
+.setnote { font-size: 0.92em; }
 .sidebar-heading { font-weight: 700; font-size: 0.85em; margin: 12px 12px 4px; }
 `;
 

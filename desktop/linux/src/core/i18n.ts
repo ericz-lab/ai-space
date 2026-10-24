@@ -275,6 +275,11 @@ const en = {
   widgetEmpty: "Nothing to show.",
   widgetStale: "Last known; its machine is offline.",
   widgetUpdated: "Updated {when}",
+  languageSystem: "Follow the desktop",
+  restartToApply: "Takes effect the next time AI Space starts.",
+  appearanceHint: "The web panel's theme and colours are set in its own Settings, on the Panel page.",
+  settingsNeedSpace: "Connect to a Space",
+  settingsNeedSpaceBody: "This section shows the Space’s own settings. They appear once {name} answers.",
 } as const;
 
 export type Key = keyof typeof en;
@@ -546,6 +551,11 @@ const zh: Record<Key, string> = {
   widgetEmpty: "没有可显示的内容。",
   widgetStale: "上次已知的内容；其所在机器离线。",
   widgetUpdated: "更新于{when}",
+  languageSystem: "跟随桌面",
+  restartToApply: "下次启动 AI Space 时生效。",
+  appearanceHint: "网页面板的主题和颜色在它自己的设置里（面板页面）。",
+  settingsNeedSpace: "请连接一个空间",
+  settingsNeedSpaceBody: "这一部分显示空间自己的设置，{name} 响应后即可显示。",
 };
 
 export type Lang = "en" | "zh";

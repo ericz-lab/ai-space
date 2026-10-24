@@ -4,6 +4,7 @@ import Soup from "gi://Soup?version=3.0";
 import WebKit from "gi://WebKit?version=6.0";
 import { type Key, type Lang, detectLang, translate } from "../core/i18n.ts";
 import type { Permission } from "../core/chat.ts";
+import { type Appearance, type Section, type WebKey, languageOf, webText } from "../core/settings.ts";
 
 /**
  * What every part of the app shares: its identity, its directories (XDG, apart from any Space
@@ -36,10 +37,6 @@ export const dirs = {
 };
 
 export const path = (...parts: string[]) => GLib.build_filenamev(parts);
-
-export const lang: Lang = detectLang(GLib.get_language_names());
-
-export const t = (key: Key, vars?: Record<string, string | number>) => translate(lang, key, vars);
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -135,6 +132,14 @@ export type Prefs = {
   lastAgent?: string;
   /** Settings › Peer: how the hub reaches this computer (the tunnel itself lives in its unit file). */
   peer?: { reach: "ssh" | "address"; target: string; hubPort: number; address: string; headers: string };
+  /** Settings › Appearance: light, dark, or the desktop's choice. */
+  appearance?: Appearance;
+  /** Settings › General › Language; unset follows the desktop. Read at start. */
+  language?: Lang;
+  /** Settings › General › Widgets off: screens show their tiles only (the panel's "Widgets" switch). */
+  noWidgets?: boolean;
+  /** The Settings section shown last, so they reopen there (the panel's `settings-section`). */
+  settingsSection?: Section;
 };
 
 const PREFS_FILE = path(dirs.config, "preferences.json");
@@ -150,6 +155,13 @@ function loadPrefs(): Prefs {
 }
 
 export const prefs: Prefs = loadPrefs();
+
+export const lang: Lang = languageOf(prefs.language) ?? detectLang(GLib.get_language_names());
+
+export const t = (key: Key, vars?: Record<string, string | number>) => translate(lang, key, vars);
+
+/** The web panel's words (src/web/messages.ts), for the parts of the app that follow its Settings. */
+export const tw = (key: WebKey, vars?: Record<string, string | number>) => webText(lang, key, vars);
 
 export function savePrefs(): void {
   void writeText(PREFS_FILE, `${JSON.stringify(prefs, null, 2)}\n`).catch((e) => logError(e, "could not save preferences"));

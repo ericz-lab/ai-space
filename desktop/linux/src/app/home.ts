@@ -5,7 +5,7 @@ import Gtk from "gi://Gtk?version=4.0";
 import { type Entry, type Widget, allEntries, entryKey, fold, opensFirst, pageUrl, panelScreens, pickText, search, widgetEntry } from "../core/catalogue.ts";
 import { relativeTime } from "../core/format.ts";
 import { type BuiltinName, HOME, type Screen, move, newScreen, pin, removeScreen, rename, screenTitle, unpin } from "../core/screens.ts";
-import { lang, t } from "./env.ts";
+import { lang, prefs, t } from "./env.ts";
 import { iconWidget } from "./icons.ts";
 import type { AppModel, Space } from "./model.ts";
 import { ScreenStore } from "./screen-store.ts";
@@ -375,7 +375,8 @@ export class HomePage {
       const e = byKey.get(key);
       if (!e) continue;
       if (e.kind === "widget") {
-        const w = c.widgets.find((x) => x.id === e.ref);
+        // Settings › General › Widgets off: the screen keeps its tiles only.
+        const w = prefs.noWidgets ? undefined : c.widgets.find((x) => x.id === e.ref);
         if (w) widgets.push(w);
       } else tiles.push({ entry: e });
     }

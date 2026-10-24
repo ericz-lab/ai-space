@@ -15,7 +15,7 @@ where Linux allows, and says below where it does less.
 | Terminal | Shells on the Space's machine and its peers, one tab each: xterm.js in a web view whose page counts as the Space's origin, speaking the panel's protocol ([terminal.md](terminal.md)); a passphrase is asked natively and kept in memory |
 | Apps | The Space's pages in tabs: apps, the web panel, links from the inbox or a chat. A link to another app opens in that app's tab, a link off the Space in the browser. A tab moves to a window of its own and back |
 | Quick Chat | A small window with one conversation: `ai-space --quick-chat` shows it or hides it. GNOME and KDE let no app register a global shortcut, so Settings shows the command to bind under Keyboard › Custom Shortcuts |
-| Settings | The saved Spaces (switch, make default, remove, add), keep running when the window is closed, start at login, notifications, the Quick Chat command; in the Local edition, AI Space on This Computer; Peer, this computer as a peer of a Space used elsewhere ([below](#peer)) |
+| Settings | Laid out as the web panel's Settings, in its words: the sections on the left, one on the right, and the pages a section opens inside it with Back ([below](#settings)). Then This Computer (the Local edition) and Peer, this computer as a peer of a Space used elsewhere ([below](#peer)) |
 
 The window has Home, Chat, Inbox, Terminal and Apps in the header (in a bar at the bottom on a
 narrow window), the Space menu at the start of the header, and a banner when the Space needs a
@@ -96,11 +96,33 @@ What the app keeps:
 | --- | --- |
 | `~/.config/ai-space/connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
 | `~/.config/ai-space/screens.json` | Home's screens, per saved Space |
-| `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand |
+| `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand, appearance, language, widgets on screens, the Settings section shown last |
 | `~/.local/share/ai-space/desktop/<connection>/` | each Space's web data: cookies (its sign-in), storage, cache |
 | `~/.cache/ai-space/catalogue-<connection>.json` | the last catalogue, shown marked as such while the Space cannot be reached |
 | `~/.config/autostart/dev.ai_space.Desktop.desktop` | Start at login (`ai-space --background`) |
 | `~/.config/systemd/user/ai-space-peer-tunnel.service` | the peer tunnel, when one was started in Settings › Peer (remove it there) |
+
+## Settings
+
+The sections and pages are the web panel's (`src/web/App.tsx`, `SettingsNav.tsx`), with the
+panel's strings: `src/web/messages.ts` holds its dictionaries without React, so this app uses the
+same words in English and Chinese. The rules behind the rows (status counts, task states, usage
+figures and the history grid) are in `src/core/settings.ts`, tested against the panel's.
+
+| Section | What |
+| --- | --- |
+| General | Widgets (cards on Home's screens, on or off), Language (the desktop's, English or 中文; read at start), then this app's own: the saved Spaces (switch, make default, remove, add), keep running when the window is closed, start at login, notifications, the Quick Chat command, WebKit's sandbox, About |
+| Appearance | Follow system, Light or Dark, for the app and the pages in it. The web panel's themes and colours stay in its own Settings, on the Panel page |
+| Models | The default model of app requests and new Space Assistant chats; App models, a page with each app's and purpose's model and the layer that chose it, changed in place |
+| Automation | Scheduled tasks (schedule, triggers, last and next run; a task unfolds to its model and its last 20 runs) and Events and calls (the catalogue of what apps provide, publish and consume; the last 100 events, each unfolding to its deliveries) |
+| Usage | Model usage (5h, 24h, 7d or 30d: totals, by app and purpose, by model, a year of days and twelve weeks of bars, the last calls) and App usage (7d to all: devices, opens, time in use, a trend per app) |
+| Status | Peers, services (start, stop and restart where the Space runs them) and backups, with the problems counted |
+| Packages | Installing a `.spaceapp` (upgrade, unsigned), the apps installed and their rollback and removal, the apps of connected Spaces, connections with the apps each may use, adding one |
+| Account | Where the Space keeps its own password and this app is signed in: change the password, the signed-in sessions (sign one out), sign out |
+
+The Space sections show the current Space, named under the section's title, and are built again
+once it answers. Pages reload with their Reload button. Every call goes through the Space's session
+in this app (the same routes the panel's page uses); nothing uses an operator token.
 
 ## Peer
 
@@ -136,7 +158,8 @@ all, and Settings shows the command that turns it on.
 `AISPACE_DEBUG=1` logs state changes and enables WebKit's inspector. Hidden options for checks
 without a person at the screen: `--page <home|chat|inbox|terminal>`, `--action <name>` (a window
 action such as `new-terminal`, `panel`, `search` or `next-screen`, an app action as
-`app.settings`, `ask=<text>`, or `query=<text>` to type into the command box; repeatable) and `--screenshot <file.png>`, which saves the window after
+`app.settings`, `ask=<text>`, `query=<text>` to type into the command box, or
+`settings=<section>[/<page>]`, such as `settings=usage/activity`; repeatable) and `--screenshot <file.png>`, which saves the window after
 `AISPACE_SCREENSHOT_DELAY` milliseconds (4000) and quits. `AISPACE_LOCAL_BUNDLE` points the Local
 manager at another release tree.
 
@@ -144,7 +167,6 @@ manager at another release tree.
 
 - Voice input in the message field.
 - Dragging tiles and cards into order (Edit This Screen moves them with buttons), and a card two columns wide.
-- The native Settings sections beyond the app's own (Appearance, Models, Usage, Status,
-  Packages, Account); the web panel's Settings has them.
+- The web panel's theme presets and colour adjustments in Settings › Appearance (the Panel page's own Settings has them), the hover-details and desk-pet switches, which only the panel draws, and the panel's 30-second refresh of the Settings pages (here, Reload).
 - Updating the app itself; the Local edition updates its service from the release the app carries.
 - A global shortcut of its own (see Quick Chat above).

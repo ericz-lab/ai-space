@@ -26,7 +26,8 @@ type RGBA = [number, number, number, number];
 
 const TONES: Record<Tone, RGBA> = { positive: [0.18, 0.64, 0.38, 1], negative: [0.88, 0.11, 0.14, 1], warning: [0.9, 0.6, 0.04, 1], neutral: [0.5, 0.5, 0.5, 1] };
 
-function colors(w: any): { fg: RGBA; accent: RGBA } {
+/** The widget's text colour and the desktop's accent, for drawing with cairo. */
+export function colors(w: any): { fg: RGBA; accent: RGBA } {
   const c = w.get_color?.();
   const fg: RGBA = c ? [c.red, c.green, c.blue, c.alpha] : [0.2, 0.2, 0.2, 1];
   let accent: RGBA = [0.21, 0.52, 0.89, 1];

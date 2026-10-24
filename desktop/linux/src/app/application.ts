@@ -4,12 +4,13 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import { parseDeepLink } from "../core/desktop.ts";
+import type { Detail, Section } from "../core/settings.ts";
 import { APP_ID, APP_ROOT, log, logError, path, prefs, readTextSync, t } from "./env.ts";
 import { Notifier } from "./inbox.ts";
 import { LocalManager } from "./local-manager.ts";
 import { AppModel } from "./model.ts";
 import { QuickChat } from "./quick-chat.ts";
-import { showSettings } from "./settings.ts";
+import { applyAppearance, showSettings } from "./settings.ts";
 import { installStyles } from "./style.ts";
 import { MainWindow, type View } from "./window.ts";
 
@@ -60,6 +61,7 @@ export class Application {
     if (this.started) return;
     this.started = true;
     installStyles();
+    applyAppearance(prefs.appearance);
     const theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default());
     theme.add_search_path(path(APP_ROOT, "data", "icons"));
     Gtk.Window.set_default_icon_name(APP_ID);
@@ -135,6 +137,10 @@ export class Application {
           const [name, arg] = a.split("=", 2) as [string, string | undefined];
           if (name === "ask" && arg && this.model.current) main.ask(this.model.current, arg);
           else if (name === "query" && arg !== undefined) main.home.setQuery(arg);
+          else if (name === "settings" && arg) {
+            const [section, detail] = arg.split("/") as [Section, Detail | undefined];
+            showSettings(main.window, this.model, this.local, section, detail);
+          }
           else (name.startsWith("app.") ? this.app.lookup_action(name.slice(4)) : main.window.lookup_action(name))?.activate(null);
         }
         return GLib.SOURCE_REMOVE;
