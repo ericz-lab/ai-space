@@ -97,3 +97,46 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
     await rm(f.home, { recursive: true, force: true });
   }
 });
+
+test("an app the operator lists in agentCallers reaches every app's agents, but not Space Assistant or the owner's routes", async () => {
+  const f = await fixture();
+  const cli = join(f.home, "fake.ts");
+  await Bun.write(cli, `const sid=crypto.randomUUID();
+console.log(JSON.stringify({type:"system",subtype:"init",session_id:sid}));
+console.log(JSON.stringify({type:"assistant",message:{content:[{type:"text",text:"ok"}]}}));
+console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
+  const registry = new AppRegistry();
+  for (const d of [f.board, f.news, join(f.ws.apps, "other")]) await registry.set(await loadManifest(d));
+  const db = new Database(":memory:");
+  const tokens: Record<string, string> = { "tok-hive": "hive", "tok-other": "other" };
+  const server = Bun.serve({
+    port: 0, hostname: "127.0.0.1",
+    routes: createAgentRoutes({
+      ws: f.ws, registry, layout: new LayoutStore(db), sessions: new SessionStore(db), runs: new RunRegistry(db), runtimes: claudeOnly(["bun", cli]), sharedSkills: f.shared,
+      agentCallers: ["hive"],
+      callerApp: async (req) => {
+        const t = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+        return t ? tokens[t] ?? "" : null;
+      },
+    }),
+  });
+  const get = (path: string, token: string) => fetch(new URL(path, server.url), { headers: { authorization: `Bearer ${token}` } });
+  const chat = (agent: string, token: string) => fetch(new URL(`/api/agents/${agent}/chat`, server.url), { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ message: "hi" }) });
+  try {
+    const board = await chat("board/analyst", "tok-hive");
+    expect(board.status).toBe(200);
+    await board.text();
+    const other = await chat("other/helper", "tok-hive");
+    expect(other.status).toBe(200);
+    await other.text();
+    expect((await get("/api/agents/board/analyst/sessions", "tok-hive")).status).toBe(200);
+    expect((await chat("space/assistant", "tok-hive")).status).toBe(403);
+    expect((await get("/api/agents/runs", "tok-hive")).status).toBe(403);
+    // An app not on the list keeps its own agents only.
+    expect((await chat("board/analyst", "tok-other")).status).toBe(403);
+    expect((await chat("board/analyst", "not-an-app")).status).toBe(403);
+  } finally {
+    server.stop(true);
+    await rm(f.home, { recursive: true, force: true });
+  }
+});
