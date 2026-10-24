@@ -1,5 +1,6 @@
 import { recordDeviceAppOpen } from "./device-usage.ts";
-import { type I18n, LOCALE, type Lang, translate } from "./i18n.ts";
+import type { I18n } from "./i18n.ts";
+import { LOCALE, type Lang, translate } from "./messages.ts";
 
 /** Types of the panel API as the browser sees them, plus tiny fetch helpers. */
 

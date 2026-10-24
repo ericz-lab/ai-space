@@ -147,7 +147,7 @@ A peer app whose `url` is already on the panel (a local app's, or an earlier pee
 
 1. Install ai-space on the second machine as a user unit (`deploy/install.sh`), workspace `~/.ai-space`, apps under `apps/` as on any machine.
 2. In its `.env`: `SPACE_HUB_TOKEN` (random) and `SPACE_NAME`.
-3. Publish its port on a hostname of the machine's tunnel; exempt `/api/peer/*` from the access layer or note the layer's service credentials.
+3. Publish its port on a hostname of the machine's tunnel; exempt `/api/peer/*` from the access layer or note the layer's service credentials. A machine with no tunnel can keep an SSH reverse tunnel to the hub's machine instead (`ssh -N -R 127.0.0.1:8711:127.0.0.1:8700 hub`), and the hub uses `http://127.0.0.1:8711`; the Linux app sets this up, with steps 2 and 4, in Settings › Peer ([linux-desktop.md](linux-desktop.md#peer)).
 4. In the hub's `.env`: `SPACE_PEER_<NAME>`, `_TOKEN` and, if needed, `_HEADERS`; restart the hub. `GET /api/peers` shows `ok` and the counts, or the error.
 5. Delete the link apps listed under `duplicates`.
 6. Backups: give the peer the same `SPACE_S3_*` credentials (or its own bucket). Its snapshots land under `backups/<SPACE_NAME>/`, apart from the hub's; never point two machines at one prefix, since both have a `space` app and may share app names. See [backup.md](backup.md#several-machines).
@@ -158,7 +158,7 @@ A peer app whose `url` is already on the panel (a local app's, or an earlier pee
 - **Peer storage inventory** in the settings, read-only.
 - **Peer deliveries**: a peer's http or stream subscription to an event that only reaches the hub. Today each machine subscribes to what reaches its own bus; events flow peer → hub only.
 - **Peer notifications**: none needed; each machine notifies through its own channels. Backups likewise: each machine snapshots its own data under its own prefix; the hub's Backups list shows local apps only.
-- **A peer behind no tunnel** (a laptop): a reverse connection the peer opens to the hub. Out of scope until a machine needs it.
+- **A peer behind no tunnel** (a laptop): a reverse connection the peer opens to the hub, built into the service. Until then, an SSH reverse tunnel (step 3 above) does the job where the peer can log in to the hub's machine.
 
 ## Without a peer
 

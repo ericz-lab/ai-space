@@ -3,9 +3,9 @@ import { noMore, parseArgs } from "./args.ts";
 import type { Ctx, Noun } from "./types.ts";
 
 /**
- * `space local`: the Local edition's managed installation on this Mac (docs/local.md). The Mac app
- * runs these with `--json` through the Bun in its bundle; they also work by hand. They touch the
- * disk and launchd directly, so they work with ai-space down.
+ * `space local`: the Local edition's managed installation on this computer (docs/local.md). The Mac and Linux apps
+ * run these with `--json` through the Bun they carry; they also work by hand. They touch the
+ * disk and launchd or systemd directly, so they work with ai-space down.
  */
 
 function show(ctx: Ctx, s: LocalStatus): void {
@@ -75,7 +75,7 @@ const lifecycle = (fn: typeof localStart) => (ctx: Ctx, argv: string[]) => {
 
 export const localNoun: Noun = {
   name: "local",
-  summary: "the Local edition's installation on this Mac (what the app runs)",
+  summary: "the Local edition's installation on this computer (what the Mac or Linux app runs)",
   verbs: {
     status: { usage: "[--claude <path>] [--codex <path>]", summary: "what this Mac has: the app's release, the installed one, the workspace, the background service", run: status },
     install: { usage: "[--migrate] [--device <name>] [--default-model <runtime/tier>] [--wait | --now] [--claude <path>] [--codex <path>]", summary: "install or upgrade from the app and start the background service; a workspace without runtimes.yaml gets one from the agent CLIs found (refused when there is none); a first install needs --default-model; an upgrade while the Space is busy is refused unless --wait (until it is idle) or --now (drain it)", run: install },

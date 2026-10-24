@@ -49,8 +49,8 @@ What differs is how each one is packaged, installed, started and updated.
    (Claude Code or Codex found or chosen) and a default model ([local.md](local.md#first-run)).
    It never installs or upgrades an agent CLI silently.
 5. **Mac first.** Each edition is published only for the systems and CPU architectures that were
-   built and tested. Mac on Apple Silicon is first. Linux x64 and arm64 follow for Server. Windows and
-   Intel Macs are accepted one by one.
+   built and tested. Mac on Apple Silicon is first. Linux x64 and arm64 follow for Server, then for
+   Client and Local (a GNOME/GTK desktop app). Windows and Intel Macs are accepted one by one.
 
 ## AI Space Server
 
@@ -82,11 +82,12 @@ login that does not depend on Cloudflare Access.
 
 ## AI Space Client
 
-**Contains** the native client: the Mac app (`desktop/macos/`), the iPhone app (`mobile/ios/`), the
-Android app (`mobile/android/`).
+**Contains** the native client: the Mac app (`desktop/macos/`), the Linux app (`desktop/linux/`),
+the iPhone app (`mobile/ios/`), the Android app (`mobile/android/`).
 
-**Installs** as a signed, notarized `.app` in a `.dmg` on the Mac. Phones install through their
-stores or a test channel.
+**Installs** as a signed, notarized `.app` in a `.dmg` on the Mac, and from a tarball whose
+`install.sh` installs it for the user on Linux ([linux-desktop.md](linux-desktop.md)). Phones
+install through their stores or a test channel.
 
 **Phones are Client only.** iOS and Android do not get a Server or Local edition: a phone cannot keep
 the Space service, its scheduler and the apps' processes running in the background. Server and
@@ -101,8 +102,8 @@ Git and no developer tools on the client machine.
 behind its access layer. A connection counts only after the client has checked the panel and a known
 API answer, not because a port answered ([macos-desktop.md](macos-desktop.md#connections-and-first-launch)).
 
-**Today:** the Mac and iPhone clients connect to existing Spaces. A release tag builds the Mac
-app into a `.dmg`, signed and notarized once the Developer ID secrets are configured
+**Today:** the Mac, Linux and iPhone clients connect to existing Spaces. A release tag builds the
+Linux app into tarballs for x64 and arm64, and the Mac app into a `.dmg`, signed and notarized once the Developer ID secrets are configured
 ([release.md](release.md)). Missing: the Developer ID certificate itself, the Share extension in
 the release build, and store or test-channel distribution for the phones.
 
@@ -112,7 +113,8 @@ the release build, and store or test-channel distribution for the phones.
 templates, the PTY helper), a pinned Bun, and the bundled apps as packages ([app-packages.md](app-packages.md)).
 
 **Installs** as a signed, notarized `.app` in a `.dmg`. A `.pkg` is used only if a system-level
-component proves necessary.
+component proves necessary. On Linux it is the Linux app's tarball with the service inside; the
+background helper is a systemd user service ([local.md](local.md#on-linux)).
 
 **First launch** creates the workspace, starts the Space service as a background helper the app owns,
 installs the bundled apps from the packages inside the bundle (no Git, no network clone), and opens
@@ -146,7 +148,10 @@ assets, chat-widget build, skills, PTY through a bundled helper, SQLite, runtime
 the one-service-per-workspace lock, the LaunchAgent, the device credential, bundled apps, the
 first-run flow and Settings. The release workflow builds, smoke-tests, signs and notarizes it with
 the others. Updates inside the app are built ([local.md](local.md#updates)); signed DMG
-installation and live launchd timing still need release acceptance testing.
+installation and live launchd timing still need release acceptance testing. The Linux app has the
+same Local edition (`bun release/linux.ts`): the same `space local` commands, a systemd user
+service, the device credential in the desktop's keyring ([local.md](local.md#on-linux)); a live
+setup on a clean desktop still needs release acceptance testing.
 
 ## Service identity
 

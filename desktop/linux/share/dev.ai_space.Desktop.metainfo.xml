@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.ai_space.Desktop</id>
+  <name>AI Space</name>
+  <summary>Your Space's apps, agents, chat and inbox</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <description>
+    <p>The native Linux client of ai-space: the Space's library under a command box, native chat with its agents, the inbox with desktop notifications, terminals, and the Space's pages in tabs. The Local edition also sets up and runs the Space on this computer as a systemd user service.</p>
+  </description>
+  <launchable type="desktop-id">dev.ai_space.Desktop.desktop</launchable>
+  <url type="homepage">https://github.com/ericz-lab/ai-space</url>
+  <provides>
+    <binary>ai-space</binary>
+  </provides>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+</component>

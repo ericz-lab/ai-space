@@ -1,7 +1,7 @@
 # Releases
 
 Status: implemented for the Server edition (Linux x64 and arm64), the Client edition and the Local
-edition (Mac, Apple Silicon; [editions.md](editions.md)). Updates inside an installed app are a
+edition (Mac, Apple Silicon; Linux x64 and arm64; [editions.md](editions.md)). Updates inside an installed app are a
 separate piece of work: a newer Local app is installed over the old one and its Settings offer the
 update ([local.md](local.md)).
 
@@ -18,6 +18,9 @@ person: the pipeline ends in a draft GitHub Release.
 | `ai-space-client-<version>-macos-arm64-unsigned.dmg` | Client | Built when no signing identity is configured: for testing, macOS blocks it for everyone else |
 | `ai-space-local-<version>-macos-arm64.dmg` | Local | The Mac app with the service inside ([local.md](local.md)), signed and notarized |
 | `ai-space-local-<version>-macos-arm64-unsigned.dmg` | Local | The same without a signing identity: for testing only |
+| `ai-space-linux-client-<version>-x64.tar.gz` | Client | The Linux app ([linux-desktop.md](linux-desktop.md)); `./install.sh` in it installs it for the user |
+| `ai-space-linux-local-<version>-x64.tar.gz` | Local | The Linux app with the service inside ([local.md](local.md#on-linux)) |
+| `ai-space-linux-client-…-arm64.tar.gz`, `ai-space-linux-local-…-arm64.tar.gz` | Client, Local | The same for arm64 |
 | `SHA256SUMS` | | `sha256sum -c SHA256SUMS --ignore-missing` checks a download |
 | `manifest.json` | | Version, commit, the run that built it, every file's size and SHA-256 |
 
@@ -147,10 +150,28 @@ What a running service needs from the machine, and what it does without it:
 | `claude`, `codex` | The user's; the service adds the usual tool directories (`~/.local/bin`, `/opt/homebrew/bin`, ...) to the bare PATH launchd gives it |
 | `zstd` | Missing: backups fail until it is installed (to solve before Local ships backups) |
 
+## Linux app
+
+The `linux` job of the release workflow, after the checks, on x64 and arm64. By hand on Linux:
+
+```bash
+bun run release:linux                     # dist/ai-space-linux-{client,local}-<version>-<arch>.tar.gz
+bun release/linux.ts --edition client     # one edition
+```
+
+`release/linux.ts` runs `desktop/linux/build.ts` for each edition: the app bundled for GJS, the
+terminal page, the icon, the launcher and `install.sh`; for Local also the release tree of
+`release/server.ts` (edition `local`) at `space/` with `runtime/space-pty` built from
+`src/space/terminal/pty_helper.c`. Nothing is signed: Linux has no counterpart of the Mac's
+notarization, so `SHA256SUMS` is what a download is checked against.
+
 ## Checks before publishing
 
 - The tag's run is green, and `manifest.json` names the tag's commit.
 - On a clean Linux machine (no Bun): install the archive, `space status`, open the panel over an
   SSH forward; install it over the previous release and see the apps and data still there.
+- On a GNOME desktop (Ubuntu 24.04): unpack the Linux client, `./install.sh`, open it from the app
+  grid, connect it to a Space, send a chat message, open a terminal; with the Local tarball, set up
+  the Space on that machine and see `systemctl --user status ai-space-local` running.
 - On a clean Mac: open the DMG, drag the app to Applications, open it without a Gatekeeper warning,
   connect it to a Space.
