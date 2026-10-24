@@ -116,6 +116,8 @@ const en = {
   "apps.empty": "No apps yet. Put an app with a space.yaml under apps/, or long-press the background to add one from a link.",
 
   "agents.clickToChat": "Click to chat",
+  "agents.onMachines": "On {machines}",
+  "agents.thisMachine": "this machine",
 
   "widget.empty": "Nothing yet",
   "widget.noData": "No data",
@@ -432,6 +434,9 @@ const en = {
   "chat.modelOpus": "opus · strong",
   "chat.modelFable": "fable · strongest",
   "chat.permTitle": "Permission",
+  "chat.machine": "Machine",
+  "chat.machineTitle": "The machine the agent runs on",
+  "chat.thisMachine": "This machine",
   "chat.step.running": "Running",
   "chat.step.completed": "Completed",
   "chat.step.failed": "Failed",
@@ -744,6 +749,8 @@ const zh: Record<Key, string> = {
   "apps.empty": "还没有应用。把带 space.yaml 的应用放到 apps/ 下，或长按背景从链接添加一个。",
 
   "agents.clickToChat": "点击开始对话",
+  "agents.onMachines": "位于 {machines}",
+  "agents.thisMachine": "本机",
 
   "widget.empty": "暂无内容",
   "widget.noData": "暂无数据",
@@ -1060,6 +1067,9 @@ const zh: Record<Key, string> = {
   "chat.modelOpus": "opus · 强",
   "chat.modelFable": "fable · 最强",
   "chat.permTitle": "权限",
+  "chat.machine": "机器",
+  "chat.machineTitle": "智能体所在的机器",
+  "chat.thisMachine": "本机",
   "chat.step.running": "运行中",
   "chat.step.completed": "已完成",
   "chat.step.failed": "失败",

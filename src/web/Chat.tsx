@@ -3,7 +3,8 @@ import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
 import { ChatSteps, historySteps, stepGroups, submitsChat, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
 import { Glyph, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
 import { browserZone } from "./shortcuts.ts";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type AgentGroup, groupAgents, groupKeyOf, groupOf, preferredMachine, rememberMachine } from "./agent-groups.ts";
 import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun } from "./api.ts";
 import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
 import { localized, useLang } from "./i18n.ts";
@@ -138,6 +139,17 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   const runner = (k: string): Runner => (runnersRef.current[k] ||= { queue: [], running: false, active: null });
 
   const key = agent.id;
+  // The same agent on several machines: one entry in the agents list, and a machine menu in the
+  // header; each machine keeps its own conversation under its own id (agent-groups.ts).
+  const groups = useMemo(() => groupAgents(agents), [agents]);
+  const group: AgentGroup = groupOf(groups, agent) ?? { key: groupKeyOf(agent), primary: agent, machines: [agent] };
+  const machines = group.machines.some((m) => m.id === agent.id) ? group.machines : [agent, ...group.machines];
+  const pickMachine = (peer: string) => {
+    const m = machines.find((x) => (x.peer ?? "") === peer);
+    if (!m || m.id === key) return;
+    rememberMachine(group.key, m.peer);
+    onSwitch?.(m);
+  };
   const images = imageDrafts[key] ?? [];
   const addImages = async (files: File[]) => {
     if (!files.length || readingImagesRef.current) return;
@@ -585,8 +597,10 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   };
 
   const tabs = Object.entries(convs);
-  // Every agent the sidebar can switch to: the catalogue, plus any open conversation's agent outside it.
-  const sideAgents = [...agents, ...tabs.flatMap(([k, v]) => (v.agent && !agents.some((a) => a.id === k) ? [v.agent] : []))];
+  // Every agent the sidebar can switch to, once whatever the machines: the catalogue, plus any open
+  // conversation's agent outside it.
+  const sideGroups = [...groups];
+  for (const [, v] of tabs) if (v.agent && !groupOf(sideGroups, v.agent)) sideGroups.push({ key: groupKeyOf(v.agent), primary: v.agent, machines: [v.agent] });
   const shown = localized(lang, agent);
 
   return (
@@ -599,7 +613,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
             <button
               key={k}
               className={`chat-tab ${k === key ? "on" : ""}`}
-              title={v.agent ? localized(lang, v.agent).title : k}
+              title={v.agent ? `${localized(lang, v.agent).title}${v.agent.peer ? ` · ${v.agent.peer}` : ""}` : k}
               onClick={() => {
                 if (k !== key && v.agent) onSwitch?.(v.agent);
               }}
@@ -615,15 +629,15 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           <Glyph name="compose" size={15} weight={1.3} />
           {t("chat.newConversation")}
         </button>
-        {sideAgents.length > 1 && (
+        {sideGroups.length > 1 && (
           <>
             <p className="chat-side-head">{t("chat.agents")}</p>
             <div className="chat-side-agents">
-              {sideAgents.map((a) => (
-                <button key={a.id} className={`chat-side-item${a.id === key ? " on" : ""}`} aria-current={a.id === key ? "true" : undefined} onClick={() => { if (a.id !== key) onSwitch?.(a); }}>
-                  <span className="chat-side-ava"><Ava icon={a.avatar} /></span>
-                  <span className="chat-side-title">{localized(lang, a).title}</span>
-                  {convs[a.id]?.busy && <i className="side-busy" aria-label={t("chat.thinking")} />}
+              {sideGroups.map((g) => (
+                <button key={g.key} className={`chat-side-item${g.key === group.key ? " on" : ""}`} aria-current={g.key === group.key ? "true" : undefined} onClick={() => { if (g.key !== group.key) onSwitch?.(preferredMachine(g)); }}>
+                  <span className="chat-side-ava"><Ava icon={g.primary.avatar} /></span>
+                  <span className="chat-side-title">{localized(lang, g.primary).title}</span>
+                  {g.machines.some((m) => convs[m.id]?.busy) && <i className="side-busy" aria-label={t("chat.thinking")} />}
                 </button>
               ))}
             </div>
@@ -664,6 +678,12 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
             </button>
           </div>
           <div className="chat-opts">
+            {machines.length > 1 && (
+              <label className="chat-permission">{t("chat.machine")}
+              <select className="chat-model" value={agent.peer ?? ""} onChange={(e) => pickMachine(e.target.value)} title={t("chat.machineTitle")} aria-label={t("chat.machineTitle")}>
+                {machines.map((m) => <option key={m.id} value={m.peer ?? ""}>{m.peer ?? t("chat.thisMachine")}</option>)}
+              </select></label>
+            )}
             {agent.modelOptions ? (
               <select className="chat-model" value={selectedBaseModel} disabled={conv.busy} onChange={(e) => pickBaseModel(e.target.value)} title={t("chat.runtimeModelTitle")} aria-label={t("chat.runtimeModelTitle")}>
                 <option value="">{t("chat.modelDefault")} · {agent.runtime}</option>

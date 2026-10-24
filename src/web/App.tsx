@@ -17,6 +17,7 @@ import Omnibox from "./Omnibox.tsx";
 import Shortcuts from "./Shortcuts.tsx";
 import ScreenNav from "./ScreenNav.tsx";
 import { BUILTINS, type Builtin, HOME, type Screen, addScreen, entryKey, move, parseKey, pin, removeScreen, seedScreens, unpin } from "./screens.ts";
+import { canonicalItems, groupAgents, groupById, groupOf, preferredMachine } from "./agent-groups.ts";
 import { BUILTIN_ICONS, fmtDuration, getJson, recordOpen, relTime, repoUrl, sendJson, type AgentInfo, type AppInfo, type BuiltinIcons, type InboxSummary, type UsageKind, type UsageRow, type WidgetInfo } from "./api.ts";
 import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
 import PetField from "./PetField.tsx";
@@ -88,6 +89,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // The built-in tiles' icons: the active icon pack's when it has them (docs/panel.md#icon-packs).
   const [builtins, setBuiltins] = useState<BuiltinIcons>(BUILTIN_ICONS);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  // The same agent on several machines is one tile; the chat picks the machine (agent-groups.ts).
+  const groups = useMemo(() => groupAgents(agents), [agents]);
+  const shownAgents = useMemo(() => groups.map((g) => g.primary), [groups]);
   const [loaded, setLoaded] = useState(false);
   // The app and agent lists arrived (not just the attempt ended): a first home screen is seeded from them.
   const [listed, setListed] = useState(false);
@@ -171,6 +175,11 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const openChat = (a: AgentInfo) => {
     setChatAgent(a);
     setPanel("chat");
+  };
+  /** A tile or library entry opens the agent on the machine chosen last time, else the local one. */
+  const openAgent = (a: AgentInfo) => {
+    const g = groupOf(groups, a);
+    openChat(g ? preferredMachine(g) : a);
   };
   // The home screen's box hands a question to Space Assistant (docs/panel.md#omnibox).
   const [ask, setAsk] = useState<Ask | null>(null);
@@ -376,13 +385,21 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     if (screens || layoutState === "loading" || !listed || !widgetsTried) return;
     const seeded = seedScreens(
       apps.map((a) => a.id),
-      agents.map((a) => a.id),
+      shownAgents.map((a) => a.id),
       widgets.map((w) => w.id),
     );
     // Only over a layout that answered: one that could not be read may hold screens already.
     if (layoutState === "ok") saveScreens(seeded);
     else setScreens(seeded);
   }, [screens, layoutState, listed, widgetsTried]);
+  // A layout pinned before agents were grouped holds one key per machine: those keys are pointed
+  // at the group once the catalogue is known, and stored, so a screen shows the agent once.
+  useEffect(() => {
+    const cur = screensRef.current;
+    if (!cur || !groups.length || layoutState !== "ok") return;
+    const next = cur.map((s) => ({ ...s, items: canonicalItems(s.items, groups) }));
+    if (next.some((s, i) => s.items.length !== cur[i]!.items.length || s.items.some((k, j) => k !== cur[i]!.items[j]))) saveScreens(next);
+  }, [screens, groups, layoutState]);
 
   // Position in the row: -1 the library, 0 home, then the operator's screens. The panel always
   // opens on home. `dir` picks the side the new screen slides in from.
@@ -538,14 +555,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         }
       : undefined;
 
-  const entries = useMemo(() => libraryEntries({ apps, agents, widgets: prefs.noWidget ? [] : widgets, builtins }, lang, t), [apps, agents, widgets, builtins, prefs.noWidget, lang, t]);
+  const entries = useMemo(() => libraryEntries({ apps, agents: shownAgents, widgets: prefs.noWidget ? [] : widgets, builtins }, lang, t), [apps, shownAgents, widgets, builtins, prefs.noWidget, lang, t]);
 
   /** Opens an agent's chat or one of the panel's own windows, from the library. */
   const openEntry = (key: string) => {
     const e = parseKey(key);
     if (e?.kind === "agent") {
-      const a = agents.find((x) => x.id === e.id);
-      if (a) openChat(a);
+      const a = groupById(groups, e.id)?.primary;
+      if (a) openAgent(a);
     } else if (e?.kind === "builtin") setPanel(e.id === "settings" ? "settings" : e.id === "inbox" ? "inbox" : e.id === "shortcuts" ? "shortcuts" : "terminal");
   };
 
@@ -601,9 +618,11 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       );
     }
     if (e?.kind === "agent") {
-      const a = agents.find((x) => x.id === e.id);
+      const g = groupById(groups, e.id);
+      const a = g?.primary;
       if (!a) return null;
       const shown = localized(lang, a);
+      const machines = g!.machines.map((m) => m.peer ?? t("agents.thisMachine"));
       return (
         <>
           <p className="pop-title">
@@ -613,7 +632,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               {a.app === "space" ? t("status.base") : a.id}
             </span>
           </p>
-          {a.peer && <p className="pop-hint">{t("common.onPeer", { peer: a.peer })}</p>}
+          {machines.length > 1 ? <p className="pop-hint">{t("agents.onMachines", { machines: machines.join(lang === "zh" ? "、" : ", ") })}</p> : a.peer && <p className="pop-hint">{t("common.onPeer", { peer: a.peer })}</p>}
           {shown.description && <p className="pop-body">{shown.description}</p>}
           {usageHint(key)}
           <p className="pop-hint">{t("agents.clickToChat")}</p>
@@ -669,7 +688,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       fallback="🦾"
       name={localized(lang, a).title}
       editing={editing}
-      onOpen={() => openChat(a)}
+      onOpen={() => openAgent(a)}
       onRemove={onRemove}
       removeTitle={t("screens.unpin")}
       showPop={false}
@@ -680,13 +699,13 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   );
   const renderScreen = (s: Screen) => {
     const appOf = new Map(apps.map((a) => [a.id, a]));
-    const agentOf = new Map(agents.map((a) => [a.id, a]));
+    const agentOf = (id: string) => groupById(groups, id)?.primary;
     const widgetOf = new Map(widgets.map((w) => [w.id, w]));
     const exists = (key: string) => {
       const e = parseKey(key);
       if (!e) return false;
       if (e.kind === "app") return appOf.has(e.id);
-      if (e.kind === "agent") return agentOf.has(e.id);
+      if (e.kind === "agent") return !!agentOf(e.id);
       if (e.kind === "widget") return widgetOf.has(e.id) && !prefs.noWidget;
       return (BUILTINS as readonly string[]).includes(e.id);
     };
@@ -710,7 +729,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               const remove = () => unpinEntry(key);
               const drag = dragProps("tiles", tiles, i);
               if (e.kind === "app") return appTile(appOf.get(e.id)!, key, remove, drag);
-              if (e.kind === "agent") return agentTile(agentOf.get(e.id)!, key, remove, drag);
+              if (e.kind === "agent") return agentTile(agentOf(e.id)!, key, remove, drag);
               return builtinTile(e.id as Builtin, key, remove, drag);
             })}
             {editing && (
@@ -797,7 +816,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
             <h2>{t("screens.library")}</h2>
             <Library
               apps={apps}
-              agents={agents}
+              agents={shownAgents}
               widgets={widgets}
               builtins={builtins}
               screens={rows}

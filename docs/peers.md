@@ -134,10 +134,14 @@ A peer that enables its terminal ([terminal.md](terminal.md)) offers it to the h
 ## Web UI
 
 - Tile: looks like a local one; the hover card says "On <peer>", and while the peer is down the tile is muted and the card says so.
-- Agents list: peer agents after local ones, same hover-card line.
+- Agents list: peer agents after local ones, same hover-card line; an agent that runs on several machines is one tile ([below](#agents-on-several-machines)).
 - Widgets: a peer chip in the card head; muted while stale.
 - Settings: a Peers section above Services when at least one peer is configured, one row per peer (name, health, snapshot age when down; the tooltip has the URL, counts and the error), then the Services rows with a peer chip on remote ones.
 - Edit mode: hide works on peer entries (hub-side), delete is not offered.
+
+## Agents on several machines
+
+An app deployed on this machine and on peers declares the same agents under the same `app/name` on each, and `GET /api/agents` lists every machine's (`space-ops/engineer`, `david/space-ops/engineer`, …). The panel groups them (`src/web/agent-groups.ts`): one tile, library entry and chat-sidebar entry per `app/name`, under the local variant (else the first peer's), with the hover card listing the machines ("On this machine, david, eric"). The chat header gets a Machine menu when there is more than one; it switches to that machine's variant, and each machine keeps its own conversation, sessions and runs under its own id, since a chat turn runs where the app lives. The choice is remembered per agent in the browser and is where the tile opens next time. A layout pinned before (one `agent:` key per machine) is pointed at the group's key and stored on load, so it shows the agent once; the layout ids themselves do not change, and the Mac and phone clients still list every machine's entry until they group too.
 
 ## Migration from link apps
 
