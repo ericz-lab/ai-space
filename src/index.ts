@@ -409,7 +409,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       const t = bearer(req);
       if (!t || tokenEquals(t, config.apiToken) || auth.verifyDevice(t)) return null;
       return (await storage.appForToken(t)) ?? "";
-    } });
+    }, agentCallers: config.agentCallers });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");

@@ -653,7 +653,7 @@ notify:
 | Top-level `spec`, `title`, `description`, `icon`, `url`, `status`, `repo` | Implemented (`src/space/scheduler/manifest.ts`); `paused`/`archived` stop the app's tasks |
 | `service` | Implemented (`src/space/services/`): under `SPACE_SUPERVISOR=space` one user unit per app (a LaunchAgent on macOS), reconciled on every sync, the environment file with `PORT`, logs from its journal (a log file on macOS); under `operator` the operator's units, probed, stopped through `SPACE_SERVICE_STOP`, logs through `SPACE_SERVICE_LOGS` |
 | Router, `/api/router` | Implemented (`src/space/router/`): with `SPACE_ROUTER=caddy` every app's hostname is routed on the machine, no per-app registration ([router.md](router.md)) |
-| `agents`, chat route | Implemented (`src/space/agents/`) on every chat runtime; `skills` listed in the agent's prompt per turn; `memory` parsed but not applied yet; an app reaches its own agents with its token ([panel.md](panel.md#apps-and-their-agents)) |
+| `agents`, chat route | Implemented (`src/space/agents/`) on every chat runtime; `skills` listed in the agent's prompt per turn; `memory` parsed but not applied yet; an app reaches its own agents with its token, and every app's when the operator lists it in `SPACE_AGENT_CALLERS` ([panel.md](panel.md#apps-and-their-agents)) |
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |
 | Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |
 | `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |
