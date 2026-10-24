@@ -2,7 +2,7 @@ import { createVoiceRoutes, voiceTarget } from "./space/bus/voice.ts";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
-import { RunRegistry, SessionStore, createAgentRoutes } from "./space/agents/index.ts";
+import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
 import { ModelService, ModelStore, createModelRoutes, recordAgentRun } from "./space/model/index.ts";
@@ -46,7 +46,7 @@ import { PackageLifecycle } from "./space/packages/lifecycle.ts";
 import { createPackagePanelRoutes } from "./space/packages/panel.ts";
 import { type Config, SHARED_SKILLS, SPACE_ROOT, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
-import { bearer, guardBrowserWrites, tokenEquals } from "./space/auth.ts";
+import { guardBrowserWrites } from "./space/auth.ts";
 import { AUTH_PUBLIC, AUTH_SELF, AuthService, AuthStore, composeRoutes, createAuthRoutes, ensureOperatorToken, gateRoutes } from "./space/auth/index.ts";
 import { ShortcutStore, Shortcuts, createShortcutRoutes } from "./space/shortcuts/index.ts";
 
@@ -405,11 +405,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         : {}),
   });
   const agentRoutes = createAgentRoutes({ actionCatalogue: () => shortcuts.catalogue(), shortcuts: shortcutStore, holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()], sharedSkills: SHARED_SKILLS,
-    callerApp: async (req) => {
-      const t = bearer(req);
-      if (!t || tokenEquals(t, config.apiToken) || auth.verifyDevice(t)) return null;
-      return (await storage.appForToken(t)) ?? "";
-    }, agentCallers: config.agentCallers });
+    callerApp: (req) => callerAppOf(req, { operatorToken: config.apiToken, hubToken: config.hubToken, isDevice: (t) => Boolean(auth.verifyDevice(t)), appForToken: (t) => storage.appForToken(t) }), agentCallers: config.agentCallers });
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");

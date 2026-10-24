@@ -1,4 +1,5 @@
 import { chatBody, parseChatImages } from "./images.ts";
+import { bearer, tokenEquals } from "../auth.ts";
 import { intents } from "../shortcuts/resolve.ts";
 import type { Action } from "../shortcuts/types.ts";
 import { matchAgentIntents, parseAgentIntent, type AgentIntentView } from "../shortcuts/agent-intents.ts";
@@ -153,6 +154,20 @@ const MAX_CONTEXT = 24_000;
 export function supportsChatImages(kind: RuntimeKind, interactive: boolean): boolean {
   if (kind === "claude-code" || kind === "codex-cli") return true;
   return kind === "deepseek-harness" && interactive;
+}
+
+/**
+ * The `callerApp` of a space: the owner (`null`) for no token, the operator's, the hub's (it arrives
+ * through `/api/peer/agents/*`, already checked there, and acts for the hub's owner) or a device's;
+ * else the app the token belongs to, or `""` for an unknown one.
+ */
+export async function callerAppOf(
+  req: Request,
+  opts: { operatorToken: string; hubToken: string; isDevice: (token: string) => boolean; appForToken: (token: string) => Promise<string | undefined> },
+): Promise<string | null> {
+  const t = bearer(req);
+  if (!t || tokenEquals(t, opts.operatorToken) || tokenEquals(t, opts.hubToken) || opts.isDevice(t)) return null;
+  return (await opts.appForToken(t)) ?? "";
 }
 
 export function createAgentRoutes(opts: AgentsApiOptions): Routes {
