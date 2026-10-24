@@ -13,6 +13,8 @@ import { workspaceLocked } from "./instance.ts";
 import { Launchctl } from "./services/launchd.ts";
 import type { Runner, UnitState } from "./services/manager.ts";
 import { spawnCollect } from "./services/manager.ts";
+import { Systemctl } from "./services/systemd.ts";
+import { execArg } from "./services/unit.ts";
 import { updateEnvText } from "./setup.ts";
 import { RUNTIMES_FILE, parseRuntimesYaml } from "./runtimes/config.ts";
 import { RuntimeRegistry } from "./runtimes/registry.ts";
@@ -21,14 +23,15 @@ import { type Run as CodexRun, refreshCodexTiers } from "./runtimes/codex-upgrad
 import type { ModelTier } from "./runtimes/types.ts";
 
 /**
- * The Local edition's managed installation on this Mac (docs/editions.md#ai-space-local,
- * docs/local.md). The Mac app runs these through `space local <verb> --json` with the Bun inside
- * its bundle; the app itself never starts or stops the service process.
+ * The Local edition's managed installation on this computer (docs/editions.md#ai-space-local,
+ * docs/local.md). The Mac and Linux apps run these through `space local <verb> --json` with the
+ * Bun they carry; the app itself never starts or stops the service process.
  *
- *   ~/Library/Application Support/ai-space/local/      the program, never the data
- *     releases/<version>-<commit>/                     a copy of the app's Resources/space
+ *   On a Mac                                           On Linux
+ *   ~/Library/Application Support/ai-space/local/      $XDG_DATA_HOME/ai-space/local/ (~/.local/share)
+ *     releases/<version>-<commit>/                     a copy of the app's release tree
  *     current -> releases/<version>-<commit>           what the background service runs
- *   ~/Library/LaunchAgents/ai.space.local.plist        the background service (launchd)
+ *   ~/Library/LaunchAgents/ai.space.local.plist        $XDG_CONFIG_HOME/systemd/user/ai-space-local.service
  *   ~/.ai-space/                                       the workspace, as every edition uses it
  *     installation.json                                this installation is the Local app's
  *
@@ -39,6 +42,8 @@ import type { ModelTier } from "./runtimes/types.ts";
  */
 
 export const LOCAL_LABEL = "ai.space.local";
+/** The systemd user unit of the Local edition on Linux; the Server edition's is `ai-space.service`. */
+export const LOCAL_UNIT = "ai-space-local.service";
 export const OWNERSHIP_FILE = "installation.json";
 export const MANAGED_BY = "ai-space-local";
 /** Releases kept besides the current one, for a rollback. */
@@ -46,22 +51,46 @@ const KEEP_RELEASES = 3;
 
 export type Ownership = { managedBy: typeof MANAGED_BY; installedAt: string; version: string; release: string };
 
+/** Which background service manager the installation uses: launchd on a Mac, systemd elsewhere. */
+export type LocalPlatform = "darwin" | "linux";
+
+export const hostPlatform = (): LocalPlatform => (process.platform === "darwin" ? "darwin" : "linux");
+
 export type LocalPaths = {
+  platform: LocalPlatform;
   prefix: string;
   releases: string;
   current: string;
-  agentsDir: string;
-  plist: string;
+  /** Where the background service's definition lives: `~/Library/LaunchAgents` or the systemd user unit directory. */
+  unitDir: string;
+  /** The LaunchAgent's plist, or the systemd unit file. */
+  unitFile: string;
   workspace: string;
   logs: string;
 };
 
-export function localPaths(env: Record<string, string | undefined> = process.env, home = homedir()): LocalPaths {
-  const prefix = env.SPACE_LOCAL_PREFIX?.trim() || join(home, "Library", "Application Support", "ai-space", "local");
-  const agentsDir = env.SPACE_LOCAL_AGENTS?.trim() || join(home, "Library", "LaunchAgents");
+/** `SPACE_LOCAL_PREFIX` and `SPACE_LOCAL_AGENTS` move the program and the service definition on either system (tests use them). */
+export function localPaths(env: Record<string, string | undefined> = process.env, home = homedir(), platform: LocalPlatform = hostPlatform()): LocalPaths {
+  const mac = platform === "darwin";
+  const data = env.XDG_DATA_HOME?.trim() || join(home, ".local", "share");
+  const config = env.XDG_CONFIG_HOME?.trim() || join(home, ".config");
+  const prefix = env.SPACE_LOCAL_PREFIX?.trim() || (mac ? join(home, "Library", "Application Support", "ai-space", "local") : join(data, "ai-space", "local"));
+  const unitDir = env.SPACE_LOCAL_AGENTS?.trim() || (mac ? join(home, "Library", "LaunchAgents") : join(config, "systemd", "user"));
   const workspace = env.SPACE_HOME?.trim() || join(home, ".ai-space");
-  return { prefix, releases: join(prefix, "releases"), current: join(prefix, "current"), agentsDir, plist: join(agentsDir, `${LOCAL_LABEL}.plist`), workspace, logs: join(workspace, "logs") };
+  return {
+    platform,
+    prefix,
+    releases: join(prefix, "releases"),
+    current: join(prefix, "current"),
+    unitDir,
+    unitFile: join(unitDir, mac ? `${LOCAL_LABEL}.plist` : LOCAL_UNIT),
+    workspace,
+    logs: join(workspace, "logs"),
+  };
 }
+
+/** The machine in messages: the Mac app's words stay as they were. */
+const machine = (p: { platform: LocalPlatform }) => (p.platform === "darwin" ? "this Mac" : "this computer");
 
 export async function readOwnership(workspace: string): Promise<Ownership | undefined> {
   try {
@@ -278,7 +307,8 @@ export type LocalStatus = {
   port: number;
   url: string;
   running?: Identity;
-  service: { label: string; plist: boolean; loaded: boolean; running: boolean; disabled: boolean; pid: number; detail: string };
+  /** `plist` keeps its name for the Mac app; it is true when the definition (plist or unit file) at `file` exists. */
+  service: { label: string; plist: boolean; file: string; loaded: boolean; running: boolean; disabled: boolean; pid: number; detail: string };
   runtimes: Runtimes;
   /** Before the workspace is the app's: the default models it can start with (see `localModelOptions`). */
   models?: ModelOption[];
@@ -300,20 +330,62 @@ export type LocalDeps = {
   runtimes?: Partial<Runtimes>;
   /** How `codex debug models` runs, for the tiers offered before install; tests replace it. */
   codexRun?: CodexRun;
+  /** The service manager to drive: the host's by default (launchd on a Mac, systemd on Linux). */
+  platform?: LocalPlatform;
 };
+
+const pathsOf = (d: LocalDeps) => localPaths(d.env, d.home, d.platform ?? hostPlatform());
 
 export function realLocalDeps(log: (line: string) => void = () => {}): LocalDeps {
   return { env: process.env, home: homedir(), root: SPACE_ROOT, run: spawnCollect, fetch, uid: process.getuid?.() ?? 0, log, sleep: Bun.sleep };
 }
 
-function launchctl(d: LocalDeps, p: LocalPaths): Launchctl {
-  return new Launchctl({ run: d.run, unitDir: p.agentsDir, logDir: p.logs, uid: d.uid, stopWaitMs: 35_000 });
+/**
+ * The background service, whichever manager runs it. `disableNow` stops it (its work drains) and
+ * keeps it off at login; it is harmless when the service was never written or loaded. `enableNow`
+ * (re)reads the definition, starts it and keeps it on at login.
+ */
+export interface LocalService {
+  readonly label: string;
+  show(): Promise<UnitState>;
+  enableNow(): Promise<void>;
+  disableNow(): Promise<void>;
+  render(): string;
 }
 
-function serviceView(s: UnitState, plist: boolean) {
+function localService(d: LocalDeps, p: LocalPaths): LocalService {
+  if (p.platform === "darwin") {
+    const lc = new Launchctl({ run: d.run, unitDir: p.unitDir, logDir: p.logs, uid: d.uid, stopWaitMs: 35_000 });
+    return { label: LOCAL_LABEL, show: () => lc.show(LOCAL_LABEL), enableNow: () => lc.enableNow(LOCAL_LABEL), disableNow: () => lc.disableNow(LOCAL_LABEL), render: () => renderLocalPlist(p) };
+  }
+  const sd = new Systemctl({ run: d.run, unitDir: p.unitDir });
   return {
-    label: LOCAL_LABEL,
-    plist,
+    label: LOCAL_UNIT,
+    show: () => sd.show(LOCAL_UNIT),
+    // systemd reads unit files on a reload only, and install has just (re)written ours.
+    enableNow: async () => {
+      await sd.daemonReload();
+      await sd.enableNow(LOCAL_UNIT);
+    },
+    disableNow: async () => {
+      const s = await sd.show(LOCAL_UNIT).catch(() => undefined);
+      if (!s || s.loadState === "not-found") return;
+      // `stop` waits for the process to exit (TimeoutStopSec), so the workspace lock is free after it.
+      await sd.disableNow(LOCAL_UNIT).catch(async (e: Error) => {
+        if (!/does not exist|not loaded|not found/i.test(e.message)) throw e;
+        await sd.stop(LOCAL_UNIT).catch(() => {});
+      });
+    },
+    render: () => renderLocalUnit(p),
+  };
+}
+
+function serviceView(label: string, s: UnitState, file: boolean, path: string) {
+  return {
+    label,
+    /** Whether the service's definition is written: the LaunchAgent's plist on a Mac, the unit file on Linux. */
+    plist: file,
+    file: path,
     loaded: s.loadState === "loaded",
     running: s.activeState === "active",
     disabled: s.unitFileState === "disabled",
@@ -330,7 +402,7 @@ async function exists(path: string): Promise<boolean> {
 }
 
 export async function localStatus(d: LocalDeps): Promise<LocalStatus> {
-  const p = localPaths(d.env, d.home);
+  const p = pathsOf(d);
   const bundle = await readRelease(d.root);
   let installed: LocalStatus["installed"];
   try {
@@ -343,9 +415,10 @@ export async function localStatus(d: LocalDeps): Promise<LocalStatus> {
   const ownership = wsExists ? await readOwnership(p.workspace) : undefined;
   const port = await workspacePort(p.workspace);
   const running = await probe(port, d.fetch);
-  const plist = await exists(p.plist);
-  const unit = await launchctl(d, p)
-    .show(LOCAL_LABEL)
+  const svc = localService(d, p);
+  const unitFile = await exists(p.unitFile);
+  const unit = await svc
+    .show()
     .catch((e: Error) => ({ loadState: "unknown", activeState: "unknown", subState: e.message, unitFileState: "", fragmentPath: "", restarts: 0, mainPid: 0 }) as UnitState);
   const locked = wsExists && workspaceLocked(join(p.workspace, "run"));
   const runtimes = await findRuntimes(d.env, d.home, d.runtimes);
@@ -369,7 +442,7 @@ export async function localStatus(d: LocalDeps): Promise<LocalStatus> {
     port,
     url: `http://127.0.0.1:${port}/`,
     ...(running ? { running } : {}),
-    service: serviceView(unit, plist),
+    service: serviceView(svc.label, unit, unitFile, p.unitFile),
     runtimes,
     ...(state === "managed" ? {} : { models: await localModelOptions(runtimes, d.codexRun) }),
   };
@@ -404,6 +477,39 @@ export function renderLocalPlist(p: LocalPaths): string {
     `  <key>StandardErrorPath</key>${str(join(p.logs, "space.log"))}`,
     "</dict>",
     "</plist>",
+    "",
+  ].join("\n");
+}
+
+/**
+ * The systemd user unit, as the LaunchAgent above: the current release's Bun runs `start` on the
+ * workspace, at login (default.target) and after a crash. `KillMode=mixed` sends SIGTERM to the
+ * service alone, so it drains its work and stops its apps itself, within `TimeoutStopSec`.
+ */
+export function renderLocalUnit(p: LocalPaths): string {
+  const env: Record<string, string> = { SPACE_HOME: p.workspace, SPACE_EDITION: "local", PATH: "/usr/local/bin:/usr/bin:/bin" };
+  const pct = (s: string) => s.replace(/%/g, "%%");
+  const envWord = (k: string, v: string) => `"${pct(`${k}=${v}`).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  const log = pct(join(p.logs, "space.log"));
+  return [
+    "# Written by the AI Space app (Local edition). Removed from its Settings: Remove background service.",
+    "[Unit]",
+    "Description=AI Space (Local edition)",
+    "",
+    "[Service]",
+    "Type=simple",
+    `ExecStart=${[join(p.current, "runtime", "bun"), join(p.current, "src", "index.ts"), "start"].map(execArg).join(" ")}`,
+    `WorkingDirectory=${pct(p.workspace)}`,
+    `Environment=${Object.entries(env).map(([k, v]) => envWord(k, v)).join(" ")}`,
+    "Restart=on-failure",
+    "RestartSec=10",
+    "KillMode=mixed",
+    "TimeoutStopSec=40",
+    `StandardOutput=append:${log}`,
+    `StandardError=append:${log}`,
+    "",
+    "[Install]",
+    "WantedBy=default.target",
     "",
   ].join("\n");
 }
@@ -597,12 +703,12 @@ export type WhenBusy = "refuse" | "wait" | "now";
  * previous release starts again.
  */
 export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; device?: string; whenBusy?: WhenBusy; waitMs?: number; defaultModel?: string } = {}): Promise<InstallResult> {
-  const p = localPaths(d.env, d.home);
+  const p = pathsOf(d);
   const status = await localStatus(d);
   const bundle = status.bundle;
   if (!bundle || bundle.edition !== "local") throw new LocalError("no-bundle", `no Local release at ${d.root} (RELEASE.json with edition "local")`, status);
   if (status.state === "foreign") {
-    if (!opts.migrate) throw new LocalError("foreign", status.reason ?? "this Mac already has an ai-space this app did not install", status);
+    if (!opts.migrate) throw new LocalError("foreign", status.reason ?? `${machine(p)} already has an ai-space this app did not install`, status);
     if (status.running || status.workspace.locked) throw new LocalError("foreign-running", `stop the ai-space that runs now before migrating it: ${status.reason}`, status);
   }
   // A workspace without a runtime gets one from the agent CLIs here; with none, nothing can run its agents.
@@ -610,7 +716,7 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
   const envBefore = await Bun.file(join(p.workspace, ".env")).text().catch(() => "");
   const needsRuntimes = !(await exists(runtimesFile)) && !RUNTIME_ENV.some((k) => new RegExp(`^\\s*${k}\\s*=\\s*\\S`, "m").test(envBefore));
   const runtimesText = needsRuntimes ? renderLocalRuntimes(status.runtimes) : undefined;
-  if (needsRuntimes && !runtimesText) throw new LocalError("no-runtime", "no agent CLI on this Mac: install Claude Code, Codex or DeepSeek Harness and sign in to it, or choose where it is (--claude, --codex, --dsh)", status);
+  if (needsRuntimes && !runtimesText) throw new LocalError("no-runtime", `no agent CLI on ${machine(p)}: install Claude Code, Codex or DeepSeek Harness and sign in to it, or choose where it is (--claude, --codex, --dsh)`, status);
   // A Space this app starts gets its default model now, so nothing ever runs on an implicit one.
   // An upgrade keeps the one it has (Settings changes it).
   if (status.state !== "managed" || opts.defaultModel !== undefined) {
@@ -618,7 +724,7 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
     if (opts.defaultModel === undefined) {
       if (!(await hasDefaultModel(p.workspace))) throw new LocalError("no-default-model", `choose the Space's default model (--default-model): ${offered.map((o) => o.value).join(", ")}`, status);
     } else if (!offered.some((o) => o.value === opts.defaultModel)) {
-      throw new LocalError("no-default-model", `${opts.defaultModel} is not a model this Mac's agent CLIs offer: ${offered.map((o) => o.value).join(", ")}`, status);
+      throw new LocalError("no-default-model", `${opts.defaultModel} is not a model ${machine(p)}'s agent CLIs offer: ${offered.map((o) => o.value).join(", ")}`, status);
     }
   }
   const migrated = status.state === "foreign";
@@ -651,19 +757,19 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
   }
   const previous = status.installed?.path;
   const upgraded = Boolean(previous && basename(previous) !== name);
-  const lc = launchctl(d, p);
+  const lc = localService(d, p);
   let snapshot: string | undefined;
   if (changing) {
     if (status.service.loaded) {
       d.log("stopping the running service (its work drains)");
-      await lc.disableNow(LOCAL_LABEL);
+      await lc.disableNow();
     }
     if (workspaceLocked(join(p.workspace, "run"))) throw new LocalError("still-running", "the service has not stopped; no update was applied", status);
     try {
       snapshot = await snapshotDb(p, name);
     } catch (e) {
       // Nothing changed yet: the old release goes back to work.
-      if (status.service.loaded) await lc.enableNow(LOCAL_LABEL).catch(() => {});
+      if (status.service.loaded) await lc.enableNow().catch(() => {});
       throw e;
     }
     if (snapshot) d.log(`space.db copied to ${snapshot}`);
@@ -712,12 +818,12 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
       }
     }
 
-    await mkdir(p.agentsDir, { recursive: true });
+    await mkdir(p.unitDir, { recursive: true });
     await mkdir(p.logs, { recursive: true });
-    await Bun.write(p.plist, renderLocalPlist(p));
+    await Bun.write(p.unitFile, lc.render());
     d.log("starting the background service");
-    await lc.disableNow(LOCAL_LABEL);
-    await lc.enableNow(LOCAL_LABEL);
+    await lc.disableNow();
+    await lc.enableNow();
     port = await workspacePort(p.workspace);
     if (!(await waitHealthy(d, port, bundle.version, d.healthTimeoutMs))) {
       throw new LocalError("unhealthy", `the service did not answer as ${bundle.version} on port ${port} in time; see ${join(p.logs, "space.log")}`, await localStatus(d));
@@ -726,7 +832,7 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
     if (!previous || previous === release) throw error;
     // Init and bootstrap can fail before the health check, including after a schema change.
     // Never replace the database while a service still owns the workspace.
-    await lc.disableNow(LOCAL_LABEL);
+    await lc.disableNow();
     if (workspaceLocked(join(p.workspace, "run"))) throw new LocalError("still-running", "the failed release has not stopped; database recovery was not attempted", await localStatus(d));
     if (snapshot) await restoreDb(p, snapshot);
     await switchCurrent(p, previous);
@@ -735,7 +841,7 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
     if (status.ownership) await writeOwnership(p.workspace, status.ownership);
     let back = `; restored ${basename(previous)}`;
     if (!status.service.disabled) {
-      await lc.enableNow(LOCAL_LABEL);
+      await lc.enableNow();
       if (await waitHealthy(d, status.port, status.installed!.version, d.healthTimeoutMs)) {
         back = `; ${basename(previous)} runs again${snapshot ? " with space.db as it was before" : ""}`;
       } else {
@@ -750,44 +856,50 @@ export async function localInstall(d: LocalDeps, opts: { migrate?: boolean; devi
 }
 
 async function requireManaged(d: LocalDeps): Promise<LocalPaths> {
-  const p = localPaths(d.env, d.home);
-  if (!(await readOwnership(p.workspace))) throw new LocalError("not-installed", "this Mac has no ai-space installed by this app", await localStatus(d));
+  const p = pathsOf(d);
+  if (!(await readOwnership(p.workspace))) throw new LocalError("not-installed", `${machine(p)} has no ai-space installed by this app`, await localStatus(d));
   return p;
 }
 
 /** Start the background service and keep it on at login. */
 export async function localStart(d: LocalDeps): Promise<LocalStatus> {
   const p = await requireManaged(d);
-  if (!(await exists(p.plist))) await Bun.write(p.plist, renderLocalPlist(p));
-  await launchctl(d, p).enableNow(LOCAL_LABEL);
+  const svc = localService(d, p);
+  if (!(await exists(p.unitFile))) {
+    await mkdir(p.unitDir, { recursive: true });
+    await Bun.write(p.unitFile, svc.render());
+  }
+  await svc.enableNow();
   return localStatus(d);
 }
 
 /** Stop it, and keep it off at login until it is started again. Work in progress drains first (SIGTERM). */
 export async function localStop(d: LocalDeps): Promise<LocalStatus> {
   const p = await requireManaged(d);
-  await launchctl(d, p).disableNow(LOCAL_LABEL);
+  await localService(d, p).disableNow();
   return localStatus(d);
 }
 
 export async function localRestart(d: LocalDeps): Promise<LocalStatus> {
   const p = await requireManaged(d);
-  const lc = launchctl(d, p);
-  await lc.disableNow(LOCAL_LABEL).catch(() => {});
-  await lc.enableNow(LOCAL_LABEL);
+  const svc = localService(d, p);
+  await svc.disableNow().catch(() => {});
+  await svc.enableNow();
   return localStatus(d);
 }
 
 /**
- * Remove the background service before the app is deleted: stop it, unregister the LaunchAgent,
- * delete the program under Application Support. The workspace (apps, databases, settings) stays,
+ * Remove the background service before the app is deleted: stop it, unregister the LaunchAgent
+ * or the systemd unit, delete the program. The workspace (apps, databases, settings) stays,
  * still marked as this app's, so installing again picks it up.
  */
 export async function localRemoveService(d: LocalDeps): Promise<LocalStatus> {
   const p = await requireManaged(d);
-  const lc = launchctl(d, p);
-  await lc.disableNow(LOCAL_LABEL).catch(() => {});
-  await rm(p.plist, { force: true });
+  const svc = localService(d, p);
+  await svc.disableNow().catch(() => {});
+  await rm(p.unitFile, { force: true });
+  // systemd forgets a removed unit on the next reload; launchd forgot it at bootout.
+  if (p.platform === "linux") await d.run(["systemctl", "--user", "daemon-reload"]).catch(() => undefined);
   await rm(p.prefix, { recursive: true, force: true });
   return localStatus(d);
 }

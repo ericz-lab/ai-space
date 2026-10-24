@@ -32,7 +32,9 @@ export function notes(m: Manifest): string {
   const lines = [`AI Space ${m.version}, built from ${m.commit.slice(0, 12)}${m.run ? ` ([run](${m.run}))` : ""}.`, "", "| File | What it is |", "| --- | --- |"];
   for (const a of m.artifacts) {
     let what = "";
-    if (a.name.startsWith("ai-space-server-")) what = "Server edition: unpack, then `bash <dir>/install.sh` (Linux, systemd user unit; docs/release.md)";
+    if (a.name.startsWith("ai-space-linux-client-")) what = "Client edition for Linux (GNOME and other GTK desktops): unpack, then `<dir>/install.sh` (docs/linux-desktop.md)";
+    else if (a.name.startsWith("ai-space-linux-local-")) what = "Local edition for Linux: the app with the service inside, run as a systemd user service; unpack, then `<dir>/install.sh` (docs/local.md)";
+    else if (a.name.startsWith("ai-space-server-")) what = "Server edition: unpack, then `bash <dir>/install.sh` (Linux, systemd user unit; docs/release.md)";
     else if (a.name.startsWith("ai-space-client-") && a.name.includes("-unsigned")) what = "Client edition for Mac, **not signed**: for testing only, macOS blocks it for everyone else";
     else if (a.name.startsWith("ai-space-client-")) what = "Client edition for Mac: signed and notarized";
     else if (a.name.startsWith("ai-space-local-") && a.name.includes("-unsigned")) what = "Local edition for Mac (the app with the service inside), **not signed**: for testing only";

@@ -61,6 +61,7 @@ Underneath, the core gives every app what a running AI system needs and nobody w
 - 💾 **Storage & backup.** Per-app SQLite or PostgreSQL and a blob store; daily snapshots to any S3 bucket, weekly verification, restore. → [storage](docs/storage.md) · [backup](docs/backup.md)
 - 🛠️ **Supervision.** ai-space can run each app's service as a systemd user unit (a LaunchAgent on macOS) and keep it in step with the manifest. → [supervision](docs/supervision.md)
 - 🖥️ **Panel.** App launcher, agent chat, widgets, task history, inbox, in English or Chinese; it counts how often each app and agent is opened and for how long. → [panel](docs/panel.md) · [usage](docs/usage.md)
+- 💻 **Desktop apps.** Native clients for Mac and Linux (GTK): the library, agent chat, inbox notifications, terminals and the apps' pages; their Local edition also runs the Space on that computer as a background service. → [Mac](docs/macos-desktop.md) · [Linux](docs/linux-desktop.md) · [Local](docs/local.md)
 - 🌐 **Peers.** One panel over several machines. → [peers](docs/peers.md)
 - ⌨️ **Web terminal** (off by default) and a **`space` CLI** for everything the API does. → [terminal](docs/terminal.md) · [cli](docs/cli.md)
 

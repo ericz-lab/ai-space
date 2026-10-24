@@ -1,4 +1,4 @@
-# Builds the Server, Client and Local editions from one commit and one version (docs/release.md).
+# Builds the Server, Client and Local editions (Mac and Linux) from one commit and one version (docs/release.md).
 #
 # A tag vX.Y.Z (equal to package.json's version, set with `bun run set-version`) builds, checks and
 # packages everything, then creates a draft GitHub Release with the artifacts, SHA256SUMS and
@@ -73,6 +73,37 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: server-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  linux:
+    name: linux app ${{ matrix.arch }}
+    needs: [version, check]
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          bun run set-version "$VERSION"
+          git -c user.name=release -c user.email=release@localhost commit -qam "release $VERSION" || true
+      - run: bun release/linux.ts --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
           path: dist/*.tar.gz
           if-no-files-found: error
 
@@ -163,7 +194,7 @@ jobs:
 
   release:
     name: draft release
-    needs: [version, server, client, local]
+    needs: [version, server, linux, client, local]
     if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15

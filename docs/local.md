@@ -1,7 +1,10 @@
-# The Local edition on a Mac
+# The Local edition on a Mac and on Linux
 
 Status: the service side is implemented (`src/space/local.ts`, `space local`); the Mac app's
-first-run flow and Settings use it ([macos-desktop.md](macos-desktop.md#managed-local-installation)).
+first-run flow and Settings use it ([macos-desktop.md](macos-desktop.md#managed-local-installation)),
+and so does the Linux app ([linux-desktop.md](linux-desktop.md), [On Linux](#on-linux)). The
+sections below describe the Mac; on Linux the same commands drive a systemd user service instead
+of a LaunchAgent.
 What the edition is and why: [editions.md](editions.md#ai-space-local). How it is built:
 [release.md](release.md#local-edition).
 
@@ -52,8 +55,8 @@ All take `--json`; the app parses that. They work with ai-space down.
 | --- | --- |
 | `space local status [--claude <path>] [--codex <path>] [--dsh <path>]` | the app's release, the installed one, the workspace and its owner, the LaunchAgent, what answers on the port, `claude`, `codex` and `dsh` |
 | `space local install [--migrate] [--device <name>] [--default-model <runtime/tier>] [--wait | --now] [--claude <path>] [--codex <path>] [--dsh <path>]` | refuse a workspace with no runtime when this Mac has no agent CLI (`no-runtime`), and a first install or takeover without a default model (`no-default-model`); store that model, copy the release out, switch `current`, `init` the workspace, write `runtimes.yaml` from the CLIs found when the workspace has none (see [First run](#first-run)), set `SPACE_EDITION=local`, `SPACE_AUTH=builtin`, `SPACE_SUPERVISOR=space`, `SPACE_DEFAULT_APPS=none` (other values stay; `SPACE_TERMINAL_ENABLED=1` and `SPACE_PACKAGE_PORT`, 8702 or a free port, only when the workspace has no value), mark it owned, write and start the LaunchAgent, wait for the service to answer as this version, install the bundled apps. A start that does not answer within a minute puts the previous release back. `--device` also makes a device credential and prints its token once |
-| `space local start` / `stop` / `restart` | `launchctl enable`+`bootstrap` / `bootout`+`disable` (stays off at login until started) / both |
-| `space local remove-service` | stop and unregister the LaunchAgent and delete the program under Application Support; the workspace stays, still owned, so installing again picks it up |
+| `space local start` / `stop` / `restart` | `launchctl enable`+`bootstrap` / `bootout`+`disable` (stays off at login until started) / both; on Linux `systemctl --user daemon-reload`+`enable --now` / `disable --now` |
+| `space local remove-service` | stop and unregister the LaunchAgent (on Linux the unit, then `daemon-reload`) and delete the program under Application Support (`~/.local/share/ai-space/local`); the workspace stays, still owned, so installing again picks it up |
 
 `--claude`, `--codex` and `--dsh` point at a CLI installed where the search does not look (the
 app's Choose…); every command takes them, so the status it prints counts that CLI. DeepSeek
@@ -98,6 +101,34 @@ credential** made at install (`--device`): a bearer token (`spd_…`) stored by 
 `auth_devices`, kept by the app in the Keychain. It counts as the owner. For the app's web views,
 `POST /api/auth/device/session` with it sets an ordinary session cookie. No password is needed on
 the Mac; `space auth init` sets one later for a browser elsewhere ([auth.md](auth.md#device-credentials)).
+
+## On Linux
+
+The Linux app ([linux-desktop.md](linux-desktop.md)) carries the release in `<app>/space/` and runs
+the same `space local … --json` commands with the Bun inside it. `space local` picks the service
+manager from the system it runs on (`hostPlatform()`); the paths follow XDG:
+
+| Path | What | Who removes it |
+| --- | --- | --- |
+| `~/.local/share/ai-space/app/space/` | the release the app carries (`install.sh` puts the app there) | `install.sh --uninstall` |
+| `~/.local/share/ai-space/local/releases/<version>-<commit>/`, `…/local/current` | the copy that runs, and the link to it; the last three releases are kept | Remove background service |
+| `~/.config/systemd/user/ai-space-local.service` | the background service (`renderLocalUnit`): `current/runtime/bun current/src/index.ts start` in the workspace, `Restart=on-failure`, `KillMode=mixed` and `TimeoutStopSec=40` so work drains as under launchd, output appended to `<workspace>/logs/space.log`, `WantedBy=default.target` (at login) | Remove background service |
+| `~/.ai-space/` | the workspace, as on the Mac | never by the app |
+
+`$XDG_DATA_HOME` and `$XDG_CONFIG_HOME` move the first and the unit's directory;
+`SPACE_LOCAL_PREFIX` and `SPACE_LOCAL_AGENTS` override both, as on the Mac. The Server edition's
+`~/.local/share/ai-space/{releases,current}` and `ai-space.service` are separate names, so both can
+be on one machine (one service per workspace still holds: the workspace lock decides).
+
+The unit's `ExecStart`, `Environment` and paths are quoted for systemd, `%` doubled, so a workspace
+path with spaces works; `systemd-analyze --user verify` accepts it. A user service runs while the
+user is logged in; `loginctl enable-linger` keeps it running after logout, which the app does not
+turn on.
+
+The device credential is kept in the desktop's keyring through the Secret Service (libsecret;
+GNOME Keyring, KWallet), by workspace path. Where no keyring answers, the app keeps it in a file
+only the user can read (`~/.local/share/ai-space/desktop/device-<hash>.token`). The app signs its
+web data in with it exactly as on the Mac (`POST /api/auth/device/session`).
 
 ## What the service needs from the Mac
 

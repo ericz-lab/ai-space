@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Name=AI Space
+Name[zh_CN]=AI Space
+Comment=Your Space's apps, agents, chat and inbox
+Comment[zh_CN]=你的空间里的应用、智能体、对话和收件箱
+Exec=@EXEC@ %u
+Icon=dev.ai_space.Desktop
+Terminal=false
+Categories=Network;Utility;
+Keywords=ai;agents;chat;assistant;space;
+MimeType=x-scheme-handler/aispace;
+StartupNotify=true
+StartupWMClass=dev.ai_space.Desktop
+DBusActivatable=false
+Actions=quick-chat;
+
+[Desktop Action quick-chat]
+Name=Quick Chat
+Name[zh_CN]=快速对话
+Exec=@EXEC@ --quick-chat

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { RunResult } from "./services/manager.ts";
 import { packApplication } from "./packages/pack.ts";
-import { LOCAL_LABEL, LocalError, type LocalDeps, findRuntimes, isHarnessAppCli, localInstall, localPaths, localRemoveService, localStatus, localStop, localStart, renderLocalPlist, renderLocalRuntimes, readActivity } from "./local.ts";
+import { LOCAL_LABEL, LOCAL_UNIT, LocalError, type LocalDeps, type LocalPlatform, findRuntimes, isHarnessAppCli, localInstall, localPaths, localRemoveService, localStatus, localStop, localStart, renderLocalPlist, renderLocalRuntimes, renderLocalUnit, readActivity } from "./local.ts";
 import { parseRuntimesYaml } from "./runtimes/config.ts";
 import { Database } from "bun:sqlite";
 
@@ -99,7 +99,67 @@ function fakeLaunchd(log: string[]) {
   };
 }
 
-async function setup() {
+/** The words of a systemd `ExecStart=` or `Environment=` value, unquoted as systemd does. */
+function systemdWords(value: string): string[] {
+  return [...value.matchAll(/"((?:[^"\\]|\\.)*)"|(\S+)/g)].map((m) =>
+    (m[1] ?? m[2]!).replace(/\\(["\\])/g, "$1").replace(/%%/g, "%").replace(/\$\$/g, "$"),
+  );
+}
+
+/** `systemctl --user` as far as Systemctl and local.ts use it, over real processes: the unit's ExecStart runs on enable. */
+function fakeSystemd(log: string[], unitDir: string) {
+  let proc: ReturnType<typeof Bun.spawn> | undefined;
+  let enabled = false;
+  let loaded = false;
+  const alive = () => proc !== undefined && proc.exitCode === null && proc.signalCode === null;
+  const ok = (stdout = ""): RunResult => ({ code: 0, stdout, stderr: "" });
+  const unitFile = join(unitDir, LOCAL_UNIT);
+  const stop = async () => {
+    if (!alive()) return;
+    proc!.kill("SIGTERM");
+    await proc!.exited;
+  };
+  return async (cmd: string[]): Promise<RunResult> => {
+    if (cmd[0] !== "systemctl" || cmd[1] !== "--user") return { code: 1, stdout: "", stderr: "" };
+    const verb = cmd[2]!;
+    if (verb !== "show") log.push(verb);
+    const exists = await Bun.file(unitFile).exists();
+    switch (verb) {
+      case "daemon-reload":
+        loaded = exists;
+        return ok();
+      case "show": {
+        if (!exists && !loaded) return ok("LoadState=not-found\nActiveState=inactive\nSubState=dead\nUnitFileState=\nMainPID=0\n");
+        const active = alive();
+        return ok(`LoadState=loaded\nActiveState=${active ? "active" : "inactive"}\nSubState=${active ? "running" : "dead"}\nUnitFileState=${enabled ? "enabled" : "disabled"}\nFragmentPath=${unitFile}\nNRestarts=0\nMainPID=${active ? proc!.pid : 0}\n`);
+      }
+      case "enable": {
+        if (!loaded) return { code: 1, stdout: "", stderr: `Failed to enable unit: Unit file ${LOCAL_UNIT} does not exist.` };
+        enabled = true;
+        if (alive()) return ok();
+        const text = await Bun.file(unitFile).text();
+        const line = (key: string) => new RegExp(`^${key}=(.*)$`, "m").exec(text)?.[1] ?? "";
+        const env: Record<string, string> = {};
+        for (const w of systemdWords(line("Environment"))) env[w.slice(0, w.indexOf("="))] = w.slice(w.indexOf("=") + 1);
+        proc = Bun.spawn(systemdWords(line("ExecStart")), { cwd: line("WorkingDirectory"), env: { ...env, HOME: process.env.HOME! }, stdout: "ignore", stderr: "ignore" });
+        procs.add(proc);
+        return ok();
+      }
+      case "disable":
+        if (!loaded) return { code: 1, stdout: "", stderr: `Failed to disable unit: Unit file ${LOCAL_UNIT} does not exist.` };
+        enabled = false;
+        await stop();
+        return ok();
+      case "stop":
+        await stop();
+        return ok();
+      default:
+        return ok();
+    }
+  };
+}
+
+async function setup(platform: LocalPlatform = "darwin") {
   const root = await mkdtemp(join(tmpdir(), "space-local-"));
   roots.push(root);
   const home = join(root, "home");
@@ -107,7 +167,7 @@ async function setup() {
   const port = await freePort();
   const workspace = join(home, ".ai-space");
   const log: string[] = [];
-  const run = fakeLaunchd(log);
+  const run = platform === "darwin" ? fakeLaunchd(log) : fakeSystemd(log, join(root, "agents"));
   // The agent CLI the user would have: a stand-in, chosen by path so the host's own never counts.
   const claude = join(root, "bin", "claude");
   await Bun.write(claude, "#!/bin/sh\necho '2.1.0 (Claude Code)'\n");
@@ -127,6 +187,7 @@ async function setup() {
     log: () => {},
     sleep: Bun.sleep,
     runtimes: { claude, codex: null, dsh: null },
+    platform,
   });
   // The port is the workspace's: written before the first install, as the app would pick a free one.
   await mkdir(workspace);
@@ -235,7 +296,7 @@ describe("space local", () => {
   });
 
   test("the LaunchAgent runs the current release's Bun on the workspace, edition local", () => {
-    const p = localPaths({ SPACE_HOME: "/Users/u/.ai-space" }, "/Users/u");
+    const p = localPaths({ SPACE_HOME: "/Users/u/.ai-space" }, "/Users/u", "darwin");
     const text = renderLocalPlist(p);
     expect(text).toContain(`<string>${LOCAL_LABEL}</string>`);
     expect(text).toContain("<string>/Users/u/Library/Application Support/ai-space/local/current/runtime/bun</string>");
@@ -290,7 +351,7 @@ describe("space local", () => {
     expect(r2).toMatchObject({ version: "0.2.0", upgraded: true });
     expect(r2.apps).toMatchObject([{ app: "hello", status: "present" }]);
     expect(r2.device).toBeUndefined();
-    const p = localPaths(deps(v2).env, deps(v2).home);
+    const p = localPaths(deps(v2).env, deps(v2).home, "darwin");
     expect(await readlink(p.current)).toBe(join("releases", `0.2.0-${"b".repeat(12)}`));
 
     const broken = await fakeRelease(join(root, "app3"), "0.3.0", "c".repeat(40), { broken: true });
@@ -356,7 +417,7 @@ describe("space local", () => {
     const db = new Database(join(workspace, "data", "space.db"), { readonly: true });
     expect(db.query("SELECT name FROM sqlite_master WHERE name = 'from_broken'").all()).toEqual([]);
     db.close();
-    const p = localPaths(deps(v2).env, deps(v2).home);
+    const p = localPaths(deps(v2).env, deps(v2).home, "darwin");
     expect((await readdir(join(p.prefix, "db-snapshots"))).length).toBe(2);
 
     // Initialization can change the schema and then throw before the health check even starts.
@@ -425,5 +486,65 @@ describe("space local", () => {
     await expect(localStop(deps(v1))).rejects.toMatchObject({ code: "not-installed" });
     await expect(localRemoveService(deps(v1))).rejects.toMatchObject({ code: "not-installed" });
     expect(await readdir(join(root))).not.toContain("prefix");
+  });
+});
+
+describe("the Local edition on Linux", () => {
+  test("paths follow the XDG directories, apart from the Server edition's", () => {
+    const p = localPaths({}, "/home/u", "linux");
+    expect(p).toMatchObject({ prefix: "/home/u/.local/share/ai-space/local", current: "/home/u/.local/share/ai-space/local/current", unitFile: "/home/u/.config/systemd/user/ai-space-local.service", workspace: "/home/u/.ai-space" });
+    const x = localPaths({ XDG_DATA_HOME: "/d", XDG_CONFIG_HOME: "/c", SPACE_HOME: "/w" }, "/home/u", "linux");
+    expect(x).toMatchObject({ prefix: "/d/ai-space/local", unitFile: "/c/systemd/user/ai-space-local.service", workspace: "/w", logs: "/w/logs" });
+  });
+
+  test("the user unit runs the current release's Bun on the workspace, quoted for systemd", () => {
+    const p = localPaths({ SPACE_HOME: "/home/u/my space" }, "/home/u", "linux");
+    const text = renderLocalUnit({ ...p, current: "/opt/100% ai/current" });
+    expect(text).toContain('ExecStart="/opt/100%% ai/current/runtime/bun" "/opt/100%% ai/current/src/index.ts" "start"');
+    expect(text).toContain('Environment="SPACE_HOME=/home/u/my space" "SPACE_EDITION=local"');
+    expect(text).toContain("WorkingDirectory=/home/u/my space");
+    expect(text).toContain("StandardOutput=append:/home/u/my space/logs/space.log");
+    expect(text).toContain("KillMode=mixed");
+    expect(text).toContain("WantedBy=default.target");
+    expect(systemdWords('"/opt/100%% ai/bun" "a \\"b\\"" "$$HOME"')).toEqual(["/opt/100% ai/bun", 'a "b"', "$HOME"]);
+  });
+
+  test("installs as a systemd user unit, stops, starts and removes it; the workspace stays", async () => {
+    const { root, workspace, port, log, deps } = await setup("linux");
+    await rm(workspace, { recursive: true });
+    const v1 = await fakeRelease(join(root, "app1"), "0.1.0", "a".repeat(40));
+    expect((await localStatus(deps(v1))).service).toMatchObject({ label: LOCAL_UNIT, plist: false, running: false });
+    await mkdir(workspace, { recursive: true });
+    await Bun.write(join(workspace, ".env"), `SPACE_PORT=${port}\n`);
+    await Bun.write(join(workspace, "installation.json"), JSON.stringify({ managedBy: "ai-space-local", installedAt: "2026-10-24T00:00:00.000Z", version: "0.0.0", release: "none" }));
+
+    const r1 = await localInstall(deps(v1), { device: "This computer" });
+    expect(r1).toMatchObject({ version: "0.1.0", url: `http://127.0.0.1:${port}/` });
+    const s1 = await localStatus(deps(v1));
+    const unitFile = join(root, "agents", LOCAL_UNIT);
+    expect(s1).toMatchObject({ state: "managed", running: { version: "0.1.0", edition: "local", installation: "managed" }, service: { label: LOCAL_UNIT, plist: true, file: unitFile, running: true, disabled: false } });
+    expect(await Bun.file(unitFile).text()).toContain(`${join(root, "prefix", "current", "runtime", "bun")}`);
+    expect((await fetch(`http://127.0.0.1:${port}/api/panel/layout`, { headers: { authorization: `Bearer ${r1.device!.token}` } })).status).toBe(200);
+    // The unit file is read again before the start.
+    expect(log.indexOf("daemon-reload")).toBeGreaterThanOrEqual(0);
+    expect(log.indexOf("daemon-reload")).toBeLessThan(log.indexOf("enable"));
+
+    const stopped = await localStop(deps(v1));
+    expect(stopped.service).toMatchObject({ running: false, disabled: true });
+    expect(stopped.running).toBeUndefined();
+    expect((await localStart(deps(v1))).service).toMatchObject({ running: true, disabled: false });
+
+    const removed = await localRemoveService(deps(v1));
+    expect(removed.service).toMatchObject({ running: false, plist: false });
+    expect(removed.installed).toBeUndefined();
+    expect(removed.state).toBe("managed");
+    expect(await Bun.file(unitFile).exists()).toBe(false);
+    expect(await Bun.file(join(workspace, "data", "space.db")).exists()).toBe(true);
+  }, 120_000);
+
+  test("a refusal names this computer, not a Mac", async () => {
+    const { root, deps } = await setup("linux");
+    const v1 = await fakeRelease(join(root, "app1"), "0.1.0", "a".repeat(40));
+    await expect(localStart(deps(v1))).rejects.toThrow("this computer has no ai-space installed by this app");
   });
 });
