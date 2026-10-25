@@ -123,7 +123,7 @@ describe("StorageService.syncApp", () => {
 });
 
 describe("StorageService.syncApp blobs", () => {
-  const s3 = { accessKeyId: "AK", secretAccessKey: "SK", endpoint: "https://s3.example", region: "auto", bucket: "default-bucket" };
+  const s3 = { accessKeyId: "TEST_ACCESS_KEY_ID", secretAccessKey: "TEST_SECRET_ACCESS_KEY", endpoint: "https://s3.example", region: "auto", bucket: "default-bucket" };
 
   async function withS3(probe?: (t: S3Target) => Promise<void>) {
     return StorageService.open({ ws, db, s3, probeS3: probe ?? (async () => {}), log: () => {} });
@@ -156,8 +156,8 @@ describe("StorageService.syncApp blobs", () => {
       S3_ENDPOINT: "https://s3.example",
       S3_REGION: "auto",
       S3_BUCKET: "default-bucket",
-      S3_ACCESS_KEY_ID: "AK",
-      S3_SECRET_ACCESS_KEY: "SK",
+      S3_ACCESS_KEY_ID: "TEST_ACCESS_KEY_ID",
+      S3_SECRET_ACCESS_KEY: "TEST_SECRET_ACCESS_KEY",
     });
 
     // A re-sync with the same declaration does not touch the network.
@@ -228,10 +228,10 @@ describe("StorageService.syncApp blobs", () => {
     await svc.syncApp("my-app", { databases: [], blobs: { backend: "s3", prefix: "media" } });
     const d = await svc.describe("my-app");
     expect(d.blobs).toEqual(expect.objectContaining({ backend: "s3", orphaned: false, env: "BLOB_URL", bucket: "default-bucket", prefix: "media/" }));
-    expect(JSON.stringify(d)).not.toContain("SK");
-    expect(JSON.stringify(d)).not.toContain("AK");
+    expect(JSON.stringify(d)).not.toContain("TEST_SECRET_ACCESS_KEY");
+    expect(JSON.stringify(d)).not.toContain("TEST_ACCESS_KEY_ID");
     expect(await svc.listApps()).toEqual(["my-app"]);
-    expect((await svc.envFor("my-app")).S3_SECRET_ACCESS_KEY).toBe("SK");
+    expect((await svc.envFor("my-app")).S3_SECRET_ACCESS_KEY).toBe("TEST_SECRET_ACCESS_KEY");
   });
 });
 

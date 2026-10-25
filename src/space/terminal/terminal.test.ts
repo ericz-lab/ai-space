@@ -219,10 +219,11 @@ describe("local sessions", () => {
     const t = await j(await post(base, "/api/terminal/sessions", {}, { origin: base }));
     const c = connect(wsUrl(base, "/api/terminal/ws", t.ticket!));
     await c.waitControl("ready");
-    c.send("echo hi\n");
-    // The output line, not the echoed input (nor "this shell" in a bash notice): the keystroke must be
-    // processed before the clock moves, or it counts as fresh input.
-    await c.waitFor(/\nhi\r?\n/);
+    c.send("echo idle-$((40+2))\n");
+    // The command's output, which the echoed input never contains (and which needs no newline before
+    // it: the shell's first prompt may print after the echo): the keystroke must be processed before
+    // the clock moves, or it counts as fresh input.
+    await c.waitFor(/idle-42/);
     clock += 61_000;
     expect(await c.closed).toMatchObject({ code: 4000, reason: "idle" });
     expect(store.recent().find((r) => r.id === t.id)).toMatchObject({ reason: "idle" });
