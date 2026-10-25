@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +6,10 @@ import { detectPtyBackend, ptyHelper, spawnPty } from "./pty.ts";
 
 // The C forkpty helper the Local edition ships as runtime/space-pty, built here with the host's C
 // compiler; skipped where there is none.
+
+// A cold CI runner can take longer than the default 5 s to start the compiler in beforeAll.
+// (A hook's own timeout argument needs a newer Bun than .bun-version.)
+setDefaultTimeout(60_000);
 
 const cc = Bun.which("cc");
 let dir = "";
@@ -18,8 +22,7 @@ beforeAll(async () => {
   const proc = Bun.spawn([cc, "-O2", "-o", helper, join(import.meta.dir, "pty_helper.c"), ...(process.platform === "linux" ? ["-lutil"] : [])], { stderr: "pipe" });
   const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
   if (code !== 0) throw new Error(`cc failed (exit ${code}): ${stderr}`);
-  // A cold CI runner can take longer than the default 5 s hook timeout to start the compiler.
-}, 60_000);
+});
 
 afterAll(async () => {
   if (dir) await rm(dir, { recursive: true, force: true });
