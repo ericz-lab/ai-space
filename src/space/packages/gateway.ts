@@ -8,6 +8,7 @@ import type { PackageLinks } from "./links.ts";
 import { sha256 } from "./pack.ts";
 import type { PackageRuntime } from "./runtime.ts";
 import { processSocket, safeCloseCode, socketFrames, socketMessage, socketQueue } from "./socket.ts";
+import { USAGE_PATH, USAGE_SCRIPT } from "../usage/script.ts";
 
 type Target = { app: string; spaceId: string; connectionId?: string };
 type Entry = Target & { label: string; origin: string };
@@ -24,6 +25,8 @@ export class PackageGateway {
   private readonly sessions = new Map<string, Session>();
   private readonly entries = new Map<string, Entry>();
   private base?: URL;
+  /** Records a local app's usage heartbeat; set once the usage service exists. Unset, the paths are 404. */
+  usageBeat?: (app: string, tab: unknown) => void;
   constructor(readonly runtime: PackageRuntime, readonly links: PackageLinks, readonly spaceId: string) {}
 
   start(port: number, publicBase?: string): number {
@@ -135,6 +138,8 @@ export class PackageGateway {
     const site = req.headers.get("sec-fetch-site");
     if (origin && origin !== entry.origin || !origin && site && site !== "same-origin" && site !== "none" && req.headers.get("sec-fetch-mode") !== "navigate") return new Response("Cross-origin application request refused", { status: 403 });
     if (!origin && !["GET", "HEAD"].includes(req.method) && site !== "same-origin") return new Response("Application write requires same origin", { status: 403 });
+    const usage = this.usageResponse(req, entry, url.pathname);
+    if (usage) return usage;
     const headers = appHeaders([...req.headers]);
     const cookie = (headers.get("cookie") ?? "").split(";").filter((p) => !p.trim().startsWith(`${COOKIE}=`)).join(";");
     if (cookie) headers.set("cookie", cookie); else headers.delete("cookie");
@@ -190,6 +195,28 @@ export class PackageGateway {
     } } });
     if (!upgraded) { abort(); req.signal.removeEventListener("abort", abort); return new Response("Socket upgrade failed", { status: 400 }); }
     return undefined;
+  }
+
+  /**
+   * The usage heartbeat (docs/usage.md) on a local app's origin, as the router does for source apps.
+   * The app is the session's, never the page's. A remote app's beat belongs to its own Space.
+   */
+  private usageResponse(req: Request, entry: Entry, path: string): Response | Promise<Response> | undefined {
+    if (path !== "/_space/usage.js" && path !== USAGE_PATH) return undefined;
+    if (entry.connectionId || !this.usageBeat) return new Response("Not found", { status: 404 });
+    if (path === "/_space/usage.js") {
+      if (req.method !== "GET" && req.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
+      return new Response(req.method === "HEAD" ? null : USAGE_SCRIPT, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" } });
+    }
+    if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+    const beat = this.usageBeat;
+    return (async () => {
+      let body: unknown;
+      try { body = JSON.parse((await req.text()).slice(0, 4096)); } catch { return new Response("body must be JSON", { status: 400 }); }
+      if (!body || typeof body !== "object") return new Response("body must be a JSON object", { status: 400 });
+      try { beat(entry.app, (body as { tab?: unknown }).tab); } catch (e) { return new Response((e as Error).message, { status: 400 }); }
+      return new Response(null, { status: 204 });
+    })();
   }
 
   private dispatch(entry: Entry, meta: unknown, body: ReadableStream<Uint8Array> | null, signal: AbortSignal): Promise<Response> {

@@ -53,6 +53,8 @@ On the server, a beat less than 90 s after its segment's last one extends the se
 
 **Routing.** The router ([router.md](router.md)) sends every app hostname's `/_space/*` to ai-space and sets `X-Space-App: <app>`. The script therefore calls its own origin: it needs no CORS and the page holds no token. The app name comes from the router, never from the page, and a beat for an app this space has not registered is refused. ai-space reads `X-Space-App` only on `/_space/*`, and the panel's own site drops any `X-Space-App` a client sends. The beat is a browser write, so it goes through the same-origin check (`guardBrowserWrites`): the router passes the `Host` through, and that matches the page's `Origin`.
 
+**Package apps.** An app installed as a package ([app-packages.md](app-packages.md)) is opened through the package gateway, not the router. The gateway answers `GET /_space/usage.js` and `POST /_space/usage/beat` on the app's origin itself, after its session cookie and same-origin checks, and records the beat under the session's app. A remote app's origin answers both with `404`: its time belongs to the Space it is installed on.
+
 **Without the router** (`SPACE_ROUTER=none`, or an app reached on its port), the app's origin has no `/_space/*`. The script's requests fail silently and the app has opens only.
 
 ## Routes
@@ -77,7 +79,7 @@ The panel sends opens with `navigator.sendBeacon`, so an open is never held up a
 
 ## For app authors
 
-The script is recommended, not required (see [app-spec.md](app-spec.md#usage)). The `space-app` template's page includes it. ai-todo, ai-notes and ai-calendar load it.
+The script is recommended, not required (see [app-spec.md](app-spec.md#usage)). Both app templates include it: `skills/space-app/templates/` and the package template `skills/space-app/package-template/` that `space app create` starts from. ai-todo, ai-notes and ai-calendar load it.
 
 ## Device usage
 
