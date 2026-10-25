@@ -15,9 +15,11 @@ beforeAll(async () => {
   if (!cc) return;
   dir = await mkdtemp(join(tmpdir(), "space-pty-"));
   helper = join(dir, "space-pty");
-  const r = Bun.spawnSync([cc, "-O2", "-o", helper, join(import.meta.dir, "pty_helper.c"), ...(process.platform === "linux" ? ["-lutil"] : [])], { stderr: "pipe" });
-  if (r.exitCode !== 0) throw new Error(`cc failed: ${r.stderr.toString()}`);
-});
+  const proc = Bun.spawn([cc, "-O2", "-o", helper, join(import.meta.dir, "pty_helper.c"), ...(process.platform === "linux" ? ["-lutil"] : [])], { stderr: "pipe" });
+  const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+  if (code !== 0) throw new Error(`cc failed (exit ${code}): ${stderr}`);
+  // A cold CI runner can take longer than the default 5 s hook timeout to start the compiler.
+}, 60_000);
 
 afterAll(async () => {
   if (dir) await rm(dir, { recursive: true, force: true });
