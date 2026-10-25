@@ -31,7 +31,8 @@ async function boot(extra: Record<string, string> = {}): Promise<Booted> {
   let out = "";
   const read = async (stream: ReadableStream<Uint8Array>) => {
     const dec = new TextDecoder();
-    for await (const chunk of stream) out += dec.decode(chunk, { stream: true });
+    const reader = stream.getReader();
+    for (let r = await reader.read(); !r.done; r = await reader.read()) out += dec.decode(r.value, { stream: true });
   };
   void read(proc.stdout);
   void read(proc.stderr);
