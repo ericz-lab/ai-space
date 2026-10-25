@@ -17,6 +17,11 @@ export type RouterConfig = {
   panelHost: string;
   /** `SPACE_ROUTER_CADDY`: the caddy binary. */
   caddyBin: string;
+  /**
+   * `SPACE_ROUTER_FALLBACK`: `127.0.0.1:<port>` that answers hostnames no app claims, instead of
+   * the 404. Empty = the 404. Set by the operator, never by a manifest: it receives every unknown name.
+   */
+  fallback: string;
 };
 
 /**
@@ -49,6 +54,8 @@ export type RouterStatus = {
   router: RouterBackend;
   domain: string;
   port: number;
+  /** `127.0.0.1:<port>` for hostnames no app claims; empty when they get the 404. */
+  fallback: string;
   /** Where the configuration is written. */
   file: string;
   routes: Route[];
