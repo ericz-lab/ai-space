@@ -96,7 +96,7 @@ http://:8080 {
 - The admin endpoint is a unix socket in the workspace `run/` directory, so `caddy reload` works the same way on Linux and macOS and nothing listens on a TCP port for it.
 - `X-Space-User` hands the app the login that Access verified, without the app parsing a JWT. The header is set by the edge and an app should trust it only behind the edge.
 - `/_space/*` on every app's hostname goes to ai-space itself (`SPACE_PORT`) with `X-Space-App` set to the app: the usage heartbeat script and its beats ([usage.md](usage.md#heartbeat)). The page calls its own origin, and the app name is the router's, not the page's. The panel's own site (`SPACE_PANEL_HOST`) has no such block and drops a client's `X-Space-App` (`header_up -X-Space-App`).
-- The last block answers hostnames that arrive through the wildcard but belong to no app.
+- The last block answers hostnames that arrive through the wildcard but belong to no app: `no such app` with a 404, or, when `SPACE_ROUTER_FALLBACK` is set, that loopback port with `X-Space-User` set and a client's `X-Space-App` dropped. The fallback is for an app that serves many names of its own, such as one page per subdomain; app hostnames still win, since Caddy matches a named site before the hostless one. It is the operator's setting, not a manifest field, because whatever listens there receives every unknown name under the wildcard.
 - Tabs, not spaces: the Caddyfile formatter's convention.
 
 ## Rendering and reload
@@ -116,6 +116,7 @@ Workspace `.env`:
 | `SPACE_ROUTER_PORT` | `8080` | the loopback port Caddy binds; the wildcard tunnel rule's target |
 | `SPACE_PANEL_HOST` | unset | route this hostname to the panel too |
 | `SPACE_ROUTER_CADDY` | `caddy` | the binary |
+| `SPACE_ROUTER_FALLBACK` | unset | a loopback port (`9071` or `127.0.0.1:9071`) that answers the hostnames no app claims, instead of the 404 |
 
 `run/` joins the workspace layout (`workspace.ts`): `run/Caddyfile`, `run/caddy.sock`. `logs/router/` holds the per-app access logs.
 

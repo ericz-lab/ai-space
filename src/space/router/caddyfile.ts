@@ -11,7 +11,8 @@ import type { Route } from "./types.ts";
  * reaches it on Linux and macOS alike. `X-Space-User` hands the app the
  * login the access layer verified; an app should trust it only behind the
  * edge. The hostless site answers whatever arrives through the wildcard
- * and belongs to no app.
+ * and belongs to no app: a 404, or the operator's fallback target (a host
+ * of many names, such as one serving a page per subdomain).
  *
  * On every app's hostname, `/_space/*` goes to ai-space itself (the usage
  * heartbeat, docs/usage.md) with `X-Space-App` set to the app: the page
@@ -28,6 +29,8 @@ export type CaddyfileOptions = {
   logDir: string;
   /** ai-space's own port, the target of every app's `/_space/*`. */
   spacePort: number;
+  /** `127.0.0.1:<port>` for hostnames no app claims; unset or empty = the 404. */
+  fallback?: string;
 };
 
 export const CADDYFILE_HEADER = "# Written by ai-space from its registry; edits are overwritten. See docs/router.md.";
@@ -73,6 +76,9 @@ export function renderCaddyfile(routes: Route[], opts: CaddyfileOptions): string
       "",
     );
   }
-  lines.push(`http://:${opts.port} {`, '\trespond "no such app" 404', "}", "");
+  const catchAll = opts.fallback
+    ? [`\treverse_proxy ${opts.fallback} {`, "\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}", "\t\theader_up -X-Space-App", "\t}"]
+    : ['\trespond "no such app" 404'];
+  lines.push(`http://:${opts.port} {`, ...catchAll, "}", "");
   return lines.join("\n");
 }

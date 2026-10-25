@@ -42,5 +42,13 @@ export function loadRouterConfig(env: Record<string, string | undefined>): { con
     warnings.push(`SPACE_PANEL_HOST=${env.SPACE_PANEL_HOST} is not a hostname; ignored`);
     panelHost = "";
   }
-  return { config: { backend, domain, port, panelHost, caddyBin: env.SPACE_ROUTER_CADDY?.trim() || "caddy" }, warnings };
+  const rawFallback = env.SPACE_ROUTER_FALLBACK?.trim() ?? "";
+  let fallback = "";
+  if (rawFallback) {
+    const m = /^(?:(?:127\.0\.0\.1|localhost):)?(\d{1,5})$/.exec(rawFallback);
+    const p = m ? Number(m[1]) : 0;
+    if (p >= 1 && p <= 65535) fallback = `127.0.0.1:${p}`;
+    else warnings.push(`SPACE_ROUTER_FALLBACK=${rawFallback} is not a loopback port (9071 or 127.0.0.1:9071); unknown hostnames keep the 404`);
+  }
+  return { config: { backend, domain, port, panelHost, caddyBin: env.SPACE_ROUTER_CADDY?.trim() || "caddy", fallback }, warnings };
 }

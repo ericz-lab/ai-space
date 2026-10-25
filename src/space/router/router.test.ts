@@ -15,15 +15,26 @@ const svc = (port: number) => ({ command: "bun run", port });
 
 describe("loadRouterConfig", () => {
   test("off by default; caddy needs a domain; values are normalised", () => {
-    expect(loadRouterConfig({})).toEqual({ config: { backend: "none", domain: "", port: 8080, panelHost: "", caddyBin: "caddy" }, warnings: [] });
+    expect(loadRouterConfig({})).toEqual({ config: { backend: "none", domain: "", port: 8080, panelHost: "", caddyBin: "caddy", fallback: "" }, warnings: [] });
     const on = loadRouterConfig({ SPACE_ROUTER: "caddy", SPACE_DOMAIN: " Example.COM. ", SPACE_ROUTER_PORT: "8081", SPACE_PANEL_HOST: "space.example.com", SPACE_ROUTER_CADDY: "/opt/caddy" });
-    expect(on).toEqual({ config: { backend: "caddy", domain: "example.com", port: 8081, panelHost: "space.example.com", caddyBin: "/opt/caddy" }, warnings: [] });
+    expect(on).toEqual({ config: { backend: "caddy", domain: "example.com", port: 8081, panelHost: "space.example.com", caddyBin: "/opt/caddy", fallback: "" }, warnings: [] });
     const noDomain = loadRouterConfig({ SPACE_ROUTER: "caddy" });
     expect(noDomain.config.backend).toBe("none");
     expect(noDomain.warnings[0]).toMatch(/needs SPACE_DOMAIN/);
     const bad = loadRouterConfig({ SPACE_ROUTER: "nginx", SPACE_DOMAIN: "https://x.com", SPACE_ROUTER_PORT: "big", SPACE_PANEL_HOST: "not a host" });
-    expect(bad.config).toEqual({ backend: "none", domain: "", port: 8080, panelHost: "", caddyBin: "caddy" });
+    expect(bad.config).toEqual({ backend: "none", domain: "", port: 8080, panelHost: "", caddyBin: "caddy", fallback: "" });
     expect(bad.warnings).toHaveLength(4);
+  });
+
+  test("the fallback is a loopback port and nothing else", () => {
+    expect(loadRouterConfig({ SPACE_ROUTER_FALLBACK: "9071" }).config.fallback).toBe("127.0.0.1:9071");
+    expect(loadRouterConfig({ SPACE_ROUTER_FALLBACK: " localhost:9071 " }).config.fallback).toBe("127.0.0.1:9071");
+    expect(loadRouterConfig({ SPACE_ROUTER_FALLBACK: "127.0.0.1:9071" }).config.fallback).toBe("127.0.0.1:9071");
+    for (const v of ["10.0.0.5:9071", "example.com:80", "http://127.0.0.1:9071", "70000", "0"]) {
+      const r = loadRouterConfig({ SPACE_ROUTER_FALLBACK: v });
+      expect(r.config.fallback).toBe("");
+      expect(r.warnings[0]).toMatch(/SPACE_ROUTER_FALLBACK/);
+    }
   });
 });
 
@@ -150,6 +161,13 @@ describe("renderCaddyfile", () => {
     expect(text).not.toContain("handle /_space/*");
   });
 
+  test("a fallback answers the hostnames no app claims, with the login and without a client's X-Space-App", () => {
+    const text = renderCaddyfile([{ app: "a", host: "a.example.com", target: "127.0.0.1:8710", status: "wildcard" }], { ...opts, fallback: "127.0.0.1:9071" });
+    expect(text.endsWith("http://:8080 {\n\treverse_proxy 127.0.0.1:9071 {\n\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}\n\t\theader_up -X-Space-App\n\t}\n}\n")).toBe(true);
+    expect(text).not.toContain("no such app");
+    expect(text).toContain("http://a.example.com:8080 {");
+  });
+
   test("no routes is still a valid file", () => {
     const text = renderCaddyfile([], opts);
     expect(text).toContain("auto_https off");
@@ -194,7 +212,7 @@ describe("Router", () => {
     const file = join(dir, "run", "Caddyfile");
     const log: string[] = [];
     const router = new Router({
-      config: { backend, domain: "example.com", port: 8080, panelHost: "", caddyBin: "caddy" },
+      config: { backend, domain: "example.com", port: 8080, panelHost: "", caddyBin: "caddy", fallback: "" },
       apps: () => apps,
       panelPort: 8700,
       file,

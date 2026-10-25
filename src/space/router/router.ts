@@ -59,8 +59,8 @@ export class Router {
   }
 
   status(): RouterStatus {
-    const { backend, domain, port } = this.opts.config;
-    return { router: backend, domain, port, file: this.opts.file, routes: this.table(), ...(this.lastSync ? { lastSync: this.lastSync } : {}) };
+    const { backend, domain, port, fallback } = this.opts.config;
+    return { router: backend, domain, port, fallback, file: this.opts.file, routes: this.table(), ...(this.lastSync ? { lastSync: this.lastSync } : {}) };
   }
 
   /** Schedule a write; every call within the window shares one run. Never rejects. */
@@ -101,7 +101,7 @@ export class Router {
       const routes = this.table();
       for (const r of routes) if (r.status === "conflict") this.log(`${r.app}: ${r.host} is already routed to another app; not rendered`);
       await mkdir(this.opts.logDir, { recursive: true });
-      const changed = await this.backend.write(renderCaddyfile(routes, { port: this.opts.config.port, socket: this.opts.socket, logDir: this.opts.logDir, spacePort: this.opts.panelPort }));
+      const changed = await this.backend.write(renderCaddyfile(routes, { port: this.opts.config.port, socket: this.opts.socket, logDir: this.opts.logDir, spacePort: this.opts.panelPort, fallback: this.opts.config.fallback }));
       // Reload on a change, and again after a failure even when nothing changed (Caddy may be up now).
       if (changed || !this.lastSync?.ok) {
         await this.backend.reload();
