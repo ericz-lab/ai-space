@@ -7,6 +7,8 @@ const port = Number(process.env.PORT) || 8710;
 Bun.serve({
   hostname: "127.0.0.1",
   port,
+  // Bun closes a request idle for 10 s by default; a stream or a model call can be quiet longer.
+  idleTimeout: 255,
   routes: {
     "/": page,
     "/healthz": new Response("ok"),

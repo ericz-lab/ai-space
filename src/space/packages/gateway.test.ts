@@ -73,6 +73,26 @@ test("local app has an isolated authenticated origin, proxies writes and preserv
   await expect(m.gateway.open({ app: "notes", spaceId: m.connections.spaceId }, "//evil.example")).rejects.toThrow(/local/);
 });
 
+test("a local app's page gets the usage script and its beats are recorded under the session's app", async () => {
+  const m = await machine("usage");
+  const b = await browser(m.gateway, { app: "notes", spaceId: m.connections.spaceId });
+  expect((await b.request("/_space/usage.js")).status).toBe(404);
+  const beats: [string, unknown][] = [];
+  m.gateway.usageBeat = (app, tab) => { if (tab === "bad") throw new Error("invalid tab"); beats.push([app, tab]); };
+  const script = await b.request("/_space/usage.js");
+  expect(script.status).toBe(200);
+  expect(script.headers.get("content-type")).toContain("javascript");
+  expect(await script.text()).toContain("/_space/usage/beat");
+  const beat = (body: string, origin = b.url.origin) => b.request("/_space/usage/beat", { method: "POST", headers: { origin, "content-type": "text/plain" }, body });
+  expect((await beat(JSON.stringify({ tab: "tab-1" }))).status).toBe(204);
+  expect((await beat(JSON.stringify({ tab: "bad" }))).status).toBe(400);
+  expect((await beat("not json")).status).toBe(400);
+  expect((await beat(JSON.stringify({ tab: "tab-2" }), "https://other.example")).status).toBe(403);
+  expect((await b.request("/_space/usage/beat", { headers: { cookie: "" }, method: "POST", body: "{}" })).status).toBe(401);
+  expect(beats).toEqual([["notes", "tab-1"]]);
+  expect(m.runtime.status("notes")?.state).toBe("idle");
+});
+
 test("a streaming response holds its runtime lease until cancellation", async () => {
   const m = await machine("stream");
   const response = await m.gateway.local({ operation: "fetch", app: "notes", path: "/stream" }, null, new AbortController().signal);
@@ -126,6 +146,8 @@ test("remote HTTP and WebSocket work over the peer outbound channel and revoke i
   const b = await browser(peer.gateway, { app: "notes", spaceId: hub.connections.spaceId, connectionId: outgoing.id });
   expect(await (await b.request("/api/echo", { method: "POST", headers: { origin: b.url.origin }, body: "remote" })).json()).toMatchObject({ label: "hub", body: "remote" });
   expect((await b.request("/cookies")).headers.getSetCookie()).toHaveLength(2);
+  peer.gateway.usageBeat = () => { throw new Error("a remote app's beat is not this space's"); };
+  expect((await b.request("/_space/usage.js")).status).toBe(404);
   await expect(hub.gateway.open({ app: "notes", spaceId: peer.connections.spaceId, connectionId: invite.connection.id })).rejects.toThrow(/not shared/);
   peer.connections.update(outgoing.id, { apps: ["notes"] }); await connected();
   const reverse = await browser(hub.gateway, { app: "notes", spaceId: peer.connections.spaceId, connectionId: invite.connection.id });

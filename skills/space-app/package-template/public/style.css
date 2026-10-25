@@ -1,3 +1,35 @@
-:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-body { margin: 0; display: grid; place-items: center; min-height: 100vh; }
-main { max-width: 40rem; padding: 2rem; }
+/* Colors are tokens: change them here, and the dark block follows the viewer's setting. */
+:root {
+  color-scheme: light dark;
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --text: #18181b;
+  --muted: #6b7280;
+  --border: #e4e4e7;
+  --accent: #4f46e5;
+  font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  line-height: 1.5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111113;
+    --surface: #1c1c1f;
+    --text: #ececef;
+    --muted: #9ca3af;
+    --border: #2e2e33;
+    --accent: #818cf8;
+  }
+}
+
+/* Phone-safe defaults: nothing may widen the page past the screen. */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); overflow-x: hidden; overflow-wrap: anywhere; }
+img, video, canvas, svg { max-width: 100%; height: auto; }
+pre { overflow-x: auto; }
+table { display: block; max-width: 100%; overflow-x: auto; }
+/* A grid or flex child shrinks below its content's width only with min-width: 0. */
+:where(main, section, article, div) { min-width: 0; }
+
+main { max-width: 40rem; margin: 0 auto; padding: 2rem 1rem; }
+a { color: var(--accent); }

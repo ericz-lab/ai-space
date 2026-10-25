@@ -209,6 +209,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const sessions = new SessionStore(store.db);
   // How often apps, agents and the panel's windows are opened, and for how long (docs/usage.md).
   const usage = new UsageService(new UsageStore(store.db, { retentionDays: config.usageRetentionDays }));
+  packageGateway.usageBeat = (app, tab) => { usage.beat(app, tab); };
   // Panel chat turns run in the background: a page closing does not stop them (docs/panel.md#chat).
   const agentRuns = new RunRegistry(store.db, { timeoutMs: config.chatTimeoutMs, onRunStart: usage.runStarted, onRunEnd: usage.runEnded });
   const health = new HealthProbe();

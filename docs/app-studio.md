@@ -10,7 +10,10 @@ GitHub and without a coding tool outside the product.
    `space app create NAME [--title T] [--description D]`. The Space copies its package template
    (`skills/space-app/package-template/`) to `<workspace>/app-src/NAME/`, fills in the name, title
    and description, packs it and installs it: a working tile right away. With `git` on the machine
-   the source gets a local history (one commit, no remote); without it, nothing is lost.
+   the source gets a local history (one commit, no remote); without it, nothing is lost. The
+   template starts with what apps used to fix one by one: the usage script, model calls without a
+   fixed model (`model.ts`), long idle timeouts, phone-width and dark-mode CSS, and the icon as
+   favicon. Its `AGENTS.md` lists them so an agent keeps them.
 2. **Build what was asked.** The panel then opens Space Assistant with the request: change the files
    in `app-src/NAME/` (its `AGENTS.md` says how), then run `space app build NAME`. The assistant
    runs in the workspace with the user's chosen permissions, through whichever agent runtime the
