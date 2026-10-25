@@ -64,6 +64,12 @@ Rules the gate (`src/space/auth/gate.ts`) holds:
 - The operator token is never empty under `builtin`: with no `SPACE_API_TOKEN` in `.env`, ai-space writes one to `<workspace>/run/operator-token` (mode 0600). The CLI reads that file when it talks to a space on loopback and has no other token, so `space …` on the machine keeps working. Being able to read the file is the local permission; a request from loopback without a credential is refused like any other, because the tunnel's requests come from loopback too.
 - A static route value (a page bundle, a fixed `Response`) has no handler to guard, so it must be `public`; anything else stops the boot.
 
+## Host names
+
+In both modes, the Space API answers only names it knows (`src/space/hosts.ts`). The same-origin check on writes compares `Origin` with `Host`, and under `external` with no `SPACE_API_TOKEN` a request without a token is the operator. A page on another site whose owner points its name at 127.0.0.1 (DNS rebinding) passes both, because its `Origin` and `Host` are its own name. So a request for an unknown name is refused with 421, unless it carries a credential this space issued (the operator, hub, device, app or consumer token).
+
+Known names are: any IP address, `localhost` and `*.localhost`, `SPACE_PANEL_HOST`, `SPACE_DOMAIN` with its subdomains, and each entry of `SPACE_ALLOWED_HOSTS` (comma or space separated; `*.example.com` covers subdomains). Routes whose policy is `public` or `self` (`/healthz`, sign-in, `/api/peer/*`, package connections) are not checked: they need no secret, or check their own. A refused name is logged once, so a space reached through a tunnel hostname that is not set as `SPACE_PANEL_HOST` shows what to add.
+
 ## The panel
 
 `src/web/Auth.tsx`. When `GET /api/auth/session` says `builtin` and not signed in, the panel shows only the sign-in card. When a session ends while the page is open, the next API call's 401 opens the card over the page: what was open stays open, and the page carries on after signing in. Settings has an Account section under `builtin`: change password, the live sessions with their last activity, sign out one, sign out.

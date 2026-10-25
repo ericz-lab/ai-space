@@ -46,7 +46,8 @@ import { PackageLifecycle } from "./space/packages/lifecycle.ts";
 import { createPackagePanelRoutes } from "./space/packages/panel.ts";
 import { type Config, SHARED_SKILLS, SPACE_ROOT, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
-import { guardBrowserWrites } from "./space/auth.ts";
+import { bearer, guardBrowserWrites, tokenEquals } from "./space/auth.ts";
+import { guardHosts, hostRules } from "./space/hosts.ts";
 import { AUTH_PUBLIC, AUTH_SELF, AuthService, AuthStore, composeRoutes, createAuthRoutes, ensureOperatorToken, gateRoutes } from "./space/auth/index.ts";
 import { ShortcutStore, Shortcuts, createShortcutRoutes } from "./space/shortcuts/index.ts";
 
@@ -520,7 +521,16 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     // Panel routes carry no token: a write from another site's page is refused (src/space/auth.ts).
     // Under SPACE_AUTH=builtin each route also needs the caller its policy names (src/space/auth/gate.ts).
     // Each module types its own table; the merged one is a plain record, hence the cast.
-    routes: guardBrowserWrites(gateRoutes(routes, policies, { mode: config.auth, auth, operatorToken: config.apiToken, isAppCredential: async (t) => Boolean(await storage.appForToken(t)) || Boolean(consumers.authenticate(t)) })) as never,
+    // A name this space does not know, without a credential, is refused (DNS rebinding; src/space/hosts.ts).
+    routes: guardHosts(guardBrowserWrites(gateRoutes(routes, policies, { mode: config.auth, auth, operatorToken: config.apiToken, isAppCredential: async (t) => Boolean(await storage.appForToken(t)) || Boolean(consumers.authenticate(t)) })), policies, {
+      rules: hostRules({ panelHost: config.router.panelHost, domain: config.router.domain, allowed: config.allowedHosts }),
+      hasCredential: async (req) => {
+        const t = bearer(req);
+        if (!t) return false;
+        return tokenEquals(t, config.apiToken) || tokenEquals(t, config.hubToken) || Boolean(auth.verifyDevice(t)) || Boolean(await storage.appForToken(t)) || Boolean(consumers.authenticate(t));
+      },
+      log: (l) => console.error(l),
+    }) as never,
     websocket: terminalWebSocket,
     fetch: () => new Response(JSON.stringify({ ok: false, error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }),
   });
