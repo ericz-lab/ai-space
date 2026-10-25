@@ -29,6 +29,22 @@ jobs:
       - run: bun run typecheck
       - run: bun test
 
+  android:
+    name: Android client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: mobile/android/**/*.gradle.kts
+      # The runner image carries the Android SDK; Gradle fetches platform 36 if it is missing.
+      - run: ./gradlew --no-daemon :app:testDebugUnitTest
+        working-directory: mobile/android
+
   native:
     name: Mac and iPhone clients
     runs-on: macos-26
