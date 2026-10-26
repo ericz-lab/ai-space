@@ -43,6 +43,8 @@ export async function loadPeerModels(peer: string): Promise<PeerModels> {
   try {
     const r = await fetch(`/api/peers/${encodeURIComponent(peer)}/model/apps`);
     if (r.status === 404 && !/^unknown peer/.test(((await r.clone().json().catch(() => ({}))) as { error?: string }).error ?? "")) return { peer, old: true };
+    // An older core answers a path it does not know with its page, not JSON.
+    if (r.ok && !r.headers.get("content-type")?.includes("json")) return { peer, old: true };
     const d = (await r.json()) as { ok: boolean; error?: string; apps?: AppRows[]; options?: Option[] };
     if (!d.ok) return { peer, error: d.error || `HTTP ${r.status}` };
     return { peer, apps: d.apps ?? [], options: d.options ?? [] };
