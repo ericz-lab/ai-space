@@ -35,6 +35,13 @@ describe("pets manifest section", () => {
     expect(p.mood).toBeUndefined();
   });
 
+  test("an animation may hold its first cell after each loop; no pause is the same as 0", () => {
+    const anims = (bark: Record<string, unknown>) => ({ name: "cat", sheet: "/s.png", grid: "4x4", animations: { walk: { row: 0, frames: 4, ms: 500 }, bark } });
+    expect(parsePetSpec(anims({ row: 1, frames: 4, ms: 900, pause: 1100 })).animations.bark).toEqual({ row: 1, frames: 4, ms: 900, pause: 1100 });
+    expect(parsePetSpec(anims({ row: 1, frames: 4, ms: 900, pause: 0 })).animations.bark).toEqual({ row: 1, frames: 4, ms: 900 });
+    for (const pause of [-1, 20_000, 1.5, "1s"]) expect(() => parsePetSpec(anims({ row: 1, frames: 4, ms: 900, pause }))).toThrow('animation "bark": pause must be an integer between 0 and 10000');
+  });
+
   test.each([
     [{ name: "cat", sheet: "/s.png", grid: "4x4", animations: { lie: { row: 0, frames: 1, ms: 500 } } }, "needs walk"],
     [{ name: "cat", sheet: "/s.png", grid: "4", animations: {} }, "grid"],
