@@ -139,6 +139,8 @@ A bare tier runs on the runtime of the space's default (`codex/basic` makes `int
 
 `GET /api/model/apps` lists every app with one row for the app and one per tag (declared, overridden, or seen in the ledger over the last 30 days): the declared value, the override, the model it runs on now and the layer that chose it. `GET /api/apps/:app/model` is one app. `PATCH /api/panel/apps/:app/model` with `{tag?, model}` sets an override and `{tag?, model: null}` clears it; like the task model route it takes only same-origin browser requests.
 
+On a hub the page also lists each peer's apps under the peer's name: the hub forwards the list and the change to the peer (`/api/peers/:peer/model/apps`, `/api/peers/:peer/apps/:app/model`), and the choices for those apps are the peer's own ([peers.md](peers.md)).
+
 ### Restarts
 
 A call is a process (`claude -p` over `ssh`, usually) and the calling app is blocked on it, so a

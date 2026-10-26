@@ -82,6 +82,19 @@ let peers: PeerHub;
 let peerEvents: Store;
 let hubIcons: IconPacks;
 let hubEvents: Store;
+// The peer's app-model routes, stubbed: what reached them, after the token check.
+const peerOverrides: { app: string; body: unknown }[] = [];
+const peerAppModels = {
+  "/api/peer/model/apps": {
+    GET: () => Response.json({ ok: true, apps: [{ app: "media", rows: [{ tag: null, model: "codex/basic", source: "default" }] }, { app: "secret", rows: [] }], options: [{ value: "codex/basic", runtime: "codex", tier: "basic", model: "gpt-mini" }] }),
+  },
+  "/api/peer/apps/:app/model": {
+    PATCH: async (req: Request & { params: Record<string, string> }) => {
+      peerOverrides.push({ app: req.params.app!, body: await req.json() });
+      return Response.json({ ok: true, app: req.params.app, rows: [] });
+    },
+  },
+};
 const mirrored: { peer: string; app: string; name: string }[] = [];
 
 // The hub's fetch: the real one towards the peer, with a switch that simulates the peer being unreachable.
@@ -147,7 +160,7 @@ widgets:
   });
   peerBus.syncApp("media", { events: { publishes: [{ name: "clip.added" }], consumes: [] }, provides: [{ name: "clip", method: "POST", path: "/api/clip", timeoutMs: 5000 }] });
   // The peer routes may upgrade a socket (the terminal's), so the server declares a websocket handler.
-  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents }) }, websocket: terminalWebSocket });
+  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents, appModels: peerAppModels, allowApp: (app) => app !== "secret" }) }, websocket: terminalWebSocket });
   peerBase = `http://127.0.0.1:${peerServer.port}`;
 
   // ---- the hub: a local app, a link app that duplicates the peer's app, and the peer
@@ -535,5 +548,29 @@ describe("one tile per url", () => {
   test("widget cards follow the same rule by link", () => {
     const w = (id: string, link: string) => ({ id, app: id.split("/").at(-1)!, name: "n", title: "t", kind: "items", size: "1x1", link, icon: "x", items: [] }) as unknown as WidgetView;
     expect(dropSameLink([w("usage/usage", "https://usage.example.com/")], [w("a/usage/usage", "https://usage.example.com/"), w("a/media/latest", "https://media.example.com/#latest"), w("b/media/latest", "https://media.example.com/#latest")]).map((x) => x.id)).toEqual(["a/media/latest"]);
+  });
+});
+
+describe("app models over peers", () => {
+  test("the peer lists its app models and takes an override only with the token, minus apps it does not share", async () => {
+    expect((await get(peerBase, "/api/peer/model/apps")).status).toBe(401);
+    const r = await get(peerBase, "/api/peer/model/apps", { headers: { authorization: "Bearer s3cret" } });
+    expect(r.body.apps.map((a: Body) => a.app)).toEqual(["media"]);
+    expect(r.body.options[0].value).toBe("codex/basic");
+    expect((await fetch(`${peerBase}/api/peer/apps/media/model`, jsonInit("PATCH", { model: "codex/basic" }))).status).toBe(401);
+    expect((await fetch(`${peerBase}/api/peer/apps/secret/model`, { ...jsonInit("PATCH", { model: "codex/basic" }), headers: { "content-type": "application/json", authorization: "Bearer s3cret" } })).status).toBe(403);
+  });
+
+  test("the hub forwards the list, and a same-origin change, to the peer", async () => {
+    peerOverrides.length = 0;
+    const list = await get(hub, "/api/peers/david/model/apps");
+    expect(list.status).toBe(200);
+    expect(list.body.apps.map((a: Body) => a.app)).toEqual(["media"]);
+    expect((await get(hub, "/api/peers/ghost/model/apps")).status).toBe(404);
+    const body = { tag: "curate", model: "codex/basic" };
+    expect((await fetch(`${hub}/api/peers/david/apps/media/model`, jsonInit("PATCH", body))).status).toBe(403);
+    const ok = await fetch(`${hub}/api/peers/david/apps/media/model`, { ...jsonInit("PATCH", body), headers: { "content-type": "application/json", origin: hub } });
+    expect(ok.status).toBe(200);
+    expect(peerOverrides).toEqual([{ app: "media", body }]);
   });
 });

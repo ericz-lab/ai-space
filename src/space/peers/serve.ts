@@ -11,11 +11,13 @@ import type { PeerModelInfo } from "./client.ts";
  * The peer side: `/api/peer/*`, present only when `SPACE_HUB_TOKEN` is set.
  * Every route requires that bearer token and mirrors a panel or agent route
  * the browser already uses, with the same handler behind the check, plus one
- * snapshot that bundles the four lists a hub merges. Nothing here mutates the
- * peer.
+ * snapshot that bundles the four lists a hub merges. What changes the peer is
+ * what its own panel could change: an uninstall, an app's model override.
  *
  *   GET  /api/peer/snapshot                        { ok, name, apps, services, widgets, agents, asOf }
  *   GET  /api/peer/apps/:app/icon                  = /api/apps/:app/icon
+ *   GET  /api/peer/model/apps                      = /api/model/apps: every app's model rows and this space's choices ┐ when the
+ *   PATCH /api/peer/apps/:app/model                = /api/panel/apps/:app/model {tag?, model}                         ┘ routes are given
  *   GET  /api/peer/apps/:app/appcolor              = /api/panel/appcolor?app=
  *   GET  /api/peer/agents/:app/:agent/avatar       = /api/agents/:app/:agent/avatar
  *   GET  /api/peer/widgets/:app/:name/embed        = /api/widgets/:app/:name/embed
@@ -73,6 +75,8 @@ export type PeerServeOptions = {
   /** The model routes for other spaces (model/api.ts `createPeerModelRoutes`) and what the snapshot says about them. */
   model?: Routes;
   modelInfo?: () => PeerModelInfo | undefined;
+  /** The app-model routes for a hub's Models page (model/app-models.ts `createPeerAppModelRoutes`). */
+  appModels?: Routes;
 };
 
 const PROXY_TIMEOUT_MS = 60_000;
@@ -208,6 +212,19 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
       ? {
           "/api/peer/model/run": { POST: guard(mirror(opts.model, "/api/peer/model/run", "POST")) },
           "/api/peer/model/image": { POST: guard(mirror(opts.model, "/api/peer/model/image", "POST")) },
+        }
+      : {}),
+    ...(opts.appModels
+      ? {
+          "/api/peer/model/apps": {
+            GET: guard(async (req, server) => {
+              const r = await mirror(opts.appModels!, "/api/peer/model/apps", "GET")(req, server);
+              if (!r || !r.ok || !opts.allowApp) return r;
+              const data = (await r.json()) as { apps: { app: string }[] };
+              return json({ ...data, apps: data.apps.filter((a) => opts.allowApp!(a.app)) });
+            }),
+          },
+          "/api/peer/apps/:app/model": { PATCH: guard(mirror(opts.appModels, "/api/peer/apps/:app/model", "PATCH")) },
         }
       : {}),
     "/api/peer/agents/:app/:agent/chat": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/chat", "POST")) },

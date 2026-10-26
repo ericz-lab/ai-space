@@ -167,23 +167,43 @@ export function createAppModelRoutes(opts: AppModelRoutesOptions) {
     "/api/panel/apps/:app/model": {
       PATCH: async (req: Request & { params: Record<string, string> }) => {
         if (!req.headers.get("origin") || !sameOrigin(req)) return error(403, "same-origin browser request required");
-        if (req.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return error(415, "application/json required");
-        const app = req.params.app!;
-        if (!known(app)) return error(404, "unknown app");
-        try {
-          const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-          if (!isRecord(body) || !("model" in body) || Object.keys(body).some((k) => k !== "model" && k !== "tag")) throw new Error("body must be {tag?, model}");
-          const tag = body.tag === undefined || body.tag === null ? null : body.tag;
-          if (tag !== null && typeof tag !== "string") throw new Error("tag must be a string");
-          if (body.model !== null && typeof body.model !== "string") throw new Error("model must be a string or null");
-          appModels.setOverride(app, tag, body.model as string | null);
-          return json({ ok: true, ...view(app) });
-        } catch (e) {
-          return error(400, (e as Error).message);
-        }
+        return patchOverride(opts, req);
       },
     },
   };
+}
+
+/**
+ * The same list and change for a hub (docs/peers.md), behind the peer token that peers/serve.ts checks:
+ *
+ * GET   /api/peer/model/apps              = GET /api/model/apps
+ * PATCH /api/peer/apps/:app/model         = PATCH /api/panel/apps/:app/model, without the same-origin check
+ *
+ * The options are this space's own: a hub shows them for the peer's apps, so a value is always one the peer can run.
+ */
+export function createPeerAppModelRoutes(opts: AppModelRoutesOptions) {
+  const local = createAppModelRoutes(opts);
+  return {
+    "/api/peer/model/apps": local["/api/model/apps"],
+    "/api/peer/apps/:app/model": { PATCH: (req: Request & { params: Record<string, string> }) => patchOverride(opts, req) },
+  };
+}
+
+async function patchOverride(opts: AppModelRoutesOptions, req: Request & { params: Record<string, string> }): Promise<Response> {
+  if (req.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return error(415, "application/json required");
+  const app = req.params.app!;
+  if (!opts.apps().includes(app)) return error(404, "unknown app");
+  try {
+    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!isRecord(body) || !("model" in body) || Object.keys(body).some((k) => k !== "model" && k !== "tag")) throw new Error("body must be {tag?, model}");
+    const tag = body.tag === undefined || body.tag === null ? null : body.tag;
+    if (tag !== null && typeof tag !== "string") throw new Error("tag must be a string");
+    if (body.model !== null && typeof body.model !== "string") throw new Error("model must be a string or null");
+    opts.appModels.setOverride(app, tag, body.model as string | null);
+    return json({ ok: true, ...opts.appModels.view(app, opts.seenTags(app)) });
+  } catch (e) {
+    return error(400, (e as Error).message);
+  }
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
