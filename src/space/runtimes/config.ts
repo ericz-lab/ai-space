@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type ModelTier, type RuntimeKind, type RuntimeSpec, type RuntimesConfig, type TierModels } from "./types.ts";
+import { MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type MachineSpec, type ModelTier, type RuntimeKind, type RuntimeSpec, type RuntimesConfig, type TierModels } from "./types.ts";
 
 /**
  * Which runtimes a space has: `<workspace>/runtimes.yaml`, or, when the file
@@ -27,7 +27,13 @@ import { MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type ModelTier, type 
  *       profile: headless         # optional: answers and agent runs; default shown
  *       liveProfile: acp          # optional: live chat; default shown
  *       provider: deepseek-account   # optional: model route; default deepseek-official
+ *   machines:                     # optional: ssh logins that answer as `<machine>:<runtime>/<model>`
+ *     bare:
+ *       ssh: bare-alias           # an alias from the operator's ~/.ssh/config
  *
+ * A runtime's own `ssh:` still works (answers on that machine under the runtime's own name) and
+ * draws a warning: naming the machine shows in the model string where the call runs
+ * (docs/model-machines.md).
  * Keys stay in the environment, never in the file: `apiKeyEnv` names the
  * variable. A runtime whose key variable is empty is dropped with a warning
  * rather than failing the boot, so a space keeps running when one login is
@@ -55,7 +61,7 @@ export function parseRuntimesYaml(text: string, env: Record<string, string | und
     throw new Error(`${RUNTIMES_FILE}: invalid YAML: ${(e as Error).message}`);
   }
   if (!isRecord(doc)) throw new Error(`${RUNTIMES_FILE}: must be a mapping`);
-  for (const key of Object.keys(doc)) if (key !== "default" && key !== "runtimes") throw new Error(`${RUNTIMES_FILE}: unknown key "${key}"`);
+  for (const key of Object.keys(doc)) if (key !== "default" && key !== "runtimes" && key !== "machines") throw new Error(`${RUNTIMES_FILE}: unknown key "${key}"`);
   if (!isRecord(doc.runtimes) || Object.keys(doc.runtimes).length === 0) throw new Error(`${RUNTIMES_FILE}: runtimes must be a non-empty mapping`);
 
   const warnings: string[] = [];
@@ -78,15 +84,31 @@ export function parseRuntimesYaml(text: string, env: Record<string, string | und
         }
         spec.models = models;
       }
+      if ("sshHost" in spec && spec.sshHost) warnings.push(`runtime ${name}: ssh is deprecated; name the machine under machines: and call it as <machine>:${name}/<model> (docs/model-machines.md)`);
       runtimes.push(spec);
     }
   }
+  const machines = parseMachines(doc.machines);
   if (runtimes.length === 0) throw new Error(`${RUNTIMES_FILE}: no usable runtime (${warnings.join("; ")})`);
 
   // No `default`: no runtime takes a bare model name; every model names its runtime.
   const def = doc.default;
   if (def !== undefined && (typeof def !== "string" || !runtimes.some((r) => r.name === def))) throw new Error(`${RUNTIMES_FILE}: default must name a configured runtime`);
-  return { config: { ...(def !== undefined ? { default: def as string } : {}), runtimes }, warnings };
+  return { config: { ...(def !== undefined ? { default: def as string } : {}), runtimes, ...(machines.length ? { machines } : {}) }, warnings };
+}
+
+function parseMachines(raw: unknown): MachineSpec[] {
+  if (raw === undefined || raw === null) return [];
+  if (!isRecord(raw)) throw new Error(`${RUNTIMES_FILE}: machines must be a mapping`);
+  return Object.entries(raw).map(([name, m]) => {
+    const ctx = `${RUNTIMES_FILE}: machine ${name}`;
+    if (!MACHINE_NAME_PATTERN.test(name)) throw new Error(`${RUNTIMES_FILE}: invalid machine name "${name}"`);
+    if (!isRecord(m)) throw new Error(`${ctx} must be a mapping`);
+    for (const key of Object.keys(m)) if (key !== "ssh") throw new Error(`${ctx} has unknown key "${key}"`);
+    const ssh = optionalString(m.ssh, `${ctx}: ssh`);
+    if (!ssh || !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(ssh)) throw new Error(`${ctx}: ssh must be a host name or alias`);
+    return { name, ssh };
+  });
 }
 
 function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>, env: Record<string, string | undefined>): RuntimeSpec | { warning: string } {

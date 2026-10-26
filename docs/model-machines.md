@@ -1,6 +1,6 @@
 # Model calls by machine
 
-Status: proposal. Nothing here is implemented yet. It builds on [runtimes.md](runtimes.md) (the adapters and `runtimes.yaml`), [model.md](model.md) (the model service and its ledger) and [peers.md](peers.md) (one panel over several machines). The [migration](#migration) at the end lists the order of the work.
+Status: implemented, except [fallback](#fallback) and per-caller budgets, which stay proposals. It builds on [runtimes.md](runtimes.md) (the adapters and `runtimes.yaml`), [model.md](model.md) (the model service and its ledger) and [peers.md](peers.md) (one panel over several machines). Code: `src/space/runtimes/registry.ts` (the machine prefix, `machines:`), `src/space/peers/model.ts` (the peer runtime), `src/space/model/api.ts` (`createPeerModelRoutes`), `src/space/model/health.ts` and `machines.ts` (the status table), `src/web/SettingsStatus.tsx` (its rows in Settings → Status). The [migration](#migration) at the end says what an operator does on an existing space.
 
 ## Problem
 
@@ -64,8 +64,9 @@ A peer that agrees to serve answers gets one more route:
 | peer route | local equivalent | notes |
 | --- | --- | --- |
 | `POST /api/peer/model/run` | `POST /api/model/run` | The same body with the machine prefix removed, and the same answer including `call`. Streaming answers keep the same SSE. |
-| `POST /api/peer/model/image` | `POST /api/model/image` | Same rule. |
-| `GET /api/peer/model/status` | `GET /api/model/status` | Feeds the hub's [status table](#status). |
+| `POST /api/peer/model/image` | `POST /api/model/image` | Same rule. Input images travel under the caller's file names, because the prompt refers to them by name. |
+
+The peer's snapshot (`GET /api/peer/snapshot`) gains `model`: the runtimes it offers, each with its kind, whether it makes pictures, its concrete model per tier (the hub's model choices show them), and the peer's own status cells. The hub reads them from the cached snapshot, so a status page never waits on a peer. A runtime the peer does not list is refused on the hub before any request is sent, with the list of runtimes the peer does offer.
 
 The peer runs the call with its own registry: its own runtimes, its own tier catalogue, its own concurrency cap. This has several effects:
 
@@ -74,7 +75,11 @@ The peer runs the call with its own registry: its own runtimes, its own tier cat
 - Tiers resolve where the CLI is installed. The hub no longer needs to read another machine's catalogue at boot.
 - Usage is recorded on the machine that paid for it (see [Ledger](#ledger)).
 
-The peer serves answers only when its operator turns it on: `SPACE_PEER_MODEL=codex,dsh` lists the runtimes a hub may use, and the default is none. The peer token can already open a chat with `bypassPermissions`, so the route gives no new power over the machine. It does spend the machine's accounts, though, and that should be a choice the operator makes on purpose.
+The peer serves answers only when its operator turns it on: `SPACE_PEER_MODEL=codex,dsh` lists the runtimes a hub may use, and the default is none. The peer token can already open a chat with `bypassPermissions`, so the route gives no new power over the machine. It does spend the machine's accounts, though, and that should be a choice the operator makes on purpose. A runtime whose answers run on yet another machine (one with its own `ssh:`) is never offered: a forwarded call stays on the machine it was sent to.
+
+### Both directions
+
+Hub and peer are roles of one link, not kinds of machine. Two spaces that list each other (`SPACE_PEER_<NAME>` with the other's `SPACE_HUB_TOKEN`) and each set `SPACE_PEER_MODEL` use each other's runtimes: the laptop sends `server:codex/basic` to the server, the server sends `laptop:claude/opus` to the laptop. Nothing loops: a forwarded call names no machine, the snapshot passes on only a space's own apps, and mirrored events are not exported again. Listing each other also merges each other's panels; that is what a peer is.
 
 ## Machines without ai-space
 
@@ -89,11 +94,11 @@ runtimes:
   claude: { kind: claude-code }
 ```
 
-`bare:codex/basic` runs this space's `codex` adapter over `ssh bare-alias`, exactly as `ssh:` does now. A runtime's own `ssh:` key keeps working during the migration: at boot it is read as an anonymous machine, and the boot log tells the operator to move it into `machines:`. When a name exists both as a peer and under `machines:`, boot fails. A machine is either a space or an ssh login, never both.
+`bare:codex/basic` runs this space's `codex` adapter over `ssh bare-alias`, exactly as `ssh:` does now. A runtime's own `ssh:` key keeps working: its answers run on that host, the ledger names the host as their machine, and the boot log tells the operator to move it into `machines:`. When a name exists both as a peer and under `machines:`, boot fails. A machine is either a space or an ssh login, never both.
 
 ## Ledger
 
-`model_calls` gains a `machine` column. It holds the machine that ran the call: empty for this machine, otherwise the peer or `machines:` name. `backend` keeps describing the path: `local`, `ssh:<alias>`, `api`, and a new value `peer:<name>`.
+`model_calls` gains a `machine` column. It holds the machine that ran the call: empty for this machine, otherwise the peer, the `machines:` name, or a runtime's own ssh host. `backend` keeps describing the path: `local`, `ssh:<alias>`, `api`, and a new value `peer:<name>`.
 
 A call forwarded to a peer writes two rows:
 
@@ -102,22 +107,25 @@ A call forwarded to a peer writes two rows:
 | hub | the calling app | `run` | `peer:box` | the tokens and cost the peer returned in `call` |
 | peer | `<hub>/<app>` | `peer` | the peer's own (`local`) | the same figures |
 
-The hub row keeps per-app views correct where the app lives. The peer row makes each login's load visible on the machine that owns it. A view that sums several machines (the usage app reads each machine's rows through the peer proxy) counts a call once: it skips hub rows whose `backend` is `peer:<name>` when it also reads that peer.
+The hub row keeps per-app views correct where the app lives. The peer row makes each login's load visible on the machine that owns it. A view that sums several machines (the usage app reads each machine's rows through the peer proxy) must count a call once: it skips hub rows whose `backend` is `peer:<name>` when it also reads that peer. That rule belongs to such a view; the core ledger keeps both rows.
 
 ## Status
 
-`GET /api/model/status` adds a table with one row per machine and one column per runtime. The hub merges the rows of every peer from `GET /api/peer/model/status`. Each cell says:
+`GET /api/model/status` adds a table with one cell per machine and runtime. The hub merges each peer's own cells from the peer's snapshot with what it saw of the calls it forwarded there (the later success, the longer limit). Each cell says:
 
-- **installed**: the CLI is found on the `PATH` the service actually runs with, not the operator's login shell.
-- **signed in**: a cheap probe per kind, at boot and every hour. The CLI's own status command where one exists; otherwise a one-token prompt.
-- **limited until**: set when a call fails with a quota or rate error (`usage limit`, `429`, `at capacity`), from the retry time the error gives or one hour. It is cleared by the next successful call.
+- **reachable**: false when ssh to a `machines:` login (or a runtime's own ssh host) fails; installed and signed in are then unknown.
+- **installed**: the CLI is found on the `PATH` the service actually runs with, not the operator's login shell. Over ssh, on that machine's login `PATH`, as the adapters run it.
+- **signed in**: probes that spend no tokens, at boot and every hour: `claude auth status` (its `loggedIn`), `codex login status` (exit 0), and for DeepSeek Harness the API key in the harness home's `.env` or, with `provider: deepseek-account`, its `.credentials.yaml`. An API runtime is signed in when its key is set.
+- **limited until**: set for one hour when a call fails with a quota or rate error (`usage limit`, `429`, `rate limit`, `at capacity`, `quota`, `overloaded`). It is cleared by the next successful call.
 - **last success**: the time of the last call that succeeded.
 
-The Settings page shows the table. A cell that is not installed or not signed in, but is named by a default, an override or an agent, is shown as a problem. On the deployment above, this check would have flagged the Claude runtime long before the first agent used it.
+For a runtime with its own `ssh:`, both machines get a cell: this one, where its chats and agent tasks run, and the ssh host, where its answers go. On the deployment above, that is exactly the pair that differed.
+
+Settings → Status shows the table. A cell is **used** when a default (the space's, `SPACE_MODEL_DEFAULT`, the runtimes.yaml default), an app override, a manifest's `model:` or an agent's declared runtime points at it. A used cell that is unreachable, not installed, not signed in or limited is a problem: red (limited is amber) and counted in the section's issues. An unused one with the same state is grey. `GET /api/model/status` returns the cells as `machines`, each with `used` and `problem`, and `servesPeers`, the runtimes this space offers. `GET /api/model/usage` adds `byMachine`.
 
 ## Fallback
 
-Without a fallback, behaviour does not change: a call goes to the machine and runtime it names, and fails there. A fallback is always written out explicitly:
+Not built yet; this is the intended shape. Without a fallback, behaviour does not change: a call goes to the machine and runtime it names, and fails there. A fallback is always written out explicitly:
 
 ```yaml
 fallback:
@@ -134,14 +142,18 @@ A call whose resolved model has a fallback list tries the entries in order. It s
 
 ## Migration
 
-1. **See it.** Add the `machine` column, and the status table on this machine only: installed, signed in, limited, last success. This needs no peer change and shows today's problems at once.
-2. **Peer answers.** Add `SPACE_PEER_MODEL`, the `/api/peer/model/*` routes, the `machine:` prefix in the registry and in model validation, the hub's `peer:<name>` backend and the two-row ledger. Merge the peers' status rows on the hub.
-3. **Move overrides.** On a space that borrows a peer's login over ssh, set the app overrides and the default to `<peer>:codex/...`, then remove `ssh:` from those runtimes so that a bare `codex/...` means this machine.
-4. **Machines without ai-space.** Add `machines:`, and read a runtime's `ssh:` as an anonymous machine with a boot warning.
-5. **Fallback.** Add explicit fallback lists, which use the status cells.
+What is in the code: the `machine` column and `peer` origin, the status table, `SPACE_PEER_MODEL` with the `/api/peer/model/*` routes, the `machine:` prefix (model service, panel overrides, `SPACE_MODEL_DEFAULT`), `machines:`, and the boot warning for a runtime's own `ssh:`. Codex tiers read the catalogue of every `machines:` login too, so a tier names a model all of them list.
+
+What an operator does on a space that borrows another space's login over a runtime's `ssh:`:
+
+1. **Look.** Settings → Status shows both cells of that runtime. Fix what is red first (a missing local login).
+2. **Offer.** On the other space, set `SPACE_PEER_MODEL` to the runtimes to share and restart it; its snapshot now lists them.
+3. **Move overrides.** On this space, set the default and the app overrides to `<peer>:codex/...`, check that calls arrive (the ledger's `machine` column, the peer's own rows), then remove `ssh:` from the runtime so that a bare `codex/...` means this machine.
+4. **Machines without ai-space** move from a runtime's `ssh:` to `machines:`.
+
+Not built: **fallback** lists and per-caller budgets ([open questions](#open-questions)).
 
 ## Open questions
 
-- Should a hub be able to set a per-app budget on a peer's account (calls or cost per day), or does the peer's own cap and `SPACE_PEER_MODEL` list suffice?
-- The `signed in` probe for each kind: which CLI commands answer without spending tokens, and how often a one-token prompt is acceptable where none does.
-- Whether `image` should be forwarded in step 2 or later. Only `codex-cli` has it, and its files travel in the request body.
+- Should a peer be able to set a budget per calling space (calls or cost per day), or do its own cap and the `SPACE_PEER_MODEL` list suffice? Deferred: the list and the cap for now.
+- Fallback as described above: deferred until the status table has run for a while and shows how often a cell is limited.

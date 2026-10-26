@@ -3,7 +3,9 @@ import { parseImages, type RunImage, spoolImages } from "./images.ts";
 import { GPT_PRICING } from "./pricing.ts";
 import type { ModelService } from "./service.ts";
 import { parseImageInput, parseRunInput, parseWindow } from "./spec.ts";
-import { APP_PATTERN, type ModelCall, TAG_PATTERN, WINDOW_MS } from "./types.ts";
+import { APP_PATTERN, type ModelCall, type Origin, TAG_PATTERN, WINDOW_MS } from "./types.ts";
+import { splitMachine } from "../runtimes/registry.ts";
+import type { HealthCell } from "./health.ts";
 import { OPERATOR, Unauthorized, identify } from "../auth.ts";
 
 /**
@@ -39,7 +41,14 @@ export type ModelApiOptions = {
   defaultModel?: string | (() => string);
   /** The app's layers when the request names no model (app-models.ts); takes the place of `defaultModel`. */
   resolveModel?: (app: string, tag: string) => ResolvedModel;
+  /** The status table: every machine's runtimes, with the problems of the used ones (docs/model-machines.md#status). */
+  machines?: () => MachineCell[];
+  /** Runtimes this space answers for other spaces (`SPACE_PEER_MODEL`). */
+  servesPeers?: string[];
 };
+
+/** A status-table cell as the API shows it. */
+export type MachineCell = HealthCell & { used: boolean; problem?: string };
 
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
 type Routes = Record<string, Handler | Partial<Record<"GET" | "POST", Handler>>>;
@@ -140,7 +149,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
     },
 
     "/api/model/status": {
-      GET: () => json({ ok: true, backend: service.backend, runtimes: service.runtimes.list(), maxConcurrency: service.maxConcurrency, ...service.load }),
+      GET: () => json({ ok: true, backend: service.backend, runtimes: service.runtimes.list(), machines: opts.machines?.() ?? [], servesPeers: opts.servesPeers ?? [], maxConcurrency: service.maxConcurrency, ...service.load }),
     },
 
     "/api/model/usage": {
@@ -168,6 +177,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
           byModel: store.groupBy(["model"], since, app),
           byRuntime: store.groupBy(["runtime", "model"], since, app),
           byBackend: store.groupBy(["backend", "origin"], since, app),
+          byMachine: store.groupBy(["machine", "runtime"], since, app),
           // The whole history, by UTC day: what the panel's grid, weekly bars and lifetime cards read.
           history: { firstAt: firstAt === undefined ? undefined : new Date(firstAt).toISOString(), totals: store.totals(0, app), days: store.days(0) },
         });
@@ -188,6 +198,88 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
   };
 }
 
+/** Who a forwarded call is for: `<space>/<app>` from the calling space (the bus uses the same header). */
+const CALLER = /^[a-z0-9][a-z0-9._-]{0,63}\/[a-z0-9][a-z0-9._-]{0,63}$/i;
+
+/**
+ * The model routes another space reaches through `/api/peer/model/*` (docs/model-machines.md):
+ * the same bodies and answers as `/api/model/run` and `/api/model/image`, run here with this
+ * space's runtimes, recorded here with `origin: peer` under the caller `<space>/<app>`. The
+ * request names its model and no machine (a forwarded call is not forwarded again), and only
+ * runtimes in `allow` answer. The peer token check is the caller's (peers/serve.ts).
+ */
+export function createPeerModelRoutes(opts: { service: ModelService; allow: string[] }): Routes {
+  const { service } = opts;
+  const prepare = (req: Request, body: Record<string, unknown> | null): { caller: string } => {
+    if (!body || typeof body !== "object") throw new Error("body must be a JSON object");
+    const caller = req.headers.get("x-space-caller")?.trim() ?? "";
+    if (!CALLER.test(caller)) throw new Error("x-space-caller must be <space>/<app>");
+    if (typeof body.model !== "string" || !body.model) throw new Error("a forwarded call names its model");
+    if (splitMachine(body.model)) throw new Error("a forwarded call names no machine: it runs here");
+    return { caller };
+  };
+  const allowed = (name: string, machine?: string) => {
+    if (!opts.allow.includes(name)) throw new Error(`runtime ${name} is not offered to other spaces here (SPACE_PEER_MODEL)`);
+    // Its answers would run on yet another machine: a forwarded call stays on the machine it was sent to.
+    if (machine) throw new Error(`runtime ${name} answers on ${machine} here, not on this machine; it cannot serve other spaces`);
+  };
+  return {
+    "/api/peer/model/run": {
+      POST: async (req) => {
+        let caller: string;
+        let input: ReturnType<typeof parseRunInput>;
+        let images: RunImage[];
+        let body: Record<string, unknown> | null;
+        try {
+          body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+          ({ caller } = prepare(req, body));
+          if (body!.stream !== undefined && typeof body!.stream !== "boolean") throw new Error("stream must be a boolean");
+          input = parseRunInput(body!);
+          images = parseImages(body!.images, { named: true });
+          const { runtime } = service.resolve(input.model);
+          allowed(runtime.name, runtime.machine);
+        } catch (e) {
+          return error(400, (e as Error).message ?? String(e));
+        }
+        const { files, cleanup } = await spoolImages(images);
+        if (files.length) input = { ...input, files };
+        if (body!.stream === true) return streamRun(service, caller, input, req.signal, undefined, cleanup, "peer");
+        try {
+          const { outcome, call } = await service.run(caller, input, req.signal, undefined, undefined, "peer");
+          if (!outcome.ok) return json({ ok: false, error: outcome.error, call: view(call) }, 502);
+          return json({ ok: true, text: outcome.text, call: view(call) });
+        } finally {
+          await cleanup();
+        }
+      },
+    },
+    "/api/peer/model/image": {
+      POST: async (req) => {
+        let caller: string;
+        let input: ReturnType<typeof parseImageInput>;
+        let images: RunImage[];
+        try {
+          const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+          ({ caller } = prepare(req, body));
+          input = parseImageInput(body!);
+          images = parseImages(body!.images, { named: true });
+          const { runtime } = service.resolveImage(input.model);
+          allowed(runtime.name, runtime.machine);
+        } catch (e) {
+          return error(400, (e as Error).message ?? String(e));
+        }
+        const { files, cleanup } = await spoolImages(images);
+        try {
+          const { outcome, call } = await service.image(caller, { ...input, files }, req.signal, undefined, "peer");
+          if (!outcome.ok) return json({ ok: false, error: outcome.error, call: view(call) }, 502);
+          return json({ ok: true, text: outcome.text, images: outcome.images.map((i) => ({ type: i.type, data: Buffer.from(i.bytes).toString("base64") })), call: view(call) });
+        } finally {
+          await cleanup();
+        }
+      },
+    },
+  };
+}
 
 /** How often a comment line goes out on an idle event stream, so no proxy or server closes it while the model thinks. */
 export const STREAM_KEEPALIVE_MS = 15_000;
@@ -197,7 +289,7 @@ export const STREAM_KEEPALIVE_MS = 15_000;
  * the request was already validated); a model failure is the `error` event,
  * with its ledger row, not a status code.
  */
-function streamRun(service: ModelService, app: string, input: ReturnType<typeof parseRunInput>, signal: AbortSignal, source?: ResolvedModel["source"], cleanup: () => Promise<void> = async () => {}): Response {
+function streamRun(service: ModelService, app: string, input: ReturnType<typeof parseRunInput>, signal: AbortSignal, source?: ResolvedModel["source"], cleanup: () => Promise<void> = async () => {}, origin: Origin = "run"): Response {
   const enc = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -213,7 +305,7 @@ function streamRun(service: ModelService, app: string, input: ReturnType<typeof 
       const event = (name: string, data: unknown) => send(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
       const keepalive = setInterval(() => send(": keepalive\n\n"), STREAM_KEEPALIVE_MS);
       void service
-        .run(app, input, signal, (text) => event("delta", { text }), source)
+        .run(app, input, signal, (text) => event("delta", { text }), source, origin)
         .then(({ outcome, call }) => {
           if (outcome.ok) event("done", { ok: true, text: outcome.text, call: view(call) });
           else event("error", { ok: false, error: outcome.error, call: view(call) });
@@ -240,6 +332,7 @@ export function view(c: ModelCall) {
     tag: c.tag,
     model: c.model,
     runtime: c.runtime,
+    machine: c.machine,
     mode: c.mode,
     modelSource: c.modelSource,
     backend: c.backend,

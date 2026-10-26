@@ -55,7 +55,11 @@ runtimes:
     profile: headless            # optional: answers and agent runs; default shown
     liveProfile: acp             # optional: live chat; default shown
     provider: deepseek-official  # optional: model route; use deepseek-account for the signed-in account
+machines:                        # optional: ssh logins that answer as <machine>:<runtime>/<model>
+  bare: { ssh: bare-alias }      # (docs/model-machines.md); a runtime's own ssh: still works, with a boot warning
 ```
+
+A model may name a machine: `bare:codex/basic` runs this space's `codex` adapter over ssh on a `machines:` login, and `box:codex/basic` sends the answer to peer `box`, which runs it with its own login ([model-machines.md](model-machines.md)). Chat and agent tasks never take a machine: they run where their app lives.
 
 ### Preparing a DeepSeek Harness
 
@@ -116,7 +120,7 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 - Chat events normalised across runtimes, with ai-space keeping its own transcripts; today the browser reads Claude Code's `stream-json` (other runtimes' adapters translate into it) and past sessions are read from each runtime's own files.
 - DeepSeek off-peak pricing in the ledger (the price table takes the peak rate), and a price table in `runtimes.yaml` for models the adapters do not know.
 - Routing by tag, fallback chains, budgets. Every agent already offers a runtime and model-tier picker, and an app's override sets its agents' default.
-- Machines as a part of the model name, answers forwarded through a peer instead of a runtime's `ssh:`, and explicit fallback lists: proposed in [model-machines.md](model-machines.md).
+- Explicit fallback lists between machines and runtimes: proposed in [model-machines.md](model-machines.md#fallback).
 
 ## Capability tiers
 

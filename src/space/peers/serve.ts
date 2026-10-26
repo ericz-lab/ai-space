@@ -5,6 +5,7 @@ import { eventPayload } from "../scheduler/events.ts";
 import type { Store } from "../scheduler/store.ts";
 import { bearer, tokenEquals } from "../auth.ts";
 import { bridge, wantsWebSocket } from "../terminal/api.ts";
+import type { PeerModelInfo } from "./client.ts";
 
 /**
  * The peer side: `/api/peer/*`, present only when `SPACE_HUB_TOKEN` is set.
@@ -37,6 +38,12 @@ import { bridge, wantsWebSocket } from "../terminal/api.ts";
  *                                                  with `latestId`; the hub mirrors them (docs/events.md)
  *   POST /api/peer/call/:app/:capability           a call from the hub: forwarded to the local bus as the caller named in
  *                                                  `x-space-caller` (the hub writes `<hub name>/<app>`)
+ *   POST /api/peer/model/run                       ┐ only when SPACE_PEER_MODEL names runtimes: an answer or pictures run
+ *   POST /api/peer/model/image                     ┘ here for `<space>/<app>` in `x-space-caller` (docs/model-machines.md);
+ *                                                    the snapshot's `model` says which runtimes
+ *
+ * Either side of a link may serve these routes: two spaces that list each other as peers call each
+ * other's runtimes both ways.
  */
 
 // The server argument only matters to the terminal's socket route, which upgrades the request.
@@ -63,6 +70,9 @@ export type PeerServeOptions = {
   /** The bus and the scheduler's store: present, the snapshot lists capabilities and the events / call routes exist. */
   bus?: Bus;
   events?: Store;
+  /** The model routes for other spaces (model/api.ts `createPeerModelRoutes`) and what the snapshot says about them. */
+  model?: Routes;
+  modelInfo?: () => PeerModelInfo | undefined;
 };
 
 const PROXY_TIMEOUT_MS = 60_000;
@@ -124,6 +134,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
           agents: own(agents.agents as { id: string; peer?: string }[]).filter((a) => a.id !== `${SPACE_APP}/${SPACE_AGENT}`),
           terminal: opts.terminal !== undefined,
           capabilities: (opts.bus?.capabilities() ?? []).filter((c) => opts.allowApp?.(c.app) !== false),
+          ...(opts.model && opts.modelInfo?.() ? { model: opts.modelInfo() } : {}),
           asOf: new Date().toISOString(),
         });
       }),
@@ -191,6 +202,12 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
               }
             }),
           },
+        }
+      : {}),
+    ...(opts.model
+      ? {
+          "/api/peer/model/run": { POST: guard(mirror(opts.model, "/api/peer/model/run", "POST")) },
+          "/api/peer/model/image": { POST: guard(mirror(opts.model, "/api/peer/model/image", "POST")) },
         }
       : {}),
     "/api/peer/agents/:app/:agent/chat": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/chat", "POST")) },

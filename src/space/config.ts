@@ -86,6 +86,8 @@ export type Config = {
   edition: Edition;
   /** Token a hub must present on `/api/peer/*` (SPACE_HUB_TOKEN); empty = those routes are absent. */
   hubToken: string;
+  /** Runtimes other spaces may use through `/api/peer/model/*` (SPACE_PEER_MODEL, comma-separated, docs/model-machines.md); empty = none. */
+  peerModel: string[];
   /** More names this space answers besides IPs, localhost, the panel host and the router's domain (SPACE_ALLOWED_HOSTS, src/space/hosts.ts). */
   allowedHosts: string;
   /** The web terminal (docs/terminal.md): off unless SPACE_TERMINAL_ENABLED is set. */
@@ -165,6 +167,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     serviceLogs: env.SPACE_SERVICE_LOGS?.trim() || DEFAULT_SERVICE_LOGS,
     name,
     hubToken: env.SPACE_HUB_TOKEN?.trim() ?? "",
+    peerModel: (env.SPACE_PEER_MODEL ?? "").split(",").map((r) => r.trim()).filter(Boolean),
     allowedHosts: env.SPACE_ALLOWED_HOSTS?.trim() ?? "",
     terminal: terminal.config,
     router: router.config,

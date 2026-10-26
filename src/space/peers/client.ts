@@ -1,4 +1,5 @@
 import type { AppCapabilities } from "../bus/bus.ts";
+import type { HealthCell } from "../model/health.ts";
 import type { AgentView, AppView, ServiceView } from "../panel/view.ts";
 import type { EventInput } from "../scheduler/types.ts";
 import type { WidgetView } from "../panel/widgets.ts";
@@ -23,7 +24,17 @@ export type PeerSnapshot = {
   terminal: boolean;
   /** What the peer's apps provide, publish and consume (docs/events.md); empty for a peer without the bus. */
   capabilities: AppCapabilities[];
+  /** The runtimes the peer answers for other spaces and its status cells (docs/model-machines.md); absent when it offers none. */
+  model?: PeerModelInfo;
   asOf: string;
+};
+
+/** What a peer's snapshot says about its model service. */
+export type PeerModelInfo = {
+  /** `tiers`: the peer's concrete model per tier, for the hub's model choices. */
+  serves: { name: string; kind: string; image: boolean; tiers: Partial<Record<string, string>> }[];
+  /** The peer's own cells (machine ""), as its status table shows them. */
+  cells: HealthCell[];
 };
 
 /** What a peer answers on `/api/peer/events`. */
@@ -188,6 +199,11 @@ export class PeerClient {
     return new Response(up.body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store", ...(runId ? { "x-run-id": runId } : {}) } });
   }
 
+  /** A request of this space's own to the peer's `/api/peer/...` path (forwarded model calls). */
+  request(path: string, init: RequestInit & { headers?: Record<string, string> } = {}): Promise<Response> {
+    return this.fetch(this.config.url + path, { ...init, headers: { ...this.authHeaders(), ...(init.headers ?? {}) } });
+  }
+
   /** The headers every request to the peer carries: the access layer's extras and the bearer token. */
   authHeaders(): Record<string, string> {
     return { ...this.config.headers, ...(this.config.token ? { authorization: `Bearer ${this.config.token}` } : {}) };
@@ -215,6 +231,20 @@ export function parseSnapshot(j: unknown): PeerSnapshot {
     agents: o.agents as AgentView[],
     terminal: o.terminal === true,
     capabilities: Array.isArray(o.capabilities) ? (o.capabilities as AppCapabilities[]) : [],
+    ...(parseModelInfo(o.model) ? { model: parseModelInfo(o.model)! } : {}),
     asOf: typeof o.asOf === "string" ? o.asOf : new Date().toISOString(),
   };
+}
+
+function parseModelInfo(v: unknown): PeerModelInfo | undefined {
+  const o = v as { serves?: unknown; cells?: unknown } | null;
+  if (!o || typeof o !== "object" || !Array.isArray(o.serves)) return undefined;
+  const serves = o.serves.filter((r): r is PeerModelInfo["serves"][number] => typeof r?.name === "string" && typeof r?.kind === "string").map((r) => ({ name: r.name, kind: r.kind, image: r.image === true, tiers: tiersOf(r.tiers) }));
+  const cells = Array.isArray(o.cells) ? (o.cells as HealthCell[]).filter((c) => typeof c?.runtime === "string") : [];
+  return { serves, cells };
+}
+
+function tiersOf(v: unknown): Partial<Record<string, string>> {
+  if (!v || typeof v !== "object") return {};
+  return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"));
 }

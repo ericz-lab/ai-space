@@ -85,10 +85,11 @@ const defaultRun: Run = async (cmd, opts) => {
 
 type Machine = { host?: string; bin: string };
 
-/** Agent runs and chat are always local; completions go to the runtime's ssh host. */
-function machinesOf(spec: CodexCliSpec): Machine[] {
+/** Agent runs and chat are always local; completions go to the runtime's ssh host and to the `machines:` logins (`hosts`). */
+function machinesOf(spec: CodexCliSpec, hosts: string[] = []): Machine[] {
   const bin = (spec.bin.length ? spec.bin : ["codex"]).map(quote).join(" ");
-  return [{ bin }, ...(spec.sshHost ? [{ host: spec.sshHost, bin }] : [])];
+  const remote = [...new Set([...(spec.sshHost ? [spec.sshHost] : []), ...hosts])];
+  return [{ bin }, ...remote.map((host) => ({ host, bin }))];
 }
 
 async function readCatalog(run: Run, m: Machine): Promise<CatalogModel[]> {
@@ -98,15 +99,15 @@ async function readCatalog(run: Run, m: Machine): Promise<CatalogModel[]> {
   return models;
 }
 
-async function tiersFor(run: Run, spec: CodexCliSpec): Promise<TierModels> {
-  return catalogTiers(intersectCatalogs(await Promise.all(machinesOf(spec).map((m) => readCatalog(run, m)))));
+async function tiersFor(run: Run, spec: CodexCliSpec, hosts: string[] = []): Promise<TierModels> {
+  return catalogTiers(intersectCatalogs(await Promise.all(machinesOf(spec, hosts).map((m) => readCatalog(run, m)))));
 }
 
 /** Boot: every codex runtime's tiers from its catalogue. A machine that cannot answer leaves the fallback names. */
-export async function refreshCodexTiers(registry: RuntimeRegistry, specs: RuntimeSpec[], log: (line: string) => void, run: Run = defaultRun): Promise<void> {
+export async function refreshCodexTiers(registry: RuntimeRegistry, specs: RuntimeSpec[], log: (line: string) => void, run: Run = defaultRun, hosts: string[] = []): Promise<void> {
   await Promise.all(specs.filter((s): s is CodexCliSpec & { models?: TierModels } => s.kind === "codex-cli").map(async (spec) => {
     try {
-      const tiers = await tiersFor(run, spec);
+      const tiers = await tiersFor(run, spec, hosts);
       registry.applyCatalogTiers(spec.name, tiers);
       log(`${spec.name} tiers from the codex catalogue: ${MODEL_TIERS.map((t) => `${t}=${tiers[t] ?? "fallback"}`).join(" ")}`);
       for (const p of stalePins(spec.models, tiers)) log(`${spec.name}/${p.tier} is pinned to ${p.pinned} in ${RUNTIMES_FILE}; the catalogue has ${p.latest}`);
@@ -136,14 +137,16 @@ export async function codexUpgrade(opts: UpgradeOptions): Promise<UpgradeResult>
   const log = opts.log;
   const result: UpgradeResult = { tiers: {}, unpriced: [], restarted: false, failures: [] };
   const file = Bun.file(join(opts.home, RUNTIMES_FILE));
-  const codex = (await file.exists()) ? parseRuntimesYaml(await file.text()).config.runtimes.filter((r): r is CodexCliSpec & { models?: TierModels } => r.kind === "codex-cli") : [];
+  const config = (await file.exists()) ? parseRuntimesYaml(await file.text()).config : undefined;
+  const codex = (config?.runtimes ?? []).filter((r): r is CodexCliSpec & { models?: TierModels } => r.kind === "codex-cli");
+  const hosts = (config?.machines ?? []).map((m) => m.ssh);
   if (!codex.length) {
     log(`no codex-cli runtime in ${join(opts.home, RUNTIMES_FILE)}; nothing to update`);
     return result;
   }
 
   const machines = new Map<string, Machine>();
-  for (const spec of codex) for (const m of machinesOf(spec)) machines.set(`${m.host ?? ""} ${m.bin}`, m);
+  for (const spec of codex) for (const m of machinesOf(spec, hosts)) machines.set(`${m.host ?? ""} ${m.bin}`, m);
   for (const m of machines.values()) {
     const where = m.host ?? "local";
     const version = async () => (await run(onHost(m.host, `${m.bin} --version`), { timeoutMs: 60_000 })).stdout.trim() || "unknown";
@@ -161,7 +164,7 @@ export async function codexUpgrade(opts: UpgradeOptions): Promise<UpgradeResult>
   for (const spec of codex) {
     let tiers: TierModels;
     try {
-      tiers = await tiersFor(run, spec);
+      tiers = await tiersFor(run, spec, hosts);
     } catch (e) {
       result.failures.push(`${spec.name}: could not read the codex catalogue: ${(e as Error).message.slice(0, 200)}`);
       continue;
@@ -177,7 +180,7 @@ export async function codexUpgrade(opts: UpgradeOptions): Promise<UpgradeResult>
         continue;
       }
       const refused: string[] = [];
-      for (const m of machinesOf(spec)) {
+      for (const m of machinesOf(spec, hosts)) {
         const probe = await run(onHost(m.host, `${m.bin} exec --ignore-user-config --ephemeral --skip-git-repo-check --sandbox read-only --model ${quote(model)} ${quote("Reply with just: ok")} < /dev/null`), { timeoutMs: 180_000 });
         if (probe.code !== 0) {
           const why = (probe.stderr || probe.stdout).trim().split("\n").filter((l) => /error/i.test(l)).at(-1) ?? `exit ${probe.code}`;

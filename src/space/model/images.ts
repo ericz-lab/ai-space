@@ -35,11 +35,12 @@ const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
  * Each is named `img<n>.<ext>` by its sniffed type, which is how the prompt
  * refers to it ("the first image" is `img1`).
  */
-export function parseImages(raw: unknown): RunImage[] {
+export function parseImages(raw: unknown, opts: { named?: boolean } = {}): RunImage[] {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) throw new Error("images must be an array of { data: base64 }");
   if (raw.length > MAX_IMAGES) throw new Error(`at most ${MAX_IMAGES} images`);
   let total = 0;
+  const seen = new Set<string>();
   return raw.map((item, i) => {
     const data = typeof item === "object" && item !== null ? (item as { data?: unknown }).data : undefined;
     if (typeof data !== "string" || !data) throw new Error(`images[${i}].data must be a base64 string`);
@@ -51,9 +52,16 @@ export function parseImages(raw: unknown): RunImage[] {
     if (total > MAX_IMAGES_BYTES) throw new Error(`images are larger than ${MAX_IMAGES_BYTES / 1024 / 1024} MB together`);
     const type = sniffImage(bytes);
     if (!type) throw new Error(`images[${i}] is not a png, jpeg, gif or webp image`);
-    return { name: `img${i + 1}.${IMAGE_EXT[type]}`, bytes };
+    // A forwarded call keeps the caller's file names, since its prompt refers to them (docs/model-machines.md).
+    const given = opts.named && typeof item === "object" && item !== null ? (item as { name?: unknown }).name : undefined;
+    if (given !== undefined && (typeof given !== "string" || !FILE_NAME.test(given) || seen.has(given))) throw new Error(`images[${i}].name must be a unique file name`);
+    const name = typeof given === "string" ? given : `img${i + 1}.${IMAGE_EXT[type]}`;
+    seen.add(name);
+    return { name, bytes };
   });
 }
+
+const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 /** Write the images to a fresh directory; `cleanup` removes it and is safe to call twice. */
 export async function spoolImages(images: RunImage[]): Promise<{ files: CompleteFile[]; cleanup: () => Promise<void> }> {

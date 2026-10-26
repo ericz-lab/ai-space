@@ -19,8 +19,17 @@ export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 /** A runtime's name in the configuration and in the ledger (`claude`, `api`, `dsh`). */
 export const RUNTIME_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
-/** Where a call ran: the machine's own CLI, one reached over ssh, or an HTTP API. */
-export type Backend = "local" | `ssh:${string}` | "api";
+/** Where a call ran: the machine's own CLI, one reached over ssh, an HTTP API, or another space reached as a peer. */
+export type Backend = "local" | `ssh:${string}` | "api" | `peer:${string}`;
+
+/**
+ * A machine's name in a model string (`box:codex/basic`, docs/model-machines.md): a peer
+ * (`SPACE_PEER_<NAME>`) or an ssh login under `machines:` in runtimes.yaml.
+ */
+export const MACHINE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+/** An ssh login that runs this space's runtimes for answers (`machines:` in runtimes.yaml). */
+export type MachineSpec = { name: string; ssh: string };
 
 export type Usage = {
   inputTokens: number;
@@ -57,6 +66,8 @@ export type CompleteInput = {
    * them, which may be another machine.
    */
   files?: CompleteFile[];
+  /** The app the call is for; a runtime that runs on another space records it there. */
+  caller?: string;
 };
 
 export const COMPLETION_MODES = ["slim", "full"] as const;
@@ -76,9 +87,10 @@ export const FILE_NAME_PATTERN = /^[a-z0-9]+\.(png|jpe?g|gif|webp)$/;
 /** Text of the answer as it is produced; a runtime that cannot stream never calls it and the caller gets the whole answer at the end. */
 export type OnDelta = (text: string) => void;
 
+/** `model`: the concrete model, when another space resolved the tier (a peer runtime). */
 export type CompleteOutcome =
-  | { ok: true; text: string; usage?: Usage; costUsd?: number; backend: Backend }
-  | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend };
+  | { ok: true; text: string; usage?: Usage; costUsd?: number; backend: Backend; model?: string }
+  | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend; model?: string };
 
 /** Write authorisation tiers a chat turn or an agent task may ask for; absent means read-only (the headless default). */
 export const PERMISSION_MODES = ["acceptEdits", "bypassPermissions", "plan"] as const;
@@ -194,13 +206,15 @@ export type ImageInput = {
   tag: string;
   files: CompleteFile[];
   timeoutMs: number;
+  /** The app the call is for, as for `CompleteInput`. */
+  caller?: string;
 };
 
 export type GeneratedImage = { type: string; bytes: Uint8Array };
 
 export type ImageOutcome =
-  | { ok: true; text: string; images: GeneratedImage[]; usage?: Usage; costUsd?: number; backend: Backend }
-  | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend };
+  | { ok: true; text: string; images: GeneratedImage[]; usage?: Usage; costUsd?: number; backend: Backend; model?: string }
+  | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend; model?: string };
 
 /**
  * A past conversation as the chat panel shows it: the user's texts and the assistant's, with the
@@ -216,6 +230,8 @@ export type RuntimeAdapter = {
   readonly kind: RuntimeKind;
   /** Where `complete` runs; the status view and the log line show it. */
   readonly backend: Backend;
+  /** The machine `complete` runs on when it is not this one (a peer or a `machines:` entry); the ledger's `machine`. */
+  readonly machine?: string;
   readonly capabilities: Capabilities;
   complete(input: CompleteInput, signal?: AbortSignal, onDelta?: OnDelta): Promise<CompleteOutcome>;
   runAgent(run: AgentRun): Promise<AgentOutcome>;
@@ -309,6 +325,8 @@ export type RuntimesConfig = {
    */
   default?: string;
   runtimes: RuntimeSpec[];
+  /** ssh logins that answer as `<machine>:<runtime>/<model>`; empty when absent. */
+  machines?: MachineSpec[];
 };
 
 /** Not supported by this runtime: the operation names what was asked. */

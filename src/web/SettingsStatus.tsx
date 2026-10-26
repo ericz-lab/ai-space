@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { getJson, relTime, sendJson, untilTime, type BackupInfo, type PeerInfo, type ServiceInfo } from "./api.ts";
+import { getJson, relTime, sendJson, untilTime, type BackupInfo, type MachineCell, type PeerInfo, type ServiceInfo } from "./api.ts";
 import { localized, useLang } from "./i18n.ts";
+import type { Key } from "./messages.ts";
 import { HEALTH, Icon, STATUS } from "./Tiles.tsx";
 
 /**
- * The status part of the settings: peers, services and backups fold into one summary line; the rows
- * show when it is expanded. A problem is a service or peer that is down, or a backup that went stale.
+ * The status part of the settings: peers, runtimes, services and backups fold into one summary line; the rows
+ * show when it is expanded. A problem is a service or peer that is down, a runtime something uses that
+ * cannot answer (docs/model-machines.md#status), or a backup that went stale.
  * Loaded each time the settings open so the health dots are fresh (the server caches probes for 15 s
  * and peer snapshots for their refresh period).
  */
@@ -34,6 +36,13 @@ export default function SettingsStatus() {
       loadServices();
     }
   };
+  // Every machine's runtimes: installed, signed in, limited, last answer.
+  const [machines, setMachines] = useState<{ cells: MachineCell[]; serves: string[] } | null>(null);
+  useEffect(() => {
+    getJson<{ machines?: MachineCell[]; servesPeers?: string[] }>("/api/model/status")
+      .then((d) => setMachines({ cells: d.machines || [], serves: d.servesPeers || [] }))
+      .catch(() => setMachines({ cells: [], serves: [] }));
+  }, []);
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);
   const [backupsOn, setBackupsOn] = useState(true);
   useEffect(() => {
@@ -50,6 +59,7 @@ export default function SettingsStatus() {
   const problems = statusLoaded
     ? services.services.filter((s) => s.status === "active" && s.health === "down").length +
       services.peers.filter((p) => p.health !== "ok").length +
+      (machines?.cells.filter((c) => c.problem).length ?? 0) +
       backups.filter((b) => b.stale && !b.retired).length
     : 0;
   const statusSummary = statusLoaded
@@ -57,6 +67,7 @@ export default function SettingsStatus() {
         t("settings.countServices", { n: services.services.length }),
         backupsOn || backups.length ? t("settings.countBackups", { n: backups.length }) : "",
         services.peers.length ? t("settings.countPeers", { n: services.peers.length }) : "",
+        machines?.cells.length ? t("settings.countRuntimes", { n: machines.cells.length }) : "",
       ]
         .filter(Boolean)
         .join(" · ")
@@ -89,6 +100,40 @@ export default function SettingsStatus() {
               </span>
             </div>
           ))}
+        </>
+      )}
+      {machines && machines.cells.length > 0 && (
+        <>
+          <p className="sethead sub">{t("settings.runtimes")}</p>
+          {machines.cells.map((c) => {
+            const state = runtimeState(c);
+            return (
+              <div
+                key={`${c.machine}|${c.runtime}`}
+                className="svcrow"
+                title={[
+                  c.kind,
+                  c.detail ?? "",
+                  c.lastOkAt ? t("runtimes.lastOk", { time: relTime(c.lastOkAt, lang) }) : "",
+                  c.limitedUntil ? t("runtimes.limitedUntil", { time: untilTime(c.limitedUntil, lang) }) : "",
+                  c.lastError ?? "",
+                  c.used ? "" : t("runtimes.unused"),
+                ]
+                  .filter(Boolean)
+                  .join("\n")}
+              >
+                <span className="svc-ico">🧠</span>
+                <span className="svc-name">{c.runtime}</span>
+                <span className="svc-peer">{c.machine || t("runtimes.thisMachine")}</span>
+                {c.lastOkAt && <span className="svc-port">{relTime(c.lastOkAt, lang)}</span>}
+                <span className={`status ${state.cls}`}>
+                  <i />
+                  {t(state.key)}
+                </span>
+              </div>
+            );
+          })}
+          {machines.serves.length > 0 && <p className="setnote">{t("runtimes.serves", { list: machines.serves.join(", ") })}</p>}
         </>
       )}
       <p className="sethead sub">{t("settings.services")}</p>
@@ -161,4 +206,11 @@ export default function SettingsStatus() {
       )}
     </>
   );
+}
+
+/** A cell's dot and word: red only for a used cell that cannot answer; an unused one is grey. */
+function runtimeState(c: MachineCell): { cls: string; key: Key } {
+  const key: Key = c.reachable === false ? "runtimes.unreachable" : c.installed === false ? "runtimes.notInstalled" : c.signedIn === false ? "runtimes.notSignedIn" : c.limitedUntil ? "runtimes.limited" : c.checkedAt || c.lastOkAt ? "runtimes.ready" : "runtimes.unchecked";
+  if (c.problem) return { cls: c.problem === "limited" ? "paused" : "down", key };
+  return { cls: key === "runtimes.ready" ? "ok" : "archived", key };
 }
