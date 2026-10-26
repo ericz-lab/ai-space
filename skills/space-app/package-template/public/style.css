@@ -1,35 +1,65 @@
-/* Colors are tokens: change them here, and the dark block follows the viewer's setting. */
+/* Colors are tokens: change them here. The dark set is written twice, for "follow the system"
+   and for the theme button's explicit choice (docs/app-spec.md#app-pages in ai-space). */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #f7f7f8;
   --surface: #ffffff;
   --text: #18181b;
   --muted: #6b7280;
   --border: #e4e4e7;
   --accent: #4f46e5;
+  --on-accent: #ffffff;
   font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   line-height: 1.5;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #111113;
     --surface: #1c1c1f;
     --text: #ececef;
     --muted: #9ca3af;
     --border: #2e2e33;
     --accent: #818cf8;
+    --on-accent: #111113;
   }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111113;
+  --surface: #1c1c1f;
+  --text: #ececef;
+  --muted: #9ca3af;
+  --border: #2e2e33;
+  --accent: #818cf8;
+  --on-accent: #111113;
 }
 
 /* Phone-safe defaults: nothing may widen the page past the screen. */
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); overflow-x: hidden; overflow-wrap: anywhere; }
+body { margin: 0; min-height: 100vh; min-height: 100dvh; background: var(--bg); color: var(--text); overflow-x: hidden; overflow-wrap: anywhere; }
 img, video, canvas, svg { max-width: 100%; height: auto; }
 pre { overflow-x: auto; }
 table { display: block; max-width: 100%; overflow-x: auto; }
 /* A grid or flex child shrinks below its content's width only with min-width: 0. */
 :where(main, section, article, div) { min-width: 0; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-main { max-width: 40rem; margin: 0 auto; padding: 2rem 1rem; }
+/* Full-bleed: the page is the app. The bar and main reach every edge and are split by a 1px
+   rule; never put padding, a border, a radius or a shadow around the app as a whole. */
+body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.bar { display: flex; align-items: center; gap: 0.75rem; min-height: 56px; padding: 0.5rem 1rem; background: var(--surface); border-bottom: 1px solid var(--border); }
+.bar .logo { width: 28px; height: 28px; border-radius: 7px; }
+.bar h1 { flex: 1; margin: 0; font-size: 1.05rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+main { padding: 1.5rem 1rem; }
 a { color: var(--accent); }
+
+/* The language switch (中 / EN) and the theme button (system → light → dark). */
+.prefs { display: flex; align-items: center; gap: 0.5rem; flex: none; }
+.seg { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 8px; }
+.seg button { min-width: 36px; height: 32px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.theme { display: inline-grid; place-items: center; width: 38px; height: 38px; border: 1px solid var(--border); border-radius: 8px; background: transparent; }
+.theme svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

@@ -18,6 +18,12 @@ The contract is docs/app-studio.md of ai-space. In short:
     valid. Do not raise `version`: the build does.
   - `server.ts` is the app's process: `Bun.serve` on `process.env.PORT`, hostname `127.0.0.1`,
     `/healthz` answering. `public/` is the page (Bun HTML import); use relative URLs.
+  - Every page keeps the three page rules (docs/app-spec.md#app-pages), which the template already
+    has: **full-bleed** (the layout fills the window; no outer border, card, radius or padding
+    around the app), **Chinese and English** (every visible string in `app.ts`'s `zh`/`en`
+    dictionary, the 中 / EN switch, an `i18n: zh:` title and description in `space.yaml`), and a **theme button** (system → light
+    → dark, saved, applied in `<head>` before the first paint). Check all of it at 1440 px and
+    375 px, in both languages and both themes, before you report the app done.
   - Bun built-ins only (`bun:sqlite`, `fetch`, `Bun.file`): there is no `bun install` step and no
     `node_modules` in a package. Keep data in `process.env.SPACE_APP_DATA_DIR`.
   - Agents, widgets, tasks and storage go in `space.yaml` as docs/app-spec.md describes them;

@@ -2,17 +2,42 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>My App</title>
     <link rel="icon" href="../icon.svg" type="image/svg+xml" />
+    <!-- Theme and language before the first paint (docs/app-spec.md#app-pages in ai-space): the
+         theme from ?theme, then the saved choice, else the system's; the language from ?lang, then
+         the saved choice, then the browser. app.ts keeps them in step with the two buttons. -->
+    <script>
+      (function () {
+        var d = document.documentElement, q = new URLSearchParams(location.search);
+        var get = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
+        var t = q.get("theme") || get("my-app.theme");
+        if (t === "light" || t === "dark") d.dataset.theme = t;
+        var l = q.get("lang") || get("my-app.lang") ||
+          ((navigator.languages || [navigator.language]).find(function (x) { return /^(zh|en)/i.test(x); }) || "en");
+        d.lang = /^zh/i.test(l) ? "zh-CN" : "en";
+      })();
+    </script>
     <link rel="stylesheet" href="./style.css" />
     <!-- Time in use for the panel (docs/usage.md). Added at run time: the bundler cannot resolve /_space/. -->
     <script>(function(){var s=document.createElement("script");s.src="/_space/usage.js";s.defer=true;document.head.appendChild(s)})()</script>
   </head>
   <body>
+    <!-- Full-bleed: the bar and main fill the window; nothing frames the app. -->
+    <header class="bar">
+      <img class="logo" src="../icon.svg" alt="" />
+      <h1 data-i18n="title"></h1>
+      <div class="prefs">
+        <div class="seg" role="group" id="langs">
+          <button type="button" data-lang="zh" lang="zh-CN">中</button>
+          <button type="button" data-lang="en" lang="en">EN</button>
+        </div>
+        <button type="button" class="theme" id="theme"></button>
+      </div>
+    </header>
     <main>
-      <h1>My App</h1>
-      <p id="message">Loading…</p>
+      <p id="message" data-i18n="loading"></p>
     </main>
     <script type="module" src="./app.ts"></script>
   </body>
