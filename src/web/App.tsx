@@ -1,6 +1,7 @@
 import type { AgentIntentView } from "../space/shortcuts/agent-intents.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddForm, UninstallForm } from "./AppForms.tsx";
+import MachineClis from "./MachineClis.tsx";
 import ModelPreference from "./ModelPreference.tsx";
 import { AccountSettings, loadAuth } from "./Auth.tsx";
 import Chat, { type Ask } from "./Chat.tsx";
@@ -633,7 +634,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       const a = g?.primary;
       if (!a) return null;
       const shown = localized(lang, a);
-      const machines = g!.machines.map((m) => m.peer ?? t("agents.thisMachine"));
+      const machines = g!.machines.map((m) => `${m.peer ?? t("agents.thisMachine")}${m.stale ? ` (${t("chat.machineOffline")})` : ""}`);
       return (
         <>
           <p className="pop-title">
@@ -963,6 +964,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                         }).catch(() => {});
                       }} />
                     </div>
+                    <MachineClis />
                     <AppModels open embedded onClose={close} selected={null} onSelect={openAppModel} />
                   </>
                 )}

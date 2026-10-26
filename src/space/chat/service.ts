@@ -43,7 +43,7 @@ export type ChatServiceOptions = {
 };
 
 /** One entry of the widget's model picker: a runtime's capability tier and the concrete model it maps to. */
-export type ModelOption = { value: string; runtime: string; tier: ModelTier; model: string };
+export type ModelOption = { value: string; runtime: string; tier: ModelTier; model: string; unavailable?: "signed-out" | "offline" };
 
 /**
  * The model a turn runs on and why: the person's pick in the widget, the
@@ -130,7 +130,7 @@ export class ChatService {
 
   /** What the picker offers: every runtime/tier pair of a runtime that answers requests. */
   modelOptions(): ModelOption[] {
-    return this.model.runtimes.tierOptions().filter((o) => o.capabilities.complete).map(({ value, runtime, tier, model }) => ({ value, runtime, tier, model }));
+    return this.model.runtimes.tierOptions().filter((o) => o.capabilities.complete).map(({ value, runtime, tier, model, unavailable }) => ({ value, runtime, tier, model, ...(unavailable ? { unavailable } : {}) }));
   }
 
   /** The space's model for an app's chat that names none: its panel override, its manifest, then Settings → default model (app-models.ts). */

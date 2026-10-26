@@ -1,10 +1,10 @@
-import { SPACE_AGENT, SPACE_APP } from "../agents/api.ts";
 import { type Bus, CallError } from "../bus/bus.ts";
 import { MAX_CALL_BODY_BYTES } from "../bus/types.ts";
 import { eventPayload } from "../scheduler/events.ts";
 import type { Store } from "../scheduler/store.ts";
 import { bearer, tokenEquals } from "../auth.ts";
 import { bridge, wantsWebSocket } from "../terminal/api.ts";
+import type { MachineInventory } from "../model/inventory.ts";
 import type { PeerModelInfo } from "./client.ts";
 
 /**
@@ -14,7 +14,7 @@ import type { PeerModelInfo } from "./client.ts";
  * snapshot that bundles the four lists a hub merges. What changes the peer is
  * what its own panel could change: an uninstall, an app's model override.
  *
- *   GET  /api/peer/snapshot                        { ok, name, apps, services, widgets, agents, asOf }
+ *   GET  /api/peer/snapshot                        { ok, name, apps, services, widgets, agents (the space agent too), inventory, asOf }
  *   GET  /api/peer/apps/:app/icon                  = /api/apps/:app/icon
  *   GET  /api/peer/model/apps                      = /api/model/apps: every app's model rows and this space's choices ┐ when the
  *   PATCH /api/peer/apps/:app/model                = /api/panel/apps/:app/model {tag?, model}                         ┘ routes are given
@@ -75,6 +75,8 @@ export type PeerServeOptions = {
   /** The model routes for other spaces (model/api.ts `createPeerModelRoutes`) and what the snapshot says about them. */
   model?: Routes;
   modelInfo?: () => PeerModelInfo | undefined;
+  /** The agent CLIs on this machine (model/inventory.ts `peerRow`), whatever this space offers other spaces. */
+  inventory?: () => MachineInventory;
   /** The app-model routes for a hub's Models page (model/app-models.ts `createPeerAppModelRoutes`). */
   appModels?: Routes;
 };
@@ -134,11 +136,12 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
           apps: own(apps.apps as { peer?: string }[]),
           services: own(services.services as { peer?: string }[]),
           widgets: own(widgets.widgets as { peer?: string }[]),
-          // The hub has its own space agent.
-          agents: own(agents.agents as { id: string; peer?: string }[]).filter((a) => a.id !== `${SPACE_APP}/${SPACE_AGENT}`),
+          // The space agent too: the hub groups it with its own, and the chat picks the machine (docs/peers.md#agents-on-several-machines).
+          agents: own(agents.agents as { id: string; peer?: string }[]),
           terminal: opts.terminal !== undefined,
           capabilities: (opts.bus?.capabilities() ?? []).filter((c) => opts.allowApp?.(c.app) !== false),
           ...(opts.model && opts.modelInfo?.() ? { model: opts.modelInfo() } : {}),
+          ...(opts.inventory ? { inventory: opts.inventory() } : {}),
           asOf: new Date().toISOString(),
         });
       }),

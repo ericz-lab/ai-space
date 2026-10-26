@@ -19,9 +19,18 @@ export type AgentInfo = {
   appIcon: string;
   /** The runtime a new chat starts on. */
   runtime: string;
-  /** Runtime/tier values the chat may pick; absent on an older peer's app agents. */
-  modelOptions?: { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string }[];
+  /** Runtime/tier values the chat may pick; absent on an older peer's app agents. `unavailable`: shown greyed. */
+  modelOptions?: ModelChoice[];
+  /** Set on a peer's agent while that machine does not answer. */
+  stale?: boolean;
 };
+
+/** A runtime/tier choice as every picker gets it; `unavailable` says why it is shown but cannot be picked (docs/model-machines.md#inventory). */
+export type ModelChoice = { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string; unavailable?: "signed-out" | "offline" };
+
+/** One agent CLI on one machine (`GET /api/model/inventory`). */
+export type CliInfo = { cli: string; kind: string; installed?: boolean; signedIn?: boolean; version?: string; path?: string; detail?: string; checkedAt?: string; configured: boolean; runtimes: string[] };
+export type MachineInventory = { machine: string; via: "local" | "ssh" | "peer"; reachable?: boolean; stale?: boolean; old?: boolean; clis: CliInfo[] };
 
 /** Icons of the panel's own tiles; `/api/apps` returns the active icon pack's over these. */
 export const BUILTIN_ICONS = { inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" };

@@ -20,12 +20,23 @@ export type RegistryDeps = { fetch?: typeof fetch };
 export type RemoteRuntimes = {
   names(): string[];
   adapter(machine: string, runtime: string): RuntimeAdapter | { error: string };
-  /** What each peer offers, with its tier names, for the panel's model choices. */
-  offered(): { machine: string; runtime: string; kind: string; image: boolean; tiers: TierModels }[];
+  /** What each peer offers, with its tier names, for the panel's model choices; `availability` from the peer's own probe. */
+  offered(): { machine: string; runtime: string; kind: string; image: boolean; tiers: TierModels; availability?: OptionAvailability }[];
 };
 
+/**
+ * Whether a runtime on a machine can be offered as a choice (docs/model-machines.md#inventory):
+ * `missing` leaves it out, `disabled` shows it greyed with the reason, `ok` (or unknown) offers it.
+ */
+export type OptionAvailability = { state: "ok" } | { state: "missing" } | { state: "disabled"; reason: "signed-out" | "offline" };
+/** `machine` is "" for this space. */
+export type AvailabilityOf = (machine: string, runtime: string) => OptionAvailability;
+
+/** A model choice; `unavailable` says why it is shown but cannot be picked. */
+export type TierOption = { value: string; runtime: string; tier: ModelTier; model: string; capabilities: RuntimeAdapter["capabilities"]; unavailable?: "signed-out" | "offline" };
+
 /** A model choice on another machine: `machine:runtime/tier`. */
-export type MachineTierOption = { value: string; machine: string; runtime: string; tier: ModelTier; model: string; capabilities: RuntimeAdapter["capabilities"] };
+export type MachineTierOption = TierOption & { machine: string };
 
 /** Kinds whose answers can run over ssh. */
 const SSH_KINDS = new Set<RuntimeSpec["kind"]>(["claude-code", "codex-cli", "deepseek-harness"]);
@@ -61,6 +72,7 @@ export class RuntimeRegistry {
   private readonly machines = new Map<string, MachineSpec>();
   private readonly machineAdapters = new Map<string, RuntimeAdapter>();
   private remote: RemoteRuntimes | undefined;
+  private availability: AvailabilityOf | undefined;
   private readonly deps: RegistryDeps;
   /** Where a bare model name goes; undefined when every model must name its runtime. */
   readonly default: RuntimeAdapter | undefined;
@@ -103,6 +115,11 @@ export class RuntimeRegistry {
     const clash = remote.names().filter((n) => this.machines.has(n));
     if (clash.length) throw new Error(`machine ${clash.join(", ")} is both a peer and an entry under machines: in runtimes.yaml; rename one`);
     this.remote = remote;
+  }
+
+  /** Hand over what the probes know, so the choices leave out what cannot run (`tierOptions`, `machineTierOptions`). */
+  setAvailability(fn: AvailabilityOf): void {
+    this.availability = fn;
   }
 
   /** A runtime's configuration, as runtimes.yaml (or the environment) gave it. */
@@ -177,22 +194,33 @@ export class RuntimeRegistry {
     for (const r of this.machineAdapters.values()) r.closeLive?.();
   }
 
-  /** Choices on other machines: every `machines:` login × runtime that runs over ssh, and what the peers offer. */
+  /** Choices on other machines: every `machines:` login × runtime that runs over ssh, and what the peers offer. A CLI missing there is left out. */
   machineTierOptions(): MachineTierOption[] {
     const out: MachineTierOption[] = [];
-    const push = (machine: string, runtime: string, image: boolean, tiers: TierModels) => {
+    const push = (machine: string, runtime: string, image: boolean, tiers: TierModels, availability: OptionAvailability = { state: "ok" }) => {
+      if (availability.state === "missing") return;
       for (const tier of MODEL_TIERS) {
         const model = tiers[tier];
-        if (model) out.push({ value: `${machine}:${runtime}/${tier}`, machine, runtime, tier, model, capabilities: { complete: true, agent: false, chat: false, image } });
+        if (model) out.push({ value: `${machine}:${runtime}/${tier}`, machine, runtime, tier, model, capabilities: { complete: true, agent: false, chat: false, image }, ...(availability.state === "disabled" ? { unavailable: availability.reason } : {}) });
       }
     };
-    for (const m of this.machines.values()) for (const spec of this.specs.values()) if (SSH_KINDS.has(spec.kind)) push(m.name, spec.name, spec.kind === "codex-cli", this.models.get(spec.name) ?? {});
-    for (const o of this.remote?.offered() ?? []) push(o.machine, o.runtime, o.image, o.tiers);
+    for (const m of this.machines.values()) for (const spec of this.specs.values()) if (SSH_KINDS.has(spec.kind)) push(m.name, spec.name, spec.kind === "codex-cli", this.models.get(spec.name) ?? {}, this.availability?.(m.name, spec.name));
+    for (const o of this.remote?.offered() ?? []) push(o.machine, o.runtime, o.image, o.tiers, o.availability);
     return out;
   }
 
-  tierOptions() {
-    return this.list().flatMap((runtime) => Object.entries(this.models.get(runtime.name) ?? {}).map(([tier, model]) => ({ value: `${runtime.name}/${tier}`, runtime: runtime.name, tier: tier as ModelTier, model: model!, capabilities: runtime.capabilities })));
+  /**
+   * Every runtime/tier choice on this space. A runtime whose CLI is missing here is left out and one
+   * that is not signed in carries `unavailable`; `all` lists every configured one, for checking a
+   * value rather than offering it.
+   */
+  tierOptions(opts: { all?: boolean } = {}): TierOption[] {
+    return this.list().flatMap((runtime) => {
+      const a = opts.all ? undefined : this.availability?.("", runtime.name);
+      if (a?.state === "missing") return [];
+      const unavailable = a?.state === "disabled" ? { unavailable: a.reason } : {};
+      return Object.entries(this.models.get(runtime.name) ?? {}).map(([tier, model]) => ({ value: `${runtime.name}/${tier}`, runtime: runtime.name, tier: tier as ModelTier, model: model!, capabilities: runtime.capabilities, ...unavailable }));
+    });
   }
 
   /** One line for the boot log: `claude (claude-code, ssh:box)*, api (anthropic-api, api)`. */

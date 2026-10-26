@@ -143,10 +143,23 @@ The hub row keeps per-app views correct where the app lives. The peer row makes 
 - **signed in**: probes that spend no tokens, at boot and every hour: `claude auth status` (its `loggedIn`), `codex login status` (exit 0), and for DeepSeek Harness the API key in the harness home's `.env` or, with `provider: deepseek-account`, its `.credentials.yaml`. An API runtime is signed in when its key is set.
 - **limited until**: set for one hour when a call fails with a quota or rate error (`usage limit`, `429`, `rate limit`, `at capacity`, `quota`, `overloaded`). It is cleared by the next successful call.
 - **last success**: the time of the last call that succeeded.
+- **version**: the CLI's `--version`, read in the same probe (over ssh, in the same round trip).
 
 For a runtime with its own `ssh:`, both machines get a cell: this one, where its chats and agent tasks run, and the ssh host, where its answers go. On the deployment above, that is exactly the pair that differed.
 
 Settings → Status shows the table. A cell is **used** when a default (the space's, `SPACE_MODEL_DEFAULT`, the runtimes.yaml default), an app override, a manifest's `model:` or an agent's declared runtime points at it. A used cell that is unreachable, not installed, not signed in or limited is a problem: red (limited is amber) and counted in the section's issues. An unused one with the same state is grey. `GET /api/model/status` returns the cells as `machines`, each with `used` and `problem`, and `servesPeers`, the runtimes this space offers. `GET /api/model/usage` adds `byMachine`.
+
+## Inventory
+
+The status table covers configured runtimes; the inventory answers "which agent CLIs does each machine have". At boot, every hour and on demand, each machine (this one and every `machines:` login) is probed for `claude`, `codex` and `dsh` by name, whether or not a runtime uses them: installed, version, signed in. Here the search also covers the user's tool directories (`~/.local/bin`, `/opt/homebrew/bin`, …) and the DeepSeek Harness app's own CLI, so a CLI the service's `PATH` does not have is still found, with its path. A peer probes itself and puts its own row in its snapshot (`inventory`, without paths), whatever `SPACE_PEER_MODEL` says; an older peer has none and is shown as such.
+
+- `GET /api/model/inventory`: `{ machines: [{ machine, via: local|ssh|peer, reachable?, stale?, old?, clis: [{ cli, kind, installed?, signedIn?, version?, path?, configured, runtimes }] }] }`. For a configured CLI the runtime's own probe (its own `bin`) wins; discovery fills in the rest.
+- `POST /api/model/status/probe` (operator): probe every runtime and CLI again now and refresh the peers' snapshots; answers as `GET`. Settings → Models has a **Check again** button for it, so a CLI installed or signed in a minute ago does not wait for the hourly probe.
+- `POST /api/model/runtimes {kind}` (operator): add a CLI found here that no runtime uses to `runtimes.yaml`, under its name (`codex`, else `codex-2`, …) with the absolute path this side found. The path never comes from the request; the file is edited as text, so comments stay, and the result must parse before it is written. Without a file, it starts from the runtimes the environment describes (keys stay in the environment). The runtime is offered after ai-space restarts. A peer's row is read-only: its CLIs are added on the peer.
+
+Settings → Models shows the inventory as a table (machine × CLI): version, signed in or not, the runtime that uses it, and the add button on this machine's row.
+
+**Choices follow the probes.** Every model picker (the chat's runtime menu, an agent's model, a task's model, the default model, each app's model) gets its options from the server, which leaves out a runtime whose CLI is not installed on its machine or whose machine cannot be reached, and marks one that is not signed in, or that sits on a peer that does not answer, with `unavailable` (`signed-out`, `offline`): shown greyed, not pickable. A cell never probed yet counts as available, so the choices are never empty while the first probe runs. A peer's own runtimes are filtered by the peer, from its own probes. A saved choice that is no longer offered is not rewritten: the picker keeps it selected and marks it, and a call on it fails as before, in the ledger.
 
 ## Fallback
 

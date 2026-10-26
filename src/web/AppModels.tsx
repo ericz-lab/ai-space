@@ -1,3 +1,5 @@
+import type { ModelChoice } from "./api.ts";
+import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type AppInfo, getJson, isImgIcon, sendJson } from "./api.ts";
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
@@ -19,7 +21,7 @@ import { type Key, type Lang, localized, useLang } from "./i18n.ts";
 type Source = "request" | "choice" | "override-tag" | "override-app" | "manifest-tag" | "manifest-default" | "default";
 export type Row = { tag: string | null; manifest?: string; override?: string; model: string; source: Source };
 export type AppRows = { app: string; rows: Row[] };
-export type Option = { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string };
+export type Option = ModelChoice;
 type AppLabel = { title: string; i18n?: AppInfo["i18n"]; icon: string };
 export type AppGroup = AppRows & { key: string; peer?: string; title: string; icon: string };
 /** One peer's part of the page: its rows and choices, or why there are none. */
@@ -127,10 +129,10 @@ function ModelRow({ app, peer, row, options, onSaved }: { app: string; peer?: st
         <div className="task-model-controls">
           <select id={`app-model-${peer ? `${peer}-` : ""}${app}-${row.tag ?? ""}`} value={row.override ?? ""} disabled={busy} onChange={(e) => void save(e.target.value)}>
             <option value="">{t("appModels.noOverride")}</option>
-            {row.override && !options.some((o) => o.value === row.override) && <option value={row.override}>{row.override}</option>}
+            {row.override && !options.some((o) => o.value === row.override) && <SavedChoice value={row.override} t={t} />}
             {[...new Set(options.map((o) => o.runtime))].map((runtime) => (
               <optgroup key={runtime} label={runtime}>
-                {options.filter((o) => o.runtime === runtime).map((o) => <option key={o.value} value={o.value}>{t(`modelTier.${o.tier}`)} · {o.model}</option>)}
+                {options.filter((o) => o.runtime === runtime).map((o) => <ChoiceOption key={o.value} o={o} label={`${t(`modelTier.${o.tier}`)} · ${o.model}`} t={t} />)}
               </optgroup>
             ))}
           </select>

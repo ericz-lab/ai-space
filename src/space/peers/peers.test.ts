@@ -160,7 +160,7 @@ widgets:
   });
   peerBus.syncApp("media", { events: { publishes: [{ name: "clip.added" }], consumes: [] }, provides: [{ name: "clip", method: "POST", path: "/api/clip", timeoutMs: 5000 }] });
   // The peer routes may upgrade a socket (the terminal's), so the server declares a websocket handler.
-  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents, appModels: peerAppModels, allowApp: (app) => app !== "secret" }) }, websocket: terminalWebSocket });
+  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents, appModels: peerAppModels, allowApp: (app) => app !== "secret", inventory: () => ({ machine: "", via: "local", clis: [{ cli: "claude", kind: "claude-code", installed: true, signedIn: true, version: "2.1.3", configured: true, runtimes: ["claude"] }, { cli: "codex", kind: "codex-cli", installed: true, signedIn: false, configured: false, runtimes: [] }, { cli: "dsh", kind: "deepseek-harness", installed: false, configured: false, runtimes: [] }] }) }) }, websocket: terminalWebSocket });
   peerBase = `http://127.0.0.1:${peerServer.port}`;
 
   // ---- the hub: a local app, a link app that duplicates the peer's app, and the peer
@@ -247,14 +247,16 @@ describe("peer config", () => {
 });
 
 describe("peer side", () => {
-  test("/api/peer/* needs the bearer token; the snapshot bundles the visible lists without the space agent", async () => {
+  test("/api/peer/* needs the bearer token; the snapshot bundles the visible lists, the space agent included", async () => {
     expect((await get(peerBase, "/api/peer/snapshot")).status).toBe(401);
     expect((await get(peerBase, "/api/peer/snapshot", { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
     const r = await get(peerBase, "/api/peer/snapshot", { headers: { authorization: "Bearer s3cret" } });
     expect(r.status).toBe(200);
     expect(r.body.name).toBe("peer-box");
     expect(r.body.apps.map((a: Body) => a.name)).toEqual(["media"]);
-    expect(r.body.agents.map((a: Body) => a.id)).toEqual(["media/helper"]);
+    expect(r.body.agents.map((a: Body) => a.id)).toEqual(["media/helper", "space/assistant"]);
+    // The CLIs on the peer go with the snapshot, whatever it offers other spaces.
+    expect(r.body.inventory.clis.map((c: Body) => c.cli)).toEqual(["claude", "codex", "dsh"]);
     expect(r.body.widgets.map((w: Body) => w.id)).toEqual(["media/board", "media/latest"]);
     expect(r.body.services).toEqual([{ app: "media", title: "Media", icon: "/api/apps/media/icon", port: 8731, health: "ok", status: "active", hidden: false }]);
     expect(typeof r.body.asOf).toBe("string");
@@ -282,7 +284,11 @@ describe("hub", () => {
     expect(media.widgets.map((w: Body) => w.id)).toEqual(["david/media/latest", "david/media/board"]);
 
     const agents = (await get(hub, "/api/agents")).body.agents;
-    expect(agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant", "david/media/helper"]);
+    // The space agent of each machine: the panel groups them and the chat picks the machine.
+    expect(agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant", "david/media/helper", "david/space/assistant"]);
+    expect(agents[3]).toMatchObject({ app: "space", name: "assistant", peer: "david", stale: false });
+    // The hub keeps the peer's CLI row with the snapshot, for the Models page and the chat's machine menu.
+    expect(peers.get("david")!.snapshot!.inventory!.clis.map((c) => [c.cli, c.installed, c.signedIn])).toEqual([["claude", true, true], ["codex", true, false], ["dsh", false, undefined]]);
 
     const widgets = (await get(hub, "/api/widgets")).body.widgets;
     expect(widgets.map((w: Body) => w.id)).toEqual(["david/media/board", "david/media/latest"]);
@@ -290,7 +296,7 @@ describe("hub", () => {
 
     const services = await get(hub, "/api/services");
     expect(services.body.services).toEqual([{ app: "media", peer: "david", title: "Media", icon: "/api/peers/david/apps/media/icon", port: 8731, health: "ok", status: "active", hidden: false }]);
-    expect(services.body.peers[0]).toMatchObject({ name: "david", health: "ok", stale: false, apps: 1, agents: 1, widgets: 2, services: 1 });
+    expect(services.body.peers[0]).toMatchObject({ name: "david", health: "ok", stale: false, apps: 1, agents: 2, widgets: 2, services: 1 });
 
     const p = (await get(hub, "/api/peers")).body.peers[0];
     expect(p).toMatchObject({ name: "david", url: peerBase, health: "ok", duplicates: ["media-link"] });
@@ -299,7 +305,7 @@ describe("hub", () => {
     // Served as a peer itself, the hub hands out only what lives on it: david's entries stay out.
     const own = await get(hub, "/api/peer/snapshot", { headers: { authorization: "Bearer hubtok" } });
     expect(own.body.apps.map((a: Body) => a.id)).toEqual(["media-link", "notes"]);
-    expect(own.body.agents.map((a: Body) => a.id)).toEqual(["notes/librarian"]);
+    expect(own.body.agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant"]);
     expect(own.body.widgets).toEqual([]);
     expect(own.body.services).toEqual([]);
   });
@@ -420,7 +426,7 @@ describe("hub", () => {
     expect(hide.body.app).toMatchObject({ id: "david/media", hidden: true });
     expect((await get(hub, "/api/apps")).body.apps.map((a: Body) => a.id)).toEqual(["media-link", "notes"]);
     expect((await get(hub, "/api/apps?all=1")).body.apps.map((a: Body) => a.id)).toEqual(["media-link", "notes", "david/media"]);
-    expect((await get(hub, "/api/agents")).body.agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant"]);
+    expect((await get(hub, "/api/agents")).body.agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant", "david/space/assistant"]);
     expect((await get(hub, "/api/widgets")).body.widgets).toEqual([]);
     expect((await get(hub, "/api/services")).body.services[0]).toMatchObject({ app: "media", peer: "david", hidden: true });
     // The peer itself is untouched.
@@ -446,6 +452,8 @@ describe("hub", () => {
     expect(media).toMatchObject({ stale: true, service: { port: 8731, health: "unknown" } });
     expect((await get(hub, "/api/widgets")).body.widgets[1]).toMatchObject({ id: "david/media/latest", stale: true, ok: true });
     expect((await get(hub, "/api/services")).body.services[0]).toMatchObject({ peer: "david", health: "unknown" });
+    // Its agents stay listed, marked stale: the chat's machine menu shows that machine offline.
+    expect((await get(hub, "/api/agents")).body.agents.filter((a: Body) => a.peer === "david").map((a: Body) => [a.id, a.stale])).toEqual([["david/media/helper", true], ["david/space/assistant", true]]);
     const r = await get(hub, "/api/peers/david/apps/media/icon");
     expect(r.status).toBe(502);
     expect(r.body.error).toContain("david unreachable");
