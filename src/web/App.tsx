@@ -161,7 +161,18 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const setSections: SettingsSection[] = ["general", "appearance", "models", "automation", "usage", "status", "packages", ...(hasAccount ? ["account" as const] : [])];
   const [setSectionPicked, setSetSection] = useState<SettingsSection>(() => savedSection([...setSections, "account"]));
   const setSection = setSections.includes(setSectionPicked) ? setSectionPicked : "general";
-  const [settingsPage, setSettingsPage] = useState<"appModels" | "tasks" | "events" | "usage" | "activity" | null>(null);
+  const [settingsPage, setSettingsPageRaw] = useState<"appModels" | "tasks" | "events" | "usage" | "activity" | null>(null);
+  // The app whose model page Settings shows: the Models section lists the apps itself, and a click
+  // opens that app's page as the section's sub-page, so back returns to the list.
+  const [appModelsApp, setAppModelsApp] = useState<string | null>(null);
+  const setSettingsPage = (p: typeof settingsPage) => {
+    setAppModelsApp(null);
+    setSettingsPageRaw(p);
+  };
+  const openAppModel = (app: string | null) => {
+    setAppModelsApp(app);
+    setSettingsPageRaw(app ? "appModels" : null);
+  };
   const pickSection = (s: SettingsSection) => {
     setSettingsPage(null);
     setSetSection(s);
@@ -899,7 +910,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                   </button>
                   {settingsPage === "usage" && <Usage open embedded onClose={close} />}
                   {settingsPage === "activity" && <Activity open embedded onClose={close} nameOf={nameOf} />}
-                  {settingsPage === "appModels" && <AppModels open embedded onClose={close} />}
+                  {settingsPage === "appModels" && <AppModels open embedded onClose={close} selected={appModelsApp} onSelect={openAppModel} />}
                   {settingsPage === "tasks" && <Tasks open embedded onClose={close} />}
                   {settingsPage === "events" && <Events open embedded onClose={close} />}
                 </> : <>
@@ -952,12 +963,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                         }).catch(() => {});
                       }} />
                     </div>
-                    <div className="setcard">
-                      <button className="setrow setlink" onClick={() => setSettingsPage("appModels")}>
-                        {t("settings.appModels")}
-                        <span>›</span>
-                      </button>
-                    </div>
+                    <AppModels open embedded onClose={close} selected={null} onSelect={openAppModel} />
                   </>
                 )}
                 {setSection === "automation" && (

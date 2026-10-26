@@ -413,7 +413,7 @@ model:
     curate: intermediate
 ```
 
-`model: basic` is short for `model: { default: basic }`. The operator can override any of it per app and tag in Settings → App models; a model the request itself names is above both, so leave `model` out of requests and declare it here. The resolution order and the ledger's `modelSource` are in [model.md](model.md#app-models).
+`model: basic` is short for `model: { default: basic }`. The operator can override any of it per app and tag in Settings → Models, on the app's page; a model the request itself names is above both, so leave `model` out of requests and declare it here. The resolution order and the ledger's `modelSource` are in [model.md](model.md#app-models).
 
 ### `checks`
 

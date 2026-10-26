@@ -117,8 +117,8 @@ A call that names no `model` runs on the first of these layers that this space c
 
 | layer | set by |
 | --- | --- |
-| `override-tag` | Settings → App models, for this app and tag |
-| `override-app` | Settings → App models, for the app as a whole |
+| `override-tag` | Settings → Models, on the app's page, for this app and tag |
+| `override-app` | Settings → Models, on the app's page, for the app as a whole |
 | `manifest-tag` | `model.tags.<tag>` in the app's `space.yaml` |
 | `manifest-default` | `model.default` in the app's `space.yaml` |
 | `default` | Settings → Default model, else `SPACE_MODEL_DEFAULT` |
@@ -179,7 +179,7 @@ The read routes carry no token, like the scheduler's: the panel runs in a browse
 
 ## Panel
 
-Settings → App models lists every app with a row for the app and one per tag: the model it runs on now, the layer that chose it and the `space.yaml` value, with a select that sets or clears the override (saved at once, used by the next call).
+Settings → Models lists every app on one line under the default model, sorted by title: the model its calls run on now, the layer that chose it, and how many of its tags run on another model. A click opens the app's page, with a row for the app and one per tag: the model it runs on now, the layer that chose it and the `space.yaml` value, with a select that sets or clears the override (saved at once, used by the next call); back returns to the list.
 
 Settings → Scheduler → Model usage opens a floating window: the window selector (5 h matches a subscription's rolling quota), four cards (calls, tokens, cost, model time), a table by app, purpose and model with the four token kinds side by side, a table by model and backend, and the last thirty calls with their outcome. Below the window comes the history: days recorded, lifetime calls, tokens and cost with the daily average, a day grid over the last year (one square per day, shade by that day's tokens, cost or calls) and weekly bars. The panel refreshes every 30 s while open.
 
