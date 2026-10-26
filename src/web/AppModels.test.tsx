@@ -128,10 +128,12 @@ test("a peer's rows load with its own choices; an older peer and an unreachable 
   const answers: Record<string, Response> = {
     "/api/peers/new/model/apps": Response.json({ ok: true, apps: [{ app: "notes", rows: [] }], options }),
     "/api/peers/old/model/apps": new Response("", { status: 404 }),
+    "/api/peers/older/model/apps": new Response("<!DOCTYPE html><html></html>", { headers: { "content-type": "text/html" } }),
     "/api/peers/down/model/apps": Response.json({ ok: false, error: "peer down unreachable: timeout" }, { status: 502 }),
   };
   globalThis.fetch = (async (url: string) => answers[url]!) as unknown as typeof fetch;
   expect(await loadPeerModels("new")).toEqual({ peer: "new", apps: [{ app: "notes", rows: [] }], options });
   expect(await loadPeerModels("old")).toEqual({ peer: "old", old: true });
+  expect(await loadPeerModels("older")).toEqual({ peer: "older", old: true });
   expect(await loadPeerModels("down")).toEqual({ peer: "down", error: "peer down unreachable: timeout" });
 });
