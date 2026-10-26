@@ -9,6 +9,8 @@ This document sets the visual and interaction rules for the panel (`src/web/`). 
 - **Implemented**: the panel does this today. The source is named, and [Panel design](panel.md#appearance) describes the mechanism.
 - **Proposed**: an accepted direction that has not been built yet. A proposed rule becomes implemented only in the change that builds it, and that change updates this document.
 
+App pages (an app's own UI, on its own origin) are not the panel; they keep the three page rules of [app-spec.md](app-spec.md#app-pages): full-bleed with no outer frame, Chinese and English with a visible switch, and a system / light / dark theme button.
+
 Nothing in this document starts a redesign on its own. The screens layout (home screen, library, more screens; [Panel design](panel.md#screens)) is implemented; section 11 records how it meets these rules and what is still open.
 
 ## 1. Principles

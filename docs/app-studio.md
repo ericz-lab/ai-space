@@ -12,8 +12,10 @@ GitHub and without a coding tool outside the product.
    and description, packs it and installs it: a working tile right away. With `git` on the machine
    the source gets a local history (one commit, no remote); without it, nothing is lost. The
    template starts with what apps used to fix one by one: the usage script, model calls without a
-   fixed model (`model.ts`), long idle timeouts, phone-width and dark-mode CSS, and the icon as
-   favicon. Its `AGENTS.md` lists them so an agent keeps them.
+   fixed model (`model.ts`), long idle timeouts, phone-width CSS, the icon as favicon, and the three
+   page rules of [app-spec.md](app-spec.md#app-pages): a full-bleed layout with no outer frame,
+   Chinese and English with a 中 / EN switch, and a theme button (system, light, dark) applied
+   before the first paint. Its `AGENTS.md` lists them so an agent keeps them.
 2. **Build what was asked.** The panel then opens Space Assistant with the request: change the files
    in `app-src/NAME/` (its `AGENTS.md` says how), then run `space app build NAME`. The assistant
    runs in the workspace with the user's chosen permissions, through whichever agent runtime the
@@ -38,7 +40,7 @@ A spec-2 package with a Bun process and no dependencies to install:
 | --- | --- |
 | `space.yaml` | `spec: 2`, `requires: { spaceApi: 1, bun: 1.3.0 }`, `launch: { kind: process, runtime: bun, entry: server.ts, mode: on-demand, health: /healthz }` |
 | `server.ts` | `Bun.serve` on `PORT`, loopback only: the page, `/healthz`, `/api/hello` |
-| `public/` | `index.html`, `app.ts`, `style.css`, bundled by Bun's HTML import at start |
+| `public/` | `index.html`, `app.ts`, `style.css`, bundled by Bun's HTML import at start: a full-bleed page with a top bar holding the 中 / EN switch and the theme button, a zh/en dictionary in `app.ts`, light and dark tokens in `style.css` |
 | `AGENTS.md` | the rules for whoever changes it |
 | `icon.svg` | the tile's icon |
 

@@ -592,6 +592,32 @@ A page that Bun's HTML import (or another bundler) builds must add the script at
 
 This is recommended, not required. The script keeps a random id per browser tab and sends a heartbeat to `/_space/usage/beat` on the page's own origin every 30 s, while the page is visible and had input in the last 2 minutes. The router forwards `/_space/*` to ai-space and names the app, so the page needs no token and no CORS. Only the time in use is recorded. The script sends nothing about the person, the page's content or what they do in the app. Opens from the panel are counted for every app, with or without the script. Without the router (an app reached on its port) the heartbeat has nowhere to go and fails silently. See [usage.md](usage.md).
 
+## App pages
+
+Every page an app shows people keeps three rules. Each was missed in app after app and fixed by hand afterwards (pages shipped inside a frame, in one language, or with no way to change the theme), so they are part of the contract. Both templates start with them (the package template's `public/`, docs/app-studio.md), and the app template styles in style-book (`cream-chat`) carry them too.
+
+1. **Full-bleed.** The app's layout is the viewport and fills the window edge to edge, on a desktop and on a phone. No page padding, outer border, rounded card or shadow around the app as a whole, and no "wall" color showing around it. Regions (sidebar, toolbar, content) reach the edges and are separated by 1px rules. A reading column may cap its width inside a region; the region's background still reaches the edges.
+2. **Chinese and English.** Every visible string (headings, buttons, placeholders, empty states, errors, `title`, `aria-label`, `<title>`, date and time formats) comes from a dictionary with `zh` and `en`, and a visible switch (中 / EN) changes it at once. The page resolves its language from the `?lang=` hint the panel adds ([i18n.md](i18n.md#apps)), then the choice saved in `localStorage`, then `navigator.languages`, then English. A spec-1 manifest declares `url: /?lang={lang}` (or the full URL with that query) so the panel can pass its language; a package (spec 2) is opened at the Space's own URL and falls back to the saved choice and the browser. Either way the manifest gives an `i18n: zh:` title and description. Text written by people, agents or models is shown as written; error messages the server returns are mapped to the page's language or returned as codes.
+3. **Theme toggle.** One visible button cycles follow system → light → dark. The default follows the system, the choice is saved in `localStorage`, and an inline script in `<head>` applies it before the first paint, so a dark page never flashes white. Colors are tokens; the dark set is written under `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { … } }` and again under `:root[data-theme="dark"] { … }`.
+
+The `<head>` part, before any stylesheet that paints (the rest, the dictionary and the two controls, is in the package template's `public/app.ts`):
+
+```html
+<script>
+  (function () {
+    var d = document.documentElement, q = new URLSearchParams(location.search);
+    var get = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
+    var t = q.get("theme") || get("my-app.theme");
+    if (t === "light" || t === "dark") d.dataset.theme = t;
+    var l = q.get("lang") || get("my-app.lang") ||
+      ((navigator.languages || [navigator.language]).find(function (x) { return /^(zh|en)/i.test(x); }) || "en");
+    d.lang = /^zh/i.test(l) ? "zh-CN" : "en";
+  })();
+</script>
+```
+
+Before shipping a page, look at it at 1440 px and 375 px wide, in both languages and both themes: nothing frames the app, every string switches, and the theme button cycles and survives a reload.
+
 ## Full example
 
 ```yaml
