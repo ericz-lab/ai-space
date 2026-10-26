@@ -16,8 +16,12 @@ export type ImageRunInput = ImageInput;
 export type ImageRunOutcome = ImageOutcome;
 
 export const APP_PATTERN = /^[a-z0-9][a-z0-9._-]*$/i;
-/** A model alias or id as a runtime names it, optionally prefixed `runtime/`; also safe inside a shell command. */
-export const MODEL_PATTERN = /^(?:[a-z][a-z0-9-]{0,31}\/)?[a-z0-9][a-z0-9._:-]{0,63}$/i;
+/**
+ * A model alias or id as a runtime names it, optionally prefixed `runtime/` or `machine:runtime/`
+ * (docs/model-machines.md); also safe inside a shell command. A colon after the `/` is the
+ * runtime's own (DeepSeek's `provider:model`).
+ */
+export const MODEL_PATTERN = /^(?:(?:[a-z0-9][a-z0-9._-]{0,63}:)?[a-z][a-z0-9-]{0,31}\/)?[a-z0-9][a-z0-9._:-]{0,63}$/i;
 /** A tag names the purpose of a call inside an app (translate, story, digest). */
 export const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 /** Tool names as `--allowedTools` takes them: bare (WebSearch) or with a matcher (Bash(git:*)). */
@@ -42,8 +46,11 @@ export const DEFAULT_IMAGE_TIMEOUT_MS = 10 * 60_000;
 export const MAX_IMAGE_PROMPT_CHARS = 32_000;
 export const DEFAULT_IMAGE_SYSTEM = "You create or edit images for an application with the image generation tool. Produce exactly the images the request asks for, using the attached images as the request says, then reply with one short line describing what you made.";
 
-/** Why a row exists: an app's request, the scheduler running an agent task, or an import of an app's own history. */
-export type Origin = "run" | "task" | "import";
+/**
+ * Why a row exists: an app's request, the scheduler running an agent task, an import of an app's
+ * own history, or a call another space forwarded here (`peer`, docs/model-machines.md#ledger).
+ */
+export type Origin = "run" | "task" | "import" | "peer";
 
 export type CallStatus = "ok" | "error";
 
@@ -55,6 +62,8 @@ export type ModelCall = {
   model: string;
   /** Which configured runtime ran it; absent on rows written before runtimes were named and on imported rows. */
   runtime?: string;
+  /** The machine that ran it when not this one (a peer or a `machines:` name); absent for this machine. */
+  machine?: string;
   /** Absent for legacy, imported, or agent/chat records. */
   mode?: CompletionMode;
   /** Which layer chose the model (app-models.ts `ModelSource`); absent on rows before layers were recorded, imports and agent tasks. */

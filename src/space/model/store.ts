@@ -34,7 +34,7 @@ CREATE INDEX IF NOT EXISTS model_calls_started ON model_calls(started_at DESC);
 CREATE INDEX IF NOT EXISTS model_calls_app_started ON model_calls(app, started_at DESC);
 `;
 
-const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [{ table: "model_calls", column: "runtime", ddl: "TEXT" }, { table: "model_calls", column: "mode", ddl: "TEXT" }, { table: "model_calls", column: "model_source", ddl: "TEXT" }];
+const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [{ table: "model_calls", column: "runtime", ddl: "TEXT" }, { table: "model_calls", column: "mode", ddl: "TEXT" }, { table: "model_calls", column: "model_source", ddl: "TEXT" }, { table: "model_calls", column: "machine", ddl: "TEXT" }];
 
 /** Days of ledger kept; 0 keeps everything (the default: the ledger is the history the panel shows). */
 export const DEFAULT_RETENTION_DAYS = 0;
@@ -45,6 +45,7 @@ type Row = {
   tag: string;
   model: string;
   runtime: string | null;
+  machine: string | null;
   mode: ModelCall["mode"] | null;
   model_source: string | null;
   backend: string;
@@ -100,15 +101,16 @@ export class ModelStore {
   add(c: ModelCallInput): ModelCall {
     const r = this.db
       .query(
-        `INSERT INTO model_calls (app, tag, model, runtime, mode, model_source, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
+        `INSERT INTO model_calls (app, tag, model, runtime, machine, mode, model_source, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
                                   input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, cost_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         c.app,
         c.tag,
         c.model,
         c.runtime ?? null,
+        c.machine ?? null,
         c.mode ?? null,
         c.modelSource ?? null,
         c.backend,
@@ -209,7 +211,7 @@ export class ModelStore {
   }
 
   /** Sums grouped by one or more columns, largest first by tokens. */
-  groupBy<K extends readonly ("app" | "tag" | "model" | "runtime" | "backend" | "origin")[]>(keys: K, since: number, app?: string): GroupTotals<Record<K[number], string>>[] {
+  groupBy<K extends readonly ("app" | "tag" | "model" | "runtime" | "machine" | "backend" | "origin")[]>(keys: K, since: number, app?: string): GroupTotals<Record<K[number], string>>[] {
     const cols = keys.join(", ");
     const sql = `SELECT ${cols}, ${TOTALS_SQL} FROM model_calls WHERE started_at >= ?${app ? " AND app = ?" : ""} GROUP BY ${cols}
                  ORDER BY (COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(cache_write_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0) + COALESCE(SUM(output_tokens), 0)) DESC, calls DESC`;
@@ -237,6 +239,12 @@ export class ModelStore {
   /** Tags an app's calls used since a point in time, for the panel's per-tag model rows. */
   tags(app: string, since: number): string[] {
     return this.db.query<{ tag: string }, [string, number]>("SELECT DISTINCT tag FROM model_calls WHERE app = ? AND started_at >= ? ORDER BY tag").all(app, since).map((r) => r.tag);
+  }
+
+  /** The newest successful call per machine and runtime ("" = this machine), for the status table. */
+  lastOk(): Map<string, number> {
+    const rows = this.db.query<{ machine: string | null; runtime: string | null; t: number }, []>("SELECT machine, runtime, MAX(started_at) AS t FROM model_calls WHERE status = 'ok' AND runtime IS NOT NULL AND origin != 'import' GROUP BY machine, runtime").all();
+    return new Map(rows.map((r) => [`${r.machine ?? ""}|${r.runtime}`, r.t]));
   }
 
   /** How many calls of an app are in flight or done since a point in time; for the API's concurrency view. */
@@ -274,6 +282,7 @@ function rowToCall(r: Row): ModelCall {
     tag: r.tag,
     model: r.model,
     runtime: r.runtime ?? undefined,
+    ...(r.machine ? { machine: r.machine } : {}),
     ...(r.mode ? { mode: r.mode } : {}),
     ...(r.model_source ? { modelSource: r.model_source } : {}),
     backend: r.backend,

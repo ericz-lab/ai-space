@@ -102,8 +102,9 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 | --- | --- |
 | `app`, `tag`, `model` | Who, why, what was asked for. |
 | `modelSource` | Which layer chose the model: `choice` (the chat widget's picker), `request`, `override-tag`, `override-app`, `manifest-tag`, `manifest-default` or `default` ([App models](#app-models)). Absent on older rows, imports and agent tasks. |
-| `backend` | `local`, `ssh:<host>`, `api`, or `agent:<runtime>` for scheduler tasks. |
-| `origin` | `run` (an app's request) or `task` (an agent task the scheduler ran). |
+| `backend` | `local`, `ssh:<host>`, `api`, `peer:<name>` for a call forwarded to another space ([model-machines.md](model-machines.md)), or `agent:<runtime>` for scheduler tasks. |
+| `machine` | The machine that ran it when not this one: a peer, a `machines:` login or a runtime's own ssh host; absent for this machine. |
+| `origin` | `run` (an app's request), `task` (an agent task the scheduler ran) or `peer` (a call another space forwarded here, recorded under `<space>/<app>`). |
 | `status`, `error` | `ok` or `error` with the reason. |
 | `startedAt`, `durationMs` | Wall clock of the whole call including any wait for a slot. |
 | `promptChars`, `outputChars` | Sizes only; prompts and answers are not stored. |

@@ -106,6 +106,12 @@ describe("agents api", () => {
     expect((await post("/api/agents/space/assistant/chat", { message: "look", images: [{ ...image, data: "bad" }] })).status).toBe(400);
   });
 
+  test("a model on another machine is refused: a chat runs where its app lives", async () => {
+    const r = await post("/api/agents/notes/librarian/chat", { message: "hi", model: "box:codex/basic" });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { error: string }).error).toContain("open box/notes/librarian");
+  });
+
   test("lists the space agent and the apps' agents", async () => {
     const r = (await (await fetch(`${base}/api/agents`)).json()) as { agents: { id: string }[] };
     expect(r.agents.map((a) => a.id)).toEqual(["notes/coder", "notes/librarian", "space/assistant"]);

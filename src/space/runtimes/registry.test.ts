@@ -33,7 +33,8 @@ runtimes:
 `,
       { MY_KEY: "sk-1" },
     );
-    expect(warnings).toEqual([]);
+    // A runtime's own ssh still works and points at machines: (docs/model-machines.md).
+    expect(warnings).toEqual(["runtime claude: ssh is deprecated; name the machine under machines: and call it as <machine>:claude/<model> (docs/model-machines.md)"]);
     expect(config).toEqual({
       default: "claude",
       runtimes: [

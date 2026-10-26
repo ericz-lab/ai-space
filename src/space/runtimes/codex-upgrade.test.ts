@@ -69,6 +69,15 @@ test("boot takes the codex tiers from the catalogue of both machines, under the 
   expect(logs[0]).toContain("advanced=fallback");
 });
 
+test("a machines: login joins the catalogue: a tier needs a model every machine lists", async () => {
+  const config = parseRuntimesYaml(yaml).config;
+  const registry = new RuntimeRegistry(config);
+  const f = fake({ remote: catalog.filter((m) => m.slug !== "gpt-6.1-sol") });
+  await refreshCodexTiers(registry, config.runtimes, () => {}, f.run, ["bare-alias"]);
+  expect(f.calls.some((c) => c.startsWith("ssh") && c.includes("bare-alias") && c.includes("debug models"))).toBe(true);
+  expect(registry.resolve("codex/intermediate").model).toBe("gpt-6-sol");
+});
+
 describe("codexUpgrade", () => {
   const withHome = async (fn: (home: string) => Promise<void>) => {
     const home = await mkdtemp(join(tmpdir(), "space-codex-upgrade-"));

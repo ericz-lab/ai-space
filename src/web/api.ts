@@ -84,6 +84,23 @@ export type WidgetInfo = {
 } & ({ ok: true; items: WidgetItem[]; blocks?: WidgetBlock[]; asOf?: string; staleAfterMs?: number } | { ok: false; error: string });
 
 /** One peer machine as `GET /api/services` and `GET /api/peers` report it. */
+/** One cell of the model status table (docs/model-machines.md#status): a runtime on a machine ("" = this one). */
+export type MachineCell = {
+  machine: string;
+  runtime: string;
+  kind: string;
+  reachable?: boolean;
+  installed?: boolean;
+  signedIn?: boolean;
+  detail?: string;
+  checkedAt?: string;
+  limitedUntil?: string;
+  lastError?: string;
+  lastOkAt?: string;
+  used: boolean;
+  problem?: "unreachable" | "not installed" | "not signed in" | "limited";
+};
+
 export type PeerInfo = {
   name: string;
   url: string;

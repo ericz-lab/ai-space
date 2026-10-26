@@ -4,8 +4,9 @@ import { basename, join } from "node:path";
 import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
 import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
-import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers } from "./space/peers/index.ts";
-import { ModelService, ModelStore, createModelRoutes, recordAgentRun } from "./space/model/index.ts";
+import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers, peerRuntimes } from "./space/peers/index.ts";
+import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, recordAgentRun } from "./space/model/index.ts";
+import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
 import { AppModels, createAppModelRoutes } from "./space/model/app-models.ts";
 import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts";
@@ -146,7 +147,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   for (const w of loaded.warnings) console.warn(`[runtimes] ${w}`);
   const runtimes = new RuntimeRegistry(loaded.config);
   // Codex tiers from the installed CLI's catalogue, in the background: the built-in names serve until it answers.
-  void refreshCodexTiers(runtimes, loaded.config.runtimes, (l) => console.log(`[runtimes] ${l}`));
+  void refreshCodexTiers(runtimes, loaded.config.runtimes, (l) => console.log(`[runtimes] ${l}`), undefined, (loaded.config.machines ?? []).map((m) => m.ssh));
   const registry = new AppRegistry();
   // The bus (docs/events.md): http and stream deliveries of every stored event, and calls between apps.
   const busStore = new BusStore(config.dbPath);
@@ -166,7 +167,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const appDefaultModel = () => modelPreferences.read() ?? config.model.defaultModel;
   const baseDefaultModel = () => modelPreferences.read() ?? config.chatModel;
   const modelStore = new ModelStore(config.dbPath, { retentionDays: config.model.retentionDays });
-  const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency });
+  // The status table (docs/model-machines.md#status): limits and successes from the calls, installed and signed in from probes.
+  const runtimeHealth = new RuntimeHealth();
+  runtimeHealth.seed(modelStore.lastOk());
+  const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency, health: runtimeHealth });
   // Per app and tag, when a call names no model (docs/model.md#app-models): panel overrides, the manifest, then the default above.
   const appModels = new AppModels(store.db, {
     manifest: (app) => registry.get(app)?.manifest.model,
@@ -179,7 +183,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         return false;
       }
     },
-    options: () => modelPreferences.options(),
+    // A model on another machine (`box:codex/basic`) is a valid override too.
+    options: () => [...modelPreferences.options(), ...runtimes.machineTierOptions()],
   });
   const chatStore = new ChatStore(config.dbPath);
   const chat = new ChatService({ store: chatStore, model, defaultModel: (app, tag) => appModels.resolve(app, tag), fileDir: (app) => join(storage.appDataDir(app), "chat") });
@@ -229,6 +234,48 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       }
     },
   });
+  // A model may name a peer (`box:codex/basic`): its answers go through the peer link (docs/model-machines.md).
+  runtimes.attachRemote(peerRuntimes(peers, config.name));
+  for (const r of config.peerModel) {
+    const rt = runtimes.get(r);
+    if (!rt?.capabilities.complete) console.error(`[model] SPACE_PEER_MODEL names ${r}, which is not a runtime here that answers requests`);
+    else if (rt.machine) console.error(`[model] SPACE_PEER_MODEL names ${r}, whose answers run on ${rt.machine}; it is not offered to other spaces`);
+  }
+  const peerModelInfo = () => {
+    const serves = config.peerModel.flatMap((name) => {
+      const r = runtimes.get(name);
+      if (!r?.capabilities.complete || r.machine) return [];
+      const tiers = Object.fromEntries(runtimes.tierOptions().filter((o) => o.runtime === name).map((o) => [o.tier, o.model]));
+      return [{ name, kind: r.kind, image: Boolean(r.capabilities.image), tiers }];
+    });
+    return serves.length ? { serves, cells: runtimeHealth.list().filter((c) => c.machine === "" && serves.some((s) => s.name === c.runtime)) } : undefined;
+  };
+  // What the status table flags when it cannot answer: every model something here is set to use.
+  const usedModels = (): string[] => {
+    const out = [appDefaultModel(), baseDefaultModel()];
+    if (runtimes.default) out.push(`${runtimes.default.name}/default`);
+    for (const e of registry.list()) {
+      const m = e.manifest;
+      const over = appModels.overrides(m.app);
+      if (over.app) out.push(over.app);
+      out.push(...Object.values(over.tags));
+      if (m.model?.default) out.push(appModels.qualify(m.model.default)!);
+      for (const t of Object.values(m.model?.tags ?? {})) out.push(appModels.qualify(t)!);
+      for (const a of m.agents ?? []) if (a.runtime) out.push(`${a.runtime}/${a.model ?? "intermediate"}`);
+    }
+    return out.filter(Boolean);
+  };
+  const machineCells = () =>
+    statusTable({
+      health: runtimeHealth,
+      runtimes,
+      used: usedModels(),
+      peers: peers.names().flatMap((name) => {
+        const info = peers.get(name)?.snapshot?.model;
+        return info ? [{ machine: name, cells: info.cells, serves: info.serves }] : [];
+      }),
+    });
+  const probeRuntimes = () => void runtimeHealth.probe(probeTargets(runtimes)).catch((e) => console.error(`[model] runtime probe failed: ${(e as Error).message}`));
   const remote = { name: config.name, capabilities: () => peers.capabilities(), providerOf: (app: string, cap?: string) => peers.providerOf(app, cap), get: (name: string) => peers.get(name) };
   // Shortcuts (docs/shortcuts.md): the actions the command box and the Shortcuts panel run, as the operator.
   const shortcutStore = new ShortcutStore(config.dbPath);
@@ -369,6 +416,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   bus.start();
   await scheduler.start();
   peers.start();
+  // Installed and signed in: at boot and every hour, without spending tokens.
+  probeRuntimes();
+  const probeTimer = setInterval(probeRuntimes, 3_600_000);
+  probeTimer.unref();
   void router.sync();
 
   const panelRoutes = createPanelRoutes({
@@ -453,7 +504,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       })],
       ["app", createNotifyRoutes({ notify, store: notifyStore, token: config.apiToken, appForToken: (t) => storage.appForToken(t) })],
       ["owner", createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel })],
-      ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag) })],
+      ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag), machines: machineCells, servesPeers: config.peerModel })],
       ["owner", createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) })],
       ["app", createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget })],
       ["public", createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name, token: config.apiToken, managed: Boolean(await readOwnership(ws.home)) })],
@@ -471,7 +522,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", agentRoutes],
       ["owner", createPeerRoutes({ hub: peers, layout, registry })],
       ["owner", terminalRoutes],
-      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}) })],
+      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
       ["public", createWebRoutes()],
       ["owner", createAuthRoutes({ mode: config.auth, auth })],
     ],
@@ -544,6 +595,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // process more than this: KillMode=mixed (children survive until the drain is over) and a
   // TimeoutStopSec above SPACE_DRAIN_SECONDS. See deploy/ai-space.service and docs/scheduler.md.
   const shutdown = async () => {
+    clearInterval(probeTimer);
     console.log("[space] shutting down");
     scheduler.stop();
     bus.stop();

@@ -2,7 +2,8 @@ import { assertCompletionMode, type OnDelta, type RuntimeAdapter } from "../runt
 import { RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
 import type { ModelStore } from "./store.ts";
 import type { ModelSource } from "./app-models.ts";
-import { type ImageRunInput, type ImageRunOutcome, type ModelCall, type RunInput, type RunOutcome, type Usage } from "./types.ts";
+import type { RuntimeHealth } from "./health.ts";
+import { type ImageRunInput, type ImageRunOutcome, type ModelCall, type Origin, type RunInput, type RunOutcome, type Usage } from "./types.ts";
 
 /**
  * The service: resolves a request's model to one of the configured runtimes
@@ -24,6 +25,8 @@ export type ModelServiceOptions = {
   maxConcurrency?: number;
   log?: (message: string) => void;
   now?: () => number;
+  /** Told about every call's outcome: the status table's limited and last-success columns. */
+  health?: RuntimeHealth;
 };
 
 export type RunResult = { outcome: RunOutcome; call: ModelCall };
@@ -31,6 +34,26 @@ export type ImageResult = { outcome: ImageRunOutcome; call: ModelCall };
 
 /** Recorded for a call the process could not finish: a restart, or a drain that ran out of grace. */
 export const INTERRUPTED = "interrupted: ai-space stopped while the call was running";
+
+/** Tools that reach only the network: a call limited to them needs nothing of the machine it runs on. */
+export const WEB_TOOLS: ReadonlySet<string> = new Set(["WebSearch", "WebFetch"]);
+
+/**
+ * Why a call needs the environment of the machine that runs it, or undefined when it is plain
+ * reasoning (docs/model-machines.md#placement): full mode carries the CLI's own context and tools
+ * there (its working directory, CLAUDE.md, MCP servers), and a tool other than the web ones reads
+ * or changes that machine. Files are not a reason: they travel with the request.
+ */
+export function needsLocal(input: Pick<RunInput, "mode" | "tools">): string | undefined {
+  if (input.mode === "full") return "full mode";
+  const local = input.tools.filter((t) => !WEB_TOOLS.has(t.split("(")[0]!));
+  return local.length ? `tools that act on the machine (${local.join(", ")})` : undefined;
+}
+
+function assertPlace(runtime: RuntimeAdapter, input: Pick<RunInput, "mode" | "tools">): void {
+  const why = runtime.machine ? needsLocal(input) : undefined;
+  if (why) throw new Error(`this call uses ${why} and needs this machine's environment, so it cannot run on ${runtime.machine}; send it without tools (or with WebSearch/WebFetch only), or hand the work to an agent on the machine that has the data`);
+}
 
 type Inflight = { mode?: RunInput["mode"]; app: string; tag: string; model: string; promptChars: number; startedAt: number };
 
@@ -40,6 +63,7 @@ export class ModelService {
   readonly maxConcurrency: number;
   private readonly log: (m: string) => void;
   private readonly now: () => number;
+  readonly health: RuntimeHealth | undefined;
   private running = 0;
   private readonly queue: (() => void)[] = [];
   private readonly inflight = new Map<Promise<RunResult | ImageResult>, Inflight>();
@@ -50,6 +74,7 @@ export class ModelService {
     this.maxConcurrency = Math.max(1, opts.maxConcurrency ?? 4);
     this.log = opts.log ?? ((m) => console.log(`[model] ${m}`));
     this.now = opts.now ?? Date.now;
+    this.health = opts.health;
   }
 
   /** Where a bare model name runs; the status view shows it. */
@@ -70,12 +95,23 @@ export class ModelService {
   }
 
   /**
+   * The runtime for a call, refusing one that needs this machine's environment but resolves to
+   * another machine (a peer, a `machines:` login or a runtime's own ssh host). Nothing moves it
+   * back here silently: the app sends plain reasoning, or hands the work to an agent where the data is.
+   */
+  place(input: Pick<RunInput, "model" | "mode" | "tools">): { runtime: RuntimeAdapter; model: string } {
+    const r = this.resolve(input.model);
+    assertPlace(r.runtime, input);
+    return r;
+  }
+
+  /**
    * Run one call for an app and record it. Never throws for a failed call: the outcome says so.
    * With `onDelta`, the runtime hands the text over as it is produced when it can; the outcome
    * still carries the whole answer. `source` is recorded with the call: which layer chose the model.
    */
-  async run(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, source?: ModelSource): Promise<RunResult> {
-    const p = this.execute(app, input, signal, onDelta, source);
+  async run(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, source?: ModelSource, origin: Origin = "run"): Promise<RunResult> {
+    const p = this.execute(app, input, signal, onDelta, source, origin);
     this.inflight.set(p, { mode: input.mode ?? (input.tools.length || input.files?.length ? undefined : "slim"), app, tag: input.tag, model: input.model, promptChars: input.prompt.length, startedAt: this.now() });
     try {
       return await p;
@@ -95,8 +131,8 @@ export class ModelService {
    * Pictures for an app: the same cap, in-flight tracking and ledger as `run`. The row carries the
    * tokens the runtime reported for driving its image tool; what the tool itself cost is not reported.
    */
-  async image(app: string, input: ImageRunInput, signal?: AbortSignal, source?: ModelSource): Promise<ImageResult> {
-    const p = this.executeImage(app, input, signal, source);
+  async image(app: string, input: ImageRunInput, signal?: AbortSignal, source?: ModelSource, origin: Origin = "run"): Promise<ImageResult> {
+    const p = this.executeImage(app, input, signal, source, origin);
     this.inflight.set(p, { app, tag: input.tag, model: input.model, promptChars: input.prompt.length, startedAt: this.now() });
     try {
       return await p;
@@ -105,11 +141,11 @@ export class ModelService {
     }
   }
 
-  private async executeImage(app: string, input: ImageRunInput, signal?: AbortSignal, source?: ModelSource): Promise<ImageResult> {
-    const row = (runtime: string | undefined, model: string, outcome: ImageRunOutcome, startedAt: number, durationMs: number) =>
+  private async executeImage(app: string, input: ImageRunInput, signal?: AbortSignal, source?: ModelSource, origin: Origin = "run"): Promise<ImageResult> {
+    const row = (runtime: RuntimeAdapter | undefined, model: string, outcome: ImageRunOutcome, startedAt: number, durationMs: number) =>
       this.store.add({
-        app, tag: input.tag, model, runtime, ...(source ? { modelSource: source } : {}),
-        backend: outcome.backend, origin: "run", status: outcome.ok ? "ok" : "error", error: outcome.ok ? undefined : outcome.error,
+        app, tag: input.tag, model: outcome.model ?? model, runtime: runtime?.name, ...(runtime?.machine ? { machine: runtime.machine } : {}), ...(source ? { modelSource: source } : {}),
+        backend: outcome.backend, origin, status: outcome.ok ? "ok" : "error", error: outcome.ok ? undefined : outcome.error,
         startedAt, durationMs, promptChars: input.prompt.length, outputChars: outcome.ok ? outcome.text.length : undefined, usage: outcome.usage, costUsd: outcome.costUsd,
       });
     let target: { runtime: RuntimeAdapter; model: string };
@@ -121,18 +157,19 @@ export class ModelService {
     }
     if (!(await this.acquire(signal))) {
       const outcome: ImageRunOutcome = { ok: false, error: "aborted", backend: target.runtime.backend };
-      return { outcome, call: row(target.runtime.name, target.model, outcome, this.now(), 0) };
+      return { outcome, call: row(target.runtime, target.model, outcome, this.now(), 0) };
     }
     const startedAt = this.now();
     let outcome: ImageRunOutcome;
     try {
-      outcome = await target.runtime.image!({ ...input, model: target.model }, signal);
+      outcome = await target.runtime.image!({ ...input, model: target.model, caller: app }, signal);
     } catch (e) {
       outcome = { ok: false, error: (e as Error).message ?? String(e), backend: target.runtime.backend };
     } finally {
       this.release();
     }
-    const call = row(target.runtime.name, target.model, outcome, startedAt, Math.max(0, this.now() - startedAt));
+    const call = row(target.runtime, target.model, outcome, startedAt, Math.max(0, this.now() - startedAt));
+    this.health?.note(target.runtime.machine ?? "", target.runtime.name, outcome.ok ? undefined : outcome.error);
     if (!outcome.ok) this.log(`${app}/${input.tag} image (${target.runtime.name}/${target.model}, ${outcome.backend}): ${outcome.error}`);
     return { outcome, call };
   }
@@ -164,49 +201,54 @@ export class ModelService {
     return { finished: started - left.length, interrupted: left.length };
   }
 
-  private async execute(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, source?: ModelSource): Promise<RunResult> {
-    let target: { runtime: RuntimeAdapter; model: string };
+  private async execute(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, source?: ModelSource, origin: Origin = "run"): Promise<RunResult> {
+    let target: { runtime: RuntimeAdapter; model: string } | undefined;
     try {
       target = this.resolve(input.model);
+      assertPlace(target.runtime, input);
       assertCompletionMode(input);
       if (input.serviceTier !== undefined && target.runtime.kind !== "codex-cli") throw new Error("serviceTier requires a local Codex streaming runtime");
       if (input.mode === "full" && target.runtime.kind !== "codex-cli" && target.runtime.kind !== "claude-code") {
         throw new Error(`runtime ${target.runtime.name} does not support full completion mode`);
       }
     } catch (e) {
-      // Recorded too: an app asking for a runtime this space lacks shows up in the ledger as its own error.
-      const outcome: RunOutcome = { ok: false, error: (e as Error).message, backend: this.backend as RunOutcome["backend"] };
-      return { outcome, call: this.record(app, input, undefined, outcome, this.now(), 0, source) };
+      // Recorded too: an app asking for a runtime this space lacks, or for this machine's environment
+      // on another, shows up in the ledger as its own error (under that runtime and machine when known).
+      const outcome: RunOutcome = { ok: false, error: (e as Error).message, backend: (target?.runtime.backend ?? this.backend) as RunOutcome["backend"] };
+      return { outcome, call: this.record(app, target ? { ...input, model: target.model } : input, target?.runtime, outcome, this.now(), 0, source, origin) };
     }
     if (!(await this.acquire(signal))) {
       // Cancelled while queued: it never ran, but the ledger still shows the request.
       const outcome: RunOutcome = { ok: false, error: "aborted", backend: target.runtime.backend };
-      return { outcome, call: this.record(app, { ...input, model: target.model }, target.runtime.name, outcome, this.now(), 0, source) };
+      return { outcome, call: this.record(app, { ...input, model: target.model }, target.runtime, outcome, this.now(), 0, source, origin) };
     }
     const startedAt = this.now();
     let outcome: RunOutcome;
     try {
-      outcome = await target.runtime.complete({ ...input, model: target.model }, signal, onDelta);
+      outcome = await target.runtime.complete({ ...input, model: target.model, caller: app }, signal, onDelta);
     } catch (e) {
       outcome = { ok: false, error: (e as Error).message ?? String(e), backend: target.runtime.backend };
     } finally {
       this.release();
     }
-    const call = this.record(app, { ...input, model: target.model }, target.runtime.name, outcome, startedAt, Math.max(0, this.now() - startedAt), source);
+    const call = this.record(app, { ...input, model: target.model }, target.runtime, outcome, startedAt, Math.max(0, this.now() - startedAt), source, origin);
+    this.health?.note(target.runtime.machine ?? "", target.runtime.name, outcome.ok ? undefined : outcome.error);
     if (!outcome.ok) this.log(`${app}/${input.tag} (${target.runtime.name}/${target.model}, ${outcome.backend}): ${outcome.error}`);
     return { outcome, call };
   }
 
-  private record(app: string, input: RunInput, runtime: string | undefined, outcome: RunOutcome, startedAt: number, durationMs: number, source?: ModelSource): ModelCall {
+  private record(app: string, input: RunInput, runtime: RuntimeAdapter | undefined, outcome: RunOutcome, startedAt: number, durationMs: number, source?: ModelSource, origin: Origin = "run"): ModelCall {
     return this.store.add({
       app,
       tag: input.tag,
-      model: input.model,
-      runtime,
+      // A peer resolved the tier: its concrete model is what ran.
+      model: outcome.model ?? input.model,
+      runtime: runtime?.name,
+      ...(runtime?.machine ? { machine: runtime.machine } : {}),
       ...(source ? { modelSource: source } : {}),
       mode: input.mode ?? (input.tools.length || input.files?.length ? undefined : "slim"),
       backend: outcome.backend,
-      origin: "run",
+      origin,
       status: outcome.ok ? "ok" : "error",
       error: outcome.ok ? undefined : outcome.error,
       startedAt,
@@ -234,6 +276,7 @@ export class ModelService {
     usage?: Usage;
     costUsd?: number;
   }): ModelCall {
+    if (entry.runtime) this.health?.note("", entry.runtime, entry.ok ? undefined : entry.error);
     return this.store.add({
       app: entry.app,
       tag: entry.tag,

@@ -23,6 +23,7 @@ import type { Manifest, ManifestAgent } from "../scheduler/manifest.ts";
 import { loadAppEnv } from "../scheduler/targets.ts";
 import type { Workspace } from "../workspace.ts";
 import { MODEL_RE, SESSION_ID_RE, runResponse } from "./runtime.ts";
+import { splitMachine } from "../runtimes/registry.ts";
 import { RunBusyError, RunClosedError, RunRegistry, RunStateError } from "./runs.ts";
 import type { SessionStore } from "./sessions.ts";
 import { readTranscript } from "./transcript.ts";
@@ -356,6 +357,9 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
           const context = await intentContext(intent.agent, intent.skills);
           agent.systemPrompt = [agent.systemPrompt, `User timezone: ${skillIntent.timezone}. Request time: ${new Date().toISOString()}. Interpret relative dates in the user's timezone.`, context].filter(Boolean).join("\n\n");
         }
+        // A chat runs where its app lives (docs/model-machines.md): another machine's runtime is that machine's agent.
+        const onMachine = typeof body.model === "string" ? splitMachine(body.model) : undefined;
+        if (onMachine) return error(400, `a chat runs where its app lives; open ${onMachine.machine}/${agent.id} for ${onMachine.machine}'s runtimes`);
         if (body.model !== undefined && (typeof body.model !== "string" || !MODEL_RE.test(body.model))) return error(400, "invalid model");
         const reqModel = typeof body.model === "string" && MODEL_RE.test(body.model) ? body.model : undefined;
         const isBase = agent.id === `${SPACE_APP}/${SPACE_AGENT}`;
