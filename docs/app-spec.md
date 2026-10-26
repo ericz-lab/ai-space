@@ -249,17 +249,18 @@ pets:
     grid: 4x4                      # cells across x down the sheet, each at most 16; all cells the same size
     width: 80                      # width on the page in CSS pixels, 24-160; default 70
     pixelated: true                # draw without smoothing (pixel art); default false
-    animations:                    # by name: row (from 0), frames (from the left), ms for one loop
+    animations:                    # by name: row (from 0), frames (from the left), ms for one loop,
+                                   #   pause: ms the first cell is held after each loop, 0-10000; default 0
       walk: { row: 0, frames: 4, ms: 560 }   # required, facing right; mirrored for walking left
       lie: { row: 1, frames: 2, ms: 2400 }
       sit: { row: 2, frames: 2, ms: 1400 }
-      bark: { row: 3, frames: 4, ms: 900 }
+      bark: { row: 3, frames: 4, ms: 900, pause: 1100 }   # a burst of barks, a rest, again
     rest: lie                      # the animation it rests in while no mood is known; default the first after walk
     mood: /api/pets/dog/mood       # optional: path on the service, or an https URL
     refresh: 30s                   # how often the mood is read; default 30s, minimum 15s
 ```
 
-The pet walks to a random spot, rests a while, and walks again; resting facing left after a walk to the left, the sheet is mirrored. With an animation named `jump`, a click plays it once.
+The pet walks to a random spot, rests a while, and walks again; resting facing left after a walk to the left, the sheet is mirrored. With an animation named `jump`, a click plays it once. An animation with a `pause` plays its loop, then holds the first cell for `pause` before the next loop (so the first cell should be the quiet pose); the bubble gives a small hop as each loop starts. An older panel refuses a `pause` key and with it the whole pet, so an app adds it only once the panels it serves understand it.
 
 Contract for `mood`. `GET <mood>` returns:
 

@@ -11,7 +11,8 @@ import { useLang } from "./i18n.ts";
 // The sheet is an <img> moved inside a clipping box rather than a CSS background: an image needs no CORS.
 export const DEFAULT_SHEET = "/pet.webp";
 
-export type PetAnimation = { row: number; frames: number; ms: number };
+/** `pause`: the first cell is held this much longer after each loop (a bark in bursts). */
+export type PetAnimation = { row: number; frames: number; ms: number; pause?: number };
 
 /** A desk pet declared by an app, as GET /api/pets lists it. */
 export type AppPetInfo = {
@@ -131,6 +132,7 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
   const box = useRef<HTMLDivElement>(null);
   const clip = useRef<HTMLElement>(null);
   const spr = useRef<HTMLImageElement>(null);
+  const sayEl = useRef<HTMLSpanElement>(null);
   const fail = useRef(onError);
   fail.current = onError;
   // The walker reads these through refs, so a new mood or a new sprite object never resets its position.
@@ -205,7 +207,8 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
     let frame = 0;
     let target = x;
     let oneShot: (() => void) | null = null;
-    let frameTimer: ReturnType<typeof setInterval> | undefined;
+    let frameTimer: ReturnType<typeof setTimeout> | undefined;
+    let run = 0; // which setState call the frame timer belongs to
     let behaveTimer: ReturnType<typeof setTimeout> | undefined;
     const walking = () => state === sp().right || (!!sp().left && state === sp().left);
 
@@ -220,13 +223,18 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
       // The bubble opens towards the middle of the page, so it never runs off an edge.
       box.current.dataset.side = x + W / 2 > innerWidth / 2 ? "right" : "left";
     };
+    // A loop of an animation with a pause starts a burst: the bubble gives a small hop with it.
+    const beat = () => sayEl.current?.animate([{ scale: "1" }, { scale: "1.06" }, { scale: "1" }], { duration: 180, easing: "ease-out" });
     const setState = (s: string) => {
       const a = sp().anims[s];
       if (!a) return;
       state = s;
       frame = 0;
-      clearInterval(frameTimer);
-      frameTimer = setInterval(() => {
+      clearTimeout(frameTimer);
+      const mine = ++run;
+      const step = a.ms / a.frames;
+      // Each cell shows for `step`; after a loop the first cell is held `pause` longer.
+      const tick = () => {
         frame += 1;
         if (frame >= a.frames) {
           frame = 0;
@@ -234,10 +242,15 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
             const done = oneShot;
             oneShot = null;
             done();
+            // The one-shot moved on to another animation, which runs its own timer.
+            if (run !== mine) return;
           }
         }
+        if (frame === 1 && a.pause) beat();
         draw();
-      }, a.ms / a.frames);
+        frameTimer = setTimeout(tick, frame === 0 && a.pause ? step + a.pause : step);
+      };
+      frameTimer = setTimeout(tick, step);
       draw();
     };
     const pickRest = () => {
@@ -305,7 +318,7 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
     behave();
     return () => {
       onMood.current = null;
-      clearInterval(frameTimer);
+      clearTimeout(frameTimer);
       clearInterval(mover);
       clearTimeout(behaveTimer);
       el.removeEventListener("click", click);
@@ -317,7 +330,7 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
   return (
     <div className="pet" ref={box} title={say || mood?.link ? undefined : t("pet.clickMe")} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ width: W, height: Math.round(CH * scale) }}>
       {say && (
-        <span className={`pet-say${bubble || hover ? " on" : ""}`} role="status">
+        <span ref={sayEl} className={`pet-say${bubble || hover ? " on" : ""}`} role="status">
           {say}
         </span>
       )}
