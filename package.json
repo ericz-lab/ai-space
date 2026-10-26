@@ -39,6 +39,7 @@
     "linux:build": "bun desktop/linux/build.ts",
     "linux:run": "bun desktop/linux/build.ts && desktop/linux/build/ai-space/bin/ai-space",
     "linux:install": "bun desktop/linux/build.ts && desktop/linux/build/ai-space/install.sh",
+    "linux:soak": "bun desktop/linux/build.ts && bun desktop/linux/soak.ts",
     "desktop:test": "desktop/macos/scripts/test.sh",
     "desktop:share:build": "desktop/macos/scripts/build-share.sh",
     "desktop:xcode": "desktop/macos/scripts/fetch-deps.sh && xcodegen generate --spec desktop/macos/project.yml",

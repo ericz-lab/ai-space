@@ -9,7 +9,7 @@ declare module "gi://*" {
 }
 
 declare module "system" {
-  const System: { programArgs: string[]; programInvocationName: string; exit(code: number): never };
+  const System: { programArgs: string[]; programInvocationName: string; exit(code: number): never; gc(): void };
   export default System;
 }
 

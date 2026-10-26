@@ -3,10 +3,12 @@ import Gdk from "gi://Gdk?version=4.0";
 import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import { type Entry, type Widget, allEntries, entryKey, fold, opensFirst, pageUrl, panelScreens, pickText, search, widgetEntry } from "../core/catalogue.ts";
+import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
 import { type BuiltinName, HOME, type Screen, move, newScreen, pin, removeScreen, rename, screenTitle, unpin } from "../core/screens.ts";
 import { lang, prefs, t } from "./env.ts";
 import { iconWidget } from "./icons.ts";
+import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
 import { ScreenStore } from "./screen-store.ts";
 import { WidgetCards } from "./widget-card.ts";
@@ -47,7 +49,8 @@ const LIBRARY = "library";
 
 type Tile = { entry: Entry } | { builtin: (typeof BUILTINS)[number] };
 
-type Page = { id: string; widget: any; body: any; entry?: any };
+/** `key` is what the page draws now: it is drawn again only when that changes. */
+type Page = { id: string; widget: any; body: any; entry?: any; key?: string; note?: any };
 
 function flow(min: number, max: number, spacing = 4, homogeneous = true): any {
   return new Gtk.FlowBox({ selection_mode: Gtk.SelectionMode.NONE, homogeneous, min_children_per_line: min, max_children_per_line: max, column_spacing: spacing, row_spacing: spacing, valign: Gtk.Align.START });
@@ -68,6 +71,9 @@ function clear(box: any): void {
   }
 }
 
+/** How long the ages on Home ("5 min ago") may stand before the pages are drawn again. */
+const AGES_MS = 5 * 60_000;
+
 const titles = { main: t("screenMain"), numbered: (n: number) => t("screenN", { n }) };
 
 export class HomePage {
@@ -84,6 +90,10 @@ export class HomePage {
   private shownId = HOME;
   /** While the pages are first placed, the page they are headed for: the carousel's own reports of page 0 meanwhile are not a swipe. */
   private placing: string | undefined;
+  /** What the dots show now. */
+  private dotsKey = "";
+  /** Which stretch of AGES_MS the ages on the pages were written in (tick). */
+  private ages = Math.floor(Date.now() / AGES_MS);
 
   constructor(
     readonly model: AppModel,
@@ -115,7 +125,10 @@ export class HomePage {
     this.widget.append(this.carousel);
     this.store.on(() => this.render());
     model.on((change) => {
-      if (change === "connections") this.store.keepOnly(model.list.connections.map((c) => c.id));
+      if (change === "connections") {
+        this.store.keepOnly(model.list.connections.map((c) => c.id));
+        this.cards.keepSpaces(model.list.connections.map((c) => c.id));
+      }
     });
   }
 
@@ -179,7 +192,7 @@ export class HomePage {
     if (id !== LIBRARY) {
       // The empty part of a screen takes the right click; a tile or a card keeps its own.
       const click = new Gtk.GestureClick({ button: Gdk.BUTTON_SECONDARY });
-      click.connect("pressed", (_g: unknown, _n: number, x: number, y: number) => this.screenMenu(scroller, { x, y }));
+      click.connect("pressed", (g: any, _n: number, x: number, y: number) => this.screenMenu(g.get_widget(), { x, y }));
       scroller.add_controller(click);
     }
     return { id, widget: scroller, body, entry };
@@ -221,10 +234,13 @@ export class HomePage {
   }
 
   private renderDots(): void {
-    clear(this.dots);
     const space = this.space;
+    const screens = space ? this.store.screens(space.conn.id) : [];
+    const key = space ? signature([space.conn.id, this.shownId, screens.map((s) => [s.id, s.name])]) : "";
+    if (key === this.dotsKey) return;
+    this.dotsKey = key;
+    clear(this.dots);
     if (!space) return;
-    const screens = this.store.screens(space.conn.id);
     const dot = (id: string, tooltip: string, child: any) => {
       const b = new Gtk.Button({ child, tooltip_text: tooltip, css_classes: ["flat", "pager-dot"] });
       if (id === this.shownId) b.add_css_class("active");
@@ -282,34 +298,71 @@ export class HomePage {
 
   // Drawing
 
+  /**
+   * Draws each page whose content changed since it was last drawn: the catalogue (a new version
+   * only when it differs), the page's screen, the query, the widgets switch. The Space is looked at
+   * every 30 seconds and the answer is nearly always the same, so nearly always nothing is drawn.
+   */
   private render(): void {
     const space = this.space;
     const c = space?.catalogue;
     if (!space || !c) {
-      for (const p of this.pages) clear(p.body);
-      clear(this.dots);
+      for (const p of this.pages) this.empty(p);
+      this.renderDots();
+      collectSoon();
       return;
     }
     const screens = this.store.screens(space.conn.id);
     this.syncPages(screens);
     const q = this.query.trim();
+    let drawn = false;
     for (const page of this.pages) {
-      clear(page.body);
+      const index = screens.findIndex((s) => s.id === page.id);
+      const query = page.id === LIBRARY || page.id === HOME ? q : "";
+      const key = signature([space.conn.id, space.catalogueVersion, space.stale, query, page.id === LIBRARY ? null : (screens[index] ?? null), prefs.noWidgets === true, this.ages]);
+      if (key === page.key) continue;
+      this.empty(page);
+      page.key = key;
+      drawn = true;
+      this.cards.page = page.id;
       if (page.id === LIBRARY) {
         if (q) this.results(space, page.body, q);
         else this.library(space, page.body);
       } else if (page.id === HOME && q) this.results(space, page.body, q);
-      else {
-        const index = screens.findIndex((s) => s.id === page.id);
-        this.screen(space, page.body, screens, index);
-      }
+      else this.screen(space, page.body, screens, index);
       if (space.stale && space.catalogueAt) {
-        const note = new Gtk.Label({ label: t("lastKnown", { when: relativeTime(space.catalogueAt, lang) }), xalign: 0, margin_top: 18 });
-        note.add_css_class("dim-label");
-        page.body.append(note);
+        page.note = new Gtk.Label({ label: t("lastKnown", { when: relativeTime(space.catalogueAt, lang) }), xalign: 0, margin_top: 18 });
+        page.note.add_css_class("dim-label");
+        page.body.append(page.note);
       }
     }
+    if (drawn) {
+      // Web views of widgets no page draws any more are closed; the widgets dropped are collected.
+      this.cards.keepOnly(space.conn.id, new Set(this.pages.map((p) => p.id)));
+      collectSoon();
+    }
     this.renderDots();
+  }
+
+  /** A page with nothing drawn on it, to be drawn again. */
+  private empty(page: Page): void {
+    this.cards.release(page.id);
+    clear(page.body);
+    page.key = undefined;
+    page.note = undefined;
+  }
+
+  /**
+   * Once a minute: "last known … ago" moves on in place, and every few minutes the pages are drawn
+   * again so the ages on the cards ("5 min") move on too, even when nothing new came.
+   */
+  tick(): void {
+    const space = this.space;
+    if (space?.stale && space.catalogueAt) for (const p of this.pages) p.note?.set_label(t("lastKnown", { when: relativeTime(space.catalogueAt, lang) }));
+    const ages = Math.floor(Date.now() / AGES_MS);
+    if (ages === this.ages) return;
+    this.ages = ages;
+    this.render();
   }
 
   /** Everything the Space has, pinned or not: apps with the panel's own tiles, agents, widgets. */
@@ -407,7 +460,7 @@ export class HomePage {
     const box = flow(1, 3, 12, false);
     for (const w of widgets) {
       const card = this.cards.card(space, w);
-      this.onRightClick(card, (x, y) => this.entryMenu(card, space, widgetEntry(w), screen, { x, y }));
+      this.onRightClick(card, (anchor, x, y) => this.entryMenu(anchor, space, widgetEntry(w), screen, { x, y }));
       box.append(card);
     }
     return box;
@@ -441,7 +494,7 @@ export class HomePage {
     const dot = e.reach === "down" || e.reach === "paused" || e.reach === "peer-offline" ? e.reach : undefined;
     const button = this.tileButton(iconWidget(e.icon, 56, space.client, e.kind === "agent" ? "avatar-default-symbolic" : "application-x-executable-symbolic"), title, tooltip, dot);
     button.connect("clicked", () => this.actions.open(space, e));
-    this.onRightClick(button, (x, y) => this.entryMenu(button, space, e, screen, { x, y }));
+    this.onRightClick(button, (anchor, x, y) => this.entryMenu(anchor, space, e, screen, { x, y }));
     return button;
   }
 
@@ -456,17 +509,22 @@ export class HomePage {
         })();
     const button = this.tileButton(widget, b.label(), screen ? undefined : b.label());
     button.connect("clicked", () => this.actions.openBuiltin(b.name));
-    this.onRightClick(button, (x, y) => this.pinMenu(button, space, `builtin:${b.name}`, screen, { x, y }, () => this.actions.openBuiltin(b.name)));
+    this.onRightClick(button, (anchor, x, y) => this.pinMenu(anchor, space, `builtin:${b.name}`, screen, { x, y }, () => this.actions.openBuiltin(b.name)));
     return button;
   }
 
   // Menus
 
-  private onRightClick(widget: any, run: (x: number, y: number) => void): void {
+  /**
+   * A right click on `widget`. The handler is handed the widget instead of holding it: a gesture's
+   * handler that held its own widget would keep it, and the whole tile or card, alive for good (the
+   * widget holds the gesture, and GJS keeps the handler of an object something else holds).
+   */
+  private onRightClick(widget: any, run: (anchor: any, x: number, y: number) => void): void {
     const click = new Gtk.GestureClick({ button: Gdk.BUTTON_SECONDARY });
     click.connect("pressed", (g: any, _n: number, x: number, y: number) => {
       g.set_state(Gtk.EventSequenceState.CLAIMED);
-      run(x, y);
+      run(g.get_widget(), x, y);
     });
     widget.add_controller(click);
   }
@@ -480,8 +538,9 @@ export class HomePage {
     pop.connect("closed", () => GLib.idle_add(GLib.PRIORITY_DEFAULT, () => (pop.unparent(), GLib.SOURCE_REMOVE)));
     const item = (label: string, run: () => void, destructive = false) => {
       const b = new Gtk.Button({ child: new Gtk.Label({ label, xalign: 0 }), css_classes: ["flat", ...(destructive ? ["destructive-action"] : [])] });
-      b.connect("clicked", () => {
-        pop.popdown();
+      // The button finds its popover rather than holding it, so the closed menu can be collected.
+      b.connect("clicked", (button: any) => {
+        button.get_ancestor(Gtk.Popover.$gtype)?.popdown();
         run();
       });
       box.append(b);
