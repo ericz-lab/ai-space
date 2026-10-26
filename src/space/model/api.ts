@@ -1,7 +1,7 @@
 import type { ResolvedModel } from "./app-models.ts";
 import { parseImages, type RunImage, spoolImages } from "./images.ts";
 import { GPT_PRICING } from "./pricing.ts";
-import type { ModelService } from "./service.ts";
+import { type ModelService, needsLocal } from "./service.ts";
 import { parseImageInput, parseRunInput, parseWindow } from "./spec.ts";
 import { APP_PATTERN, type ModelCall, type Origin, TAG_PATTERN, WINDOW_MS } from "./types.ts";
 import { splitMachine } from "../runtimes/registry.ts";
@@ -93,8 +93,8 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
           } else fallback = typeof opts.defaultModel === "function" ? opts.defaultModel() : opts.defaultModel;
           input = parseRunInput(body, { model: fallback });
           images = parseImages(body.images);
-          // An unknown `runtime/` prefix is the request's mistake, not a model failure.
-          service.resolve(input.model);
+          // An unknown `runtime/` prefix, or a call that needs this machine sent to another, is the request's mistake, not a model failure.
+          service.place(input);
         } catch (e) {
           if (e instanceof Unauthorized) return error(401, "unauthorized");
           return error(400, (e as Error).message ?? String(e));
@@ -235,6 +235,9 @@ export function createPeerModelRoutes(opts: { service: ModelService; allow: stri
           ({ caller } = prepare(req, body));
           if (body!.stream !== undefined && typeof body!.stream !== "boolean") throw new Error("stream must be a boolean");
           input = parseRunInput(body!);
+          // Here it would read this machine, not the caller's: only plain reasoning crosses a link.
+          const local = needsLocal(input);
+          if (local) throw new Error(`a forwarded call is plain reasoning only; this one uses ${local}`);
           images = parseImages(body!.images, { named: true });
           const { runtime } = service.resolve(input.model);
           allowed(runtime.name, runtime.machine);

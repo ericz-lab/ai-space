@@ -34,11 +34,36 @@ Every operation is handed to a machine: this one, or a peer.
 
 | operation | where it may run | why |
 | --- | --- | --- |
-| `complete`, `image` | any machine that offers the runtime | one prompt in, one answer out; it needs no files of the app |
+| `complete`, `image` | any machine that offers the runtime, when the call is [portable](#placement) | one prompt in, one answer out; it needs no files of the app |
 | `agent` (scheduler task) | the machine where the app lives | it works in the app directory |
 | `chat` (one-shot and live) | the machine where the app lives | same; a chat with an app on a peer already goes to that peer |
 
 Choosing a machine for `agent` and `chat` therefore means choosing the app's machine, which [peers.md](peers.md#agents-on-several-machines) already does (the Machine menu of the chat header). Only `complete` and `image` need a new way to name a machine.
+
+## Placement
+
+A call either needs the environment of the machine that runs it, or it does not. Sending one that does to another machine reads or changes the wrong machine, or fails there, so it is refused.
+
+| the call | needs this machine | may run elsewhere |
+| --- | --- | --- |
+| slim mode, no tools | no | yes |
+| slim mode, only `WebSearch` / `WebFetch` | no (the network is the same everywhere) | yes |
+| files or input images | no: they travel with the request | yes |
+| `mode: "full"` | yes: the CLI's own context and tools (working directory, `CLAUDE.md`, MCP servers) | no |
+| any other tool (`Read`, `Bash`, `Grep`, an MCP tool, ...) | yes: it acts on the machine | no |
+| `agent`, `chat` | yes | only on the app's machine ([the rule](#the-rule)) |
+
+A tool is judged by its name before any `(...)` pattern. "Another machine" is anything the runtime's `machine` names: a peer, a `machines:` login, or a runtime's own `ssh:`.
+
+Where it is checked:
+
+- **Model service**: `/api/model/run` answers 400, and a call through the service records an error row under that runtime and machine. Nothing moves the call back to this machine silently: a model name that points elsewhere is the operator's choice, and the fix is in the app or the override.
+- **The peer**: `/api/peer/model/run` refuses full mode and non-web tools in a forwarded call, so an older or misconfigured space cannot make it read the peer's files.
+
+An app whose work needs a machine's data does one of two things:
+
+1. **Collect, then ask.** The app reads the data itself on its own machine and puts it in the prompt (or as files); the model call is plain reasoning and may run anywhere.
+2. **Hand the task over.** The work goes to an agent on the machine that has the data (an `agent` task or a chat with the app there), which uses that machine's own runtime.
 
 ## Naming a machine in a model
 
@@ -152,6 +177,19 @@ What an operator does on a space that borrows another space's login over a runti
 4. **Machines without ai-space** move from a runtime's `ssh:` to `machines:`.
 
 Not built: **fallback** lists and per-caller budgets ([open questions](#open-questions)).
+
+### Apps
+
+The goal for app code: call `/api/model/run` and `/api/model/image` only, start no CLI, name no model, send a `tag` (its default tier in `space.yaml` under `model.tags`), and keep every call [portable](#placement). The space then picks the runtime and the machine, and moving machines changes no app code.
+
+1. **Clean the apps** (one commit and deploy per app), before the core is deployed:
+   - **Calls that need a machine but only want the web**: `finance-writer` drafts with `mode: "full"` only for web search. It sends `tools: ["WebSearch", "WebFetch"]` instead, and its `ModelRequest` type drops `mode`. Do this first: once the core is deployed, its full-mode calls over a runtime's `ssh:` are refused.
+   - **Fallbacks to a local CLI**: apps that try the model service and run `claude -p` when they have no token drop the CLI branch and fail with a clear error instead. The CLI path was never recorded in the ledger.
+   - **Local CLI only**: an app that runs `claude -p` itself moves to the model service with its own tag.
+   - **Model names in code**: apps that send `codex/...` drop it and declare their tags in `space.yaml`. A model a person picks by hand (a command-line choice) stays.
+2. **Deploy the core** on every space.
+3. **Offer and switch** as in the operator steps above.
+4. **Keep it so**: the app check warns when app source runs `claude -p` or `codex exec`, reads `CLAUDE_BIN`, or calls a vendor API host.
 
 ## Open questions
 

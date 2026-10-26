@@ -12,7 +12,7 @@ ai-space starts an AI runtime in three places: the model service answers an app'
 
 | operation | caller | what it is |
 | --- | --- | --- |
-| `complete` | model service | One answer to one prompt with the request's own system prompt, model, tools and thinking cap. Uses slim mode by default; full mode retains native CLI context and tools (see [completion modes](#completion-modes)). May run on another machine over ssh, borrowing its login. |
+| `complete` | model service | One answer to one prompt with the request's own system prompt, model, tools and thinking cap. Uses slim mode by default; full mode retains native CLI context and tools (see [completion modes](#completion-modes)). May run on another machine (a peer or an ssh login) only when it needs nothing of this one: slim mode with no tools or only WebSearch/WebFetch ([placement](model-machines.md#placement)). |
 | `agent` | scheduler | A coding agent at work: the runtime's own system prompt and tools, the prompt file on stdin, inside the app directory. Always local: it needs the directory. |
 | `chat` | panel | One turn of a conversation, streamed as the runtime's own events; a session id gives continuity. Always local, for the same reason. An interactive turn goes to a process kept for the conversation ([Live chat](#live-chat)). |
 

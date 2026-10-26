@@ -35,6 +35,26 @@ export type ImageResult = { outcome: ImageRunOutcome; call: ModelCall };
 /** Recorded for a call the process could not finish: a restart, or a drain that ran out of grace. */
 export const INTERRUPTED = "interrupted: ai-space stopped while the call was running";
 
+/** Tools that reach only the network: a call limited to them needs nothing of the machine it runs on. */
+export const WEB_TOOLS: ReadonlySet<string> = new Set(["WebSearch", "WebFetch"]);
+
+/**
+ * Why a call needs the environment of the machine that runs it, or undefined when it is plain
+ * reasoning (docs/model-machines.md#placement): full mode carries the CLI's own context and tools
+ * there (its working directory, CLAUDE.md, MCP servers), and a tool other than the web ones reads
+ * or changes that machine. Files are not a reason: they travel with the request.
+ */
+export function needsLocal(input: Pick<RunInput, "mode" | "tools">): string | undefined {
+  if (input.mode === "full") return "full mode";
+  const local = input.tools.filter((t) => !WEB_TOOLS.has(t.split("(")[0]!));
+  return local.length ? `tools that act on the machine (${local.join(", ")})` : undefined;
+}
+
+function assertPlace(runtime: RuntimeAdapter, input: Pick<RunInput, "mode" | "tools">): void {
+  const why = runtime.machine ? needsLocal(input) : undefined;
+  if (why) throw new Error(`this call uses ${why} and needs this machine's environment, so it cannot run on ${runtime.machine}; send it without tools (or with WebSearch/WebFetch only), or hand the work to an agent on the machine that has the data`);
+}
+
 type Inflight = { mode?: RunInput["mode"]; app: string; tag: string; model: string; promptChars: number; startedAt: number };
 
 export class ModelService {
@@ -71,6 +91,17 @@ export class ModelService {
   resolve(model: string): { runtime: RuntimeAdapter; model: string } {
     const r = this.runtimes.resolve(model);
     if (!r.runtime.capabilities.complete) throw new Error(`runtime ${r.runtime.name} does not answer requests`);
+    return r;
+  }
+
+  /**
+   * The runtime for a call, refusing one that needs this machine's environment but resolves to
+   * another machine (a peer, a `machines:` login or a runtime's own ssh host). Nothing moves it
+   * back here silently: the app sends plain reasoning, or hands the work to an agent where the data is.
+   */
+  place(input: Pick<RunInput, "model" | "mode" | "tools">): { runtime: RuntimeAdapter; model: string } {
+    const r = this.resolve(input.model);
+    assertPlace(r.runtime, input);
     return r;
   }
 
@@ -171,18 +202,20 @@ export class ModelService {
   }
 
   private async execute(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, source?: ModelSource, origin: Origin = "run"): Promise<RunResult> {
-    let target: { runtime: RuntimeAdapter; model: string };
+    let target: { runtime: RuntimeAdapter; model: string } | undefined;
     try {
       target = this.resolve(input.model);
+      assertPlace(target.runtime, input);
       assertCompletionMode(input);
       if (input.serviceTier !== undefined && target.runtime.kind !== "codex-cli") throw new Error("serviceTier requires a local Codex streaming runtime");
       if (input.mode === "full" && target.runtime.kind !== "codex-cli" && target.runtime.kind !== "claude-code") {
         throw new Error(`runtime ${target.runtime.name} does not support full completion mode`);
       }
     } catch (e) {
-      // Recorded too: an app asking for a runtime this space lacks shows up in the ledger as its own error.
-      const outcome: RunOutcome = { ok: false, error: (e as Error).message, backend: this.backend as RunOutcome["backend"] };
-      return { outcome, call: this.record(app, input, undefined, outcome, this.now(), 0, source, origin) };
+      // Recorded too: an app asking for a runtime this space lacks, or for this machine's environment
+      // on another, shows up in the ledger as its own error (under that runtime and machine when known).
+      const outcome: RunOutcome = { ok: false, error: (e as Error).message, backend: (target?.runtime.backend ?? this.backend) as RunOutcome["backend"] };
+      return { outcome, call: this.record(app, target ? { ...input, model: target.model } : input, target?.runtime, outcome, this.now(), 0, source, origin) };
     }
     if (!(await this.acquire(signal))) {
       // Cancelled while queued: it never ran, but the ledger still shows the request.

@@ -11,7 +11,7 @@ import { createPeerServeRoutes } from "../peers/serve.ts";
 import { createModelRoutes, createPeerModelRoutes } from "./api.ts";
 import { RuntimeHealth, probeRuntime, readStatus } from "./health.ts";
 import { cellOf, probeTargets, statusTable } from "./machines.ts";
-import { ModelService } from "./service.ts";
+import { ModelService, needsLocal } from "./service.ts";
 import { ModelStore } from "./store.ts";
 import { MODEL_PATTERN } from "./types.ts";
 
@@ -197,6 +197,35 @@ describe("answers through a peer", () => {
     const ba = link();
     expect((await ab.hub.run("a-app", input("box:api/haiku"))).outcome.ok).toBe(true);
     expect((await ba.hub.run("b-app", input("box:api/haiku"))).outcome.ok).toBe(true);
+  });
+
+  test("a call that needs this machine's environment is refused on another, here and at the peer", async () => {
+    const { hub, hubRuntimes, peerService } = link();
+    for (const extra of [{ mode: "full" as const }, { tools: ["Bash"] }, { tools: ["WebSearch", "Read(/etc/*)"] }]) {
+      const { outcome, call } = await hub.run("news", { ...input("box:api/haiku"), ...extra });
+      expect(outcome.ok).toBe(false);
+      expect(call).toMatchObject({ status: "error", machine: "box" });
+      expect(call.error).toContain("needs this machine's environment, so it cannot run on box");
+    }
+    // Plain reasoning and the web tools travel; files do too, since they ride along with the request.
+    expect(needsLocal({ mode: "slim", tools: ["WebSearch", "WebFetch(example.com)"] })).toBeUndefined();
+    expect(() => hub.place({ ...input("box:api/haiku"), tools: ["WebSearch"] })).not.toThrow();
+    // On this machine nothing is refused.
+    expect(() => hub.place({ ...input("codex/basic"), mode: "full" })).not.toThrow();
+    expect(hubRuntimes.resolve("codex/basic").runtime.machine).toBeUndefined();
+
+    const routes = createPeerModelRoutes({ service: peerService, allow: ["api"] }) as Record<string, Record<string, (req: Request & { params: Record<string, string> }) => Promise<Response>>>;
+    const r = await routes["/api/peer/model/run"]!.POST!(Object.assign(new Request("http://box/x", { method: "POST", headers: { "x-space-caller": "hub/news" }, body: JSON.stringify({ prompt: "hi", model: "api/haiku", tools: ["Bash"] }) }), { params: {} }));
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { error: string }).error).toContain("plain reasoning only");
+  });
+
+  test("a machines: login or a runtime's own ssh refuses full mode too", () => {
+    const reg = new RuntimeRegistry(parseRuntimesYaml(`machines:\n  bare: { ssh: me@bare }\nruntimes:\n  codex: { kind: codex-cli }\n  old: { kind: codex-cli, ssh: other }\n`).config);
+    const svc = new ModelService({ store: hubStore, runtimes: reg, log: () => {} });
+    expect(() => svc.place({ ...input("bare:codex/basic"), mode: "full" })).toThrow("cannot run on bare");
+    expect(() => svc.place({ ...input("old/basic"), tools: ["Bash"] })).toThrow("cannot run on other");
+    expect(() => svc.place({ ...input("codex/basic"), mode: "full" })).not.toThrow();
   });
 
   test("the model status lists the machines; usage sums by machine", async () => {
