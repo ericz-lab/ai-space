@@ -6,6 +6,9 @@
  *   SPACE_PEER_<NAME>_HEADERS=Name: value; Name: value   (an access layer in front of the peer)
  *   SPACE_PEER_<NAME>_REFRESH=30s                        (snapshot refresh; default 30s, minimum 10s)
  *
+ * SPACE_PEER_MODEL is not a peer: it lists the runtimes this space offers to
+ * others (docs/model-machines.md), so no peer can be called "model".
+ *
  * NAME is lowercased and `_` becomes `-` to form the peer name, as notify
  * channels do. A malformed peer rejects that one peer (reported, not thrown)
  * and leaves the others alone.
@@ -13,6 +16,8 @@
 
 export const ENV_PREFIX = "SPACE_PEER_";
 const SUFFIXES = ["_TOKEN", "_HEADERS", "_REFRESH"] as const;
+/** `SPACE_PEER_*` settings of this space itself, not peers. */
+const OWN_SETTINGS = new Set(["MODEL"]);
 
 export const PEER_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export const DEFAULT_REFRESH_MS = 30_000;
@@ -43,6 +48,7 @@ export function loadPeers(env: Record<string, string | undefined> = process.env)
   for (const [key, raw] of Object.entries(env)) {
     if (!key.startsWith(ENV_PREFIX) || raw === undefined) continue;
     const rest = key.slice(ENV_PREFIX.length);
+    if (OWN_SETTINGS.has(rest)) continue;
     const suffix = SUFFIXES.find((s) => rest.endsWith(s) && rest.length > s.length);
     if (suffix) {
       const name = envToName(rest.slice(0, -suffix.length));
