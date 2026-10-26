@@ -159,6 +159,7 @@ A peer app whose `url` is already on the panel (a local app's, or an earlier pee
 ## Later
 
 - **Peer tasks**: `GET /api/peer/tasks` and `/api/peer/tasks/:id/runs`, read-only, so the Tasks drawer groups tasks by machine. Running or toggling a task stays on the machine that owns it.
+- **Peer answers**: `POST /api/peer/model/run`, so a hub uses a peer's runtime logins through the peer instead of a runtime's `ssh:`, with usage recorded on the peer. Proposed in [model-machines.md](model-machines.md).
 - **Peer storage inventory** in the settings, read-only.
 - **Peer deliveries**: a peer's http or stream subscription to an event that only reaches the hub. Today each machine subscribes to what reaches its own bus; events flow peer → hub only.
 - **Peer notifications**: none needed; each machine notifies through its own channels. Backups likewise: each machine snapshots its own data under its own prefix; the hub's Backups list shows local apps only.

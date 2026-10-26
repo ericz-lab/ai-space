@@ -116,6 +116,7 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 - Chat events normalised across runtimes, with ai-space keeping its own transcripts; today the browser reads Claude Code's `stream-json` (other runtimes' adapters translate into it) and past sessions are read from each runtime's own files.
 - DeepSeek off-peak pricing in the ledger (the price table takes the peak rate), and a price table in `runtimes.yaml` for models the adapters do not know.
 - Routing by tag, fallback chains, budgets. Every agent already offers a runtime and model-tier picker, and an app's override sets its agents' default.
+- Machines as a part of the model name, answers forwarded through a peer instead of a runtime's `ssh:`, and explicit fallback lists: proposed in [model-machines.md](model-machines.md).
 
 ## Capability tiers
 
