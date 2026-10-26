@@ -55,6 +55,7 @@ export async function loadPeerModels(peer: string): Promise<PeerModels> {
 
 function Ico({ icon }: { icon: string }) {
   const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [icon]);
   if (isImgIcon(icon) && !broken) return <img src={icon} alt="" loading="lazy" onError={() => setBroken(true)} />;
   return <>{isImgIcon(icon) ? "📦" : icon || "📦"}</>;
 }
@@ -231,7 +232,9 @@ export default function AppModels({ open, onClose, onBack, embedded = false, sel
   const toGroups = (apps: AppRows[], peer?: string): AppGroup[] => {
     const keyOf = (app: string) => (peer ? `${peer}/${app}` : app);
     const label = (key: string, app: string) => (labels[key] ? localized(lang, labels[key]).title : app);
-    return apps.map((a) => ({ ...a, key: keyOf(a.app), ...(peer ? { peer } : {}), title: label(keyOf(a.app), a.app), icon: labels[keyOf(a.app)]?.icon || "📦" })).sort((a, b) => a.title.localeCompare(b.title, lang as Lang));
+    // A peer app the hub's list leaves out (one with the same link as a local app) still has its icon on the peer.
+    const iconOf = (app: string) => labels[keyOf(app)]?.icon || (peer ? `/api/peers/${encodeURIComponent(peer)}/apps/${encodeURIComponent(app)}/icon` : "📦");
+    return apps.map((a) => ({ ...a, key: keyOf(a.app), ...(peer ? { peer } : {}), title: label(keyOf(a.app), a.app), icon: iconOf(a.app) })).sort((a, b) => a.title.localeCompare(b.title, lang as Lang));
   };
   const groups = useMemo(() => toGroups(data?.apps ?? []), [data, labels, lang]);
   const peerGroups = useMemo(() => peers.map((p) => ({ ...p, groups: toGroups(p.apps ?? [], p.peer) })), [peers, labels, lang]);
