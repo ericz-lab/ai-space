@@ -1173,6 +1173,10 @@ a.widget-title:hover { color: var(--text); }
 .app-model { margin: 8px 12px; }
 .app-model label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .app-model .task-name { color: var(--text, inherit); font-size: 13px; }
+/* The app list: one line per app, the model it runs on at the right, a chevron to its page. */
+.app-model-row { align-items: center; }
+.app-model-row .task-sched { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.app-model-chev { flex: none; color: var(--muted); font-size: 16px; line-height: 1; }
 
 /* Screens (docs/panel.md#screens): one screen at a time, sliding in from the side it lies on. The
    shell leaves room at the bottom for the dock. */
