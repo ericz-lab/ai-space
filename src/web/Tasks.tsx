@@ -1,3 +1,5 @@
+import type { ModelChoice } from "./api.ts";
+import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { type AppInfo, type RunInfo, type TaskInfo, dateTime, fmtDuration, getJson, isImgIcon, relTime, scheduleText, sendJson, untilTime } from "./api.ts";
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
@@ -72,7 +74,7 @@ function Runs({ taskId }: { taskId: string }) {
   );
 }
 
-type ModelOption = { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string; capabilities: { agent: boolean; complete: boolean } };
+type ModelOption = ModelChoice & { capabilities: { agent: boolean; complete: boolean } };
 
 function ModelPicker({ task, onSaved }: { task: TaskInfo; onSaved: (task: TaskInfo) => void }) {
   const { t } = useLang();
@@ -105,9 +107,9 @@ function ModelPicker({ task, onSaved }: { task: TaskInfo; onSaved: (task: TaskIn
     <div className="task-model-controls">
       <select id={`task-model-${task.id}`} value={value} disabled={busy || !loaded || task.orphaned} onChange={(e) => { setValue(e.target.value); setSaved(false); }}>
         <option value="">{t("tasks.modelDefault", { model: task.base?.model ?? t("chat.modelDefault") })}</option>
-        {value && !eligible.some((o) => o.value === value) && <option value={value}>{value}</option>}
+        {value && !eligible.some((o) => o.value === value) && <SavedChoice value={value} t={t} />}
         {[...new Set(eligible.map((o) => o.runtime))].map((runtime) => <optgroup key={runtime} label={runtime}>
-          {eligible.filter((o) => o.runtime === runtime).map((o) => <option key={o.value} value={o.value}>{t(`modelTier.${o.tier}`)} · {o.model}</option>)}
+          {eligible.filter((o) => o.runtime === runtime).map((o) => <ChoiceOption key={o.value} o={o} label={`${t(`modelTier.${o.tier}`)} · ${o.model}`} t={t} />)}
         </optgroup>)}
       </select>
       <button type="button" disabled={busy || !loaded || task.orphaned || value === (task.overrides.model ?? "")} onClick={() => void save()}>{busy ? t("common.loading") : t("common.save")}</button>

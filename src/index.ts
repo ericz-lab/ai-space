@@ -7,6 +7,8 @@ import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, WidgetFeed, 
 import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers, peerRuntimes } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
+import { availabilityOf } from "./space/model/health.ts";
+import { createInventoryRoutes, peerRow } from "./space/model/inventory.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
 import { AppModels, createAppModelRoutes, createPeerAppModelRoutes } from "./space/model/app-models.ts";
 import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts";
@@ -170,6 +172,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // The status table (docs/model-machines.md#status): limits and successes from the calls, installed and signed in from probes.
   const runtimeHealth = new RuntimeHealth();
   runtimeHealth.seed(modelStore.lastOk());
+  // The choices leave out a runtime whose CLI is missing and grey one that is not signed in (docs/model-machines.md#inventory).
+  runtimes.setAvailability((machine, runtime) => availabilityOf(runtimeHealth.get(machine, runtime)));
   const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency, health: runtimeHealth });
   // Per app and tag, when a call names no model (docs/model.md#app-models): panel overrides, the manifest, then the default above.
   const appModels = new AppModels(store.db, {
@@ -277,7 +281,13 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         return info ? [{ machine: name, cells: info.cells, serves: info.serves }] : [];
       }),
     });
-  const probeRuntimes = () => void runtimeHealth.probe(probeTargets(runtimes)).catch((e) => console.error(`[model] runtime probe failed: ${(e as Error).message}`));
+  const probeAll = () =>
+    Promise.all([
+      runtimeHealth.probe(probeTargets(runtimes)),
+      // Every agent CLI on each machine, used or not: the Models page's inventory.
+      runtimeHealth.discover([{ machine: "" }, ...runtimes.machineList().map((m) => ({ machine: m.name, ssh: m.ssh }))]),
+    ]).then(() => undefined);
+  const probeRuntimes = () => void probeAll().catch((e) => console.error(`[model] runtime probe failed: ${(e as Error).message}`));
   const remote = { name: config.name, capabilities: () => peers.capabilities(), providerOf: (app: string, cap?: string) => peers.providerOf(app, cap), get: (name: string) => peers.get(name) };
   // Shortcuts (docs/shortcuts.md): the actions the command box and the Shortcuts panel run, as the operator.
   const shortcutStore = new ShortcutStore(config.dbPath);
@@ -505,6 +515,15 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         apps: () => scheduler.apps().filter((app) => store.findTask(app, BACKUP_TASK)?.orphaned === false),
       })],
       ["app", createNotifyRoutes({ notify, store: notifyStore, token: config.apiToken, appForToken: (t) => storage.appForToken(t) })],
+      ["owner", createInventoryRoutes({
+        health: runtimeHealth,
+        runtimes,
+        peers: () => peers.names().map((name) => ({ machine: name, stale: peers.get(name)?.health() !== "ok", inventory: peers.get(name)?.snapshot?.inventory })),
+        probe: () => Promise.all([probeAll(), peers.refreshAll()]).then(() => undefined),
+        home: ws.home,
+        token: config.apiToken,
+        env,
+      })],
       ["owner", createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel })],
       ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag), machines: machineCells, servesPeers: config.peerModel })],
       ["owner", createAppModelRoutes(appModelRouteOpts)],
@@ -524,7 +543,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", agentRoutes],
       ["owner", createPeerRoutes({ hub: peers, layout, registry })],
       ["owner", terminalRoutes],
-      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
+      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), inventory: () => peerRow(runtimeHealth, runtimes), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
       ["public", createWebRoutes()],
       ["owner", createAuthRoutes({ mode: config.auth, auth })],
     ],

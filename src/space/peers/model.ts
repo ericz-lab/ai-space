@@ -1,3 +1,4 @@
+import { availabilityOf } from "../model/health.ts";
 import type { RemoteRuntimes } from "../runtimes/registry.ts";
 import { RUNTIME_KINDS, Unsupported, type Backend, type CompleteFile, type CompleteInput, type CompleteOutcome, type ImageInput, type ImageOutcome, type OnDelta, type RuntimeAdapter, type RuntimeKind, type Usage } from "../runtimes/types.ts";
 import type { PeerClient } from "./client.ts";
@@ -85,7 +86,13 @@ export function peerRuntimes(peers: PeerHub, hub: string): RemoteRuntimes {
   return {
     names: () => peers.names(),
     offered: () =>
-      peers.names().flatMap((machine) => (peers.get(machine)?.snapshot?.model?.serves ?? []).map((r) => ({ machine, runtime: r.name, kind: r.kind, image: r.image, tiers: r.tiers }))),
+      peers.names().flatMap((machine) => {
+        const client = peers.get(machine);
+        const info = client?.snapshot?.model;
+        // The peer's own probe of each runtime decides, and a peer that does not answer is offline.
+        const offline = client?.health() !== "ok";
+        return (info?.serves ?? []).map((r) => ({ machine, runtime: r.name, kind: r.kind, image: r.image, tiers: r.tiers, availability: availabilityOf(info?.cells.find((c) => c.runtime === r.name), offline) }));
+      }),
     adapter(machine, runtime) {
       const client = peers.get(machine);
       if (!client) return { error: `unknown peer: ${machine}` };

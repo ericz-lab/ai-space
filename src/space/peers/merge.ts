@@ -15,8 +15,8 @@ export function peerRoute(peer: string, s: string): string {
   return s.startsWith("/api/") ? `/api/peers/${encodeURIComponent(peer)}/${s.slice("/api/".length)}` : s;
 }
 
-export function mergeAgent(peer: string, a: AgentView): AgentView {
-  return { ...a, id: peerId(peer, a.id), peer, avatar: peerRoute(peer, a.avatar), appIcon: peerRoute(peer, a.appIcon) };
+export function mergeAgent(peer: string, a: AgentView, stale = false): AgentView {
+  return { ...a, id: peerId(peer, a.id), peer, stale, avatar: peerRoute(peer, a.avatar), appIcon: peerRoute(peer, a.appIcon) };
 }
 
 /** Every app of the snapshot, `hidden` set from the hub's layout; the caller filters. */
@@ -31,14 +31,14 @@ export function mergeApps(peer: string, snap: PeerSnapshot, hidden: Set<string>,
     // A peer app is never deleted from the hub, whatever it is on its own machine.
     manifestOnly: false,
     ...(a.service ? { service: { port: a.service.port, health: stale ? "unknown" : a.service.health } } : {}),
-    agents: a.agents.map((ag) => mergeAgent(peer, ag)),
+    agents: a.agents.map((ag) => mergeAgent(peer, ag, stale)),
     widgets: a.widgets.map((w) => ({ ...w, id: peerId(peer, w.id) })),
   }));
 }
 
-/** Agents of apps the hub does not hide. */
-export function mergeAgents(peer: string, snap: PeerSnapshot, hidden: Set<string>): AgentView[] {
-  return snap.agents.filter((a) => !hidden.has(peerId(peer, a.app))).map((a) => mergeAgent(peer, a));
+/** Agents of apps the hub does not hide, marked stale when the peer is: the chat shows that machine offline. */
+export function mergeAgents(peer: string, snap: PeerSnapshot, hidden: Set<string>, stale = false): AgentView[] {
+  return snap.agents.filter((a) => !hidden.has(peerId(peer, a.app))).map((a) => mergeAgent(peer, a, stale));
 }
 
 /** Widgets of apps the hub does not hide; items keep their last payload, marked stale when the peer is. */

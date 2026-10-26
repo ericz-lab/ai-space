@@ -5,7 +5,8 @@ import { Glyph, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type AgentGroup, groupAgents, groupKeyOf, groupOf, preferredMachine, rememberMachine } from "./agent-groups.ts";
-import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun } from "./api.ts";
+import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun, type MachineInventory } from "./api.ts";
+import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
 import { localized, useLang } from "./i18n.ts";
 
@@ -144,9 +145,23 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   const groups = useMemo(() => groupAgents(agents), [agents]);
   const group: AgentGroup = groupOf(groups, agent) ?? { key: groupKeyOf(agent), primary: agent, machines: [agent] };
   const machines = group.machines.some((m) => m.id === agent.id) ? group.machines : [agent, ...group.machines];
+  // Which agent CLIs each machine has, for the machine menu (docs/model-machines.md#inventory); read when there is a choice.
+  const [inventory, setInventory] = useState<MachineInventory[]>([]);
+  const several = machines.length > 1;
+  useEffect(() => {
+    if (!several || !open) return;
+    let live = true;
+    getJson<{ machines: MachineInventory[] }>("/api/model/inventory").then((d) => { if (live) setInventory(d.machines); }).catch(() => {});
+    return () => { live = false; };
+  }, [several, open, group.key]);
+  const machineLabel = (m: AgentInfo) => {
+    const row = inventory.find((r) => r.machine === (m.peer ?? ""));
+    const clis = row?.clis.filter((c) => c.installed && c.signedIn !== false).map((c) => c.cli) ?? [];
+    return `${m.peer ?? t("chat.thisMachine")}${clis.length ? ` · ${clis.join(", ")}` : ""}${m.stale ? ` (${t("chat.machineOffline")})` : ""}`;
+  };
   const pickMachine = (peer: string) => {
     const m = machines.find((x) => (x.peer ?? "") === peer);
-    if (!m || m.id === key) return;
+    if (!m || m.id === key || m.stale) return;
     rememberMachine(group.key, m.peer);
     onSwitch?.(m);
   };
@@ -469,7 +484,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
 
   const submit = () => {
     const text = input.trim();
-    if ((!text && !images.length) || readingImagesRef.current) return;
+    if ((!text && !images.length) || readingImagesRef.current || agent.stale) return;
     setInput("");
     setImageDrafts((drafts) => ({ ...drafts, [key]: [] }));
     setImageError("");
@@ -680,17 +695,17 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           <div className="chat-opts">
             {machines.length > 1 && (
               <label className="chat-permission">{t("chat.machine")}
-              <select className="chat-model" value={agent.peer ?? ""} onChange={(e) => pickMachine(e.target.value)} title={t("chat.machineTitle")} aria-label={t("chat.machineTitle")}>
-                {machines.map((m) => <option key={m.id} value={m.peer ?? ""}>{m.peer ?? t("chat.thisMachine")}</option>)}
+              <select className="chat-model chat-machine" value={agent.peer ?? ""} onChange={(e) => pickMachine(e.target.value)} title={t("chat.machineTitle")} aria-label={t("chat.machineTitle")}>
+                {machines.map((m) => <option key={m.id} value={m.peer ?? ""} disabled={m.stale && m.id !== agent.id}>{machineLabel(m)}</option>)}
               </select></label>
             )}
             {agent.modelOptions ? (
               <select className="chat-model" value={selectedBaseModel} disabled={conv.busy} onChange={(e) => pickBaseModel(e.target.value)} title={t("chat.runtimeModelTitle")} aria-label={t("chat.runtimeModelTitle")}>
                 <option value="">{t("chat.modelDefault")} · {agent.runtime}</option>
-                {selectedBaseModel && !agent.modelOptions.some((o) => o.value === selectedBaseModel) && <option value={selectedBaseModel}>{selectedBaseModel}</option>}
+                {selectedBaseModel && !agent.modelOptions.some((o) => o.value === selectedBaseModel) && <SavedChoice value={selectedBaseModel} t={t} />}
                 {[...new Set(agent.modelOptions.map((o) => o.runtime))].map((runtime) => (
                   <optgroup key={runtime} label={runtime}>
-                    {agent.modelOptions!.filter((o) => o.runtime === runtime).map((o) => <option key={o.value} value={o.value}>{runtime} · {t(`modelTier.${o.tier}`)} · {o.model}</option>)}
+                    {agent.modelOptions!.filter((o) => o.runtime === runtime).map((o) => <ChoiceOption key={o.value} o={o} label={`${runtime} · ${t(`modelTier.${o.tier}`)} · ${o.model}`} t={t} />)}
                   </optgroup>
                 ))}
               </select>
@@ -768,6 +783,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           </button>
         )}
         {imageError && <div className="msg-note" role="alert">{imageError}</div>}
+        {agent.stale && <div className="msg-note" role="status">{t("chat.machineOfflineNote", { machine: agent.peer ?? t("chat.thisMachine") })}</div>}
         {!!images.length && <div className="chat-images chat-image-drafts">{images.map((image, index) => <div key={index}>
           <img src={imageURL(image)} alt={image.name} />
           <button aria-label={t("chat.removeImage")} disabled={readingImages} onClick={() => setImageDrafts((drafts) => ({ ...drafts, [key]: images.filter((_, i) => i !== index) }))}>×</button>
@@ -781,6 +797,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
             ref={inputRef}
             rows={1}
             value={input}
+            disabled={agent.stale}
             aria-label={t("chat.inputLabel")}
             placeholder={conv.busy ? t("chat.placeholderBusy") : t("chat.placeholder")}
             onChange={(e) => setInput(e.target.value)}
@@ -797,7 +814,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
               }
             }}
           />
-          <button className="chat-send" title={t("chat.send")} aria-label={t("chat.send")} disabled={readingImages || (!input.trim() && !images.length)} onClick={submit}>
+          <button className="chat-send" title={t("chat.send")} aria-label={t("chat.send")} disabled={readingImages || agent.stale || (!input.trim() && !images.length)} onClick={submit}>
             <Glyph name="send" size={17} weight={1.9} />
           </button>
         </div>

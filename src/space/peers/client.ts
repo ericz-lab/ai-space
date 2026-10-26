@@ -1,5 +1,6 @@
 import type { AppCapabilities } from "../bus/bus.ts";
 import type { HealthCell } from "../model/health.ts";
+import type { MachineInventory } from "../model/inventory.ts";
 import type { AgentView, AppView, ServiceView } from "../panel/view.ts";
 import type { EventInput } from "../scheduler/types.ts";
 import type { WidgetView } from "../panel/widgets.ts";
@@ -26,6 +27,8 @@ export type PeerSnapshot = {
   capabilities: AppCapabilities[];
   /** The runtimes the peer answers for other spaces and its status cells (docs/model-machines.md); absent when it offers none. */
   model?: PeerModelInfo;
+  /** The agent CLIs on the peer (docs/model-machines.md#inventory); absent from an older peer. */
+  inventory?: MachineInventory;
   asOf: string;
 };
 
@@ -232,6 +235,7 @@ export function parseSnapshot(j: unknown): PeerSnapshot {
     terminal: o.terminal === true,
     capabilities: Array.isArray(o.capabilities) ? (o.capabilities as AppCapabilities[]) : [],
     ...(parseModelInfo(o.model) ? { model: parseModelInfo(o.model)! } : {}),
+    ...(parseInventory(o.inventory) ? { inventory: parseInventory(o.inventory)! } : {}),
     asOf: typeof o.asOf === "string" ? o.asOf : new Date().toISOString(),
   };
 }
@@ -242,6 +246,24 @@ function parseModelInfo(v: unknown): PeerModelInfo | undefined {
   const serves = o.serves.filter((r): r is PeerModelInfo["serves"][number] => typeof r?.name === "string" && typeof r?.kind === "string").map((r) => ({ name: r.name, kind: r.kind, image: r.image === true, tiers: tiersOf(r.tiers) }));
   const cells = Array.isArray(o.cells) ? (o.cells as HealthCell[]).filter((c) => typeof c?.runtime === "string") : [];
   return { serves, cells };
+}
+
+/** A peer's CLI row: only the fields the panel shows, of the expected types. */
+function parseInventory(v: unknown): MachineInventory | undefined {
+  const o = v as { clis?: unknown; reachable?: unknown } | null;
+  if (!o || typeof o !== "object" || !Array.isArray(o.clis)) return undefined;
+  const str = (x: unknown) => (typeof x === "string" ? x.slice(0, 200) : undefined);
+  const bool = (x: unknown) => (typeof x === "boolean" ? x : undefined);
+  const clis = (o.clis as Record<string, unknown>[])
+    .filter((c) => c && typeof c.cli === "string" && typeof c.kind === "string")
+    .slice(0, 16)
+    .map((c) => {
+      const out: MachineInventory["clis"][number] = { cli: str(c.cli)!, kind: str(c.kind)!, configured: c.configured === true, runtimes: Array.isArray(c.runtimes) ? (c.runtimes as unknown[]).filter((r): r is string => typeof r === "string").slice(0, 16) : [] };
+      for (const k of ["installed", "signedIn"] as const) if (bool(c[k]) !== undefined) out[k] = bool(c[k]);
+      for (const k of ["version", "detail", "checkedAt"] as const) if (str(c[k]) !== undefined) out[k] = str(c[k]);
+      return out;
+    });
+  return { machine: "", via: "local", ...(o.reachable === false ? { reachable: false } : {}), clis };
 }
 
 function tiersOf(v: unknown): Partial<Record<string, string>> {

@@ -297,7 +297,7 @@ describe("status table", () => {
     expect(await probeRuntime(spawn, { PATH: "/nonexistent" })({ machine: "", spec: claude })).toMatchObject({ installed: false });
     expect(calls).toEqual([]);
     expect(await probeRuntime(spawn, { PATH: "/usr/bin:/bin" })({ machine: "", spec: { ...claude, bin: ["true"] } })).toEqual({ installed: true, signedIn: true });
-    expect(calls[0]).toEqual(["true", "auth", "status"]);
+    expect(calls).toEqual([["true", "--version"], ["true", "auth", "status"]]);
     // Over ssh through the login shell; 127 is a missing CLI there.
     const missing = (async () => ({ code: 127, stdout: "", stderr: "", timedOut: false, aborted: false })) as unknown as Parameters<typeof probeRuntime>[0];
     expect(await probeRuntime(missing)({ machine: "bare", spec: claude, ssh: "bare-alias" })).toMatchObject({ installed: false });

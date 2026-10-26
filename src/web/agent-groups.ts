@@ -12,7 +12,7 @@ import type { AgentInfo } from "./api.ts";
 export type AgentGroup = {
   /** `<app>/<name>`, the same on every machine. */
   key: string;
-  /** The variant that stands for the group: the local one, else the first listed. */
+  /** The variant that stands for the group: the local one, else the first peer that answers, else the first listed. */
   primary: AgentInfo;
   /** Every machine's variant, the local one first, then the peers in the catalogue's order. */
   machines: AgentInfo[];
@@ -30,7 +30,11 @@ export function groupAgents(agents: AgentInfo[]): AgentGroup[] {
     else if (!a.peer && g.primary.peer) {
       g.primary = a;
       g.machines.unshift(a);
-    } else g.machines.push(a);
+    } else {
+      g.machines.push(a);
+      // An offline peer does not stand for the group while another peer answers.
+      if (g.primary.peer && g.primary.stale && !a.stale) g.primary = a;
+    }
   }
   return [...byKey.values()];
 }
@@ -65,10 +69,14 @@ export function rememberMachine(key: string, peer: string | undefined): void {
   }
 }
 
-/** The variant a tile opens: the machine chosen last time when it is still listed, else the primary. */
+/**
+ * The variant a tile opens: the machine chosen last time when it is still listed and answering,
+ * else the primary. The choice is kept, so it comes back once that machine answers again.
+ */
 export function preferredMachine(g: AgentGroup, remembered: string | undefined = rememberedMachine(g.key)): AgentInfo {
   if (remembered === undefined) return g.primary;
-  return g.machines.find((m) => (m.peer ?? "") === remembered) ?? g.primary;
+  const m = g.machines.find((x) => (x.peer ?? "") === remembered);
+  return m && !m.stale ? m : g.primary;
 }
 
 /**

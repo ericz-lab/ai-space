@@ -45,6 +45,22 @@ describe("agent groups", () => {
     expect(preferredMachine(g, "gone")).toBe(local);
   });
 
+  test("an offline machine: not the primary while another peer answers, and a remembered one falls back until it is back", () => {
+    const davidOff = { ...david, stale: true };
+    expect(groupAgents([davidOff, eric])[0]!.primary).toBe(eric);
+    expect(groupAgents([davidOff, eric])[0]!.machines).toEqual([davidOff, eric]);
+    const g = groupAgents([local, davidOff, eric])[0]!;
+    expect(preferredMachine(g, "david")).toBe(local);
+    expect(preferredMachine(groupAgents([local, david, eric])[0]!, "david")).toBe(david);
+  });
+
+  test("the space assistant of every machine is one group, so the chat can pick the machine", () => {
+    const remote = agent("david/space/assistant", "david");
+    const g = groupAgents([assistant, remote])[0]!;
+    expect(g.key).toBe("space/assistant");
+    expect(g.machines).toEqual([assistant, remote]);
+  });
+
   test("screen items point every machine's key at the primary, once; unknown keys stay", () => {
     const groups = groupAgents([local, david, eric]);
     const items = ["app:notes", "agent:david/space-ops/engineer", "builtin:inbox", "agent:space-ops/engineer", "agent:eric/space-ops/engineer", "agent:gone/x/y"];

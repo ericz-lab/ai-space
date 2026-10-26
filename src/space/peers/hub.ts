@@ -46,7 +46,7 @@ export class PeerHub {
   }
 
   agents(hidden: Set<string>): AgentView[] {
-    return this.collect((c) => mergeAgents(c.name, c.snapshot!, hidden));
+    return this.collect((c) => mergeAgents(c.name, c.snapshot!, hidden, c.health() !== "ok"));
   }
 
   widgets(hidden: Set<string>): WidgetView[] {

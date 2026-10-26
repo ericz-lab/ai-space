@@ -113,7 +113,7 @@ export function spaceAgentView(runtimes?: RuntimeRegistry, defaultModel?: string
 
 /** The runtime/tier values any agent's chat may pick. */
 function chatOptions(runtimes: RuntimeRegistry): NonNullable<AgentView["modelOptions"]> {
-  return runtimes.tierOptions().filter((o) => o.capabilities.chat).map(({ value, runtime, tier, model }) => ({ value, runtime, tier, model }));
+  return runtimes.tierOptions().filter((o) => o.capabilities.chat).map(({ value, runtime, tier, model, unavailable }) => ({ value, runtime, tier, model, ...(unavailable ? { unavailable } : {}) }));
 }
 
 function baseRuntime(runtimes: RuntimeRegistry, defaultModel?: string): string {
@@ -387,7 +387,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         }
         // A tier the runtime has no model for (DeepSeek Harness) leaves the runtime's own default.
         const tier = (MODEL_TIERS as readonly string[]).includes(selected.slice(selectedName.length + 1));
-        const model = tier && !opts.runtimes.tierOptions().some((o) => o.value === selected) ? undefined : opts.runtimes.resolve(selected).model;
+        const model = tier && !opts.runtimes.tierOptions({ all: true }).some((o) => o.value === selected) ? undefined : opts.runtimes.resolve(selected).model;
         const permissionMode = typeof body.permissionMode === "string" ? body.permissionMode : undefined;
         const env: Record<string, string | undefined> = { ...process.env, ...(await loadAppEnv(agent.cwd)), ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}) };
         let run;

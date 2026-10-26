@@ -28,7 +28,9 @@ export type AgentView = {
   /** The runtime a new chat starts on; in an app's own view, only the manifest's declaration. */
   runtime?: string;
   /** Runtime/tier values the chat may pick (docs/panel.md#agent-models). */
-  modelOptions?: { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string }[];
+  modelOptions?: { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string; unavailable?: "signed-out" | "offline" }[];
+  /** Set on a peer's agent while the peer does not answer: the entry is its last snapshot (docs/peers.md#agents-on-several-machines). */
+  stale?: boolean;
 };
 
 export type AppView = {
