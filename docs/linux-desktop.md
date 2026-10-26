@@ -111,7 +111,7 @@ figures and the history grid) are in `src/core/settings.ts`, tested against the 
 
 | Section | What |
 | --- | --- |
-| General | Widgets (cards on Home's screens, on or off), Language (the desktop's, English or 中文; read at start), then this app's own: the saved Spaces (switch, make default, remove, add), keep running when the window is closed, start at login, notifications, the Quick Chat command, WebKit's sandbox, About |
+| General | Widgets (cards on Home's screens, on or off), Language (the desktop's, English or 中文; read at start), then this app's own: the saved Spaces (switch, edit the address and name, make default, remove, add; a new address is checked as when connecting), keep running when the window is closed, start at login, notifications, the Quick Chat command, WebKit's sandbox, About |
 | Appearance | Follow system, Light or Dark, for the app and the pages in it. The web panel's themes and colours stay in its own Settings, on the Panel page |
 | Models | The default model of app requests and new Space Assistant chats; App models, a page with each app's and purpose's model and the layer that chose it, changed in place |
 | Automation | Scheduled tasks (schedule, triggers, last and next run; a task unfolds to its model and its last 20 runs) and Events and calls (the catalogue of what apps provide, publish and consume; the last 100 events, each unfolding to its deliveries) |

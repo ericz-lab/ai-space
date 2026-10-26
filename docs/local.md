@@ -128,7 +128,10 @@ turn on.
 The device credential is kept in the desktop's keyring through the Secret Service (libsecret;
 GNOME Keyring, KWallet), by workspace path. Where no keyring answers, the app keeps it in a file
 only the user can read (`~/.local/share/ai-space/desktop/device-<hash>.token`). The app signs its
-web data in with it exactly as on the Mac (`POST /api/auth/device/session`).
+web data in with it exactly as on the Mac (`POST /api/auth/device/session`). A Space saved at the
+service's address without the app's mark (added by hand, from the welcome screen's suggestion, or
+before the setup) gets the mark when the app sees that the workspace is its own, so it signs in with
+the device credential instead of asking for an owner password the Local edition never sets.
 
 ## What the service needs from the Mac
 
