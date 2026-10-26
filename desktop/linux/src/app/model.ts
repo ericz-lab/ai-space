@@ -73,6 +73,8 @@ export class AppModel {
   private ticks = 0;
   /** The Local edition signs in to its own Space with the device credential; set by LocalManager. */
   signIn: ((space: Space) => Promise<boolean>) | undefined;
+  /** The saved Space the Local edition runs but that is not marked yet (`localToClaim`); set by LocalManager. */
+  localToClaim: ((connections: readonly Connection[]) => string | undefined) | undefined;
   /** New unread inbox threads, for desktop notifications. */
   onFreshInbox: ((space: Space, items: InboxItem[]) => void) | undefined;
 
@@ -144,6 +146,7 @@ export class AppModel {
 
   add(name: string, url: string, opts: { managed?: boolean; makeDefault?: boolean } = {}): Space {
     const c = this.list.add(name, url, opts);
+    this.markLocal();
     this.save();
     this.select(c.id);
     return this.space(c.id)!;
@@ -173,6 +176,7 @@ export class AppModel {
       this.spaces.get(id)?.client.close();
       this.spaces.delete(id);
     }
+    this.markLocal();
     this.save();
     if (moved && this.currentId === id) {
       this.emit("selection", this.current);
@@ -187,6 +191,18 @@ export class AppModel {
     log("local", "marking", c.name, "as this computer's Space");
     this.list.setManaged(id, c.url);
     this.save();
+    // It may already show "sign in": look again, now with the device credential.
+    const space = this.spaces.get(id);
+    if (space?.state.kind === "signin") void this.refresh(space);
+  }
+
+  /** A Space added or pointed at the Local edition's address after launch is its own too. */
+  private markLocal(): void {
+    const id = this.localToClaim?.(this.list.connections);
+    const c = id ? this.list.get(id) : undefined;
+    if (!c || c.managed) return;
+    log("local", "marking", c.name, "as this computer's Space");
+    this.list.setManaged(c.id, c.url);
   }
 
   /**

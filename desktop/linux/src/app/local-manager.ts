@@ -87,6 +87,7 @@ export class LocalManager {
 
   constructor(private readonly model: AppModel) {
     model.signIn = (space) => this.signIn(space);
+    model.localToClaim = (connections) => localToClaim(connections, this.status);
   }
 
   get available(): boolean {
