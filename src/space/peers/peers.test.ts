@@ -214,6 +214,8 @@ describe("peer config", () => {
       SPACE_PEER_TOO_FAST: "http://h",
       SPACE_HUB_TOKEN: "mine",
       SPACE_API_TOKEN: "x",
+      // This space's own offer (docs/model-machines.md), not a peer called "model".
+      SPACE_PEER_MODEL: "codex,claude",
     });
     expect(peers).toEqual([
       { name: "david", url: "https://space-david.example.com", token: "tok", headers: { "CF-Access-Client-Id": "id", "CF-Access-Client-Secret": "sec" }, refreshMs: 60_000 },
