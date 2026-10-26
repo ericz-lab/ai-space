@@ -161,6 +161,35 @@ export class AppModel {
   }
 
   /**
+   * A saved Space's new name or address. A new address gets a new client and a fresh look, and
+   * the pages of the old one close (the window shows the Space again).
+   */
+  update(id: string, name: string, url: string): void {
+    const before = this.list.get(id)?.url;
+    this.list.update(id, name, url);
+    const moved = before !== undefined && before !== url;
+    if (moved) {
+      // `space()` cannot see the change: the Space shares the list's connection object.
+      this.spaces.get(id)?.client.close();
+      this.spaces.delete(id);
+    }
+    this.save();
+    if (moved && this.currentId === id) {
+      this.emit("selection", this.current);
+      void this.refresh(this.current!);
+    }
+  }
+
+  /** The Space the Local edition runs was saved without its mark (`localToClaim`): mark it, so the app signs in with the device credential. */
+  claimLocal(id: string): void {
+    const c = this.list.get(id);
+    if (!c || c.managed) return;
+    log("local", "marking", c.name, "as this computer's Space");
+    this.list.setManaged(id, c.url);
+    this.save();
+  }
+
+  /**
    * After the Local edition is set up or taken over: the Space it runs becomes the saved, default
    * and shown one, marked as the app's own so the app signs in to it with its device credential.
    */

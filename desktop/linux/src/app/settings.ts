@@ -2,6 +2,7 @@ import Adw from "gi://Adw?version=1";
 import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import { type Appearance, type Detail, type Section, APPEARANCES, SECTION_LABEL, WEB_SECTIONS, appearanceOf, decodeAuth, hasAccount } from "../core/settings.ts";
+import type { Connection } from "../core/connections.ts";
 import { LANGS } from "../../../../src/web/messages.ts";
 import { APP_ID, APP_ROOT, exists, logError, path, prefs, savePrefs, t, tw, writeText } from "./env.ts";
 import type { LocalManager } from "./local-manager.ts";
@@ -308,6 +309,7 @@ function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) =>
         });
         box.append(b);
       };
+      item(t("editSpace"), () => editSpace(ctx.dialog, model, c, renderSpaces));
       if (!c.isDefault)
         item(t("makeDefault"), () => {
           model.list.setDefault(c.id);
@@ -370,6 +372,21 @@ function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) =>
   aboutRow.connect("activated", () => ctx.dialog.get_root()?.get_application()?.lookup_action("about")?.activate(null));
   about.add(aboutRow);
   page.add(about);
+}
+
+/** A saved Space's address and name, changed in a dialog over Settings; the address is checked as when connecting. */
+function editSpace(parent: any, model: AppModel, c: Connection, done: () => void): void {
+  const dialog = new Adw.Dialog({ title: t("editSpaceTitle"), content_width: 460 });
+  const view = new Adw.ToolbarView();
+  view.add_top_bar(new Adw.HeaderBar());
+  const form = connectForm(model, () => {
+    dialog.close();
+    done();
+  }, c);
+  for (const side of ["top", "bottom", "start", "end"]) form[`set_margin_${side}`](18);
+  view.set_content(form);
+  dialog.set_child(view);
+  dialog.present(parent);
 }
 
 /** Appearance: the panel's mode row (Follow system, Light, Dark), for this app and the pages in it. */

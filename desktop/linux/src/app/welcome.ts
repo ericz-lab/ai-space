@@ -2,9 +2,9 @@ import Adw from "gi://Adw?version=1";
 import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import { classifyIdentity } from "../core/check.ts";
-import { LOCAL_DEFAULT_URL } from "../core/connections.ts";
+import { type Connection, LOCAL_DEFAULT_URL } from "../core/connections.ts";
 import type { Key } from "../core/i18n.ts";
-import { ConnectionUrlError, normalizeConnectionUrl, resolveUrl } from "../core/url.ts";
+import { ConnectionUrlError, normalizeConnectionUrl, resolveUrl, sameOrigin } from "../core/url.ts";
 import { bytesToText, t } from "./env.ts";
 import { appTexture } from "./icons.ts";
 import { plainRequest } from "./http.ts";
@@ -31,14 +31,15 @@ export async function probeSpace(url: string): Promise<string | undefined> {
 }
 
 /** The address field with its checks; `onDone` runs once the Space is saved. */
-export function connectForm(model: AppModel, onDone: () => void): any {
-  const group = new Adw.PreferencesGroup({ title: t("connectTitle") });
-  const url = new Adw.EntryRow({ title: t("spaceUrl"), input_purpose: Gtk.InputPurpose.URL, show_apply_button: false });
-  const name = new Adw.EntryRow({ title: t("spaceName") });
+/** Connect to a Space by its address, or, given `editing`, change a saved one's address and name. */
+export function connectForm(model: AppModel, onDone: () => void, editing?: Connection): any {
+  const group = new Adw.PreferencesGroup({ title: editing ? "" : t("connectTitle") });
+  const url = new Adw.EntryRow({ title: t("spaceUrl"), input_purpose: Gtk.InputPurpose.URL, show_apply_button: false, text: editing?.url ?? "" });
+  const name = new Adw.EntryRow({ title: t("spaceName"), text: editing?.name ?? "" });
   group.add(url);
   group.add(name);
   const error = new Gtk.Label({ xalign: 0, wrap: true, visible: false, margin_top: 8, css_classes: ["error"] });
-  const button = new Gtk.Button({ label: t("connect"), halign: Gtk.Align.END, margin_top: 10, css_classes: ["pill", "suggested-action"] });
+  const button = new Gtk.Button({ label: editing ? t("save") : t("connect"), halign: Gtk.Align.END, margin_top: 10, css_classes: ["pill", "suggested-action"] });
   const spinner = new Gtk.Spinner({ visible: false });
   const go = async () => {
     error.set_visible(false);
@@ -50,16 +51,24 @@ export function connectForm(model: AppModel, onDone: () => void): any {
       error.set_visible(true);
       return;
     }
-    button.set_sensitive(false);
-    spinner.set_visible(true);
-    spinner.start();
-    const problem = await probeSpace(normalized);
-    spinner.stop();
-    spinner.set_visible(false);
-    button.set_sensitive(true);
-    if (problem) {
-      error.set_text(problem);
-      error.set_visible(true);
+    // A new address must answer as a Space; a new name alone needs no look.
+    if (!editing || !sameOrigin(editing.url, normalized)) {
+      button.set_sensitive(false);
+      spinner.set_visible(true);
+      spinner.start();
+      const problem = await probeSpace(normalized);
+      spinner.stop();
+      spinner.set_visible(false);
+      button.set_sensitive(true);
+      if (problem) {
+        error.set_text(problem);
+        error.set_visible(true);
+        return;
+      }
+    }
+    if (editing) {
+      model.update(editing.id, name.get_text(), normalized);
+      onDone();
       return;
     }
     model.add(name.get_text(), normalized);
@@ -77,6 +86,7 @@ export function connectForm(model: AppModel, onDone: () => void): any {
   row.append(spinner);
   row.append(button);
   box.append(row);
+  if (editing) return box;
   // A Space already answering on this computer is one click away.
   void probeSpace(LOCAL_DEFAULT_URL).then((problem) => {
     if (problem || model.list.connections.some((c) => c.url === LOCAL_DEFAULT_URL)) return;

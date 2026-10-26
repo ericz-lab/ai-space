@@ -1,4 +1,4 @@
-import { hostOf, isLoopback } from "./url.ts";
+import { hostOf, isLoopback, sameOrigin } from "./url.ts";
 
 /**
  * The saved Spaces, as the Mac client keeps them (`ConnectionStore.swift`): one JSON file under
@@ -67,11 +67,19 @@ export class ConnectionList {
     return c;
   }
 
-  update(id: string, name: string, url: string): void {
+  /**
+   * A new name or address. Returns whether the address now names another origin; the device
+   * credential belongs to the Local edition's own address, so such a Space is no longer the app's
+   * own (`localToClaim` marks it again when it points back there).
+   */
+  update(id: string, name: string, url: string): boolean {
     const c = this.get(id);
-    if (!c) return;
+    if (!c) return false;
+    const moved = !sameOrigin(c.url, url);
     c.name = displayName(name, url);
     c.url = url;
+    if (moved) c.managed = false;
+    return moved;
   }
 
   setManaged(id: string, url: string, managed = true): void {
@@ -90,4 +98,16 @@ export class ConnectionList {
     this.connections = this.connections.filter((c) => c.id !== id);
     if (this.connections.length && !this.connections.some((c) => c.isDefault)) this.connections[0]!.isDefault = true;
   }
+}
+
+/**
+ * The saved Space that is the Local edition's own but not marked so: the Local edition runs this
+ * computer's Space (`state` "managed") and no saved Space is marked, but one points at its address,
+ * as when it was added by hand, from the welcome screen's suggestion, or before the setup. The app
+ * then signs in to it with the device credential instead of asking for an owner password the Local
+ * edition never sets.
+ */
+export function localToClaim(connections: readonly Connection[], local: { state: string; url: string } | undefined): string | undefined {
+  if (local?.state !== "managed" || connections.some((c) => c.managed)) return undefined;
+  return connections.find((c) => sameOrigin(c.url, local.url))?.id;
 }

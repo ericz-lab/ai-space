@@ -1,6 +1,7 @@
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Secret from "gi://Secret";
+import { localToClaim } from "../core/connections.ts";
 import { type InstallResult, LocalFailure, type LocalStatus, type Release, decodeLocal, hasSession, needsDeviceCredential, runtimeArgs, updateAvailable } from "../core/local.ts";
 import { hostOf, resolveUrl } from "../core/url.ts";
 import { APP_ROOT, dirs, exists, log, logError, openExternally, path, prefs, readTextSync, savePrefs, t, writeText } from "./env.ts";
@@ -147,6 +148,8 @@ export class LocalManager {
     if (!this.available) return;
     try {
       this.status = await this.run<LocalStatus>(["status", ...this.args]);
+      const claim = localToClaim(this.model.list.connections, this.status);
+      if (claim) this.model.claimLocal(claim);
     } catch (e) {
       this.failure = e instanceof LocalFailure ? e : new LocalFailure("error", String(e));
     }

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { ConnectionUrlError, escapeSegment, isLoopback, normalizeConnectionUrl, origin, queryParams, resolveUrl, sameOrigin } from "./url.ts";
-import { ConnectionList, decodeConnections, encodeConnections } from "./connections.ts";
+import { ConnectionList, decodeConnections, encodeConnections, localToClaim } from "./connections.ts";
 import { agentBase, allEntries, decodeCatalogue, NotASpaceError, opensFirst, pageUrl, panelScreens, pickText, search, widgetLines } from "./catalogue.ts";
 import { checkResponse, classifyIdentity, classifyLayout, SpaceError } from "./check.ts";
 import { LineSplitter, SSEParser } from "./sse.ts";
@@ -66,6 +66,30 @@ describe("saved connections", () => {
     expect(back).toEqual(list.connections);
     expect(decodeConnections('[{"id":"x","name":"n","url":"https://n/","isDefault":true}]')[0]!.managed).toBe(false);
     expect(() => decodeConnections('{"id":1}')).toThrow();
+  });
+
+  test("editing renames, moves, and drops the Local mark only when the origin changes", () => {
+    let n = 0;
+    const list = new ConnectionList([], () => `id${++n}`);
+    const local = list.add("This Computer", "http://127.0.0.1:8700/", { managed: true });
+    expect(list.update(local.id, "Mine", "http://127.0.0.1:8700/")).toBe(false);
+    expect(list.get(local.id)).toMatchObject({ name: "Mine", url: "http://127.0.0.1:8700/", managed: true });
+    expect(list.update(local.id, "", "http://127.0.0.1:8711/")).toBe(true);
+    expect(list.get(local.id)).toMatchObject({ name: "127.0.0.1", url: "http://127.0.0.1:8711/", managed: false });
+    expect(list.update("missing", "x", "https://x.example.com/")).toBe(false);
+  });
+
+  test("a hand-added Space at the Local edition's address becomes the app's own", () => {
+    const hand = { id: "h", name: "This Computer", url: "http://127.0.0.1:8700/", isDefault: false, managed: false };
+    const remote = { id: "r", name: "Remote", url: "https://space.example.com/", isDefault: true, managed: false };
+    const status = { state: "managed", url: "http://127.0.0.1:8700/" };
+    expect(localToClaim([remote, hand], status)).toBe("h");
+    expect(localToClaim([remote, { ...hand, url: "http://127.0.0.1:8700" }], status)).toBe("h");
+    // Not the Local edition's (another installation, or none), or one is marked already.
+    expect(localToClaim([remote, hand], { state: "foreign", url: status.url })).toBeUndefined();
+    expect(localToClaim([remote, hand], undefined)).toBeUndefined();
+    expect(localToClaim([{ ...remote, managed: true }, hand], status)).toBeUndefined();
+    expect(localToClaim([remote], status)).toBeUndefined();
   });
 });
 
