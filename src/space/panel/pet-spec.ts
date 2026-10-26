@@ -7,8 +7,11 @@ import { parseDuration } from "../scheduler/schedule.ts";
  * from the app runs in the page.
  */
 
-/** One row of the sprite sheet: `frames` cells from the left, played over `ms`. */
-export type PetAnimation = { row: number; frames: number; ms: number };
+/**
+ * One row of the sprite sheet: `frames` cells from the left, played over `ms`; with `pause`, the first
+ * cell is held that much longer after each loop, so a bark can come in bursts.
+ */
+export type PetAnimation = { row: number; frames: number; ms: number; pause?: number };
 
 export type ManifestPet = {
   name: string;
@@ -71,8 +74,9 @@ export function parsePetSpec(raw: unknown, where = "pets[0]"): ManifestPet {
     if (!NAME_RE.test(anim)) throw new Error(`${ctx}: invalid name`);
     const a = raw.animations[anim];
     if (!isRecord(a)) throw new Error(`${ctx} must be { row, frames, ms }`);
-    for (const key of Object.keys(a)) if (!["row", "frames", "ms"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
-    animations[anim] = { row: int(a.row, `${ctx}: row`, 0, rows - 1), frames: int(a.frames, `${ctx}: frames`, 1, columns), ms: int(a.ms, `${ctx}: ms`, 100, 10_000) };
+    for (const key of Object.keys(a)) if (!["row", "frames", "ms", "pause"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
+    const pause = a.pause === undefined ? 0 : int(a.pause, `${ctx}: pause`, 0, 10_000);
+    animations[anim] = { row: int(a.row, `${ctx}: row`, 0, rows - 1), frames: int(a.frames, `${ctx}: frames`, 1, columns), ms: int(a.ms, `${ctx}: ms`, 100, 10_000), ...(pause ? { pause } : {}) };
   }
   if (!animations.walk) throw new Error(`${pet}: animations needs walk (facing right)`);
   const rest = raw.rest === undefined ? names.find((n) => n !== "walk") : raw.rest;
