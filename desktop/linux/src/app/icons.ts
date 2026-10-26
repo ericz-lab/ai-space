@@ -12,6 +12,9 @@ import { APP_ROOT, path } from "./env.ts";
  */
 
 const textures = new Map<string, Promise<any | undefined>>();
+/** Icons that would not load, by when: tried again after a while, not on every draw. */
+const failed = new Map<string, number>();
+const RETRY_MS = 5 * 60_000;
 
 export const isImageIcon = (icon: string | undefined) => Boolean(icon) && (/^(https?:)?\/\//.test(icon!) || icon!.startsWith("/"));
 
@@ -40,6 +43,7 @@ export function loadTexture(icon: string, client: SpaceClient | undefined, size 
   const url = client ? (resolveUrl(icon, `${client.base}/`) ?? icon) : icon;
   const key = `${url}@${size}`;
   let p = textures.get(key);
+  if (!p && Date.now() - (failed.get(key) ?? -Infinity) < RETRY_MS) return Promise.resolve(undefined);
   if (!p) {
     p = (async () => {
       try {
@@ -50,8 +54,12 @@ export function loadTexture(icon: string, client: SpaceClient | undefined, size 
       }
     })();
     textures.set(key, p);
-    // A failure is tried again on a later draw, not remembered.
-    void p.then((t) => t || textures.delete(key));
+    // A failure is tried again a few minutes later.
+    void p.then((t) => {
+      if (t) return failed.delete(key);
+      textures.delete(key);
+      failed.set(key, Date.now());
+    });
   }
   return p;
 }
@@ -85,7 +93,8 @@ export function iconWidget(icon: string | undefined, size: number, client: Space
   box.append(shown);
   if (icon) {
     void loadTexture(icon, client, size).then((texture) => {
-      if (!texture) return;
+      // A widget dropped before its icon came gets none.
+      if (!texture || !box.get_parent()) return;
       const pic = new Gtk.Picture({ paintable: texture, content_fit: Gtk.ContentFit.CONTAIN, can_shrink: true, width_request: size, height_request: size });
       pic.add_css_class("tile-image");
       box.remove(shown);

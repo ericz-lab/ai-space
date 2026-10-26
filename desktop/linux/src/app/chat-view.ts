@@ -12,6 +12,7 @@ import { allCommands, stepGroups, toolSummary, toolVariant } from "../../../../s
 import type { Key } from "../core/i18n.ts";
 import { coalesce, lang, prefs, savePrefs, t } from "./env.ts";
 import { iconWidget } from "./icons.ts";
+import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
 
 /**
@@ -347,6 +348,7 @@ export class ChatView {
     // Order changed (a queued reply inserted, another conversation opened): draw everything again.
     if (messages.length < this.rows.length || this.rows.some((r, i) => messages[i]?.id !== r.id)) {
       for (const r of this.rows) this.list.remove(r.widget);
+      if (this.rows.length) collectSoon();
       this.rows = [];
     }
     messages.forEach((m, i) => {
@@ -359,6 +361,8 @@ export class ChatView {
         this.list.insert_child_after(widget, row.widget);
         this.list.remove(row.widget);
         this.rows[i] = { id: m.id, sig, widget };
+        // A streamed reply is drawn again many times a second: the old drawings go soon after.
+        collectSoon();
       } else {
         this.list.append(widget);
         this.rows.push({ id: m.id, sig, widget });
@@ -515,20 +519,24 @@ export class ChatView {
     const row = new Gtk.Box({ spacing: 8 });
     const problem = label("", { classes: ["error", "caption"] });
     problem.set_visible(false);
-    const answer = async (allow: boolean) => {
-      row.set_sensitive(false);
+    // The buttons' handlers find the row and the problem line from the button: a handler holding
+    // the widgets around its button would keep the card alive after the message is drawn again.
+    const answer = async (button: any, allow: boolean) => {
+      const row = button.get_parent();
+      const problem = row?.get_next_sibling();
+      row?.set_sensitive(false);
       const why = await this.conv?.answer(s.id.replace(/^approval:/, ""), allow);
       if (why) {
-        problem.set_text(why);
-        problem.set_visible(true);
-        row.set_sensitive(true);
+        problem?.set_text(why);
+        problem?.set_visible(true);
+        row?.set_sensitive(true);
       }
     };
     const allow = new Gtk.Button({ label: t("allow") });
     allow.add_css_class("suggested-action");
-    allow.connect("clicked", () => void answer(true));
+    allow.connect("clicked", (b: any) => void answer(b, true));
     const deny = new Gtk.Button({ label: t("deny") });
-    deny.connect("clicked", () => void answer(false));
+    deny.connect("clicked", (b: any) => void answer(b, false));
     row.append(allow);
     row.append(deny);
     card.append(row);
@@ -553,13 +561,17 @@ export class ChatView {
     const id = s.id.replace(/^approval:/, "");
     const problem = label("", { classes: ["error", "caption"] });
     problem.set_visible(false);
-    const reply = async (allow: boolean, answers?: Record<string, string[]>) => {
-      card.set_sensitive(false);
+    // As in approvalCard, a handler reaches the card through the widget it is on, never holds it.
+    const reply = async (from: any, allow: boolean, answers?: Record<string, string[]>) => {
+      let c = from;
+      while (c && !c.has_css_class("card-inner")) c = c.get_parent();
+      const problem = c?.get_last_child();
+      c?.set_sensitive(false);
       const why = await this.conv?.answer(id, allow, answers);
       if (why) {
-        problem.set_text(why);
-        problem.set_visible(true);
-        card.set_sensitive(true);
+        problem?.set_text(why);
+        problem?.set_visible(true);
+        c?.set_sensitive(true);
       }
     };
     const oneClick = questions.length === 1 && !questions[0]!.multiSelect;
@@ -578,7 +590,7 @@ export class ChatView {
           v.append(label(opt.label, { selectable: false }));
           if (opt.description) v.append(label(opt.description, { classes: ["caption", "dim-label"], selectable: false }));
           b.set_child(v);
-          b.connect("clicked", () => void reply(true, { [q.id]: [opt.label] }));
+          b.connect("clicked", (button: any) => void reply(button, true, { [q.id]: [opt.label] }));
           card.append(b);
           continue;
         }
@@ -587,7 +599,7 @@ export class ChatView {
           if (group) check.set_group(group);
           else group = check;
         }
-        check.connect("toggled", () => {
+        check.connect("toggled", (check: any) => {
           if (check.get_active()) {
             if (!q.multiSelect) chosen.clear();
             chosen.add(opt.label);
@@ -596,7 +608,7 @@ export class ChatView {
         card.append(check);
       }
       const entry = new Gtk.Entry({ placeholder_text: t("yourAnswer") });
-      if (oneClick) entry.connect("activate", () => entry.get_text().trim() && void reply(true, { [q.id]: questionAnswer(false, [], entry.get_text()) }));
+      if (oneClick) entry.connect("activate", (entry: any) => entry.get_text().trim() && void reply(entry, true, { [q.id]: questionAnswer(false, [], entry.get_text()) }));
       typed.set(q.id, entry);
       card.append(entry);
     }
@@ -604,15 +616,15 @@ export class ChatView {
     if (!oneClick) {
       const sendB = new Gtk.Button({ label: t("send") });
       sendB.add_css_class("suggested-action");
-      sendB.connect("clicked", () => {
+      sendB.connect("clicked", (button: any) => {
         const answers: Record<string, string[]> = {};
         for (const q of questions) answers[q.id] = questionAnswer(q.multiSelect, [...(picks.get(q.id) ?? [])], typed.get(q.id)?.get_text() ?? "");
-        void reply(true, answers);
+        void reply(button, true, answers);
       });
       row.append(sendB);
     }
     const skip = new Gtk.Button({ label: t("skip") });
-    skip.connect("clicked", () => void reply(false));
+    skip.connect("clicked", (button: any) => void reply(button, false));
     row.append(skip);
     card.append(row);
     card.append(problem);

@@ -6,6 +6,7 @@ import Gtk from "gi://Gtk?version=4.0";
 import Pango from "gi://Pango";
 import { type Agent, type Entry, pageUrl, pickText } from "../core/catalogue.ts";
 import type { DeepLink, InboxItem } from "../core/desktop.ts";
+import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
 import { ChatPage } from "./chat-page.ts";
 import { lang, openExternally, prefs, savePrefs, t } from "./env.ts";
@@ -42,6 +43,10 @@ export class MainWindow {
   private readonly pages: Record<View, any> = {} as Record<View, any>;
   private welcome: WelcomePage | undefined;
   private shown: Space | undefined;
+  private readonly spaceLabel: any;
+  private readonly spaceList: any;
+  /** What the Space menu lists now. */
+  private spaceMenuKey = "";
 
   constructor(
     readonly app: any,
@@ -103,6 +108,27 @@ export class MainWindow {
     header.pack_start(this.sidebarButton);
     this.spaceButton = new Gtk.MenuButton({ always_show_arrow: true, tooltip_text: t("spaces") });
     header.pack_start(this.spaceButton);
+    // The Space menu is made once; its rows follow the saved Spaces (renderSpaceMenu).
+    this.spaceLabel = new Gtk.Label({ ellipsize: Pango.EllipsizeMode.END, max_width_chars: 22 });
+    const spaceBox = new Gtk.Box({ spacing: 6 });
+    spaceBox.append(this.spaceLabel);
+    this.spaceButton.set_child(spaceBox);
+    const spacePop = new Gtk.Popover();
+    this.spaceList = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ["navigation-sidebar"] });
+    this.spaceList.connect("row-activated", (_l: unknown, row: any) => {
+      spacePop.popdown();
+      this.model.select(row.connId);
+    });
+    const spaceColumn = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 4 });
+    spaceColumn.append(this.spaceList);
+    const manage = new Gtk.Button({ label: t("manageSpaces"), css_classes: ["flat"] });
+    manage.connect("clicked", () => {
+      spacePop.popdown();
+      showSettings(this.window, this.model, this.local);
+    });
+    spaceColumn.append(manage);
+    spacePop.set_child(spaceColumn);
+    this.spaceButton.set_popover(spacePop);
     const menu = new Gio.Menu();
     menu.append(t("quickChat"), "app.quick-chat");
     menu.append(t("reload"), "win.reload");
@@ -136,6 +162,12 @@ export class MainWindow {
     this.installActions();
     model.on((change, space) => this.onModel(change, space));
     this.showSpace();
+    // Ages on screen ("last known 5 min ago") move on with nothing new fetched.
+    GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT_IDLE, 60, () => {
+      if (this.model.current?.stale) this.renderBanner();
+      this.home.tick();
+      return GLib.SOURCE_CONTINUE;
+    });
   }
 
   private presented = false;
@@ -261,41 +293,25 @@ export class MainWindow {
   private renderSpaceMenu(): void {
     const current = this.model.current;
     const dot = (s: Space) => (s.state.kind === "ready" ? "" : s.state.kind === "connecting" ? "…" : " ⚠");
-    const box = new Gtk.Box({ spacing: 6 });
-    box.append(new Gtk.Label({ label: current ? `${current.conn.name}${dot(current)}` : t("spaces"), ellipsize: Pango.EllipsizeMode.END, max_width_chars: 22 }));
-    this.spaceButton.set_child(box);
-    const pop = new Gtk.Popover();
-    const list = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ["navigation-sidebar"] });
-    for (const c of this.model.list.connections) {
-      const s = this.model.space(c.id)!;
+    this.spaceLabel.set_label(current ? `${current.conn.name}${dot(current)}` : t("spaces"));
+    const rows = this.model.list.connections.map((c) => ({ c, unread: c.id === current?.conn.id ? 0 : this.model.space(c.id)!.inbox.summary.unread }));
+    const key = signature([current?.conn.id, rows.map(({ c, unread }) => [c.id, c.name, c.url, unread])]);
+    if (key === this.spaceMenuKey) return;
+    this.spaceMenuKey = key;
+    this.spaceList.remove_all();
+    for (const { c, unread } of rows) {
       const row = new Gtk.ListBoxRow() as any;
       row.connId = c.id;
       const r = new Gtk.Box({ spacing: 8, margin_top: 4, margin_bottom: 4 });
       r.append(new Gtk.Image({ icon_name: c.id === current?.conn.id ? "object-select-symbolic" : "", pixel_size: 16, width_request: 16 }));
       const text = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, hexpand: true });
       text.append(new Gtk.Label({ label: c.name, xalign: 0 }));
-      const sub = new Gtk.Label({ label: c.url, xalign: 0, css_classes: ["caption", "dim-label"] });
-      text.append(sub);
+      text.append(new Gtk.Label({ label: c.url, xalign: 0, css_classes: ["caption", "dim-label"] }));
       r.append(text);
-      const unread = s.inbox.summary.unread;
-      if (unread && c.id !== current?.conn.id) r.append(new Gtk.Label({ label: String(unread), css_classes: ["caption", "accent"] }));
+      if (unread) r.append(new Gtk.Label({ label: String(unread), css_classes: ["caption", "accent"] }));
       row.set_child(r);
-      list.append(row);
+      this.spaceList.append(row);
     }
-    list.connect("row-activated", (_l: unknown, row: any) => {
-      pop.popdown();
-      this.model.select(row.connId);
-    });
-    const v = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 4 });
-    v.append(list);
-    const manage = new Gtk.Button({ label: t("manageSpaces"), css_classes: ["flat"] });
-    manage.connect("clicked", () => {
-      pop.popdown();
-      showSettings(this.window, this.model, this.local);
-    });
-    v.append(manage);
-    pop.set_child(v);
-    this.spaceButton.set_popover(pop);
   }
 
   private renderBanner(): void {

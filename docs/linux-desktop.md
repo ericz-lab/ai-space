@@ -163,6 +163,32 @@ action such as `new-terminal`, `panel`, `search` or `next-screen`, an app action
 `AISPACE_SCREENSHOT_DELAY` milliseconds (4000) and quits. `AISPACE_LOCAL_BUNDLE` points the Local
 manager at another release tree.
 
+## Memory
+
+The window stays open for days, looking at the Space every 30 seconds. Three rules keep that
+from growing the process:
+
+- **Redraw only on a change.** The model announces a catalogue or an inbox only when it differs
+  from the last one announced (`core/change.ts`); Home draws a page again only when what that page
+  shows changed, and the Space menu is made once and refilled only when its rows change. Almost
+  every look at a Space returns what is already on screen and draws nothing.
+- **A handler never holds its own widget.** GJS keeps the handler of an object that something
+  else still holds (a gesture held by its widget, a button held by its box), and with it whatever
+  the handler holds. A right-click handler that held its tile kept the tile, its gesture and the
+  handler alive after the tile left the screen: every dropped Home page stayed in memory. Handlers
+  take the widget from the signal (`gesture.get_widget()`, the button passed in) instead.
+- **Collect after dropping widgets or reading the Space.** The collector only sees its own heap,
+  not the widgets, layouts, textures and answer bytes behind it, so `memory.ts` asks for a
+  collection a moment after a redraw or a look. Web views of widgets no page shows are closed, and
+  one libsoup session serves every request outside a Space's own.
+
+`bun run linux:soak` builds the client and checks it: a stand-in Space on loopback, the client in
+a D-Bus session and XDG directories of its own (on a headless GNOME Shell when there is one), its
+RSS every 15 seconds, and the growth per hour after a warm-up. `--poll <seconds>` sets how often
+the client looks (`AISPACE_POLL_SECONDS`, 2 by default: fifteen times the real pace), `--churn`
+changes a widget on every look so every look redraws, `--minutes` how long it runs, `--build` which
+build it runs. `AISPACE_MEMSTAT=<seconds>` makes any run print its RSS and threads.
+
 ## What the Mac client has and this one does not (yet)
 
 - Voice input in the message field.

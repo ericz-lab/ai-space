@@ -8,6 +8,7 @@ import type { Detail, Section } from "../core/settings.ts";
 import { APP_ID, APP_ROOT, log, logError, path, prefs, readTextSync, t } from "./env.ts";
 import { Notifier } from "./inbox.ts";
 import { LocalManager } from "./local-manager.ts";
+import { startMemoryStats } from "./memory.ts";
 import { AppModel } from "./model.ts";
 import { QuickChat } from "./quick-chat.ts";
 import { applyAppearance, showSettings } from "./settings.ts";
@@ -92,6 +93,7 @@ export class Application {
     }
     this.model.refreshAll();
     this.model.startPolling();
+    startMemoryStats();
   }
 
   private window(): MainWindow {

@@ -247,13 +247,41 @@ function linked(child: any, link: string | undefined, open: (link: string) => vo
 }
 
 /**
- * The cards of one page. An embed page keeps its web view across redraws (the catalogue is looked
- * at again every minute), so the app's page is not reloaded each time.
+ * The cards of Home's pages. An embed card keeps its web view while its page is drawn again with
+ * the widget still on it, so the app's page is not reloaded; a web view no page draws any more is
+ * closed, as are those of a Space that was removed.
  */
 export class WidgetCards {
-  private readonly embeds = new Map<string, any>();
+  /** By Space, page and widget; `used` is false from the moment the page is cleared until it draws the widget again. */
+  private readonly embeds = new Map<string, { conn: string; page: string; view: any; used: boolean }>();
+  /** The page being drawn, set by Home before it asks for cards. */
+  page = "";
 
   constructor(private readonly actions: CardActions) {}
+
+  /** A page is about to be drawn again: its web views stay only if the new drawing asks for them. */
+  release(page: string): void {
+    for (const e of this.embeds.values()) if (e.page === page) e.used = false;
+  }
+
+  /** After drawing a Space's pages: closes its web views no page asked for again. */
+  keepOnly(conn: string, pages: Set<string>): void {
+    for (const [key, e] of this.embeds) if (e.conn === conn && (!e.used || !pages.has(e.page))) this.close(key);
+  }
+
+  /** Closes the web views of Spaces no longer saved. */
+  keepSpaces(conns: string[]): void {
+    for (const [key, e] of this.embeds) if (!conns.includes(e.conn)) this.close(key);
+  }
+
+  private close(key: string): void {
+    const e = this.embeds.get(key);
+    if (!e) return;
+    this.embeds.delete(key);
+    e.view.get_parent()?.remove?.(e.view);
+    // Ends its page now rather than whenever the collector finds the view.
+    e.view.run_dispose();
+  }
 
   card(space: Space, w: Widget): any {
     const card = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 8, valign: Gtk.Align.START, hexpand: true });
@@ -316,19 +344,20 @@ export class WidgetCards {
   }
 
   private embed(space: Space, w: Widget): any {
-    const key = `${space.conn.id}:${w.id}`;
-    let view = this.embeds.get(key);
-    if (view) {
-      view.get_parent()?.remove?.(view);
-      return view;
+    const key = `${space.conn.id}\n${this.page}\n${w.id}`;
+    const kept = this.embeds.get(key);
+    if (kept) {
+      kept.view.get_parent()?.remove?.(kept.view);
+      kept.used = true;
+      return kept.view;
     }
-    view = createWebView({ connectionId: space.conn.id, connection: space.conn.url, onExternal: (uri) => this.actions.open(w, uri) });
+    const view = createWebView({ connectionId: space.conn.id, connection: space.conn.url, onExternal: (uri) => this.actions.open(w, uri) });
     view.set_size_request(-1, embedHeight(w.size));
     view.set_vexpand(false);
     view.add_css_class("wb-embed");
     const url = resolveUrl(embedPath(w, Adw.StyleManager.get_default().get_dark(), lang), space.conn.url);
     if (url) view.load_uri(url);
-    this.embeds.set(key, view);
+    this.embeds.set(key, { conn: space.conn.id, page: this.page, view, used: true });
     return view;
   }
 }

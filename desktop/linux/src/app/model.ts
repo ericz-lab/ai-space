@@ -1,12 +1,14 @@
 import GLib from "gi://GLib";
 import { type Agent, type Catalogue, NotASpaceError, agentBase, decodeCatalogue } from "../core/catalogue.ts";
 import { type Identity, type SpaceState, SpaceError, classifyIdentity, classifyLayout } from "../core/check.ts";
+import { ChangeGate } from "../core/change.ts";
 import { type Connection, ConnectionList, decodeConnections, encodeConnections } from "../core/connections.ts";
 import { normalizeConnectionUrl, sameOrigin } from "../core/url.ts";
 import { Conversation, type RunInfo } from "../core/conversation.ts";
 import { type InboxItem, type InboxSummary, InboxSeen, decodeInbox } from "../core/desktop.ts";
 import { dirs, exists, log, logError, newId, path, prefs, readText, readTextSync, savePrefs, sleep, t, writeText } from "./env.ts";
 import { SpaceClient } from "./http.ts";
+import { collectSoon } from "./memory.ts";
 import { cookieHeader, forgetSession } from "./web.ts";
 
 /**
@@ -29,6 +31,12 @@ export class Space {
   readonly seen = new InboxSeen();
   readonly conversations = new Map<string, Conversation>();
   refreshing: Promise<void> | undefined;
+  /** What was last announced, so the same catalogue or inbox fetched again redraws nothing. */
+  readonly shown = new ChangeGate();
+  /** Counts the catalogue's changes, so a view can tell whether it already draws this one. */
+  catalogueVersion = 0;
+  /** When the catalogue was last kept on disk. */
+  savedAt = 0;
 
   constructor(public conn: Connection) {
     this.client = new SpaceClient(conn.url, (uri) => cookieHeader(conn.id, uri));
@@ -37,9 +45,22 @@ export class Space {
   get ready(): boolean {
     return this.state.kind === "ready";
   }
+
+  /** Whether the catalogue, with its last-known mark, differs from what was last announced. */
+  catalogueChanged(): boolean {
+    if (!this.shown.changed("catalogue", [this.catalogue, this.stale])) return false;
+    this.catalogueVersion++;
+    return true;
+  }
 }
 
+/** The catalogue on disk is rewritten when it changes, and at least this often for its date. */
+const CACHE_EVERY_MS = 10 * 60_000;
+
 const CONNECTIONS_FILE = path(dirs.config, "connections.json");
+
+/** How often the Space is looked at; `AISPACE_POLL_SECONDS` shortens it for a soak test (desktop/linux/soak.ts). */
+const POLL_SECONDS = Math.max(1, Number(GLib.getenv("AISPACE_POLL_SECONDS") ?? "30") || 30);
 
 export class AppModel {
   readonly list: ConnectionList;
@@ -102,6 +123,7 @@ export class AppModel {
       void this.loadCachedCatalogue(s);
     } else if (s.conn.url !== conn.url) {
       // The address changed: a new client and a fresh look.
+      s.client.close();
       s = new Space(conn);
       this.spaces.set(id, s);
     }
@@ -129,6 +151,7 @@ export class AppModel {
 
   remove(id: string): void {
     this.list.remove(id);
+    this.spaces.get(id)?.client.close();
     this.spaces.delete(id);
     forgetSession(id);
     if (this.currentId === id) this.currentId = this.list.default?.id;
@@ -147,7 +170,10 @@ export class AppModel {
     let id: string;
     if (existing) {
       // A Space at another address gets a new client on the next look.
-      if (!sameOrigin(existing.url, url)) this.spaces.delete(existing.id);
+      if (!sameOrigin(existing.url, url)) {
+        this.spaces.get(existing.id)?.client.close();
+        this.spaces.delete(existing.id);
+      }
       this.list.setManaged(existing.id, sameOrigin(existing.url, url) ? existing.url : url);
       id = existing.id;
     } else {
@@ -219,7 +245,7 @@ export class AppModel {
       this.setState(space, { kind: "unreachable", detail: e instanceof Error ? e.message : String(e) });
       if (space.catalogue) {
         space.stale = true;
-        this.emit("catalogue", space);
+        if (space.catalogueChanged()) this.emit("catalogue", space);
       }
     }
   }
@@ -232,7 +258,10 @@ export class AppModel {
     space.catalogue = decodeCatalogue(raw);
     space.catalogueAt = Date.now();
     space.stale = false;
-    this.emit("catalogue", space);
+    const changed = space.catalogueChanged();
+    if (changed) this.emit("catalogue", space);
+    if (!changed && space.catalogueAt - space.savedAt < CACHE_EVERY_MS) return;
+    space.savedAt = space.catalogueAt;
     void writeText(path(dirs.cache, `catalogue-${space.conn.id}.json`), JSON.stringify({ at: space.catalogueAt, raw }), 0o600).catch(() => {});
   }
 
@@ -245,7 +274,7 @@ export class AppModel {
       space.catalogue = decodeCatalogue(raw);
       space.catalogueAt = at;
       space.stale = true;
-      this.emit("catalogue", space);
+      if (space.catalogueChanged()) this.emit("catalogue", space);
     } catch {}
   }
 
@@ -254,7 +283,7 @@ export class AppModel {
       space.inbox = decodeInbox(await space.client.get("/api/inbox?filter=open&limit=200"));
       const fresh = space.seen.fresh(space.inbox.items);
       if (fresh.length) this.onFreshInbox?.(space, fresh);
-      this.emit("inbox", space);
+      if (space.shown.changed("inbox", space.inbox)) this.emit("inbox", space);
     } catch (e) {
       if (e instanceof SpaceError && e.kind === "signin") this.setState(space, { kind: "signin" });
     }
@@ -316,10 +345,12 @@ export class AppModel {
 
   startPolling(): void {
     if (this.timer) return;
-    this.timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT_IDLE, 30, () => {
+    this.timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT_IDLE, POLL_SECONDS, () => {
       this.ticks++;
       const current = this.current;
-      if (current) void this.refresh(current, { catalogue: this.ticks % 2 === 0 });
+      // Each look leaves answers behind whose bytes live outside the JavaScript heap, where its
+      // collector does not look: collect once the look is done rather than when the heap fills.
+      if (current) void this.refresh(current, { catalogue: this.ticks % 2 === 0 }).finally(() => collectSoon());
       for (const conn of this.list.connections) {
         if (conn.id === current?.conn.id) continue;
         const s = this.space(conn.id)!;

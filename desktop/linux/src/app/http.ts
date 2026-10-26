@@ -97,6 +97,12 @@ export class SpaceClient implements ChatApi {
     }
   }
 
+  /** Ends every request of a client no longer used (its Space was removed or moved). */
+  close(): void {
+    this.session.abort();
+    this.streams.abort();
+  }
+
   /** Bytes of an icon or avatar; another origin's are fetched without the Space's cookies. */
   async bytes(path: string): Promise<GBytes> {
     const { msg } = await this.message("GET", path, { accept: "*/*" });
@@ -174,8 +180,11 @@ export class SpaceClient implements ChatApi {
 }
 
 /** A request outside any Space's session (another origin's icon, the device sign-in). */
+let plain: any;
+
 export async function plainRequest(method: string, url: string, headers: Record<string, string> = {}): Promise<{ status: number; bytes: GBytes; msg: any }> {
-  const session = new Soup.Session({ user_agent: USER_AGENT, timeout: 15 });
+  // One session for all of them: a session each would keep its connections and threads until collected.
+  const session = (plain ??= new Soup.Session({ user_agent: USER_AGENT, timeout: 15 }));
   const msg = Soup.Message.new(method, url);
   if (!msg) throw new SpaceError("invalid", `not a URL: ${url}`);
   msg.set_flags(Soup.MessageFlags.NO_REDIRECT);
