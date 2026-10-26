@@ -11,6 +11,9 @@ import { bridge, wantsWebSocket } from "../terminal/api.ts";
  *   GET   /api/peers                                    every peer: health, snapshot time, counts, duplicates
  *   PATCH /api/peers/:peer/apps/:app                    { hidden }: hide a peer app on this panel only
  *   DELETE /api/peers/:peer/apps/:app                   uninstall the app on the peer (forwarded), refresh its snapshot
+ *   GET   /api/peers/:peer/model/apps                   the peer's app-model rows and its own choices (forwarded)
+ *   PATCH /api/peers/:peer/apps/:app/model              {tag?, model}: set or clear an app's override on the peer
+ *                                                       (forwarded; same-origin browser requests only, like the local route)
  *   GET   /api/peers/:peer/apps/:app/icon               ┐
  *   GET   /api/peers/:peer/apps/:app/appcolor           │
  *   GET   /api/peers/:peer/agents/:app/:agent/avatar    │ forwarded to the peer's /api/peer/... with
@@ -120,6 +123,13 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
       },
     },
 
+    "/api/peers/:peer/model/apps": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/apps/:app/model": {
+      PATCH: (req, server) => {
+        if (!req.headers.get("origin") || !sameOrigin(req)) return error(403, "same-origin browser request required");
+        return proxy(FORWARD_TIMEOUT_MS)(req, server);
+      },
+    },
     "/api/peers/:peer/apps/:app/icon": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/apps/:app/appcolor": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/avatar": { GET: proxy(FORWARD_TIMEOUT_MS) },

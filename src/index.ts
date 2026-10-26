@@ -8,7 +8,7 @@ import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers,
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
-import { AppModels, createAppModelRoutes } from "./space/model/app-models.ts";
+import { AppModels, createAppModelRoutes, createPeerAppModelRoutes } from "./space/model/app-models.ts";
 import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts";
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
@@ -186,6 +186,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     // A model on another machine (`box:codex/basic`) is a valid override too.
     options: () => [...modelPreferences.options(), ...runtimes.machineTierOptions()],
   });
+  // The Models page's rows, for this panel and for a hub's (peers/serve.ts).
+  const appModelRouteOpts = { appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app: string) => modelStore.tags(app, Date.now() - 30 * 86400_000) };
   const chatStore = new ChatStore(config.dbPath);
   const chat = new ChatService({ store: chatStore, model, defaultModel: (app, tag) => appModels.resolve(app, tag), fileDir: (app) => join(storage.appDataDir(app), "chat") });
   // A chat turn the last process did not live to finish is closed here, with the text it had saved (docs/chat.md#turn).
@@ -505,7 +507,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["app", createNotifyRoutes({ notify, store: notifyStore, token: config.apiToken, appForToken: (t) => storage.appForToken(t) })],
       ["owner", createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel })],
       ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag), machines: machineCells, servesPeers: config.peerModel })],
-      ["owner", createAppModelRoutes({ appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app) => modelStore.tags(app, Date.now() - 30 * 86400_000) })],
+      ["owner", createAppModelRoutes(appModelRouteOpts)],
       ["app", createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget })],
       ["public", createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name, token: config.apiToken, managed: Boolean(await readOwnership(ws.home)) })],
       ["owner", panelRoutes],
@@ -522,7 +524,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", agentRoutes],
       ["owner", createPeerRoutes({ hub: peers, layout, registry })],
       ["owner", terminalRoutes],
-      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
+      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
       ["public", createWebRoutes()],
       ["owner", createAuthRoutes({ mode: config.auth, auth })],
     ],

@@ -5,7 +5,7 @@ import { RuntimeRegistry } from "../runtimes/registry.ts";
 import { fakeModelBin } from "../runtimes/testing.ts";
 import { fakeCodexBin } from "../runtimes/testing-codex.ts";
 import { createModelRoutes } from "./api.ts";
-import { AppModels, type AppModelSpec, createAppModelRoutes, parseAppModelSpec } from "./app-models.ts";
+import { AppModels, type AppModelSpec, createAppModelRoutes, createPeerAppModelRoutes, parseAppModelSpec } from "./app-models.ts";
 import { ModelPreferences } from "./preferences.ts";
 import { ModelService } from "./service.ts";
 import { ModelStore } from "./store.ts";
@@ -126,5 +126,23 @@ test("routes list apps with their rows and change overrides only from a same-ori
     const one = routes["/api/apps/:app/model"].GET(Object.assign(new Request("http://localhost/api/apps/feed/model"), { params: { app: "feed" } }));
     expect((await one.json()).rows[1].source).toBe("override-tag");
     expect(routes["/api/apps/:app/model"].GET(Object.assign(new Request("http://localhost/api/apps/ghost/model"), { params: { app: "ghost" } })).status).toBe(404);
+  } finally { close(); }
+});
+
+test("the peer routes list the same rows and change an override without a browser origin", async () => {
+  const { appModels, close } = setup({ feed: { tags: { translate: "basic" } } });
+  const routes = createPeerAppModelRoutes({ appModels, apps: () => ["feed"], seenTags: () => [] });
+  const patch = (app: string, body: unknown, headers: Record<string, string> = { "content-type": "application/json" }) =>
+    routes["/api/peer/apps/:app/model"].PATCH(Object.assign(new Request(`http://peer/api/peer/apps/${app}/model`, { method: "PATCH", headers, body: JSON.stringify(body) }), { params: { app } }));
+  try {
+    const list = await routes["/api/peer/model/apps"].GET().json();
+    expect(list.apps.map((a: { app: string }) => a.app)).toEqual(["feed"]);
+    expect(list.options.length).toBe(8);
+    expect((await patch("feed", { model: "claude/junior" }, {})).status).toBe(415);
+    expect((await patch("ghost", { model: "claude/junior" })).status).toBe(404);
+    expect((await patch("feed", { model: "nope/basic" })).status).toBe(400);
+    const ok = await patch("feed", { tag: "translate", model: "claude/junior" });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).rows[1]).toMatchObject({ tag: "translate", override: "claude/junior", source: "override-tag" });
   } finally { close(); }
 });

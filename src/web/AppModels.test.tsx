@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import AppModels, { type AppGroup, AppModelDetail, AppModelList, type Option, saveAppModel, summarize } from "./AppModels.tsx";
+import AppModels, { type AppGroup, AppModelDetail, AppModelList, loadPeerModels, type Option, saveAppModel, summarize } from "./AppModels.tsx";
 import { translate } from "./messages.ts";
 
 const t = (key: Parameters<typeof translate>[1], vars?: Record<string, string | number>) => translate("en", key, vars);
@@ -10,6 +10,7 @@ const options: Option[] = [
   { value: "david:codex/intermediate", runtime: "codex", tier: "intermediate", model: "gpt" },
 ];
 const news: AppGroup = {
+  key: "news",
   app: "news",
   title: "News",
   icon: "📰",
@@ -20,7 +21,7 @@ const news: AppGroup = {
     { tag: "digest", model: "david:codex/intermediate", source: "override-app" },
   ],
 };
-const notes: AppGroup = { app: "notes", title: "Notes", icon: "📝", rows: [{ tag: null, model: "codex/intermediate", source: "default" }] };
+const notes: AppGroup = { key: "notes", app: "notes", title: "Notes", icon: "📝", rows: [{ tag: null, model: "codex/intermediate", source: "default" }] };
 
 /** Every element in a rendered tree, walking function components that hold no hooks. */
 function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
@@ -100,4 +101,37 @@ test("standalone, an open app's page has a back button to the list", () => {
   const html = renderToStaticMarkup(<AppModels open onClose={() => {}} selected="news" onSelect={() => {}} />);
   expect(html).toContain('title="Back"');
   expect(html).toContain('aria-label="news"');
+});
+
+test("a peer's app is keyed by its machine and its page's selects carry the machine", () => {
+  const remote: AppGroup = { ...notes, key: "david/notes", peer: "david" };
+  const opened: string[] = [];
+  const tree = AppModelList({ groups: [remote], onOpen: (key) => opened.push(key), t, heading: t("appModels.onPeer", { peer: "david" }) });
+  (elements(tree).find((el) => el.type === "button")!.props.onClick as () => void)();
+  expect(opened).toEqual(["david/notes"]);
+  expect(renderToStaticMarkup(tree)).toContain("On david");
+  expect(renderToStaticMarkup(<AppModelDetail group={remote} options={options} onSaved={() => {}} t={t} />)).toContain('id="app-model-david-notes-"');
+  expect(renderToStaticMarkup(<AppModelList groups={[]} onOpen={() => {}} t={t} heading="On box" note="box is not answering: down" />)).toContain("box is not answering");
+});
+
+test("a change to a peer's app goes to the hub's peer route", async () => {
+  const calls: { url: string; body: unknown }[] = [];
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    calls.push({ url, body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ ok: true, app: "notes", rows: [] }));
+  }) as unknown as typeof fetch;
+  await saveAppModel("notes", null, "codex/basic", "david");
+  expect(calls).toEqual([{ url: "/api/peers/david/apps/notes/model", body: { model: "codex/basic" } }]);
+});
+
+test("a peer's rows load with its own choices; an older peer and an unreachable one are told apart", async () => {
+  const answers: Record<string, Response> = {
+    "/api/peers/new/model/apps": Response.json({ ok: true, apps: [{ app: "notes", rows: [] }], options }),
+    "/api/peers/old/model/apps": new Response("", { status: 404 }),
+    "/api/peers/down/model/apps": Response.json({ ok: false, error: "peer down unreachable: timeout" }, { status: 502 }),
+  };
+  globalThis.fetch = (async (url: string) => answers[url]!) as unknown as typeof fetch;
+  expect(await loadPeerModels("new")).toEqual({ peer: "new", apps: [{ app: "notes", rows: [] }], options });
+  expect(await loadPeerModels("old")).toEqual({ peer: "old", old: true });
+  expect(await loadPeerModels("down")).toEqual({ peer: "down", error: "peer down unreachable: timeout" });
 });
