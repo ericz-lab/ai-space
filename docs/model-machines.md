@@ -184,6 +184,7 @@ The goal for app code: call `/api/model/run` and `/api/model/image` only, start 
 
 1. **Clean the apps** (one commit and deploy per app), before the core is deployed:
    - **Calls that need a machine but only want the web**: `finance-writer` drafts with `mode: "full"` only for web search. It sends `tools: ["WebSearch", "WebFetch"]` instead, and its `ModelRequest` type drops `mode`. Do this first: once the core is deployed, its full-mode calls over a runtime's `ssh:` are refused.
+   - **Calls that do need their machine** (full mode with the app's own tools, like a group chat whose agents read the workspace) keep their mode. Before the core is deployed, the operator points their tag at a runtime of that machine that is signed in there; otherwise, once the core is deployed, those calls are refused and the ledger shows why.
    - **Fallbacks to a local CLI**: apps that try the model service and run `claude -p` when they have no token drop the CLI branch and fail with a clear error instead. The CLI path was never recorded in the ledger.
    - **Local CLI only**: an app that runs `claude -p` itself moves to the model service with its own tag.
    - **Model names in code**: apps that send `codex/...` drop it and declare their tags in `space.yaml`. A model a person picks by hand (a command-line choice) stays.
