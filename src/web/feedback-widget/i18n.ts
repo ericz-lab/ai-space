@@ -102,7 +102,11 @@ const zh: Record<Key, string> = {
 const dict: Record<Lang, Record<Key, string>> = { en, zh };
 
 export function tr(lang: Lang, key: Key, vars: Record<string, string | number> = {}): string {
-  return dict[lang][key].replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? ""));
+  // A page can hold this script while the space has moved on: a word the space sends that this
+  // copy does not know (a new status) shows as itself instead of breaking the card.
+  const words = dict[lang] as Record<string, string | undefined>;
+  const text = words[key] ?? (dict.en as Record<string, string | undefined>)[key] ?? String(key).replace(/^status\./, "");
+  return text.replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? ""));
 }
 
 /** The page's language: its `<html lang>`, Chinese or English. */
