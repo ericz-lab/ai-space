@@ -14,7 +14,11 @@ import {
   MIN_PASSWORD,
   backupState,
   dateTime,
+  type FeedbackView,
+  type WebKey,
+  FEEDBACK_EFFORTS,
   decodeBackups,
+  decodeFeedback,
   decodePackageCatalogue,
   decodePreferences,
   decodeServices,
@@ -97,6 +101,70 @@ export function usageSection(page: any, ctx: Ctx): void {
   g.add(linkRow(tw("settings.usage"), () => ctx.open("usage")));
   g.add(linkRow(tw("settings.activity"), () => ctx.open("activity")));
   page.add(g);
+}
+
+// ------------------------------------------------------------------ feedback
+
+/**
+ * Settings → Feedback (FeedbackSettings.tsx): the button on app pages, what happens to what is sent,
+ * where the Fix Engineer runs and on which model, and which apps show the button. The recent list
+ * stays in the panel; this section links nowhere else.
+ */
+export function feedbackSection(page: any, ctx: Ctx, space: Space): void {
+  loading(page, { description: tw("feedback.enabledHelp") }, async (group) => {
+    let view: FeedbackView = decodeFeedback(await space.client.get("/api/panel/feedback/settings"));
+    const save = (patch: Record<string, unknown>, undo: () => void) => {
+      void space.client
+        .send("PUT", "/api/panel/feedback/settings", patch)
+        .then((raw) => {
+          view = decodeFeedback(raw);
+        })
+        .catch((e) => {
+          ctx.toast(errorText(e));
+          undo();
+        });
+    };
+    const toggle = (title: string, active: boolean, key: "enabled" | "errors" | "appsDefault", subtitle?: string) => {
+      const r = new Adw.SwitchRow({ active });
+      plain(r, title, subtitle);
+      let quiet = false;
+      r.connect("notify::active", () => {
+        if (quiet) return;
+        save({ [key]: r.get_active() }, () => {
+          quiet = true;
+          r.set_active(!r.get_active());
+          quiet = false;
+        });
+      });
+      return r;
+    };
+    const s = view.settings;
+    group.add(toggle(tw("feedback.enabled"), s.enabled, "enabled"));
+    const pick = (title: string, choices: { value: string; label: string }[], value: string, key: string) => {
+      const c = choiceRow(title, choices, value, (v) => save({ [key]: v }, () => c.set(String((view.settings as Record<string, unknown>)[key] ?? ""))));
+      group.add(c.row);
+    };
+    pick(tw("feedback.mode"), [{ value: "auto", label: tw("feedback.mode.auto") }, { value: "later", label: tw("feedback.mode.later") }], s.mode, "mode");
+    pick(tw("feedback.machine"), view.machines.map((m) => ({ value: m.value, label: m.value ? m.label : tw("feedback.thisMachine", { name: m.label }) })), s.machine, "machine");
+    pick(tw("feedback.model"), modelChoices(view.models, s.model, tw("feedback.modelDefault"), lang), s.model, "model");
+    pick(tw("feedback.effort"), FEEDBACK_EFFORTS.map((e) => ({ value: e, label: tw(`feedback.effort.${e}` as WebKey) })), s.effort, "effort");
+    group.add(toggle(tw("feedback.errors"), s.errors, "errors"));
+    group.add(row(tw("feedback.shortcut"), view.shortcut));
+
+    const apps = new Adw.PreferencesGroup({ title: tw("feedback.apps"), description: tw("feedback.appsHelp") });
+    apps.add(toggle(tw("feedback.appsDefault"), s.appsDefault, "appsDefault"));
+    for (const a of view.apps) {
+      const title = lang === "zh" && a.zh ? a.zh : a.title;
+      const state = () => tw("feedback.app.default", { state: view.settings.appsDefault ? tw("feedback.on") : tw("feedback.off") });
+      const c = choiceRow(title, [{ value: "default", label: state() }, { value: "on", label: tw("feedback.on") }, { value: "off", label: tw("feedback.off") }], s.apps[a.app] ?? "default", (v) =>
+        save({ apps: { [a.app]: v } }, () => c.set(view.settings.apps[a.app] ?? "default")),
+      );
+      apps.add(c.row);
+    }
+    page.add(apps);
+    const trust = new Adw.PreferencesGroup({ description: tw("feedback.trust") });
+    page.add(trust);
+  });
 }
 
 // ------------------------------------------------------------------ status

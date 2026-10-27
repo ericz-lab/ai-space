@@ -4,7 +4,7 @@ import Soup from "gi://Soup?version=3.0";
 import WebKit from "gi://WebKit?version=6.0";
 import { decideNavigation, grantsMicrophone } from "../core/navigation.ts";
 import { sameOrigin } from "../core/url.ts";
-import { DEBUG, dirs, log, path } from "./env.ts";
+import { APP_ROOT, DEBUG, dirs, log, path, readTextSync } from "./env.ts";
 
 /**
  * Web content of one saved Space: a WebKit network session of its own, persistent, apart from
@@ -94,6 +94,19 @@ export type WebViewOptions = {
   contentManager?: any;
 };
 
+/** This build's version for the user agent, a plain token ("dev" when unknown). */
+let uaVersion: string | undefined;
+function clientVersion(): string {
+  if (uaVersion === undefined) {
+    try {
+      uaVersion = String((JSON.parse(readTextSync(path(APP_ROOT, "VERSION.json")) ?? "") as { version?: string }).version ?? "dev").replace(/[^\w.+-]/g, "") || "dev";
+    } catch {
+      uaVersion = "dev";
+    }
+  }
+  return uaVersion;
+}
+
 /** A web view in the connection's session, with the navigation rules of the Mac client. */
 export function createWebView(o: WebViewOptions): any {
   const settings = new WebKit.Settings({
@@ -103,6 +116,9 @@ export function createWebView(o: WebViewOptions): any {
     javascript_can_access_clipboard: true,
     enable_smooth_scrolling: true,
   });
+  // `AISpaceLinux/<version>` after WebKit's own user agent, as the Mac (`AISpaceDesktop/`) and phone
+  // (`AISpaceMobile/`) clients add theirs: pages such as the feedback button tell this client from a browser.
+  settings.set_user_agent_with_application_details("AISpaceLinux", clientVersion());
   const view = new WebKit.WebView({ network_session: networkSession(o.connectionId), settings, hexpand: true, vexpand: true, ...(o.contentManager ? { user_content_manager: o.contentManager } : {}) });
   /** The origin the view counts as its own: where its first page loaded. */
   let home: string | undefined;
