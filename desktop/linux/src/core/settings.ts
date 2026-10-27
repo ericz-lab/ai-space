@@ -15,13 +15,14 @@ export { activityBars, activityRange, type UsageWindow } from "../../../../src/w
 export const webText = (lang: Lang, key: WebKey, vars?: Record<string, string | number>) => translate(lang, key, vars);
 
 /** The panel's sections, then this client's own two (This Computer in the Local edition, Peer). */
-export type Section = "general" | "appearance" | "models" | "automation" | "usage" | "status" | "packages" | "account" | "local" | "peer";
-export const WEB_SECTIONS = ["general", "appearance", "models", "automation", "usage", "status", "packages", "account"] as const;
+export type Section = "general" | "appearance" | "models" | "automation" | "feedback" | "usage" | "status" | "packages" | "account" | "local" | "peer";
+export const WEB_SECTIONS = ["general", "appearance", "models", "automation", "feedback", "usage", "status", "packages", "account"] as const;
 export const SECTION_LABEL: Record<(typeof WEB_SECTIONS)[number], WebKey> = {
   general: "settings.section.general",
   appearance: "settings.section.appearance",
   models: "settings.section.models",
   automation: "settings.section.automation",
+  feedback: "settings.section.feedback",
   usage: "settings.section.usage",
   status: "settings.status",
   packages: "settings.section.packages",
@@ -124,6 +125,43 @@ export const decodeAppModels = (raw: unknown) => ({
   apps: listOf<AppModels>(raw, "apps").map((a) => ({ app: String(a.app), rows: objects(a.rows) as AppModelRow[] })),
   options: listOf<ModelOption>(raw, "options"),
 });
+
+// ------------------------------------------------------------------ feedback
+
+/** Settings → Feedback, `GET /api/panel/feedback/settings` (FeedbackSettings.tsx). */
+export type FeedbackView = {
+  settings: { enabled: boolean; appsDefault: boolean; apps: Record<string, string>; mode: "auto" | "later"; machine: string; model: string; effort: "high" | "xhigh" | "max"; errors: boolean };
+  apps: { app: string; title: string; zh?: string; enabled: boolean }[];
+  machines: Choice[];
+  models: ModelOption[];
+  later: number;
+  shortcut: string;
+};
+export const FEEDBACK_EFFORTS = ["high", "xhigh", "max"] as const;
+
+export function decodeFeedback(raw: unknown): FeedbackView {
+  const s = field(raw, "settings");
+  const apps = field(s, "apps");
+  const mode = field(s, "mode");
+  const effort = field(s, "effort");
+  return {
+    settings: {
+      enabled: field(s, "enabled") === true,
+      appsDefault: field(s, "appsDefault") !== false,
+      apps: typeof apps === "object" && apps !== null ? Object.fromEntries(Object.entries(apps).filter(([, v]) => v === "on" || v === "off")) : {},
+      mode: mode === "later" ? "later" : "auto",
+      machine: String(field(s, "machine") ?? ""),
+      model: String(field(s, "model") ?? ""),
+      effort: FEEDBACK_EFFORTS.includes(effort as "high") ? (effort as FeedbackView["settings"]["effort"]) : "xhigh",
+      errors: field(s, "errors") !== false,
+    },
+    apps: listOf<FeedbackView["apps"][number]>(raw, "apps").filter((a) => typeof a.app === "string").map((a) => ({ app: a.app, title: String(a.title ?? a.app), ...(typeof a.zh === "string" ? { zh: a.zh } : {}), enabled: a.enabled === true })),
+    machines: listOf<Choice>(raw, "machines").map((m) => ({ value: String(m.value ?? ""), label: String(m.label ?? "") })),
+    models: listOf<ModelOption>(raw, "models").filter((o) => typeof o.value === "string"),
+    later: Number(field(field(raw, "counts"), "later") ?? 0) || 0,
+    shortcut: String(field(raw, "shortcut") ?? "Alt+Shift+F"),
+  };
+}
 
 // ------------------------------------------------------------------ tasks
 

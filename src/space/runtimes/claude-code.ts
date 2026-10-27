@@ -4,7 +4,7 @@ import { LivePool } from "./live.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
-import { assertCompletionMode, FILE_NAME_PATTERN, PERMISSION_MODES, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, CHAT_EFFORTS, FILE_NAME_PATTERN, PERMISSION_MODES, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /**
  * Claude Code as a runtime. Three operations, one CLI:
@@ -274,6 +274,7 @@ export function chatArgs(t: ChatTurn, extra: string[] = []): string[] {
   if (t.model) args.push("--model", t.model);
   if (t.sessionId) args.push("--resume", t.sessionId);
   if ((PERMISSION_MODES as readonly string[]).includes(t.permissionMode ?? "")) args.push("--permission-mode", t.permissionMode!);
+  if (t.effort && (CHAT_EFFORTS as readonly string[]).includes(t.effort)) args.push("--effort", t.effort);
   if (t.systemPrompt) args.push("--append-system-prompt", t.systemPrompt);
   if (t.allowedTools?.length) args.push("--allowedTools", t.allowedTools.join(","));
   args.push(...extra);

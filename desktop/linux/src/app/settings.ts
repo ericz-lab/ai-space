@@ -11,7 +11,7 @@ import type { AppModel } from "./model.ts";
 import { PeerPage } from "./peer-view.ts";
 import { type Ctx, choiceRow, loadLabels, plain } from "./settings-kit.ts";
 import { activityPage, appModelsPage, eventsPage, tasksPage, usagePage } from "./settings-pages.ts";
-import { accountSection, automationSection, modelsSection, packagesSection, statusSection, usageSection } from "./settings-space.ts";
+import { accountSection, automationSection, feedbackSection, modelsSection, packagesSection, statusSection, usageSection } from "./settings-space.ts";
 import { connectForm } from "./welcome.ts";
 
 /**
@@ -51,6 +51,7 @@ const ICONS: Record<Section, string> = {
   appearance: "preferences-desktop-appearance-symbolic",
   models: "applications-science-symbolic",
   automation: "preferences-system-time-symbolic",
+  feedback: "chat-message-new-symbolic",
   usage: "speedometer-symbolic",
   status: "network-wired-symbolic",
   packages: "package-x-generic-symbolic",
@@ -59,7 +60,7 @@ const ICONS: Record<Section, string> = {
   peer: "network-server-symbolic",
 };
 
-const SPACE_SECTIONS: Section[] = ["models", "automation", "usage", "status", "packages", "account"];
+const SPACE_SECTIONS: Section[] = ["models", "automation", "feedback", "usage", "status", "packages", "account"];
 
 const label = (s: Section) => (s === "local" ? t("thisComputer") : s === "peer" ? t("peer") : tw(SECTION_LABEL[s]));
 
@@ -229,6 +230,9 @@ function sectionPage(s: Section, ctx: Ctx, local: LocalManager, model: AppModel,
       break;
     case "automation":
       automationSection(prefsPage, ctx);
+      break;
+    case "feedback":
+      feedbackSection(prefsPage, ctx, space!);
       break;
     case "usage":
       usageSection(prefsPage, ctx);

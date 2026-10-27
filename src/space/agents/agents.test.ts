@@ -114,7 +114,7 @@ describe("agents api", () => {
 
   test("lists the space agent and the apps' agents", async () => {
     const r = (await (await fetch(`${base}/api/agents`)).json()) as { agents: { id: string }[] };
-    expect(r.agents.map((a) => a.id)).toEqual(["notes/coder", "notes/librarian", "space/assistant"]);
+    expect(r.agents.map((a) => a.id)).toEqual(["notes/coder", "notes/librarian", "space/assistant", "space/ui-fixer"]);
     expect(r.agents.find((a) => a.id === "space/assistant")).toMatchObject({
       title: "Space Assistant",
       i18n: { zh: { title: "空间助手" } },
@@ -137,6 +137,17 @@ describe("agents api", () => {
     // Resuming keeps one row and its title.
     await events(await post("/api/agents/notes/librarian/chat", { message: "again", sessionId: "cafe0001-0000-4000-8000-000000000000" }));
     expect(sessions.list("notes/librarian")).toMatchObject([{ sid: "cafe0002-0000-4000-8000-000000000000", title: "hello" }]);
+  });
+
+  test("the Fix Engineer runs in the workspace root with its rules, and takes an effort level", async () => {
+    const r = (await (await fetch(`${base}/api/agents`)).json()) as { agents: { id: string; title?: string }[] };
+    expect(r.agents.find((a) => a.id === "space/ui-fixer")).toMatchObject({ title: "Fix Engineer", i18n: { zh: { title: "修复工程师" } } });
+    const ev = await events(await post("/api/agents/space/ui-fixer/chat", { message: "fix", effort: "xhigh", permissionMode: "bypassPermissions" }));
+    const text = String((ev[1] as { message: { content: { text: string }[] } }).message.content[0]!.text);
+    expect(text).toContain(`cwd=${home}`);
+    expect(text).toContain("--permission-mode --effort --append-system-prompt");
+    expect(text).toContain("prompt=You are the Fix Engineer of an ai-space");
+    expect((await post("/api/agents/space/ui-fixer/chat", { message: "fix", effort: "turbo" })).status).toBe(400);
   });
 
   test("space agent runs in the workspace root without an allow-list", async () => {

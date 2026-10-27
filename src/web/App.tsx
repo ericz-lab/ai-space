@@ -26,6 +26,7 @@ import { type PetChoice, resolvePet } from "./petdex.ts";
 import SettingsStatus from "./SettingsStatus.tsx";
 import { SECTION_LABEL, type SettingsSection, SettingsNav, saveSection, savedSection } from "./SettingsNav.tsx";
 import Packages from "./Packages.tsx";
+import FeedbackSettings from "./FeedbackSettings.tsx";
 import { backdropOf, useAppearance } from "./theme.ts";
 import ThemeSettings from "./ThemeSettings.tsx";
 import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
@@ -159,7 +160,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   useEffect(() => {
     if (setsOpen) void loadAuth().then((s) => setHasAccount(s.mode === "builtin" && !!s.signedIn)).catch(() => {});
   }, [setsOpen]);
-  const setSections: SettingsSection[] = ["general", "appearance", "models", "automation", "usage", "status", "packages", ...(hasAccount ? ["account" as const] : [])];
+  const setSections: SettingsSection[] = ["general", "appearance", "models", "automation", "feedback", "usage", "status", "packages", ...(hasAccount ? ["account" as const] : [])];
   const [setSectionPicked, setSetSection] = useState<SettingsSection>(() => savedSection([...setSections, "account"]));
   const setSection = setSections.includes(setSectionPicked) ? setSectionPicked : "general";
   const [settingsPage, setSettingsPageRaw] = useState<"appModels" | "tasks" | "events" | "usage" | "activity" | null>(null);
@@ -992,6 +993,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                     </button>
                   </div>
                 )}
+                {setSection === "feedback" && <FeedbackSettings />}
                 {setSection === "status" && (
                   <div className="setcard">
                     <SettingsStatus />

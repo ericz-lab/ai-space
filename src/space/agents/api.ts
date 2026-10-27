@@ -18,7 +18,7 @@ import type { AppRegistry } from "../panel/registry.ts";
 import { type AgentView, agentView } from "../panel/view.ts";
 import type { PeerHub } from "../peers/hub.ts";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
-import { APPROVAL_DECISIONS, MODEL_TIERS, type ApprovalDecision, type QuestionAnswers, type RuntimeKind } from "../runtimes/types.ts";
+import { APPROVAL_DECISIONS, CHAT_EFFORTS, MODEL_TIERS, type ApprovalDecision, type ChatEffort, type QuestionAnswers, type RuntimeKind } from "../runtimes/types.ts";
 import type { Manifest, ManifestAgent } from "../scheduler/manifest.ts";
 import { loadAppEnv } from "../scheduler/targets.ts";
 import type { Workspace } from "../workspace.ts";
@@ -27,12 +27,13 @@ import { splitMachine } from "../runtimes/registry.ts";
 import { RunBusyError, RunClosedError, RunRegistry, RunStateError } from "./runs.ts";
 import type { SessionStore } from "./sessions.ts";
 import { readTranscript } from "./transcript.ts";
+import { fixerSystemPrompt } from "../feedback/prompt.ts";
 
 /**
  * HTTP surface for agents, shaped as a Bun.serve `routes` table.
  *
  *   GET  /api/agents                              every agent of every visible app, plus the space agent, then the peers' agents
- *   POST /api/agents/:app/:agent/chat             { message, sessionId?, model?, permissionMode?, interactive? } → SSE of a new background run (x-run-id)
+ *   POST /api/agents/:app/:agent/chat             { message, sessionId?, model?, permissionMode?, effort?, interactive? } → SSE of a new background run (x-run-id)
  *   GET  /api/agents/runs?recent=<s>&agent=        runs newest first: running ones and those that ended in the last `recent` seconds
  *   GET  /api/agents/:app/:agent/runs              the agent's runs (same query)
  *   GET  /api/agents/:app/:agent/runs/:id          one run
@@ -106,6 +107,28 @@ export function spaceAgentView(runtimes?: RuntimeRegistry, defaultModel?: string
     i18n: { zh: { title: "空间助手", description: "工作区助手：了解各个应用，读取它们的清单和文件，协助运维这个空间。" } },
     avatar: "/assistant.svg",
     appIcon: "✨",
+    runtime: runtimes ? baseRuntime(runtimes, defaultModel) : "claude",
+    ...(runtimes ? { modelOptions: chatOptions(runtimes) } : {}),
+  };
+}
+
+/**
+ * The space's Fix Engineer (docs/feedback.md): fixes an app from feedback sent with the button on its
+ * page. It works in the workspace root and changes one app's source checkout per run; the feedback
+ * service starts it, and the person can chat with it like any agent.
+ */
+export const FIXER_AGENT = "ui-fixer";
+
+export function fixerAgentView(runtimes?: RuntimeRegistry, defaultModel?: string): AgentView {
+  return {
+    id: `${SPACE_APP}/${FIXER_AGENT}`,
+    app: SPACE_APP,
+    name: FIXER_AGENT,
+    title: "Fix Engineer",
+    description: "Fixes apps from the feedback sent with the button on their pages: changes only that app's source, runs its checks, deploys, and hands the result back for review.",
+    i18n: { zh: { title: "修复工程师", description: "处理 app 页面上反馈按钮发来的问题：只改这个 app 的源码，跑检查、部署，再交回给你验收。" } },
+    avatar: "/assistant.svg",
+    appIcon: "🛠",
     runtime: runtimes ? baseRuntime(runtimes, defaultModel) : "claude",
     ...(runtimes ? { modelOptions: chatOptions(runtimes) } : {}),
   };
@@ -251,6 +274,12 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     if (app === SPACE_APP && name === SPACE_AGENT) {
       return { id: `${SPACE_APP}/${SPACE_AGENT}`, runtime: baseRuntime(opts.runtimes, baseDefault()), cwd: opts.ws.home, systemPrompt: withCatalogue(spaceAgentPrompt(opts.ws), SPACE_APP), tools: [], app: SPACE_APP };
     }
+    if (app === SPACE_APP && name === FIXER_AGENT) {
+      const skillDir = opts.sharedSkills ? join(opts.sharedSkills, "app-fix") : undefined;
+      const skill = skillDir ? await Bun.file(join(skillDir, "SKILL.md")).text().catch(() => "") : "";
+      const prompt = [fixerSystemPrompt(opts.ws.home, skillDir ? join(skillDir, "scope.ts") : undefined), skill ? `--- The app-fix skill ---\n${skill.slice(0, MAX_CONTEXT)}` : ""].filter(Boolean).join("\n\n");
+      return { id: `${SPACE_APP}/${FIXER_AGENT}`, runtime: baseRuntime(opts.runtimes, baseDefault()), cwd: opts.ws.home, systemPrompt: prompt, tools: [], app: SPACE_APP };
+    }
     const entry = registry.get(app);
     const a = entry?.manifest.agents.find((x) => x.name === name);
     if (!entry || !a) throw new NotFound(`unknown agent: ${app}/${name}`);
@@ -318,7 +347,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
       GET: async (req) => {
         const lay = layout.read();
         const hidden = new Set(lay.hidden);
-        const agents: AgentView[] = [spaceAgentView(opts.runtimes, baseDefault())];
+        const agents: AgentView[] = [spaceAgentView(opts.runtimes, baseDefault()), fixerAgentView(opts.runtimes, baseDefault())];
         for (const { manifest } of registry.list()) {
           if (hidden.has(manifest.app) || manifest.status === "archived") continue;
           for (const a of manifest.agents) {
@@ -389,6 +418,8 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const tier = (MODEL_TIERS as readonly string[]).includes(selected.slice(selectedName.length + 1));
         const model = tier && !opts.runtimes.tierOptions({ all: true }).some((o) => o.value === selected) ? undefined : opts.runtimes.resolve(selected).model;
         const permissionMode = typeof body.permissionMode === "string" ? body.permissionMode : undefined;
+        if (body.effort !== undefined && !(CHAT_EFFORTS as readonly unknown[]).includes(body.effort)) return error(400, `effort must be one of ${CHAT_EFFORTS.join(", ")}`);
+        const effort = body.effort as ChatEffort | undefined;
         const env: Record<string, string | undefined> = { ...process.env, ...(await loadAppEnv(agent.cwd)), ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}) };
         let run;
         const release = await opts.holdApp?.(agent.app);
@@ -398,7 +429,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
             runtime,
             model,
             // The manifest's tool list is Claude Code's syntax; other runtimes bound the agent by the permission mode's sandbox.
-            turn: { message, images, sessionId, model, permissionMode, interactive, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
+            turn: { message, images, sessionId, model, permissionMode, ...(effort ? { effort } : {}), interactive, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
             onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model, skillIntent ?? undefined),
           });
           if (release) runs.subscribe(run.id, run.lastSeq, { onEvent() {}, onEnd: release });

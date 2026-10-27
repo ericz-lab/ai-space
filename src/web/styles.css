@@ -1450,3 +1450,13 @@ a.widget-title:hover { color: var(--text); }
 .settings-detail .usage-table tbody tr + tr { border-top: 1px solid var(--hairline); }
 .settings-detail .usage-scroll { max-width: 100%; }
 .settings-detail .usage-windows { flex-wrap: wrap; }
+/* Settings → Feedback (FeedbackSettings.tsx): a second line under a row's label, the shortcut, the recent list. */
+.setsub { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); font-weight: 400; }
+.setsub a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.setkbd {
+  font: 500 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 4px 8px; border-radius: 6px;
+  border: 1px solid var(--glass-border); background: var(--glass); color: var(--text);
+}
+.setcard .setrow.feedback-row { cursor: default; align-items: flex-start; }
+.feedback-text { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.feedback-text b { font-weight: 500; margin-right: 4px; }

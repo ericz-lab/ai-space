@@ -14,6 +14,7 @@ import {
   callTokens,
   decodeAuth,
   decodeBackups,
+  decodeFeedback,
   decodePreferences,
   decodeServices,
   decodeTasks,
@@ -38,7 +39,7 @@ import {
 } from "./settings.ts";
 
 test("the panel's sections, in its order, under its names", () => {
-  expect([...WEB_SECTIONS]).toEqual(["general", "appearance", "models", "automation", "usage", "status", "packages", "account"]);
+  expect([...WEB_SECTIONS]).toEqual(["general", "appearance", "models", "automation", "feedback", "usage", "status", "packages", "account"]);
   expect(SECTION_LABEL).toEqual(WEB_LABEL);
   expect(webText("zh", "settings.section.models")).toBe(MESSAGES.zh["settings.section.models"]);
   expect(webText("en", "settings.countServices", { n: 3 })).toBe("3 services");
@@ -158,4 +159,21 @@ test("packages and account", () => {
   expect(hasAccount(decodeAuth({ mode: "builtin", signedIn: true }))).toBe(true);
   expect(hasAccount(decodeAuth({ mode: "builtin" }))).toBe(false);
   expect(hasAccount(decodeAuth(null))).toBe(false);
+});
+
+test("feedback settings read as the panel writes them, with safe defaults", () => {
+  const v = decodeFeedback({
+    settings: { enabled: true, appsDefault: false, apps: { "ai-todo": "on", bad: "maybe" }, mode: "later", machine: "hub", model: "claude/intermediate", effort: "max", errors: false },
+    apps: [{ app: "ai-todo", title: "AI Todo", zh: "AI 待办", enabled: true }, { title: "no id" }],
+    machines: [{ value: "", label: "here" }],
+    models: [{ value: "claude/intermediate", runtime: "claude", tier: "intermediate", model: "opus" }],
+    counts: { later: 3 },
+    shortcut: "Alt+Shift+F",
+  });
+  expect(v.settings).toEqual({ enabled: true, appsDefault: false, apps: { "ai-todo": "on" }, mode: "later", machine: "hub", model: "claude/intermediate", effort: "max", errors: false });
+  expect(v.apps).toEqual([{ app: "ai-todo", title: "AI Todo", zh: "AI 待办", enabled: true }]);
+  expect(v.later).toBe(3);
+  const empty = decodeFeedback(null);
+  expect(empty.settings).toEqual({ enabled: false, appsDefault: true, apps: {}, mode: "auto", machine: "", model: "", effort: "xhigh", errors: true });
+  expect(empty.shortcut).toBe("Alt+Shift+F");
 });
