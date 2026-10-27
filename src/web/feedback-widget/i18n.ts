@@ -44,6 +44,8 @@ const en = {
   "status.failed": "Not fixed",
   "status.skipped": "Needs you",
   "status.recorded": "Recorded",
+  "status.accepted": "Accepted",
+  "status.dropped": "Dropped",
 } as const;
 
 export type Key = keyof typeof en;
@@ -93,6 +95,8 @@ const zh: Record<Key, string> = {
   "status.failed": "未修好",
   "status.skipped": "需要你",
   "status.recorded": "已记录",
+  "status.accepted": "已验收",
+  "status.dropped": "已放弃",
 };
 
 const dict: Record<Lang, Record<Key, string>> = { en, zh };

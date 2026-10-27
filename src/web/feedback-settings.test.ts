@@ -9,7 +9,7 @@ const view = (): View => ({
   ],
   machines: [],
   models: [],
-  counts: { later: 0, queued: 0, fixing: 0, review: 0, failed: 0, skipped: 0, recorded: 0 },
+  counts: { later: 0, queued: 0, fixing: 0, review: 0, failed: 0, skipped: 0, recorded: 0, accepted: 0, dropped: 0 },
   shortcut: "Alt+Shift+F",
 });
 

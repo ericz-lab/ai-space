@@ -8,14 +8,19 @@ import { TodoSink } from "./todo.ts";
 
 type Handler = (req: Request, server?: unknown) => Response | Promise<Response>;
 
-function setup() {
+function setup(o: { taskStatus?: string } = {}) {
   const store = new FeedbackStore(new Database(":memory:"));
   let todo = 40;
   const service = new FeedbackService({
     store,
     name: "home",
     app: (app) => (app === "ai-todo" ? { title: "AI Todo", hasDeployCheck: true } : undefined),
-    todo: () => new TodoSink(async (cap) => (cap === "add" ? { status: 201, text: JSON.stringify({ ok: true, todos: [{ id: ++todo }] }) } : { status: 200, text: '{"ok":true}' }), ""),
+    todo: () =>
+      new TodoSink(async (cap) => {
+        if (cap === "add") return { status: 201, text: JSON.stringify({ ok: true, todos: [{ id: ++todo }] }) };
+        if (cap === "task" && o.taskStatus) return { status: 200, text: JSON.stringify({ ok: true, todo: { status: o.taskStatus } }) };
+        return { status: 200, text: '{"ok":true}' };
+      }, ""),
     fixer: { start: async () => "run-1", wait: () => new Promise(() => {}) },
     machines: () => ["hub"],
     log: () => {},
@@ -76,6 +81,14 @@ describe("feedback routes", () => {
     expect((await call("POST", "/_space/feedback", { body, headers: page })).json).toMatchObject({ id: 1, repeated: true });
     expect((await call("POST", "/_space/feedback", { body: "x".repeat(10 * 1024 * 1024), headers: page })).status).toBe(413);
     expect((await call("GET", "/_space/feedback/recent", { headers: { "x-space-app": "ai-todo" } })).json.items).toMatchObject([{ id: 1, text: "Too small", status: "later", todoId: 41 }]);
+  });
+
+  test("the page's recent list and the panel follow a task accepted in ai-todo", async () => {
+    const { call, service } = setup({ taskStatus: "done" });
+    service.saveSettings({ enabled: true, mode: "later" });
+    await call("POST", "/_space/feedback", { body: JSON.stringify({ text: "Too small" }), headers: page });
+    expect((await call("GET", "/_space/feedback/recent", { headers: { "x-space-app": "ai-todo" } })).json.items).toMatchObject([{ id: 1, status: "accepted", todoId: 41 }]);
+    expect((await call("GET", "/api/panel/feedback/settings")).json.counts).toMatchObject({ later: 0, accepted: 1 });
   });
 
   test("settings and the list for the panel", async () => {

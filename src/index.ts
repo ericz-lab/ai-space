@@ -476,6 +476,15 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     callerApp: (req) => callerAppOf(req, { operatorToken: config.apiToken, hubToken: config.hubToken, isDevice: (t) => Boolean(auth.verifyDevice(t)), appForToken: (t) => storage.appForToken(t) }), agentCallers: config.agentCallers });
   // Feedback from app pages, and the Fix Engineer (`space/ui-fixer`) it hands the fixes to (docs/feedback.md).
   const chatRoute = (agentRoutes["/api/agents/:app/:agent/chat"] as { POST: Parameters<typeof localFixer>[0] }).POST;
+  const todoPlaces = {
+    name: config.name,
+    bus,
+    local: () => {
+      const m = registry.get(TODO_APP)?.manifest;
+      return m ? { provides: Boolean(m.provides?.some((c) => c.name === "add")), ...(m.url ? { url: m.url } : {}) } : undefined;
+    },
+    peers: () => peers.names().flatMap((name) => (peers.get(name) ? [{ name, client: peers.get(name)! }] : [])),
+  };
   const feedback = new FeedbackService({
     store: new FeedbackStore(store.db),
     name: config.name,
@@ -483,16 +492,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       const m = registry.get(app)?.manifest;
       return m ? { title: m.title ?? m.app, ...(m.i18n?.zh?.title ? { zhTitle: m.i18n.zh.title } : {}), ...(m.repo ? { repo: m.repo } : {}), hasDeployCheck: Boolean(m.deploy?.check.length) } : undefined;
     },
-    todo: () =>
-      todoSinkFor({
-        name: config.name,
-        bus,
-        local: () => {
-          const m = registry.get(TODO_APP)?.manifest;
-          return m ? { provides: Boolean(m.provides?.some((c) => c.name === "add")), ...(m.url ? { url: m.url } : {}) } : undefined;
-        },
-        peers: () => peers.names().flatMap((name) => (peers.get(name) ? [{ name, client: peers.get(name)! }] : [])),
-      }),
+    todo: () => todoSinkFor(todoPlaces),
+    todoAt: (peer) => todoSinkFor(todoPlaces, peer),
     fixer: fixerPort(localFixer(chatRoute, agentRuns), peerFixer((name) => {
       const c = peers.get(name);
       return c ? (path, init) => c.request(path, init) : undefined;

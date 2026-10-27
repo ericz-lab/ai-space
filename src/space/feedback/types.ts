@@ -47,10 +47,14 @@ export const DEFAULT_SETTINGS: FeedbackSettings = {
  * A row's life: `later` waits for a batch the person starts, `queued` waits for the engineer (it
  * starts once the app's current fix ends), `fixing` has a run, `review` waits for the person in
  * ai-todo, `failed` ended without a fix, `skipped` was not an app fix (it needs a person), and
- * `recorded` found no todo app to go to.
+ * `recorded` found no todo app to go to. `accepted` and `dropped` follow the task: the person marked
+ * it done, or dropped or deleted it, in ai-todo (synced by FeedbackService.syncTodos).
  */
-export const STATUSES = ["later", "queued", "fixing", "review", "failed", "skipped", "recorded"] as const;
+export const STATUSES = ["later", "queued", "fixing", "review", "failed", "skipped", "recorded", "accepted", "dropped"] as const;
 export type Status = (typeof STATUSES)[number];
+
+/** States a row leaves when its task is closed in ai-todo: not while a fix is queued or running. */
+export const TODO_SYNCED: readonly Status[] = ["later", "review", "failed", "skipped"];
 
 export type ClientKind = "desktop-browser" | "phone-browser" | "tablet-browser" | "mac-client" | "iphone-client" | "android-client" | "linux-client";
 export type ClientInfo = { kind: ClientKind; os: string; browser: string; version?: string };

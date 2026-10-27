@@ -79,6 +79,20 @@ export class TodoSink {
     }
   }
 
+  /**
+   * The task's status in ai-todo ("open", "doing", "review", "deferred", "done", "dropped"), "gone"
+   * when ai-todo says there is no such task, or null when it could not be read.
+   */
+  async taskStatus(id: number): Promise<string | "gone" | null> {
+    try {
+      const r = await this.json<{ todo?: { status?: unknown } }>("task", { id });
+      return typeof r.todo?.status === "string" ? r.todo.status : null;
+    } catch (e) {
+      // ai-todo's own "no such todo"; a 404 from the bus (no ai-todo, no capability) says nothing about the task.
+      return (e as { status?: number }).status === 404 && /no such todo/i.test((e as Error).message) ? "gone" : null;
+    }
+  }
+
   async task(id: number): Promise<TodoTask | null> {
     try {
       const r = await this.json<{ todo: { status: string }; records?: { content: string; source: string; createdAt: string }[] }>("task", { id });
@@ -102,14 +116,15 @@ type PeerLike = { provides(app: string, capability?: string): boolean; request(p
 /**
  * ai-todo here when it is registered and provides `add`, else the first peer whose snapshot says it
  * does (calls go as `<this space>/space`, as the hub's forwarded calls do). Undefined when neither.
+ * With `at`, only that place: "" for this space, else the peer of that name (where a row's task is).
  */
 export function todoSinkFor(opts: {
   name: string;
   bus: BusLike;
   local: () => { provides: boolean; url?: string } | undefined;
   peers: () => { name: string; client: PeerLike }[];
-}): TodoSink | undefined {
-  const here = opts.local();
+}, at?: string): TodoSink | undefined {
+  const here = at === undefined || at === "" ? opts.local() : undefined;
   if (here?.provides) {
     return new TodoSink(async (capability, body) => {
       const { contentType, bytes } = await encode(body);
@@ -117,7 +132,9 @@ export function todoSinkFor(opts: {
       return { status: r.status, text: new TextDecoder().decode(r.body) };
     }, "", here.url);
   }
+  if (at === "") return undefined;
   for (const p of opts.peers()) {
+    if (at !== undefined && p.name !== at) continue;
     if (!p.client.provides(TODO_APP, "add")) continue;
     const url = p.client.snapshot?.apps.find((a) => a.name === TODO_APP)?.url;
     return new TodoSink(async (capability, body) => {
