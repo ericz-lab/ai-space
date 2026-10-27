@@ -3,6 +3,8 @@ import { type AppInfo, dateTime, fmtDuration, getJson, relTime } from "./api.ts"
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
 
 // Usage window (a floating panel): what the model service recorded, read-only.
+// - The ledger is the open Space's own: its apps' calls, including those it sent to another machine;
+//   apps running on a peer are in the peer's ledger. The header names the Space.
 // - Reads `GET /api/model/usage?window=…` when opened and every 30 s while open.
 // - One window at a time (5h matches a subscription's rolling quota; 24h, 7d, 30d for trends).
 // - Rows are app → tag → model, largest first; a model table and the last calls follow.
@@ -12,6 +14,7 @@ type Totals = { calls: number; errors: number; inputTokens: number; cacheWriteTo
 type UsageInfo = {
   window: string;
   since: string;
+  space?: string;
   backend: string;
   totals: Totals;
   byApp: (Totals & { app: string })[];
@@ -221,7 +224,9 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
             </button>
           )}
           <b>{t("usage.title")}</b>
-          <span className="chat-sub">{usage ? t("usage.backend", { backend: usage.backend }) : ""}</span>
+          <span className="chat-sub" title={t("usage.spaceHint")}>
+            {usage ? `${usage.space ? `${t("usage.space", { space: usage.space })} · ` : ""}${t("usage.backend", { backend: usage.backend })}` : ""}
+          </span>
           <span className="usage-windows">
             {WINDOWS.map((w) => (
               <button key={w} className={`usage-win${w === window ? " on" : ""}`} onClick={() => setWindow(w)}>
