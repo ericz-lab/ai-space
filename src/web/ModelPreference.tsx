@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getJson, sendJson, type AgentInfo } from "./api.ts";
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { useLang } from "./i18n.ts";
@@ -9,26 +9,31 @@ export default function ModelPreference({ onSaved }: { onSaved: () => void }) {
   const { t } = useLang();
   const [data, setData] = useState<Preferences | null>(null);
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+  // The choice being saved: shown at once, with the menu still usable, until the answer replaces it.
+  const [choice, setChoice] = useState<string | null>(null);
+  const saves = useRef(0);
   useEffect(() => {
     getJson<Preferences>("/api/model/preferences").then(setData).catch((e) => setError(e.message));
   }, []);
   const save = async (value: string) => {
-    setSaving(true);
+    const n = ++saves.current;
+    setChoice(value);
     setError("");
     try {
-      setData(await sendJson<Preferences>("PUT", "/api/model/preferences", { defaultModel: value || null }));
+      const next = await sendJson<Preferences>("PUT", "/api/model/preferences", { defaultModel: value || null });
+      if (n !== saves.current) return;
+      setData(next);
       onSaved();
     } catch (e) {
-      setError((e as Error).message);
+      if (n === saves.current) setError((e as Error).message);
     } finally {
-      setSaving(false);
+      if (n === saves.current) setChoice(null);
     }
   };
   return <>
     <label className="setrow">
       {t("settings.defaultModel")}
-      <select className="setselect" disabled={!data || saving} value={data?.defaultModel ?? ""} onChange={(e) => void save(e.target.value)}>
+      <select className="setselect" disabled={!data} value={choice ?? data?.defaultModel ?? ""} onChange={(e) => void save(e.target.value)}>
         <option value="">{t("settings.modelEnvironment")}</option>
         {data?.defaultModel && !data.options.some((o) => o.value === data.defaultModel) && <SavedChoice value={data.defaultModel} t={t} />}
         {data?.options.map((o) => <ChoiceOption key={o.value} o={o} label={`${o.runtime} · ${t(`modelTier.${o.tier}`)} · ${o.model}`} t={t} />)}
