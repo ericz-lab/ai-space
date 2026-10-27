@@ -56,7 +56,9 @@ Text everywhere passes through `redact()`, which hides bearer tokens, JWTs and w
 5. The engineer's run moves the task to **doing** and records which run it is. Its answer ends with a `RESULT:` line (JSON): `fixed`, `not-fixed` or `needs-person`, a summary, the commit, and one status per piece of feedback. The space records the summary on the task and moves it to **review** (验收) when fixed. The person accepts it in ai-todo, or rejects it there with a reason; **Fix again** in Settings starts a new run that reads the task's records, the reason included.
 6. A run that errors, times out or ends without a `RESULT:` line counts as not fixed.
 
-States: `later` (waiting), `queued`, `fixing`, `review` (fixed, to accept), `failed`, `skipped` (needs a person), `recorded` (no task).
+7. The row follows its task. When the button's recent list, Settings → Feedback or a hub's view of this space is read (at most once a minute, waiting at most 2.5 s for ai-todo), rows in `later`, `review`, `failed` or `skipped` ask ai-todo for their task, here or on the peer that holds it: a task marked done makes the row `accepted`; a task dropped or deleted makes it `dropped`. A task that cannot be read changes nothing, and a row being fixed is left alone.
+
+States: `later` (waiting), `queued`, `fixing`, `review` (fixed, to accept), `failed`, `skipped` (needs a person), `recorded` (no task), `accepted` (its task is done), `dropped` (its task was dropped or deleted).
 
 ## The Fix Engineer
 

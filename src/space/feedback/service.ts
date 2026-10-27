@@ -3,7 +3,7 @@ import { parseContext, parseImages, redact } from "./context.ts";
 import { type FixResult, type FixTarget, fixMessage, parseResult, todoPlan, todoTitle } from "./prompt.ts";
 import { FeedbackStore, recentView } from "./store.ts";
 import type { TodoSink } from "./todo.ts";
-import { type FeedbackRow, type FeedbackSettings, LIMITS, type RecentView, type Status } from "./types.ts";
+import { type FeedbackRow, type FeedbackSettings, LIMITS, type RecentView, STATUSES, type Status, TODO_SYNCED } from "./types.ts";
 
 /**
  * Feedback from app pages to a fix (docs/feedback.md): a submission becomes a row and an ai-todo
@@ -35,6 +35,8 @@ export type FeedbackServiceOptions = {
   app: (app: string) => AppInfo | undefined;
   /** ai-todo here or on a peer; undefined when neither has it. */
   todo: () => TodoSink | undefined;
+  /** ai-todo at one place ("" here, else a peer): where a row's task was made. Defaults to `todo` when it is there. */
+  todoAt?: (peer: string) => TodoSink | undefined;
   fixer: FixerPort;
   /** The peers the engineer may run on. */
   machines: () => string[];
@@ -64,6 +66,9 @@ function say(lang: Lang, key: keyof typeof WORDS, vars: Record<string, string> =
   return WORDS[key][lang].replace(/\{(\w+)\}/g, (_, k: string) => vars[k] ?? "");
 }
 
+/** How often the rows waiting on a person look at their tasks, and how long a read waits for that. */
+export const TODO_SYNC = { everyMs: 60_000, waitMs: 2_500, batch: 200, parallel: 6 } as const;
+
 const langOf = (r: FeedbackRow): Lang => (/^zh/i.test(r.context.lang) || /[一-鿿]/.test(r.text) ? "zh" : "en");
 /** The app's name in the language the feedback was written in. */
 const titleFor = (info: AppInfo, r: FeedbackRow): string => (langOf(r) === "zh" && info.zhTitle ? info.zhTitle : info.title);
@@ -73,6 +78,8 @@ export class FeedbackService {
   private readonly now: () => number;
   /** Apps with a fix running, by app. */
   private readonly active = new Map<string, Promise<void>>();
+  private syncing: Promise<void> | null = null;
+  private syncedAt = Number.NEGATIVE_INFINITY;
 
   constructor(private readonly opts: FeedbackServiceOptions) {
     this.store = opts.store;
@@ -127,9 +134,53 @@ export class FeedbackService {
   }
 
   counts(): Record<Status, number> {
-    const out = { later: 0, queued: 0, fixing: 0, review: 0, failed: 0, skipped: 0, recorded: 0 } as Record<Status, number>;
+    const out = Object.fromEntries(STATUSES.map((s) => [s, 0])) as Record<Status, number>;
     for (const r of this.store.list({ limit: 500 })) out[r.status]++;
     return out;
+  }
+
+  /**
+   * Follow the tasks of rows that wait on a person (`later`, `review`, `failed`, `skipped`): a task
+   * done in ai-todo makes its row `accepted`, a task dropped or deleted makes it `dropped`. At most
+   * once a minute unless forced; calls made meanwhile share the one running.
+   */
+  syncTodos(force = false): Promise<void> {
+    if (this.syncing) return this.syncing;
+    if (!force && this.now() - this.syncedAt < TODO_SYNC.everyMs) return Promise.resolve();
+    this.syncedAt = this.now();
+    this.syncing = this.followTodos()
+      .catch((e) => this.log(`todo sync: ${(e as Error).message}`))
+      .finally(() => {
+        this.syncing = null;
+      });
+    return this.syncing;
+  }
+
+  /** Before a list is read: the sync, waited for briefly so a slow ai-todo never holds the page. */
+  async refresh(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([this.syncTodos(), new Promise<void>((r) => (timer = setTimeout(r, TODO_SYNC.waitMs)))]);
+    clearTimeout(timer);
+  }
+
+  private async followTodos(): Promise<void> {
+    const rows = this.store.list({ status: [...TODO_SYNCED], limit: TODO_SYNC.batch }).filter((r) => r.todoId !== null);
+    const sinks = new Map<string, TodoSink | undefined>();
+    const sinkAt = (peer: string) => {
+      if (!sinks.has(peer)) sinks.set(peer, this.opts.todoAt ? this.opts.todoAt(peer) : ((s) => (s?.peer === peer ? s : undefined))(this.opts.todo()));
+      return sinks.get(peer);
+    };
+    const one = async (r: FeedbackRow) => {
+      const sink = sinkAt(r.todoPeer);
+      if (!sink) return;
+      const status = await sink.taskStatus(r.todoId!);
+      const next: Status | null = status === "done" ? "accepted" : status === "dropped" || status === "gone" ? "dropped" : null;
+      if (!next) return;
+      // A fix may have started while ai-todo answered.
+      const cur = this.store.get(r.id);
+      if (cur && TODO_SYNCED.includes(cur.status)) this.store.patch(r.id, { status: next });
+    };
+    for (let i = 0; i < rows.length; i += TODO_SYNC.parallel) await Promise.all(rows.slice(i, i + TODO_SYNC.parallel).map(one));
   }
 
   /** A submission from a page of `app` (named by the router, never by the page). */

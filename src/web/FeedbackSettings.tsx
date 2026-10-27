@@ -10,7 +10,7 @@ import type { Key } from "./i18n.ts";
  * follow these settings too (the server sends them on), and their feedback shows here as well.
  */
 
-type Status = "later" | "queued" | "fixing" | "review" | "failed" | "skipped" | "recorded";
+type Status = "later" | "queued" | "fixing" | "review" | "failed" | "skipped" | "recorded" | "accepted" | "dropped";
 type AppRow = { app: string; title: string; zh?: string; status: string; enabled: boolean };
 export type PeerView = { name: string; ok: boolean; error?: string; synced: boolean; apps: AppRow[]; counts: Partial<Record<Status, number>> };
 export type Settings = { enabled: boolean; appsDefault: boolean; apps: Record<string, "on" | "off">; mode: "auto" | "later"; machine: string; model: string; effort: "high" | "xhigh" | "max"; errors: boolean };

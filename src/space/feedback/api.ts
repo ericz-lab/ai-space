@@ -48,9 +48,15 @@ export function createFeedbackRoutes(opts: FeedbackApiOptions): Routes {
     return app;
   };
   const settingsView = async () => {
+    // The rows' states follow their tasks (accepted, dropped) before they are counted.
+    const synced = service.refresh();
+    if (!opts.peers) {
+      await synced;
+      return { ...localSettingsView(opts), peers: [] };
+    }
+    const peers = await opts.peers.views(service.settings());
+    await synced;
     const local = localSettingsView(opts);
-    if (!opts.peers) return { ...local, peers: [] };
-    const peers = await opts.peers.views(local.settings);
     // A copy left paused here when its app moved to a peer is that peer's app now: list it once.
     const moved = new Set(peers.flatMap((p) => p.apps.map((a) => a.app)));
     return { ...local, apps: local.apps.filter((a) => !(a.status === "paused" && moved.has(a.app))), peers };
@@ -72,10 +78,11 @@ export function createFeedbackRoutes(opts: FeedbackApiOptions): Routes {
       }),
     },
     "/_space/feedback/recent": {
-      GET: guarded((req) => {
+      GET: guarded(async (req) => {
         const app = appOf(req);
         if (app instanceof Response) return app;
         if (!service.enabledFor(app)) return json({ ok: true, items: [] });
+        await service.refresh();
         return json({ ok: true, items: service.recent(app) });
       }),
     },
@@ -107,8 +114,8 @@ export function createFeedbackRoutes(opts: FeedbackApiOptions): Routes {
     "/api/panel/feedback": {
       GET: guarded(async (req) => {
         const limit = limitOf(req);
+        const [remote] = await Promise.all([opts.peers ? opts.peers.recent(limit) : [], service.refresh()]);
         const local: Record<string, unknown>[] = service.list(limit).map((r) => ({ ...rowView(r), peer: "" }));
-        const remote = opts.peers ? await opts.peers.recent(limit) : [];
         const items = [...local, ...remote].sort((a, b) => Number(b.createdAt ?? 0) - Number(a.createdAt ?? 0)).slice(0, limit);
         return json({ ok: true, items, counts: service.counts() });
       }),
@@ -136,14 +143,20 @@ export function createFeedbackPeerServeRoutes(opts: Omit<FeedbackApiOptions, "pe
   const { service } = opts;
   return {
     "/api/peer/feedback/settings": {
-      GET: guarded(() => json(localSettingsView(opts))),
+      GET: guarded(async () => {
+        await service.refresh();
+        return json(localSettingsView(opts));
+      }),
       PUT: guarded(async (req) => {
         service.saveSettings(await req.json().catch(() => null));
         return json(localSettingsView(opts));
       }),
     },
     "/api/peer/feedback": {
-      GET: guarded((req) => json({ ok: true, items: service.list(limitOf(req)).map(rowView), counts: service.counts() })),
+      GET: guarded(async (req) => {
+        await service.refresh();
+        return json({ ok: true, items: service.list(limitOf(req)).map(rowView), counts: service.counts() });
+      }),
     },
     "/api/peer/feedback/fix": {
       POST: guarded(async (req) => json({ ok: true, ...service.fix(fixBody(((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>)) })),

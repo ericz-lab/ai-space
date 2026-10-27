@@ -263,3 +263,89 @@ describe("fixing", () => {
     await service.idle();
   });
 });
+
+describe("following the task", () => {
+  /** ai-todo whose tasks have the given states; a missing id is deleted ("no such todo"). */
+  function todoWith(states: Record<number, string>, peer = "", reads: number[] = []) {
+    const call: Caller = async (capability, b) => {
+      if (capability !== "task") return { status: 200, text: '{"ok":true}' };
+      const id = Number(("json" in b ? (b.json as { id: number }) : { id: 0 }).id);
+      reads.push(id);
+      if (states[id] === "bus404") return { status: 404, text: '{"ok":false,"error":"ai-todo does not provide task"}' };
+      if (!(id in states)) return { status: 404, text: '{"ok":false,"error":"no such todo"}' };
+      return { status: 200, text: JSON.stringify({ ok: true, todo: { id, status: states[id] }, records: [] }) };
+    };
+    return new TodoSink(call, peer);
+  }
+
+  function rows(store: FeedbackStore, list: { status: string; todoId: number | null; todoPeer?: string }[]) {
+    return list.map((r, i) => {
+      const row = store.add({ app: "ai-todo", text: `row ${i}`, context: { url: "", path: "/", title: "", viewport: { w: 0, h: 0, dpr: 1 }, touch: false, theme: "light", lang: "en", elements: [], errors: [], tz: "UTC" }, client: { kind: "desktop-browser", os: "Linux", browser: "Chrome" }, status: "review" });
+      return store.patch(row.id, { status: r.status as never, todoId: r.todoId, todoPeer: r.todoPeer ?? "" })!.id;
+    });
+  }
+
+  function make(states: Record<number, string>, o: { peers?: Record<string, Record<number, string>>; now?: () => number } = {}) {
+    const store = new FeedbackStore(new Database(":memory:"));
+    const reads: number[] = [];
+    const here = todoWith(states, "", reads);
+    const service = new FeedbackService({
+      store,
+      name: "home",
+      app: () => undefined,
+      todo: () => here,
+      todoAt: (peer) => (peer === "" ? here : o.peers?.[peer] ? todoWith(o.peers[peer]!, peer, reads) : undefined),
+      fixer: fakeFixer().port,
+      machines: () => [],
+      log: () => {},
+      ...(o.now ? { now: o.now } : {}),
+    });
+    return { store, service, reads };
+  }
+
+  test("a task done in ai-todo is accepted; dropped or deleted is dropped; open ones stay", async () => {
+    const { store, service } = make({ 1: "done", 2: "dropped", 4: "review", 5: "doing", 6: "done", 7: "done" });
+    const ids = rows(store, [
+      { status: "review", todoId: 1 },
+      { status: "skipped", todoId: 2 },
+      { status: "failed", todoId: 3 },
+      { status: "review", todoId: 4 },
+      { status: "review", todoId: 5 },
+      { status: "fixing", todoId: 6 },
+      { status: "later", todoId: 7 },
+      { status: "recorded", todoId: null },
+    ]);
+    await service.syncTodos();
+    expect(ids.map((id) => store.get(id)!.status)).toEqual(["accepted", "dropped", "dropped", "review", "review", "fixing", "accepted", "recorded"]);
+    expect(service.counts()).toMatchObject({ accepted: 2, dropped: 2, review: 2, fixing: 1, recorded: 1 });
+    expect(service.recent("ai-todo").find((r) => r.id === ids[6])!.status).toBe("accepted");
+  });
+
+  test("a task held on a peer is read there, and an unknown answer changes nothing", async () => {
+    const { store, service } = make({ 1: "bus404" }, { peers: { hub: { 9: "done" } } });
+    const [mine, theirs, lost] = rows(store, [
+      { status: "review", todoId: 1 },
+      { status: "review", todoId: 9, todoPeer: "hub" },
+      { status: "review", todoId: 9, todoPeer: "gone-peer" },
+    ]);
+    await service.syncTodos();
+    expect(store.get(mine!)!.status).toBe("review");
+    expect(store.get(theirs!)!.status).toBe("accepted");
+    expect(store.get(lost!)!.status).toBe("review");
+  });
+
+  test("at most once a minute, unless forced; reads share the running sync", async () => {
+    let now = 1_000_000;
+    const { store, service, reads } = make({ 1: "review" }, { now: () => now });
+    rows(store, [{ status: "review", todoId: 1 }]);
+    await Promise.all([service.refresh(), service.refresh()]);
+    expect(reads).toEqual([1]);
+    await service.refresh();
+    expect(reads).toEqual([1]);
+    now += 61_000;
+    await service.refresh();
+    expect(reads).toEqual([1, 1]);
+    await service.syncTodos(true);
+    expect(reads).toEqual([1, 1, 1]);
+  });
+});
