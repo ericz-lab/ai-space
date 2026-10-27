@@ -260,7 +260,7 @@ describe("peer side", () => {
     expect(r.status).toBe(200);
     expect(r.body.name).toBe("peer-box");
     expect(r.body.apps.map((a: Body) => a.name)).toEqual(["media"]);
-    expect(r.body.agents.map((a: Body) => a.id)).toEqual(["media/helper", "space/assistant"]);
+    expect(r.body.agents.map((a: Body) => a.id)).toEqual(["media/helper", "space/assistant", "space/ui-fixer"]);
     // The CLIs on the peer go with the snapshot, whatever it offers other spaces.
     expect(r.body.inventory.clis.map((c: Body) => c.cli)).toEqual(["claude", "codex", "dsh"]);
     expect(r.body.widgets.map((w: Body) => w.id)).toEqual(["media/board", "media/latest"]);
@@ -291,8 +291,8 @@ describe("hub", () => {
 
     const agents = (await get(hub, "/api/agents")).body.agents;
     // The space agent of each machine: the panel groups them and the chat picks the machine.
-    expect(agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant", "david/media/helper", "david/space/assistant"]);
-    expect(agents[3]).toMatchObject({ app: "space", name: "assistant", peer: "david", stale: false });
+    expect(agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant", "space/ui-fixer", "david/media/helper", "david/space/assistant", "david/space/ui-fixer"]);
+    expect(agents[4]).toMatchObject({ app: "space", name: "assistant", peer: "david", stale: false });
     // The hub keeps the peer's CLI row with the snapshot, for the Models page and the chat's machine menu.
     expect(peers.get("david")!.snapshot!.inventory!.clis.map((c) => [c.cli, c.installed, c.signedIn])).toEqual([["claude", true, true], ["codex", true, false], ["dsh", false, undefined]]);
 
@@ -302,7 +302,7 @@ describe("hub", () => {
 
     const services = await get(hub, "/api/services");
     expect(services.body.services).toEqual([{ app: "media", peer: "david", title: "Media", icon: "/api/peers/david/apps/media/icon", port: 8731, health: "ok", status: "active", hidden: false }]);
-    expect(services.body.peers[0]).toMatchObject({ name: "david", health: "ok", stale: false, apps: 1, agents: 2, widgets: 2, services: 1 });
+    expect(services.body.peers[0]).toMatchObject({ name: "david", health: "ok", stale: false, apps: 1, agents: 3, widgets: 2, services: 1 });
 
     const p = (await get(hub, "/api/peers")).body.peers[0];
     expect(p).toMatchObject({ name: "david", url: peerBase, health: "ok", duplicates: ["media-link"] });
@@ -311,7 +311,7 @@ describe("hub", () => {
     // Served as a peer itself, the hub hands out only what lives on it: david's entries stay out.
     const own = await get(hub, "/api/peer/snapshot", { headers: { authorization: "Bearer hubtok" } });
     expect(own.body.apps.map((a: Body) => a.id)).toEqual(["media-link", "notes"]);
-    expect(own.body.agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant"]);
+    expect(own.body.agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant", "space/ui-fixer"]);
     expect(own.body.widgets).toEqual([]);
     expect(own.body.services).toEqual([]);
   });
@@ -432,7 +432,7 @@ describe("hub", () => {
     expect(hide.body.app).toMatchObject({ id: "david/media", hidden: true });
     expect((await get(hub, "/api/apps")).body.apps.map((a: Body) => a.id)).toEqual(["media-link", "notes"]);
     expect((await get(hub, "/api/apps?all=1")).body.apps.map((a: Body) => a.id)).toEqual(["media-link", "notes", "david/media"]);
-    expect((await get(hub, "/api/agents")).body.agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant", "david/space/assistant"]);
+    expect((await get(hub, "/api/agents")).body.agents.map((a: Body) => a.id)).toEqual(["notes/librarian", "space/assistant", "space/ui-fixer", "david/space/assistant", "david/space/ui-fixer"]);
     expect((await get(hub, "/api/widgets")).body.widgets).toEqual([]);
     expect((await get(hub, "/api/services")).body.services[0]).toMatchObject({ app: "media", peer: "david", hidden: true });
     // The peer itself is untouched.
@@ -459,7 +459,7 @@ describe("hub", () => {
     expect((await get(hub, "/api/widgets")).body.widgets[1]).toMatchObject({ id: "david/media/latest", stale: true, ok: true });
     expect((await get(hub, "/api/services")).body.services[0]).toMatchObject({ peer: "david", health: "unknown" });
     // Its agents stay listed, marked stale: the chat's machine menu shows that machine offline.
-    expect((await get(hub, "/api/agents")).body.agents.filter((a: Body) => a.peer === "david").map((a: Body) => [a.id, a.stale])).toEqual([["david/media/helper", true], ["david/space/assistant", true]]);
+    expect((await get(hub, "/api/agents")).body.agents.filter((a: Body) => a.peer === "david").map((a: Body) => [a.id, a.stale])).toEqual([["david/media/helper", true], ["david/space/assistant", true], ["david/space/ui-fixer", true]]);
     const r = await get(hub, "/api/peers/david/apps/media/icon");
     expect(r.status).toBe(502);
     expect(r.body.error).toContain("david unreachable");

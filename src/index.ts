@@ -27,6 +27,9 @@ import { TerminalService, TerminalStore, createTerminalRoutes, terminalWebSocket
 import { Router, createRouterRoutes } from "./space/router/index.ts";
 import { createLogsRoutes } from "./space/logs/index.ts";
 import { UsageService, UsageStore, createUsageRoutes } from "./space/usage/index.ts";
+import { FeedbackService, FeedbackStore, createFeedbackRoutes, deployFromOrigin, fixerPort, localFixer, peerFixer, todoSinkFor } from "./space/feedback/index.ts";
+import { TODO_APP } from "./space/feedback/todo.ts";
+import { buildFeedbackScript } from "./web/feedback-widget/build.ts";
 import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/services/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
 import { createIdentityRoutes } from "./space/identity.ts";
@@ -471,6 +474,55 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   });
   const agentRoutes = createAgentRoutes({ actionCatalogue: () => shortcuts.catalogue(), shortcuts: shortcutStore, holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()], sharedSkills: SHARED_SKILLS,
     callerApp: (req) => callerAppOf(req, { operatorToken: config.apiToken, hubToken: config.hubToken, isDevice: (t) => Boolean(auth.verifyDevice(t)), appForToken: (t) => storage.appForToken(t) }), agentCallers: config.agentCallers });
+  // Feedback from app pages, and the Fix Engineer (`space/ui-fixer`) it hands the fixes to (docs/feedback.md).
+  const chatRoute = (agentRoutes["/api/agents/:app/:agent/chat"] as { POST: Parameters<typeof localFixer>[0] }).POST;
+  const feedback = new FeedbackService({
+    store: new FeedbackStore(store.db),
+    name: config.name,
+    app: (app) => {
+      const m = registry.get(app)?.manifest;
+      return m ? { title: m.title ?? m.app, ...(m.i18n?.zh?.title ? { zhTitle: m.i18n.zh.title } : {}), ...(m.repo ? { repo: m.repo } : {}), hasDeployCheck: Boolean(m.deploy?.check.length) } : undefined;
+    },
+    todo: () =>
+      todoSinkFor({
+        name: config.name,
+        bus,
+        local: () => {
+          const m = registry.get(TODO_APP)?.manifest;
+          return m ? { provides: Boolean(m.provides?.some((c) => c.name === "add")), ...(m.url ? { url: m.url } : {}) } : undefined;
+        },
+        peers: () => peers.names().flatMap((name) => (peers.get(name) ? [{ name, client: peers.get(name)! }] : [])),
+      }),
+    fixer: fixerPort(localFixer(chatRoute, agentRuns), peerFixer((name) => {
+      const c = peers.get(name);
+      return c ? (path, init) => c.request(path, init) : undefined;
+    })),
+    machines: () => peers.names(),
+    deploy: (app) => deployFromOrigin(ws.home, app),
+  });
+  feedback.resume();
+  const feedbackScript = buildFeedbackScript({ dev: process.env.SPACE_DEV === "1" });
+  const feedbackRoutes = createFeedbackRoutes({
+    service: feedback,
+    script: feedbackScript,
+    apps: () =>
+      registry
+        .list()
+        .map((e) => e.manifest)
+        .filter((m) => m.url && m.status !== "archived")
+        .map((m) => ({ app: m.app, title: m.title ?? m.app, ...(m.i18n?.zh?.title ? { zh: m.i18n.zh.title } : {}), status: m.status }))
+        .sort((a, b) => a.title.localeCompare(b.title)),
+    machines: () => [{ value: "", label: config.name }, ...peers.names().map((n) => ({ value: n, label: n }))],
+    models: () => runtimes.tierOptions().filter((o) => o.capabilities.chat && !o.unavailable).map(({ value, runtime, tier, model }) => ({ value, runtime, tier, model })),
+  });
+  packageGateway.feedback = (app, req) => {
+    const path = new URL(req.url).pathname;
+    const route = feedbackRoutes[path]?.[req.method as "GET" | "POST"];
+    if (!route) return new Response("Not found", { status: 404 });
+    const headers = new Headers(req.headers);
+    headers.set("x-space-app", app);
+    return route(new Request(req, { headers }));
+  };
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
   const terminal = new TerminalService({ config: config.terminal, cwd: ws.home, store: new TerminalStore(store.db), env, extraEnv: { SPACE_HOME: ws.home } });
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");
@@ -538,6 +590,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createPackageOpenRoutes(packageGateway, config.apiToken)],
       ["owner", createRouterRoutes({ router })],
       ["owner", createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)) })],
+      ["owner", feedbackRoutes],
       ["owner", createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) })],
       ["owner", createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest })],
       ["owner", agentRoutes],
@@ -556,6 +609,12 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       "/_space/usage.js": "public",
       // Heartbeats arrive through the router from app pages, which hold no panel session; they only count time in use.
       "/_space/usage/beat": "public",
+      // The feedback button on app pages (docs/feedback.md): the router names the app, the page holds no session;
+      // a write is same-origin only, and nothing is sent unless Settings turned feedback on for that app.
+      "/_space/feedback.js": "public",
+      "/_space/feedback/config": "public",
+      "/_space/feedback/recent": "public",
+      "/_space/feedback": "public",
       // Checked by the connection's own token and the remote space's id.
       "/api/connections/channel": "self",
       // What apps read about the space today (space-ops, ai-usage, ai-spark, voice-chat), with their app token.

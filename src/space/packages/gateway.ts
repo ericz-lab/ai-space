@@ -27,6 +27,8 @@ export class PackageGateway {
   private base?: URL;
   /** Records a local app's usage heartbeat; set once the usage service exists. Unset, the paths are 404. */
   usageBeat?: (app: string, tab: unknown) => void;
+  /** Answers a local app's `/_space/feedback*` (docs/feedback.md) as the router does for source apps; unset, they are 404. */
+  feedback?: (app: string, req: Request) => Response | Promise<Response>;
   constructor(readonly runtime: PackageRuntime, readonly links: PackageLinks, readonly spaceId: string) {}
 
   start(port: number, publicBase?: string): number {
@@ -140,6 +142,10 @@ export class PackageGateway {
     if (!origin && !["GET", "HEAD"].includes(req.method) && site !== "same-origin") return new Response("Application write requires same origin", { status: 403 });
     const usage = this.usageResponse(req, entry, url.pathname);
     if (usage) return usage;
+    if (url.pathname === "/_space/feedback.js" || url.pathname === "/_space/feedback" || url.pathname.startsWith("/_space/feedback/")) {
+      // The app is the session's, never the page's; a remote app's feedback belongs to its own Space.
+      return entry.connectionId || !this.feedback ? new Response("Not found", { status: 404 }) : this.feedback(entry.app, req);
+    }
     const headers = appHeaders([...req.headers]);
     const cookie = (headers.get("cookie") ?? "").split(";").filter((p) => !p.trim().startsWith(`${COOKIE}=`)).join(";");
     if (cookie) headers.set("cookie", cookie); else headers.delete("cookie");
