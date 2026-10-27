@@ -6,20 +6,25 @@ import type { Key } from "./i18n.ts";
 /**
  * Settings → Feedback (docs/feedback.md): the button app pages show, what happens to what is sent
  * with it, where the Fix Engineer runs and on which model, which apps show the button, and the
- * feedback sent lately with a way to start the waiting ones.
+ * feedback sent lately with a way to start the waiting ones. On a space with peers, each peer's apps
+ * follow these settings too (the server sends them on), and their feedback shows here as well.
  */
 
 type Status = "later" | "queued" | "fixing" | "review" | "failed" | "skipped" | "recorded";
+type AppRow = { app: string; title: string; zh?: string; status: string; enabled: boolean };
+export type PeerView = { name: string; ok: boolean; error?: string; synced: boolean; apps: AppRow[]; counts: Partial<Record<Status, number>> };
 export type Settings = { enabled: boolean; appsDefault: boolean; apps: Record<string, "on" | "off">; mode: "auto" | "later"; machine: string; model: string; effort: "high" | "xhigh" | "max"; errors: boolean };
 export type View = {
   settings: Settings;
-  apps: { app: string; title: string; zh?: string; status: string; enabled: boolean }[];
+  apps: AppRow[];
+  /** Each peer's apps, which follow these settings; absent from an older space. */
+  peers?: PeerView[];
   machines: { value: string; label: string }[];
   models: { value: string; runtime: string; tier: string; model: string }[];
   counts: Record<Status, number>;
   shortcut: string;
 };
-type Item = { id: number; app: string; text: string; status: Status; path: string; todoId: number | null; todoPeer: string; todoUrl: string | null; runId: string | null; runMachine: string; note: string | null; createdAt: number };
+type Item = { id: number; peer?: string; app: string; text: string; status: Status; path: string; todoId: number | null; todoPeer: string; todoUrl: string | null; runId: string | null; runMachine: string; note: string | null; createdAt: number };
 
 /**
  * The view with a settings patch applied the way the server applies it (`mergeSettings`): an app
@@ -34,7 +39,8 @@ export function withPatch(view: View, patch: Partial<Settings>): View {
   }
   const settings = { ...view.settings, ...patch, apps };
   const shown = (app: string) => settings.enabled && (apps[app] ? apps[app] === "on" : settings.appsDefault);
-  return { ...view, settings, apps: view.apps.map((a) => ({ ...a, enabled: shown(a.app) })) };
+  const follow = (rows: AppRow[]) => rows.map((a) => ({ ...a, enabled: shown(a.app) }));
+  return { ...view, settings, apps: follow(view.apps), ...(view.peers ? { peers: view.peers.map((p) => (p.ok ? { ...p, apps: follow(p.apps) } : p)) } : {}) };
 }
 
 export default function FeedbackSettings() {
@@ -71,7 +77,7 @@ export default function FeedbackSettings() {
       load();
     }
   };
-  const fix = async (body: { app?: string; ids?: number[] }) => {
+  const fix = async (body: { peer?: string; app?: string; ids?: number[] }) => {
     setBusy(true);
     setError("");
     try {
@@ -88,10 +94,26 @@ export default function FeedbackSettings() {
   if (!view) return <div className="setcard"><p className="setnote">{error || t("common.loading")}</p></div>;
   const s = view.settings;
   const appName = (a: { title: string; zh?: string }) => (lang === "zh" && a.zh ? a.zh : a.title);
-  const appTitle = (app: string) => {
-    const a = view.apps.find((x) => x.app === app);
+  const appTitle = (app: string, peer = "") => {
+    const rows = peer ? (view.peers ?? []).find((p) => p.name === peer)?.apps ?? [] : view.apps;
+    const a = rows.find((x) => x.app === app);
     return a ? appName(a) : app;
   };
+  const appRow = (a: AppRow) => (
+    <label className="setrow" key={a.app}>
+      <span>
+        {appName(a)}
+        <small className="setsub">{a.enabled ? t("feedback.app.shown") : t("feedback.app.hidden")}</small>
+      </span>
+      <select className="setselect" value={s.apps[a.app] ?? "default"} onChange={(e) => void save({ apps: { [a.app]: e.target.value } as unknown as Settings["apps"] })}>
+        <option value="default">{t("feedback.app.default", { state: s.appsDefault ? t("feedback.on") : t("feedback.off") })}</option>
+        <option value="on">{t("feedback.on")}</option>
+        <option value="off">{t("feedback.off")}</option>
+      </select>
+    </label>
+  );
+  const peers = view.peers ?? [];
+  const peerWaiting = peers.filter((p) => p.ok && (p.counts.later ?? 0) > 0);
   const waiting = view.counts.later;
   return <>
     <div className="setcard">
@@ -146,38 +168,37 @@ export default function FeedbackSettings() {
         {t("feedback.appsDefault")}
         <input type="checkbox" role="switch" checked={s.appsDefault} onChange={() => void save({ appsDefault: !s.appsDefault })} />
       </label>
-      {view.apps.map((a) => (
-        <label className="setrow" key={a.app}>
-          <span>
-            {appName(a)}
-            <small className="setsub">{a.enabled ? t("feedback.app.shown") : t("feedback.app.hidden")}</small>
-          </span>
-          <select className="setselect" value={s.apps[a.app] ?? "default"} onChange={(e) => void save({ apps: { [a.app]: e.target.value } as unknown as Settings["apps"] })}>
-            <option value="default">{t("feedback.app.default", { state: s.appsDefault ? t("feedback.on") : t("feedback.off") })}</option>
-            <option value="on">{t("feedback.on")}</option>
-            <option value="off">{t("feedback.off")}</option>
-          </select>
-        </label>
-      ))}
+      {view.apps.map(appRow)}
       <p className="setnote">{t("feedback.appsHelp")}</p>
     </div>
+
+    {peers.map((p) => (
+      <div className="setcard" key={`peer-${p.name}`}>
+        <p className="sethead">{t("feedback.peerApps", { name: p.name })}</p>
+        {!p.ok && <p className="setnote err">{t("feedback.peerDown", { name: p.name, error: p.error ?? "" })}</p>}
+        {p.ok && p.apps.length === 0 && <p className="setnote">{t("feedback.peerNone", { name: p.name })}</p>}
+        {p.ok && p.apps.map(appRow)}
+        {p.ok && !p.synced && <p className="setnote err">{t("feedback.peerUnsynced", { name: p.name, error: p.error ?? "" })}</p>}
+        {p.ok && p.apps.length > 0 && <p className="setnote">{t("feedback.peerAppsHelp", { name: p.name })}</p>}
+      </div>
+    ))}
 
     <div className="setcard">
       <p className="sethead">{t("feedback.recent")}</p>
       {items.length === 0 && <p className="setnote">{t("feedback.none")}</p>}
       {items.map((i) => (
-        <div className="setrow feedback-row" key={i.id}>
+        <div className="setrow feedback-row" key={`${i.peer ?? ""}-${i.id}`}>
           <span className="feedback-text">
-            <b>{appTitle(i.app)}</b> {i.text}
+            <b>{appTitle(i.app, i.peer)}</b> {i.text}
             <small className="setsub">
-              {t(`feedback.status.${i.status}` as Key)}
+              {i.peer ? `${i.peer} · ` : ""}{t(`feedback.status.${i.status}` as Key)}
               {i.todoId ? <> · {i.todoUrl ? <a href={i.todoUrl} target="_blank" rel="noopener">{t("feedback.todo", { n: i.todoId })}</a> : t("feedback.todo", { n: i.todoId })}</> : null}
               {i.runMachine ? ` · ${i.runMachine}` : ""} · {relTime(i.createdAt, lang)}
               {i.note && (i.status === "failed" || i.status === "skipped" || i.status === "recorded") ? <> · <span title={i.note}>{i.note.split("\n")[0]!.slice(0, 120)}</span></> : null}
             </small>
           </span>
           {(i.status === "failed" || i.status === "skipped" || i.status === "review" || i.status === "later") && i.todoId !== null && (
-            <button className="btn2" disabled={busy} onClick={() => void fix({ ids: [i.id] })}>{i.status === "later" ? t("feedback.fixNow") : t("feedback.fixAgain")}</button>
+            <button className="btn2" disabled={busy} onClick={() => void fix({ ...(i.peer ? { peer: i.peer } : {}), ids: [i.id] })}>{i.status === "later" ? t("feedback.fixNow") : t("feedback.fixAgain")}</button>
           )}
         </div>
       ))}
@@ -185,6 +206,7 @@ export default function FeedbackSettings() {
         {waiting > 0 && <span className="setnote">{t("feedback.waiting", { n: waiting })}</span>}
         <span className="setbtns-gap" />
         {waiting > 0 && <button className="btn2" disabled={busy} onClick={() => void fix({})}>{t("feedback.fixWaiting", { n: waiting })}</button>}
+        {peerWaiting.map((p) => <button className="btn2" key={p.name} disabled={busy} onClick={() => void fix({ peer: p.name })}>{t("feedback.fixWaitingOn", { n: p.counts.later ?? 0, name: p.name })}</button>)}
         <button className="btn2" disabled={busy} onClick={load}>{t("feedback.refresh")}</button>
       </div>
       {notice && <p className="setnote" role="status">{notice}</p>}

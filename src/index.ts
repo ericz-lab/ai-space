@@ -27,7 +27,7 @@ import { TerminalService, TerminalStore, createTerminalRoutes, terminalWebSocket
 import { Router, createRouterRoutes } from "./space/router/index.ts";
 import { createLogsRoutes } from "./space/logs/index.ts";
 import { UsageService, UsageStore, createUsageRoutes } from "./space/usage/index.ts";
-import { FeedbackService, FeedbackStore, createFeedbackRoutes, deployFromOrigin, fixerPort, localFixer, peerFixer, todoSinkFor } from "./space/feedback/index.ts";
+import { FeedbackService, FeedbackStore, PeerFeedbackSync, createFeedbackPeerServeRoutes, createFeedbackRoutes, deployFromOrigin, fixerPort, localFixer, peerFixer, todoSinkFor } from "./space/feedback/index.ts";
 import { TODO_APP } from "./space/feedback/todo.ts";
 import { buildFeedbackScript } from "./web/feedback-widget/build.ts";
 import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/services/index.ts";
@@ -502,9 +502,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   });
   feedback.resume();
   const feedbackScript = buildFeedbackScript({ dev: process.env.SPACE_DEV === "1" });
-  const feedbackRoutes = createFeedbackRoutes({
+  const feedbackLists = {
     service: feedback,
-    script: feedbackScript,
     apps: () =>
       registry
         .list()
@@ -514,7 +513,17 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         .sort((a, b) => a.title.localeCompare(b.title)),
     machines: () => [{ value: "", label: config.name }, ...peers.names().map((n) => ({ value: n, label: n }))],
     models: () => runtimes.tierOptions().filter((o) => o.capabilities.chat && !o.unavailable).map(({ value, runtime, tier, model }) => ({ value, runtime, tier, model })),
+  };
+  // Apps on a peer ask that peer whether to show the button: the switches set here are sent there.
+  const feedbackPeers = new PeerFeedbackSync({
+    hubName: config.name,
+    peers: () => peers.names().flatMap((name) => {
+      const c = peers.get(name);
+      return c ? [{ name, request: (path: string, init?: RequestInit & { headers?: Record<string, string> }) => c.request(path, init) }] : [];
+    }),
+    log: (line) => console.error(line),
   });
+  const feedbackRoutes = createFeedbackRoutes({ ...feedbackLists, script: feedbackScript, peers: feedbackPeers });
   packageGateway.feedback = (app, req) => {
     const path = new URL(req.url).pathname;
     const route = feedbackRoutes[path]?.[req.method as "GET" | "POST"];
@@ -596,7 +605,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", agentRoutes],
       ["owner", createPeerRoutes({ hub: peers, layout, registry })],
       ["owner", terminalRoutes],
-      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), inventory: () => peerRow(runtimeHealth, runtimes), ledger: createPeerUsageRoutes({ service: model, name: config.name, skipApps: () => packageStore.list().filter((o) => o.state === "installed").map((o) => o.app) }), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
+      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), feedback: createFeedbackPeerServeRoutes(feedbackLists), inventory: () => peerRow(runtimeHealth, runtimes), ledger: createPeerUsageRoutes({ service: model, name: config.name, skipApps: () => packageStore.list().filter((o) => o.state === "installed").map((o) => o.app) }), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
       ["public", createWebRoutes()],
       ["owner", createAuthRoutes({ mode: config.auth, auth })],
     ],

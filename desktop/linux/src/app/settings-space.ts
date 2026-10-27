@@ -151,17 +151,31 @@ export function feedbackSection(page: any, ctx: Ctx, space: Space): void {
     group.add(toggle(tw("feedback.errors"), s.errors, "errors"));
     group.add(row(tw("feedback.shortcut"), view.shortcut));
 
-    const apps = new Adw.PreferencesGroup({ title: tw("feedback.apps"), description: tw("feedback.appsHelp") });
-    apps.add(toggle(tw("feedback.appsDefault"), s.appsDefault, "appsDefault"));
-    for (const a of view.apps) {
+    const appRow = (a: FeedbackView["apps"][number]) => {
       const title = lang === "zh" && a.zh ? a.zh : a.title;
       const state = () => tw("feedback.app.default", { state: view.settings.appsDefault ? tw("feedback.on") : tw("feedback.off") });
       const c = choiceRow(title, [{ value: "default", label: state() }, { value: "on", label: tw("feedback.on") }, { value: "off", label: tw("feedback.off") }], s.apps[a.app] ?? "default", (v) =>
         save({ apps: { [a.app]: v } }, () => c.set(view.settings.apps[a.app] ?? "default")),
       );
-      apps.add(c.row);
-    }
+      return c.row;
+    };
+    const apps = new Adw.PreferencesGroup({ title: tw("feedback.apps"), description: tw("feedback.appsHelp") });
+    apps.add(toggle(tw("feedback.appsDefault"), s.appsDefault, "appsDefault"));
+    for (const a of view.apps) apps.add(appRow(a));
     page.add(apps);
+    // Apps on a peer follow these settings too: the hub sends them there (docs/feedback.md#apps-on-a-peer).
+    for (const p of view.peers) {
+      const note = !p.ok
+        ? tw("feedback.peerDown", { name: p.name, error: p.error })
+        : !p.synced
+          ? tw("feedback.peerUnsynced", { name: p.name, error: p.error })
+          : p.apps.length
+            ? tw("feedback.peerAppsHelp", { name: p.name })
+            : tw("feedback.peerNone", { name: p.name });
+      const g = new Adw.PreferencesGroup({ title: tw("feedback.peerApps", { name: p.name }), description: note });
+      for (const a of p.apps) g.add(appRow(a));
+      page.add(g);
+    }
     const trust = new Adw.PreferencesGroup({ description: tw("feedback.trust") });
     page.add(trust);
   });

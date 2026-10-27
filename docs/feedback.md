@@ -74,6 +74,18 @@ Settings choose its model (default `claude/intermediate`) and effort (`high`, `x
 
 Settings → Feedback → **Fix on** can name a peer ([peers.md](peers.md)). The space starts the engineer there through `/api/peer/agents/space/ui-fixer/chat` and polls the run. There the engineer clones the app into its own `app-src/<app>/` when missing, commits, and pushes to `origin` main; it does not deploy. When it reports a pushed fix, the app's machine fast-forwards its `app-src/<app>` from `origin` and pushes to its `deploy` remote (`deploy.ts`); anything unexpected (local changes, another branch, no deploy remote) stops it, and the task says why. The peer must run an ai-space that has the Fix Engineer.
 
+## Apps on a peer
+
+An app page asks the space that serves it whether to show the button (`/_space/feedback/config` goes to the router of the machine the app runs on). So a space with peers ([peers.md](peers.md)) sends its choices on: each time its Settings → Feedback is read or saved, every peer gets them for the apps that run there (`peers.ts`).
+
+- **What is sent:** the main switch, "Show on apps by default", what happens to feedback, the effort and the script-errors switch as they are, and each of the peer's apps as this space sets it (an app it has no word on goes back to the default). Apps here and on a peer that share a name share a switch.
+- **Fix on** is a machine as this space sees it. For a peer's apps it becomes the app's own machine when it names that peer, or names a machine the peer does not know; this space ("This machine") is named when the peer knows it by name. **Model** is sent only when the peer offers it, and the peer keeps its own otherwise.
+- **The page** lists each peer's apps under "Apps on <peer>", with the same switches, and says when a peer cannot be reached, runs an ai-space without these routes, or did not take the change (tried again the next time the page opens). A copy left paused here when its app moved to a peer is listed once, under the peer.
+- **Recent feedback** includes the peers', marked with the peer; **Fix now**, **Fix again** and **Fix N waiting on <peer>** run there.
+- The peer's own Settings still work, but the hub's choices win: they are put back the next time the hub's page is read.
+
+On the peer the routes are `/api/peer/feedback*` behind the hub's token (`createFeedbackPeerServeRoutes`): that space's own settings and rows, never its peers', so two spaces that are each other's peers never ask in a circle. Package apps are left out, as in the peer's other lists.
+
 ## Trust
 
 The button's routes are public: an app page holds no panel session. What stands between a page and the engineer:
@@ -98,10 +110,14 @@ GET  /_space/feedback.js                 the button's script (public)
 GET  /_space/feedback/config             { enabled, mode, errors, app, client, shortcut } for X-Space-App (public)
 GET  /_space/feedback/recent             the app's last five (public; empty while off)
 POST /_space/feedback                    { text, mode?: now|later, context, images?: [{name, data}] } → 201 { id, status, todoId, todoUrl } (public, same origin)
-GET  /api/panel/feedback/settings        settings, apps with their state, machines, models, counts (owner)
-PUT  /api/panel/feedback/settings        a settings patch (owner)
-GET  /api/panel/feedback?limit=          recent feedback of every app (owner)
-POST /api/panel/feedback/fix             { app? } the waiting ones, or { ids } again (owner)
+GET  /api/panel/feedback/settings        settings, apps with their state, machines, models, counts, peers (owner)
+PUT  /api/panel/feedback/settings        a settings patch, sent on to the peers (owner)
+GET  /api/panel/feedback?limit=          recent feedback of every app, the peers' with `peer` (owner)
+POST /api/panel/feedback/fix             { peer?, app? } the waiting ones, or { peer?, ids } again (owner)
+GET  /api/peer/feedback/settings         ┐ for a hub, behind its token: this space's own settings view,
+PUT  /api/peer/feedback/settings         │ a settings patch, its rows and starting its fixes
+GET  /api/peer/feedback?limit=           │ (no peers of its own)
+POST /api/peer/feedback/fix              ┘
 ```
 
 ## Data
