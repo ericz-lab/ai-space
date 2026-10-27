@@ -94,6 +94,10 @@ export type CompleteOutcome =
 
 /** Write authorisation tiers a chat turn or an agent task may ask for; absent means read-only (the headless default). */
 export const PERMISSION_MODES = ["acceptEdits", "bypassPermissions", "plan"] as const;
+
+/** Claude Code's effort levels (`claude --effort`). */
+export const CHAT_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type ChatEffort = (typeof CHAT_EFFORTS)[number];
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
 /** An agent task: the prompt on stdin, the runtime's own tools, inside the app directory. */
@@ -133,6 +137,8 @@ export type ChatTurn = {
   sessionId?: string;
   /** Write authorisation tier; anything else means read-only (the headless default). */
   permissionMode?: string;
+  /** How hard the model thinks (Claude Code's `--effort`); runtimes without the setting ignore it. */
+  effort?: ChatEffort;
   systemPrompt?: string;
   allowedTools?: string[];
   cwd: string;

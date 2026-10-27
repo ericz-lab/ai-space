@@ -248,4 +248,11 @@ describe("chatArgs", () => {
     ]);
     expect(chatArgs({ message: "hi", cwd: "/x", permissionMode: "root" })).not.toContain("--permission-mode");
   });
+
+  test("passes a known effort level after the permission mode, and drops anything else", () => {
+    expect(chatArgs({ message: "hi", cwd: "/x", permissionMode: "bypassPermissions", effort: "xhigh" })).toEqual([
+      "-p", "hi", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "bypassPermissions", "--effort", "xhigh",
+    ]);
+    expect(chatArgs({ message: "hi", cwd: "/x", effort: "turbo" as never })).not.toContain("--effort");
+  });
 });
