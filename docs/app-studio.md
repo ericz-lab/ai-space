@@ -11,7 +11,7 @@ GitHub and without a coding tool outside the product.
    (`skills/space-app/package-template/`) to `<workspace>/app-src/NAME/`, fills in the name, title
    and description, packs it and installs it: a working tile right away. With `git` on the machine
    the source gets a local history (one commit, no remote); without it, nothing is lost. The
-   template starts with what apps used to fix one by one: the usage script, model calls without a
+   template starts with what apps used to fix one by one: the usage and feedback scripts, model calls without a
    fixed model (`model.ts`), long idle timeouts, phone-width CSS, the icon as favicon, and the three
    page rules of [app-spec.md](app-spec.md#app-pages): a full-bleed layout with no outer frame,
    Chinese and English with a 中 / EN switch, and a theme button (system, light, dark) applied
