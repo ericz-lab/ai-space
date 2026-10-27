@@ -38,6 +38,8 @@ export type PeerModelInfo = {
   serves: { name: string; kind: string; image: boolean; tiers: Partial<Record<string, string>> }[];
   /** The peer's own cells (machine ""), as its status table shows them. */
   cells: HealthCell[];
+  /** The peer keeps a call asked for under a `ref` through a dropped link, and asking again attaches to it (docs/model-machines.md#resuming). */
+  resume?: boolean;
 };
 
 /** What a peer answers on `/api/peer/events`. */
@@ -245,7 +247,7 @@ function parseModelInfo(v: unknown): PeerModelInfo | undefined {
   if (!o || typeof o !== "object" || !Array.isArray(o.serves)) return undefined;
   const serves = o.serves.filter((r): r is PeerModelInfo["serves"][number] => typeof r?.name === "string" && typeof r?.kind === "string").map((r) => ({ name: r.name, kind: r.kind, image: r.image === true, tiers: tiersOf(r.tiers) }));
   const cells = Array.isArray(o.cells) ? (o.cells as HealthCell[]).filter((c) => typeof c?.runtime === "string") : [];
-  return { serves, cells };
+  return { serves, cells, ...((o as { resume?: unknown }).resume === true ? { resume: true } : {}) };
 }
 
 /** A peer's CLI row: only the fields the panel shows, of the expected types. */

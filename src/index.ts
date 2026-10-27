@@ -254,7 +254,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       const tiers = Object.fromEntries(runtimes.tierOptions().filter((o) => o.runtime === name).map((o) => [o.tier, o.model]));
       return [{ name, kind: r.kind, image: Boolean(r.capabilities.image), tiers }];
     });
-    return serves.length ? { serves, cells: runtimeHealth.list().filter((c) => c.machine === "" && serves.some((s) => s.name === c.runtime)) } : undefined;
+    return serves.length ? { serves, cells: runtimeHealth.list().filter((c) => c.machine === "" && serves.some((s) => s.name === c.runtime)), resume: true } : undefined;
   };
   // What the status table flags when it cannot answer: every model something here is set to use.
   const usedModels = (): string[] => {
