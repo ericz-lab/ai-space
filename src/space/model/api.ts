@@ -1,5 +1,6 @@
 import type { ResolvedModel } from "./app-models.ts";
 import { parseImages, type RunImage, spoolImages } from "./images.ts";
+import { type FinalEvent, type PeerRun, PeerRuns, REF_PATTERN } from "./peer-runs.ts";
 import { GPT_PRICING } from "./pricing.ts";
 import { type ModelService, needsLocal } from "./service.ts";
 import { parseImageInput, parseRunInput, parseWindow } from "./spec.ts";
@@ -277,8 +278,10 @@ const CALLER = /^[a-z0-9][a-z0-9._-]{0,63}\/[a-z0-9][a-z0-9._-]{0,63}$/i;
  * request names its model and no machine (a forwarded call is not forwarded again), and only
  * runtimes in `allow` answer. The peer token check is the caller's (peers/serve.ts).
  */
-export function createPeerModelRoutes(opts: { service: ModelService; allow: string[] }): Routes {
+export function createPeerModelRoutes(opts: { service: ModelService; allow: string[]; runs?: PeerRuns }): Routes {
   const { service } = opts;
+  // Calls asked for under a `ref`: they outlive a dropped link, and asking again attaches (peer-runs.ts).
+  const runs = opts.runs ?? new PeerRuns();
   const prepare = (req: Request, body: Record<string, unknown> | null): { caller: string } => {
     if (!body || typeof body !== "object") throw new Error("body must be a JSON object");
     const caller = req.headers.get("x-space-caller")?.trim() ?? "";
@@ -303,6 +306,7 @@ export function createPeerModelRoutes(opts: { service: ModelService; allow: stri
           body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
           ({ caller } = prepare(req, body));
           if (body!.stream !== undefined && typeof body!.stream !== "boolean") throw new Error("stream must be a boolean");
+          if (body!.ref !== undefined && (typeof body!.ref !== "string" || !REF_PATTERN.test(body!.ref))) throw new Error("ref must be 8 to 80 letters, digits, - or _");
           input = parseRunInput(body!);
           // Here it would read this machine, not the caller's: only plain reasoning crosses a link.
           const local = needsLocal(input);
@@ -312,6 +316,19 @@ export function createPeerModelRoutes(opts: { service: ModelService; allow: stri
           allowed(runtime.name, runtime.machine);
         } catch (e) {
           return error(400, (e as Error).message ?? String(e));
+        }
+        if (typeof body!.ref === "string") {
+          const ready = input;
+          const { run, fresh } = runs.open(caller, body!.ref, async (signal, onDelta) => {
+            const { files, cleanup } = await spoolImages(images);
+            try {
+              const { outcome, call } = await service.run(caller, files.length ? { ...ready, files } : ready, signal, onDelta, undefined, "peer");
+              return outcome.ok ? { event: "done", data: { ok: true, text: outcome.text, call: view(call) } } : { event: "error", data: { ok: false, error: outcome.error, call: view(call) } };
+            } finally {
+              await cleanup();
+            }
+          });
+          return streamPeerRun(run, fresh);
         }
         const { files, cleanup } = await spoolImages(images);
         if (files.length) input = { ...input, files };
@@ -323,6 +340,14 @@ export function createPeerModelRoutes(opts: { service: ModelService; allow: stri
         } finally {
           await cleanup();
         }
+      },
+    },
+    // The caller gave up on a call it asked for under a ref: stop it here too.
+    "/api/peer/model/runs/:ref/cancel": {
+      POST: (req) => {
+        const caller = req.headers.get("x-space-caller")?.trim() ?? "";
+        if (!CALLER.test(caller)) return error(400, "x-space-caller must be <space>/<app>");
+        return json({ ok: true, cancelled: runs.cancel(caller, req.params.ref ?? "") });
       },
     },
     "/api/peer/model/image": {
@@ -355,6 +380,54 @@ export function createPeerModelRoutes(opts: { service: ModelService; allow: stri
 
 /** How often a comment line goes out on an idle event stream, so no proxy or server closes it while the model thinks. */
 export const STREAM_KEEPALIVE_MS = 15_000;
+
+/**
+ * A forwarded call's event stream (peer-runs.ts). The connection that started it gets its text as it
+ * comes; one that attached after a dropped link gets only the end, since its caller already has the
+ * text up to the drop and the end carries the whole answer. Either way the connection closing leaves
+ * the call running.
+ */
+function streamPeerRun(run: PeerRun, withDeltas: boolean): Response {
+  const enc = new TextEncoder();
+  let stop = () => {};
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let open = true;
+      const send = (chunk: string) => {
+        if (!open) return;
+        try {
+          controller.enqueue(enc.encode(chunk));
+        } catch {
+          open = false;
+        }
+      };
+      const event = (name: string, data: unknown) => send(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+      const delta = (text: string) => event("delta", { text });
+      if (withDeltas) run.deltas.add(delta);
+      const keepalive = setInterval(() => send(": keepalive\n\n"), STREAM_KEEPALIVE_MS);
+      stop = () => {
+        open = false;
+        clearInterval(keepalive);
+        run.deltas.delete(delta);
+      };
+      // An immediate comment: the response starts at once, before the model says anything.
+      send(": started\n\n");
+      void run.settled.then((final: FinalEvent) => {
+        event(final.event, final.data);
+        stop();
+        try {
+          controller.close();
+        } catch {
+          /* already closed by the client */
+        }
+      });
+    },
+    cancel() {
+      stop();
+    },
+  });
+  return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive" } });
+}
 
 /**
  * The same call as an event stream. The response starts at once (200, since

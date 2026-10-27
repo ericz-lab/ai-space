@@ -43,8 +43,9 @@ import type { PeerModelInfo } from "./client.ts";
  *   GET  /api/peer/model/usage?window&skip         ┐ this machine's own ledger, for a hub's usage page; `skip` names the
  *   GET  /api/peer/model/calls?limit&skip          ┘ reading space, whose calls run here its own rows count (docs/model-machines.md#ledger)
  *   POST /api/peer/model/run                       ┐ only when SPACE_PEER_MODEL names runtimes: an answer or pictures run
- *   POST /api/peer/model/image                     ┘ here for `<space>/<app>` in `x-space-caller` (docs/model-machines.md);
- *                                                    the snapshot's `model` says which runtimes
+ *   POST /api/peer/model/image                     │ here for `<space>/<app>` in `x-space-caller` (docs/model-machines.md);
+ *                                                  │ the snapshot's `model` says which runtimes. A run with a `ref` survives
+ *   POST /api/peer/model/runs/:ref/cancel          ┘ a dropped link and is attached to again; the caller cancels it here
  *
  * Either side of a link may serve these routes: two spaces that list each other as peers call each
  * other's runtimes both ways.
@@ -218,6 +219,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     ...(opts.model
       ? {
           "/api/peer/model/run": { POST: guard(mirror(opts.model, "/api/peer/model/run", "POST")) },
+          "/api/peer/model/runs/:ref/cancel": { POST: guard(mirror(opts.model, "/api/peer/model/runs/:ref/cancel", "POST")) },
           "/api/peer/model/image": { POST: guard(mirror(opts.model, "/api/peer/model/image", "POST")) },
         }
       : {}),

@@ -102,6 +102,16 @@ The peer runs the call with its own registry: its own runtimes, its own tier cat
 
 The peer serves answers only when its operator turns it on: `SPACE_PEER_MODEL=codex,dsh` lists the runtimes a hub may use, and the default is none. The peer token can already open a chat with `bypassPermissions`, so the route gives no new power over the machine. It does spend the machine's accounts, though, and that should be a choice the operator makes on purpose. A runtime whose answers run on yet another machine (one with its own `ssh:`) is never offered: a forwarded call stays on the machine it was sent to.
 
+### Resuming
+
+The link between two spaces can drop while the model is still working: a tunnel reconnecting, a proxy restarting. Before this, the caller recorded a failure, its app tried again, and the peer, which had finished the first call, ran and billed a second one. Now an answer that crosses a link survives a drop. Code: `model/peer-runs.ts` (the peer's calls by ref), `createPeerModelRoutes` in `model/api.ts`, `createPeerRuntime` in `peers/model.ts`.
+
+- The calling space sends each answer with a random `ref`, only to a peer whose snapshot says `model.resume: true`. An older peer would run the same request twice.
+- On the peer, a call with a ref runs on its own signal: the connection closing does not stop it. A second request with the same ref from the same caller attaches to that call, running or finished, and never starts another. The connection that started it gets the text as it comes; one that attached gets the end only, which carries the whole answer. The end of a finished call is kept for 15 minutes, at most 200 of them; after that, or after the peer restarts, the ref starts a new call.
+- On the calling side, a stream that breaks before its end, a request that cannot reach the peer, or a proxy's 5xx (502, 503, 504, 52x, 530) sends the same request again with the same ref: after 1 s, then 2, 4, 8, at most 15 s apart, until the call's own deadline (its timeout plus a minute for the link). The log says `link dropped … asking again for call <ref>`. A call that runs out of time is a failure that says the link did not come back.
+- A caller that gives up (its request aborted) sends `POST /api/peer/model/runs/<ref>/cancel`, and the peer stops the call.
+- The ledger has one row on each side, as for any forwarded call. Pictures (`/api/peer/model/image`) are not resumed yet.
+
 ### Both directions
 
 Hub and peer are roles of one link, not kinds of machine. Two spaces that list each other (`SPACE_PEER_<NAME>` with the other's `SPACE_HUB_TOKEN`) and each set `SPACE_PEER_MODEL` use each other's runtimes: the laptop sends `server:codex/basic` to the server, the server sends `laptop:claude/opus` to the laptop. Nothing loops: a forwarded call names no machine, the snapshot passes on only a space's own apps, and mirrored events are not exported again. Listing each other also merges each other's panels; that is what a peer is.
