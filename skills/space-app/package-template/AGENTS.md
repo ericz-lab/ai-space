@@ -18,6 +18,9 @@ Keep what the template already does. Each of these was once fixed by hand in man
 
 - **Usage.** `public/index.html` loads `/_space/usage.js`, so the panel shows the app's time in use.
   Keep the line in every page.
+- **Feedback.** `public/index.html` also loads `/_space/feedback.js`, the space's feedback button.
+  Keep it in every page. Feedback sent with it becomes an ai-todo task that the Fix Engineer fixes
+  by this file's rules, so keep the rules, the checks and the deploy channel here current.
 - **Models.** Call models through `model.ts` and give each call a `tag` (`translate`, `summary`).
   Never name a model: the Space chooses it, and the operator can change it per app and tag.
 - **Timeouts.** `server.ts` sets `idleTimeout: 255` and `model.ts` turns off fetch's timeout. A

@@ -594,7 +594,7 @@ This is recommended, not required. The script keeps a random id per browser tab 
 
 ### Feedback
 
-An app page can carry the space's feedback button with one more line, added the same way (at runtime when a bundler builds the page):
+Every app page carries the space's feedback button, with one more line added the same way (at runtime when a bundler builds the page). The app templates have it from the first version; an older app adds it:
 
 ```html
 <script src="/_space/feedback.js" defer></script>
