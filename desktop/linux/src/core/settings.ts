@@ -132,12 +132,18 @@ export const decodeAppModels = (raw: unknown) => ({
 export type FeedbackView = {
   settings: { enabled: boolean; appsDefault: boolean; apps: Record<string, string>; mode: "auto" | "later"; machine: string; model: string; effort: "high" | "xhigh" | "max"; errors: boolean };
   apps: { app: string; title: string; zh?: string; enabled: boolean }[];
+  /** Each peer's apps, which follow these settings (the hub sends them on). */
+  peers: { name: string; ok: boolean; error: string; synced: boolean; apps: { app: string; title: string; zh?: string; enabled: boolean }[] }[];
   machines: Choice[];
   models: ModelOption[];
   later: number;
   shortcut: string;
 };
 export const FEEDBACK_EFFORTS = ["high", "xhigh", "max"] as const;
+
+function feedbackApps(raw: unknown): FeedbackView["apps"] {
+  return listOf<FeedbackView["apps"][number]>(raw, "apps").filter((a) => typeof a.app === "string").map((a) => ({ app: a.app, title: String(a.title ?? a.app), ...(typeof a.zh === "string" ? { zh: a.zh } : {}), enabled: a.enabled === true }));
+}
 
 export function decodeFeedback(raw: unknown): FeedbackView {
   const s = field(raw, "settings");
@@ -155,7 +161,10 @@ export function decodeFeedback(raw: unknown): FeedbackView {
       effort: FEEDBACK_EFFORTS.includes(effort as "high") ? (effort as FeedbackView["settings"]["effort"]) : "xhigh",
       errors: field(s, "errors") !== false,
     },
-    apps: listOf<FeedbackView["apps"][number]>(raw, "apps").filter((a) => typeof a.app === "string").map((a) => ({ app: a.app, title: String(a.title ?? a.app), ...(typeof a.zh === "string" ? { zh: a.zh } : {}), enabled: a.enabled === true })),
+    apps: feedbackApps(raw),
+    peers: listOf<Record<string, unknown>>(raw, "peers")
+      .filter((p) => typeof p.name === "string")
+      .map((p) => ({ name: String(p.name), ok: p.ok === true, error: typeof p.error === "string" ? p.error : "", synced: p.synced === true, apps: feedbackApps(p) })),
     machines: listOf<Choice>(raw, "machines").map((m) => ({ value: String(m.value ?? ""), label: String(m.label ?? "") })),
     models: listOf<ModelOption>(raw, "models").filter((o) => typeof o.value === "string"),
     later: Number(field(field(raw, "counts"), "later") ?? 0) || 0,

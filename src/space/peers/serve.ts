@@ -18,6 +18,10 @@ import type { PeerModelInfo } from "./client.ts";
  *   GET  /api/peer/apps/:app/icon                  = /api/apps/:app/icon
  *   GET  /api/peer/model/apps                      = /api/model/apps: every app's model rows and this space's choices ┐ when the
  *   PATCH /api/peer/apps/:app/model                = /api/panel/apps/:app/model {tag?, model}                         ┘ routes are given
+ *   GET  /api/peer/feedback/settings               ┐ this space's feedback settings and rows, without its peers, so a hub
+ *   PUT  /api/peer/feedback/settings               │ shows and sets the switches of the apps that run here
+ *   GET  /api/peer/feedback?limit                  │ (feedback/api.ts `createFeedbackPeerServeRoutes`, docs/feedback.md)
+ *   POST /api/peer/feedback/fix                    ┘
  *   GET  /api/peer/apps/:app/appcolor              = /api/panel/appcolor?app=
  *   GET  /api/peer/agents/:app/:agent/avatar       = /api/agents/:app/:agent/avatar
  *   GET  /api/peer/widgets/:app/:name/embed        = /api/widgets/:app/:name/embed
@@ -84,6 +88,8 @@ export type PeerServeOptions = {
   inventory?: () => MachineInventory;
   /** The app-model routes for a hub's Models page (model/app-models.ts `createPeerAppModelRoutes`). */
   appModels?: Routes;
+  /** The feedback routes for a hub's Settings → Feedback (feedback/api.ts `createFeedbackPeerServeRoutes`). */
+  feedback?: Routes;
 };
 
 const PROXY_TIMEOUT_MS = 60_000;
@@ -102,6 +108,13 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
         return json({ ok: false, error: (e as Error).message ?? String(e) }, 400);
       }
     };
+
+  /** A list answer without the apps legacy peers do not share (package apps). */
+  const onlyShared = async (r: Response | undefined, key: "apps" | "items" = "apps"): Promise<Response | undefined> => {
+    if (!r || !r.ok || !opts.allowApp) return r;
+    const data = (await r.json()) as Record<string, { app: string }[]>;
+    return json({ ...data, [key]: (data[key] ?? []).filter((a) => opts.allowApp!(a.app)) });
+  };
 
   const mirror = (routes: Routes, path: string, method: Method): Handler => {
     const h = handlerOf(routes, path, method);
@@ -227,6 +240,16 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
       ? {
           "/api/peer/model/usage": { GET: guard(mirror(opts.ledger, "/api/peer/model/usage", "GET")) },
           "/api/peer/model/calls": { GET: guard(mirror(opts.ledger, "/api/peer/model/calls", "GET")) },
+        }
+      : {}),
+    ...(opts.feedback
+      ? {
+          "/api/peer/feedback/settings": {
+            GET: guard(async (req, server) => onlyShared(await mirror(opts.feedback!, "/api/peer/feedback/settings", "GET")(req, server))),
+            PUT: guard(async (req, server) => onlyShared(await mirror(opts.feedback!, "/api/peer/feedback/settings", "PUT")(req, server))),
+          },
+          "/api/peer/feedback": { GET: guard(async (req, server) => onlyShared(await mirror(opts.feedback!, "/api/peer/feedback", "GET")(req, server), "items")) },
+          "/api/peer/feedback/fix": { POST: guard(mirror(opts.feedback, "/api/peer/feedback/fix", "POST")) },
         }
       : {}),
     ...(opts.appModels

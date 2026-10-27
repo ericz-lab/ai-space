@@ -1,5 +1,6 @@
 import { APP_HEADER } from "../usage/api.ts";
 import { APP_PATTERN } from "../usage/types.ts";
+import { PeerError, type PeerFeedbackSync } from "./peers.ts";
 import { FeedbackError, type FeedbackService } from "./service.ts";
 import { LIMITS } from "./types.ts";
 
@@ -10,13 +11,17 @@ import { LIMITS } from "./types.ts";
  *   GET  /_space/feedback/config             { enabled, ... } for the app the router names (public)
  *   POST /_space/feedback                    { text, mode?, context, images? } → { id, status, todoId, todoUrl } (public, same origin)
  *   GET  /_space/feedback/recent             the app's last five, without context (public)
- *   GET  /api/panel/feedback/settings        settings, apps, machines, models (owner)
- *   PUT  /api/panel/feedback/settings        a settings patch (owner)
- *   GET  /api/panel/feedback                 recent feedback of every app (owner)
- *   POST /api/panel/feedback/fix             { app? | ids? } start waiting feedback now (owner)
+ *   GET  /api/panel/feedback/settings        settings, apps, machines, models, and each peer's apps (owner)
+ *   PUT  /api/panel/feedback/settings        a settings patch, sent on to the peers (owner)
+ *   GET  /api/panel/feedback                 recent feedback of every app, the peers' too (owner)
+ *   POST /api/panel/feedback/fix             { peer?, app? | ids? } start waiting feedback now (owner)
  *
  * `/_space/*` arrives through the router, which names the app in `X-Space-App`; a page cannot pick
  * another app. The writes are same-origin only (guardBrowserWrites in the entry point).
+ *
+ * A space with peers keeps their switches in line with its own (peers.ts): reading or saving the
+ * settings sends each peer this space's choices for the apps it runs. What a peer serves for that is
+ * `createFeedbackPeerServeRoutes`: its own settings and rows, never its peers'.
  */
 
 export type FeedbackApiOptions = {
@@ -26,6 +31,8 @@ export type FeedbackApiOptions = {
   apps: () => { app: string; title: string; zh?: string; status: string }[];
   machines: () => { value: string; label: string }[];
   models: () => { value: string; runtime: string; tier: string; model: string }[];
+  /** On a space with peers: their apps' switches follow this space's settings. */
+  peers?: PeerFeedbackSync;
 };
 
 type Handler = (req: Request) => Response | Promise<Response>;
@@ -40,38 +47,14 @@ export function createFeedbackRoutes(opts: FeedbackApiOptions): Routes {
     if (!APP_PATTERN.test(app)) return error(404, "unknown app");
     return app;
   };
-  const guarded = (h: (req: Request) => Response | Promise<Response>): Handler => async (req) => {
-    try {
-      return await h(req);
-    } catch (e) {
-      return e instanceof FeedbackError ? error(e.status, e.message) : error(500, (e as Error).message);
-    }
+  const settingsView = async () => {
+    const local = localSettingsView(opts);
+    if (!opts.peers) return { ...local, peers: [] };
+    const peers = await opts.peers.views(local.settings);
+    // A copy left paused here when its app moved to a peer is that peer's app now: list it once.
+    const moved = new Set(peers.flatMap((p) => p.apps.map((a) => a.app)));
+    return { ...local, apps: local.apps.filter((a) => !(a.status === "paused" && moved.has(a.app))), peers };
   };
-  const settingsView = () => ({
-    ok: true,
-    settings: service.settings(),
-    apps: opts.apps().map((a) => ({ ...a, enabled: service.enabledFor(a.app) })),
-    machines: opts.machines(),
-    models: opts.models(),
-    counts: service.counts(),
-    shortcut: "Alt+Shift+F",
-  });
-  const rowView = (r: ReturnType<FeedbackService["list"]>[number]) => ({
-    id: r.id,
-    app: r.app,
-    text: r.text.slice(0, 300),
-    status: r.status,
-    path: r.context.path,
-    client: r.client.kind,
-    todoId: r.todoId,
-    todoPeer: r.todoPeer,
-    todoUrl: r.todoUrl,
-    runId: r.runId,
-    runMachine: r.runMachine,
-    note: r.note,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  });
 
   return {
     "/_space/feedback.js": {
@@ -115,27 +98,110 @@ export function createFeedbackRoutes(opts: FeedbackApiOptions): Routes {
       }),
     },
     "/api/panel/feedback/settings": {
-      GET: guarded(() => json(settingsView())),
+      GET: guarded(async () => json(await settingsView())),
       PUT: guarded(async (req) => {
-        const body = await req.json().catch(() => null);
-        service.saveSettings(body);
-        return json(settingsView());
+        service.saveSettings(await req.json().catch(() => null));
+        return json(await settingsView());
       }),
     },
     "/api/panel/feedback": {
-      GET: guarded((req) => {
-        const limit = Number(new URL(req.url).searchParams.get("limit") ?? 50);
-        return json({ ok: true, items: service.list(Number.isFinite(limit) ? limit : 50).map(rowView), counts: service.counts() });
+      GET: guarded(async (req) => {
+        const limit = limitOf(req);
+        const local: Record<string, unknown>[] = service.list(limit).map((r) => ({ ...rowView(r), peer: "" }));
+        const remote = opts.peers ? await opts.peers.recent(limit) : [];
+        const items = [...local, ...remote].sort((a, b) => Number(b.createdAt ?? 0) - Number(a.createdAt ?? 0)).slice(0, limit);
+        return json({ ok: true, items, counts: service.counts() });
       }),
     },
     "/api/panel/feedback/fix": {
       POST: guarded(async (req) => {
-        const b = ((await req.json().catch(() => null)) ?? {}) as { app?: unknown; ids?: unknown };
-        const app = typeof b.app === "string" && APP_PATTERN.test(b.app) ? b.app : undefined;
-        const ids = Array.isArray(b.ids) ? b.ids.filter((x): x is number => Number.isInteger(x)).slice(0, 100) : undefined;
-        return json({ ok: true, ...service.fix({ ...(app ? { app } : {}), ...(ids ? { ids } : {}) }) });
+        const b = ((await req.json().catch(() => null)) ?? {}) as { peer?: unknown; app?: unknown; ids?: unknown };
+        const what = fixBody(b);
+        if (typeof b.peer === "string" && b.peer) {
+          if (!opts.peers) return error(404, `unknown peer: ${b.peer}`);
+          return json({ ok: true, ...(await opts.peers.fix(b.peer, what)) });
+        }
+        return json({ ok: true, ...service.fix(what) });
       }),
     },
+  };
+}
+
+/**
+ * What a hub reads and changes on this space (`/api/peer/feedback*`, behind the peer token in
+ * peers/serve.ts): this space's own settings view and rows, without its peers, so two spaces that
+ * are peers of each other never ask each other in a circle.
+ */
+export function createFeedbackPeerServeRoutes(opts: Omit<FeedbackApiOptions, "peers" | "script">): Routes {
+  const { service } = opts;
+  return {
+    "/api/peer/feedback/settings": {
+      GET: guarded(() => json(localSettingsView(opts))),
+      PUT: guarded(async (req) => {
+        service.saveSettings(await req.json().catch(() => null));
+        return json(localSettingsView(opts));
+      }),
+    },
+    "/api/peer/feedback": {
+      GET: guarded((req) => json({ ok: true, items: service.list(limitOf(req)).map(rowView), counts: service.counts() })),
+    },
+    "/api/peer/feedback/fix": {
+      POST: guarded(async (req) => json({ ok: true, ...service.fix(fixBody(((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>)) })),
+    },
+  };
+}
+
+function localSettingsView(opts: Omit<FeedbackApiOptions, "peers" | "script">) {
+  const { service } = opts;
+  return {
+    ok: true,
+    settings: service.settings(),
+    apps: opts.apps().map((a) => ({ ...a, enabled: service.enabledFor(a.app) })),
+    machines: opts.machines(),
+    models: opts.models(),
+    counts: service.counts(),
+    shortcut: "Alt+Shift+F",
+  };
+}
+
+function rowView(r: ReturnType<FeedbackService["list"]>[number]) {
+  return {
+    id: r.id,
+    app: r.app,
+    text: r.text.slice(0, 300),
+    status: r.status,
+    path: r.context.path,
+    client: r.client.kind,
+    todoId: r.todoId,
+    todoPeer: r.todoPeer,
+    todoUrl: r.todoUrl,
+    runId: r.runId,
+    runMachine: r.runMachine,
+    note: r.note,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+function fixBody(b: { app?: unknown; ids?: unknown }): { app?: string; ids?: number[] } {
+  const app = typeof b.app === "string" && APP_PATTERN.test(b.app) ? b.app : undefined;
+  const ids = Array.isArray(b.ids) ? b.ids.filter((x): x is number => Number.isInteger(x)).slice(0, 100) : undefined;
+  return { ...(app ? { app } : {}), ...(ids ? { ids } : {}) };
+}
+
+function limitOf(req: Request): number {
+  const n = Number(new URL(req.url).searchParams.get("limit") ?? 50);
+  return Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), 1), 500) : 50;
+}
+
+function guarded(h: (req: Request) => Response | Promise<Response>): Handler {
+  return async (req) => {
+    try {
+      return await h(req);
+    } catch (e) {
+      if (e instanceof FeedbackError || e instanceof PeerError) return error(e.status, e.message);
+      return error(500, (e as Error).message);
+    }
   };
 }
 
