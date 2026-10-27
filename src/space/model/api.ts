@@ -22,7 +22,8 @@ import { OPERATOR, Unauthorized, identify } from "../auth.ts";
  *                                             { ok, text, images: [{ type, data: base64 }], call }, 502 when the model failed.
  *                                             Only a runtime that makes images (codex-cli); the input images as for `run`.
  *   GET  /api/model/status                    the configured runtimes, concurrency, calls in flight
- *   GET  /api/model/usage?window=24h&app      sums by app, tag, model, runtime and backend over a window, plus the whole history by day
+ *   GET  /api/model/usage?window=24h&app      this space's ledger (`space` names it): sums by app, tag, model, runtime and backend
+ *                                             over a window, plus the whole history by day
  *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored)
  *
  * The caller of `run` is identified by its bearer token: an app's own
@@ -45,6 +46,8 @@ export type ModelApiOptions = {
   machines?: () => MachineCell[];
   /** Runtimes this space answers for other spaces (`SPACE_PEER_MODEL`). */
   servesPeers?: string[];
+  /** This space's name (SPACE_NAME): the ledger is this space's own, so the usage answer says whose it is. */
+  space?: string;
 };
 
 /** A status-table cell as the API shows it. */
@@ -170,6 +173,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
           ok: true,
           window,
           since: new Date(since).toISOString(),
+          ...(opts.space ? { space: opts.space } : {}),
           backend: service.backend,
           totals: store.totals(since, app),
           byApp: store.groupBy(["app"], since, app),

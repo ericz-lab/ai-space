@@ -88,7 +88,7 @@ A peer that agrees to serve answers gets one more route:
 
 | peer route | local equivalent | notes |
 | --- | --- | --- |
-| `POST /api/peer/model/run` | `POST /api/model/run` | The same body with the machine prefix removed, and the same answer including `call`. Streaming answers keep the same SSE. |
+| `POST /api/peer/model/run` | `POST /api/model/run` | The same body with the machine prefix removed, and the same answer including `call`. Streaming answers keep the same SSE. The calling space always asks for the stream, even when its own caller wants one answer: the response starts at once and keepalives flow, so a proxy on the link neither cuts a long call at its first-byte limit nor replaces a failure's body with its own error page. |
 | `POST /api/peer/model/image` | `POST /api/model/image` | Same rule. Input images travel under the caller's file names, because the prompt refers to them by name. |
 
 The peer's snapshot (`GET /api/peer/snapshot`) gains `model`: the runtimes it offers, each with its kind, whether it makes pictures, its concrete model per tier (the hub's model choices show them), and the peer's own status cells. The hub reads them from the cached snapshot, so a status page never waits on a peer. A runtime the peer does not list is refused on the hub before any request is sent, with the list of runtimes the peer does offer.
