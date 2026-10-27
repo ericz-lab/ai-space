@@ -49,6 +49,7 @@ import {
   untilTime,
   type AppModelRow,
   type WebKey,
+  modelOn,
 } from "../core/settings.ts";
 import { lang, tw } from "./env.ts";
 import type { Space } from "./model.ts";
@@ -372,19 +373,19 @@ export function usagePage(ctx: Ctx, space: Space): any {
       body.append(
         table(
           [tw("usage.app"), tw("usage.tag"), tw("usage.model"), tw("usage.calls"), ...tokenHeads, tw("usage.cost")],
-          usage.byTag.map((r) => ({ cells: [label(r.app), r.tag, r.model, r.errors ? `${r.calls} (${r.errors})` : String(r.calls), ...tokenCells(r), fmtCost(r.costUsd)], tooltip: r.errors ? `${r.app}${tw("usage.errors", { n: r.errors })}` : r.app, ...(r.errors ? { alert: 3 } : {}) })),
+          usage.byTag.map((r) => ({ cells: [label(r.app), r.tag, modelOn(r), r.errors ? `${r.calls} (${r.errors})` : String(r.calls), ...tokenCells(r), fmtCost(r.costUsd)], tooltip: r.errors ? `${r.app}${tw("usage.errors", { n: r.errors })}` : r.app, ...(r.errors ? { alert: 3 } : {}) })),
           { numeric: (c) => c > 2 },
         ),
       );
     }
     if (usage.byModel.length) {
       body.append(heading(tw("usage.byModel")));
-      const origin = (o: string) => (o === "task" ? tw("usage.originTask") : o === "import" ? tw("usage.originImport") : tw("usage.originRun"));
+      const origin = (o: string) => (o === "task" ? tw("usage.originTask") : o === "import" ? tw("usage.originImport") : o === "peer" ? tw("usage.originPeer") : tw("usage.originRun"));
       body.append(
         table(
           [tw("usage.model"), tw("usage.calls"), ...tokenHeads, tw("usage.cost")],
           [
-            ...usage.byModel.map((r) => ({ cells: [r.model, String(r.calls), ...tokenCells(r), fmtCost(r.costUsd)] })),
+            ...usage.byModel.map((r) => ({ cells: [modelOn(r), String(r.calls), ...tokenCells(r), fmtCost(r.costUsd)] })),
             ...usage.byBackend.map((r) => ({ cells: [`${r.backend} · ${origin(r.origin)}`, String(r.calls), ...tokenCells(r), fmtCost(r.costUsd)], dim: true })),
           ],
         ),
@@ -418,7 +419,7 @@ export function usagePage(ctx: Ctx, space: Space): any {
       for (const c of calls) {
         const tokens = callTokens(c);
         const tip = c.error || `${c.app}/${c.tag} · ${c.backend}${c.modelSource ? ` · ${sourceText(c.modelSource)}` : ""}`;
-        const r = row(c.model, [`${label(c.app)} · ${c.tag}`, relTime(c.startedAt, lang), c.error ?? ""].filter(Boolean).join(" · "), tip);
+        const r = row(modelOn(c), [`${label(c.app)} · ${c.tag}`, relTime(c.startedAt, lang), c.error ?? ""].filter(Boolean).join(" · "), tip);
         r.add_prefix(badge(c.status === "ok" ? "ok" : "down"));
         r.add_suffix(new Gtk.Label({ label: [tokens !== undefined ? fmtTokens(tokens) : "", c.costUsd !== undefined ? fmtCost(c.costUsd) : "", fmtDuration(c.durationMs, lang)].filter(Boolean).join(" · "), css_classes: ["caption", "dim-label", "numeric"] }));
         group.add(r);

@@ -3,11 +3,13 @@ import { type AppInfo, dateTime, fmtDuration, getJson, relTime } from "./api.ts"
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
 
 // Usage window (a floating panel): what the model service recorded, read-only.
-// - The ledger is the open Space's own: its apps' calls, including those it sent to another machine;
-//   apps running on a peer are in the peer's ledger. The header names the Space.
+// - The ledger is the open Space's own: its apps' calls, including those it sent to another machine.
+//   The header names the Space.
 // - Reads `GET /api/model/usage?window=…` when opened and every 30 s while open.
 // - One window at a time (5h matches a subscription's rolling quota; 24h, 7d, 30d for trends).
 // - Rows are app → tag → model, largest first; a model table and the last calls follow.
+// - On a hub the peers' calls are in too: the app as `<peer>/<app>` (who started it), the model as
+//   `<machine>:<model>` when another machine ran it (docs/model-machines.md#ledger).
 // Token figures are what the runtime reported; a call with none shows a dash, nothing is estimated.
 
 type Totals = { calls: number; errors: number; inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number; tokens: number; costUsd: number; durationMs: number };
@@ -18,10 +20,12 @@ type UsageInfo = {
   backend: string;
   totals: Totals;
   byApp: (Totals & { app: string })[];
-  byTag: (Totals & { app: string; tag: string; model: string })[];
-  byModel: (Totals & { model: string })[];
+  byTag: (Totals & { app: string; tag: string; model: string; machine?: string })[];
+  byModel: (Totals & { model: string; machine?: string })[];
   byBackend: (Totals & { backend: string; origin: string })[];
   history: { firstAt?: string; totals: Totals; days: (Totals & { day: string })[] };
+  /** On a hub: each peer, whether its rows are in, and from when. */
+  peers?: { name: string; ok: boolean; asOf?: string; error?: string }[];
 };
 type Metric = "tokens" | "costUsd" | "calls";
 const METRICS: Metric[] = ["tokens", "costUsd", "calls"];
@@ -30,6 +34,9 @@ type CallInfo = {
   app: string;
   tag: string;
   model: string;
+  machine?: string;
+  /** The peer this call comes from, on a hub. */
+  peer?: string;
   modelSource?: string;
   backend: string;
   origin: string;
@@ -42,6 +49,9 @@ type CallInfo = {
 };
 
 const WINDOWS = ["5h", "24h", "7d", "30d"] as const;
+
+/** The model with the machine that ran it, when that is not this one: `david:gpt-6-luna`. */
+export const modelOn = (r: { model: string; machine?: string }): string => (r.machine ? `${r.machine}:${r.model}` : r.model);
 
 /** 1234 → 1.2K, 1234567 → 1.23M, 2689400000 → 2.69B; a missing figure is a dash. */
 export const fmtTokens = (n: number | undefined): string => {
@@ -195,7 +205,8 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
         .catch((e) => setErr(String((e as Error).message || e)));
     load();
     getJson<{ apps: AppInfo[] }>("/api/apps?all=1")
-      .then((d) => setApps(Object.fromEntries((d.apps || []).map((a) => [a.name, { title: a.title, ...(a.i18n ? { i18n: a.i18n } : {}) }]))))
+      // Keyed by id: a peer's app is `<peer>/<app>`, as its calls are.
+      .then((d) => setApps(Object.fromEntries((d.apps || []).map((a) => [a.id || a.name, { title: a.title, ...(a.i18n ? { i18n: a.i18n } : {}) }]))))
       .catch(() => {});
     const timer = setInterval(load, 30_000);
     return () => clearInterval(timer);
@@ -241,6 +252,13 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
         <div className="task-body">
           <p className="task-note">{t("usage.costNote")}</p>
           {err && <p className="task-note">{t("common.unavailable", { error: err })}</p>}
+          {usage?.peers
+            ?.filter((p) => !p.ok)
+            .map((p) => (
+              <p key={p.name} className="task-note">
+                {p.asOf ? t("usage.peerStale", { peer: p.name, error: p.error ?? "", time: dateTime(p.asOf, lang) }) : t("usage.peerMissing", { peer: p.name, error: p.error ?? "" })}
+              </p>
+            ))}
           {usage === null && !err && <p className="task-note">{t("common.loading")}</p>}
           {tot && (
             <div className="usage-cards">
@@ -285,10 +303,10 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
                   </thead>
                   <tbody>
                     {usage.byTag.map((r) => (
-                      <tr key={`${r.app}/${r.tag}/${r.model}`} className={r.errors ? "has-errors" : ""}>
+                      <tr key={`${r.app}/${r.tag}/${modelOn(r)}`} className={r.errors ? "has-errors" : ""}>
                         <td title={r.app}>{label(r.app)}</td>
                         <td>{r.tag}</td>
-                        <td>{r.model}</td>
+                        <td>{modelOn(r)}</td>
                         <td title={r.errors ? t("usage.errors", { n: r.errors }) : undefined}>
                           {r.calls}
                           {r.errors ? <i className="usage-err">{r.errors}</i> : null}
@@ -322,8 +340,8 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
                   </thead>
                   <tbody>
                     {usage.byModel.map((r) => (
-                      <tr key={r.model}>
-                        <td>{r.model}</td>
+                      <tr key={modelOn(r)}>
+                        <td>{modelOn(r)}</td>
                         <td>{r.calls}</td>
                         <TokenCells t={r} />
                         <td>{fmtCost(r.costUsd)}</td>
@@ -332,7 +350,7 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
                     {usage.byBackend.map((r) => (
                       <tr key={`${r.backend}/${r.origin}`} className="usage-dim">
                         <td>
-                          {r.backend} · {r.origin === "task" ? t("usage.originTask") : r.origin === "import" ? t("usage.originImport") : t("usage.originRun")}
+                          {r.backend} · {r.origin === "task" ? t("usage.originTask") : r.origin === "import" ? t("usage.originImport") : r.origin === "peer" ? t("usage.originPeer") : t("usage.originRun")}
                         </td>
                         <td>{r.calls}</td>
                         <TokenCells t={r} />
@@ -356,7 +374,7 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
                     <div className="run-line">
                       <span className={`status ${c.status === "ok" ? "ok" : "down"}`}>
                         <i />
-                        {c.model}
+                        {modelOn(c)}
                       </span>
                       <span className="usage-call">
                         {label(c.app)} · {c.tag}

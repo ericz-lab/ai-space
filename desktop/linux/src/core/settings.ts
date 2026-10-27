@@ -201,16 +201,19 @@ export type UsageInfo = {
   window: string;
   backend: string;
   totals: Totals;
-  byTag: (Totals & { app: string; tag: string; model: string })[];
-  byModel: (Totals & { model: string })[];
+  byTag: (Totals & { app: string; tag: string; model: string; machine?: string })[];
+  byModel: (Totals & { model: string; machine?: string })[];
   byBackend: (Totals & { backend: string; origin: string })[];
   history: { firstAt?: string; totals: Totals; days: (Totals & { day: string })[] };
 };
+/** The model with the machine that ran it, when that is not the Space's own: `david:gpt-6-luna` (src/web/Usage.tsx). */
+export const modelOn = (r: { model: string; machine?: string }): string => (r.machine ? `${r.machine}:${r.model}` : r.model);
 export type CallInfo = {
   id: number;
   app: string;
   tag: string;
   model: string;
+  machine?: string;
   modelSource?: string;
   backend: string;
   status: "ok" | "error";
