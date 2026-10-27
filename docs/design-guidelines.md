@@ -260,7 +260,9 @@ Implemented unless marked *(proposed)*.
 
 **Chat panel.** Reading surface, at most 1000 px wide. A 236 px sidebar on the left: a full-width New conversation button, the agents, and the shown agent's recent sessions; the current agent and session get a neutral `text` 10% fill, never the accent. Header buttons are flat until hovered; head and composer are divided by `hairline`. On phones the sidebar gives way to 34 px agent tabs (the current one with a 2 px `--focus` ring, the others at 0.6) and a history button. A running agent shows a pulsing `success` dot (static under reduced motion *(proposed)*). *(Proposed:)* the message column is at most about 72 characters wide, the input keeps its draft when a turn fails, and the failure appears in the thread with a retry action.
 
-**Settings.** Reading surface, at most 860 px wide; on phones, full screen. Sections are listed on the left (icon and label, the current one with a neutral `text` 10% fill), and on phones in a scrolling row above. A section's rows sit in cards: 1 px `hairline` border, 12 px radius, `hairline` between rows. Rows are 12 × 16 px, at least 48 px tall, with the control on the right. Subgroups inside a card have an 11 px uppercase label (Latin only). Switches are 40 × 24 px. Drafts (appearance) show a live preview, with Save as the primary action and Cancel beside it.
+**Settings.** Reading surface, at most 860 px wide; on phones, full screen. Sections are listed on the left (icon and label, the current one with a neutral `text` 10% fill), and on phones in a scrolling row above. A section's rows sit in cards: 1 px `hairline` border, 12 px radius, `hairline` between rows. Rows are 12 × 16 px, at least 48 px tall, with the control on the right. Subgroups inside a card have an 11 px uppercase label (Latin only). Switches are 40 × 24 px. A switch or menu shows its new value at once and stays usable while the change is saved; a failed save shows the error under the control and puts the saved value back (the *Busy* state is for actions, not for settings). Drafts (appearance) show a live preview, with Save as the primary action and Cancel beside it.
+
+**Menus (selects).** Native `<select>` elements everywhere. Where the browser supports `appearance: base-select` and the pointer is a mouse, the open list is drawn in the page rather than in a system pop-up (which, in Chrome on Linux under Wayland, jumps and shakes as it opens): glass-strong fill, 1 px `hairline` border, 12 px radius, `shadow`, 4 px inset; 13 px options with an 8 px radius, a `text` 8% fill on hover, the chosen one in weight 600 with an `accent` check, unavailable ones in `muted`. The closed box keeps its own style with a thin chevron that turns up while the list is open, and is as wide as the chosen label. Touch screens and other browsers keep the system list.
 
 **Forms and modals.** Labels above fields (13 px `muted`). Fields: glass fill, 10 px radius, 9 × 12 px padding, 16 px font on phones (prevents iOS zoom; implemented). The primary button is filled with `text` and `inverse`; secondary buttons are glass pills. Errors are in `danger` under the actions, and the form keeps every value.
 
@@ -269,7 +271,8 @@ Implemented unless marked *(proposed)*.
 | Use | Duration / easing (implemented unless marked) |
 | --- | --- |
 | Hover, color, opacity | 150 ms ease |
-| Switch thumb | 220 ms `cubic-bezier(0.34, 1.3, 0.64, 1)` |
+| Switch thumb | 220 ms `cubic-bezier(0.34, 1.3, 0.64, 1)`, for its slide and its stretch while pressed |
+| Menu list open | 150 ms fade in; the chevron turns in 150 ms; none under reduced motion |
 | Panel open (`rise`) | 200 ms ease, from 10 px lower at 98.5% scale |
 | Glow on/off | 300 ms ease |
 | Screen change | 280 ms `cubic-bezier(0.2, 0.8, 0.2, 1)`, 48 px horizontal slide with fade; none under reduced motion |

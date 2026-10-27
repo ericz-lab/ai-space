@@ -102,17 +102,21 @@ export function AppModelList({ groups, onOpen, t, heading, note }: { groups: App
 
 function ModelRow({ app, peer, row, options, onSaved }: { app: string; peer?: string; row: Row; options: Option[]; onSaved: (rows: AppRows) => void }) {
   const { t } = useLang();
-  const [busy, setBusy] = useState(false);
+  // The choice being saved: shown at once, with the menu still usable, until the answer replaces the row.
+  const [choice, setChoice] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const saves = useRef(0);
   const save = async (value: string) => {
-    setBusy(true);
+    const n = ++saves.current;
+    setChoice(value);
     setError("");
     try {
-      onSaved(await saveAppModel(app, row.tag, value, peer));
+      const rows = await saveAppModel(app, row.tag, value, peer);
+      if (n === saves.current) onSaved(rows);
     } catch (e) {
-      setError((e as Error).message);
+      if (n === saves.current) setError((e as Error).message);
     } finally {
-      setBusy(false);
+      if (n === saves.current) setChoice(null);
     }
   };
   return (
@@ -127,7 +131,7 @@ function ModelRow({ app, peer, row, options, onSaved }: { app: string; peer?: st
           </span>
         </label>
         <div className="task-model-controls">
-          <select id={`app-model-${peer ? `${peer}-` : ""}${app}-${row.tag ?? ""}`} value={row.override ?? ""} disabled={busy} onChange={(e) => void save(e.target.value)}>
+          <select id={`app-model-${peer ? `${peer}-` : ""}${app}-${row.tag ?? ""}`} value={choice ?? row.override ?? ""} onChange={(e) => void save(e.target.value)}>
             <option value="">{t("appModels.noOverride")}</option>
             {row.override && !options.some((o) => o.value === row.override) && <SavedChoice value={row.override} t={t} />}
             {[...new Set(options.map((o) => o.runtime))].map((runtime) => (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getJson, relTime, sendJson } from "./api.ts";
 import { useLang } from "./i18n.ts";
 import type { Key } from "./i18n.ts";
@@ -10,8 +10,8 @@ import type { Key } from "./i18n.ts";
  */
 
 type Status = "later" | "queued" | "fixing" | "review" | "failed" | "skipped" | "recorded";
-type Settings = { enabled: boolean; appsDefault: boolean; apps: Record<string, "on" | "off">; mode: "auto" | "later"; machine: string; model: string; effort: "high" | "xhigh" | "max"; errors: boolean };
-type View = {
+export type Settings = { enabled: boolean; appsDefault: boolean; apps: Record<string, "on" | "off">; mode: "auto" | "later"; machine: string; model: string; effort: "high" | "xhigh" | "max"; errors: boolean };
+export type View = {
   settings: Settings;
   apps: { app: string; title: string; zh?: string; status: string; enabled: boolean }[];
   machines: { value: string; label: string }[];
@@ -20,6 +20,22 @@ type View = {
   shortcut: string;
 };
 type Item = { id: number; app: string; text: string; status: Status; path: string; todoId: number | null; todoPeer: string; todoUrl: string | null; runId: string | null; runMachine: string; note: string | null; createdAt: number };
+
+/**
+ * The view with a settings patch applied the way the server applies it (`mergeSettings`): an app
+ * set to "default" loses its own value, and each app's shown/hidden follows. The page shows a
+ * choice with this at once and saves in the background.
+ */
+export function withPatch(view: View, patch: Partial<Settings>): View {
+  const apps = { ...view.settings.apps };
+  for (const [app, v] of Object.entries((patch.apps ?? {}) as Record<string, string>)) {
+    if (v === "default") delete apps[app];
+    else apps[app] = v as "on" | "off";
+  }
+  const settings = { ...view.settings, ...patch, apps };
+  const shown = (app: string) => settings.enabled && (apps[app] ? apps[app] === "on" : settings.appsDefault);
+  return { ...view, settings, apps: view.apps.map((a) => ({ ...a, enabled: shown(a.app) })) };
+}
 
 export default function FeedbackSettings() {
   const { lang, t } = useLang();
@@ -40,15 +56,19 @@ export default function FeedbackSettings() {
     return () => clearInterval(id);
   }, [items, load]);
 
+  // A switch or menu shows its new value at once and stays usable while the change is saved; only
+  // the answer to the newest save is shown, so a slower earlier one cannot undo a later choice.
+  const saves = useRef(0);
   const save = async (patch: Partial<Settings>) => {
-    setBusy(true);
+    const n = ++saves.current;
     setError("");
+    setView((v) => (v ? withPatch(v, patch) : v));
     try {
-      setView(await sendJson<View>("PUT", "/api/panel/feedback/settings", patch));
+      const next = await sendJson<View>("PUT", "/api/panel/feedback/settings", patch);
+      if (n === saves.current) setView(next);
     } catch (e) {
       setError((e as Error).message);
-    } finally {
-      setBusy(false);
+      load();
     }
   };
   const fix = async (body: { app?: string; ids?: number[] }) => {
@@ -77,25 +97,25 @@ export default function FeedbackSettings() {
     <div className="setcard">
       <label className="setrow">
         {t("feedback.enabled")}
-        <input type="checkbox" role="switch" checked={s.enabled} disabled={busy} onChange={() => void save({ enabled: !s.enabled })} />
+        <input type="checkbox" role="switch" checked={s.enabled} onChange={() => void save({ enabled: !s.enabled })} />
       </label>
       <p className="setnote">{t("feedback.enabledHelp")}</p>
       <label className="setrow">
         {t("feedback.mode")}
-        <select className="setselect" value={s.mode} disabled={busy} onChange={(e) => void save({ mode: e.target.value as Settings["mode"] })}>
+        <select className="setselect" value={s.mode} onChange={(e) => void save({ mode: e.target.value as Settings["mode"] })}>
           <option value="auto">{t("feedback.mode.auto")}</option>
           <option value="later">{t("feedback.mode.later")}</option>
         </select>
       </label>
       <label className="setrow">
         {t("feedback.machine")}
-        <select className="setselect" value={s.machine} disabled={busy} onChange={(e) => void save({ machine: e.target.value })}>
+        <select className="setselect" value={s.machine} onChange={(e) => void save({ machine: e.target.value })}>
           {view.machines.map((m) => <option key={m.value} value={m.value}>{m.value ? m.label : t("feedback.thisMachine", { name: m.label })}</option>)}
         </select>
       </label>
       <label className="setrow">
         {t("feedback.model")}
-        <select className="setselect" value={s.model} disabled={busy} onChange={(e) => void save({ model: e.target.value })}>
+        <select className="setselect" value={s.model} onChange={(e) => void save({ model: e.target.value })}>
           <option value="">{t("feedback.modelDefault")}</option>
           {s.model && !view.models.some((o) => o.value === s.model) && <option value={s.model}>{s.model}</option>}
           {view.models.map((o) => <option key={o.value} value={o.value}>{`${o.runtime} · ${t(`modelTier.${o.tier}` as Key)} · ${o.model}`}</option>)}
@@ -103,7 +123,7 @@ export default function FeedbackSettings() {
       </label>
       <label className="setrow">
         {t("feedback.effort")}
-        <select className="setselect" value={s.effort} disabled={busy} onChange={(e) => void save({ effort: e.target.value as Settings["effort"] })}>
+        <select className="setselect" value={s.effort} onChange={(e) => void save({ effort: e.target.value as Settings["effort"] })}>
           <option value="high">{t("feedback.effort.high")}</option>
           <option value="xhigh">{t("feedback.effort.xhigh")}</option>
           <option value="max">{t("feedback.effort.max")}</option>
@@ -111,7 +131,7 @@ export default function FeedbackSettings() {
       </label>
       <label className="setrow">
         {t("feedback.errors")}
-        <input type="checkbox" role="switch" checked={s.errors} disabled={busy} onChange={() => void save({ errors: !s.errors })} />
+        <input type="checkbox" role="switch" checked={s.errors} onChange={() => void save({ errors: !s.errors })} />
       </label>
       <div className="setrow" style={{ cursor: "default" }}>
         {t("feedback.shortcut")}
@@ -124,7 +144,7 @@ export default function FeedbackSettings() {
       <p className="sethead">{t("feedback.apps")}</p>
       <label className="setrow">
         {t("feedback.appsDefault")}
-        <input type="checkbox" role="switch" checked={s.appsDefault} disabled={busy} onChange={() => void save({ appsDefault: !s.appsDefault })} />
+        <input type="checkbox" role="switch" checked={s.appsDefault} onChange={() => void save({ appsDefault: !s.appsDefault })} />
       </label>
       {view.apps.map((a) => (
         <label className="setrow" key={a.app}>
@@ -132,7 +152,7 @@ export default function FeedbackSettings() {
             {appName(a)}
             <small className="setsub">{a.enabled ? t("feedback.app.shown") : t("feedback.app.hidden")}</small>
           </span>
-          <select className="setselect" value={s.apps[a.app] ?? "default"} disabled={busy} onChange={(e) => void save({ apps: { [a.app]: e.target.value } as unknown as Settings["apps"] })}>
+          <select className="setselect" value={s.apps[a.app] ?? "default"} onChange={(e) => void save({ apps: { [a.app]: e.target.value } as unknown as Settings["apps"] })}>
             <option value="default">{t("feedback.app.default", { state: s.appsDefault ? t("feedback.on") : t("feedback.off") })}</option>
             <option value="on">{t("feedback.on")}</option>
             <option value="off">{t("feedback.off")}</option>
