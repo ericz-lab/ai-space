@@ -23,9 +23,9 @@ import { OPERATOR, Unauthorized, identify } from "../auth.ts";
  *                                             { ok, text, images: [{ type, data: base64 }], call }, 502 when the model failed.
  *                                             Only a runtime that makes images (codex-cli); the input images as for `run`.
  *   GET  /api/model/status                    the configured runtimes, concurrency, calls in flight
- *   GET  /api/model/usage?window=24h&app      sums by app, tag, model, runtime and backend over a window, plus the whole history by day;
- *                                             on a hub, without `app`, the peers' ledgers too, under `<peer>/<app>`, and `peers`
- *                                             says which answered (docs/model-machines.md#ledger)
+ *   GET  /api/model/usage?window=24h&app      this space's ledger (`space` names it): sums by app, tag, model, runtime and backend
+ *                                             over a window, plus the whole history by day; on a hub, without `app`, the peers'
+ *                                             ledgers too, under `<peer>/<app>`, and `peers` says which answered (docs/model-machines.md#ledger)
  *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored); on a hub, without
  *                                             `app` or `tag`, the peers' recent calls too
  *
@@ -49,6 +49,8 @@ export type ModelApiOptions = {
   machines?: () => MachineCell[];
   /** Runtimes this space answers for other spaces (`SPACE_PEER_MODEL`). */
   servesPeers?: string[];
+  /** This space's name (SPACE_NAME): the ledger is this space's own, so the usage answer says whose it is. */
+  space?: string;
   /** The peers' ledgers, for a hub that shows them with its own (peers/ledgers.ts). */
   peerLedgers?: PeerLedgerSource;
 };
@@ -186,11 +188,11 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
         }
         const app = q.get("app") ?? undefined;
         if (app !== undefined && !APP_PATTERN.test(app)) return error(400, "invalid app");
-        if (app !== undefined || !opts.peerLedgers) return json({ ok: true, ...usageReport(service.store, window, service.backend, { app }) });
+        if (app !== undefined || !opts.peerLedgers) return json({ ok: true, ...(opts.space ? { space: opts.space } : {}), ...usageReport(service.store, window, service.backend, { app }) });
         return opts.peerLedgers.usage(window).then((peers) => {
           const local = usageReport(service.store, window, service.backend, { skipCallers: answered(peers) });
           const merged = mergeReports(local, peers.flatMap((p) => (p.data ? [peerReport(p.peer, p.data)] : [])));
-          return json({ ok: true, ...merged, peers: peers.map(peerStatus) });
+          return json({ ok: true, ...(opts.space ? { space: opts.space } : {}), ...merged, peers: peers.map(peerStatus) });
         });
       },
     },

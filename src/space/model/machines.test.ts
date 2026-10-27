@@ -111,7 +111,7 @@ describe("answers through a peer", () => {
   });
 
   /** Space "box" offering `allow`, and space "hub" with box as its peer; the link is an in-process call. */
-  function link(opts: { allow?: string[]; api?: typeof fetch; token?: string; hubToken?: string } = {}) {
+  function link(opts: { allow?: string[]; api?: typeof fetch; token?: string; hubToken?: string; proxy?: (r: Response) => Response } = {}) {
     const peerRuntimesReg = new RuntimeRegistry({ default: "api", runtimes: [{ name: "api", kind: "anthropic-api", apiKey: "sk", apiUrl: "" }] }, { fetch: opts.api ?? fakeApi() });
     const peerHealth = new RuntimeHealth();
     const peerService = new ModelService({ store: peerStore, runtimes: peerRuntimesReg, log: () => {}, health: peerHealth });
@@ -128,7 +128,8 @@ describe("answers through a peer", () => {
       const req = new Request(url, init);
       const route = served[new URL(req.url).pathname];
       if (!route?.[req.method]) return new Response("not found", { status: 404 });
-      return route[req.method]!(Object.assign(req, { params: {} }), undefined);
+      const r = await route[req.method]!(Object.assign(req, { params: {} }), undefined);
+      return opts.proxy ? opts.proxy(r) : r;
     }) as unknown as typeof fetch;
     const peers = new PeerHub([{ name: "box", url: "http://box", token: opts.hubToken ?? "t", headers: {}, refreshMs: 30_000 }], { fetch: wire });
     peers.get("box")!.snapshot = { name: "box", apps: [], services: [], widgets: [], agents: [], terminal: false, capabilities: [], model: { serves: allow.map((name) => ({ name, kind: "anthropic-api", image: false, tiers: {} })), cells: [] }, asOf: new Date().toISOString() };
@@ -164,6 +165,17 @@ describe("answers through a peer", () => {
     const { outcome, call } = await hub.run("news", input("box:api/haiku"));
     expect(outcome.ok).toBe(false);
     expect(call.error).toContain("usage limit");
+    expect(hubHealth.list().find((c) => c.machine === "box")?.limitedUntil).toBeDefined();
+  });
+
+  test("a proxy on the link that swaps a 502's body still lets the peer's error and model through", async () => {
+    // A CDN in front of the peer answers a 502 with its own page; the call travels as an event stream, so a failure is an event.
+    const proxy = (r: Response) => (r.status === 502 ? new Response("error code: 502", { status: 502 }) : r);
+    const { hub, hubHealth } = link({ proxy, api: fakeApi({ error: { status: 429, message: "429 Too Many Requests" } }) });
+    const { outcome, call } = await hub.run("news", input("box:api/haiku"));
+    expect(outcome.ok).toBe(false);
+    expect(call.error).toContain("429 Too Many Requests");
+    expect(call.model).toBe("haiku");
     expect(hubHealth.list().find((c) => c.machine === "box")?.limitedUntil).toBeDefined();
   });
 
@@ -231,10 +243,11 @@ describe("answers through a peer", () => {
   test("the model status lists the machines; usage sums by machine", async () => {
     const { hub } = link();
     await hub.run("news", input("box:api/haiku"));
-    const routes = createModelRoutes({ service: hub, machines: () => [{ machine: "box", runtime: "api", kind: "anthropic-api", used: true }], servesPeers: [] }) as Record<string, Record<string, (req: Request & { params: Record<string, string> }) => Promise<Response>>>;
+    const routes = createModelRoutes({ service: hub, machines: () => [{ machine: "box", runtime: "api", kind: "anthropic-api", used: true }], servesPeers: [], space: "hub" }) as Record<string, Record<string, (req: Request & { params: Record<string, string> }) => Promise<Response>>>;
     const status = (await (await routes["/api/model/status"]!.GET!(Object.assign(new Request("http://x/api/model/status"), { params: {} }))).json()) as { machines: unknown[] };
     expect(status.machines).toHaveLength(1);
-    const usage = (await (await routes["/api/model/usage"]!.GET!(Object.assign(new Request("http://x/api/model/usage"), { params: {} }))).json()) as { byMachine: { machine: string; calls: number }[] };
+    const usage = (await (await routes["/api/model/usage"]!.GET!(Object.assign(new Request("http://x/api/model/usage"), { params: {} }))).json()) as { space: string; byMachine: { machine: string; calls: number }[] };
+    expect(usage.space).toBe("hub");
     expect(usage.byMachine).toMatchObject([{ machine: "box", calls: 1 }]);
   });
 });

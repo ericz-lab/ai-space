@@ -47,12 +47,15 @@ export function createPeerRuntime(client: PeerClient, hub: string, runtime: { na
           prompt: input.prompt, system: input.system, model: `${runtime.name}/${input.model}`, tag: input.tag, tools: input.tools,
           timeoutMs: input.timeoutMs, maxTokens: input.maxTokens,
           ...(input.mode ? { mode: input.mode } : {}), ...(input.thinking !== undefined ? { thinking: input.thinking } : {}), ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
-          ...(images.length ? { images } : {}), ...(onDelta ? { stream: true } : {}),
+          // Always the event stream, with or without a caller reading the deltas: the answer starts at once and
+          // keepalives flow, so a proxy on the link neither times out a long call (a 100 s first-byte limit) nor
+          // swaps a failure's body for its own error page; the failure comes back as an event with its ledger row.
+          ...(images.length ? { images } : {}), stream: true,
         }, signal);
       } catch (e) {
         return fail(signal?.aborted ? "aborted" : `peer ${client.name}: ${(e as Error).message}`);
       }
-      if (r.ok && onDelta && (r.headers.get("content-type") ?? "").startsWith("text/event-stream")) return readStream(r, onDelta, fail, backend);
+      if (r.ok && (r.headers.get("content-type") ?? "").startsWith("text/event-stream")) return readStream(r, onDelta, fail, backend);
       const j = (await r.json().catch(() => null)) as { ok?: boolean; text?: unknown; error?: unknown; call?: Call } | null;
       if (r.ok && j?.ok === true && typeof j.text === "string") return { ok: true, text: j.text, backend, ...figures(j.call) };
       return fail(linkError(r, j), j?.call);
@@ -118,7 +121,7 @@ async function encode(files?: CompleteFile[]): Promise<{ name: string; data: str
 }
 
 /** The peer's event stream: `delta` {text} as it comes, then `done` or `error` with the ledger row. */
-async function readStream(r: Response, onDelta: OnDelta, fail: (error: string, call?: Call) => CompleteOutcome, backend: Backend): Promise<CompleteOutcome> {
+async function readStream(r: Response, onDelta: OnDelta | undefined, fail: (error: string, call?: Call) => CompleteOutcome, backend: Backend): Promise<CompleteOutcome> {
   const reader = r.body!.pipeThrough(new TextDecoderStream()).getReader();
   let buf = "";
   try {
@@ -138,7 +141,7 @@ async function readStream(r: Response, onDelta: OnDelta, fail: (error: string, c
         }
         if (!data.length) continue;
         const j = JSON.parse(data.join("\n")) as { text?: unknown; error?: unknown; call?: Call };
-        if (name === "delta" && typeof j.text === "string") onDelta(j.text);
+        if (name === "delta" && typeof j.text === "string") onDelta?.(j.text);
         else if (name === "done" && typeof j.text === "string") return { ok: true, text: j.text, backend, ...figures(j.call) };
         else if (name === "error") return fail(typeof j.error === "string" ? j.error : "the peer reported an error", j.call);
       }
