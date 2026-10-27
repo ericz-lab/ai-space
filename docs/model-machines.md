@@ -132,7 +132,19 @@ A call forwarded to a peer writes two rows:
 | hub | the calling app | `run` | `peer:box` | the tokens and cost the peer returned in `call` |
 | peer | `<hub>/<app>` | `peer` | the peer's own (`local`) | the same figures |
 
-The hub row keeps per-app views correct where the app lives. The peer row makes each login's load visible on the machine that owns it. A view that sums several machines (the usage app reads each machine's rows through the peer proxy) must count a call once: it skips hub rows whose `backend` is `peer:<name>` when it also reads that peer. That rule belongs to such a view; the core ledger keeps both rows.
+The hub row keeps per-app views correct where the app lives. The peer row makes each login's load visible on the machine that owns it. A view that sums several machines must count a call once. That rule belongs to such a view; the core ledger keeps both rows.
+
+### The hub's usage page
+
+The hub's Settings → Model usage (`GET /api/model/usage`, `GET /api/model/calls`) shows every peer's calls with its own. Code: `model/report.ts` (the report, a peer's rows as the hub shows them, the merge), `peers/ledgers.ts` (asking the peers), `createPeerUsageRoutes` in `model/api.ts` (the peer side).
+
+- **Who started the call** is the row kept: the caller's `origin: run` (or `task`) row. A peer's app shows as `<peer>/<app>`, under the name the hub gives the peer.
+- **Where it ran** is the machine: a row the peer ran itself names the peer; a row it sent on keeps the machine it names. The page shows the model as `<machine>:<model>` (`david:gpt-6-luna`), whichever space made the call, and the bare model for a call the hub ran.
+- **Counted once**: the hub asks each peer with `skip=<SPACE_NAME>`, and the peer leaves out its `origin: peer` rows under `<hub>/`, which the hub's own rows count. The hub in turn leaves out its `origin: peer` rows under `<peer's SPACE_NAME>/` for every peer whose rows it has. Rows another space forwarded to a peer stay, labelled for other spaces.
+- **Never waiting long**: a read asks every peer at once and waits at most 4 s. A peer that does not answer is shown from its last answer, and `peers` in the response says so (`ok: false`, `asOf`, `error`); the page shows that note. A peer that never answered contributes nothing, and the calls the hub ran for it stay in the hub's figures. A peer on an older ai-space answers 404 and is listed as not included.
+- Apps the peer does not share with legacy peers (installed packages) are left out of its answer. An `app` filter reads the hub's own ledger only.
+
+Recent calls from a peer carry `peer` and `peerId` (the peer's own id); their `id` is negative and distinct per peer, since clients key the list by id.
 
 ## Status
 

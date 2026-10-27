@@ -4,8 +4,8 @@ import { basename, join } from "node:path";
 import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
 import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
-import { PeerHub, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers, peerRuntimes } from "./space/peers/index.ts";
-import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, recordAgentRun } from "./space/model/index.ts";
+import { PeerHub, PeerLedgers, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers, peerRuntimes } from "./space/peers/index.ts";
+import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { availabilityOf } from "./space/model/health.ts";
 import { createInventoryRoutes, peerRow } from "./space/model/inventory.ts";
@@ -525,7 +525,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         env,
       })],
       ["owner", createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel })],
-      ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag), machines: machineCells, servesPeers: config.peerModel })],
+      ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag), machines: machineCells, servesPeers: config.peerModel, ...(peers.names().length ? { peerLedgers: new PeerLedgers(peers, config.name) } : {}) })],
       ["owner", createAppModelRoutes(appModelRouteOpts)],
       ["app", createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget })],
       ["public", createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name, token: config.apiToken, managed: Boolean(await readOwnership(ws.home)) })],
@@ -543,7 +543,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", agentRoutes],
       ["owner", createPeerRoutes({ hub: peers, layout, registry })],
       ["owner", terminalRoutes],
-      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), inventory: () => peerRow(runtimeHealth, runtimes), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
+      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), inventory: () => peerRow(runtimeHealth, runtimes), ledger: createPeerUsageRoutes({ service: model, name: config.name, skipApps: () => packageStore.list().filter((o) => o.state === "installed").map((o) => o.app) }), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
       ["public", createWebRoutes()],
       ["owner", createAuthRoutes({ mode: config.auth, auth })],
     ],

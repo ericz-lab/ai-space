@@ -30,7 +30,7 @@ Non-goals, for now:
 - Conversations. One call is one prompt and one answer; there is no session or history.
 - Files other than images over `/api/model/run`, and images by URL. A call's images come inside the request (`images`, below); ai-space never fetches what a request names, since it sits on loopback next to every app.
 - Switches and budgets (turning an app's calls off from the panel, refusing calls past a daily budget). The ledger is the prerequisite; the controls come after there is data to set them from.
-- Merging the ledgers of peer machines into the hub's view.
+- Copying peers' rows into the hub's ledger. A hub reads its peers' ledgers when its usage page asks and adds them to the answer ([model-machines.md](model-machines.md#ledger)); each row stays on the machine that wrote it.
 
 ## Backends
 
@@ -170,8 +170,8 @@ A task with an `agent` target (`docs/scheduler.md`) runs on the runtime the targ
 POST /api/model/run                       run one call (app token, or operator token + app)
 POST /api/model/image                     pictures from a prompt and optional input images (same tokens)
 GET  /api/model/status                    backend, concurrency cap, calls running and waiting
-GET  /api/model/usage?window=24h&app=x    totals and sums by app, by app/tag/model, by model, by backend/origin over 5h | 24h | 7d | 30d, plus `history`: lifetime totals and per-day sums since the first row
-GET  /api/model/calls?app&tag&limit       recent calls, newest first
+GET  /api/model/usage?window=24h&app=x    totals and sums by app, by app/tag/model/machine, by model/machine, by backend/origin over 5h | 24h | 7d | 30d, plus `history`: lifetime totals and per-day sums since the first row; on a hub without `app`, the peers' rows too and `peers` (which answered)
+GET  /api/model/calls?app&tag&limit       recent calls, newest first; on a hub without `app` or `tag`, the peers' calls too
 GET  /api/model/apps                      every app's model per tag and the layer that chose it
 GET  /api/apps/:app/model                 the same for one app
 PATCH /api/panel/apps/:app/model          set or clear a panel override (same-origin browser only)
@@ -221,7 +221,6 @@ An app that shows the answer while it is written adds `stream: true` and reads t
 
 - Per-app and per-tag switches, with the panel able to flip them once it holds a credential for mutating routes.
 - Daily budgets that turn a call into `429 budget exceeded`, which an app treats as skipped.
-- Peer ledgers in the hub's view (`docs/peers.md`).
 - Batch hints: the service could tell an app, from its own ledger, that its calls are mostly fixed overhead.
 
 ### GPT cost estimates

@@ -75,6 +75,20 @@ describe("ModelStore", () => {
     ]);
   });
 
+  test("a scope leaves out the calls another space forwarded, and apps by name", () => {
+    store.add(call());
+    store.add(call({ app: "hub_1/news", origin: "peer" }));
+    store.add(call({ app: "hubx1/news", origin: "peer" }));
+    store.add(call({ app: "hub_1/run-here" }));
+    store.add(call({ app: "secret" }));
+    const apps = (scope: Parameters<ModelStore["totals"]>[1]) => store.groupBy(["app"], 0, scope).map((g) => g.app).sort();
+    // `_` is not a wildcard: hubx1's calls stay; a row of origin run under the prefix stays too.
+    expect(apps({ skipCallers: ["hub_1"], skipApps: ["secret"] })).toEqual(["hub_1/run-here", "hubx1/news", "news"]);
+    expect(store.totals(0, { skipCallers: ["hub_1"] }).calls).toBe(4);
+    expect(store.list({ skipCallers: ["hub_1"], skipApps: ["secret", "news"], tag: "translate" }).map((c) => c.app).sort()).toEqual(["hub_1/run-here", "hubx1/news"]);
+    expect(store.firstAt({ skipApps: ["news", "secret", "hub_1/news", "hubx1/news", "hub_1/run-here"] })).toBeUndefined();
+  });
+
   test("rows older than the retention are pruned on insert", () => {
     store.add(call({ startedAt: T0 - 11 * DAY }));
     store.add(call({ startedAt: T0 - 9 * DAY }));

@@ -40,6 +40,8 @@ import type { PeerModelInfo } from "./client.ts";
  *                                                  with `latestId`; the hub mirrors them (docs/events.md)
  *   POST /api/peer/call/:app/:capability           a call from the hub: forwarded to the local bus as the caller named in
  *                                                  `x-space-caller` (the hub writes `<hub name>/<app>`)
+ *   GET  /api/peer/model/usage?window&skip         ┐ this machine's own ledger, for a hub's usage page; `skip` names the
+ *   GET  /api/peer/model/calls?limit&skip          ┘ reading space, whose calls run here its own rows count (docs/model-machines.md#ledger)
  *   POST /api/peer/model/run                       ┐ only when SPACE_PEER_MODEL names runtimes: an answer or pictures run
  *   POST /api/peer/model/image                     ┘ here for `<space>/<app>` in `x-space-caller` (docs/model-machines.md);
  *                                                    the snapshot's `model` says which runtimes
@@ -75,6 +77,8 @@ export type PeerServeOptions = {
   /** The model routes for other spaces (model/api.ts `createPeerModelRoutes`) and what the snapshot says about them. */
   model?: Routes;
   modelInfo?: () => PeerModelInfo | undefined;
+  /** The ledger routes for a hub's usage page (model/api.ts `createPeerUsageRoutes`), whatever this space offers other spaces. */
+  ledger?: Routes;
   /** The agent CLIs on this machine (model/inventory.ts `peerRow`), whatever this space offers other spaces. */
   inventory?: () => MachineInventory;
   /** The app-model routes for a hub's Models page (model/app-models.ts `createPeerAppModelRoutes`). */
@@ -215,6 +219,12 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
       ? {
           "/api/peer/model/run": { POST: guard(mirror(opts.model, "/api/peer/model/run", "POST")) },
           "/api/peer/model/image": { POST: guard(mirror(opts.model, "/api/peer/model/image", "POST")) },
+        }
+      : {}),
+    ...(opts.ledger
+      ? {
+          "/api/peer/model/usage": { GET: guard(mirror(opts.ledger, "/api/peer/model/usage", "GET")) },
+          "/api/peer/model/calls": { GET: guard(mirror(opts.ledger, "/api/peer/model/calls", "GET")) },
         }
       : {}),
     ...(opts.appModels

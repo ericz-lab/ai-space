@@ -160,7 +160,7 @@ widgets:
   });
   peerBus.syncApp("media", { events: { publishes: [{ name: "clip.added" }], consumes: [] }, provides: [{ name: "clip", method: "POST", path: "/api/clip", timeoutMs: 5000 }] });
   // The peer routes may upgrade a socket (the terminal's), so the server declares a websocket handler.
-  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents, appModels: peerAppModels, allowApp: (app) => app !== "secret", inventory: () => ({ machine: "", via: "local", clis: [{ cli: "claude", kind: "claude-code", installed: true, signedIn: true, version: "2.1.3", configured: true, runtimes: ["claude"] }, { cli: "codex", kind: "codex-cli", installed: true, signedIn: false, configured: false, runtimes: [] }, { cli: "dsh", kind: "deepseek-harness", installed: false, configured: false, runtimes: [] }] }) }) }, websocket: terminalWebSocket });
+  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents, appModels: peerAppModels, ledger: { "/api/peer/model/usage": { GET: () => Response.json({ ok: true, name: "peer-box" }) }, "/api/peer/model/calls": { GET: () => Response.json({ ok: true, name: "peer-box", calls: [] }) } }, allowApp: (app) => app !== "secret", inventory: () => ({ machine: "", via: "local", clis: [{ cli: "claude", kind: "claude-code", installed: true, signedIn: true, version: "2.1.3", configured: true, runtimes: ["claude"] }, { cli: "codex", kind: "codex-cli", installed: true, signedIn: false, configured: false, runtimes: [] }, { cli: "dsh", kind: "deepseek-harness", installed: false, configured: false, runtimes: [] }] }) }) }, websocket: terminalWebSocket });
   peerBase = `http://127.0.0.1:${peerServer.port}`;
 
   // ---- the hub: a local app, a link app that duplicates the peer's app, and the peer
@@ -247,6 +247,12 @@ describe("peer config", () => {
 });
 
 describe("peer side", () => {
+  test("the ledger routes need the bearer token too", async () => {
+    expect((await get(peerBase, "/api/peer/model/usage?window=24h")).status).toBe(401);
+    expect((await get(peerBase, "/api/peer/model/calls", { headers: { authorization: "Bearer wrong" } })).status).toBe(401);
+    expect((await get(peerBase, "/api/peer/model/usage?window=24h", { headers: { authorization: "Bearer s3cret" } })).body).toEqual({ ok: true, name: "peer-box" });
+  });
+
   test("/api/peer/* needs the bearer token; the snapshot bundles the visible lists, the space agent included", async () => {
     expect((await get(peerBase, "/api/peer/snapshot")).status).toBe(401);
     expect((await get(peerBase, "/api/peer/snapshot", { headers: { authorization: "Bearer wrong" } })).status).toBe(401);

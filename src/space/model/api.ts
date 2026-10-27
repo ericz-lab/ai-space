@@ -3,7 +3,8 @@ import { parseImages, type RunImage, spoolImages } from "./images.ts";
 import { GPT_PRICING } from "./pricing.ts";
 import { type ModelService, needsLocal } from "./service.ts";
 import { parseImageInput, parseRunInput, parseWindow } from "./spec.ts";
-import { APP_PATTERN, type ModelCall, type Origin, TAG_PATTERN, WINDOW_MS } from "./types.ts";
+import { mergeReports, peerReport, type UsageReport, usageReport } from "./report.ts";
+import { APP_PATTERN, type ModelCall, type Origin, TAG_PATTERN, type Window } from "./types.ts";
 import { splitMachine } from "../runtimes/registry.ts";
 import type { HealthCell } from "./health.ts";
 import { OPERATOR, Unauthorized, identify } from "../auth.ts";
@@ -22,8 +23,11 @@ import { OPERATOR, Unauthorized, identify } from "../auth.ts";
  *                                             { ok, text, images: [{ type, data: base64 }], call }, 502 when the model failed.
  *                                             Only a runtime that makes images (codex-cli); the input images as for `run`.
  *   GET  /api/model/status                    the configured runtimes, concurrency, calls in flight
- *   GET  /api/model/usage?window=24h&app      sums by app, tag, model, runtime and backend over a window, plus the whole history by day
- *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored)
+ *   GET  /api/model/usage?window=24h&app      sums by app, tag, model, runtime and backend over a window, plus the whole history by day;
+ *                                             on a hub, without `app`, the peers' ledgers too, under `<peer>/<app>`, and `peers`
+ *                                             says which answered (docs/model-machines.md#ledger)
+ *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored); on a hub, without
+ *                                             `app` or `tag`, the peers' recent calls too
  *
  * The caller of `run` is identified by its bearer token: an app's own
  * `SPACE_APP_TOKEN` maps to that app; the operator's `SPACE_API_TOKEN` (or no
@@ -45,7 +49,26 @@ export type ModelApiOptions = {
   machines?: () => MachineCell[];
   /** Runtimes this space answers for other spaces (`SPACE_PEER_MODEL`). */
   servesPeers?: string[];
+  /** The peers' ledgers, for a hub that shows them with its own (peers/ledgers.ts). */
+  peerLedgers?: PeerLedgerSource;
 };
+
+/** A call as the API shows it. */
+export type CallView = ReturnType<typeof view>;
+
+/** One peer's answer to a ledger read: `data` is absent when it never answered; `error` says why the last try failed. */
+export type PeerLedger<T> = { peer: string; space: string; data?: T; error?: string; asOf?: string };
+
+export type PeerLedgerSource = {
+  usage(window: Window): Promise<PeerLedger<UsageReport>[]>;
+  calls(limit: number): Promise<PeerLedger<CallView[]>[]>;
+};
+
+/** What the usage answer says about each peer: whether its rows are in, and from when. */
+const peerStatus = (l: PeerLedger<unknown>) => ({ name: l.peer, ok: l.data !== undefined && !l.error, ...(l.asOf ? { asOf: l.asOf } : {}), ...(l.error ? { error: l.error } : {}) });
+
+/** The spaces whose rows the hub drops from its own ledger: their own rows of the same calls are in the merge. */
+const answered = (ls: PeerLedger<unknown>[]) => ls.filter((l) => l.data !== undefined && l.space).map((l) => l.space);
 
 /** A status-table cell as the API shows it. */
 export type MachineCell = HealthCell & { used: boolean; problem?: string };
@@ -163,23 +186,11 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
         }
         const app = q.get("app") ?? undefined;
         if (app !== undefined && !APP_PATTERN.test(app)) return error(400, "invalid app");
-        const since = Date.now() - WINDOW_MS[window];
-        const store = service.store;
-        const firstAt = store.firstAt();
-        return json({
-          ok: true,
-          window,
-          since: new Date(since).toISOString(),
-          backend: service.backend,
-          totals: store.totals(since, app),
-          byApp: store.groupBy(["app"], since, app),
-          byTag: store.groupBy(["app", "tag", "model"], since, app),
-          byModel: store.groupBy(["model"], since, app),
-          byRuntime: store.groupBy(["runtime", "model"], since, app),
-          byBackend: store.groupBy(["backend", "origin"], since, app),
-          byMachine: store.groupBy(["machine", "runtime"], since, app),
-          // The whole history, by UTC day: what the panel's grid, weekly bars and lifetime cards read.
-          history: { firstAt: firstAt === undefined ? undefined : new Date(firstAt).toISOString(), totals: store.totals(0, app), days: store.days(0) },
+        if (app !== undefined || !opts.peerLedgers) return json({ ok: true, ...usageReport(service.store, window, service.backend, { app }) });
+        return opts.peerLedgers.usage(window).then((peers) => {
+          const local = usageReport(service.store, window, service.backend, { skipCallers: answered(peers) });
+          const merged = mergeReports(local, peers.flatMap((p) => (p.data ? [peerReport(p.peer, p.data)] : [])));
+          return json({ ok: true, ...merged, peers: peers.map(peerStatus) });
         });
       },
     },
@@ -191,8 +202,64 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
         if (app !== undefined && !APP_PATTERN.test(app)) return error(400, "invalid app");
         const tag = q.get("tag") ?? undefined;
         if (tag !== undefined && !TAG_PATTERN.test(tag)) return error(400, "invalid tag");
-        const limit = Number(q.get("limit") ?? 50);
-        return json({ ok: true, calls: service.store.list({ app, tag, limit: Number.isFinite(limit) ? limit : 50 }).map(view) });
+        const asked = Number(q.get("limit") ?? 50);
+        const limit = Math.max(1, Math.min(Number.isFinite(asked) ? asked : 50, 500));
+        if (app !== undefined || tag !== undefined || !opts.peerLedgers) return json({ ok: true, calls: service.store.list({ app, tag, limit }).map(view) });
+        return opts.peerLedgers.calls(limit).then((peers) => {
+          const own = service.store.list({ limit, skipCallers: answered(peers) }).map(view);
+          const theirs = peers.flatMap((p, i) => (p.data ?? []).map((c) => peerCall(p.peer, c, i)));
+          const calls = [...own, ...theirs].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, limit);
+          return json({ ok: true, calls, peers: peers.map(peerStatus) });
+        });
+      },
+    },
+  };
+}
+
+/** Room for each peer's ids in the hub's list: a peer's call `n` is `-((index + 1) * PEER_ID_SPAN + n)`. */
+const PEER_ID_SPAN = 1e9;
+
+/**
+ * A peer's call as the hub lists it: who started it (`<peer>/<app>`) and where it ran (the peer,
+ * unless it sent it on). Its id is negative and unique per peer, since clients key the list by id;
+ * `peerId` keeps the peer's own.
+ */
+export function peerCall(peer: string, c: CallView, index: number): CallView & { peer: string; peerId: number } {
+  return { ...c, id: -((index + 1) * PEER_ID_SPAN + c.id), peerId: c.id, app: `${peer}/${c.app}`, machine: c.machine || peer, peer };
+}
+
+/**
+ * The ledger as another space reads it through `/api/peer/model/*` (peers/serve.ts guards them with the
+ * peer token): this machine's own share. `skip` names the reading space, whose calls run here are left
+ * out, since its own rows count them. `skipApps` are apps the peer link does not share.
+ *
+ *   GET /api/peer/model/usage?window=24h&skip=<space>   { ok, name, ...UsageReport }
+ *   GET /api/peer/model/calls?limit=30&skip=<space>     { ok, name, calls }
+ */
+export function createPeerUsageRoutes(opts: { service: ModelService; name: string; skipApps?: () => string[] }): Routes {
+  const scope = (q: URLSearchParams) => {
+    const skip = q.get("skip") ?? "";
+    return { skipCallers: skip && APP_PATTERN.test(skip) ? [skip] : [], skipApps: opts.skipApps?.() ?? [] };
+  };
+  return {
+    "/api/peer/model/usage": {
+      GET: (req) => {
+        const q = new URL(req.url).searchParams;
+        let window: Window;
+        try {
+          window = parseWindow(q.get("window"));
+        } catch (e) {
+          return error(400, (e as Error).message);
+        }
+        return json({ ok: true, name: opts.name, ...usageReport(opts.service.store, window, opts.service.backend, scope(q)) });
+      },
+    },
+    "/api/peer/model/calls": {
+      GET: (req) => {
+        const q = new URL(req.url).searchParams;
+        const asked = Number(q.get("limit") ?? 50);
+        const limit = Math.max(1, Math.min(Number.isFinite(asked) ? asked : 50, 500));
+        return json({ ok: true, name: opts.name, calls: opts.service.store.list({ limit, ...scope(q) }).map(view) });
       },
     },
   };
