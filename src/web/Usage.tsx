@@ -372,9 +372,9 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
                 {calls.map((c) => (
                   <div key={c.id} className="runrow" title={c.error || `${c.app}/${c.tag} · ${c.backend}${c.modelSource ? ` · ${t(`appModels.source.${c.modelSource}` as Key)}` : ""}`}>
                     <div className="run-line">
-                      <span className={`status ${c.status === "ok" ? "ok" : "down"}`}>
+                      <span className={`status ${c.status === "ok" ? "ok" : "down"} usage-model`} title={modelOn(c)}>
                         <i />
-                        {modelOn(c)}
+                        <span className="usage-model-name">{modelOn(c)}</span>
                       </span>
                       <span className="usage-call">
                         {label(c.app)} · {c.tag}
