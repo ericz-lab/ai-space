@@ -572,6 +572,10 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 
 .usage-err { font-style: normal; color: var(--danger); margin-left: 4px; }
 .usage-call { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A call's model, `machine:model` when another machine ran it: one line, cut with an ellipsis (the title has it whole). */
+.run-line .status.usage-model { width: auto; flex: 0 1 auto; max-width: 40%; min-width: 0; }
+.usage-model i { flex: none; }
+.usage-model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-grid { display: grid; grid-auto-rows: 11px; gap: 2px; padding: 6px 8px 4px; width: max-content; }
 .usage-month { grid-row: 1; font-size: 10px; color: var(--muted); line-height: 11px; white-space: nowrap; }
 .usage-day { display: block; width: 11px; height: 11px; border-radius: 2px; background: var(--glass-strong); }
