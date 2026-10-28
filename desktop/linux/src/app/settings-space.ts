@@ -117,7 +117,7 @@ function machineClis(page: any, space: Space): void {
       const columns = cliColumns(rows);
       const cell = (c: CliInfo | undefined, canAdd: boolean): any => {
         const st = cliCell(c, canAdd);
-        if (st.kind === "dim") return new Gtk.Label({ label: tw(st.text), xalign: 0, css_classes: ["dim-label", "caption"], ...(st.tip ? { tooltip_text: st.tip } : {}) });
+        if (st.kind === "dim") return new Gtk.Label({ label: tw(st.text), xalign: 0, valign: Gtk.Align.START, css_classes: ["dim-label", "caption"], ...(st.tip ? { tooltip_text: st.tip } : {}) });
         const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 2, ...(st.tip ? { tooltip_text: st.tip } : {}) });
         box.append(new Gtk.Label({ label: st.version, xalign: 0, css_classes: ["heading"] }));
         const tone: Tone = st.signTone === "ok" ? "ok" : st.signTone === "warn" ? "paused" : "unknown";
