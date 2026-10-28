@@ -255,6 +255,7 @@ final class AppModel: ObservableObject {
         l.onCatalogue = { [weak self] catalogue in
             guard let self else { return }
             screens.seed(connection.id, from: catalogue.panelScreens)
+            screens.merge(connection.id, groups: catalogue.agentGroups)
             iconStores[connection.id]?.retryFailed()
         }
         loaders[connection.id] = l
@@ -636,7 +637,7 @@ final class AppModel: ObservableObject {
         guard let c = selected else { return }
         switch entry.kind {
         case .agent:
-            destination = .hub(.chat(agent: entry.ref))
+            destination = .hub(.chat(agent: preferredAgent(entry, in: c).ref))
         case .app:
             guard let url = entry.pageURL(space: c.url) else { return openWebPanel() }
             // A plain link to another site is the browser's; an app of the Space is a tab.
@@ -749,6 +750,13 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: Conversations
+
+    /// The machine an agent opens on: the one picked last time on this Mac while it answers, else
+    /// the local one (AgentGroups.preferred).
+    func preferredAgent(_ entry: CatalogueEntry, in connection: Connection) -> CatalogueEntry {
+        guard let group = loaders[connection.id]?.catalogue?.agentGroup(entry) else { return entry }
+        return AgentGroups.preferred(group, remembered: MachineChoice.remembered(group.key, space: connection.id))
+    }
 
     /// Whether a conversation already open in this app is running a turn.
     func isChatBusy(_ ref: AgentRef) -> Bool { chats[ref]?.busy == true }

@@ -563,3 +563,9 @@
 "Nothing was opened in the last 7 days." = "最近 7 天没有打开记录。";
 "No scheduled tasks." = "没有定时任务。";
 "No recent events." = "没有最近的事件。";
+
+/* Agents on several machines */
+"%@ is offline. Pick another machine, or wait until it answers again." = "%@ 当前离线。请换一台机器，或等它恢复后再发。";
+"This machine" = "本机";
+"Machine" = "机器";
+"The machine the agent runs on" = "智能体所在的机器";

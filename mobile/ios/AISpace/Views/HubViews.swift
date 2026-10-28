@@ -66,8 +66,8 @@ struct HubPageContent: View {
         case .packages: PackagesPage(model: model, connection: connection, api: api)
         case .terminal: TerminalPage(store: model.terminal(for: connection))
         case .chat(let key):
-            if let agent = loader.catalogue?.agents.first(where: { $0.key == key }), let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) {
-                ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons, backdrop: model.backdrops(for: connection))
+            if let key, loader.catalogue?.agent(key) != nil {
+                AgentChat(model: model, connection: connection, loader: loader, icons: icons, key: key)
             } else {
                 AgentsPage(model: model, connection: connection, loader: loader, icons: icons)
             }
