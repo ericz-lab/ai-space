@@ -3,6 +3,7 @@
  * where it lies (default desktop/linux/build/ai-space):
  *
  *   main.js                 the app (src/main.ts bundled for GJS; gi:// imports stay external)
+ *   ball.js                 the floating ball's process (src/ball/ball.ts, GTK 3 on X11)
  *   terminal/terminal.js    xterm.js and the session glue, loaded into the terminal's web view
  *   terminal/xterm.css
  *   data/icons/…            the app icon (hicolor), shared with the Mac app's
@@ -37,6 +38,8 @@ export async function buildLinux(opts: { out?: string; local?: boolean; root?: s
 
   // GJS has no fetch, URL or Node built-ins: the bundle keeps gi:// and `system` as its imports.
   await bundle(join(HERE, "src", "main.ts"), join(dir, "main.js"), { format: "esm", target: "browser", external: ["gi://*", "system"] });
+  // The floating ball's own process: GTK 3 on X11 (src/ball/ball.ts).
+  await bundle(join(HERE, "src", "ball", "ball.ts"), join(dir, "ball.js"), { format: "esm", target: "browser", external: ["gi://*", "system", "cairo"] });
   await bundle(join(HERE, "terminal", "terminal.ts"), join(dir, "terminal", "terminal.js"), { format: "iife", target: "browser", minify: true });
   await cp(join(root, "node_modules", "@xterm", "xterm", "css", "xterm.css"), join(dir, "terminal", "xterm.css"));
 

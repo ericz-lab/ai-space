@@ -1,10 +1,12 @@
 import Adw from "gi://Adw?version=1";
 import Gdk from "gi://Gdk?version=4.0";
+import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import { groupById } from "../core/agents.ts";
 import { type Agent, pickText } from "../core/catalogue.ts";
+import { withLead } from "../core/floating-ball.ts";
 import { ChatView } from "./chat-view.ts";
-import { lang, prefs, t } from "./env.ts";
+import { DEBUG, lang, log, prefs, t } from "./env.ts";
 import type { AppModel } from "./model.ts";
 import type { MainWindow } from "./window.ts";
 
@@ -33,8 +35,13 @@ export class QuickChat {
     });
   }
 
+  /** The window while it is on screen (for the debug screenshot). */
+  get shown(): any {
+    return this.window?.is_visible() ? this.window : undefined;
+  }
+
   toggle(opts: { text?: string } = {}): void {
-    if (this.window?.is_visible() && this.window.is_active() && opts.text === undefined) {
+    if (this.window?.is_visible() && this.window.is_active && opts.text === undefined) {
       this.window.set_visible(false);
       return;
     }
@@ -43,6 +50,24 @@ export class QuickChat {
     if (opts.text !== undefined) this.view!.setDraft(opts.text);
     this.window.present();
     this.view!.focus();
+  }
+
+  /**
+   * Shows Quick Chat on an agent (a section of the floating ball): `lead` goes before the draft
+   * once, `picture` joins the next message, and `startupId` (the click's, from the ball) lets the
+   * window come to the front. It never sends by itself.
+   */
+  open(opts: { agent?: Agent; lead?: string; picture?: { name: string; bytes: Uint8Array }; startupId?: string } = {}): void {
+    this.ensure();
+    if (opts.agent) this.agent = opts.agent;
+    this.renderAgents();
+    if (opts.lead) this.view!.setDraft(withLead(this.view!.draft(), opts.lead));
+    if (opts.picture) this.view!.attachImage(opts.picture.name, opts.picture.bytes);
+    if (opts.startupId) this.window.set_startup_id(opts.startupId);
+    this.window.present();
+    this.view!.focus();
+    // Whether the desktop let the window come to the front (on Wayland only with a valid token).
+    if (DEBUG) GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => (log("quick chat", { agent: this.agent?.id, picture: opts.picture?.name, startupId: Boolean(opts.startupId), active: Boolean(this.window.is_active) }), GLib.SOURCE_REMOVE));
   }
 
   private ensure(): void {

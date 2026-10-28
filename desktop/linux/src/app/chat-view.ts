@@ -303,7 +303,12 @@ export class ChatView {
     this.focus();
   }
 
-  private draft(): string {
+  /** A picture added to the next message, as one attached by hand (the floating ball's drop). */
+  attachImage(name: string, bytes: Uint8Array): void {
+    this.addImage(name, bytes);
+  }
+
+  draft(): string {
     const b = this.input.get_buffer();
     return b.get_text(b.get_start_iter(), b.get_end_iter(), false);
   }
