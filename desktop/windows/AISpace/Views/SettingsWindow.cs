@@ -111,8 +111,79 @@ internal sealed class SettingsWindow : Window
             Ui.Text(L.T("Quick Chat"), 14, bold: true),
             Ui.Text(L.T("A small chat window over every app, from anywhere with this shortcut, the notification area or the jump list."), 13, secondary: true),
             shortcut, _shortcutNote,
+            FloatingBallSettings(),
             Ui.Column(8, [.. install]),
             Ui.Row(logs), about);
+    }
+
+    /// <summary>
+    /// The floating ball on this computer: shown or not, and what each of its four sections opens
+    /// in the Space the main window shows (the Mac's FloatingBallSettings). Each Space keeps its own.
+    /// </summary>
+    private UIElement FloatingBallSettings()
+    {
+        var parts = new List<UIElement>
+        {
+            Ui.Text(L.T("Floating Ball"), 14, bold: true),
+            Ui.Text(L.T("A small ball over every app. Rest the pointer on it for four sections: click one to hand text and pictures to that app's agent (Space Assistant when the app has none), or drop a picture on it. Drag the ball to move it; right-click it to hide it. Each Space keeps its own sections on this computer."), 13, secondary: true),
+        };
+        if (_app.Ball is not { } ball) return Ui.Column(8, [.. parts]);
+        var sections = new StackPanel { Visibility = ball.Shown ? Visibility.Visible : Visibility.Collapsed };
+        var show = new CheckBox { Content = L.T("Show the Floating Ball"), IsChecked = ball.Shown };
+        show.Click += (_, _) =>
+        {
+            ball.Set(show.IsChecked == true);
+            sections.Visibility = ball.Shown ? Visibility.Visible : Visibility.Collapsed;
+        };
+        parts.Add(show);
+        parts.Add(sections);
+        var space = ball.Space;
+        var live = space is not null && _model.Lives.TryGetValue(space.Id, out var l) && l.LastRefresh is not null ? l : null;
+        if (space is null || live is null)
+        {
+            sections.Children.Add(Ui.Text(L.T("Its sections can be chosen once a Space answers."), 13, secondary: true));
+            return Ui.Column(8, [.. parts]);
+        }
+        sections.Children.Add(Ui.Text(L.F("Sections in {0}", space.DisplayNameOr()), 13, secondary: true));
+        var apps = live.Apps.Where(a => a.Opens).ToList();
+        string Label(string title, string? peer) => peer is null ? title : $"{title} · {peer}";
+        var grid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        foreach (var section in FloatingBallRules.Sections)
+        {
+            var defaults = FloatingBallRules.Resolve(live.Apps, live.Agents, null)[section];
+            var choice = new ComboBox { MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 6) };
+            void Add(string label, string value) => choice.Items.Add(new ComboBoxItem { Content = label, Tag = value });
+            Add(L.F("Default ({0})", defaults.Title() ?? FloatingBall.FallbackTitle(section)), "");
+            Add(L.T("None"), FloatingBallRules.EmptySlot);
+            foreach (var a in apps) Add(Label(a.DisplayTitle(), a.Peer), FloatingBallRules.Key(a));
+            foreach (var a in live.Agents) Add(Label(a.DisplayTitle(), a.Peer), FloatingBallRules.Key(a));
+            var current = ball.Slot(space.Id, section) ?? "";
+            choice.SelectedItem = choice.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == current) ?? choice.Items[0];
+            var id = space.Id;
+            choice.SelectionChanged += (_, _) =>
+            {
+                if (choice.SelectedItem is ComboBoxItem { Tag: string value }) ball.SetSlot(id, section, value.Length == 0 ? null : value);
+            };
+            var name = Ui.Text(section switch
+            {
+                BallSection.Keep => L.T("Top"),
+                BallSection.Assistant => L.T("Right"),
+                BallSection.Todo => L.T("Bottom"),
+                _ => L.T("Left"),
+            }, 13);
+            name.Margin = new Thickness(0, 6, 12, 0);
+            var row = grid.RowDefinitions.Count;
+            grid.RowDefinitions.Add(new RowDefinition());
+            Grid.SetRow(name, row);
+            Grid.SetRow(choice, row);
+            Grid.SetColumn(choice, 1);
+            grid.Children.Add(name);
+            grid.Children.Add(choice);
+        }
+        sections.Children.Add(grid);
+        return Ui.Column(8, [.. parts]);
     }
 
     private void ShortcutNote(bool registered)

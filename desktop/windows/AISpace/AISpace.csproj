@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\AISpace.ico" />
+    <Resource Include="Assets\AppMark.png" />
   </ItemGroup>
 
   <!-- WPF and WinForms both define Application, Button and the like; the app means WPF's, and

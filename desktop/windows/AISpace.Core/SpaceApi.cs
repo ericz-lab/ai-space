@@ -94,6 +94,22 @@ public sealed class SpaceApi
         }
     }
 
+    /// <summary>A file the Space serves (an app's icon), with its sign-in when it is the Space's own.</summary>
+    public async Task<byte[]> Bytes(string path, CancellationToken ct = default)
+    {
+        using var r = await Request(HttpMethod.Get, path, accept: "*/*").ConfigureAwait(false);
+        try
+        {
+            using var response = await _http.SendAsync(r, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) throw new SpaceApiException(SpaceApiFailure.Http, $"HTTP {(int)response.StatusCode}", (int)response.StatusCode);
+            return await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            throw new SpaceApiException(SpaceApiFailure.Network, e.Message);
+        }
+    }
+
     public async Task<string> Send(HttpMethod method, string path, object json, CancellationToken ct = default)
     {
         var (status, _, body) = await Answer(method, path, json, ct).ConfigureAwait(false);

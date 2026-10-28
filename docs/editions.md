@@ -85,7 +85,7 @@ login that does not depend on Cloudflare Access.
 ## AI Space Client
 
 **Contains** the native client: the Mac app (`desktop/macos/`), the Linux app (`desktop/linux/`),
-the Windows app (`desktop/windows/`, with a smaller tray app for the floating ball beside it), the
+the Windows app (`desktop/windows/`), the
 iPhone app (`mobile/ios/`), the Android app (`mobile/android/`).
 
 **Installs** as a signed, notarized `.app` in a `.dmg` on the Mac, and from a tarball whose

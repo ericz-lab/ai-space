@@ -25,6 +25,7 @@ public partial class App
     private Tray? _tray;
     private HotKey? _hotKey;
     private Notifier? _notifier;
+    private FloatingBall? _ball;
 
     public static bool Quitting { get; private set; }
 
@@ -75,7 +76,8 @@ public partial class App
         model.ShowWindowRequested += () => _main.Bring();
         model.EditRequested += id => SettingsWindow.EditSpace(_main, model, id);
         _tray = new Tray(model, this);
-        _hotKey = new HotKey(() => QuickChat().Toggle());
+        _ball = new FloatingBall(model, this);
+        _hotKey = new HotKey(() => Chat().Toggle());
         ApplyShortcut();
         Registration.RegisterLinks();
         SetJumpList();
@@ -83,6 +85,7 @@ public partial class App
         _instance.Listen(a => Dispatcher.BeginInvoke(() => Handle(a)));
 
         model.Start();
+        _ball.Sync();
         if (args.ShowsWindow) _main.Bring();
         Handle(e.Args);
         if (!args.Background && !args.ToastActivated && !Registration.IsInstalled && !model.Prefs.InstallDeclined) Dispatcher.BeginInvoke(OfferInstall, DispatcherPriority.ApplicationIdle);
@@ -108,9 +111,15 @@ public partial class App
 
     public void ShowMain() => _main?.Bring();
 
-    public void ShowQuickChat(string? agent, string? text) => QuickChat().Present(agent, text);
+    public void ShowQuickChat(string? agent, string? text) => Chat().Present(agent, text);
 
-    private QuickChatWindow QuickChat() => _quick ??= new QuickChatWindow(_model!);
+    internal QuickChatWindow Chat() => _quick ??= new QuickChatWindow(_model!);
+
+    /// <summary>The floating ball (Settings › General turns it on).</summary>
+    internal FloatingBall? Ball => _ball;
+
+    /// <summary>A short notice from the notification area icon (a picture the floating ball could not take).</summary>
+    public void Notice(string title, string text) => _tray?.Notice(title, text);
 
     public void OpenSettings(int tab = 0)
     {
@@ -167,6 +176,7 @@ public partial class App
         Quitting = true;
         _model?.SavePrefs();
         _model?.Stop();
+        _ball?.Close();
         _tray?.Dispose();
         _hotKey?.Dispose();
         _instance?.Dispose();

@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Shell;
 using AISpace.Core;
+using AISpace.Shell;
 using AISpace.Web;
 
 namespace AISpace.Views;
@@ -12,12 +14,18 @@ namespace AISpace.Views;
 /// It shows the Space's own chat, so a conversation here is the same one the panel shows; text
 /// from a link is put in the message field and waits for the person to send it. Closing it only
 /// hides it: an answer being written goes on.
+///
+/// Drawn to the Mac's size (Design Studio's design 12): 380 wide, no title bar, a 40 high header
+/// to drag it by with the Space, the agent, "Open in Main Window" and Close; the page's own chat
+/// header below holds the model and the permission choice. A section of the floating ball opens
+/// it beside the ball (<see cref="FloatingBallRules.ChatOrigin"/>), a dropped picture attached;
+/// the shortcut opens it in the upper middle of the screen.
 /// </summary>
 internal sealed class QuickChatWindow : Window
 {
     private readonly AppModel _model;
-    private readonly ComboBox _spaces = new() { MinWidth = 140, Visibility = Visibility.Collapsed };
-    private readonly ComboBox _agents = new() { MinWidth = 220 };
+    private readonly ComboBox _spaces = new() { Width = 110, Margin = new Thickness(0, 0, 6, 0), Visibility = Visibility.Collapsed };
+    private readonly ComboBox _agents = new() { MinWidth = 120 };
     private readonly Grid _host = new();
     private PanelView? _view;
     private bool _filling;
@@ -27,13 +35,17 @@ internal sealed class QuickChatWindow : Window
     {
         _model = model;
         Title = L.T("Quick Chat");
-        Width = 700;
-        Height = 600;
-        MinWidth = 420;
-        MinHeight = 360;
+        Width = FloatingBallRules.ChatWidth;
+        Height = FloatingBallRules.ChatHeight;
+        MinWidth = 340;
+        MinHeight = 320;
         Topmost = true;
         ShowInTaskbar = false;
+        WindowStartupLocation = WindowStartupLocation.Manual;
         Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri("pack://application:,,,/Assets/AISpace.ico"));
+        // No title bar: the header is where it is dragged; the frame keeps Windows' shadow and round corners.
+        WindowChrome.SetWindowChrome(this, new WindowChrome { CaptionHeight = 40, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(0, 0, 0, 1), UseAeroCaptionButtons = false });
+        SourceInitialized += (_, _) => Native.MakeToolWindow(this, noActivate: false);
 
         var open = Ui.IconButton(Ui.OpenOutside, L.T("Open in Main Window"), () =>
         {
@@ -51,10 +63,20 @@ internal sealed class QuickChatWindow : Window
             Remember(_view.Connection.Id, agent);
             _view.Navigate(PanelLink.Chat(_view.Connection.Uri, agent));
         };
-        var bar = new DockPanel { Margin = new Thickness(8, 6, 8, 6) };
+        var close = Ui.IconButton(Ui.Close, L.T("Close (Esc)"), Hide);
+        var bar = new DockPanel { Height = 40, Margin = new Thickness(8, 0, 4, 0) };
+        DockPanel.SetDock(close, Dock.Right);
         DockPanel.SetDock(open, Dock.Right);
+        DockPanel.SetDock(_spaces, Dock.Left);
+        bar.Children.Add(close);
         bar.Children.Add(open);
-        bar.Children.Add(Ui.Row(_spaces, _agents));
+        bar.Children.Add(_spaces);
+        bar.Children.Add(_agents);
+        foreach (var c in new FrameworkElement[] { close, open, _spaces, _agents })
+        {
+            c.VerticalAlignment = VerticalAlignment.Center;
+            WindowChrome.SetIsHitTestVisibleInChrome(c, true);
+        }
         var root = new DockPanel();
         DockPanel.SetDock(bar, Dock.Top);
         root.Children.Add(bar);
@@ -85,20 +107,33 @@ internal sealed class QuickChatWindow : Window
         else Present(null, null);
     }
 
-    /// <summary>Shows the window on <paramref name="agent"/> (or the one last used), with <paramref name="text"/> added to its message field.</summary>
-    public void Present(string? agent, string? text)
+    /// <summary>
+    /// Shows the window on <paramref name="agent"/> (or the one last used) of <paramref name="space"/>
+    /// (or the one it shows), with <paramref name="text"/> added to its message field; beside
+    /// <paramref name="near"/> (the floating ball) when given, with <paramref name="picture"/> attached.
+    /// </summary>
+    public void Present(string? agent, string? text, Guid? space = null, ScreenRect? near = null, BallPicture? picture = null)
     {
         var remembered = Remembered();
-        var connection = _view?.Connection.Id ?? remembered?.Connection ?? _model.Selected ?? _model.Store.Default?.Id;
+        var connection = (space is { } wanted && _model.Store.Get(wanted) is not null ? wanted : (Guid?)null)
+            ?? _view?.Connection.Id ?? remembered?.Connection ?? _model.Selected ?? _model.Store.Default?.Id;
         if (connection is not { } id)
         {
             _model.ShowMainWindow();
             return;
         }
         Open(id, agent ?? (remembered?.Connection == id ? remembered?.Agent : null), text);
-        if (!_placed)
+        if (near is { } ball)
         {
-            // Near the top of the screen the pointer is on, as the Mac places its panel.
+            var area = Native.WorkArea(this, new Point(ball.X + ball.Width / 2, ball.Y + ball.Height / 2));
+            var o = FloatingBallRules.ChatOrigin(ball, Width, Height, area);
+            Left = o.X;
+            Top = o.Y;
+            _placed = true;
+        }
+        else if (!_placed)
+        {
+            // Near the top of the screen, as the Mac places its panel for the shortcut.
             var area = SystemParameters.WorkArea;
             Left = area.Left + (area.Width - Width) / 2;
             Top = area.Top + area.Height * 0.12;
@@ -107,6 +142,7 @@ internal sealed class QuickChatWindow : Window
         Show();
         Activate();
         _view?.FocusPage();
+        if (picture is not null && _view is { } v) _ = v.DropPicture(picture.Name, picture.Type, picture.Bytes);
     }
 
     private void Open(Guid id, string? agent, string? text)

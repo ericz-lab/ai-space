@@ -15,11 +15,12 @@ terminal and settings, is the Space's own page; the app adds what a page cannot 
 | --- | --- |
 | Window | The Space menu (each saved Space with its state, Add a Space…), Back, Forward and Reload, a tab per open app page next to Home (the panel), then Open in Browser, Inbox with the unread count, Chat and Settings. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: an address to connect to, the address of a Space on this computer in one click, and in the Local edition the setup ([below](#this-computer)). The window keeps its size and place |
 | Pages | Each saved Space has its own WebView2 profile (cookies, storage, cache), so signing in on the panel signs in everything that Space's pages and native calls do. A link to an app of the Space opens in that app's tab, a link off the Space in the default browser. A page that cannot load shows why, with Try Again, Open in Browser and Edit Space… |
-| Quick Chat | A small window over every app with one agent's chat (the panel's own, so a conversation there is the same one): Ctrl+Alt+Space by default (Ctrl+Shift+Space, Alt+Shift+Space or off in Settings), the notification area menu, the jump list, or `aispace://chat`. It remembers the agent last used; Escape or closing hides it, and an answer being written goes on |
-| Notification area | The icon (the Mac's menu bar extra): a click opens the window; the menu has each Space with its state, a sign-in when it needs one, who is working, the unread threads and its apps, then Quick Chat, Settings… and Quit AI Space. Its tooltip counts what is unread and who is working |
+| Quick Chat | A small window over every app with one agent's chat (the panel's own, so a conversation there is the same one): Ctrl+Alt+Space by default (Ctrl+Shift+Space, Alt+Shift+Space or off in Settings), the notification area menu, the jump list, a section of the floating ball, or `aispace://chat`. 380 wide as the Mac's, with no title bar: a 40 high header to drag it by (the Space, the agent, Open in Main Window, Close), then the page's chat in its narrow layout, whose header holds the model and the permission choice. The shortcut opens it in the upper middle of the screen, the ball beside itself ([below](#the-floating-ball)). It remembers the agent last used; Escape or Close hides it, and an answer being written goes on |
+| Floating ball | A 52 px ball over every app that never takes the keyboard (off until Settings › General turns it on; the notification area menu and its own right-click menu show and hide it) ([below](#the-floating-ball)) |
+| Notification area | The icon (the Mac's menu bar extra): a click opens the window; the menu has each Space with its state, a sign-in when it needs one, who is working, the unread threads and its apps, then Quick Chat, Show the Floating Ball, Settings… and Quit AI Space. Its tooltip counts what is unread and who is working |
 | Notifications | New unread inbox threads of every saved Space as Windows notifications, with Mark as Read and Done; a click opens the thread. The taskbar button carries a badge while something is unread |
 | Links | `aispace://` links as on the Mac (`DeepLink` in `AISpace.Core`): `chat?agent=&text=`, `open?app=`, `inbox`, `show`. A link may fill in a message but never sends it. The jump list has Quick Chat and Inbox |
-| Settings | General (notifications, keep running when the window is closed, start at sign-in, the Quick Chat shortcut, installing, the log), Spaces (add, edit, make default, sign out, remove) and This Computer (the Local edition) |
+| Settings | General (notifications, keep running when the window is closed, start at sign-in, the Quick Chat shortcut, the floating ball and its sections, installing, the log), Spaces (add, edit, make default, sign out, remove) and This Computer (the Local edition) |
 
 The app is one copy per Windows session: starting it again (the Start menu, a link, the jump
 list) hands what it was started with to the running copy. Closing the window leaves it in the
@@ -28,6 +29,38 @@ Quit AI Space ends it. A Space and its agents keep running wherever they run.
 
 The interface is in English or Chinese, following Windows' display language (`Strings.zh.cs`;
 `desktop/windows/strings.test.ts` checks that every string has its Chinese).
+
+## The floating ball
+
+The Mac's floating ball ([macos-desktop.md](macos-desktop.md)), with the same rules
+(`AISpace.Core/FloatingBallRules.cs`, the Mac's `Services/FloatingBallRules.swift` with y pointing
+down; the Linux client's `core/floating-ball.ts` is the same port):
+
+- **The ball** is a round tool window above every app (topmost, no taskbar button, not in Alt+Tab,
+  and a click on it leaves the app in front where it was). Drag it anywhere: it stays inside the
+  screen it was left on and comes back there next time (`floatingBallOrigin` in the preferences).
+- **The dial.** Rest the pointer on the ball and four sections open around it: top Keep, right
+  Space Assistant, bottom Todo, left Design Studio by default. A click on one opens Quick Chat on
+  its agent beside the ball (left of it when there is room, its bottom a little under the ball's
+  middle: `ChatOrigin`). An app with no agent of its own lends Space Assistant, with "Save this
+  to …:" already in the draft. An empty section (None) opens Settings.
+- **Drop a picture.** One picture (a file from Explorer, or picture data from another app) dropped
+  on a section opens Quick Chat there with the picture attached; on the hub it goes to Space
+  Assistant. A picture that is not PNG, JPEG, GIF or WebP (a bitmap, a TIFF) is converted to PNG.
+  More than one file, a file that is not a picture, or one over 5 MB is refused with a notice
+  from the notification area. The picture is handed to the chat page as a dropped file once the
+  page has opened the agent's chat; it is never sent by itself.
+- **Sections per Space.** The sections come from the Space the main window shows. Settings ›
+  General sets what each opens in that Space (Default, None, any app or agent); each Space keeps
+  its own choices (`floatingBallSlots`, by the saved Space's id).
+
+`AISpace/FloatingBall.cs` fills the sections from the Space's live catalogue and its icons (fetched
+with the Space's sign-in) and turns what the ball reports into Quick Chat; `Views/BallWindow.cs`
+draws the ball and the dial and reads the pointer and drags.
+
+Where it differs from the Mac: Quick Chat is the Space's chat page rather than a native view, so it
+keeps one height (520) instead of growing from 96 to 420 with the replies, and a click elsewhere
+does not hide it.
 
 ## How the panel opens a window
 
@@ -46,14 +79,15 @@ colour), WebView2 for the pages, Windows Forms for the notification area icon, a
 ```
 desktop/windows/
   AISpace.Core/        what does not need Windows: connections and preferences, address rules,
+                       the floating ball's rules (FloatingBallRules.cs),
                        the Space check, the API and live state (catalogue, inbox, runs), deep
                        links, navigation and permission rules, installation strings, WSL commands
                        and the Local edition's answers
   AISpace.Core.Tests/  its tests (xUnit), run on any system
   AISpace/             the app (Windows only): App.xaml.cs (the Mac's AppDelegate), AppModel.cs,
-                       MainWindow.cs, Web/ (WebView2 profiles and PanelView, the Mac's
-                       PanelSession), Views/ (welcome, connection, Settings, Quick Chat, This
-                       Computer), Shell/ (single instance, notification area, notifications, the
+                       MainWindow.cs, FloatingBall.cs, Web/ (WebView2 profiles and PanelView, the
+                       Mac's PanelSession), Views/ (welcome, connection, Settings, Quick Chat, the
+                       floating ball's window and dial, This Computer), Shell/ (single instance, notification area, notifications, the
                        shortcut, registration, Win32 calls, the log), Local/ (wsl.exe and the
                        Local manager), Strings*.cs (English and Chinese)
   Directory.Build.props  shared settings and the version (`bun run set-version` rewrites it)
@@ -102,7 +136,7 @@ What the app keeps:
 | Path | What |
 | --- | --- |
 | `%APPDATA%\ai-space\connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
-| `%APPDATA%\ai-space\preferences.json` | keep running, notifications, the shortcut, the window's place, the Quick Chat agent, the Local edition's distribution |
+| `%APPDATA%\ai-space\preferences.json` | keep running, notifications, the shortcut, the window's place, the Quick Chat agent, the floating ball (shown, its place, each Space's sections), the Local edition's distribution |
 | `%LOCALAPPDATA%\ai-space\web\` | WebView2's data, one profile per saved Space: cookies (its sign-in), storage, cache |
 | `%LOCALAPPDATA%\ai-space\inbox-seen\` | which inbox threads were already notified, per Space |
 | `%LOCALAPPDATA%\ai-space\logs\windows.log` | the app's log (Settings › General › Open Log Folder) |

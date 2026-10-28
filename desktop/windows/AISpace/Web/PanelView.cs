@@ -87,6 +87,49 @@ internal sealed class PanelView : Grid
         }
     }
 
+    /// <summary>
+    /// Attaches a picture to the chat the page opens, as if it were dropped on the chat's field
+    /// (src/web/Chat.tsx takes dropped files as images): once the page has read its <c>#chat</c>
+    /// link and shows the field, within ten seconds. The picture is never sent by itself.
+    /// </summary>
+    public async Task<bool> DropPicture(string name, string type, byte[] bytes)
+    {
+        const string ready = "!location.hash.startsWith('#chat') && !!document.querySelector('.chat-input textarea:not([disabled])')";
+        // The link is read when the page has loaded, or at once by a page already up.
+        await Task.Delay(400);
+        for (var i = 0; i < 40; i++)
+        {
+            if (IsDisposed || _web?.CoreWebView2 is not { } core) return false;
+            try
+            {
+                if (await core.ExecuteScriptAsync(ready) == "true")
+                {
+                    var script = $$"""
+                        (() => {
+                          const box = document.querySelector('.chat-input');
+                          if (!box) return false;
+                          const raw = atob({{System.Text.Json.JsonSerializer.Serialize(Convert.ToBase64String(bytes))}});
+                          const data = new Uint8Array(raw.length);
+                          for (let i = 0; i < raw.length; i++) data[i] = raw.charCodeAt(i);
+                          const transfer = new DataTransfer();
+                          transfer.items.add(new File([data], {{System.Text.Json.JsonSerializer.Serialize(name)}}, { type: {{System.Text.Json.JsonSerializer.Serialize(type)}} }));
+                          box.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
+                          return true;
+                        })()
+                        """;
+                    return await core.ExecuteScriptAsync(script) == "true";
+                }
+            }
+            catch (Exception e) when (e is InvalidOperationException or System.Runtime.InteropServices.COMException)
+            {
+                // Between two documents: try again.
+            }
+            await Task.Delay(250);
+        }
+        Log.Write("quick chat: the chat did not open in time for the dropped picture");
+        return false;
+    }
+
     /// <summary>Reloads the page; after a failure, starts again from the home page.</summary>
     public void Reload()
     {

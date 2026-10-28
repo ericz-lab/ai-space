@@ -82,6 +82,19 @@ public sealed class Preferences
     /// <summary>The person chose to run the program from where it is rather than install it.</summary>
     [JsonPropertyName("installDeclined")] public bool InstallDeclined { get; set; }
     [JsonPropertyName("window")] public WindowPlace? Window { get; set; }
+    /// <summary>The floating ball over every app (the Mac's and Linux's); off until turned on in Settings › General.</summary>
+    [JsonPropertyName("floatingBall")] public bool FloatingBall { get; set; }
+    /// <summary>The ball's four sections for each Space (connection id → entry keys: top, right, bottom, left; "" the default, "-" none).</summary>
+    [JsonPropertyName("floatingBallSlots")] public Dictionary<string, List<string>> BallSlots { get; set; } = [];
+    /// <summary>Where the ball last stood (its top-left corner, in device-independent pixels); unset until it was moved.</summary>
+    [JsonPropertyName("floatingBallOrigin")] public double[]? FloatingBallOrigin { get; set; }
+
+    [JsonIgnore]
+    public ScreenPoint? BallOrigin
+    {
+        get => FloatingBallOrigin is [var x, var y] ? new ScreenPoint(x, y) : null;
+        set => FloatingBallOrigin = value is { } p ? [Math.Round(p.X), Math.Round(p.Y)] : null;
+    }
 
     public sealed record WindowPlace(double Left, double Top, double Width, double Height, bool Maximized);
 

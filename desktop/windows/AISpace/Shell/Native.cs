@@ -34,6 +34,74 @@ internal static partial class Native
     [LibraryImport("shell32.dll")]
     public static partial void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
 
+    // The floating ball's window and the screens (Views/BallWindow.cs).
+
+    private const int GWL_EXSTYLE = -20;
+    private const long WS_EX_TOOLWINDOW = 0x00000080;
+    private const long WS_EX_NOACTIVATE = 0x08000000;
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MONITORINFO { public int Size; public RECT Monitor; public RECT Work; public uint Flags; }
+
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static partial IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
+
+    [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static partial IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetCursorPos(out POINT point);
+
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr MonitorFromPoint(POINT point, uint flags);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetMonitorInfoW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+
+    /// <summary>
+    /// A tool window: no taskbar button and not in Alt+Tab; with <paramref name="noActivate"/>, a
+    /// click on it leaves the app in front where it was (the Mac's non-activating panel).
+    /// </summary>
+    public static void MakeToolWindow(System.Windows.Window window, bool noActivate)
+    {
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+        var style = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64() | WS_EX_TOOLWINDOW;
+        if (noActivate) style |= WS_EX_NOACTIVATE;
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(style));
+    }
+
+    /// <summary>The pointer, in the visual's device-independent pixels.</summary>
+    public static System.Windows.Point Cursor(System.Windows.Media.Visual visual)
+    {
+        GetCursorPos(out var p);
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(visual);
+        return new System.Windows.Point(p.X / scale.DpiScaleX, p.Y / scale.DpiScaleY);
+    }
+
+    /// <summary>The work area (the screen without the taskbar) of the monitor at a point, both in device-independent pixels.</summary>
+    public static Core.ScreenRect WorkArea(System.Windows.Media.Visual visual, System.Windows.Point at)
+    {
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(visual);
+        var monitor = MonitorFromPoint(new POINT { X = (int)(at.X * scale.DpiScaleX), Y = (int)(at.Y * scale.DpiScaleY) }, MONITOR_DEFAULTTONEAREST);
+        var info = new MONITORINFO { Size = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(monitor, ref info))
+        {
+            var w = System.Windows.SystemParameters.WorkArea;
+            return new Core.ScreenRect(w.X, w.Y, w.Width, w.Height);
+        }
+        var r = info.Work;
+        return new Core.ScreenRect(r.Left / scale.DpiScaleX, r.Top / scale.DpiScaleY, (r.Right - r.Left) / scale.DpiScaleX, (r.Bottom - r.Top) / scale.DpiScaleY);
+    }
+
     /// <summary>Tells Explorer that file associations changed, so a new link handler is used at once.</summary>
     public static void AssociationsChanged() => SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero);
 

@@ -53,6 +53,8 @@ internal sealed class Tray : IDisposable
     /// <summary>Once, when the window first closes: the app is still here.</summary>
     public void Hint() => _icon.ShowBalloonTip(6000, "AI Space", L.T("AI Space keeps running here, so the inbox can reach you. Right-click for more, or quit it from this menu."), Forms.ToolTipIcon.Info);
 
+    public void Notice(string title, string text) => _icon.ShowBalloonTip(4000, title, text, Forms.ToolTipIcon.None);
+
     private void Build()
     {
         _menu.Items.Clear();
@@ -72,6 +74,10 @@ internal sealed class Tray : IDisposable
         _menu.Items.Add(new Forms.ToolStripSeparator());
         var shortcut = _model.Prefs.QuickChat == QuickChatShortcut.Off ? "" : "\t" + Shortcuts.Label(_model.Prefs.QuickChat);
         _menu.Items.Add(new Forms.ToolStripMenuItem(L.T("Quick Chat") + shortcut, null, (_, _) => _app.ShowQuickChat(null, null)));
+        if (_app.Ball is { } ball)
+        {
+            _menu.Items.Add(new Forms.ToolStripMenuItem(L.T("Show the Floating Ball"), null, (_, _) => ball.Set(!ball.Shown)) { Checked = ball.Shown });
+        }
         _menu.Items.Add(new Forms.ToolStripMenuItem(L.T("Settings…"), null, (_, _) => _app.OpenSettings()));
         _menu.Items.Add(new Forms.ToolStripSeparator());
         _menu.Items.Add(new Forms.ToolStripMenuItem(L.T("Quit AI Space"), null, (_, _) => _app.Quit()));
