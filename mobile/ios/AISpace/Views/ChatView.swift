@@ -13,8 +13,8 @@ struct AgentsPage: View {
         List {
             if agents.isEmpty { Text("This Space has no agents.").foregroundStyle(.secondary) }
             ForEach(agents) { agent in
-                if let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) {
-                    NavigationLink { ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons, backdrop: model.backdrops(for: connection)) } label: {
+                if ChatRoute.base(ref: agent.ref, peer: agent.peer) != nil {
+                    NavigationLink { AgentChat(model: model, connection: connection, loader: loader, icons: icons, key: model.preferredAgent(agent, in: connection).key) } label: {
                         HStack(spacing: 12) {
                             EntryIcon(icon: agent.icon, fallback: "person.fill", icons: icons, size: 40, isRound: true)
                             VStack(alignment: .leading, spacing: 2) {
@@ -24,7 +24,7 @@ struct AgentsPage: View {
                         }
                         .accessibilityElement(children: .combine)
                     }
-                    .disabled(agent.reach == .peerOffline)
+                    .disabled(loader.catalogue?.agentGroup(agent)?.machines.allSatisfy(\.isOffline) ?? agent.isOffline)
                     .listRowBackground(Theme.glass)
                 }
             }
@@ -42,6 +42,40 @@ struct AgentsPage: View {
     }
 }
 
+/// One agent's conversation on the machine picked for it (src/web/agent-groups.ts): the agent's
+/// variants on each machine share a menu in the head, and each keeps its own conversation.
+struct AgentChat: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    @ObservedObject var loader: CatalogueLoader
+    let icons: IconStore
+    /// The variant on show, by its catalogue key.
+    @State private var key: String
+
+    init(model: AppModel, connection: Connection, loader: CatalogueLoader, icons: IconStore, key: String) {
+        self.model = model
+        self.connection = connection
+        self.loader = loader
+        self.icons = icons
+        _key = State(initialValue: key)
+    }
+
+    var body: some View {
+        if let agent = loader.catalogue?.agent(key), let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) {
+            let group = loader.catalogue?.agentGroup(agent)
+            ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons, backdrop: model.backdrops(for: connection),
+                     machines: group?.machines ?? [agent]) { picked in
+                guard picked.key != key, !picked.isOffline else { return }
+                if let group { MachineChoice.remember(group.key, peer: picked.peer, space: connection.id) }
+                key = picked.key
+            }
+            .id(agent.key)
+        } else {
+            AgentsPage(model: model, connection: connection, loader: loader, icons: icons)
+        }
+    }
+}
+
 /// One agent's conversation: the messages, the reply as it streams in, and the field to write in.
 /// The model and the permission mode are the agent's defaults; the web panel's chat can pick them.
 /// It is drawn as the panel's chat on a phone (src/web/Chat.tsx): a translucent sheet over the
@@ -52,6 +86,9 @@ struct ChatPage: View {
     @ObservedObject var store: ChatStore
     let icons: IconStore
     let backdrop: BackdropStore
+    /// The agent's variant on each machine, this one among them; a menu in the head when there are several.
+    var machines: [CatalogueEntry] = []
+    var pickMachine: ((CatalogueEntry) -> Void)? = nil
     @State private var picked: [PhotosPickerItem] = []
     @State private var reading = 0
 
@@ -79,6 +116,10 @@ struct ChatPage: View {
             if let error = store.imageError {
                 Text(verbatim: error).font(.footnote).foregroundStyle(Theme.danger).padding(.horizontal, 14).padding(.bottom, 6)
             }
+            if agent.isOffline {
+                Text("\(machineName(agent)) is offline. Pick another machine, or wait until it answers again.")
+                    .font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.bottom, 6)
+            }
             if !store.images.isEmpty { attachments }
             composer
         }
@@ -97,6 +138,7 @@ struct ChatPage: View {
                     Button { store.stop() } label: { Image(systemName: "stop.fill") }
                         .accessibilityLabel(Text("Stop"))
                 }
+                if machines.count > 1 { machineMenu }
                 Menu {
                     if store.sessions.isEmpty {
                         Text("No earlier chats")
@@ -136,8 +178,11 @@ struct ChatPage: View {
             EntryIcon(icon: agent.icon, fallback: "person.fill", icons: icons, size: 26, isRound: true)
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: agent.displayTitle()).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(1)
-                Text(store.isRunning ? "Thinking…" : store.inSession ? "in session" : "new session")
-                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 0) {
+                    Text(store.isRunning ? "Thinking…" : store.inSession ? "in session" : "new session")
+                    if machines.count > 1 { Text(verbatim: " · " + machineName(agent)) }
+                }
+                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .accessibilityElement(children: .combine)
@@ -160,7 +205,7 @@ struct ChatPage: View {
                 .frame(minHeight: 36)
                 .background(Theme.glass, in: RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous).strokeBorder(Theme.glassBorder))
-            ChatSendButton(enabled: store.canSend && reading == 0) { store.send() }
+            ChatSendButton(enabled: store.canSend && reading == 0 && !agent.isOffline) { store.send() }
         }
         .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 10)
         .overlay(alignment: .top) { Theme.hairline.frame(height: 1) }
@@ -208,6 +253,35 @@ struct ChatPage: View {
         }
         guard let picture = CapturePicture.prepare(data) else { return nil }
         return ChatImage(name: "Image \(number).\(picture.kind.fileExtension)", mediaType: picture.kind.mimeType, bytes: picture.data)
+    }
+
+    /// The machines the agent runs on; an offline one is shown and cannot be picked.
+    private var machineMenu: some View {
+        Menu {
+            Section {
+                ForEach(machines) { m in
+                    Button { pickMachine?(m) } label: {
+                        if m.key == agent.key {
+                            Label { Text(verbatim: machineLabel(m)) } icon: { Image(systemName: "checkmark") }
+                        } else {
+                            Text(verbatim: machineLabel(m))
+                        }
+                    }
+                    .disabled(m.isOffline && m.key != agent.key)
+                }
+            } header: {
+                Text("The machine the agent runs on")
+            }
+        } label: {
+            Image(systemName: "desktopcomputer")
+        }
+        .accessibilityLabel(Text("Machine"))
+    }
+
+    private func machineName(_ m: CatalogueEntry) -> String { m.peer ?? String(localized: "This machine") }
+
+    private func machineLabel(_ m: CatalogueEntry) -> String {
+        m.isOffline ? machineName(m) + " (" + String(localized: "offline") + ")" : machineName(m)
     }
 
     private var intro: some View {

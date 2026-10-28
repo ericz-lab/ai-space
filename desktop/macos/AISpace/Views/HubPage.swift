@@ -98,10 +98,18 @@ struct HubPageContent: View {
                 .navigationTitle(Text("Settings"))
         case .chat(let agent):
             if let agent, let chat = model.chat(AgentRef(connection: connection.id, agent: agent)) {
+                let entry = loader.catalogue?.agent("agent:\(agent)")
+                let group = entry.flatMap { loader.catalogue?.agentGroup($0) }
                 HStack(spacing: 0) {
                     ChatSidebar(model: model, connection: connection, loader: loader, icons: icons, chat: chat, current: agent)
                     Divider()
-                    ChatView(chat: chat, icons: icons, compact: false)
+                    VStack(spacing: 0) {
+                        if let group, group.isShared {
+                            MachineMenu(model: model, connection: connection, group: group, current: agent)
+                        }
+                        ChatView(chat: chat, icons: icons, compact: false,
+                                 offlineMachine: entry?.isOffline == true ? entry?.peer ?? String(localized: "This machine") : nil)
+                    }
                 }
                 .navigationTitle(Text(verbatim: chat.agent.displayTitle))
             } else if agent != nil, model.lives[connection.id]?.status == .unknown {
@@ -126,7 +134,8 @@ struct AgentsPage: View {
         List {
             if agents.isEmpty { Text("This Space has no agents.").foregroundStyle(.secondary) }
             ForEach(agents) { agent in
-                Button { model.destination = .hub(.chat(agent: agent.ref)) } label: {
+                let machines = loader.catalogue?.agentGroup(agent)?.machines ?? [agent]
+                Button { model.destination = .hub(.chat(agent: model.preferredAgent(agent, in: connection).ref)) } label: {
                     HStack(spacing: 12) {
                         EntryIcon(icon: agent.icon, fallback: "person.fill", icons: icons, size: 36, isRound: true)
                         VStack(alignment: .leading, spacing: 2) {
@@ -134,10 +143,13 @@ struct AgentsPage: View {
                             if let detail = agent.displayDetail() { Text(verbatim: detail).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
                         }
                         Spacer()
-                        if running.contains(where: { $0.agent == agent.ref || agent.ref.hasSuffix("/" + $0.agent) }) {
+                        if machines.contains(where: { m in running.contains { $0.agent == m.ref || m.ref.hasSuffix("/" + $0.agent) } }) {
                             ProgressView().controlSize(.small).help("Working")
                         }
-                        if let peer = agent.peer { Text(verbatim: peer).font(.caption).foregroundStyle(.tertiary) }
+                        if machines.count > 1 || agent.peer != nil {
+                            Text(verbatim: machines.map { $0.peer ?? String(localized: "This machine") }.joined(separator: ", "))
+                                .font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                        }
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                     }
                     .contentShape(Rectangle())
@@ -145,7 +157,7 @@ struct AgentsPage: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.vertical, 3)
-                .disabled(agent.reach == .peerOffline)
+                .disabled(machines.allSatisfy(\.isOffline))
             }
         }
         .navigationTitle(Text("Chat"))
@@ -166,7 +178,7 @@ struct ChatSidebar: View {
     let current: String
 
     var body: some View {
-        let agents = loader.catalogue?.agents ?? []
+        let groups = loader.catalogue?.agentGroups ?? []
         let locked = chat.busy || chat.pendingImageImports > 0
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
@@ -181,18 +193,21 @@ struct ChatSidebar: View {
                 .foregroundStyle(Theme.text)
                 .disabled(locked)
                 .help("New Conversation")
-                if agents.count > 1 {
+                // One entry per agent whatever its machines; the menu above the chat picks the machine.
+                if groups.count > 1 {
                     heading("Agents")
-                    ForEach(agents) { agent in
-                        item(on: agent.ref == current, action: { model.destination = .hub(.chat(agent: agent.ref)) }) {
+                    ForEach(groups) { group in
+                        let agent = group.primary
+                        let on = group.machines.contains { $0.ref == current }
+                        item(on: on, action: { if !on { model.destination = .hub(.chat(agent: model.preferredAgent(agent, in: connection).ref)) } }) {
                             EntryIcon(icon: agent.icon, fallback: "person.fill", icons: icons, size: 20, isRound: true)
                             Text(verbatim: agent.displayTitle()).lineLimit(1)
                             Spacer(minLength: 4)
-                            if busy(agent.ref) {
+                            if group.machines.contains(where: { busy($0.ref) }) {
                                 Circle().fill(Theme.accent).frame(width: 7, height: 7).help("Working")
                             }
                         }
-                        .disabled(agent.reach == .peerOffline)
+                        .disabled(group.machines.allSatisfy(\.isOffline))
                     }
                 }
                 heading("Recent")
@@ -243,5 +258,51 @@ struct ChatSidebar: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// Above a conversation with an agent that runs on several machines (src/web/Chat.tsx): which
+/// machine it is talking to. Each machine keeps its own conversation; an offline one is shown
+/// and cannot be picked. The choice is remembered on this Mac.
+struct MachineMenu: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    let group: AgentGroup
+    /// The variant on show, by its ref.
+    let current: String
+
+    var body: some View {
+        let shown = group.machines.first { $0.ref == current }
+        HStack {
+            Spacer(minLength: 0)
+            Menu {
+                ForEach(group.machines) { m in
+                    Button {
+                        guard m.ref != current, !m.isOffline else { return }
+                        MachineChoice.remember(group.key, peer: m.peer, space: connection.id)
+                        model.destination = .hub(.chat(agent: m.ref))
+                    } label: {
+                        if m.ref == current {
+                            Label(label(m), systemImage: "checkmark")
+                        } else {
+                            Text(verbatim: label(m))
+                        }
+                    }
+                    .disabled(m.isOffline && m.ref != current)
+                }
+            } label: {
+                Label(shown.map { label($0) } ?? "", systemImage: "desktopcomputer")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("The machine the agent runs on")
+        }
+        .font(.caption)
+        .padding(.horizontal, 20).padding(.vertical, 6)
+    }
+
+    private func label(_ m: CatalogueEntry) -> String {
+        let name = m.peer ?? String(localized: "This machine")
+        return m.isOffline ? name + " (" + String(localized: "offline") + ")" : name
     }
 }

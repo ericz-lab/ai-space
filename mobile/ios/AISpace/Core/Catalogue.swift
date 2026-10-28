@@ -165,7 +165,10 @@ enum CatalogueError: Error, Equatable {
 
 struct Catalogue: Equatable {
     var apps: [CatalogueEntry] = []
+    /// One entry per agent, whatever the number of machines it runs on: each group's primary (AgentGroups).
     var agents: [CatalogueEntry] = []
+    /// Every agent with its variants on each machine; the chat picks the machine.
+    var agentGroups: [AgentGroup] = []
     var widgets: [CatalogWidget] = []
     var peers: [PeerStatus] = []
     /// The panel's screens, home first; nil while the Space has stored none (the panel seeds them on its first load).
@@ -186,7 +189,17 @@ struct Catalogue: Equatable {
     /// Entry keys pinned to the panel's home screen, in order.
     var homePins: [String] { panelScreens.first?.items ?? [] }
 
-    func entry(_ key: String) -> CatalogueEntry? { entries.first { $0.key == key } }
+    func entry(_ key: String) -> CatalogueEntry? { entries.first { $0.key == key } ?? agent(key) }
+
+    /// An agent on any machine by its entry key (`agent:<ref>`), not only the one that stands for its group.
+    func agent(_ key: String) -> CatalogueEntry? {
+        agentGroups.flatMap(\.machines).first(where: { $0.key == key }) ?? agents.first(where: { $0.key == key })
+    }
+
+    /// The group an agent's variant belongs to.
+    func agentGroup(_ entry: CatalogueEntry) -> AgentGroup? {
+        AgentGroups.group(agentGroups, ref: entry.ref)
+    }
 
     /// An app by its layout id or, failing that, its bare name (the first match, local before peers).
     func app(named name: String) -> CatalogueEntry? {
@@ -222,7 +235,8 @@ struct Catalogue: Equatable {
         out.apps = appsBody.apps.elements
             .filter { $0.hidden != true && $0.status != "archived" && !($0.url ?? "").isEmpty }
             .map { entry($0, offlinePeers: offline) }
-        out.agents = agentsBody.agents.elements.map { entry($0, offlinePeers: offline) }
+        out.agentGroups = AgentGroups.group(agentsBody.agents.elements.map { entry($0, offlinePeers: offline) })
+        out.agents = out.agentGroups.map(\.primary)
         // Read apart: an older Space, or one whose icons are not strings, still has its apps.
         out.builtinIcons = (try? decoder.decode(BuiltinsBody.self, from: payload.apps))?.builtins ?? [:]
         out.widgets = widgetsBody.widgets.elements
@@ -258,7 +272,7 @@ struct Catalogue: Equatable {
     static func entry(_ a: AgentInfo, offlinePeers: Set<String> = []) -> CatalogueEntry {
         CatalogueEntry(kind: .agent, ref: a.id, title: a.title, detail: a.description, i18n: a.i18n,
                        icon: a.avatar, peer: a.peer, link: nil,
-                       reach: a.peer.map(offlinePeers.contains) == true ? .peerOffline : .unknown)
+                       reach: a.stale == true || a.peer.map(offlinePeers.contains) == true ? .peerOffline : .unknown)
     }
 
     static func entry(_ w: CatalogWidget) -> CatalogueEntry {
@@ -266,4 +280,109 @@ struct Catalogue: Equatable {
                        icon: w.icon, peer: w.peer, link: w.link,
                        reach: w.stale == true ? .peerOffline : (w.ok == false ? .down : .unknown))
     }
+}
+
+// MARK: One agent across machines
+
+/// One agent, whatever the number of machines it runs on (src/web/agent-groups.ts,
+/// docs/peers.md#agents-on-several-machines). An app deployed on this machine and on peers lists
+/// the same `<app>/<name>` agent once per machine, and every peer's Space Assistant is there too;
+/// the library, the search and the agents list show one entry per group, and the chat picks the
+/// machine. Each variant keeps its own ref, sessions and chat routes, since a turn runs where the
+/// app lives.
+struct AgentGroup: Hashable, Identifiable {
+    /// `<app>/<name>`, the same on every machine.
+    var key: String
+    /// The variant that stands for the group: the local one, else the first peer that answers, else the first listed.
+    var primary: CatalogueEntry
+    /// Every machine's variant, the local one first, then the peers in the catalogue's order.
+    var machines: [CatalogueEntry]
+
+    var id: String { key }
+    /// More than one machine to choose from.
+    var isShared: Bool { machines.count > 1 }
+
+    func variant(peer: String?) -> CatalogueEntry? { machines.first { $0.peer == peer } }
+}
+
+enum AgentGroups {
+    /// `<app>/<name>` of an agent's ref, without the `<peer>/` in front of a peer's.
+    static func key(ref: String, peer: String?) -> String {
+        guard let peer, ref.hasPrefix(peer + "/") else { return ref }
+        return String(ref.dropFirst(peer.count + 1))
+    }
+
+    static func key(of entry: CatalogueEntry) -> String { key(ref: entry.ref, peer: entry.peer) }
+
+    /// Groups in the order their first variant has in the catalogue; within a group the local variant comes first.
+    static func group(_ agents: [CatalogueEntry]) -> [AgentGroup] {
+        var order: [String] = []
+        var byKey: [String: AgentGroup] = [:]
+        for a in agents {
+            let k = key(of: a)
+            guard var g = byKey[k] else {
+                order.append(k)
+                byKey[k] = AgentGroup(key: k, primary: a, machines: [a])
+                continue
+            }
+            if a.peer == nil && g.primary.peer != nil {
+                g.primary = a
+                g.machines.insert(a, at: 0)
+            } else {
+                g.machines.append(a)
+                // An offline peer does not stand for the group while another peer answers.
+                if g.primary.peer != nil && g.primary.isOffline && !a.isOffline { g.primary = a }
+            }
+            byKey[k] = g
+        }
+        return order.compactMap { byKey[$0] }
+    }
+
+    /// The group whose variant has this ref.
+    static func group(_ groups: [AgentGroup], ref: String) -> AgentGroup? {
+        groups.first { g in g.machines.contains { $0.ref == ref } }
+    }
+
+    /// The variant a tile opens: the machine chosen last time (`""` for this one) when it is still
+    /// listed and answering, else the primary. The choice is kept, so it comes back once that
+    /// machine answers again.
+    static func preferred(_ g: AgentGroup, remembered: String?) -> CatalogueEntry {
+        guard let remembered else { return g.primary }
+        guard let m = g.machines.first(where: { ($0.peer ?? "") == remembered }), !m.isOffline else { return g.primary }
+        return m
+    }
+
+    /// Screen items with every agent key pointed at its group's primary and repeats dropped, so a
+    /// layout pinned before the grouping (one key per machine) shows one tile; keys of agents the
+    /// catalogue does not list are kept as they are.
+    static func canonical(_ items: [String], _ groups: [AgentGroup]) -> [String] {
+        var out: [String] = []
+        for item in items {
+            var next = item
+            if item.hasPrefix("agent:"), let g = group(groups, ref: String(item.dropFirst("agent:".count))) {
+                next = g.primary.key
+            }
+            if !out.contains(next) { out.append(next) }
+        }
+        return out
+    }
+}
+
+/// The machine last chosen for each agent, on this device, per Space: the peer's name, or `""`
+/// for the Space's own machine; nil when never chosen.
+enum MachineChoice {
+    private static func key(_ space: UUID, _ group: String) -> String { "chatMachine.\(space.uuidString).\(group)" }
+
+    static func remembered(_ group: String, space: UUID, defaults: UserDefaults = .standard) -> String? {
+        defaults.string(forKey: key(space, group))
+    }
+
+    static func remember(_ group: String, peer: String?, space: UUID, defaults: UserDefaults = .standard) {
+        defaults.set(peer ?? "", forKey: key(space, group))
+    }
+}
+
+extension CatalogueEntry {
+    /// It lives on a peer that does not answer: shown, but not sent to.
+    var isOffline: Bool { reach == .peerOffline }
 }

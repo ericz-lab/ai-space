@@ -29,7 +29,18 @@ struct ModelUsagePage: View {
                     }
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
+                        if let space = store.usage?.space, !space.isEmpty {
+                            // The ledger is the open Space's own; apps running on a peer are in the peer's.
+                            Text("Space \(space)")
+                        }
                         if let backend = store.usage?.backend { Text("Backend: \(backend)") }
+                        ForEach(store.usage?.peersOff ?? [], id: \.name) { p in
+                            if let at = p.asOf.flatMap(ISO8601.parse) {
+                                Text("\(p.name) did not answer (\(p.error ?? "")); its figures are from \(at.formatted(date: .abbreviated, time: .shortened))")
+                            } else {
+                                Text("\(p.name) is not included: \(p.error ?? "")")
+                            }
+                        }
                         Text("Costs include GPT estimates at standard API rates, not subscription charges. Unknown costs are excluded from totals.")
                     }
                 }
@@ -37,7 +48,7 @@ struct ModelUsagePage: View {
                 if let rows = store.usage?.byTag?.elements, !rows.isEmpty {
                     Section {
                         ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
-                            usageRow(title: [r.app.map(store.title), r.tag].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), detail: r.model, r.totals)
+                            usageRow(title: [r.app.map(store.title), r.tag].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "), detail: r.modelOn, r.totals)
                         }
                     } header: {
                         Text("By app and tag")
@@ -45,7 +56,7 @@ struct ModelUsagePage: View {
                 }
                 if let rows = store.usage?.byModel?.elements, !rows.isEmpty {
                     Section {
-                        ForEach(Array(rows.enumerated()), id: \.offset) { _, r in usageRow(title: r.model ?? "", detail: nil, r.totals) }
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, r in usageRow(title: r.modelOn ?? "", detail: nil, r.totals) }
                     } header: {
                         Text("By model")
                     }
@@ -53,11 +64,12 @@ struct ModelUsagePage: View {
                 history
                 if !store.calls.isEmpty {
                     Section {
-                        ForEach(store.calls) { call in
+                        ForEach(store.calls, id: \.key) { call in
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: 6) {
                                     Dot(color: call.status == "ok" ? Theme.success : Theme.danger)
-                                    Text(verbatim: call.model ?? "").foregroundStyle(Theme.text).lineLimit(1)
+                                    // `machine:model` stays on one line, cut at the end.
+                                    Text(verbatim: call.modelOn ?? "").foregroundStyle(Theme.text).lineLimit(1).truncationMode(.tail)
                                     Spacer(minLength: 8)
                                     if let date = call.startedAt.flatMap(ISO8601.parse) {
                                         Text(verbatim: HubFormat.relative(date)).font(.caption).foregroundStyle(.secondary)
@@ -291,29 +303,55 @@ struct AppModelsPage: View {
                 } footer: {
                     Text("The model an app's calls run on when they name none. A choice here overrides what the app declares, for every device; “No override” returns to it.")
                 }
-                ForEach(store.sorted) { app in
+                appSections(store.sorted, options: store.options, peer: nil)
+                // On a hub, each peer's apps under its name, offered the peer's own choices (src/web/AppModels.tsx).
+                ForEach(store.peers) { p in
                     Section {
-                        ForEach(app.rows) { row in
-                            ModelMenu(options: store.options, current: row.override, none: String(localized: "No override"), disabled: store.isSaving,
-                                      pick: { value in Task { await store.setModel(app: app.app, tag: row.tag, value) } }) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(verbatim: row.tag ?? String(localized: "All calls")).foregroundStyle(Theme.text)
-                                    Text(verbatim: [row.model, source(row.source)].compactMap { $0 }.joined(separator: " · "))
-                                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                                }
-                            }
+                        if p.isLoading {
+                            ProgressView()
+                        } else if p.old {
+                            Text("\(p.peer) runs an older core; update it to list its apps here.").font(.footnote).foregroundStyle(.secondary)
+                        } else if let error = p.error {
+                            Text("\(p.peer) is not answering: \(error)").font(.footnote).foregroundStyle(Theme.danger)
+                        } else if p.apps?.isEmpty == true {
+                            Text("No apps installed.").font(.footnote).foregroundStyle(.secondary)
                         }
                     } header: {
-                        HStack(spacing: 8) {
-                            EntryIcon(icon: store.labels[app.app]?.icon, fallback: "shippingbox", icons: icons, size: 20)
-                            Text(verbatim: store.title(app.app))
-                        }
+                        Text("On \(p.peer)")
                     }
+                    appSections(store.sorted(p.apps ?? [], peer: p.peer), options: p.options ?? [], peer: p.peer)
                 }
             }
             .hubRows()
         }
         .hubPage("App models", store)
+    }
+
+    /// One section per app: the app-wide row and one per tag, each a model menu saved at once.
+    private func appSections(_ apps: [AppModelRows], options: [ModelChoice], peer: String?) -> some View {
+        ForEach(apps) { app in
+            Section {
+                ForEach(app.rows) { row in
+                    ModelMenu(options: options, current: row.override, none: String(localized: "No override"), disabled: store.isSaving,
+                              pick: { value in Task { await store.setModel(app: app.app, peer: peer, tag: row.tag, value) } }) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: row.tag ?? String(localized: "All calls")).foregroundStyle(Theme.text)
+                            Text(verbatim: [row.model, source(row.source)].compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                }
+            } header: {
+                HStack(spacing: 8) {
+                    EntryIcon(icon: store.icon(app.app, peer: peer), fallback: "shippingbox", icons: icons, size: 20)
+                    Text(verbatim: store.title(app.app, peer: peer))
+                    if let peer {
+                        Spacer(minLength: 4)
+                        Text(verbatim: peer).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
     }
 
     /// The layer that chose the model a row runs on.

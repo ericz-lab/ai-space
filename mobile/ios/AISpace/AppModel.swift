@@ -238,6 +238,7 @@ final class AppModel: ObservableObject {
         l.onCatalogue = { [weak self] catalogue in
             guard let self else { return }
             self.screens.seed(connection.id, from: catalogue.panelScreens)
+            self.screens.merge(connection.id, groups: catalogue.agentGroups)
             self.icons[connection.id]?.retryFailed()
             self.backdrops[connection.id]?.retryFailed()
             self.publishQuickActions()
@@ -494,10 +495,17 @@ final class AppModel: ObservableObject {
         guard let connection = selected else { return }
         guard let url = entry.pageURL(space: connection.url) else {
             // An agent has no page: it is talked to.
-            if entry.kind == .agent { hubPage = .chat(agent: entry.key) } else { openWebPanel() }
+            if entry.kind == .agent { hubPage = .chat(agent: preferredAgent(entry, in: connection).key) } else { openWebPanel() }
             return
         }
         open(url, title: entry.displayTitle(), key: entry.key, in: connection)
+    }
+
+    /// The machine an agent's tile opens it on: the one picked last time on this phone while it
+    /// answers, else the local one (AgentGroups.preferred).
+    func preferredAgent(_ entry: CatalogueEntry, in connection: Connection) -> CatalogueEntry {
+        guard let group = loaders[connection.id]?.catalogue?.agentGroup(entry) else { return entry }
+        return AgentGroups.preferred(group, remembered: MachineChoice.remembered(group.key, space: connection.id))
     }
 
     /// A page of the Space opens in the app with the Space's session; any other address is Safari's.
@@ -588,7 +596,7 @@ final class AppModel: ObservableObject {
         case .chat(let agent, let text):
             page = nil
             showingWebPanel = false
-            let entry = agent.flatMap { id in loaders[connection.id]?.catalogue?.agents.first { $0.ref == id } }
+            let entry = agent.flatMap { id in loaders[connection.id]?.catalogue?.agent("agent:\(id)") }
             // The text is put in the field, never sent: any web page can open a link.
             if let entry, let text, let base = ChatRoute.base(ref: entry.ref, peer: entry.peer) { chat(for: connection, base: base).draft = text }
             hubPage = .chat(agent: entry?.key)

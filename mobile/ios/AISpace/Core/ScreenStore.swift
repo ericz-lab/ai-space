@@ -42,6 +42,14 @@ final class ScreenStore: ObservableObject {
         write(connection, Record(screens: Self.copy(panel), seeded: true))
     }
 
+    /// Points every agent pinned once per machine at its group, so a screen shows the agent once
+    /// (AgentGroups.canonical); keeps whether the layout was copied or made by hand.
+    func merge(_ connection: UUID, groups: [AgentGroup]) {
+        guard let record = records[connection.uuidString], !groups.isEmpty else { return }
+        let screens = record.screens.map { s in PanelScreen(id: s.id, name: s.name, items: AgentGroups.canonical(s.items, groups)) }
+        write(connection, Record(screens: screens, seeded: record.seeded))
+    }
+
     func edit(_ connection: UUID, _ change: ([PanelScreen]) -> [PanelScreen]) {
         // A layout made by hand is never overwritten by a later copy.
         write(connection, Record(screens: Self.normalized(change(screens(connection))), seeded: true))

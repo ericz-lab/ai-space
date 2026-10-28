@@ -75,6 +75,8 @@ struct ModelPreferences: Decodable, Equatable {
         var runtime: String?
         var tier: String?
         var model: String?
+        /// Why it is shown but cannot be picked (ModelChoiceText).
+        var unavailable: String?
 
         var id: String { value }
         /// "codex · basic · gpt-6-luna", as the panel's menu writes it.
@@ -82,6 +84,8 @@ struct ModelPreferences: Decodable, Equatable {
             let parts = [runtime, tier.map { $0.prefix(1).uppercased() + $0.dropFirst() }, model].compactMap { $0 }.filter { !$0.isEmpty }
             return parts.isEmpty ? value : parts.joined(separator: " · ")
         }
+        var isAvailable: Bool { (unavailable ?? "").isEmpty }
+        var shownLabel: String { ModelChoiceText.label(label, unavailable: unavailable) }
     }
 
     /// nil while the Space follows its environment's defaults.
@@ -102,6 +106,9 @@ struct ModelPreferences: Decodable, Equatable {
 
     /// The label of a value, also of one the Space no longer offers.
     func label(_ value: String) -> String { options.first { $0.value == value }?.label ?? value }
+
+    /// Whether a value may be picked: one offered and available, or no choice at all.
+    func canPick(_ value: String) -> Bool { value.isEmpty || options.first { $0.value == value }?.isAvailable == true }
 }
 
 struct SpaceSettings: Equatable {

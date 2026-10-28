@@ -38,6 +38,8 @@ struct AgentInfo: Decodable, Identifiable, Hashable {
     var i18n: I18n?
     var avatar: String?
     var runtime: String?
+    /// Set on a peer's agent while that machine does not answer.
+    var stale: Bool?
 
     var displayTitle: String { Lang.pick(title, i18n, \.title) }
 

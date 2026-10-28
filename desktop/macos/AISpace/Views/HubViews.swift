@@ -97,12 +97,16 @@ struct ModelMenu<Label: View>: View {
     @ViewBuilder let label: () -> Label
 
     var body: some View {
-        Picker(selection: Binding(get: { current ?? "" }, set: { pick($0.isEmpty ? nil : $0) })) {
+        Picker(selection: Binding(get: { current ?? "" }, set: { value in
+            // A greyed choice is shown, not picked (ModelChoiceText).
+            guard value.isEmpty || options.first(where: { $0.value == value })?.isAvailable != false else { return }
+            pick(value.isEmpty ? nil : value)
+        })) {
             Text(verbatim: none).tag("")
             if let current, !current.isEmpty, !options.contains(where: { $0.value == current }) {
-                Text(verbatim: current).tag(current)
+                Text(verbatim: ModelChoiceText.saved(current)).tag(current)
             }
-            ForEach(options) { Text(verbatim: $0.label).tag($0.value) }
+            ForEach(options) { o in Text(verbatim: o.shownLabel).tag(o.value).disabled(!o.isAvailable) }
         } label: {
             label()
         }

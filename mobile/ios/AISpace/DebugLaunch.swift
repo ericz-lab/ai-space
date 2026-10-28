@@ -61,7 +61,7 @@ enum DebugLaunch {
         if let text = env["AISPACE_SEARCH"] { model.query = text }
         if let message = env["AISPACE_CHAT_SEND"], let key = env["AISPACE_HUB"].flatMap({ $0.hasPrefix("chat:") ? String($0.dropFirst(5)) : nil }) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                guard let c = model.selected, let agent = model.loader(for: c).catalogue?.agents.first(where: { $0.key == key }),
+                guard let c = model.selected, let agent = model.loader(for: c).catalogue?.agent(key),
                       let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) else { return }
                 let chat = model.chat(for: c, base: base)
                 chat.draft = message
@@ -70,7 +70,7 @@ enum DebugLaunch {
         }
         if let sid = env["AISPACE_CHAT_OPEN"], let key = env["AISPACE_HUB"].flatMap({ $0.hasPrefix("chat:") ? String($0.dropFirst(5)) : nil }) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                guard let c = model.selected, let agent = model.loader(for: c).catalogue?.agents.first(where: { $0.key == key }),
+                guard let c = model.selected, let agent = model.loader(for: c).catalogue?.agent(key),
                       let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) else { return }
                 Task { await model.chat(for: c, base: base).open(ChatSessionInfo(sid: sid)) }
             }
