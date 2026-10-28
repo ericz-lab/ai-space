@@ -111,7 +111,7 @@ internal fun FeedbackPage(model: AppModel, connection: Connection, api: SpaceApi
                 }
             }
 
-            group(key = "apps", headerContent = { SubHead(stringResource(R.string.feedback_apps)) }, footer = { Text(stringResource(R.string.feedback_apps_help)) }) {
+            group(key = "apps", headerContent = { Header(stringResource(R.string.feedback_apps)) }, footer = { Text(stringResource(R.string.feedback_apps_help)) }) {
                 SwitchCell(stringResource(R.string.feedback_apps_default), s.appsDefault) { store.save(FeedbackPatch(appsDefault = it)) }
                 for (a in view.apps) AppSwitch(a, s) { store.save(FeedbackPatch(apps = mapOf(a.app to it))) }
             }
@@ -119,7 +119,7 @@ internal fun FeedbackPage(model: AppModel, connection: Connection, api: SpaceApi
             for (p in view.peers) {
                 group(
                     key = "peer:${p.name}",
-                    headerContent = { SubHead(stringResource(R.string.feedback_peer_apps, p.name)) },
+                    headerContent = { Header(stringResource(R.string.feedback_peer_apps, p.name)) },
                     footer = { if (p.ok && p.apps.isNotEmpty()) Text(stringResource(R.string.feedback_peer_apps_help, p.name)) },
                 ) {
                     when {
@@ -131,7 +131,7 @@ internal fun FeedbackPage(model: AppModel, connection: Connection, api: SpaceApi
                 }
             }
 
-            group(key = "recent", headerContent = { SubHead(stringResource(R.string.feedback_recent)) }) {
+            group(key = "recent", headerContent = { Header(stringResource(R.string.feedback_recent)) }) {
                 if (store.items.isEmpty()) NoteCell(stringResource(R.string.feedback_none))
                 for (item in store.items) {
                     FeedbackRow(item, view.appTitle(item.app, item.peer), busy = store.isFixing, open = { url ->
@@ -231,12 +231,6 @@ private fun feedbackStatus(status: String): String = when (status) {
     "accepted" -> stringResource(R.string.feedback_status_accepted)
     "dropped" -> stringResource(R.string.feedback_status_dropped)
     else -> status
-}
-
-/** A section's heading, as the cards' headings are drawn. */
-@Composable
-internal fun SubHead(text: String) {
-    Text(text, style = MaterialTheme.typography.labelLarge, color = AiTheme.tokens.secondaryText)
 }
 
 @Composable

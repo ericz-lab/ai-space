@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,13 +55,26 @@ internal fun ModelUsagePage(api: SpaceApi) {
                 key = "totals",
                 footer = {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        usage?.backend?.let { Text(stringResource(R.string.hub_backend, it)) }
+                        // Whose ledger this is: a peer's apps are in its own, or here on a hub as peer/app.
+                        val whose = listOfNotNull(
+                            usage?.space?.let { stringResource(R.string.usage_space, it) },
+                            usage?.backend?.let { stringResource(R.string.hub_backend, it) },
+                        )
+                        if (whose.isNotEmpty()) Text(whose.joinToString(" · "))
+                        if (usage?.space != null) Text(stringResource(R.string.usage_space_hint))
                         Text(stringResource(R.string.hub_costs_note))
                     }
                 },
             ) {
                 Segmented(ModelUsageStore.windows.map { it to it }, window) { store.choose(it) }
                 HubNotice(store)
+                for (p in usage?.absentPeers ?: emptyList()) {
+                    val time = p.asOf?.let { ISO8601.parse(it) }
+                    Warning(
+                        if (time != null) stringResource(R.string.usage_peer_stale, p.name, p.error ?: "", dateTime(time))
+                        else stringResource(R.string.usage_peer_missing, p.name, p.error ?: ""),
+                    )
+                }
                 usage?.totals?.let { t ->
                     val errors = t.errors ?: 0.0
                     StatCards(
@@ -78,13 +92,19 @@ internal fun ModelUsagePage(api: SpaceApi) {
             if (byTag.isNotEmpty()) {
                 groupItems(byTag.withIndex().toList(), key = { "tag:${it.index}" }, headerContent = { Header(stringResource(R.string.hub_by_app_tag)) }) { (_, r) ->
                     val title = listOfNotNull(r.app?.let { store.title(it) }, r.tag).filter { it.isNotEmpty() }.joinToString(" · ")
-                    UsageRow(title, r.model, r.totals)
+                    UsageRow(title, r.modelOn, r.totals)
                 }
             }
-            val byModel = usage?.byModel ?: emptyList()
+            // The models, then the backends each with where its calls came from (dimmer, as the panel's table).
+            val byModel = (usage?.byModel ?: emptyList()).map { it to false } + (usage?.byBackend ?: emptyList()).map { it to true }
             if (byModel.isNotEmpty()) {
-                groupItems(byModel.withIndex().toList(), key = { "model:${it.index}" }, headerContent = { Header(stringResource(R.string.hub_by_model)) }) { (_, r) ->
-                    UsageRow(r.model ?: "", null, r.totals)
+                groupItems(byModel.withIndex().toList(), key = { "model:${it.index}" }, headerContent = { Header(stringResource(R.string.hub_by_model)) }) { (_, row) ->
+                    val (r, backend) = row
+                    if (backend) {
+                        UsageRow(listOfNotNull(r.backend, originLabel(r.origin)).joinToString(" · "), null, r.totals, dim = true)
+                    } else {
+                        UsageRow(r.modelOn ?: "", null, r.totals)
+                    }
                 }
             }
             val history = usage?.history?.totals
@@ -123,7 +143,8 @@ internal fun ModelUsagePage(api: SpaceApi) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Dot(if (call.status == "ok") ThemeTokens.success else ThemeTokens.danger)
-                            Text(call.model ?: "", color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            // `<machine>:<model>` can be long: one line, cut, never over the time.
+                            Text(call.modelOn ?: "", color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, softWrap = false, modifier = Modifier.weight(1f))
                             call.startedAt?.let { ISO8601.parse(it) }?.let {
                                 Text(HubFormat.relative(it), style = MaterialTheme.typography.bodySmall, color = t.secondaryText)
                             }
@@ -150,11 +171,21 @@ internal fun Header(text: String) {
     Text(text, style = MaterialTheme.typography.labelLarge, color = AiTheme.tokens.secondaryText)
 }
 
+/** Where a backend's calls came from (Usage.tsx's backend rows). */
 @Composable
-private fun UsageRow(title: String, detail: String?, t: ModelTotals) {
+private fun originLabel(origin: String?): String? = when (origin) {
+    null, "" -> null
+    "task" -> stringResource(R.string.usage_origin_task)
+    "import" -> stringResource(R.string.usage_origin_import)
+    "peer" -> stringResource(R.string.usage_origin_peer)
+    else -> stringResource(R.string.usage_origin_run)
+}
+
+@Composable
+private fun UsageRow(title: String, detail: String?, t: ModelTotals, dim: Boolean = false) {
     val tokens = AiTheme.tokens
     val errors = (t.errors ?: 0.0).toInt()
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
+    Row(Modifier.fillMaxWidth().alpha(if (dim) 0.7f else 1f).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, color = tokens.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val line = listOfNotNull(

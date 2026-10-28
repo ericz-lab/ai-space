@@ -165,9 +165,7 @@ open class HubStore(val api: SpaceApi, protected val scope: CoroutineScope) {
             askedLabels = false
             return
         }
-        val map = LinkedHashMap<String, AppLabel>()
-        for (a in apps) map.putIfAbsent(a.name, a)
-        labels = map
+        labels = AppLabel.index(apps)
     }
 
     fun title(app: String): String = labels[app]?.displayTitle() ?: app

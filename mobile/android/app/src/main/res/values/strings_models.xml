@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Models across machines: usage with peers, peer app models, the agent CLIs by machine (src/web/messages.ts). -->
+<resources>
+    <string name="usage_space">Space %1$s</string>
+    <string name="usage_space_hint">Calls made by this Space\'s apps, including those it sent to another machine. On a hub, the peers\' apps are here too, as peer/app; the model shows machine:model when another machine ran it.</string>
+    <string name="usage_origin_task">agent tasks</string>
+    <string name="usage_origin_run">api calls</string>
+    <string name="usage_origin_import">imported</string>
+    <string name="usage_origin_peer">for other spaces</string>
+    <string name="usage_peer_missing">%1$s is not included: %2$s</string>
+    <string name="usage_peer_stale">%1$s did not answer (%2$s); its figures are from %3$s</string>
+</resources>

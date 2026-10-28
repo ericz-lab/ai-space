@@ -78,13 +78,25 @@ sealed class JSONValue {
     }
 }
 
-/** An app's name and icon for a heading; `GET /api/apps?all=1` also names headless and hidden apps. */
-data class AppLabel(val name: String, val title: String, val i18n: I18n? = null, val icon: String? = null) {
+/**
+ * An app's name and icon for a heading; `GET /api/apps?all=1` also names headless and hidden apps.
+ * [id] is `<peer>/<app>` for a peer's app, as its model calls name it.
+ */
+data class AppLabel(val name: String, val title: String, val i18n: I18n? = null, val icon: String? = null, val id: String = name) {
     fun displayTitle(lang: String = Lang.current): String = Lang.pick(title, i18n, Lang.title, lang)
 
     companion object : JsonReader<AppLabel> {
         override fun from(o: JSONObject): AppLabel? {
-            return AppLabel(o.str("name") ?: return null, o.str("title") ?: return null, I18nReader.read(o), o.str("icon"))
+            val name = o.str("name") ?: return null
+            return AppLabel(name, o.str("title") ?: return null, I18nReader.read(o), o.str("icon"), o.str("id") ?: name)
+        }
+
+        /** Labels by id and, for the bare name a row may carry, the first app of that name (local before peers). */
+        fun index(apps: List<AppLabel>): Map<String, AppLabel> {
+            val map = LinkedHashMap<String, AppLabel>()
+            for (a in apps) map.putIfAbsent(a.id, a)
+            for (a in apps) map.putIfAbsent(a.name, a)
+            return map
         }
     }
 }
@@ -348,19 +360,29 @@ data class ModelTotals(
     }
 }
 
-/** Totals for one app, tag, model, backend or day: the totals and whichever names the row has. */
+/**
+ * Totals for one app, tag, model, backend or day: the totals and whichever names the row has. On a
+ * hub a peer's app is `<peer>/<app>`, and [machine] names the machine that ran the model when it is
+ * not this one (docs/model-machines.md#ledger).
+ */
 data class ModelUsageRow(
     val totals: ModelTotals,
     val app: String? = null,
     val tag: String? = null,
     val model: String? = null,
     val backend: String? = null,
+    /** task, run, import, or peer (calls this Space ran for other Spaces). */
     val origin: String? = null,
     val day: String? = null,
+    val machine: String? = null,
 ) {
+    /** The model with the machine that ran it: `david:gpt-6-luna` (Usage.tsx `modelOn`). */
+    val modelOn: String? get() = model?.let { ModelUsage.modelOn(it, machine) }
+
     companion object : JsonReader<ModelUsageRow> {
         override fun from(o: JSONObject) = ModelUsageRow(
             ModelTotals.from(o), o.str("app"), o.str("tag"), o.str("model"), o.str("backend"), o.str("origin"), o.str("day"),
+            o.str("machine")?.ifEmpty { null },
         )
     }
 }
@@ -376,7 +398,24 @@ data class ModelUsage(
     val byTag: List<ModelUsageRow>? = null,
     val byModel: List<ModelUsageRow>? = null,
     val history: History? = null,
+    /** The Space whose ledger this is; a newer Space names itself. */
+    val space: String? = null,
+    val byBackend: List<ModelUsageRow>? = null,
+    /** On a hub: each peer, whether its rows are in, and from when. */
+    val peers: List<Peer>? = null,
 ) {
+    /** A peer's part of a hub's figures: [ok] in, else missing or ([asOf]) from its last answer. */
+    data class Peer(val name: String, val ok: Boolean, val asOf: String? = null, val error: String? = null) {
+        companion object : JsonReader<Peer> {
+            override fun from(o: JSONObject): Peer? {
+                return Peer(o.str("name") ?: return null, o.bool("ok") == true, o.str("asOf"), o.str("error"))
+            }
+        }
+    }
+
+    /** The peers whose figures are not all in now. */
+    val absentPeers: List<Peer> get() = peers?.filter { !it.ok } ?: emptyList()
+
     data class History(val firstAt: String? = null, val totals: ModelTotals? = null, val days: List<ModelUsageRow>? = null) {
         companion object : JsonReader<History> {
             override fun from(o: JSONObject) = History(
@@ -422,16 +461,29 @@ data class ModelUsage(
                 byTag = o.arr("byTag")?.let { Json.lossy(it, ModelUsageRow) },
                 byModel = o.arr("byModel")?.let { Json.lossy(it, ModelUsageRow) },
                 history = o.obj("history")?.let { History.from(it) },
+                space = o.str("space")?.ifEmpty { null },
+                byBackend = o.arr("byBackend")?.let { Json.lossy(it, ModelUsageRow) },
+                peers = o.arr("peers")?.let { Json.lossy(it, Peer) },
             )
         }
+
+        /** `<machine>:<model>` when another machine ran it, else the model. */
+        fun modelOn(model: String, machine: String?): String = if (machine.isNullOrEmpty()) model else "$machine:$model"
     }
 }
 
 data class ModelCall(
+    /** Negative for a peer's call on a hub, so ids never collide. */
     val id: Int,
+    /** `<peer>/<app>` for a peer's call on a hub. */
     val app: String,
     val tag: String? = null,
     val model: String? = null,
+    /** The machine that ran the model, when it is not this one. */
+    val machine: String? = null,
+    /** The peer this call comes from, on a hub. */
+    val peer: String? = null,
+    val origin: String? = null,
     val status: String? = null,
     val error: String? = null,
     val startedAt: String? = null,
@@ -453,6 +505,9 @@ data class ModelCall(
         }
     }
 
+    /** The model with the machine that ran it: `david:gpt-6-luna`. */
+    val modelOn: String? get() = model?.let { ModelUsage.modelOn(it, machine) }
+
     companion object : JsonReader<ModelCall> {
         override fun from(o: JSONObject): ModelCall? {
             return ModelCall(
@@ -460,6 +515,9 @@ data class ModelCall(
                 app = o.str("app") ?: return null,
                 tag = o.str("tag"),
                 model = o.str("model"),
+                machine = o.str("machine")?.ifEmpty { null },
+                peer = o.str("peer")?.ifEmpty { null },
+                origin = o.str("origin"),
                 status = o.str("status"),
                 error = o.str("error"),
                 startedAt = o.str("startedAt"),
