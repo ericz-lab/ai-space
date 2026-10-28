@@ -14,10 +14,12 @@ struct FloatingBallRulesTests {
     }
 
     @Test func firstPlaceIsTheRightEdgeAThirdOfTheWayDown() {
+        // Typed values: inside #expect, a bare `1440 - 52 - 12` is an Int and never equals a CGFloat.
         let o = origin(nil)
-        #expect(o.x == 1440 - 52 - 12)
+        let rightEdge: CGFloat = 1440 - 52 - 12
+        #expect(o.x == rightEdge)
         #expect(o.y > visible.midY)
-        #expect(o.y + 52 + 12 <= visible.maxY)
+        #expect(o.y + size.height + FloatingBallRules.margin <= visible.maxY)
     }
 
     @Test func savedPlaceIsKeptWhenItFits() {
@@ -27,7 +29,7 @@ struct FloatingBallRulesTests {
     @Test func savedPlaceOffTheScreenComesBackInside() {
         // Under the Dock, past the right edge, over the menu bar: each side is pulled in by the margin.
         #expect(origin(CGPoint(x: -40, y: 0)) == CGPoint(x: 12, y: 82))
-        #expect(origin(CGPoint(x: 5000, y: 5000)) == CGPoint(x: 1440 - 52 - 12, y: 875 - 52 - 12))
+        #expect(origin(CGPoint(x: 5000, y: 5000)) == CGPoint(x: 1376, y: 811))
     }
 
     @Test func aScreenTooSmallForTheBallStillGetsIt() {
