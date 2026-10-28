@@ -150,8 +150,8 @@ struct QuickChatView: View {
                 AgentPicker(model: model, state: state)
                 if let chat = model.quickChatController { WorkingMark(chat: chat) }
                 Spacer(minLength: 8)
-                // Kept for their keys (⌘N, ⌘O); the spec's header shows only the close button.
-                if let chat = model.quickChatController { NewConversationButton(chat: chat).frame(width: 0, height: 0).opacity(0) }
+                if let chat = model.quickChatController { NewChatButton(chat: chat) }
+                // Kept for its key (⌘O).
                 Button("") { model.openQuickChatInMainWindow(); close() }
                     .keyboardShortcut("o", modifiers: .command)
                     .disabled(model.quickChatController == nil)
@@ -194,22 +194,47 @@ private struct ThreadHeight: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
+/// New Conversation (⌘N) beside Close, drawn as Close is.
+private struct NewChatButton: View {
+    @ObservedObject var chat: ChatController
+
+    var body: some View {
+        RoundHeaderButton(symbol: "square.and.pencil", size: 9, help: "New Conversation (⌘N)") { chat.newConversation() }
+            .keyboardShortcut("n", modifiers: .command)
+            .disabled(chat.busy || chat.messages.isEmpty)
+    }
+}
+
 /// The 20 pt round close button of the spec.
 private struct CloseButton: View {
     let action: () -> Void
+
+    var body: some View {
+        RoundHeaderButton(symbol: "xmark", size: 8, help: "Close (Esc)", action: action)
+    }
+}
+
+/// A 20 pt round button of the header: a glyph on a light grey disc.
+private struct RoundHeaderButton: View {
+    let symbol: String
+    let size: CGFloat
+    let help: LocalizedStringKey
+    let action: () -> Void
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.isEnabled) private var enabled
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+            Image(systemName: symbol).font(.system(size: size, weight: .bold))
                 .foregroundStyle(scheme == .dark ? Color(red: 235 / 255, green: 235 / 255, blue: 245 / 255).opacity(0.6) : Color(red: 60 / 255, green: 60 / 255, blue: 67 / 255).opacity(0.6))
                 .frame(width: 20, height: 20)
                 .background(Color(red: 120 / 255, green: 120 / 255, blue: 128 / 255).opacity(scheme == .dark ? 0.32 : 0.14), in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help("Close (Esc)")
-        .accessibilityLabel(Text("Close"))
+        .opacity(enabled ? 1 : 0.4)
+        .help(help)
+        .accessibilityLabel(Text(help))
     }
 }
 
@@ -390,16 +415,6 @@ struct HeaderButtonStyle: ButtonStyle {
 @MainActor
 final class Hover: ObservableObject {
     @Published var on = false
-}
-
-private struct NewConversationButton: View {
-    @ObservedObject var chat: ChatController
-
-    var body: some View {
-        HeaderButton(symbol: "square.and.pencil", help: "New Conversation (⌘N)") { chat.newConversation() }
-            .keyboardShortcut("n", modifiers: .command)
-            .disabled(chat.busy || chat.messages.isEmpty)
-    }
 }
 
 /// A small spinner beside the agent while its turn runs, so the header says it is working.
