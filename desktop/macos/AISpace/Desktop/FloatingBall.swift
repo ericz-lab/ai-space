@@ -10,7 +10,7 @@ private typealias DialSection = FloatingBallRules.Section
 /// Space Assistant, Todo, Design Studio): a click opens Quick Chat on that app's agent, to paste
 /// text and pictures into and leave the rest to the agent; a picture dropped on a section opens it
 /// with the picture attached. Drag the ball to move it (its place is remembered on this Mac),
-/// click its hub for the main window, right-click for the picture actions and Hide. Space →
+/// right-click for the picture actions and Hide. Space →
 /// Floating Ball and Settings show or hide it.
 @MainActor
 final class FloatingBall: NSObject, NSWindowDelegate {
@@ -18,8 +18,8 @@ final class FloatingBall: NSObject, NSWindowDelegate {
     private let state = FloatingBallState()
     private lazy var panel: NSPanel = makePanel()
     private var screenWatcher: NSObjectProtocol?
-    /// Opens Quick Chat on an agent, with text to start the message.
-    private let chat: (_ agent: String, _ text: String?) -> Void
+    /// Opens Quick Chat on an agent, with text to start the message, beside the ball's frame.
+    private let chat: (_ agent: String, _ text: String?, _ near: NSRect?) -> Void
     /// The agent each section hands its work to, as an agent key (`<connection> <app>/<name>`).
     private var agents: [DialSection: String] = [:]
     /// Sections whose app has no agent of its own; Space Assistant takes their work.
@@ -28,7 +28,7 @@ final class FloatingBall: NSObject, NSWindowDelegate {
     private var pointerWatch: Timer?
     private var ticksOutside = 0
 
-    init(model: AppModel, chat: @escaping (_ agent: String, _ text: String?) -> Void) {
+    init(model: AppModel, chat: @escaping (_ agent: String, _ text: String?, _ near: NSRect?) -> Void) {
         self.model = model
         self.chat = chat
         super.init()
@@ -93,12 +93,6 @@ final class FloatingBall: NSObject, NSWindowDelegate {
         surface.state = state
         surface.take = { [weak self] data, section in self?.drop(data, on: section) }
         surface.refuse = { [weak self] message in self?.collapse(); self?.model.pictureSharing.refuse(message) }
-        // The hub (or the closed ball) brings the main window forward; Pending Shares stays in the right-click menu.
-        surface.open = { [weak self] in
-            self?.collapse()
-            NSApp.activate()
-            self?.model.showMainWindow()
-        }
         surface.openSection = { [weak self] section in self?.open(section) }
         surface.settle = { [weak self] in self?.settle() }
         surface.expand = { [weak self] in self?.expand() }
@@ -119,7 +113,7 @@ final class FloatingBall: NSObject, NSWindowDelegate {
         let ball = panel.frame
         guard let visible = (panel.screen ?? NSScreen.main)?.visibleFrame else { return }
         let center = FloatingBallRules.dialCenter(ball: CGPoint(x: ball.midX, y: ball.midY), visible: visible)
-        let d = FloatingBallRules.dialDiameter
+        let d = FloatingBallRules.dialWindow
         resolveEntries()
         state.highlighted = nil
         state.shown = false
@@ -219,7 +213,7 @@ final class FloatingBall: NSObject, NSWindowDelegate {
     /// Assistant takes the work and the message starts by saying where it goes (once).
     private func handOver(_ section: DialSection) -> Bool {
         guard let agent = agents[section] else { return false }
-        chat(agent, nil)
+        chat(agent, nil, panel.isVisible ? panel.frame : nil)
         if borrowed.contains(section), let chat = model.quickChatController {
             let name = state.entries[section]?.displayTitle() ?? section.fallbackTitle
             let lead = String(localized: "Save this to \(name):")
@@ -310,7 +304,7 @@ private struct FloatingBallLook: View {
             if state.receiving {
                 ProgressView().controlSize(.small)
             } else {
-                Logo(size: 30)
+                Logo(size: 28)
             }
         }
         .padding(3)
@@ -322,25 +316,38 @@ private struct FloatingBallLook: View {
     }
 }
 
-/// The open dial, drawn as a disc of frosted glass (the reference's "glass disc"): four sections
-/// around a hub, the one under the pointer tinted with the accent and named in the hub.
+/// The open dial, drawn to Design Studio's spec (design 11, "glass disc"): a 168 pt disc of frosted
+/// glass with a hairline rim, four sections around a 60 pt hub, the section under the pointer
+/// tinted blue and named in the hub. During a drag the sections that cannot take the picture are
+/// faded and grey; a section Settings left empty is a dashed circle with a plus.
 private struct FloatingDial: View {
     @ObservedObject var state: FloatingBallState
+    @Environment(\.colorScheme) private var scheme
 
-    private let outer = FloatingBallRules.dialDiameter / 2 - 4
+    private let outer = FloatingBallRules.dialDiameter / 2
     private let inner = FloatingBallRules.hubDiameter / 2
+    private let iconSize: CGFloat = 28
+
+    private var dark: Bool { scheme == .dark }
+    private var line: Color { dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08) }
+    private var tint: Color { Color(nsColor: .systemBlue).opacity(dark ? 0.22 : 0.14) }
 
     var body: some View {
         GeometryReader { geo in
             let c = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
             ZStack {
-                Circle().fill(.regularMaterial).frame(width: outer * 2, height: outer * 2).position(c)
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(Circle().fill(dark ? Color(red: 40 / 255, green: 40 / 255, blue: 44 / 255).opacity(0.62) : Color.white.opacity(0.62)))
+                    .overlay(Circle().strokeBorder(line, lineWidth: 1))
+                    .frame(width: outer * 2, height: outer * 2)
+                    .shadow(color: .black.opacity(0.18), radius: 16, y: 12)
+                    .position(c)
                 ForEach(DialSection.allCases, id: \.self) { section in
                     DialWedge(center: c, angle: section.angle, inner: inner, outer: outer)
-                        .fill(Theme.accent.opacity(state.highlighted == section && usable(section) ? 0.2 : 0))
+                        .fill(state.highlighted == section && (usable(section) || state.hidden.contains(section)) ? tint : .clear)
                 }
-                DialSeparators(center: c, inner: inner, outer: outer).stroke(Color.primary.opacity(0.07), lineWidth: 1)
-                Circle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1).frame(width: outer * 2, height: outer * 2).position(c)
+                DialSeparators(center: c, inner: inner, outer: outer).stroke(line, lineWidth: 1)
                 ForEach(DialSection.allCases, id: \.self) { section in
                     icon(section).position(point(section, center: c))
                 }
@@ -356,6 +363,7 @@ private struct FloatingDial: View {
         state.entries[section] != nil && (!state.dragging || state.droppable.contains(section))
     }
 
+    /// Icon centres 57 pt from the middle: halfway between the hub and the rim.
     private func point(_ section: DialSection, center c: CGPoint) -> CGPoint {
         let r = (inner + outer) / 2, a = section.angle * .pi / 180
         return CGPoint(x: c.x + cos(a) * r, y: c.y - sin(a) * r)
@@ -366,20 +374,25 @@ private struct FloatingDial: View {
     }
 
     @ViewBuilder private func icon(_ section: DialSection) -> some View {
-        let lit = state.highlighted == section && usable(section)
-        Group {
-            if state.hidden.contains(section) {
-                Color.clear.frame(width: 36, height: 36)
-            } else if let entry = state.entries[section], let icons = state.icons[section] {
-                EntryIcon(icon: entry.icon, fallback: symbol(section), icons: icons, size: 36, isRound: entry.kind == .agent)
-            } else {
-                Image(systemName: symbol(section)).font(.system(size: 20, weight: .medium)).foregroundStyle(.secondary)
-                    .frame(width: 36, height: 36)
+        if state.hidden.contains(section) {
+            ZStack {
+                Circle().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 2.6]))
+                Image(systemName: "plus").font(.system(size: 9, weight: .semibold))
             }
+            .foregroundStyle(dark ? Color(red: 235 / 255, green: 235 / 255, blue: 245 / 255).opacity(0.3) : Color(red: 60 / 255, green: 60 / 255, blue: 67 / 255).opacity(0.3))
+            .frame(width: iconSize, height: iconSize)
+        } else {
+            Group {
+                if let entry = state.entries[section], let icons = state.icons[section] {
+                    EntryIcon(icon: entry.icon, fallback: symbol(section), icons: icons, size: iconSize, isRound: entry.kind == .agent)
+                } else {
+                    Image(systemName: symbol(section)).font(.system(size: 15, weight: .medium)).foregroundStyle(.secondary)
+                        .frame(width: iconSize, height: iconSize)
+                }
+            }
+            .saturation(usable(section) ? 1 : 0)
+            .opacity(usable(section) ? 1 : 0.3)
         }
-        .scaleEffect(lit ? 1.14 : 1)
-        .opacity(usable(section) ? 1 : 0.35)
-        .animation(.easeOut(duration: 0.12), value: lit)
     }
 
     private func symbol(_ section: DialSection) -> String {
@@ -392,22 +405,29 @@ private struct FloatingDial: View {
         }
     }
 
+    /// What the hub says: the section under the pointer ("Send to …" during a drag, "Add in
+    /// Settings…" for an empty one); nothing otherwise.
+    private var label: String? {
+        guard let section = state.highlighted else { return nil }
+        if state.hidden.contains(section) { return String(localized: "Add in Settings…") }
+        if state.dragging, usable(section) { return String(localized: "Send to \(title(section))") }
+        return title(section)
+    }
+
     private var hub: some View {
         ZStack {
-            Circle().fill(Color.primary.opacity(0.05))
-            Circle().strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
-            if let section = state.highlighted, !state.hidden.contains(section) {
-                Text(verbatim: title(section))
-                    .font(.system(size: 12, weight: .semibold))
+            Circle().fill(dark ? Color(red: 52 / 255, green: 52 / 255, blue: 57 / 255).opacity(0.78) : Color.white.opacity(0.78))
+            Circle().strokeBorder(line, lineWidth: 1)
+            if state.receiving {
+                ProgressView().controlSize(.small)
+            } else if let label {
+                Text(verbatim: label)
+                    .font(.system(size: 11, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                    .foregroundStyle(usable(section) ? Color.primary : Color.secondary)
-                    .padding(.horizontal, 8)
-            } else if state.receiving {
-                ProgressView().controlSize(.small)
-            } else {
-                Logo(size: 30)
+                    .minimumScaleFactor(0.85)
+                    .foregroundStyle(Theme.text)
+                    .padding(.horizontal, 5)
             }
         }
     }
@@ -440,8 +460,8 @@ private struct DialSeparators: Shape {
         var p = Path()
         for degrees in stride(from: 45.0, to: 360, by: 90) {
             let a = degrees * .pi / 180
-            p.move(to: CGPoint(x: center.x + cos(a) * (inner + 6), y: center.y - sin(a) * (inner + 6)))
-            p.addLine(to: CGPoint(x: center.x + cos(a) * (outer - 6), y: center.y - sin(a) * (outer - 6)))
+            p.move(to: CGPoint(x: center.x + cos(a) * inner, y: center.y - sin(a) * inner))
+            p.addLine(to: CGPoint(x: center.x + cos(a) * outer, y: center.y - sin(a) * outer))
         }
         return p
     }
@@ -449,14 +469,13 @@ private struct DialSeparators: Shape {
 
 /// The ball's mouse and drag handling. A press and release is a click; a press that moves takes
 /// the window along (a borderless panel is not moved by the system). Resting on the ball opens
-/// the dial; a click there opens the section under the pointer, or the main window on the hub. A
+/// the dial; a click there opens the section under the pointer (the hub does nothing). A
 /// drag from another app is taken when it holds one picture, as data, as one file or as a file
 /// promise; it opens the dial too, so the picture can be dropped on a section.
 private final class FloatingBallSurface: NSView {
     var state: FloatingBallState?
     var take: (Data, FloatingBallRules.Section?) -> Void = { _, _ in }
     var refuse: (String) -> Void = { _ in }
-    var open: () -> Void = {}
     var openSection: (FloatingBallRules.Section) -> Void = { _ in }
     var settle: () -> Void = {}
     var expand: () -> Void = {}
@@ -546,7 +565,8 @@ private final class FloatingBallSurface: NSView {
         defer { pressed = nil; startOrigin = nil }
         if moved { return settle() }
         guard event.clickCount == 1 else { return }
-        if let s = section(at: convert(event.locationInWindow, from: nil)) { openSection(s) } else { open() }
+        // The hub and the closed ball do nothing on a click; only a section opens something.
+        if let s = section(at: convert(event.locationInWindow, from: nil)) { openSection(s) }
     }
 
     // MARK: Drop

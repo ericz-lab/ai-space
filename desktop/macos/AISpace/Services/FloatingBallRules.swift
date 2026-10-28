@@ -20,10 +20,13 @@ enum FloatingBallRules {
 
     // MARK: The dial
 
-    /// The glass disc that opens around the ball under the pointer: four sections around a hub.
-    static let dialDiameter: CGFloat = 236
-    /// The hub in the middle, where the ball stands and the section under the pointer is named.
-    static let hubDiameter: CGFloat = 84
+    /// The glass disc that opens around the ball under the pointer: four sections around a hub
+    /// (Design Studio's spec, design 11).
+    static let dialDiameter: CGFloat = 168
+    /// The hub in the middle, where the section under the pointer is named.
+    static let hubDiameter: CGFloat = 60
+    /// The window around the disc: room for its shadow (0 12 32) on every side.
+    static let dialWindow: CGFloat = dialDiameter + 64
 
     /// The four places the dial opens, clockwise from the top.
     enum Section: Int, CaseIterable, Equatable {

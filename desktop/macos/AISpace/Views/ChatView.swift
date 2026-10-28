@@ -224,7 +224,7 @@ private struct ChatIntro: View {
     }
 }
 
-private struct MessageRow: View {
+struct MessageRow: View {
     let message: ChatMessage
     /// Present on the last reply when it failed and its message can go again.
     let retry: (() -> Void)?
@@ -838,7 +838,7 @@ struct FailureCard: View {
     }
 }
 
-private struct ChatImagePreview: View {
+struct ChatImagePreview: View {
     let image: ChatImage
     var body: some View {
         if let picture = NSImage(data: image.bytes) {

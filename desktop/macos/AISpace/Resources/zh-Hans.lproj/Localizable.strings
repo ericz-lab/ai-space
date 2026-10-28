@@ -126,6 +126,10 @@
 "Floating Ball" = "悬浮球";
 "Save this to %@:" = "把下面的内容存进 %@：";
 "None" = "无";
+"Add in Settings…" = "在设置中添加…";
+"Hand it to %@…" = "交给 %@…";
+"↩ Send" = "↩ 发送";
+"Send to %@" = "交给 %@";
 "Top" = "上";
 "Right" = "右";
 "Bottom" = "下";
