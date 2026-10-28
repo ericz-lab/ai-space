@@ -16,6 +16,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import dev.aispace.android.core.ModelChoice
+import dev.aispace.android.core.AppModelRows
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,13 +58,26 @@ internal fun ModelUsagePage(api: SpaceApi) {
                 key = "totals",
                 footer = {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        usage?.backend?.let { Text(stringResource(R.string.hub_backend, it)) }
+                        // Whose ledger this is: a peer's apps are in its own, or here on a hub as peer/app.
+                        val whose = listOfNotNull(
+                            usage?.space?.let { stringResource(R.string.usage_space, it) },
+                            usage?.backend?.let { stringResource(R.string.hub_backend, it) },
+                        )
+                        if (whose.isNotEmpty()) Text(whose.joinToString(" · "))
+                        if (usage?.space != null) Text(stringResource(R.string.usage_space_hint))
                         Text(stringResource(R.string.hub_costs_note))
                     }
                 },
             ) {
                 Segmented(ModelUsageStore.windows.map { it to it }, window) { store.choose(it) }
                 HubNotice(store)
+                for (p in usage?.absentPeers ?: emptyList()) {
+                    val time = p.asOf?.let { ISO8601.parse(it) }
+                    Warning(
+                        if (time != null) stringResource(R.string.usage_peer_stale, p.name, p.error ?: "", dateTime(time))
+                        else stringResource(R.string.usage_peer_missing, p.name, p.error ?: ""),
+                    )
+                }
                 usage?.totals?.let { t ->
                     val errors = t.errors ?: 0.0
                     StatCards(
@@ -78,13 +95,19 @@ internal fun ModelUsagePage(api: SpaceApi) {
             if (byTag.isNotEmpty()) {
                 groupItems(byTag.withIndex().toList(), key = { "tag:${it.index}" }, headerContent = { Header(stringResource(R.string.hub_by_app_tag)) }) { (_, r) ->
                     val title = listOfNotNull(r.app?.let { store.title(it) }, r.tag).filter { it.isNotEmpty() }.joinToString(" · ")
-                    UsageRow(title, r.model, r.totals)
+                    UsageRow(title, r.modelOn, r.totals)
                 }
             }
-            val byModel = usage?.byModel ?: emptyList()
+            // The models, then the backends each with where its calls came from (dimmer, as the panel's table).
+            val byModel = (usage?.byModel ?: emptyList()).map { it to false } + (usage?.byBackend ?: emptyList()).map { it to true }
             if (byModel.isNotEmpty()) {
-                groupItems(byModel.withIndex().toList(), key = { "model:${it.index}" }, headerContent = { Header(stringResource(R.string.hub_by_model)) }) { (_, r) ->
-                    UsageRow(r.model ?: "", null, r.totals)
+                groupItems(byModel.withIndex().toList(), key = { "model:${it.index}" }, headerContent = { Header(stringResource(R.string.hub_by_model)) }) { (_, row) ->
+                    val (r, backend) = row
+                    if (backend) {
+                        UsageRow(listOfNotNull(r.backend, originLabel(r.origin)).joinToString(" · "), null, r.totals, dim = true)
+                    } else {
+                        UsageRow(r.modelOn ?: "", null, r.totals)
+                    }
                 }
             }
             val history = usage?.history?.totals
@@ -123,7 +146,8 @@ internal fun ModelUsagePage(api: SpaceApi) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Dot(if (call.status == "ok") ThemeTokens.success else ThemeTokens.danger)
-                            Text(call.model ?: "", color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            // `<machine>:<model>` can be long: one line, cut, never over the time.
+                            Text(call.modelOn ?: "", color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis, softWrap = false, modifier = Modifier.weight(1f))
                             call.startedAt?.let { ISO8601.parse(it) }?.let {
                                 Text(HubFormat.relative(it), style = MaterialTheme.typography.bodySmall, color = t.secondaryText)
                             }
@@ -150,11 +174,21 @@ internal fun Header(text: String) {
     Text(text, style = MaterialTheme.typography.labelLarge, color = AiTheme.tokens.secondaryText)
 }
 
+/** Where a backend's calls came from (Usage.tsx's backend rows). */
 @Composable
-private fun UsageRow(title: String, detail: String?, t: ModelTotals) {
+private fun originLabel(origin: String?): String? = when (origin) {
+    null, "" -> null
+    "task" -> stringResource(R.string.usage_origin_task)
+    "import" -> stringResource(R.string.usage_origin_import)
+    "peer" -> stringResource(R.string.usage_origin_peer)
+    else -> stringResource(R.string.usage_origin_run)
+}
+
+@Composable
+private fun UsageRow(title: String, detail: String?, t: ModelTotals, dim: Boolean = false) {
     val tokens = AiTheme.tokens
     val errors = (t.errors ?: 0.0).toInt()
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
+    Row(Modifier.fillMaxWidth().alpha(if (dim) 0.7f else 1f).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, color = tokens.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val line = listOfNotNull(
@@ -265,35 +299,76 @@ internal fun AppModelsPage(api: SpaceApi, icons: IconImages) {
     LaunchedEffect(store) { store.refresh() }
     HubScaffold(stringResource(R.string.hub_app_models)) { padding ->
         val apps = store.sorted
-        val labels = store.labels
+        val peers = store.peers
         HubList(padding, onRefresh = { store.refresh() }) {
             group(key = "notice", footer = { Text(stringResource(R.string.hub_app_models_footer)) }) {
                 HubNotice(store)
             }
-            for (app in apps) {
-                groupItems(
-                    app.rows,
-                    key = { "am:${app.app}:${it.id}" },
-                    headerContent = { AppHeader(labels[app.app]?.icon, store.title(app.app), icons) },
-                ) { row ->
-                    ModelMenu(
-                        options = store.options,
-                        current = row.override,
-                        none = stringResource(R.string.hub_no_override),
-                        disabled = store.isSaving,
-                        pick = { value -> scope.launch { store.setModel(app.app, row.tag, value) } },
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(row.tag ?: stringResource(R.string.hub_all_calls), color = AiTheme.tokens.text)
-                            Text(
-                                listOfNotNull(row.model, modelSource(row.source)).joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = AiTheme.tokens.secondaryText,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+            // On a hub the Space's own apps come first, under this machine's name; each peer's follow under its own.
+            if (peers.isNotEmpty() && apps.isNotEmpty()) item(key = "am-here") { MachineHeading(stringResource(R.string.app_models_here)) }
+            appModelGroups(store, apps, null, store.options, icons) { app, tag, value -> scope.launch { store.setModel(app, tag, value) } }
+            for (p in peers) {
+                item(key = "am-peer:${p.peer}") { MachineHeading(stringResource(R.string.app_models_on_peer, p.peer)) }
+                // Reading, an older core, unreachable, or nothing to set: a note in place of its apps.
+                if (p.isLoading || p.old || p.error != null || p.apps.isNullOrEmpty()) {
+                    group(key = "am-note:${p.peer}") {
+                        val error = p.error
+                        when {
+                            p.isLoading -> NoteCell(stringResource(R.string.hub_loading))
+                            p.old -> NoteCell(stringResource(R.string.app_models_peer_old, p.peer))
+                            error != null -> NoteCell(stringResource(R.string.app_models_peer_down, p.peer, error), ThemeTokens.danger)
+                            else -> NoteCell(stringResource(R.string.app_models_empty))
                         }
                     }
+                } else {
+                    // The peer's own choices: its calls run there.
+                    appModelGroups(store, store.sorted(p), p.peer, p.options, icons) { app, tag, value -> scope.launch { store.setModel(app, tag, value, p.peer) } }
+                }
+            }
+        }
+    }
+}
+
+/** A machine's name over its apps. */
+@Composable
+private fun MachineHeading(text: String) {
+    Text(
+        text, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = AiTheme.tokens.text,
+        modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 16.dp, bottom = 2.dp),
+    )
+}
+
+/** One card per app: the row for the whole app, then one per purpose, each with its override menu. */
+private fun LazyListScope.appModelGroups(
+    store: AppModelsStore,
+    apps: List<AppModelRows>,
+    peer: String?,
+    options: List<ModelChoice>,
+    icons: IconImages,
+    pick: (String, String?, String?) -> Unit,
+) {
+    for (app in apps) {
+        groupItems(
+            app.rows,
+            key = { "am:${peer ?: ""}:${app.app}:${it.id}" },
+            headerContent = { AppHeader(store.icon(app.app, peer), store.title(app.app, peer), icons) },
+        ) { row ->
+            ModelMenu(
+                options = options,
+                current = row.override,
+                none = stringResource(R.string.hub_no_override),
+                disabled = store.isSaving,
+                pick = { value -> pick(app.app, row.tag, value) },
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(row.tag ?: stringResource(R.string.hub_all_calls), color = AiTheme.tokens.text)
+                    Text(
+                        listOfNotNull(row.model, modelSource(row.source)).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AiTheme.tokens.secondaryText,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }

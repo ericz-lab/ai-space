@@ -230,4 +230,14 @@
     <string name="terminal_closed_shutdown">closed: ai-space stopped</string>
     <string name="terminal_closed">closed</string>
     <string name="terminal_connection_lost">connection lost</string>
+    <string name="chat_machine">Machine</string>
+    <string name="chat_machine_title">The machine the agent runs on</string>
+    <string name="chat_this_machine">This machine</string>
+    <string name="chat_machine_offline">offline</string>
+    <string name="chat_machine_separator">", "</string>
+    <string name="chat_on_machines">On %1$s</string>
+    <string name="chat_machine_offline_note">%1$s is offline. Pick another machine, or wait until it answers again.</string>
+    <string name="models_signed_out">not signed in</string>
+    <string name="models_offline">offline</string>
+    <string name="models_saved_missing">not available</string>
 </resources>

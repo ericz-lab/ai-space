@@ -124,7 +124,14 @@ data class ModelPreferences(
     val baseDefault: String? = null,
     val options: List<Option> = emptyList(),
 ) {
-    data class Option(val value: String, val runtime: String? = null, val tier: String? = null, val model: String? = null) {
+    data class Option(
+        val value: String,
+        val runtime: String? = null,
+        val tier: String? = null,
+        val model: String? = null,
+        /** Why it is shown greyed ([ModelChoices]); null is offered. */
+        val unavailable: String? = null,
+    ) {
         val id: String get() = value
 
         /** "codex · Basic · gpt-6-luna", as the panel's menu writes it. */
@@ -132,7 +139,7 @@ data class ModelPreferences(
 
         companion object : JsonReader<Option> {
             override fun from(o: JSONObject): Option? {
-                return Option(o.str("value") ?: return null, o.str("runtime"), o.str("tier"), o.str("model"))
+                return Option(o.str("value") ?: return null, o.str("runtime"), o.str("tier"), o.str("model"), o.str("unavailable"))
             }
         }
     }

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings → Feedback (src/web/messages.ts feedback.*). -->
+<resources>
+    <string name="feedback_title">Feedback</string>
+    <string name="feedback_enabled">Feedback button on app pages</string>
+    <string name="feedback_enabled_help">A small button in the corner of each app page (Alt+Shift+F): people describe a problem, pick the element, add a picture, and it becomes an ai-todo task. Off until you turn it on.</string>
+    <string name="feedback_mode">What happens to feedback</string>
+    <string name="feedback_mode_auto">Fix it right away</string>
+    <string name="feedback_mode_later">Record it, fix later together</string>
+    <string name="feedback_machine">Fix on</string>
+    <string name="feedback_this_machine">%1$s (this machine)</string>
+    <string name="feedback_model">Fix Engineer model</string>
+    <string name="feedback_model_default">Default chat model</string>
+    <string name="feedback_effort">Effort</string>
+    <string name="feedback_effort_high">High</string>
+    <string name="feedback_effort_xhigh">Extra high</string>
+    <string name="feedback_effort_max">Max</string>
+    <string name="feedback_errors">Attach recent script errors</string>
+    <string name="feedback_shortcut">Shortcut</string>
+    <string name="feedback_trust">The button sends what the person types, the page address, client, screen size, theme, language and picked elements; passwords, tokens and form values are left out. The Fix Engineer changes only that app\'s source and treats page content as data, not instructions. Turn this on only when app pages need sign-in.</string>
+    <string name="feedback_apps">Apps</string>
+    <string name="feedback_apps_default">Show on apps by default</string>
+    <string name="feedback_app_shown">Button shown</string>
+    <string name="feedback_app_hidden">Button hidden</string>
+    <string name="feedback_app_default">Default (%1$s)</string>
+    <string name="feedback_on">On</string>
+    <string name="feedback_off">Off</string>
+    <string name="feedback_apps_help">An app shows the button when the main switch is on and the app is on — by its own setting, or by the default.</string>
+    <string name="feedback_peer_apps">Apps on %1$s</string>
+    <string name="feedback_peer_apps_help">These apps run on %1$s. Their pages ask %1$s, so the choices above and these switches are sent to %1$s each time this page opens or changes. Fix on: the app\'s own machine, unless %1$s also knows the one chosen above.</string>
+    <string name="feedback_peer_down">Can\'t reach %1$s: %2$s</string>
+    <string name="feedback_peer_unsynced">Not sent to %1$s yet: %2$s. It is tried again the next time this page opens.</string>
+    <string name="feedback_peer_none">No apps with a page on %1$s.</string>
+    <string name="feedback_fix_waiting_on">Fix %1$d waiting on %2$s</string>
+    <string name="feedback_recent">Recent feedback</string>
+    <string name="feedback_none">Nothing sent yet.</string>
+    <string name="feedback_todo">task #%1$d</string>
+    <string name="feedback_status_later">Waiting to be fixed</string>
+    <string name="feedback_status_queued">Queued</string>
+    <string name="feedback_status_fixing">Fixing</string>
+    <string name="feedback_status_review">Fixed — to review</string>
+    <string name="feedback_status_failed">Not fixed</string>
+    <string name="feedback_status_skipped">Needs a person</string>
+    <string name="feedback_status_recorded">Recorded</string>
+    <string name="feedback_status_accepted">Accepted</string>
+    <string name="feedback_status_dropped">Dropped in ai-todo</string>
+    <string name="feedback_fix_now">Fix now</string>
+    <string name="feedback_fix_again">Fix again</string>
+    <string name="feedback_fix_waiting">Fix %1$d waiting now</string>
+    <string name="feedback_refresh">Refresh</string>
+    <string name="feedback_started">Sent %1$d to the Fix Engineer.</string>
+</resources>

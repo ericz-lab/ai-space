@@ -49,6 +49,8 @@ import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CropSquare
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Feedback
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Inventory2
@@ -108,6 +110,7 @@ import dev.aispace.android.HubPage
 import dev.aispace.android.R
 import dev.aispace.android.core.Connection
 import dev.aispace.android.core.Lang
+import dev.aispace.android.core.ModelChoices
 import dev.aispace.android.core.ModelPreferences
 import dev.aispace.android.core.PeerStatus
 import dev.aispace.android.core.SpaceBackup
@@ -120,6 +123,7 @@ import dev.aispace.android.live.LoaderStatus
 import dev.aispace.android.live.SettingsLoader
 import dev.aispace.android.ui.common.EntryIcon
 import dev.aispace.android.ui.home.HomeType
+import dev.aispace.android.ui.hub.choiceLabel
 import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.Appearance
 import dev.aispace.android.ui.theme.ThemePreset
@@ -195,6 +199,7 @@ fun SettingsPage(
             appearance(model)
             models(model, space?.models, status, saving, saveError) { value -> scope.launch { settings.setDefaultModel(value) } }
             automation(model)
+            feedback(model)
             usage(model)
             spaceStatus(connection, status, space, loading, peers)
             if (peers.isNotEmpty()) peerRows(peers)
@@ -579,7 +584,14 @@ private fun LazyListScope.models(
 ) {
     sectionTitle("models") { stringResource(R.string.settings_models) }
     if (m != null) defaultModel(m, status, saving, saveError, choose)
-    card("app-models", rows = listOf(pageRow("app-models", R.string.settings_app_models, Icons.Outlined.Memory, HubPage.AppModels, model)), spaced = m != null)
+    card(
+        "app-models",
+        rows = listOf(
+            pageRow("app-models", R.string.settings_app_models, Icons.Outlined.Memory, HubPage.AppModels, model),
+            pageRow("clis", R.string.clis_title, Icons.Outlined.Dns, HubPage.MachineClis, model),
+        ),
+        spaced = m != null,
+    )
 }
 
 private fun LazyListScope.defaultModel(
@@ -605,8 +617,15 @@ private fun LazyListScope.defaultModel(
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val missing = ModelChoices.savedMissing(current, m.options.map { it.value })
+                val savedMissing = stringResource(R.string.models_saved_missing)
+                val shown = when {
+                    current == null -> environment
+                    missing != null -> "$missing ($savedMissing)"
+                    else -> m.options.firstOrNull { it.value == current }?.let { choiceLabel(it.label, it.unavailable) } ?: current
+                }
                 Text(
-                    current?.let { m.label(it) } ?: environment, style = HomeType.body, color = t.secondaryText,
+                    shown, style = HomeType.body, color = t.secondaryText,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                 )
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = t.secondaryText, modifier = Modifier.size(18.dp))
@@ -616,14 +635,14 @@ private fun LazyListScope.defaultModel(
                     open = false
                     choose(null)
                 }
+                ModelChoices.savedMissing(current, m.options.map { it.value })?.let { missing ->
+                    ModelChoice("$missing (${stringResource(R.string.models_saved_missing)})", true, enabled = false) { open = false }
+                }
                 m.options.forEach { option ->
-                    ModelChoice(option.label, current == option.value) {
+                    ModelChoice(choiceLabel(option.label, option.unavailable), current == option.value, enabled = option.unavailable == null) {
                         open = false
                         choose(option.value)
                     }
-                }
-                if (current != null && m.options.none { it.value == current }) {
-                    ModelChoice(current, true) { open = false }
                 }
             }
         }
@@ -649,10 +668,11 @@ private fun LazyListScope.defaultModel(
 }
 
 @Composable
-private fun ModelChoice(label: String, on: Boolean, onClick: () -> Unit) {
+private fun ModelChoice(label: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     DropdownMenuItem(
         text = { Text(label) },
         onClick = onClick,
+        enabled = enabled,
         leadingIcon = if (on) {
             { Icon(Icons.Filled.Check, contentDescription = null) }
         } else {
@@ -678,6 +698,15 @@ private fun LazyListScope.automation(model: AppModel) {
             pageRow("tasks", R.string.settings_tasks, Icons.Outlined.Schedule, HubPage.Tasks, model),
             pageRow("events", R.string.settings_events, Icons.Outlined.Bolt, HubPage.Events, model),
         ),
+    )
+}
+
+/** Feedback: the button on app pages and the Fix Engineer. */
+private fun LazyListScope.feedback(model: AppModel) {
+    section(
+        "feedback",
+        header = { stringResource(R.string.settings_section_feedback) },
+        rows = listOf(pageRow("feedback", R.string.settings_feedback, Icons.Outlined.Feedback, HubPage.Feedback, model)),
     )
 }
 

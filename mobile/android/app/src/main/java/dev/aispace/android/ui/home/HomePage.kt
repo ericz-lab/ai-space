@@ -108,6 +108,7 @@ import androidx.compose.ui.unit.sp
 import dev.aispace.android.AppModel
 import dev.aispace.android.MainTab
 import dev.aispace.android.R
+import dev.aispace.android.core.AgentGroups
 import dev.aispace.android.core.CatalogWidget
 import dev.aispace.android.core.Catalogue
 import dev.aispace.android.core.CatalogueEntry
@@ -290,7 +291,7 @@ private fun LibraryPage(env: HomeEnv, modifier: Modifier) {
 /** Everything the Space has, pinned or not. */
 private fun PageRows.library(catalogue: Catalogue, query: String, columns: Int) {
     val apps = CatalogueSearch.filter(catalogue.apps, query)
-    val agents = CatalogueSearch.filter(catalogue.agents, query)
+    val agents = CatalogueSearch.filter(catalogue.shownAgents, query)
     val widgets = catalogue.widgets.filter { CatalogueSearch.matches(Catalogue.entry(it), query) }
     if (apps.isNotEmpty()) {
         heading(R.string.home_apps, first = true)
@@ -410,7 +411,7 @@ private fun UniversalSearch(env: HomeEnv, fieldTop: Dp, modifier: Modifier, page
  */
 private fun PageRows.screenRows(catalogue: Catalogue, screen: PanelScreen, columns: Int, showsWidgets: Boolean) {
     val byKey = catalogue.entries.associateBy { it.key }
-    val tiles = screen.items.mapNotNull { byKey[it] }.filter { it.kind != EntryKind.widget }
+    val tiles = AgentGroups.canonicalItems(screen.items, catalogue.agentGroups).mapNotNull { byKey[it] }.filter { it.kind != EntryKind.widget }
     // Settings can leave the widget cards off the screens; they stay pinned and stay in the library.
     val widgets = if (showsWidgets) {
         screen.items.mapNotNull { key -> catalogue.widgets.firstOrNull { "widget:${it.id}" == key } }.distinctBy { it.id }
