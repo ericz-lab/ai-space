@@ -12,10 +12,17 @@ final class ChatTextEditor: NSTextView {
     var pasteboard: () -> NSPasteboard = { .general }
     var onFocus: (Bool) -> Void = { _ in }
 
+    /// The height the text needs at `width`, measured on a copy: SwiftUI asks with widths it
+    /// never places the field at (zero, unbounded), and laying out the editor itself at one of
+    /// those left it wrapping at the wrong width, so a long line slid out of the field.
     func contentHeight(for width: CGFloat) -> CGFloat {
-        guard let container = textContainer, let layout = layoutManager else { return 20 }
-        setFrameSize(NSSize(width: width, height: frame.height))
-        container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
+        let source: NSAttributedString = textStorage ?? NSAttributedString(string: string)
+        let storage = NSTextStorage(attributedString: source)
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: width.isFinite ? width : .greatestFiniteMagnitude, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = textContainer?.lineFragmentPadding ?? 0
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
         layout.ensureLayout(for: container)
         // The extra fragment overlaps the used rect for an empty editor; it is not
         // an additional line. Its bottom also accounts for a trailing newline.
@@ -69,6 +76,24 @@ final class ChatTextEditor: NSTextView {
     }
 }
 
+/// Keeps the editor exactly as wide as what the scroll view shows, so text wraps at the field's
+/// edge and the caret is never scrolled sideways out of view.
+final class ChatTextScrollView: NSScrollView {
+    override func tile() {
+        super.tile()
+        guard let editor = documentView as? NSTextView else { return }
+        let width = contentSize.width
+        if width > 0, editor.frame.width != width {
+            editor.setFrameSize(NSSize(width: width, height: editor.frame.height))
+            editor.sizeToFit()
+        }
+        if contentView.bounds.origin.x != 0 {
+            contentView.scroll(to: NSPoint(x: 0, y: contentView.bounds.origin.y))
+            reflectScrolledClipView(contentView)
+        }
+    }
+}
+
 struct ChatTextInput: NSViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
@@ -80,9 +105,10 @@ struct ChatTextInput: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = ChatTextScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
         let editor = ChatTextEditor(frame: .zero)
         editor.isRichText = false
@@ -125,10 +151,9 @@ struct ChatTextInput: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
+        // A size only: the scroll view sets the editor's width once SwiftUI places it.
         guard let width = proposal.width, let editor = nsView.documentView as? ChatTextEditor else { return nil }
-        let height = editor.contentHeight(for: width)
-        editor.setFrameSize(NSSize(width: width, height: height))
-        return CGSize(width: width, height: min(160, height))
+        return CGSize(width: width, height: min(160, editor.contentHeight(for: width)))
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {

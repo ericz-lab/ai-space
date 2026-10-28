@@ -22,6 +22,35 @@ struct ChatTextInputTests {
         #expect(editor.contentHeight(for: 300) == empty)
     }
 
+    @Test func measuringAtAnotherWidthLeavesTheEditorAlone() {
+        let editor = ChatTextEditor(frame: NSRect(x: 0, y: 0, width: 300, height: 20))
+        editor.font = .systemFont(ofSize: 14)
+        editor.textContainer?.lineFragmentPadding = 0
+        editor.string = String(repeating: "输入较长的文字会", count: 6)
+        _ = editor.contentHeight(for: 40)
+        _ = editor.contentHeight(for: .infinity)
+        #expect(editor.frame.width == 300)
+        #expect(editor.contentHeight(for: 40) > editor.contentHeight(for: 300))
+    }
+
+    @Test func theScrollViewKeepsTheEditorAsWideAsTheField() {
+        let scroll = ChatTextScrollView(frame: NSRect(x: 0, y: 0, width: 280, height: 40))
+        scroll.hasHorizontalScroller = false
+        let editor = ChatTextEditor(frame: NSRect(x: 0, y: 0, width: 70, height: 20))
+        editor.isVerticallyResizable = true
+        editor.isHorizontallyResizable = false
+        editor.textContainer?.widthTracksTextView = true
+        scroll.documentView = editor
+        editor.string = String(repeating: "输入较长的文字会", count: 6)
+        scroll.contentView.scroll(to: NSPoint(x: 120, y: 0))
+        scroll.tile()
+        #expect(editor.frame.width == scroll.contentSize.width)
+        #expect(scroll.contentView.bounds.origin.x == 0)
+        scroll.setFrameSize(NSSize(width: 200, height: 40))
+        scroll.tile()
+        #expect(editor.frame.width == scroll.contentSize.width)
+    }
+
     @Test func screenshotPasteReachesTheComposerAndLeavesTextAlone() {
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
