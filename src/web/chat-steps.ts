@@ -4,6 +4,8 @@
  * `text` what it wants to do, `output` why) and a message the person added while it ran. An
  * approval with `questions` is a question the agent asks; `answers` is what the person chose.
  */
+import { monitorInput, toolErrorText } from "../space/runtimes/tool-text.ts";
+
 export type ChatQuestion = { id: string; header: string; question: string; options: { label: string; description: string }[]; multiSelect: boolean };
 export type ChatStep = {
   id: string;
@@ -65,14 +67,14 @@ export class ChatSteps {
       if (event.type === "assistant" && block.type === "tool_use" && block.id) {
         const id = `tool:${block.id}`;
         const input = block.input && typeof block.input === "object" ? block.input as Record<string, unknown> : {};
-        const hint = detail(input.command ?? input.file_path ?? input.path ?? input.query ?? input.url ?? block.input);
+        const hint = monitorInput(block.name ?? "", input) ?? detail(input.command ?? input.file_path ?? input.path ?? input.query ?? input.url ?? block.input);
         const current = this.steps.find((s) => s.id === id);
         if (current) { if (hint) current.text = hint; }
         else this.steps.push({ id, kind: "tool", name: block.name ?? "tool", text: hint, output: "", state: "running" });
       }
       if (event.type === "user" && block.type === "tool_result") {
         const current = this.steps.find((s) => s.id === `tool:${block.tool_use_id}`);
-        if (current) { current.output = detail(block.content); current.state = block.is_error ? "failed" : "completed"; }
+        if (current) { current.output = block.is_error ? toolErrorText(detail(block.content)) : detail(block.content); current.state = block.is_error ? "failed" : "completed"; }
       }
     }
     if (event.type === "done") this.finish();
@@ -95,7 +97,7 @@ export const historySteps = (steps: HistoryStep[]): ChatStep[] => steps.map((ste
   : { id: `history:${i}`, kind: "tool", name: step.name, text: step.input, output: step.output, state: step.failed ? "failed" : "completed" });
 
 /** How a tool row is drawn: its icon, its localized title, and the one-line summary beside it. */
-export type ToolVariant = "bash" | "read" | "write" | "edit" | "search" | "web" | "code" | "task" | "plan" | "other";
+export type ToolVariant = "bash" | "read" | "write" | "edit" | "search" | "web" | "code" | "task" | "plan" | "monitor" | "other";
 const VARIANTS: [RegExp, ToolVariant][] = [
   [/^(bash|pwsh|shell|exec|exec_command|command|command_execution|local_shell|run_command|terminal)$/i, "bash"],
   [/^(read|read_file|read_image|view|notebookread|cat)$/i, "read"],
@@ -106,6 +108,7 @@ const VARIANTS: [RegExp, ToolVariant][] = [
   [/^(run_code|code)$/i, "code"],
   [/^(task|agent|subagent|spawn_agent|send_message|wait_agent)$/i, "task"],
   [/^(todowrite|todo_write|update_plan)$/i, "plan"],
+  [/^monitor$/i, "monitor"],
 ];
 export const toolVariant = (name: string): ToolVariant => {
   const bare = name.replace(/^mcp__.*__/, "");

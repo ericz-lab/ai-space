@@ -13,6 +13,7 @@ const GLYPHS: Record<ToolVariant | "chevron" | "shield" | "question" | "history"
   code: <><path d="M6.3 1.5L4.5 14.5" /><path d="M11.5 1.5L9.7 14.5" /><path d="M2.4 5.5H14.1" /><path d="M1.9 10.5H13.6" /></>,
   task: <path d="M8 1.8L9.5 6.5L14.2 8L9.5 9.5L8 14.2L6.5 9.5L1.8 8L6.5 6.5Z" />,
   plan: <><path d="M5.5 4H13.5" /><path d="M5.5 8H13.5" /><path d="M5.5 12H13.5" /><circle cx="2.8" cy="4" r=".6" /><circle cx="2.8" cy="8" r=".6" /><circle cx="2.8" cy="12" r=".6" /></>,
+  monitor: <><path d="M1.5 8H4.4L6 4.5L8.6 11.5L10.4 8H14.5" /></>,
   other: <><circle cx="8" cy="8" r="1.8" /><path d="M8 1.5V4.2M8 11.8V14.5M1.5 8H4.2M11.8 8H14.5M3.4 3.4L5.3 5.3M10.7 10.7L12.6 12.6M3.4 12.6L5.3 10.7M10.7 5.3L12.6 3.4" /></>,
   chevron: <path d="M4 6L7.3 9.3C7.7 9.7 8.3 9.7 8.7 9.3L12 6" />,
   history: <><path d="M2.6 8A5.4 5.4 0 1 0 4.2 4.2" /><path d="M2.4 2.4V4.6H4.6" /><path d="M8 5V8L10.2 9.4" /></>,
