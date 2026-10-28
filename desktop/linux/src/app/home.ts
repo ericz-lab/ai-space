@@ -2,11 +2,12 @@ import Adw from "gi://Adw?version=1";
 import Gdk from "gi://Gdk?version=4.0";
 import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
-import { type Entry, type Widget, allEntries, entryKey, fold, opensFirst, pageUrl, panelScreens, pickText, search, widgetEntry } from "../core/catalogue.ts";
+import { canonicalItems } from "../core/agents.ts";
+import { type Entry, type Widget, allEntries, entriesByKey, entryKey, fold, opensFirst, pageUrl, panelScreens, pickText, search, widgetEntry } from "../core/catalogue.ts";
 import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
 import { type BuiltinName, HOME, type Screen, move, newScreen, pin, removeScreen, rename, screenTitle, unpin } from "../core/screens.ts";
-import { lang, prefs, t } from "./env.ts";
+import { lang, prefs, t, tw } from "./env.ts";
 import { iconWidget } from "./icons.ts";
 import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
@@ -159,7 +160,15 @@ export class HomePage {
   show(space: Space | undefined): void {
     if (space !== this.space) this.query = "";
     this.space = space;
-    if (space?.catalogue) this.store.seed(space.conn.id, panelScreens(space.catalogue));
+    if (space?.catalogue) {
+      this.store.seed(space.conn.id, panelScreens(space.catalogue));
+      // A screen pinned with one machine's variant of an agent shows the agent's single tile (agents.ts).
+      const groups = space.catalogue.agentGroups;
+      const screens = this.store.screens(space.conn.id);
+      if (groups.length && screens.some((sc) => canonicalItems(sc.items, groups).join("\n") !== sc.items.join("\n"))) {
+        this.store.edit(space.conn.id, (all) => all.map((sc) => ({ ...sc, items: canonicalItems(sc.items, groups) })));
+      }
+    }
     this.render();
   }
 
@@ -416,7 +425,7 @@ export class HomePage {
     const screen = screens[index];
     if (!screen) return;
     const c = space.catalogue!;
-    const byKey = new Map(allEntries(c).map((e) => [entryKey(e), e]));
+    const byKey = entriesByKey(c);
     const tiles: Tile[] = [];
     const widgets: Widget[] = [];
     for (const key of screen.items) {
@@ -490,7 +499,8 @@ export class HomePage {
     const title = pickText(e.title, e.i18n, "title", lang);
     const detail = pickText(e.detail ?? "", e.i18n, "description", lang);
     // The library's tiles tell what they are; a screen's show none, as on the Mac.
-    const tooltip = screen ? undefined : [title, detail, e.peer ? `@${e.peer}` : ""].filter(Boolean).join("\n");
+    const where = e.machines ? tw("agents.onMachines", { machines: e.machines.map((m) => m || tw("agents.thisMachine")).join(lang === "zh" ? "、" : ", ") }) : e.peer ? `@${e.peer}` : "";
+    const tooltip = screen ? undefined : [title, detail, where].filter(Boolean).join("\n");
     const dot = e.reach === "down" || e.reach === "paused" || e.reach === "peer-offline" ? e.reach : undefined;
     const button = this.tileButton(iconWidget(e.icon, 56, space.client, e.kind === "agent" ? "avatar-default-symbolic" : "application-x-executable-symbolic"), title, tooltip, dot);
     button.connect("clicked", () => this.actions.open(space, e));
@@ -669,7 +679,7 @@ export class HomePage {
       const screens = this.store.screens(conn);
       const screen = screens.find((s) => s.id === id);
       if (!c || !screen) return;
-      const byKey = new Map(allEntries(c).map((e) => [entryKey(e), e]));
+      const byKey = entriesByKey(c);
       const shownKeys = screen.items.filter((k) => byKey.has(k) || BUILTINS.some((b) => k === `builtin:${b.name}`));
       const tiles = shownKeys.filter((k) => byKey.get(k)?.kind !== "widget");
       const widgets = shownKeys.filter((k) => byKey.get(k)?.kind === "widget");
