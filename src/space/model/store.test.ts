@@ -152,7 +152,7 @@ describe("GPT API-equivalent costs", () => {
   });
 
   test.each([
-    ["gpt-6-astra", 0.086], ["gpt-6-sol", 0.0172], ["gpt-6-luna", 0.00086],
+    ["gpt-6-astra", 0.086], ["gpt-6.1-sol", 0.0171], ["gpt-6.1-terra", 0.00855], ["gpt-6-sol", 0.0172], ["gpt-6-luna", 0.00086],
     ["gpt-5.6-sol", 0.0344], ["gpt-5.6-terra", 0.0192], ["gpt-5.6-luna", 0.00192],
   ])("uses the rate for %s", (model, expected) => {
     const c = store.add(call({ model, costUsd: undefined, usage: { inputTokens: 1000, cacheWriteTokens: 2000, cacheReadTokens: 1000, outputTokens: 1000 } }));

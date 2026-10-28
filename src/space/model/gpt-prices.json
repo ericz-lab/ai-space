@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "asOf": "2026-09-30",
+  "asOf": "2026-10-28",
   "currency": "USD",
   "unitTokens": 1000000,
   "source": "https://developers.openai.com/api/docs/pricing",
@@ -20,8 +20,20 @@
     "gpt-6.1-sol": {
       "input": 2,
       "cacheWrite": 2.5,
-      "cacheRead": 0.2,
+      "cacheRead": 0.1,
       "output": 10,
+      "longContext": {
+        "threshold": 272000,
+        "inputMultiplier": 2,
+        "outputMultiplier": 1.5
+      },
+      "fastMultiplier": 2
+    },
+    "gpt-6.1-terra": {
+      "input": 1,
+      "cacheWrite": 1.25,
+      "cacheRead": 0.05,
+      "output": 5,
       "longContext": {
         "threshold": 272000,
         "inputMultiplier": 2,
