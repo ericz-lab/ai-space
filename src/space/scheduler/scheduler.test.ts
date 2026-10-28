@@ -38,6 +38,18 @@ const mt = (name: string, over: Partial<Manifest["tasks"][number]> = {}): Manife
 });
 
 describe("manifest sync", () => {
+  test("a run gets the app's service port, and loses it when the service goes", async () => {
+    const ports: (number | undefined)[] = [];
+    const h = harness({ runner: async (_task, ctx) => { ports.push(ctx.port); return { status: "ok" }; } });
+    h.s.syncManifest({ ...h.manifest([mt("t")]), service: { command: "bun start", port: 8080 } });
+    h.s.runNow(h.store.findTask("demo", "t")!.id);
+    await h.s.idle();
+    h.s.syncManifest(h.manifest([mt("t")]));
+    h.s.runNow(h.store.findTask("demo", "t")!.id);
+    await h.s.idle();
+    expect(ports).toEqual([8080, undefined]);
+  });
+
   test("creates, updates, orphans and revives tasks idempotently", () => {
     const h = harness();
     let r = h.s.syncManifest(h.manifest([mt("a"), mt("b")]));

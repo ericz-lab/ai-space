@@ -133,6 +133,21 @@ describe("http target", () => {
     expect(r.status).toBe("error");
     expect(r.error).toMatch(/NOPE_MISSING/);
   });
+  test("${PORT} resolves to the app's service port, other placeholders from its .env and space.env", async () => {
+    delete process.env.PORT;
+    const r = await runTarget(
+      { kind: "http", method: "POST", url: "http://127.0.0.1:${PORT}/ok", headers: { authorization: "Bearer ${APP_TOKEN} ${GREETING}" } },
+      { ...ctx(), port: server.port, env: { APP_TOKEN: "from-space-env" } },
+    );
+    expect(r.status).toBe("ok");
+    expect(JSON.parse(r.output!).auth).toBe("Bearer from-space-env from dotenv");
+  });
+
+  test("without a service port ${PORT} is still a missing variable", async () => {
+    delete process.env.PORT;
+    const r = await runTarget({ kind: "http", method: "GET", url: "http://127.0.0.1:${PORT}/ok" }, ctx());
+    expect(r).toMatchObject({ status: "error", error: "missing environment variable PORT" });
+  });
 });
 
 describe("command target", () => {
@@ -148,6 +163,11 @@ describe("command target", () => {
     const r = await runTarget({ kind: "command", command: "${T_ECHO} ${T_MISSING:-fallback}" }, ctx());
     expect(r.status).toBe("ok");
     expect(r.output).toBe("fallback");
+  });
+
+  test("a command task sees PORT and resolves ${PORT} from the app's service", async () => {
+    const r = await runTarget({ kind: "command", command: 'printf "%s/${PORT}" "$PORT"' }, { ...ctx(), port: 8123 });
+    expect(r.output).toBe("8123/8123");
   });
 
   test("non-zero exit is an error with stderr captured", async () => {
