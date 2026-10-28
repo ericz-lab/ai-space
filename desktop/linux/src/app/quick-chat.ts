@@ -207,7 +207,6 @@ export class QuickChat {
       this.view?.redraw();
     });
     this.permissionMenu = new Gtk.Popover({ child: this.permissionList, has_arrow: false });
-    this.permissionMenu.connect("show", () => this.renderPermission());
     this.permission = new Gtk.MenuButton({ popover: this.permissionMenu, valign: Gtk.Align.CENTER });
     this.permission.add_css_class("qc-round");
     header.append(this.permission);
@@ -217,13 +216,25 @@ export class QuickChat {
     });
     header.append(this.fresh);
     header.append(this.roundButton("window-close-symbolic", `${t("close")} (Esc)`, () => this.hide()));
-    // Dragging the header moves the panel, as dragging a title bar does.
+    // Dragging the header's empty part moves the panel, as dragging a title bar does. Only once the
+    // pointer has moved: a move that starts on the press takes the click from the header's buttons.
     const drag = new Gtk.GestureDrag();
-    drag.connect("drag-begin", (g: any, x: number, y: number) => {
+    let start: { x: number; y: number } | undefined;
+    drag.connect("drag-begin", (_g: unknown, x: number, y: number) => {
+      const hit = header.pick(x, y, Gtk.PickFlags.DEFAULT);
+      let onButton = false;
+      for (let w = hit; w && w !== header; w = w.get_parent()) if (w instanceof Gtk.Button || w instanceof Gtk.MenuButton) onButton = true;
+      start = onButton ? undefined : { x, y };
+    });
+    drag.connect("drag-update", (g: any, dx: number, dy: number) => {
+      if (!start || Math.hypot(dx, dy) < 4) return;
       const surface = this.window.get_surface();
       const device = g.get_device();
-      if (surface && device) surface.begin_move(device, 1, x, y, g.get_current_event_time());
+      const at = start;
+      start = undefined;
+      if (surface && device) surface.begin_move(device, 1, at.x + dx, at.y + dy, g.get_current_event_time());
     });
+    drag.connect("drag-end", () => (start = undefined));
     header.add_controller(drag);
     panel.append(header);
     panel.append(this.view.widget);
@@ -331,8 +342,12 @@ export class QuickChat {
   }
 
   /** The permission button: a lock (ask first), a pencil (edit files) or an orange open lock (all). */
+  private shownPermission: Permission | undefined;
   private renderPermission(): void {
     const current = (PERMISSIONS.includes(prefs.permission as Permission) ? prefs.permission : "") as Permission;
+    // Drawn again only when it changed: replacing the button's content would close its open list.
+    if (current === this.shownPermission) return;
+    this.shownPermission = current;
     this.permission.set_child(new Gtk.Image({ icon_name: PERMISSION_ICON[current], pixel_size: 10 }));
     if (current === "bypassPermissions") this.permission.add_css_class("qc-open");
     else this.permission.remove_css_class("qc-open");
