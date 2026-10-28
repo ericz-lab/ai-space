@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chatArgs, cliArgs, cliEnv, createClaudeCode, filesNote, parseCliOutput, readStreamLine, remoteCommand } from "./claude-code.ts";
+import { chatArgs, cliArgs, cliEnv, createClaudeCode, filesNote, parseCliOutput, readStreamLine, remoteCommand, reportedError } from "./claude-code.ts";
 import { fakeModelBin } from "./testing.ts";
 import type { ClaudeCodeSpec, CompleteInput } from "./types.ts";
 
@@ -148,6 +148,17 @@ describe("parseCliOutput", () => {
   });
 });
 
+describe("reportedError", () => {
+  test("the reason of an is_error envelope, nothing for anything else", () => {
+    expect(reportedError(JSON.stringify({ type: "result", is_error: true, result: " Not logged in " }))).toBe("Not logged in");
+    expect(reportedError(JSON.stringify({ type: "result", is_error: true, result: "", subtype: "error_max_turns" }))).toBe("error_max_turns");
+    expect(reportedError(JSON.stringify({ type: "result", is_error: true }))).toBeUndefined();
+    expect(reportedError(JSON.stringify({ type: "result", is_error: false, result: "fine" }))).toBeUndefined();
+    expect(reportedError('{"type":"system"}\n{"type":"result","is_error":true,"result":"x"}')).toBeUndefined();
+    expect(reportedError("plain text")).toBeUndefined();
+  });
+});
+
 describe("complete, locally", () => {
   const runtime = createClaudeCode(spec());
 
@@ -202,6 +213,19 @@ describe("complete, locally", () => {
     }
   });
 
+  test("a run the CLI refuses and exits 1 on gives its reason, not the raw output", async () => {
+    const reason = "Failed to authenticate: OAuth session expired and could not be refreshed";
+    process.env.FAKE_MODEL_MODE = "refused";
+    try {
+      expect(await runtime.complete(input())).toEqual({ ok: false, error: reason, backend: "local" });
+      const deltas: string[] = [];
+      expect(await runtime.complete(input(), undefined, (t) => deltas.push(t))).toEqual({ ok: false, error: reason, backend: "local" });
+      expect(deltas).toEqual([]);
+    } finally {
+      delete process.env.FAKE_MODEL_MODE;
+    }
+  });
+
   test("a missing binary fails without throwing", async () => {
     const r = await createClaudeCode(spec({ bin: ["/nonexistent/claude-bin"] })).complete(input());
     expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/could not start|setsid: failed to execute/) });
@@ -237,6 +261,27 @@ describe("agent runs", () => {
     } finally {
       delete process.env.FAKE_MODEL_MODE;
     }
+  });
+
+  test("a refused run gives the CLI's reason and keeps the output", async () => {
+    process.env.FAKE_MODEL_MODE = "refused";
+    try {
+      const r = await createClaudeCode(spec()).runAgent({ prompt: "x", cwd: process.cwd(), env: process.env, signal: new AbortController().signal });
+      expect(r).toMatchObject({ ok: false, error: "Failed to authenticate: OAuth session expired and could not be refreshed", output: expect.stringContaining('"is_error":true'), timedOut: false });
+    } finally {
+      delete process.env.FAKE_MODEL_MODE;
+    }
+  });
+});
+
+describe("chat", () => {
+  test("a refused turn finishes with the CLI's reason; the result line is still forwarded", async () => {
+    const lines: string[] = [];
+    const error = await new Promise<string | null>((resolve) => {
+      createClaudeCode(spec()).chat({ message: "hi", cwd: process.cwd(), env: { ...process.env, FAKE_MODEL_MODE: "refused" } }, { onEvent: (l) => lines.push(l), onFinish: resolve });
+    });
+    expect(error).toBe("Failed to authenticate: OAuth session expired and could not be refreshed");
+    expect(lines.at(-1)).toContain('"type":"result"');
   });
 });
 
