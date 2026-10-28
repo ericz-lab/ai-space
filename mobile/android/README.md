@@ -6,7 +6,9 @@ Status: builds with Gradle, 172 JVM tests pass, and runs on an Android 16 emulat
 
 ## What it does
 
-The same as the iPhone client, area by area (see `mobile/ios/README.md` → What it does): saved Spaces; Home (the library with one search), this phone's screens copied from the panel once and kept on the phone, Settings, swiped side by side, opening on the first screen, which carries universal search (the Space's resolver, calculations and conversions at once, action forms and runs, asking an agent, and streamed voice input); widget state cards; reach and peer states with the last catalogue and its age; app pages in retained tabs with one draggable More button; the host list that keeps other sites in the browser; the Space's pages (inbox, chat with the agent's work in order, questions to answer and attached images, tasks, model and app usage, app models, events, apps and connections); the terminal; the web panel; `aispace://` links; and the first four apps of the home screen as launcher shortcuts that carry their Space.
+The same as the iPhone client, area by area (see `mobile/ios/README.md` → What it does): saved Spaces; Home (the library with one search), this phone's screens copied from the panel once and kept on the phone, Settings, swiped side by side, opening on the first screen, which carries universal search (the Space's resolver, calculations and conversions at once, action forms and runs, asking an agent, and streamed voice input); widget state cards; reach and peer states with the last catalogue and its age; app pages in retained tabs with one draggable More button; the host list that keeps other sites in the browser; the Space's pages (inbox, chat with the agent's work in order, questions to answer and attached images, tasks, model and app usage, app models, events, apps and connections, feedback settings, the agent CLIs by machine); the terminal; the web panel; `aispace://` links; and the first four apps of the home screen as launcher shortcuts that carry their Space.
+
+Across machines, as the web panel does: an agent deployed on several machines shows once in the library, search, the screens and the agents list (`core/AgentGroups.kt`: the local variant, else the first peer that answers), and the chat head has a Machine menu that switches to another machine's variant, each with its own conversation; an offline machine is shown and cannot be sent to, and the choice is remembered per agent on the phone. Model usage names the Space, shows `machine:model`, a hub's peers' calls as `<peer>/<app>` and the peers that are missing; App models lists each peer's apps under its name with the peer's own choices; every model picker greys a choice that is not signed in or offline and keeps a saved choice that is no longer offered, marked.
 
 Where Android differs:
 
@@ -31,7 +33,8 @@ mobile/android/
     AISpaceApplication.kt, MainActivity.kt, DebugLaunch.kt
     core/                pure Kotlin, no android.*: iOS Core/ and the Mac client's shared Foundation files
                          (Connection, ConnectionStore, SpaceCheck, SpaceApi on OkHttp, models, ChatStream,
-                         DesktopRules, NavigationPolicy), HubModels, TerminalModels, widget blocks, screens
+                         DesktopRules, NavigationPolicy), HubModels, TerminalModels, widget blocks, screens,
+                         AgentGroups (one agent across machines), Feedback, MachineInventory (CLIs by machine)
     live/                CatalogueLoader, SettingsLoader, IconStore (+ SVG via an offscreen WebView),
                          BackdropStore, the stores of the Space's pages, ChatStore, TerminalStore and
                          TerminalConnection, AppPaths
@@ -71,6 +74,8 @@ On the emulator (Pixel 7, API 36), by screenshots from the debug launch switches
 - Against a scratch Space (`SPACE_TERMINAL_ENABLED=1`) with a stand-in app: connecting, the first screen, the library and its search (Chinese too), Settings, every Space page, the web panel (Ready, dock hidden, cookies in the Space's own profile), the terminal (a real shell, colours, typing), the widget card blocks, `aispace://open`, the More menu with its full-screen scrim, links inside an app and out to the browser, retained tabs keeping their draft, dark mode, a theme's artwork from its disk cache, the Chinese locale.
 - Against a scratch Space in dark and light mode with Orbit and Northern Lights: Settings in the panel's sections on the translucent sheet, the blur staying put while the page is swiped; the agent chat on the sheet with its head, a turn sent and streamed, its two calls left unfolded when it ended, the same session reopened from History with the calls folded, opened, and one call's input and output.
 - Against a real Space behind Cloudflare Access: signing in through Access in the web panel; the catalogue, icons and widget cards over native calls with the profile's cookie; the same after a force-stop (the cookie survives the process); an app on another subdomain opening signed in; the terminal socket through Access to a peer's shell; the chat agents, their earlier chats and a long Markdown answer; swiping between screens, a long press on an app, landscape.
+
+Agents across machines and the machine menu, Settings → Feedback, peers in Model usage and App models, greyed model choices and the CLIs by machine were checked by JVM tests of their `core/` rules and a full compile only, not yet on the emulator or against a hub with peers.
 
 Not checked yet: a question or approval card in a live turn; the sheet before Android 12; signing out and in again; dragging the More button; TalkBack; downloads and file inputs; Google as an identity provider inside WebView (refused in an embedded view on iOS); a phone without WebView's multi-profile feature.
 
