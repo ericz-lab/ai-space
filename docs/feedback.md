@@ -39,7 +39,7 @@ What goes with the person's words (`context.ts` cleans it on the server too, so 
 | --- | --- |
 | app | named by the router (`X-Space-App`), never by the page |
 | url, path, title | the page; credentials and query or fragment parameters whose names look secret (`token`, `key`, `session`, `code`, ...) are replaced by `redacted` |
-| client | from the `User-Agent`: desktop, phone or tablet browser (with browser and system), or the Mac (`AISpaceDesktop/`), iPhone or Android (`AISpaceMobile/`) or Linux (`AISpaceLinux/`) client |
+| client | from the `User-Agent`: desktop, phone or tablet browser (with browser and system), or the Mac (`AISpaceDesktop/`), iPhone or Android (`AISpaceMobile/`), Linux (`AISpaceLinux/`) or Windows (`AISpaceWindows/`) client |
 | viewport, touch, theme, language, time zone | as the page sees them |
 | picked elements | selector, tag, a little text, cleaned HTML (no `<script>`/`<style>`, no `on*` handlers, no `value`, no secret-looking attributes), position |
 | script errors | the last ten `error` / `unhandledrejection` messages since the page loaded; Settings can turn this off |

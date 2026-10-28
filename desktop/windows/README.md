@@ -64,7 +64,7 @@ dotnet build App                # the app (on Linux/macOS too)
 dotnet publish App -c Release -r win-x64 --self-contained false -o out
 ```
 
-From the repository root: `bun run windows:test`, `bun run windows:build`. CI runs both on Linux.
+From the repository root: `bun run windows:ball:test`, `bun run windows:ball:build`. CI runs both on Linux (the "Windows floating ball" job).
 `out\AISpace.exe` is the app; it needs the .NET 8 Desktop Runtime (or publish with
 `--self-contained true`). To start it with Windows, put a shortcut to it in
 `shell:startup`.

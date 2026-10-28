@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- 17763 (Windows 10 1809) is the oldest system with the notification APIs the toasts use. -->
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>AISpace</AssemblyName>
+    <RootNamespace>AISpace</RootNamespace>
+    <ApplicationIcon>Assets\AISpace.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- LibraryImport generates the Win32 calls (Shell/Native.cs). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- WPF0001: the Fluent theme (Application.ThemeMode) is still marked experimental.
+         WFO0003: the WinForms advice to set DPI in code; this is a WPF app, whose manifest sets it. -->
+    <NoWarn>$(NoWarn);WPF0001;WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3537.50" />
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AISpace.Core\AISpace.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\AISpace.ico" />
+  </ItemGroup>
+
+  <!-- WPF and WinForms both define Application, Button and the like; the app means WPF's, and
+       names WinForms (the notification area icon) as Forms. -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Using Include="System.Windows.Forms" Alias="Forms" />
+    <Using Include="System.IO" />
+    <Using Include="System.IO.Path" Alias="Path" />
+  </ItemGroup>
+
+</Project>

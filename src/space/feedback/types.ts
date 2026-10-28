@@ -56,7 +56,7 @@ export type Status = (typeof STATUSES)[number];
 /** States a row leaves when its task is closed in ai-todo: not while a fix is queued or running. */
 export const TODO_SYNCED: readonly Status[] = ["later", "review", "failed", "skipped"];
 
-export type ClientKind = "desktop-browser" | "phone-browser" | "tablet-browser" | "mac-client" | "iphone-client" | "android-client" | "linux-client";
+export type ClientKind = "desktop-browser" | "phone-browser" | "tablet-browser" | "mac-client" | "iphone-client" | "android-client" | "linux-client" | "windows-client";
 export type ClientInfo = { kind: ClientKind; os: string; browser: string; version?: string };
 
 /** A page element the person picked, as the script describes it. */

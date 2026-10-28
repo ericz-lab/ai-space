@@ -19,6 +19,8 @@ node_modules/
 dist/
 build/
 __pycache__/
+desktop/windows/**/bin/
+desktop/windows/**/obj/
 *.pyc
 .venv/
 

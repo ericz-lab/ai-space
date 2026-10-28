@@ -1,10 +1,11 @@
-# The Local edition on a Mac and on Linux
+# The Local edition on a Mac, on Linux and on Windows
 
 Status: the service side is implemented (`src/space/local.ts`, `space local`); the Mac app's
 first-run flow and Settings use it ([macos-desktop.md](macos-desktop.md#managed-local-installation)),
-and so does the Linux app ([linux-desktop.md](linux-desktop.md), [On Linux](#on-linux)). The
-sections below describe the Mac; on Linux the same commands drive a systemd user service instead
-of a LaunchAgent.
+and so do the Linux app ([linux-desktop.md](linux-desktop.md), [On Linux](#on-linux)) and the
+Windows app ([windows-desktop.md](windows-desktop.md), [On Windows](#on-windows)). The sections
+below describe the Mac; on Linux the same commands drive a systemd user service instead of a
+LaunchAgent, and on Windows that Linux service runs inside WSL 2.
 What the edition is and why: [editions.md](editions.md#ai-space-local). How it is built:
 [release.md](release.md#local-edition).
 
@@ -132,6 +133,33 @@ web data in with it exactly as on the Mac (`POST /api/auth/device/session`). A S
 service's address without the app's mark (added by hand, from the welcome screen's suggestion, or
 before the setup) gets the mark when the app sees that the workspace is its own, so it signs in with
 the device credential instead of asking for an owner password the Local edition never sets.
+
+## On Windows
+
+The Windows app ([windows-desktop.md](windows-desktop.md#this-computer)) runs the Linux edition's
+service inside a WSL 2 distribution: everything in [On Linux](#on-linux) holds there, in the
+distribution's own home. The app carries the Linux release as `local\bundle.tar.gz` (with its
+`RELEASE.json`) beside `AISpace.exe`, unpacks it in the distribution under
+`~/.local/share/ai-space/windows/bundle/<version>-<commit>/` (once per version, older ones
+removed), and runs `space local … --json` there with its Bun through `wsl.exe`, with a plain
+environment (no Windows PATH, so a Windows program never passes for an agent CLI). Scripts reach
+the distribution on standard input, never through Windows' command-line quoting.
+
+| Where | What | Who removes it |
+| --- | --- | --- |
+| `%LOCALAPPDATA%\Programs\AI Space\local\` | the release the app carries | uninstalling the app |
+| `~/.local/share/ai-space/windows/bundle/` (in the distribution) | it unpacked, what `space local` runs from | Remove background service leaves it; the next setup reuses it |
+| `~/.local/share/ai-space/local/…`, `~/.config/systemd/user/ai-space-local.service`, `~/.ai-space/` (in the distribution) | as [On Linux](#on-linux) | as on Linux |
+| `/etc/wsl.conf` (in the distribution) | `systemd=true` under `[boot]`, the rest kept | never by the app |
+| Credential Manager › `ai-space/local-device/<distribution><workspace>` | the device credential | a fresh setup replaces it; a sign-in the Space refuses removes it |
+
+Two things WSL needs that Linux does not. systemd is off in some distributions: the app turns it on
+in `/etc/wsl.conf`, restarts the distribution once (`wsl --terminate`) and checks that it came up,
+and turns on lingering (`loginctl enable-linger`) so the user service runs with no terminal open.
+And WSL stops a distribution once no Windows process uses it: the app starts one hidden `wsl.exe`
+that sleeps in it, at sign-in and after a setup, and leaves it running when the app quits; its
+process id is kept in `%LOCALAPPDATA%\ai-space\wsl-keepalive.pid`. The service listens on the
+distribution's loopback, which WSL forwards to Windows' `127.0.0.1`.
 
 ## What the service needs from the Mac
 
