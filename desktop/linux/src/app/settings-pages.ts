@@ -26,6 +26,8 @@ import {
   byApp,
   callTokens,
   catalogueApps,
+  fallbackNote,
+  traceLines,
   dateTime,
   dayKey,
   decodeAppModels,
@@ -468,8 +470,10 @@ export function usagePage(ctx: Ctx, space: Space): any {
       const group = new Adw.PreferencesGroup({ title: tw("usage.recent") });
       for (const c of calls) {
         const tokens = callTokens(c);
-        const tip = c.error || `${c.app}/${c.tag} · ${c.backend}${c.modelSource ? ` · ${sourceText(c.modelSource)}` : ""}`;
-        const r = row(modelOn(c), [`${label(c.app)} · ${c.tag}`, relTime(c.startedAt, lang), c.error ?? ""].filter(Boolean).join(" · "), tip);
+        // A fallback says from which model in the subtitle; the trace, when there is one, is the tooltip's tail.
+        const fell = fallbackNote(c, lang);
+        const tip = [c.error || `${c.app}/${c.tag} · ${c.backend}${c.modelSource ? ` · ${sourceText(c.modelSource)}` : ""}`, ...(c.trace ? ["", tw("usage.trace"), ...traceLines(c.trace, lang)] : [])].join("\n");
+        const r = row(modelOn(c), [`${label(c.app)} · ${c.tag}`, fell ? `↪ ${fell}` : "", relTime(c.startedAt, lang), c.error ?? ""].filter(Boolean).join(" · "), tip);
         r.add_prefix(badge(c.status === "ok" ? "ok" : "down"));
         r.add_suffix(new Gtk.Label({ label: [tokens !== undefined ? fmtTokens(tokens) : "", c.costUsd !== undefined ? fmtCost(c.costUsd) : "", fmtDuration(c.durationMs, lang)].filter(Boolean).join(" · "), css_classes: ["caption", "dim-label", "numeric"] }));
         group.add(r);

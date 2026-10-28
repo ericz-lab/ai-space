@@ -18,7 +18,7 @@ ai-space starts an AI runtime in three places: the model service answers an app'
 
 A fourth, optional operation, `image`, makes pictures for the model service's `POST /api/model/image` ([model.md](model.md#images)); only `codex-cli` has it.
 
-An adapter declares which of the three it supports (`capabilities`). A caller asking for one it lacks gets a clear error (a 400 from the model API, a 501 from chat, a failed run from the scheduler), never a silent fallback to another runtime.
+An adapter declares which of the three it supports (`capabilities`). A caller asking for one it lacks gets a clear error (a 400 from the model API, a 501 from chat, a failed run from the scheduler), never a silent fallback to another runtime. The one way an answer moves to another runtime is a [fallback list](model-machines.md#fallback) the operator wrote, for account and link failures only, and the ledger row says so.
 
 Every operation reports what the runtime said about the model call, token counts and cost when it gave them, and the model service or the scheduler hook writes the ledger row (`runtime`, `backend`, `model`, usage). Nothing is estimated: a runtime that reports no usage leaves the row without figures.
 
@@ -57,7 +57,11 @@ runtimes:
     provider: deepseek-official  # optional: model route; use deepseek-account for the signed-in account
 machines:                        # optional: ssh logins that answer as <machine>:<runtime>/<model>
   bare: { ssh: bare-alias }      # (docs/model-machines.md); a runtime's own ssh: still works, with a boot warning
+fallback:                        # optional: where a call goes when its account or link fails (docs/model-machines.md#fallback)
+  claude/basic: [bare:claude/basic, dsh/basic]   # [machine:]runtime/tier, never a higher tier than the key's
 ```
+
+Every runtime takes `models:`, which pins a tier to a concrete model (`models: { basic: haiku }`); the pins win over the runtime's own defaults and, for Codex, its catalogue.
 
 A model may name a machine: `bare:codex/basic` runs this space's `codex` adapter over ssh on a `machines:` login, and `box:codex/basic` sends the answer to peer `box`, which runs it with its own login ([model-machines.md](model-machines.md)). Chat and agent tasks never take a machine: they run where their app lives.
 
@@ -110,17 +114,40 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 
 `GET /api/model/status` lists the configured runtimes with their kind, backend and capabilities. The boot log line names them: `runtimes claude (claude-code, ssh:box)*, api (anthropic-api, api) (file)`, the asterisk marking the default and the parenthesis whether the file or the environment described them.
 
+## magpie
+
+[magpie](https://github.com/yetone/magpie) is a local gateway: one Anthropic Messages endpoint in front of many providers, with its own keys, accounts, protocol translation and failover. ai-space does not grow a gateway of its own; a space that has magpie running uses it as an `anthropic-api` runtime:
+
+```yaml
+runtimes:
+  magpie:
+    kind: anthropic-api
+    url: http://127.0.0.1:3425/v1/messages
+    apiKeyEnv: MAGPIE_API_KEY     # in .env: MAGPIE_API_KEY=magpie-ai-space; magpie counts the calls under "ai-space"
+    models:                       # magpie's ids: provider/model, or one of its groups
+      basic: deepseek/deepseek-chat
+      intermediate: anthropic/claude-sonnet-4-5
+fallback:
+  codex/basic: [magpie/basic]     # magpie answers when the Codex login is out of quota
+```
+
+- **Names**: `magpie/basic` resolves through the pins; `magpie/<provider>/<model>` sends magpie's own id. An API runtime's pin may contain `/` for that reason; other runtimes' may not.
+- **Where it can be used**: a request's `model`, a manifest's `model:` tags, `SPACE_MODEL_DEFAULT`, `default: magpie` in this file, and fallback entries. The panel's overrides and model pickers list Claude Code and Codex tiers only, as before. As for any API runtime: no tools, no files, no full mode; a fallback entry on it is skipped for such a call.
+- **What answered**: magpie names the model that served a call in `X-Magpie-Model`; the call's [trace](model.md#trace) keeps it as `served`, so a group or magpie's own failover is visible in the ledger. A refused call's `Retry-After` is appended to the error (`(retry after 30s)`) and sets how long the cell rests.
+- **Cost**: priced like any API call when the model it names has a list price here, else left without one; magpie's own Usage page has its figures.
+- **Not done here**: pointing the Claude Code or Codex CLI runtimes at magpie (an `ANTHROPIC_BASE_URL` or provider setting injected per runtime). Each CLI's own sign-in is used, as before.
+
 ## Code
 
-`src/space/runtimes/`: `types.ts` (operations, specs, adapter interface), `process.ts` (spawn, collect, kill the process group on timeout), `claude-code.ts`, `live.ts` (live chat's process pool and events), `claude-live.ts`, `codex-live.ts` and `deepseek-live.ts` (live chat over each runtime's protocol), `deepseek-harness.ts`, `anthropic-api.ts`, `transcripts.ts` (past sessions from each runtime's records), `config.ts` (`runtimes.yaml` and the environment fallback), `registry.ts` (by name, `runtime/model` resolution), `testing.ts`, `testing-dsh.ts`, `testing-dsh-acp.ts` and `testing-live.ts` (the fake CLIs tests use).
+`src/space/runtimes/`: `types.ts` (operations, specs, adapter interface), `process.ts` (spawn, collect, kill the process group on timeout), `claude-code.ts`, `live.ts` (live chat's process pool and events), `claude-live.ts`, `codex-live.ts` and `deepseek-live.ts` (live chat over each runtime's protocol), `deepseek-harness.ts`, `anthropic-api.ts` (also [magpie](#magpie)), `transcripts.ts` (past sessions from each runtime's records), `config.ts` (`runtimes.yaml` and the environment fallback), `registry.ts` (by name, `runtime/model` resolution), `testing.ts`, `testing-dsh.ts`, `testing-dsh-acp.ts` and `testing-live.ts` (the fake CLIs tests use).
 
 ## Follow-ups
 
 - Further kinds: another coding agent's CLI (its one-shot mode for answers and agent runs, its event stream for chat, usage read from where it records it), model APIs of other vendors.
 - Chat events normalised across runtimes, with ai-space keeping its own transcripts; today the browser reads Claude Code's `stream-json` (other runtimes' adapters translate into it) and past sessions are read from each runtime's own files.
 - DeepSeek off-peak pricing in the ledger (the price table takes the peak rate), and a price table in `runtimes.yaml` for models the adapters do not know.
-- Routing by tag, fallback chains, budgets. Every agent already offers a runtime and model-tier picker, and an app's override sets its agents' default.
-- Explicit fallback lists between machines and runtimes: proposed in [model-machines.md](model-machines.md#fallback).
+- Routing by tag, budgets. Every agent already offers a runtime and model-tier picker, and an app's override sets its agents' default. Fallback lists between machines and runtimes are built ([model-machines.md](model-machines.md#fallback)).
+- An environment per CLI runtime (`env:`), so a Claude Code or Codex runtime can answer through [magpie](#magpie) too.
 
 ## Capability tiers
 
@@ -133,7 +160,7 @@ Use these four names consistently when discussing models or selecting them in re
 | Intermediate | `intermediate` | Opus (`opus`) | Sol (`gpt-6.1-sol`) | `deepseek-flash` |
 | Advanced | `advanced` | Fable (`fable`) | Astra (`gpt-6-astra`) | `deepseek-v4-pro` |
 
-These are operator-defined tiers, not a claim that two providers' models perform identically. Availability depends on the CLI and account. `codex/basic` selects Codex Luna; `claude/advanced` selects Claude Fable. A bare `advanced` uses the default runtime. Concrete model IDs still work. Unknown or unavailable models fail without silently switching provider or using a more expensive model. The DeepSeek Harness tiers are defaults: Flash serves basic, junior and the default intermediate, and only advanced uses Pro; a `models` mapping pins other names. The Anthropic API has no tier mapping.
+These are operator-defined tiers, not a claim that two providers' models perform identically. Availability depends on the CLI and account. `codex/basic` selects Codex Luna; `claude/advanced` selects Claude Fable. A bare `advanced` uses the default runtime. Concrete model IDs still work. Unknown or unavailable models fail without silently switching provider or using a more expensive model; a [fallback list](model-machines.md#fallback) switches only as written, never to a higher tier, and the ledger records it. The DeepSeek Harness tiers are defaults: Flash serves basic, junior and the default intermediate, and only advanced uses Pro; a `models` mapping pins other names. The Anthropic API has no default tier mapping; its `models:` pins give it one ([magpie](#magpie)).
 
 Each runtime may override versions with a `models` mapping. The ledger records the resolved concrete model, not the alias:
 
@@ -160,7 +187,7 @@ To default only application model calls to Codex, set `SPACE_MODEL_DEFAULT=codex
 
 ## Codex CLI completions
 
-Local runtimes can opt into real text deltas for tool-free `slim` requests by adding `streamCompletions: true` to their `codex-cli` entry in `runtimes.yaml`. This uses `codex app-server` over stdio when the caller requests streaming; ordinary completions, full/tool/file requests and chat retain the existing paths. SSH runtimes reject this option. There is no fallback or replay after partial output.
+Local runtimes can opt into real text deltas for tool-free `slim` requests by adding `streamCompletions: true` to their `codex-cli` entry in `runtimes.yaml`. This uses `codex app-server` over stdio when the caller requests streaming; ordinary completions, full/tool/file requests and chat retain the existing paths. SSH runtimes reject this option. There is no fallback or replay after partial output: a fallback list moves on only before the first delta.
 
 The adapter creates an ephemeral thread in a temporary directory, supplies the request's system prompt, disables optional context, native tools, plugins, hooks and configured MCP servers, and refuses any unexpected tool/approval request. The saved CLI login stays in place. Output is bounded, timeout/abort kills the process group on Linux, and token usage still reaches the model ledger. The app-server protocol is version-dependent: test the installed CLI before enabling the option. See the [official protocol](https://learn.chatgpt.com/docs/app-server).
 
@@ -172,7 +199,7 @@ In the default slim mode, the adapter runs `codex exec --json` in a fresh tempor
 
 In slim mode, user configuration and exec rules are skipped, project instructions and skill instructions disabled, and shell, browser, apps, plugins, memories and subagents disabled. Execution uses a read-only sandbox. This is a text-completion adapter: requested tools and file attachments are rejected, not silently ignored. Machine-wide managed policies still apply.
 
-In slim mode, reasoning effort is fixed to `low` to control usage. Full mode uses the CLI default. The existing `thinking` field is accepted for compatibility but does not impose a numeric budget or disable reasoning (including `thinking: 0`). As with other CLI adapters, `maxTokens` is not a hard output cap. Requests are single-turn and ephemeral; there is no automatic model fallback. Tool-free slim completions retry recognized transient transport failures (such as SSH broken pipes and connection resets) up to three times, waiting 1, 2 and 4 seconds. All attempts and waits share the original request timeout; cancellation interrupts backoff. Authentication, configuration, malformed output and completed answers are not retried. Full-mode, tool-using, agent, chat and image calls are never replayed by this policy. The CLI itself may also retry transient transport failures. A disconnected remote attempt may run until its original timeout, so retries can incur additional usage not reported by the interrupted process.
+In slim mode, reasoning effort is fixed to `low` to control usage. Full mode uses the CLI default. The existing `thinking` field is accepted for compatibility but does not impose a numeric budget or disable reasoning (including `thinking: 0`). As with other CLI adapters, `maxTokens` is not a hard output cap. Requests are single-turn and ephemeral; the adapter never switches model itself (a [fallback list](model-machines.md#fallback) in `runtimes.yaml` can, after the adapter has given up). Tool-free slim completions retry recognized transient transport failures (such as SSH broken pipes and connection resets) up to three times, waiting 1, 2 and 4 seconds. All attempts and waits share the original request timeout; cancellation interrupts backoff. Authentication, configuration, malformed output and completed answers are not retried. Full-mode, tool-using, agent, chat and image calls are never replayed by this policy. The CLI itself may also retry transient transport failures. A disconnected remote attempt may run until its original timeout, so retries can incur additional usage not reported by the interrupted process.
 
 Only a complete successful JSON event stream with a nonempty final message is accepted. A zero exit code with `turn.failed`, malformed output or an incomplete stream is a failure. Streaming callers receive one final text chunk after validation. Usage is recorded from Codex's actual counters; cached input is separated from total input, and no dollar cost is invented for subscription usage.
 

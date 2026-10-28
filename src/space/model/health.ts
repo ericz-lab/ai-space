@@ -6,6 +6,7 @@ import { dshAppCandidates, isHarnessAppCli } from "../local.ts";
 import { spawnCollect } from "../runtimes/process.ts";
 import type { OptionAvailability } from "../runtimes/registry.ts";
 import type { RuntimeSpec } from "../runtimes/types.ts";
+import { classifyFailure, type Failure, type FailureKind, REST_MS, restFor } from "./failure.ts";
 
 /**
  * The status table of docs/model-machines.md#status: one cell per machine and
@@ -13,7 +14,8 @@ import type { RuntimeSpec } from "../runtimes/types.ts";
  * with, whether it is signed in, whether the account is limited, and when it
  * last answered. Probes cost no tokens: `claude auth status`, `codex login
  * status`, the harness's key or account file. `limited` comes from the errors
- * calls return; the next success clears it.
+ * calls return, read by cause (failure.ts): how long a cell rests depends on why it failed, and
+ * the next success clears it.
  */
 
 export type HealthCell = {
@@ -33,8 +35,15 @@ export type HealthCell = {
   /** What the probe said when it did not pass (the CLI's own line). */
   detail?: string;
   checkedAt?: string;
+  /** Resting until then: calls that fall back put it last (docs/model-machines.md#fallback). */
   limitedUntil?: string;
+  /** Why it rests: credit, quota, rate or transport (failure.ts). Absent on an older peer's cell. */
+  restKind?: FailureKind;
+  /** The time came from the runtime's own words (a reset time, Retry-After), not a default. */
+  restSaid?: boolean;
   lastError?: string;
+  /** What the last error was, as failure.ts reads it. */
+  lastErrorKind?: FailureKind;
   lastOkAt?: string;
 };
 
@@ -44,15 +53,14 @@ export type ProbeTarget = { machine: string; spec: RuntimeSpec; ssh?: string; di
 export type Prober = (target: ProbeTarget) => Promise<ProbeResult>;
 export type Spawn = typeof spawnCollect;
 
-/** Errors that mean the account, not the request: the cell is limited until the time below. */
-const LIMIT_RE = /usage limit|rate.?limit|too many requests|\b429\b|at capacity|quota|overloaded/i;
-const LIMIT_MS = 3_600_000;
 const PROBE_TIMEOUT_MS = 30_000;
 const VERSION_TIMEOUT_MS = 10_000;
 
 export class RuntimeHealth {
   private readonly cells = new Map<string, HealthCell>();
   private readonly found = new Map<string, HealthCell>();
+  /** Rate limits and transport failures in a row, per cell: each doubles the rest (failure.ts `restFor`). */
+  private readonly streaks = new Map<string, { kind: FailureKind; count: number; until: number }>();
   private readonly now: () => number;
   private readonly prober: Prober;
 
@@ -83,18 +91,47 @@ export class RuntimeHealth {
     }
   }
 
-  /** One call's outcome: a success clears a limit, an account error sets one. */
-  note(machine: string, runtime: string, error?: string): void {
+  /**
+   * One call's outcome. A success clears the rest and the run of failures. A failure is read by
+   * cause and rests the cell for it: until the time the error named, else credit 30 min, quota 15,
+   * rate limits 1, 2, 4 … min and transport failures 1, 2, 4 … min in a row; auth and other errors
+   * do not rest it. A rest already longer is kept. Returns how the error was read.
+   */
+  note(machine: string, runtime: string, error?: string, failure?: Failure): Failure | undefined {
+    const key = `${machine}|${runtime}`;
     const c = this.cell(machine, runtime);
     const at = this.now();
     if (error === undefined) {
       c.lastOkAt = new Date(at).toISOString();
-      delete c.limitedUntil;
-      delete c.lastError;
-      return;
+      for (const k of ["limitedUntil", "restKind", "restSaid", "lastError", "lastErrorKind"] as const) delete c[k];
+      this.streaks.delete(key);
+      return undefined;
     }
+    const f = failure ?? classifyFailure(error, at);
     c.lastError = error.slice(0, 300);
-    if (LIMIT_RE.test(error)) c.limitedUntil = new Date(at + LIMIT_MS).toISOString();
+    c.lastErrorKind = f.kind;
+    let streak = 1;
+    if (f.kind === "rate" || f.kind === "transport") {
+      const last = this.streaks.get(key);
+      streak = last && last.kind === f.kind && at - last.until < REST_MS.forget ? last.count + 1 : 1;
+    }
+    const rest = restFor(f, at, streak);
+    if (!rest) return f;
+    if (f.kind === "rate" || f.kind === "transport") this.streaks.set(key, { kind: f.kind, count: streak, until: rest.until });
+    const current = c.limitedUntil ? Date.parse(c.limitedUntil) : 0;
+    if (current > rest.until) return f;
+    c.limitedUntil = new Date(rest.until).toISOString();
+    c.restKind = f.kind;
+    if (rest.said) c.restSaid = true;
+    else delete c.restSaid;
+    return f;
+  }
+
+  /** Whether the cell rests now, why, and until when. */
+  resting(machine: string, runtime: string): { until: string; kind?: FailureKind } | undefined {
+    const c = this.cells.get(`${machine}|${runtime}`);
+    if (!c?.limitedUntil || Date.parse(c.limitedUntil) <= this.now()) return undefined;
+    return { until: c.limitedUntil, ...(c.restKind ? { kind: c.restKind } : {}) };
   }
 
   /** Probe every target; one that fails to answer is recorded as such, never thrown. */
@@ -141,11 +178,11 @@ export class RuntimeHealth {
     return [...this.found.values()].map((c) => ({ ...c })).sort((a, b) => a.machine.localeCompare(b.machine) || a.runtime.localeCompare(b.runtime));
   }
 
-  /** Every cell; a limit that has run out is not shown. */
+  /** Every cell; a rest that has run out is not shown. */
   list(): HealthCell[] {
     const at = this.now();
     return [...this.cells.values()]
-      .map((c) => (c.limitedUntil && Date.parse(c.limitedUntil) <= at ? (({ limitedUntil: _, ...rest }) => rest)(c) : { ...c }))
+      .map((c) => (c.limitedUntil && Date.parse(c.limitedUntil) <= at ? (({ limitedUntil: _, restKind: _k, restSaid: _s, ...rest }) => rest)(c) : { ...c }))
       .sort((a, b) => a.machine.localeCompare(b.machine) || a.runtime.localeCompare(b.runtime));
   }
 }

@@ -2,7 +2,7 @@ import type { ResolvedModel } from "./app-models.ts";
 import { parseImages, type RunImage, spoolImages } from "./images.ts";
 import { type FinalEvent, type PeerRun, PeerRuns, REF_PATTERN } from "./peer-runs.ts";
 import { GPT_PRICING } from "./pricing.ts";
-import { type ModelService, needsLocal } from "./service.ts";
+import { type CallChoice, type ModelService, needsLocal } from "./service.ts";
 import { parseImageInput, parseRunInput, parseWindow } from "./spec.ts";
 import { mergeReports, peerReport, type UsageReport, usageReport } from "./report.ts";
 import { APP_PATTERN, type ModelCall, type Origin, TAG_PATTERN, type Window } from "./types.ts";
@@ -23,12 +23,13 @@ import { OPERATOR, Unauthorized, identify } from "../auth.ts";
  *   POST /api/model/image                     pictures: { prompt, images?, model?, tag?, system?, timeoutMs? }; 200
  *                                             { ok, text, images: [{ type, data: base64 }], call }, 502 when the model failed.
  *                                             Only a runtime that makes images (codex-cli); the input images as for `run`.
- *   GET  /api/model/status                    the configured runtimes, concurrency, calls in flight
+ *   GET  /api/model/status                    the configured runtimes, fallback lists, concurrency, calls in flight
  *   GET  /api/model/usage?window=24h&app      this space's ledger (`space` names it): sums by app, tag, model, runtime and backend
  *                                             over a window, plus the whole history by day; on a hub, without `app`, the peers'
  *                                             ledgers too, under `<peer>/<app>`, and `peers` says which answered (docs/model-machines.md#ledger)
- *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored); on a hub, without
- *                                             `app` or `tag`, the peers' recent calls too
+ *   GET  /api/model/calls?app&tag&limit       recent calls, newest first (prompts and answers are not stored), each with its
+ *                                             `fallbackFrom`, `tries` and `trace` when it has them; on a hub, without `app` or
+ *                                             `tag`, the peers' recent calls too
  *
  * The caller of `run` is identified by its bearer token: an app's own
  * `SPACE_APP_TOKEN` maps to that app; the operator's `SPACE_API_TOKEN` (or no
@@ -104,7 +105,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
         let body: Record<string, unknown>;
         let images: RunImage[];
         let fallback: string | undefined;
-        let source: ResolvedModel["source"] | undefined;
+        let source: CallChoice | undefined;
         try {
           const parsed = (await req.json().catch(() => null)) as Record<string, unknown> | null;
           if (!parsed || typeof parsed !== "object") return error(400, "body must be a JSON object");
@@ -115,7 +116,8 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
           else if (opts.resolveModel) {
             const chosen = opts.resolveModel(app, typeof body.tag === "string" && TAG_PATTERN.test(body.tag) ? body.tag : "other");
             fallback = chosen.model;
-            source = chosen.source;
+            // The layers skipped on the way go into the call's trace.
+            source = chosen.skipped ? { source: chosen.source, skipped: chosen.skipped } : chosen.source;
           } else fallback = typeof opts.defaultModel === "function" ? opts.defaultModel() : opts.defaultModel;
           input = parseRunInput(body, { model: fallback });
           images = parseImages(body.images);
@@ -175,7 +177,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
     },
 
     "/api/model/status": {
-      GET: () => json({ ok: true, backend: service.backend, runtimes: service.runtimes.list(), machines: opts.machines?.() ?? [], servesPeers: opts.servesPeers ?? [], maxConcurrency: service.maxConcurrency, ...service.load }),
+      GET: () => json({ ok: true, backend: service.backend, runtimes: service.runtimes.list(), fallback: service.runtimes.fallbacks(), machines: opts.machines?.() ?? [], servesPeers: opts.servesPeers ?? [], maxConcurrency: service.maxConcurrency, ...service.load }),
     },
 
     "/api/model/usage": {
@@ -434,7 +436,7 @@ function streamPeerRun(run: PeerRun, withDeltas: boolean): Response {
  * the request was already validated); a model failure is the `error` event,
  * with its ledger row, not a status code.
  */
-function streamRun(service: ModelService, app: string, input: ReturnType<typeof parseRunInput>, signal: AbortSignal, source?: ResolvedModel["source"], cleanup: () => Promise<void> = async () => {}, origin: Origin = "run"): Response {
+function streamRun(service: ModelService, app: string, input: ReturnType<typeof parseRunInput>, signal: AbortSignal, source?: CallChoice, cleanup: () => Promise<void> = async () => {}, origin: Origin = "run"): Response {
   const enc = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -490,6 +492,9 @@ export function view(c: ModelCall) {
     outputChars: c.outputChars,
     usage: c.usage,
     costUsd: c.costUsd,
+    ...(c.fallbackFrom ? { fallbackFrom: c.fallbackFrom } : {}),
+    ...(c.tries !== undefined ? { tries: c.tries } : {}),
+    ...(c.trace ? { trace: c.trace } : {}),
   };
 }
 

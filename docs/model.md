@@ -109,7 +109,21 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 | `startedAt`, `durationMs` | Wall clock of the whole call including any wait for a slot. |
 | `promptChars`, `outputChars` | Sizes only; prompts and answers are not stored. |
 | `usage` | `inputTokens`, `cacheWriteTokens`, `cacheReadTokens`, `outputTokens`, as reported; absent when the runtime reported none. |
+| `fallbackFrom` | The first choice (`[machine:]runtime/model`) when another entry of its [fallback list](model-machines.md#fallback) answered; absent otherwise. |
+| `tries` | How many runtimes were tried: 1 for a plain call, more after a fallback; absent on rows that never ran (a refused request, a task, an import). |
+| `trace` | How the call was placed ([Trace](#trace)), when there was more to it than the row says. |
 | `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend. GPT-6 Astra/Sol/Luna, GPT-6.1 Sol/Terra and GPT-5.6 Sol/Terra/Luna calls without a reported cost use standard API list prices (verified 2026-09-23; GPT-6.1 Sol and Terra 2026-10-28); absent for unknown models or incomplete usage. |
+
+### Trace
+
+A row says which runtime, machine and model answered and which [layer](#app-models) chose it. When there was more to the decision, the row also carries `trace`, written where the decision was made, with the values it used:
+
+- `skippedLayers`: layers above the one that chose, which named a model this space cannot run (`{ source, model }`).
+- `candidates`: the first choice and its fallback list, in the order they were considered. An entry that could not take the call is `skipped` with the reason (full mode on another machine, tools or files the runtime refuses, a runtime this space lacks). An entry put after the others says why (`later`: `resting` with `restKind` and `until`, `signed-out`, `unreachable`, `not-installed`).
+- `tries`: each runtime tried, with `runtime`, `machine`, `model`, `ok`, `ms`, and for a failure the error (cut to 200 characters), its `kind` (`credit`, `quota`, `rate`, `auth`, `transport`, `other`; [model-machines.md](model-machines.md#status)) and `streamed` when output had already reached the caller. `served` is what an upstream gateway said answered it ([runtimes.md](runtimes.md#magpie)).
+- `stop`: why the chain stopped: `answered`, `not-switched` (a failure a call does not move on for), `streamed`, `no-time` (the request's timeout was spent), `exhausted` (every candidate failed) or `aborted`.
+
+A call with one candidate, one try and nothing skipped stores no trace: its row is the whole story. Settings → Scheduler → Model usage shows `fallback from …` and the number of tries on the call's line, and the trace under it.
 
 ### App models
 
@@ -169,9 +183,9 @@ A task with an `agent` target (`docs/scheduler.md`) runs on the runtime the targ
 ```
 POST /api/model/run                       run one call (app token, or operator token + app)
 POST /api/model/image                     pictures from a prompt and optional input images (same tokens)
-GET  /api/model/status                    backend, concurrency cap, calls running and waiting
+GET  /api/model/status                    backend, concurrency cap, calls running and waiting, the fallback lists (`fallback`), the status cells (`machines`)
 GET  /api/model/usage?window=24h&app=x    totals and sums by app, by app/tag/model/machine, by model/machine, by backend/origin over 5h | 24h | 7d | 30d, plus `history`: lifetime totals and per-day sums since the first row; on a hub without `app`, the peers' rows too and `peers` (which answered)
-GET  /api/model/calls?app&tag&limit       recent calls, newest first; on a hub without `app` or `tag`, the peers' calls too
+GET  /api/model/calls?app&tag&limit       recent calls, newest first, with `fallbackFrom`, `tries` and `trace` when they have them; on a hub without `app` or `tag`, the peers' calls too
 GET  /api/model/apps                      every app's model per tag and the layer that chose it
 GET  /api/apps/:app/model                 the same for one app
 PATCH /api/panel/apps/:app/model          set or clear a panel override (same-origin browser only)
@@ -183,7 +197,7 @@ The read routes carry no token, like the scheduler's: the panel runs in a browse
 
 Settings → Models lists every app on one line under the default model, sorted by title: the model its calls run on now, the layer that chose it, and how many of its tags run on another model. A click opens the app's page, with a row for the app and one per tag: the model it runs on now, the layer that chose it and the `space.yaml` value, with a select that sets or clears the override (saved at once, used by the next call); back returns to the list.
 
-Settings → Scheduler → Model usage opens a floating window. It reads the open Space's own ledger, and its header names that Space: the calls of the apps that run there, including those it sent to another machine (`machine` and `peer:<name>` in the backend rows). On a hub it also shows its peers' calls, read from their ledgers ([model-machines.md](model-machines.md#the-hubs-usage-page)). Then: the window selector (5 h matches a subscription's rolling quota), four cards (calls, tokens, cost, model time), a table by app, purpose and model with the four token kinds side by side, a table by model and backend, and the last thirty calls with their outcome. Below the window comes the history: days recorded, lifetime calls, tokens and cost with the daily average, a day grid over the last year (one square per day, shade by that day's tokens, cost or calls) and weekly bars. The panel refreshes every 30 s while open.
+Settings → Scheduler → Model usage opens a floating window. It reads the open Space's own ledger, and its header names that Space: the calls of the apps that run there, including those it sent to another machine (`machine` and `peer:<name>` in the backend rows). On a hub it also shows its peers' calls, read from their ledgers ([model-machines.md](model-machines.md#the-hubs-usage-page)). Then: the window selector (5 h matches a subscription's rolling quota), four cards (calls, tokens, cost, model time), a table by app, purpose and model with the four token kinds side by side, a table by model and backend, and the last thirty calls with their outcome (a fallback and the [trace](#trace) included). Below the window comes the history: days recorded, lifetime calls, tokens and cost with the daily average, a day grid over the last year (one square per day, shade by that day's tokens, cost or calls) and weekly bars. The panel refreshes every 30 s while open.
 
 ## Adopting it in an app
 
@@ -209,7 +223,8 @@ An app that shows the answer while it is written adds `stream: true` and reads t
 
 | situation | behaviour |
 | --- | --- |
-| The runtime is not installed or not logged in | Every call fails with the runtime's message; each failure is a ledger row, so the panel shows a column of errors rather than silence. |
+| The runtime is not installed or not logged in | Every call fails with the runtime's message; each failure is a ledger row, so the panel shows a column of errors rather than silence. A fallback list does not move on for a refused sign-in. |
+| Out of credit, quota used up, rate limited | The cell rests for a time set by the cause or named by the runtime ([model-machines.md](model-machines.md#status)); a call with a fallback list moves to its next entry. |
 | ssh host unreachable | Same: `ssh` exits non-zero, the call fails with its stderr. |
 | Call longer than `timeoutMs` | The process is killed; the call fails with `timed out`. |
 | More calls than the cap | They wait in order; `GET /api/model/status` shows how many. A waiting call's `durationMs` includes the wait. |
@@ -221,6 +236,8 @@ An app that shows the answer while it is written adds `stream: true` and reads t
 
 - Per-app and per-tag switches, with the panel able to flip them once it holds a credential for mutating routes.
 - Daily budgets that turn a call into `429 budget exceeded`, which an app treats as skipped.
+- Lanes: a concurrency cap per runtime or machine, so a slow runtime does not hold the slots another one could answer with. The cap is still one for the whole service, and a fallback keeps its slot.
+- Fallback for image calls: `/api/model/image` runs its one runtime, as before.
 - Batch hints: the service could tell an app, from its own ledger, that its calls are mostly fixed overhead.
 
 ### GPT cost estimates

@@ -84,11 +84,18 @@ function strip(c: HealthCell): Partial<HealthCell> {
   return rest;
 }
 
-/** The peer's report, with this side's newer success and longer limit. */
+/** The peer's report, with this side's newer success and longer rest (and that rest's cause). */
 function merge(peer: HealthCell, seen?: HealthCell): HealthCell {
   if (!seen) return peer;
   const later = (a?: string, b?: string) => (!a ? b : !b ? a : Date.parse(a) >= Date.parse(b) ? a : b);
   const lastOkAt = later(peer.lastOkAt, seen.lastOkAt);
   const limitedUntil = later(peer.limitedUntil, seen.limitedUntil);
-  return { ...peer, ...(lastOkAt ? { lastOkAt } : {}), ...(limitedUntil ? { limitedUntil } : {}), ...(seen.lastError ? { lastError: seen.lastError } : {}) };
+  const rest = !limitedUntil ? {} : limitedUntil === peer.limitedUntil ? pick(peer) : pick(seen);
+  const { restKind: _k, restSaid: _s, ...base } = peer;
+  return {
+    ...base, ...(lastOkAt ? { lastOkAt } : {}), ...(limitedUntil ? { limitedUntil, ...rest } : {}),
+    ...(seen.lastError ? { lastError: seen.lastError, ...(seen.lastErrorKind ? { lastErrorKind: seen.lastErrorKind } : {}) } : {}),
+  };
 }
+
+const pick = (c: HealthCell): Partial<HealthCell> => ({ ...(c.restKind ? { restKind: c.restKind } : {}), ...(c.restSaid ? { restSaid: true } : {}) });

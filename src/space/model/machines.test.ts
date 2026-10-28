@@ -279,18 +279,22 @@ describe("pictures through a peer", () => {
 });
 
 describe("status table", () => {
-  test("a success clears a limit; an account error sets one; other errors do not", () => {
+  test("a success clears a rest; an account error sets one by its cause; other errors do not", () => {
     let now = 1_000_000;
     const h = new RuntimeHealth({ now: () => now, prober: async () => ({ installed: true }) });
     h.note("", "codex", "exceeded retry limit, last status: 429 Too Many Requests");
-    expect(h.list()[0]!.limitedUntil).toBe(new Date(now + 3_600_000).toISOString());
+    expect(h.list()[0]).toMatchObject({ limitedUntil: new Date(now + 60_000).toISOString(), restKind: "rate", lastErrorKind: "rate" });
     h.note("", "codex");
     expect(h.list()[0]!.limitedUntil).toBeUndefined();
+    expect(h.list()[0]!.restKind).toBeUndefined();
     h.note("", "codex", "verification failed (exit 1)");
     expect(h.list()[0]!.limitedUntil).toBeUndefined();
+    expect(h.list()[0]!.lastErrorKind).toBe("other");
     h.note("", "codex", "You've hit your usage limit");
-    now += 3_600_001;
+    expect(h.list()[0]).toMatchObject({ limitedUntil: new Date(now + 15 * 60_000).toISOString(), restKind: "quota" });
+    now += 15 * 60_000 + 1;
     expect(h.list()[0]!.limitedUntil).toBeUndefined();
+    expect(h.list()[0]!.restKind).toBeUndefined();
   });
 
   test("the CLIs' own status commands decide signed in", () => {
@@ -338,6 +342,23 @@ describe("status table", () => {
     expect(table.find((c) => c.machine === "far")).toMatchObject({ used: true, problem: "not installed" });
     expect(cellOf("haiku", reg)).toBe("|codex");
     expect(cellOf("box:codex/basic", reg)).toBe("box|codex");
+  });
+
+  test("a merged cell keeps the cause of whichever rest is longer", () => {
+    const reg = new RuntimeRegistry({ default: "codex", runtimes: [{ name: "codex", kind: "codex-cli", bin: [] }] });
+    const health = new RuntimeHealth({ prober: async () => ({}) });
+    health.note("box", "codex", "429 Too Many Requests");
+    const far = new Date(Date.now() + 3 * 3_600_000).toISOString();
+    const peerCell = { machine: "", runtime: "codex", kind: "codex-cli", limitedUntil: far, restKind: "quota" as const, restSaid: true };
+    const box = (cells: typeof peerCell[]) => statusTable({ health, runtimes: reg, used: [], peers: [{ machine: "box", serves: [{ name: "codex", kind: "codex-cli" }], cells }] }).find((c) => c.machine === "box")!;
+    expect(box([peerCell])).toMatchObject({ limitedUntil: far, restKind: "quota", restSaid: true, lastErrorKind: "rate" });
+    // An older peer reports no cause: this side's shorter rate rest loses, and its cause with it.
+    const { restKind: _k, restSaid: _s, ...old } = peerCell;
+    const merged = box([old as typeof peerCell]);
+    expect(merged.limitedUntil).toBe(far);
+    expect(merged.restKind).toBeUndefined();
+    // Without the peer's rest, this side's own (the rate limit it saw) shows with its cause.
+    expect(box([{ ...old, limitedUntil: undefined } as unknown as typeof peerCell])).toMatchObject({ restKind: "rate" });
   });
 
   test("the ledger seeds the last success per machine and runtime", async () => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getJson, relTime, sendJson, untilTime, type BackupInfo, type MachineCell, type PeerInfo, type ServiceInfo } from "./api.ts";
+import { failureText } from "./call-trace.ts";
 import { localized, useLang } from "./i18n.ts";
 import type { Key } from "./messages.ts";
 import { HEALTH, Icon, STATUS } from "./Tiles.tsx";
@@ -37,11 +38,11 @@ export default function SettingsStatus() {
     }
   };
   // Every machine's runtimes: installed, signed in, limited, last answer.
-  const [machines, setMachines] = useState<{ cells: MachineCell[]; serves: string[] } | null>(null);
+  const [machines, setMachines] = useState<{ cells: MachineCell[]; serves: string[]; fallback: Record<string, string[]> } | null>(null);
   useEffect(() => {
-    getJson<{ machines?: MachineCell[]; servesPeers?: string[] }>("/api/model/status")
-      .then((d) => setMachines({ cells: d.machines || [], serves: d.servesPeers || [] }))
-      .catch(() => setMachines({ cells: [], serves: [] }));
+    getJson<{ machines?: MachineCell[]; servesPeers?: string[]; fallback?: Record<string, string[]> }>("/api/model/status")
+      .then((d) => setMachines({ cells: d.machines || [], serves: d.servesPeers || [], fallback: d.fallback || {} }))
+      .catch(() => setMachines({ cells: [], serves: [], fallback: {} }));
   }, []);
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);
   const [backupsOn, setBackupsOn] = useState(true);
@@ -106,7 +107,7 @@ export default function SettingsStatus() {
         <>
           <p className="sethead sub">{t("settings.runtimes")}</p>
           {machines.cells.map((c) => {
-            const state = runtimeState(c);
+            const state = runtimeState(c, lang);
             return (
               <div
                 key={`${c.machine}|${c.runtime}`}
@@ -115,7 +116,12 @@ export default function SettingsStatus() {
                   c.kind,
                   c.detail ?? "",
                   c.lastOkAt ? t("runtimes.lastOk", { time: relTime(c.lastOkAt, lang) }) : "",
-                  c.limitedUntil ? t("runtimes.limitedUntil", { time: untilTime(c.limitedUntil, lang) }) : "",
+                  c.limitedUntil
+                    ? c.restKind
+                      ? `${t("runtimes.restUntil", { time: untilTime(c.limitedUntil, lang), cause: failureText(c.restKind, lang) })}${c.restSaid ? ` (${t("runtimes.restSaid")})` : ""}`
+                      : t("runtimes.limitedUntil", { time: untilTime(c.limitedUntil, lang) })
+                    : "",
+                  c.lastErrorKind ? t("runtimes.lastErrorKind", { kind: failureText(c.lastErrorKind, lang) }) : "",
                   c.lastError ?? "",
                   c.used ? "" : t("runtimes.unused"),
                 ]
@@ -128,11 +134,14 @@ export default function SettingsStatus() {
                 {c.lastOkAt && <span className="svc-port">{relTime(c.lastOkAt, lang)}</span>}
                 <span className={`status ${state.cls}`}>
                   <i />
-                  {t(state.key)}
+                  {state.text ?? t(state.key)}
                 </span>
               </div>
             );
           })}
+          {Object.keys(machines.fallback).length > 0 && (
+            <p className="setnote">{t("runtimes.fallback", { list: Object.entries(machines.fallback).map(([key, list]) => `${key} → ${list.join(", ")}`).join("; ") })}</p>
+          )}
           {machines.serves.length > 0 && <p className="setnote">{t("runtimes.serves", { list: machines.serves.join(", ") })}</p>}
         </>
       )}
@@ -208,9 +217,13 @@ export default function SettingsStatus() {
   );
 }
 
-/** A cell's dot and word: red only for a used cell that cannot answer; an unused one is grey. */
-function runtimeState(c: MachineCell): { cls: string; key: Key } {
+/**
+ * A cell's dot and word: red only for a used cell that cannot answer; an unused one is grey. A resting
+ * cell says why it rests (out of credit, quota used up, rate limited, connection failing).
+ */
+function runtimeState(c: MachineCell, lang: Parameters<typeof failureText>[1]): { cls: string; key: Key; text?: string } {
   const key: Key = c.reachable === false ? "runtimes.unreachable" : c.installed === false ? "runtimes.notInstalled" : c.signedIn === false ? "runtimes.notSignedIn" : c.limitedUntil ? "runtimes.limited" : c.checkedAt || c.lastOkAt ? "runtimes.ready" : "runtimes.unchecked";
-  if (c.problem) return { cls: c.problem === "limited" ? "paused" : "down", key };
-  return { cls: key === "runtimes.ready" ? "ok" : "archived", key };
+  const text = key === "runtimes.limited" && c.restKind ? failureText(c.restKind, lang) : undefined;
+  if (c.problem) return { cls: c.problem === "limited" ? "paused" : "down", key, ...(text ? { text } : {}) };
+  return { cls: key === "runtimes.ready" ? "ok" : "archived", key, ...(text ? { text } : {}) };
 }
