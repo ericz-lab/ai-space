@@ -93,3 +93,20 @@ test("a folded run names commands only when every call in it is one", () => {
   expect(allCommands(run(["Read"]))).toBe(false);
   expect(allCommands([])).toBe(false);
 });
+test("Monitor is an optional tool: drawn with its description, a rejection without the schema dump", () => {
+  expect(toolVariant("Monitor")).toBe("monitor");
+  const turn = new ChatSteps();
+  turn.apply({ type: "assistant", message: { content: [{ type: "tool_use", id: "m", name: "Monitor", input: { description: "build finishes", command: "until test -f done; do sleep 5; done", timeout_ms: 60000 } }] } });
+  turn.apply({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "m", content: [{ type: "text", text: "Monitor started (task b1)." }] }] } });
+  turn.apply({ type: "assistant", message: { content: [{ type: "tool_use", id: "n", name: "Monitor", input: { command: "tail -f log" } }] } });
+  turn.apply({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "n", is_error: true, content: "<tool_use_error>InputValidationError: Monitor failed due to the following issue:\nThe required parameter `description` is missing\n\nThis tool's schema was not sent to the API. For reference, this tool's input schema is: {\"type\":\"object\"}</tool_use_error>" }] } });
+  turn.finish();
+  expect(turn.steps[0]).toMatchObject({ kind: "tool", state: "completed", output: "Monitor started (task b1)." });
+  expect(toolSummary(turn.steps[0]!.text)).toBe("build finishes");
+  expect(turn.steps[1]).toMatchObject({ state: "failed", text: "tail -f log", output: "InputValidationError: Monitor failed due to the following issue:\nThe required parameter `description` is missing" });
+  // A runtime without Monitor never sends one: a turn of other tools is untouched.
+  const plain = new ChatSteps();
+  plain.apply(tool("a"));
+  plain.finish();
+  expect(plain.steps.map((s) => toolVariant(s.name))).toEqual(["bash"]);
+});

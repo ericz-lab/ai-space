@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TranscriptMessage, TranscriptStep } from "./types.ts";
+import { monitorInput, toolErrorText } from "./tool-text.ts";
 
 /**
  * Past chat sessions, read back from each runtime's own records so restoring
@@ -58,6 +59,7 @@ export function parseClaudeTranscript(jsonl: string): TranscriptMessage[] {
           if (step) {
             step.output = clip(resultText(b.content));
             step.failed = b.is_error === true;
+            if (step.failed) step.output = clip(toolErrorText(resultText(b.content)));
           }
         }
       }
@@ -179,7 +181,7 @@ function addText(msgs: TranscriptMessage[], text: string): void {
 function addTool(msgs: TranscriptMessage[], name: string, input: unknown, output = "", failed = false): ToolStep {
   const last = lastAi(msgs);
   last.tools.push({ name, hint: toolHint(input) });
-  const step: ToolStep = { kind: "tool", name, input: stepInput(input), output: clip(output), failed };
+  const step: ToolStep = { kind: "tool", name, input: clip(monitorInput(name, input) ?? stepInput(input)), output: clip(output), failed };
   (last.steps ??= []).push(step);
   return step;
 }
