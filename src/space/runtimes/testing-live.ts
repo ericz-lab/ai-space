@@ -10,6 +10,12 @@
  *   `wait`               a long step: the turn waits for a steered message (answered with
  *                        `heard: <text>`) or a stop
  *   anything else        `echo: <text> [pid <pid>]`, so a test can tell whether a process was reused
+ *
+ * Claude only (docs/runtimes.md#background-work):
+ *   `bg:<n>`             starts a background Bash job, takes in a Monitor report mid-turn and ends
+ *                        the turn; then, by itself, an empty turn and `n` turns answering reports
+ *                        (`woke <i>`), the last one after the job ended
+ *   `fixture:<path>`     plays a recorded stdout (one event per line) instead of answering
  */
 
 export function fakeLiveBin(which: "claude" | "codex"): string[] {
@@ -75,6 +81,16 @@ async function claude(args: string[]): Promise<void> {
     if (m.type !== "user") continue;
     const content = (m.message as { content: unknown }).content;
     const said = typeof content === "string" ? content : (content as { type: string; text?: string }[]).map((c) => (c.type === "text" ? c.text : `[${c.type}]`)).join(" ");
+    if (said.startsWith("fixture:")) {
+      // The recording replays the turn's own message itself; a pause after each result lets the
+      // turns the CLI starts by itself come after the turn's end, as they do.
+      for (const line of (await Bun.file(said.slice("fixture:".length)).text()).split("\n")) {
+        if (!line.trim()) continue;
+        process.stdout.write(line + "\n");
+        if (JSON.parse(line).type === "result") await Bun.sleep(5);
+      }
+      continue;
+    }
     out({ ...m, session_id: sid, isReplay: true });
     if (turn?.waiting === "steer") {
       text(`heard: ${said}`);
@@ -96,6 +112,37 @@ async function claude(args: string[]): Promise<void> {
     } else if (said === "wait") {
       turn = { waiting: "steer" };
       out({ type: "assistant", message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command: "sleep" } }] }, session_id: sid });
+    } else if (said.startsWith("bg:")) {
+      const n = Number(said.slice("bg:".length));
+      const job = { task_id: "job-1", task_type: "local_bash", description: "sleep a while" };
+      const notice = (body: string) => `<task-notification>\n<task-id>job-1</task-id>\n${body}\n</task-notification>`;
+      const origin = { kind: "task-notification", producer: "session-task" };
+      turn = { waiting: null };
+      out({ type: "assistant", message: { content: [{ type: "tool_use", id: "bg-tool", name: "Bash", input: { command: "sleep 9", run_in_background: true } }] }, session_id: sid });
+      out({ type: "system", subtype: "background_tasks_changed", tasks: [job], session_id: sid });
+      out({ type: "system", subtype: "task_started", ...job, tool_use_id: "bg-tool", is_backgrounded: true, session_id: sid });
+      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "bg-tool", content: "Command running in background with ID: job-1." }] }, session_id: sid });
+      // A report that arrives while the turn runs is taken in mid-turn.
+      out({ type: "user", message: { role: "user", content: notice('<summary>Monitor event: "sleep a while"</summary>\n<event>tick 0</event>') }, session_id: sid, isReplay: true, origin });
+      text("started");
+      result();
+      void (async () => {
+        await Bun.sleep(20);
+        // Two reports arriving together: the CLI opens and closes a turn with nothing in it.
+        out({ type: "system", subtype: "init", session_id: sid, model, permissionMode: mode });
+        out({ type: "result", subtype: "success", is_error: false, num_turns: 0, result: "", session_id: sid, origin });
+        for (let i = 1; i <= n; i++) {
+          await Bun.sleep(20);
+          out({ type: "system", subtype: "init", session_id: sid, model, permissionMode: mode });
+          if (i === n) {
+            out({ type: "system", subtype: "task_updated", task_id: "job-1", patch: { status: "completed", end_time: Date.now() }, session_id: sid });
+            out({ type: "system", subtype: "task_notification", task_id: "job-1", tool_use_id: "bg-tool", status: "completed", summary: 'Background command "sleep a while" completed (exit code 0)', session_id: sid });
+            out({ type: "system", subtype: "background_tasks_changed", tasks: [], session_id: sid });
+          }
+          text(`woke ${i}`);
+          out({ type: "result", subtype: "success", is_error: false, num_turns: 1, result: `woke ${i}`, session_id: sid, origin });
+        }
+      })();
     } else {
       turn = { waiting: null };
       text(`echo: ${said} [pid ${process.pid}] [model ${model}] [mode ${mode}]`);

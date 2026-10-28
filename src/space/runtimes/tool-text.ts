@@ -26,3 +26,25 @@ export function monitorInput(name: string, input: unknown): string | undefined {
   const source = typeof i.command === "string" ? i.command : typeof i.ws?.url === "string" ? i.ws.url : "";
   return [i.description.trim(), source].filter(Boolean).join("\n");
 }
+
+/**
+ * A background job's report as Claude Code hands it to the agent, a user message
+ * `<task-notification><task-id>…</task-id><status>…</status><summary>…</summary><event>…</event></task-notification>`:
+ * a Monitor event carries `<event>`, an ended job `<status>`. `line` is what the chat shows,
+ * `detail` what opens under it; null for any other text.
+ */
+export type TaskNotice = { taskId: string; toolUseId?: string; status?: string; summary: string; event?: string; line: string; detail: string };
+
+export function taskNotice(text: string): TaskNotice | null {
+  const body = /^\s*<task-notification>([\s\S]*?)<\/task-notification>/.exec(text)?.[1];
+  if (body === undefined) return null;
+  const tag = (name: string) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(body)?.[1]?.trim() || undefined;
+  const taskId = tag("task-id") ?? "";
+  const toolUseId = tag("tool-use-id");
+  const status = tag("status");
+  const summary = tag("summary") ?? "";
+  const event = tag("event");
+  const line = (event ? `${summary}: ${event.split("\n")[0]}` : summary) || taskId || "background job";
+  const detail = [summary, event, status && `status: ${status}`].filter(Boolean).join("\n");
+  return { taskId, ...(toolUseId ? { toolUseId } : {}), ...(status ? { status } : {}), summary, ...(event ? { event } : {}), line: line.slice(0, 300), detail: detail.slice(0, 12000) };
+}

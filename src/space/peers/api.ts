@@ -25,6 +25,7 @@ import { bridge, wantsWebSocket } from "../terminal/api.ts";
  *   POST  /api/peers/:peer/agents/:app/:agent/runs/:id/stop │
  *   POST  /api/peers/:peer/agents/:app/:agent/runs/:id/steer │
  *   POST  /api/peers/:peer/agents/:app/:agent/runs/:id/approvals/:rid │
+ *   GET   /api/peers/:peer/agents/:app/:agent/watch     │
  *   GET   /api/peers/:peer/apps/:app/proxy/api/*        ┘ (the peer app's own API; docs/peers.md)
  *
  * A WebSocket upgrade on the last one is bridged to the peer app's socket at that path, frame
@@ -144,6 +145,7 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
     "/api/peers/:peer/agents/:app/:agent/runs/:id/stop": { POST: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/runs/:id/steer": { POST: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/runs/:id/approvals/:rid": { POST: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/watch": { GET: proxy() },
     "/api/peers/:peer/agents/:app/:agent/sessions": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/sessions/:sid": { GET: proxy(FORWARD_TIMEOUT_MS) },
     // An app on this hub reading a peer app's API; the peer bounds the call with its own timeout.

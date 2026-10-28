@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { ApprovalDecision, ChatHandle, ChatTurn, QuestionAnswers, RuntimeAdapter, SteerInput } from "../runtimes/types.ts";
+import type { ApprovalDecision, BackgroundJob, ChatCallbacks, ChatHandle, ChatTurn, QuestionAnswers, RuntimeAdapter, SteerInput } from "../runtimes/types.ts";
 
 /**
  * Chat turns as background runs (docs/panel.md#chat). A turn belongs to the server, not to the
@@ -11,9 +11,16 @@ import type { ApprovalDecision, ChatHandle, ChatTurn, QuestionAnswers, RuntimeAd
  * the last one it saw. The row in `agent_runs` (space.db) holds the run's identity and status from
  * the start and its events once it ends, so a finished turn is still there after its memory copy
  * is dropped, or after a restart; a row still `running` at boot is marked `interrupted`.
+ *
+ * A live conversation may also speak by itself (docs/runtimes.md#background-work): after a
+ * background job it started reports back, the runtime runs a turn of its own. That turn is a run
+ * too, `trigger: "background"`, with an empty message, on the same session; `watch` tells an open
+ * panel about it, and about the session's background jobs.
  */
 
 export type RunStatus = "running" | "done" | "error" | "stopped" | "timeout" | "interrupted";
+/** Who started the run: the person's message, or the runtime answering a background job's report. */
+export type RunTrigger = "user" | "background";
 
 export type RunInfo = {
   id: string;
@@ -32,9 +39,13 @@ export type RunInfo = {
   finishedAt: number | null;
   /** Sequence number of the newest event (0: none yet). */
   lastSeq: number;
+  trigger: RunTrigger;
 };
 
 export type RunEvent = { seq: number; line: string };
+
+/** What `watch` tells: a run started or ended, or a session's background jobs changed (the whole list). */
+export type RunNews = { type: "run"; run: RunInfo } | { type: "jobs"; agent: string; sessionId: string; jobs: BackgroundJob[] };
 
 export type RunListener = {
   onEvent: (ev: RunEvent) => void;
@@ -87,7 +98,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   started_at  INTEGER NOT NULL,
   finished_at INTEGER,
   last_seq    INTEGER NOT NULL DEFAULT 0,
-  events      TEXT
+  events      TEXT,
+  trigger     TEXT NOT NULL DEFAULT 'user'
 );
 CREATE INDEX IF NOT EXISTS agent_runs_started ON agent_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS agent_runs_agent ON agent_runs(agent, started_at DESC);
@@ -107,6 +119,7 @@ type Row = {
   finished_at: number | null;
   last_seq: number;
   events: string | null;
+  trigger: RunTrigger | null;
 };
 
 type Live = {
@@ -131,6 +144,9 @@ export class RunRegistry {
   private readonly now: () => number;
   private readonly hooks: Pick<RunRegistryOptions, "onRunStart" | "onRunEnd">;
   private closing = false;
+  /** Each conversation's background jobs, by `agent \n session`: the runtime's last whole list. */
+  private readonly jobLists = new Map<string, BackgroundJob[]>();
+  private readonly watchers = new Set<(news: RunNews) => void>();
 
   constructor(
     private readonly db: Database,
@@ -140,6 +156,8 @@ export class RunRegistry {
     this.now = options.now ?? Date.now;
     this.hooks = { onRunStart: options.onRunStart, onRunEnd: options.onRunEnd };
     db.exec(SCHEMA);
+    const columns = db.query<{ name: string }, []>("PRAGMA table_info(agent_runs)").all();
+    if (!columns.some((c) => c.name === "trigger")) db.exec("ALTER TABLE agent_runs ADD COLUMN trigger TEXT NOT NULL DEFAULT 'user'");
     // A run the previous process left running died with it.
     db.query("UPDATE agent_runs SET status = 'interrupted', error = 'ai-space restarted during the turn', finished_at = COALESCE(finished_at, ?) WHERE status = 'running'").run(this.now());
   }
@@ -160,46 +178,40 @@ export class RunRegistry {
         }
       }
     }
-    const info: RunInfo = {
-      id: crypto.randomUUID(),
-      agent: spec.agent,
-      sessionId,
-      sid: null,
-      message: spec.turn.message,
-      runtime: spec.runtime.name,
-      model: spec.model ?? null,
-      status: "running",
-      error: null,
-      startedAt: this.now(),
-      finishedAt: null,
-      lastSeq: 0,
-    };
-    let resolveEnded = () => {};
-    const ended = new Promise<void>((r) => (resolveEnded = r));
-    const run: Live = { info, events: [], bytes: 0, listeners: new Set(), handle: { kill: () => {} }, ended, resolveEnded };
-    this.live.set(info.id, run);
-    this.db
-      .query("INSERT INTO agent_runs (id, agent, session_id, message, runtime, model, status, started_at) VALUES (?, ?, ?, ?, ?, ?, 'running', ?)")
-      .run(info.id, info.agent, sessionId, info.message, info.runtime, info.model, info.startedAt);
-    this.notify("onRunStart", info);
-    if (this.opts.timeoutMs > 0) {
-      run.timer = setTimeout(() => this.end(run, "timeout", `timed out after ${Math.round(this.opts.timeoutMs / 60_000)} min`), this.opts.timeoutMs);
-    }
+    const run = this.open({ agent: spec.agent, sessionId, message: spec.turn.message, runtime: spec.runtime.name, model: spec.model ?? null, trigger: "user" });
     try {
-      const handle = spec.runtime.chat(spec.turn, {
-        onEvent: (line) => this.push(run, line),
-        onSession: (sid) => {
-          info.sid = sid;
-          this.db.query("UPDATE agent_runs SET sid = ? WHERE id = ?").run(sid, info.id);
-          spec.onSession?.(sid);
-        },
-        onFinish: (error) => this.finish(run, error),
+      run.handle = spec.runtime.chat(spec.turn, {
+        ...this.callbacks(run, spec.onSession),
+        onWake: (handle) => this.wake(spec, run, handle),
+        onJobs: (jobs) => this.setJobs(spec.agent, run.info.sid ?? run.info.sessionId, jobs),
       });
-      run.handle = handle;
     } catch (e) {
       this.finish(run, (e as Error).message);
     }
-    return { ...info };
+    return { ...run.info };
+  }
+
+  /**
+   * Follow what happens to the runs: each start and end, and each change of a conversation's
+   * background jobs. Returns the function that stops it.
+   */
+  watch(listener: (news: RunNews) => void): () => void {
+    this.watchers.add(listener);
+    return () => this.watchers.delete(listener);
+  }
+
+  /** A conversation's background jobs as the runtime last reported them; empty when it never did. */
+  jobs(agent: string, sessionId: string): BackgroundJob[] {
+    return (this.jobLists.get(`${agent}\n${sessionId}`) ?? []).map((j) => ({ ...j }));
+  }
+
+  /** Every conversation with background jobs known, of `agent` or of every agent (null), newest report last. */
+  jobsOf(agent: string | null): { agent: string; sessionId: string; jobs: BackgroundJob[] }[] {
+    return [...this.jobLists.entries()].flatMap(([k, jobs]) => {
+      const at = k.indexOf("\n");
+      const owner = k.slice(0, at);
+      return agent === null || owner === agent ? [{ agent: owner, sessionId: k.slice(at + 1), jobs: jobs.map((j) => ({ ...j })) }] : [];
+    });
   }
 
   /** A run by id: the live copy, else its row. */
@@ -309,6 +321,63 @@ export class RunRegistry {
 
   // ------------------------------------------------------------------ internals
 
+  /** A new running run: in memory, in its row, its timeout armed, its start told. */
+  private open(fields: Pick<RunInfo, "agent" | "sessionId" | "message" | "runtime" | "model" | "trigger">): Live {
+    const info: RunInfo = { id: crypto.randomUUID(), ...fields, sid: null, status: "running", error: null, startedAt: this.now(), finishedAt: null, lastSeq: 0 };
+    let resolveEnded = () => {};
+    const ended = new Promise<void>((r) => (resolveEnded = r));
+    const run: Live = { info, events: [], bytes: 0, listeners: new Set(), handle: { kill: () => {} }, ended, resolveEnded };
+    this.live.set(info.id, run);
+    this.db
+      .query("INSERT INTO agent_runs (id, agent, session_id, message, runtime, model, status, started_at, trigger) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)")
+      .run(info.id, info.agent, info.sessionId, info.message, info.runtime, info.model, info.startedAt, info.trigger);
+    this.notify("onRunStart", info);
+    if (this.opts.timeoutMs > 0) {
+      run.timer = setTimeout(() => this.end(run, "timeout", `timed out after ${Math.round(this.opts.timeoutMs / 60_000)} min`), this.opts.timeoutMs);
+    }
+    this.announce({ type: "run", run: { ...info } });
+    return run;
+  }
+
+  private callbacks(run: Live, onSession?: (sid: string) => void): ChatCallbacks {
+    return {
+      onEvent: (line) => this.push(run, line),
+      onSession: (sid) => {
+        run.info.sid = sid;
+        this.db.query("UPDATE agent_runs SET sid = ? WHERE id = ?").run(sid, run.info.id);
+        onSession?.(sid);
+      },
+      onFinish: (error) => this.finish(run, error),
+    };
+  }
+
+  /** The runtime answers a background report by itself: a run of its own on the conversation of `origin`. */
+  private wake(spec: StartRun, origin: Live, handle: ChatHandle): ChatCallbacks | null {
+    if (this.closing) return null;
+    const run = this.open({ agent: spec.agent, sessionId: origin.info.sid ?? origin.info.sessionId, message: "", runtime: spec.runtime.name, model: spec.model ?? null, trigger: "background" });
+    run.handle = handle;
+    return this.callbacks(run, spec.onSession);
+  }
+
+  private setJobs(agent: string, sessionId: string | null, jobs: BackgroundJob[]): void {
+    if (!sessionId) return;
+    const key = `${agent}\n${sessionId}`;
+    this.jobLists.delete(key); // newest last
+    this.jobLists.set(key, jobs.map((j) => ({ ...j })));
+    while (this.jobLists.size > 200) this.jobLists.delete(this.jobLists.keys().next().value!);
+    this.announce({ type: "jobs", agent, sessionId, jobs: this.jobs(agent, sessionId) });
+  }
+
+  private announce(news: RunNews): void {
+    for (const w of this.watchers) {
+      try {
+        w(news);
+      } catch (e) {
+        console.error(`[agents] run watcher failed: ${(e as Error).message}`);
+      }
+    }
+  }
+
   private notify(hook: "onRunStart" | "onRunEnd", info: RunInfo): void {
     try {
       this.hooks[hook]?.({ ...info });
@@ -363,6 +432,7 @@ export class RunRegistry {
     for (const l of run.listeners) l.onEnd({ ...info });
     run.listeners.clear();
     this.notify("onRunEnd", info);
+    this.announce({ type: "run", run: { ...info } });
     run.resolveEnded();
     setTimeout(() => this.live.delete(info.id), this.opts.keepFinishedMs).unref?.();
     this.evict();
@@ -423,5 +493,6 @@ function fromRow(row: Row): RunInfo {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     lastSeq: row.last_seq,
+    trigger: row.trigger ?? "user",
   };
 }

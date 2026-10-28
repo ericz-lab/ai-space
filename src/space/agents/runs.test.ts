@@ -145,6 +145,62 @@ describe("run registry", () => {
     expect(sub.seen.at(-1)!.seq).toBe(50);
     expect(sub.seen.reduce((n, e) => n + e.line.length, 0)).toBeLessThanOrEqual(400);
   });
+
+  test("a turn the runtime starts by itself is a background run of the same conversation; watch tells about it and the jobs", () => {
+    const { runtime, turns } = scriptedRuntime();
+    const db = new Database(":memory:");
+    let clock = 1_000;
+    const runs = new RunRegistry(db, { now: () => clock++ });
+    const news: unknown[] = [];
+    const unwatch = runs.watch((n) => news.push(n.type === "run" ? { type: "run", trigger: n.run.trigger, status: n.run.status } : { type: "jobs", sessionId: n.sessionId, n: n.jobs.length }));
+    const sessions: string[] = [];
+    const run = runs.start({ agent: "a/x", runtime, turn: { message: "watch it", cwd: "/" }, onSession: (sid) => sessions.push(sid) });
+    turns[0]!.cb.onSession?.("s1");
+    turns[0]!.cb.onJobs?.([{ id: "job-1", kind: "monitor", description: "ticks", status: "running", startedAt: 1, endedAt: null }]);
+    turns[0]!.cb.onFinish(null);
+    expect(runs.jobs("a/x", "s1")).toMatchObject([{ id: "job-1", status: "running" }]);
+
+    let killed = false;
+    const wake = turns[0]!.cb.onWake!({ kill: () => (killed = true) })!;
+    const [bg] = runs.list({ agent: "a/x", limit: 1 });
+    expect(bg).toMatchObject({ trigger: "background", sessionId: "s1", message: "", status: "running" });
+    // The conversation is busy while the agent answers: the person's next message is refused, not lost.
+    expect(() => runs.start({ agent: "a/x", runtime, turn: { message: "again", cwd: "/", sessionId: "s1" } })).toThrow(/already has a turn/);
+    wake.onSession?.("s1");
+    wake.onEvent(text("tick 2 seen"));
+    wake.onFinish(null);
+    expect(runs.get(bg!.id)).toMatchObject({ status: "done", trigger: "background", lastSeq: 1 });
+    expect(sessions).toEqual(["s1", "s1"]);
+    // Stopping one goes to the turn's own handle.
+    const second = turns[0]!.cb.onWake!({ kill: () => (killed = true) })!;
+    const [bg2] = runs.list({ agent: "a/x", limit: 1 });
+    runs.stop(bg2!.id);
+    expect(killed).toBe(true);
+    second.onFinish("stopped");
+
+    expect(news).toEqual([
+      { type: "run", trigger: "user", status: "running" },
+      { type: "jobs", sessionId: "s1", n: 1 },
+      { type: "run", trigger: "user", status: "done" },
+      { type: "run", trigger: "background", status: "running" },
+      { type: "run", trigger: "background", status: "done" },
+      { type: "run", trigger: "background", status: "running" },
+      { type: "run", trigger: "background", status: "stopped" },
+    ]);
+    unwatch();
+    // The trigger survives a restart.
+    expect(new RunRegistry(db).get(bg!.id)).toMatchObject({ trigger: "background" });
+    expect(new RunRegistry(db).get(run.id)).toMatchObject({ trigger: "user" });
+  });
+
+  test("a registry shutting down takes no turn the runtime starts by itself", async () => {
+    const { runtime, turns } = scriptedRuntime();
+    const runs = new RunRegistry(new Database(":memory:"));
+    runs.start({ agent: "a/x", runtime, turn: { message: "hi", cwd: "/" } });
+    turns[0]!.cb.onFinish(null);
+    await runs.shutdown();
+    expect(turns[0]!.cb.onWake!({ kill() {} })).toBeNull();
+  });
 });
 
 // The HTTP surface with a real child process: a stand-in claude CLI.
@@ -356,6 +412,31 @@ describe("live turns over HTTP", () => {
     expect(said).toContain("heard: also this");
     expect((await post(`/runs/${id}/steer`, { message: "late" })).status).toBe(409);
     expect((await post(`/runs/${id}/steer`, {})).status).toBe(400);
+  });
+
+  test("the agent's answers to its background jobs arrive as background runs an open panel learns of", async () => {
+    const watch = await fetch(`${liveBase}/watch`);
+    expect(watch.headers.get("content-type")).toContain("text/event-stream");
+    const r = await post("/chat", { message: "bg:2", interactive: true });
+    const id = r.headers.get("x-run-id")!;
+    const turn = await readFrames(r);
+    expect(turn.filter(([, d]) => d.type === "steer")).toEqual([]);
+    const news = await readFrames(watch, (fs) => fs.filter(([, d]) => d.type === "run" && (d.run as RunInfo).trigger === "background" && (d.run as RunInfo).status === "done").length >= 2);
+    const background = news.flatMap(([, d]) => (d.type === "run" && (d.run as RunInfo).trigger === "background" && (d.run as RunInfo).status === "done" ? [d.run as RunInfo] : []));
+    expect(background.map((b) => b.sessionId)).toEqual([liveRuns.get(id)!.sid, liveRuns.get(id)!.sid]);
+    const jobs = news.filter(([, d]) => d.type === "jobs").map(([, d]) => (d.jobs as { status: string }[]).map((j) => j.status));
+    expect(jobs[0]).toEqual(["running"]);
+    expect(jobs.at(-1)).toEqual(["completed"]);
+    // A background run replays like any other.
+    const replay = await readFrames(await fetch(`${liveBase}/runs/${background[0]!.id}/events`));
+    const said = replay.filter(([, d]) => d.type === "assistant").flatMap(([, d]) => (d.message as { content: { text?: string }[] }).content.map((c) => c.text));
+    expect(said).toEqual(["woke 1"]);
+    // A panel opened later learns the jobs from the first frames.
+    const late = await readFrames(await fetch(`${liveBase}/watch`), (fs) => fs.some(([, d]) => d.type === "jobs"));
+    expect(late.find(([, d]) => d.type === "jobs")![1]).toMatchObject({ type: "jobs", agent: "space/assistant", sessionId: liveRuns.get(id)!.sid, jobs: [{ id: "job-1", kind: "bash", status: "completed" }] });
+    // The panel's one stream for every agent of the space says the same.
+    const all = await readFrames(await fetch(`http://127.0.0.1:${live.port}/api/agents/watch`), (fs) => fs.some(([, d]) => d.type === "jobs"));
+    expect(all.find(([, d]) => d.type === "jobs")![1]).toMatchObject({ agent: "space/assistant", jobs: [{ id: "job-1" }] });
   });
 
   test("a one-shot turn cannot be steered: the client sends the message next instead", async () => {
