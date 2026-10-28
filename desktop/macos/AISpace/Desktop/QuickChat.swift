@@ -150,6 +150,7 @@ struct QuickChatView: View {
                 AgentPicker(model: model, state: state)
                 if let chat = model.quickChatController { WorkingMark(chat: chat) }
                 Spacer(minLength: 8)
+                PermissionButton()
                 if let chat = model.quickChatController { NewChatButton(chat: chat) }
                 // Kept for its key (⌘O).
                 Button("") { model.openQuickChatInMainWindow(); close() }
@@ -202,6 +203,49 @@ private struct NewChatButton: View {
         RoundHeaderButton(symbol: "square.and.pencil", size: 9, help: "New Conversation (⌘N)") { chat.newConversation() }
             .keyboardShortcut("n", modifiers: .command)
             .disabled(chat.busy || chat.messages.isEmpty)
+    }
+}
+
+/// The permission of the next messages, shared with the main window's picker: a 20 pt round
+/// button whose glyph shows the choice and opens a menu of the three.
+private struct PermissionButton: View {
+    @ObservedObject private var preferences = Preferences.shared
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let current = preferences.chatPermission
+        Menu {
+            Picker("Permission", selection: $preferences.chatPermission) {
+                ForEach(ChatPermission.allCases) { permission in
+                    Label(permission.label, systemImage: permission.symbol).tag(permission)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Image(systemName: current.symbol).font(.system(size: 9, weight: .bold))
+                .foregroundStyle(current == .all ? Color.orange
+                    : scheme == .dark ? Color(red: 235 / 255, green: 235 / 255, blue: 245 / 255).opacity(0.6) : Color(red: 60 / 255, green: 60 / 255, blue: 67 / 255).opacity(0.6))
+                .frame(width: 20, height: 20)
+                .background((current == .all ? Color.orange : Color(red: 120 / 255, green: 120 / 255, blue: 128 / 255))
+                    .opacity(scheme == .dark ? 0.32 : 0.14), in: Circle())
+                .contentShape(Circle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(Text("Permission: \(current.label)"))
+        .accessibilityLabel(Text("Permission: \(current.label)"))
+    }
+}
+
+private extension ChatPermission {
+    var symbol: String {
+        switch self {
+        case .readOnly: return "lock"
+        case .editFiles: return "pencil"
+        case .all: return "lock.open"
+        }
     }
 }
 
