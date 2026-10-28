@@ -36,6 +36,9 @@ import {
   taskModels,
   taskStatus,
   usageHeader,
+  appModelPath,
+  decodePeerModels,
+  peerAppIcon,
   usagePeerNotes,
   webText,
 } from "./settings.ts";
@@ -194,4 +197,18 @@ test("model usage names the Space and the peers whose rows are missing or old", 
   expect(notes[0]).toStartWith("eric did not answer (timeout); its figures are from ");
   expect(notes[1]).toBe("box is not included: no route");
   expect(usagePeerNotes(u, "zh")[1]).toBe("未包含 box：no route");
+});
+
+test("app models: a peer's apps, an older core, a peer that fails", () => {
+  const json = "application/json";
+  const ok = decodePeerModels("david", { status: 200, contentType: json, body: JSON.stringify({ ok: true, apps: [{ app: "notes", rows: [{ tag: null, model: "m", source: "default" }] }], options: [{ value: "c:s", runtime: "claude", tier: "basic", model: "s", unavailable: "offline" }] }) });
+  expect(ok.apps?.map((a) => a.app)).toEqual(["notes"]);
+  expect(ok.options?.[0]?.unavailable).toBe("offline");
+  expect(decodePeerModels("david", { status: 404, contentType: json, body: '{"ok":false,"error":"not found"}' })).toEqual({ peer: "david", old: true });
+  expect(decodePeerModels("david", { status: 200, contentType: "text/html", body: "<!doctype html>" })).toEqual({ peer: "david", old: true });
+  expect(decodePeerModels("david", { status: 404, contentType: json, body: '{"ok":false,"error":"unknown peer david"}' })).toEqual({ peer: "david", error: "unknown peer david" });
+  expect(decodePeerModels("david", { status: 502, contentType: "text/plain", body: "bad gateway" })).toEqual({ peer: "david", error: "HTTP 502" });
+  expect(appModelPath("my app")).toBe("/api/panel/apps/my%20app/model");
+  expect(appModelPath("notes", "david")).toBe("/api/peers/david/apps/notes/model");
+  expect(peerAppIcon("david", "notes")).toBe("/api/peers/david/apps/notes/icon");
 });

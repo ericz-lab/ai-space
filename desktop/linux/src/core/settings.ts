@@ -133,6 +133,35 @@ export const decodeAppModels = (raw: unknown) => ({
   options: listOf<ModelOption>(raw, "options"),
 });
 
+/** A peer's part of App models (AppModels.tsx): its rows and its own choices, or why there are none. */
+export type PeerModels = { peer: string; apps?: AppModels[]; options?: ModelOption[]; error?: string; old?: boolean };
+
+/** Where an app's override is saved: the panel's route here, the peer's own through the hub for a peer app. */
+export const appModelPath = (app: string, peer?: string) => (peer ? `/api/peers/${encodeURIComponent(peer)}/apps/${encodeURIComponent(app)}/model` : `/api/panel/apps/${encodeURIComponent(app)}/model`);
+
+/** A peer app's icon on the peer, for an app the hub's own list leaves out. */
+export const peerAppIcon = (peer: string, app: string) => `/api/peers/${encodeURIComponent(peer)}/apps/${encodeURIComponent(app)}/icon`;
+
+/**
+ * `GET /api/peers/:peer/model/apps` as AppModels.tsx's `loadPeerModels` reads it: a peer whose
+ * core has no such route (a 404 other than "unknown peer", or its page instead of JSON) is old,
+ * not failed.
+ */
+export function decodePeerModels(peer: string, a: { status: number; body: string; contentType: string }): PeerModels {
+  let d: unknown;
+  try {
+    d = JSON.parse(a.body);
+  } catch {
+    d = undefined;
+  }
+  const error = typeof field(d, "error") === "string" ? (field(d, "error") as string) : "";
+  if (a.status === 404 && !/^unknown peer/.test(error)) return { peer, old: true };
+  if (a.status >= 200 && a.status < 300 && !a.contentType.includes("json")) return { peer, old: true };
+  if (d === undefined || field(d, "ok") !== true) return { peer, error: error || `HTTP ${a.status}` };
+  const { apps, options } = decodeAppModels(d);
+  return { peer, apps, options };
+}
+
 // ------------------------------------------------------------------ feedback
 
 /** Settings → Feedback, `GET /api/panel/feedback/settings` (FeedbackSettings.tsx). */
