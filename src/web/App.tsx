@@ -4,7 +4,8 @@ import { AddForm, UninstallForm } from "./AppForms.tsx";
 import MachineClis from "./MachineClis.tsx";
 import ModelPreference from "./ModelPreference.tsx";
 import { AccountSettings, loadAuth } from "./Auth.tsx";
-import Chat, { type Ask } from "./Chat.tsx";
+import Chat, { type Ask, type Draft } from "./Chat.tsx";
+import { linkedAgent, type PanelLink, parsePanelLink } from "./panel-link.ts";
 import Pet, { AppPet, type AppPetInfo, DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
@@ -212,6 +213,38 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     setPanel("chat");
   };
   const [omniFocus, setOmniFocus] = useState(0);
+  // A link into the panel (panel-link.ts, docs/panel.md#panel-links): read on load and whenever the
+  // fragment changes, then cleared, so the same link opens its window again. A chat link waits for
+  // the agent list; its text joins the message field and is not sent.
+  const [link, setLink] = useState<PanelLink | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  useEffect(() => {
+    const read = () => {
+      const l = parsePanelLink(location.hash);
+      if (!l) return;
+      history.replaceState(history.state, "", location.pathname + location.search);
+      setLink(l);
+    };
+    read();
+    window.addEventListener("hashchange", read);
+    return () => window.removeEventListener("hashchange", read);
+  }, []);
+  useEffect(() => {
+    if (!link) return;
+    if (link.open !== "chat") {
+      setLink(null);
+      setPanel(link.open);
+      return;
+    }
+    if (link.agent && !loaded) return;
+    const target = link.agent ? linkedAgent(agents, link.agent) : null;
+    if (target && target.peer && target.id === link.agent) openChat(target);
+    else if (target) openAgent(target);
+    else setPanel("chat");
+    const text = link.text;
+    if (text) setDraft((d) => ({ id: (d?.id ?? 0) + 1, text }));
+    setLink(null);
+  }, [link, loaded]);
 
   // The app list answers at once with the health the server has cached; a service it has not
   // probed yet comes back "unknown", so the list is asked once more after the probes had their
@@ -1023,7 +1056,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Terminal open={panel === "terminal"} onClose={close} />
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
       <Shortcuts open={panel === "shortcuts"} onClose={close} onOpenTasks={openTasks} />
-      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} ask={ask} onTurnSettled={() => { void reload(); }} />
+      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} ask={ask} draft={draft} onTurnSettled={() => { void reload(); }} />
     </>
   );
 }
