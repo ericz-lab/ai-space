@@ -1,6 +1,7 @@
 import Cairo from "cairo";
 import Gdk from "gi://Gdk?version=3.0";
 import GdkPixbuf from "gi://GdkPixbuf";
+import GdkX11 from "gi://GdkX11?version=3.0";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=3.0";
@@ -9,7 +10,7 @@ import PangoCairo from "gi://PangoCairo";
 import system from "system";
 import { unixStreams } from "../app/unix-streams.ts";
 import {
-  ANGLE, DIAL_DIAMETER, DIAL_WINDOW, DIAMETER, type DialSection, type FromBall, HUB_DIAMETER, type Point, type Rect, SECTIONS, type Section,
+  ANGLE, chatOrigin, DIAL_DIAMETER, DIAL_WINDOW, DIAMETER, type DialSection, type FromBall, HUB_DIAMETER, type Point, type Rect, SECTIONS, type Section,
   type ToBall, dialCenter, isPictureType, offer, origin, sectionAt,
 } from "../core/floating-ball.ts";
 
@@ -672,6 +673,28 @@ function snapshot(file: string): void {
   printerr(`[ai-space-ball] snapshot ${file}`);
 }
 
+/**
+ * Quick Chat beside the ball. The app's window is a Wayland client's X11 window (GTK 4 can show a
+ * window on XWayland but not place it), so the ball, an X11 client, moves it and keeps it above.
+ */
+let chat: { xid: number; window: any } | undefined;
+function placeChat(xid: number, width: number, height: number): void {
+  try {
+    if (chat?.xid !== xid) chat = { xid, window: GdkX11.X11Window.foreign_new_for_display(Gdk.Display.get_default(), xid) };
+    if (!chat.window) return;
+    const [wx, wy] = win.get_position();
+    const ball = { x: wx + offset.x, y: wy + offset.y, width: DIAMETER, height: DIAMETER };
+    const o = chatOrigin(ball, { width, height }, workArea({ x: ball.x + DIAMETER / 2, y: ball.y + DIAMETER / 2 }));
+    chat.window.move(o.x, o.y);
+    chat.window.set_keep_above(true);
+    Gdk.Display.get_default().flush();
+    log(`chat placed at ${o.x},${o.y} ${width}x${height}`);
+  } catch (e) {
+    chat = undefined;
+    printerr(`[ai-space-ball] could not place Quick Chat: ${e}`);
+  }
+}
+
 // The app's messages
 
 function handle(raw: string): void {
@@ -694,6 +717,9 @@ function handle(raw: string): void {
       labels = m.labels;
       win.queue_draw();
       if (SHOT) snapshot(SHOT);
+      break;
+    case "place":
+      placeChat(m.xid, m.width, m.height);
       break;
     case "quit":
       Gtk.main_quit();

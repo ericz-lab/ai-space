@@ -218,8 +218,31 @@ export type DialSection = {
 };
 
 /** App → ball. */
+// Quick Chat beside the ball (the Mac's `QuickChat.position`)
+
+/** Quick Chat's width (Design Studio's spec, design 12); it is 96 high while empty and grows up to `CHAT_MAX_HEIGHT`. */
+export const CHAT_WIDTH = 380;
+export const CHAT_MAX_HEIGHT = 420;
+
+/**
+ * Where Quick Chat stands (its top-left) when the ball opened it: 12 beside the ball, on its left
+ * when there is room, else its right; its bottom 48 under the ball's middle, so as it grows taller
+ * it grows upward past the ball. Kept 8 inside the work area.
+ */
+export function chatOrigin(ball: Rect, size: Size, visible: Rect): Point {
+  const gap = 12, edge = 8;
+  const left = ball.x - gap - size.width;
+  let x = left >= visible.x ? left : ball.x + ball.width + gap;
+  let y = ball.y + ball.height / 2 + 48 - size.height;
+  x = Math.min(Math.max(x, visible.x + edge), visible.x + visible.width - size.width - edge);
+  y = Math.min(Math.max(y, visible.y + edge), visible.y + visible.height - size.height - edge);
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
 export type ToBall =
   | { type: "init"; origin?: Point; markIcon?: string }
+  /** Put the app's X11 window `xid` (Quick Chat) beside the ball and above other windows. */
+  | { type: "place"; xid: number; width: number; height: number }
   | { type: "dial"; sections: Record<Section, DialSection>; dark: boolean; labels: { addInSettings: string; sendTo: string; hub: string; menu: { quickChat: string; settings: string; hide: string } } }
   | { type: "quit" };
 

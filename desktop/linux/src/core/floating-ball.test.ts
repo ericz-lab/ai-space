@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { decodeCatalogue } from "./catalogue.ts";
 import {
-  DIAL_DIAMETER, EMPTY_SLOT, MARGIN, type Rect, agentFor, agentForApp, decodeFromBall, dialCenter, isOwnDrop, isPictureType, offer,
+  CHAT_WIDTH, DIAL_DIAMETER, EMPTY_SLOT, chatOrigin, MARGIN, type Rect, agentFor, agentForApp, decodeFromBall, dialCenter, isOwnDrop, isPictureType, offer,
   origin, refFor, resolveDial, sectionAt, setting, slot, withLead,
 } from "./floating-ball.ts";
 
@@ -182,5 +182,34 @@ describe("the two processes", () => {
   test("the lead goes before the message once", () => {
     expect(withLead("", "Save this to Keep:")).toBe("Save this to Keep:\n");
     expect(withLead("Save this to Keep:\nhello", "Save this to Keep:")).toBe("Save this to Keep:\nhello");
+  });
+});
+
+describe("Quick Chat beside the ball", () => {
+  const screen: Rect = { x: 0, y: 32, width: 1920, height: 1168 };
+  const ball = (x: number, y: number): Rect => ({ x, y, width: 52, height: 52 });
+
+  test("on the ball's left, its bottom under the ball's middle", () => {
+    expect(chatOrigin(ball(1856, 401), { width: CHAT_WIDTH, height: 96 }, screen)).toEqual({ x: 1856 - 12 - CHAT_WIDTH, y: 427 + 48 - 96 });
+  });
+
+  test("on its right when the left has no room", () => {
+    expect(chatOrigin(ball(20, 401), { width: CHAT_WIDTH, height: 96 }, screen).x).toBe(20 + 52 + 12);
+  });
+
+  test("taller, it grows upward and keeps its bottom", () => {
+    const short = chatOrigin(ball(1856, 401), { width: CHAT_WIDTH, height: 96 }, screen);
+    const tall = chatOrigin(ball(1856, 401), { width: CHAT_WIDTH, height: 420 }, screen);
+    expect(tall.y + 420).toBe(short.y + 96);
+  });
+
+  test("never above the top of the work area or below its bottom", () => {
+    expect(chatOrigin(ball(1856, 40), { width: CHAT_WIDTH, height: 420 }, screen).y).toBe(32 + 8);
+    expect(chatOrigin(ball(1856, 1140), { width: CHAT_WIDTH, height: 96 }, screen).y).toBe(32 + 1168 - 96 - 8);
+  });
+
+  test("on a second monitor, inside that monitor", () => {
+    const right: Rect = { x: 1920, y: 0, width: 1920, height: 1200 };
+    expect(chatOrigin(ball(1930, 300), { width: CHAT_WIDTH, height: 96 }, right).x).toBe(1930 + 52 + 12);
   });
 });

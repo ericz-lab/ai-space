@@ -141,8 +141,18 @@ picture attached; the click's time goes with it as an X11 startup id, which the 
 with so the desktop may bring it to the front. If the ball ends by itself it is started again,
 at most three times a minute; it ends with the app.
 
-Limits: with no XWayland (rare; `DISPLAY` unset) Settings says the ball cannot run. Quick Chat
-opens where the desktop puts it, not beside the ball (a Wayland window cannot be placed). Pictures
+Quick Chat is drawn as the Mac's (Design Studio's design 12): a 380 px panel with rounded
+corners and no title bar, a 40 px header (the agent with its list, a spinner while it works,
+New Conversation, Close) and the field with "↩ Send" in it; it is about 96 px high while empty and
+grows with the replies, the thread scrolling past 324 px. Escape or a click elsewhere hides it;
+Ctrl+N starts a new conversation, Ctrl+J lists the agents, Ctrl+O moves it to the main window.
+Where XWayland is there the panel is an X11 window of the app (GTK 4 opens XWayland's display
+beside its Wayland one), so the ball can place it: 12 px beside the ball, on its left when there is
+room, its bottom 48 px under the ball's middle so it grows upward, and above other windows.
+
+Limits: with no XWayland (rare; `DISPLAY` unset) Settings says the ball cannot run, and Quick
+Chat is a Wayland window the desktop places. Opened by its shortcut, Quick Chat also goes where
+the desktop puts it. Pictures
 promised by a source without data or a file (XDND direct save) are not taken. There is no Share
 Picture editor on Linux, so a picture dropped on the hub goes to Space Assistant in Quick Chat.
 

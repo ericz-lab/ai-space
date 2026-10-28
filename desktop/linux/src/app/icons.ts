@@ -74,7 +74,8 @@ export function appTexture(name: string): any | undefined {
 }
 
 /** An icon as a widget of `size` pixels: an emoji label, the image once it has loaded, or the fallback glyph. */
-export function iconWidget(icon: string | undefined, size: number, client: SpaceClient | undefined, fallback = "application-x-executable-symbolic"): any {
+/** `exact`: the picture takes exactly `size`, not its own larger size (a small avatar beside a name). */
+export function iconWidget(icon: string | undefined, size: number, client: SpaceClient | undefined, fallback = "application-x-executable-symbolic", exact = false): any {
   const box = new Gtk.Box({ width_request: size, height_request: size, halign: Gtk.Align.CENTER, valign: Gtk.Align.CENTER });
   box.add_css_class("tile-icon");
   const glyph = () => {
@@ -95,7 +96,9 @@ export function iconWidget(icon: string | undefined, size: number, client: Space
     void loadTexture(icon, client, size).then((texture) => {
       // A widget dropped before its icon came gets none.
       if (!texture || !box.get_parent()) return;
-      const pic = new Gtk.Picture({ paintable: texture, content_fit: Gtk.ContentFit.CONTAIN, can_shrink: true, width_request: size, height_request: size });
+      const pic = exact
+        ? new Gtk.Image({ paintable: texture, pixel_size: size })
+        : new Gtk.Picture({ paintable: texture, content_fit: Gtk.ContentFit.CONTAIN, can_shrink: true, width_request: size, height_request: size });
       pic.add_css_class("tile-image");
       box.remove(shown);
       shown = pic;

@@ -70,6 +70,7 @@ export class FloatingBall {
   stop(): void {
     const proc = this.proc;
     this.proc = undefined;
+    this.quick.placer = undefined;
     if (!proc) return;
     this.write({ type: "quit" });
     try {
@@ -142,6 +143,7 @@ export class FloatingBall {
       GLib.spawn_close_pid(pid);
       proc.exited = true;
       if (this.proc !== proc) return;
+      this.quick.placer = undefined;
       this.proc = undefined;
       this.stdin = undefined;
       // A ball that ended by itself comes back, unless it keeps ending.
@@ -150,6 +152,8 @@ export class FloatingBall {
       if (this.wanted && this.restarts.length <= 3) GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => (this.sync(), GLib.SOURCE_REMOVE));
       else if (this.wanted) logError(new Error("it ended three times in a minute"), "floating ball");
     });
+    // Quick Chat opened from the ball stands beside it: the ball places its X11 window.
+    this.quick.placer = (xid, width, height) => this.write({ type: "place", xid, width, height });
     const mark = path(APP_ROOT, "data", "icons", "hicolor", "scalable", "apps", "dev.ai_space.Desktop.svg");
     this.write({ type: "init", ...(prefs.floatingBallOrigin ? { origin: prefs.floatingBallOrigin } : {}), markIcon: mark });
     this.pushDial();
