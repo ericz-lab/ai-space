@@ -573,6 +573,217 @@ struct MachineInventory: Decodable, Hashable, Identifiable {
     }
 }
 
+// MARK: Feedback (docs/feedback.md)
+
+/// The settings of the feedback button on app pages and of the Fix Engineer
+/// (`GET /api/panel/feedback/settings`, src/web/FeedbackSettings.tsx). Read leniently, as the Linux
+/// client does: a value it does not know falls back to the Space's default.
+struct FeedbackSettings: Decodable, Equatable {
+    static let efforts = ["high", "xhigh", "max"]
+
+    /// The main switch: off, no app shows the button.
+    var enabled = false
+    /// Apps with no switch of their own show the button when this is true.
+    var appsDefault = true
+    /// Per-app switches, `on` or `off`; an app missing here follows `appsDefault`.
+    var apps: [String: String] = [:]
+    /// `auto` fixes at once, `later` records it to be fixed together.
+    var mode = "auto"
+    /// Where the Fix Engineer runs: "" for the Space's own machine, else a peer's name.
+    var machine = ""
+    /// `runtime/model`; "" for the default chat model.
+    var model = ""
+    var effort = "xhigh"
+    /// Whether the page sends the last script errors it saw.
+    var errors = true
+
+    private enum CodingKeys: String, CodingKey { case enabled, appsDefault, apps, mode, machine, model, effort, errors }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = (try? c.decode(Bool.self, forKey: .enabled)) == true
+        appsDefault = (try? c.decode(Bool.self, forKey: .appsDefault)) != false
+        apps = ((try? c.decode([String: String].self, forKey: .apps)) ?? [:]).filter { $0.value == "on" || $0.value == "off" }
+        mode = (try? c.decode(String.self, forKey: .mode)) == "later" ? "later" : "auto"
+        machine = (try? c.decode(String.self, forKey: .machine)) ?? ""
+        model = (try? c.decode(String.self, forKey: .model)) ?? ""
+        let effort = try? c.decode(String.self, forKey: .effort)
+        self.effort = effort.flatMap { Self.efforts.contains($0) ? $0 : nil } ?? "xhigh"
+        errors = (try? c.decode(Bool.self, forKey: .errors)) != false
+    }
+
+    /// Whether an app's pages show the button.
+    func shown(_ app: String) -> Bool { enabled && (apps[app].map { $0 == "on" } ?? appsDefault) }
+}
+
+/// One change to the feedback settings, as `PUT /api/panel/feedback/settings` takes it.
+enum FeedbackChange: Equatable {
+    case enabled(Bool)
+    case appsDefault(Bool)
+    /// An app's switch: `default`, `on` or `off`. A peer's apps take the same switches (the hub sends them on).
+    case app(String, String)
+    case mode(String)
+    case machine(String)
+    case model(String)
+    case effort(String)
+    case errors(Bool)
+
+    var json: [String: Any] {
+        switch self {
+        case .enabled(let v): return ["enabled": v]
+        case .appsDefault(let v): return ["appsDefault": v]
+        case .app(let app, let v): return ["apps": [app: v]]
+        case .mode(let v): return ["mode": v]
+        case .machine(let v): return ["machine": v]
+        case .model(let v): return ["model": v]
+        case .effort(let v): return ["effort": v]
+        case .errors(let v): return ["errors": v]
+        }
+    }
+}
+
+struct FeedbackApp: Decodable, Hashable, Identifiable {
+    var app: String
+    var title: String?
+    var zh: String?
+    var enabled: Bool?
+
+    var id: String { app }
+    func displayTitle(lang: String = Lang.current) -> String {
+        if lang == "zh", let zh, !zh.isEmpty { return zh }
+        return title.flatMap { $0.isEmpty ? nil : $0 } ?? app
+    }
+}
+
+/// A peer's apps, which follow these settings: the hub sends them on (docs/feedback.md#apps-on-a-peer).
+struct FeedbackPeer: Decodable, Hashable, Identifiable {
+    var name: String
+    var ok: Bool?
+    var error: String?
+    /// The settings reached the peer.
+    var synced: Bool?
+    var apps: Lossy<FeedbackApp>?
+    var counts: [String: Int]?
+
+    var id: String { name }
+    var appList: [FeedbackApp] { apps?.elements ?? [] }
+    var waiting: Int { counts?["later"] ?? 0 }
+}
+
+struct FeedbackView: Decodable, Equatable {
+    struct Machine: Decodable, Hashable, Identifiable {
+        var value: String
+        var label: String
+        var id: String { value }
+    }
+
+    var settings: FeedbackSettings
+    var apps: [FeedbackApp]
+    /// Absent from an older Space.
+    var peers: [FeedbackPeer]
+    var machines: [Machine]
+    var models: [ModelChoice]
+    var counts: [String: Int]
+    var shortcut: String
+
+    private enum CodingKeys: String, CodingKey { case settings, apps, peers, machines, models, counts, shortcut }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        settings = (try? c.decode(FeedbackSettings.self, forKey: .settings)) ?? FeedbackSettings()
+        apps = (try? c.decode(Lossy<FeedbackApp>.self, forKey: .apps))?.elements ?? []
+        peers = (try? c.decode(Lossy<FeedbackPeer>.self, forKey: .peers))?.elements ?? []
+        machines = (try? c.decode(Lossy<Machine>.self, forKey: .machines))?.elements ?? []
+        models = (try? c.decode(Lossy<ModelChoice>.self, forKey: .models))?.elements ?? []
+        counts = (try? c.decode([String: Int].self, forKey: .counts)) ?? [:]
+        shortcut = (try? c.decode(String.self, forKey: .shortcut)) ?? "Alt+Shift+F"
+    }
+
+    /// Feedback waiting to be fixed here.
+    var waiting: Int { counts["later"] ?? 0 }
+
+    /// The view with a change applied the way the Space applies it (FeedbackSettings.tsx
+    /// `withPatch`): an app set to `default` loses its own switch, and each app's shown or hidden
+    /// follows. The page shows a choice at once and saves in the background.
+    func applying(_ change: FeedbackChange) -> FeedbackView {
+        var next = self
+        switch change {
+        case .enabled(let v): next.settings.enabled = v
+        case .appsDefault(let v): next.settings.appsDefault = v
+        case .app(let app, let v): next.settings.apps[app] = v == "default" ? nil : v
+        case .mode(let v): next.settings.mode = v
+        case .machine(let v): next.settings.machine = v
+        case .model(let v): next.settings.model = v
+        case .effort(let v): next.settings.effort = v
+        case .errors(let v): next.settings.errors = v
+        }
+        let s = next.settings
+        func follow(_ apps: [FeedbackApp]) -> [FeedbackApp] { apps.map { var a = $0; a.enabled = s.shown(a.app); return a } }
+        next.apps = follow(apps)
+        next.peers = peers.map { p in
+            guard p.ok == true else { return p }
+            var q = p
+            q.apps?.elements = follow(p.appList)
+            return q
+        }
+        return next
+    }
+
+    /// An app's title, here or on a peer; its id when neither lists it.
+    func title(_ app: String, peer: String?, lang: String = Lang.current) -> String {
+        let rows = peer.map { name in peers.first { $0.name == name }?.appList ?? [] } ?? apps
+        return rows.first { $0.app == app }?.displayTitle(lang: lang) ?? app
+    }
+}
+
+/// One piece of feedback sent lately (`GET /api/panel/feedback`), a peer's too on a hub.
+struct FeedbackItem: Decodable, Hashable, Identifiable {
+    var id: Int
+    var peer: String?
+    var app: String
+    var text: String
+    var status: String
+    var todoId: Int?
+    var todoUrl: String?
+    var runMachine: String?
+    var note: String?
+    /// Milliseconds since 1970.
+    var createdAt: Double?
+
+    /// Two Spaces may have the same id.
+    var key: String { "\(peer ?? "")-\(id)" }
+    /// The peer it was sent on; nil for this Space's own (which the route marks with "").
+    var peerName: String? { peer.flatMap { $0.isEmpty ? nil : $0 } }
+    /// The Fix Engineer is at it or about to be: the list follows it.
+    var isActive: Bool { status == "fixing" || status == "queued" }
+    /// Fix now (waiting) or Fix again (not fixed, needs a person, to review), for a row with a task.
+    var canFix: Bool { todoId != nil && ["failed", "skipped", "review", "later"].contains(status) }
+    /// The engineer's note, shown on the rows where it says why.
+    var shownNote: String? {
+        guard let note, ["failed", "skipped", "recorded"].contains(status) else { return nil }
+        let line = note.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? ""
+        return String(line.prefix(120))
+    }
+
+    /// The status in words (`feedback.status.*`).
+    static func statusText(_ status: String) -> String {
+        switch status {
+        case "later": return String(localized: "Waiting to be fixed")
+        case "queued": return String(localized: "Queued")
+        case "fixing": return String(localized: "Fixing")
+        case "review": return String(localized: "Fixed — to review")
+        case "failed": return String(localized: "Not fixed")
+        case "skipped": return String(localized: "Needs a person")
+        case "recorded": return String(localized: "Recorded")
+        case "accepted": return String(localized: "Accepted")
+        case "dropped": return String(localized: "Dropped in ai-todo")
+        default: return status
+        }
+    }
+}
+
 // MARK: Events (docs/events.md)
 
 struct SpaceEvent: Decodable, Hashable, Identifiable {

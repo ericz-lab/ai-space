@@ -312,6 +312,63 @@ final class MachineClisStore: HubStore {
     }
 }
 
+/// Settings → Feedback (src/web/FeedbackSettings.tsx, docs/feedback.md): the button on app pages,
+/// what happens to what is sent with it, where the Fix Engineer runs and on which model, which apps
+/// show the button (a peer's too, on a hub), and the feedback sent lately.
+final class FeedbackStore: HubStore {
+    @Published private(set) var view: FeedbackView?
+    @Published private(set) var items: [FeedbackItem] = []
+    /// What the last Fix now said.
+    @Published private(set) var notice: String?
+    @Published private(set) var fixing = false
+    /// Only the answer to the newest change is shown, so a slower earlier one cannot undo a later choice.
+    private var saves = 0
+
+    override func load() async throws {
+        async let recent = try? api.data("/api/panel/feedback?limit=20")
+        view = try Hub.decode(FeedbackView.self, from: try await api.data("/api/panel/feedback/settings"))
+        if let data = await recent { items = (try? Hub.rows(FeedbackItem.self, "items", from: data)) ?? items }
+    }
+
+    /// Something is being fixed: the list is read again while it is.
+    var isActive: Bool { items.contains(where: \.isActive) }
+
+    /// Shows the change at once and saves it; the menu stays usable meanwhile.
+    func change(_ change: FeedbackChange) async {
+        guard let current = view else { return }
+        saves += 1
+        let n = saves
+        view = current.applying(change)
+        saveError = nil
+        do {
+            let answer = try await api.send("PUT", "/api/panel/feedback/settings", json: change.json)
+            if n == saves, let fresh = try? Hub.decode(FeedbackView.self, from: answer) { view = fresh }
+        } catch {
+            saveError = Self.message(error)
+            await refresh()
+        }
+    }
+
+    /// Starts waiting feedback now: one row (`ids`), or everything waiting here or on a peer.
+    func fix(peer: String? = nil, ids: [Int]? = nil) async {
+        fixing = true
+        defer { fixing = false }
+        var body: [String: Any] = [:]
+        if let peer { body["peer"] = peer }
+        if let ids { body["ids"] = ids }
+        do {
+            struct Queued: Decodable { var queued: Int }
+            let answer = try await api.send("POST", "/api/panel/feedback/fix", json: body)
+            let n = (try? Hub.decode(Queued.self, from: answer))?.queued ?? 0
+            notice = String(localized: "Sent \(n) to the Fix Engineer.")
+            saveError = nil
+        } catch {
+            saveError = Self.message(error)
+        }
+        await refresh()
+    }
+}
+
 final class EventsStore: HubStore {
     @Published private(set) var events: [SpaceEvent] = []
     @Published private(set) var capabilities: [CapabilityApp] = []

@@ -179,6 +179,70 @@ struct HubModelsTests {
         #expect(MachineInventory.lastChecked(rows) == ISO8601.parse("2026-10-27T02:00:00.000Z"))
     }
 
+    static let feedback = """
+    {"settings":{"enabled":true,"appsDefault":true,"apps":{"notes":"off","bad":"maybe"},"mode":"later","machine":"","model":"claude/intermediate","effort":"huge","errors":false},
+     "apps":[{"app":"notes","title":"Notes","zh":"笔记","status":"active","enabled":false},{"app":"todo","title":"Todo","status":"active","enabled":true}],
+     "peers":[{"name":"david","ok":true,"synced":false,"error":"timeout","apps":[{"app":"draw","title":"Draw","status":"active","enabled":true}],"counts":{"later":2}},
+              {"name":"lab","ok":false,"synced":false,"error":"fetch failed","apps":[],"counts":{}}],
+     "machines":[{"value":"","label":"home"},{"value":"david","label":"david"}],
+     "models":[{"value":"claude/intermediate","runtime":"claude","tier":"intermediate","model":"opus"}],
+     "counts":{"later":3,"queued":0},"shortcut":"Alt+Shift+F"}
+    """
+
+    @Test func readsTheFeedbackSettingsLeniently() throws {
+        let v = try Hub.decode(FeedbackView.self, from: Data(Self.feedback.utf8))
+        #expect(v.settings.enabled && v.settings.mode == "later" && !v.settings.errors)
+        // A switch or effort it does not know falls back.
+        #expect(v.settings.apps == ["notes": "off"])
+        #expect(v.settings.effort == "xhigh")
+        #expect(v.apps.map { $0.displayTitle(lang: "zh") } == ["笔记", "Todo"])
+        #expect(v.peers.map(\.waiting) == [2, 0])
+        #expect(v.waiting == 3)
+        #expect(v.title("draw", peer: "david") == "Draw")
+        #expect(v.title("gone", peer: nil) == "gone")
+        // An older Space without peers still reads.
+        let old = try Hub.decode(FeedbackView.self, from: Data(#"{"settings":{},"apps":[],"machines":[],"models":[],"counts":{}}"#.utf8))
+        #expect(old.peers.isEmpty && !old.settings.enabled && old.settings.appsDefault && old.shortcut == "Alt+Shift+F")
+    }
+
+    @Test func showsAFeedbackChoiceAtOnceAsTheSpaceAppliesIt() throws {
+        let v = try Hub.decode(FeedbackView.self, from: Data(Self.feedback.utf8))
+        // Back to the default: the app's own switch goes, and it follows the default again.
+        let back = v.applying(.app("notes", "default"))
+        #expect(back.settings.apps["notes"] == nil)
+        #expect(back.apps.map(\.enabled) == [true, true])
+        // The main switch off hides every app, a peer's that answers too; one that does not is left as it was.
+        let off = v.applying(.enabled(false))
+        #expect(off.apps.allSatisfy { $0.enabled == false })
+        #expect(off.peers[0].appList.map(\.enabled) == [false])
+        #expect(off.peers[1] == v.peers[1])
+        let hidden = v.applying(.appsDefault(false))
+        #expect(hidden.apps.map(\.enabled) == [false, false])
+        #expect(FeedbackChange.app("todo", "on").json["apps"] as? [String: String] == ["todo": "on"])
+        #expect(FeedbackChange.model("").json["model"] as? String == "")
+    }
+
+    @Test func readsTheRecentFeedbackAndWhatCanBeFixed() throws {
+        let items = try Hub.rows(FeedbackItem.self, "items", from: Data("""
+        {"ok":true,"items":[
+          {"id":1,"peer":"","app":"notes","text":"Button is cut","status":"later","path":"/","todoId":9,"todoPeer":"","todoUrl":null,"runId":null,"runMachine":"","note":null,"createdAt":1790000000000},
+          {"id":1,"peer":"david","app":"draw","text":"Slow","status":"failed","todoId":4,"todoUrl":"https://todo.example.com/4","runMachine":"david","note":"build failed\\nmore","createdAt":1790000000000},
+          {"id":2,"peer":"","app":"notes","text":"Typo","status":"fixing","todoId":5,"createdAt":1790000000000},
+          {"id":3,"peer":"","app":"notes","text":"Nice","status":"accepted","todoId":6,"createdAt":1790000000000},
+          {"id":4,"peer":"","app":"notes","text":"No task","status":"recorded","todoId":null,"note":"no todo app","createdAt":1790000000000}
+        ]}
+        """.utf8))
+        #expect(items.map(\.peerName) == [nil, "david", nil, nil, nil])
+        #expect(Set(items.map(\.key)).count == 5)
+        #expect(items.map(\.canFix) == [true, true, false, false, false])
+        #expect(items.map(\.isActive) == [false, false, true, false, false])
+        #expect(items[1].shownNote == "build failed")
+        #expect(items[4].shownNote == "no todo app")
+        #expect(items[0].shownNote == nil)
+        #expect(FeedbackItem.statusText("accepted") == "Accepted")
+        #expect(FeedbackItem.statusText("dropped") == "Dropped in ai-todo")
+    }
+
     @Test func readsAppModelsEventsAndPackages() throws {
         let models = try Hub.rows(AppModelRows.self, "apps", from: Data(#"{"apps":[{"app":"notes","rows":[{"tag":null,"model":"codex/basic","source":"default"},{"tag":"image","manifest":"codex/intermediate","override":"claude/basic","model":"claude/basic","source":"override-tag"}]}]}"#.utf8))
         #expect(models[0].rows.map(\.id) == ["", "image"])

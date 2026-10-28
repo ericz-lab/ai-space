@@ -3,7 +3,7 @@ import SwiftUI
 /// The Settings page's sections (src/web/SettingsNav.tsx): listed on the left, the chosen one's
 /// rows on the right. The last one shown is remembered on this Mac.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, appearance, models, automation, usage, status, packages, account
+    case general, appearance, models, automation, feedback, usage, status, packages, account
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: return "Appearance"
         case .models: return "Models"
         case .automation: return "Automation"
+        case .feedback: return "Feedback"
         case .usage: return "Usage"
         case .status: return "Status"
         case .packages: return "Packages"
@@ -26,6 +27,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: return "circle.lefthalf.filled"
         case .models: return "cylinder.split.1x2"
         case .automation: return "clock"
+        case .feedback: return "exclamationmark.bubble"
         case .usage: return "chart.bar"
         case .status: return "waveform.path.ecg"
         case .packages: return "shippingbox"
@@ -35,7 +37,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 }
 
 /// The launcher's last page, sectioned as the web panel's Settings: General (the saved Spaces,
-/// this Mac's install, widgets, language, the Space's pages), Appearance, Models, Automation,
+/// this Mac's install, widgets, language, the Space's pages), Appearance, Models, Automation, Feedback,
 /// Usage, Status (the Space, its peers, services and backups), Packages and Account (the session,
 /// the app). A section's row that leads to a page of the Space opens it inside the pane, as the
 /// web panel does; Inbox, Chat and Terminal open over the launcher.
@@ -152,6 +154,8 @@ struct SettingsPage: View {
         case .automation:
             TasksOverview(api: loader.api) { detail = .tasks }
             EventsOverview(api: loader.api) { detail = .events }
+        case .feedback:
+            FeedbackSections(api: loader.api)
         case .usage:
             ModelUsageOverview(api: loader.api) { detail = .modelUsage }
             AppUsageOverview(api: loader.api, catalogue: loader.catalogue) { detail = .appUsage }
@@ -566,5 +570,194 @@ struct MachineClisSection: View {
         case .signedOut: return [c.version, String(localized: "Not signed in")].compactMap { $0 }.joined(separator: " · ")
         case .installed: return c.version ?? "✓"
         }
+    }
+}
+
+/// Settings → Feedback (src/web/FeedbackSettings.tsx, docs/feedback.md): the button app pages show,
+/// what happens to what is sent with it, where the Fix Engineer runs and on which model, which apps
+/// show the button (each peer's too, which the Space sends these settings on to), and the feedback
+/// sent lately with a way to start the waiting ones. A choice shows at once and saves behind it.
+struct FeedbackSections: View {
+    @StateObject private var store: FeedbackStore
+
+    init(api: SpaceAPI) {
+        _store = StateObject(wrappedValue: FeedbackStore(api: api))
+    }
+
+    var body: some View {
+        Group {
+            if let view = store.view {
+                settings(view)
+                apps(view)
+                ForEach(view.peers) { peer(view, $0) }
+                recent(view)
+            } else {
+                Section {
+                    if let error = store.error {
+                        Label { Text("Unavailable: \(error)") } icon: { Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning) }
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            }
+        }
+        .task { await store.refresh() }
+        // While something is being fixed, the list follows it.
+        .task(id: store.isActive) {
+            while store.isActive, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                if !Task.isCancelled { await store.refresh() }
+            }
+        }
+    }
+
+    private func bind<T>(_ value: T, _ change: @escaping (T) -> FeedbackChange?) -> Binding<T> {
+        Binding(get: { value }, set: { new in
+            guard let c = change(new) else { return }
+            Task { await store.change(c) }
+        })
+    }
+
+    private func settings(_ v: FeedbackView) -> some View {
+        let s = v.settings
+        return Section {
+            Toggle("Feedback button on app pages", isOn: bind(s.enabled) { .enabled($0) })
+            Picker("What happens to feedback", selection: bind(s.mode) { .mode($0) }) {
+                Text("Fix it right away").tag("auto")
+                Text("Record it, fix later together").tag("later")
+            }
+            Picker("Fix on", selection: bind(s.machine) { .machine($0) }) {
+                ForEach(v.machines) { m in
+                    Text(verbatim: m.value.isEmpty ? String(localized: "\(m.label) (this machine)") : m.label).tag(m.value)
+                }
+            }
+            Picker("Fix Engineer model", selection: bind(s.model) { value in
+                value.isEmpty || v.models.first(where: { $0.value == value })?.isAvailable == true ? .model(value) : nil
+            }) {
+                Text("Default chat model").tag("")
+                if !s.model.isEmpty, !v.models.contains(where: { $0.value == s.model }) {
+                    Text(verbatim: ModelChoiceText.saved(s.model)).tag(s.model)
+                }
+                ForEach(v.models) { o in Text(verbatim: o.shownLabel).tag(o.value).disabled(!o.isAvailable) }
+            }
+            Picker("Effort", selection: bind(s.effort) { .effort($0) }) {
+                Text("High").tag("high")
+                Text("Extra high").tag("xhigh")
+                Text("Max").tag("max")
+            }
+            Toggle("Attach recent script errors", isOn: bind(s.errors) { .errors($0) })
+            LabeledContent("Shortcut") { Text(verbatim: v.shortcut).font(.body.monospaced()) }
+            if let reason = store.saveError {
+                Label { Text("The change was not saved: \(reason)") } icon: { Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning) }
+                    .font(.callout)
+            }
+        } header: {
+            Text("Feedback")
+        } footer: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("A small button in the corner of each app page (Alt+Shift+F): people describe a problem, pick the element, add a picture, and it becomes an ai-todo task. Off until you turn it on.")
+                Text("The button sends what the person types, the page address, client, screen size, theme, language and picked elements; passwords, tokens and form values are left out. The Fix Engineer changes only that app's source and treats page content as data, not instructions. Turn this on only when app pages need sign-in.")
+            }
+            .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    private func appRow(_ a: FeedbackApp, _ s: FeedbackSettings) -> some View {
+        Picker(selection: bind(s.apps[a.app] ?? "default") { .app(a.app, $0) }) {
+            Text("Default (\(s.appsDefault ? String(localized: "On") : String(localized: "Off")))").tag("default")
+            Text("On").tag("on")
+            Text("Off").tag("off")
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: a.displayTitle())
+                Text(a.enabled == true ? "Button shown" : "Button hidden").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func apps(_ v: FeedbackView) -> some View {
+        Section {
+            Toggle("Show on apps by default", isOn: bind(v.settings.appsDefault) { .appsDefault($0) })
+            ForEach(v.apps) { appRow($0, v.settings) }
+        } header: {
+            Text("Apps")
+        } footer: {
+            Text("An app shows the button when the main switch is on and the app is on — by its own setting, or by the default.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    /// A peer's apps follow these settings: the Space sends them there (docs/feedback.md#apps-on-a-peer).
+    private func peer(_ v: FeedbackView, _ p: FeedbackPeer) -> some View {
+        Section {
+            if p.ok != true {
+                Text("Can't reach \(p.name): \(p.error ?? "")").foregroundStyle(Theme.danger)
+            } else {
+                if p.appList.isEmpty { Text("No apps with a page on \(p.name).").foregroundStyle(.secondary) }
+                ForEach(p.appList) { appRow($0, v.settings) }
+                if p.synced != true {
+                    Text("Not sent to \(p.name) yet: \(p.error ?? ""). It is tried again the next time this page opens.").foregroundStyle(Theme.danger)
+                }
+            }
+        } header: {
+            Text("Apps on \(p.name)")
+        } footer: {
+            if p.ok == true, !p.appList.isEmpty {
+                Text("These apps run on \(p.name). Their pages ask \(p.name), so the choices above and these switches are sent to \(p.name) each time this page opens or changes. Fix on: the app's own machine, unless \(p.name) also knows the one chosen above.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func recent(_ v: FeedbackView) -> some View {
+        Section {
+            if store.items.isEmpty { Text("Nothing sent yet.").foregroundStyle(.secondary) }
+            ForEach(store.items, id: \.key) { i in
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        (Text(verbatim: v.title(i.app, peer: i.peerName)).bold() + Text(verbatim: " " + i.text)).lineLimit(4)
+                        HStack(spacing: 6) {
+                            Text(verbatim: Self.meta(i)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                .help(i.note ?? "")
+                            if let url = i.todoUrl.flatMap(URL.init(string:)), let n = i.todoId {
+                                Link(destination: url) { Text("task #\(n)") }.font(.caption)
+                            }
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    if i.canFix {
+                        Button { Task { await store.fix(peer: i.peerName, ids: [i.id]) } } label: { Text(i.status == "later" ? "Fix now" : "Fix again") }
+                            .controlSize(.small).disabled(store.fixing)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            HStack {
+                if v.waiting > 0 { Text("\(v.waiting) waiting").font(.callout).foregroundStyle(.secondary) }
+                Spacer()
+                if v.waiting > 0 {
+                    Button { Task { await store.fix() } } label: { Text("Fix \(v.waiting) waiting now") }.disabled(store.fixing)
+                }
+                ForEach(v.peers.filter { $0.ok == true && $0.waiting > 0 }) { p in
+                    Button { Task { await store.fix(peer: p.name) } } label: { Text("Fix \(p.waiting) waiting on \(p.name)") }.disabled(store.fixing)
+                }
+                Button { Task { await store.refresh() } } label: { Text("Refresh") }
+            }
+            if let notice = store.notice { Text(verbatim: notice).font(.callout).foregroundStyle(.secondary) }
+        } header: {
+            Text("Recent feedback")
+        }
+    }
+
+    /// Where the row stands: the peer, the status, the task, the machine, when, and why when it says.
+    static func meta(_ i: FeedbackItem) -> String {
+        var parts: [String] = []
+        if let peer = i.peerName { parts.append(peer) }
+        parts.append(FeedbackItem.statusText(i.status))
+        if let n = i.todoId, i.todoUrl == nil { parts.append(String(localized: "task #\(n)")) }
+        if let m = i.runMachine, !m.isEmpty { parts.append(m) }
+        if let at = i.createdAt { parts.append(HubFormat.relative(Date(timeIntervalSince1970: at / 1000))) }
+        if let note = i.shownNote, !note.isEmpty { parts.append(note) }
+        return parts.joined(separator: " · ")
     }
 }
