@@ -516,3 +516,7 @@
 "This machine" = "本机";
 "Machine" = "机器";
 "The machine the agent runs on" = "智能体所在的机器";
+
+/* Model choices */
+"not signed in" = "未登录";
+"not available" = "不可用";

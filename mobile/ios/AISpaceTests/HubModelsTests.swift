@@ -49,6 +49,29 @@ struct HubModelsTests {
         #expect(options[0].label == "claude · Basic · haiku")
     }
 
+    @Test func greysAChoiceThatCannotBePicked() throws {
+        let options = try Hub.rows(ModelChoice.self, "options", from: Data("""
+        {"ok":true,"options":[
+          {"value":"claude/basic","runtime":"claude","tier":"basic","model":"haiku"},
+          {"value":"codex/basic","runtime":"codex","tier":"basic","model":"luna","unavailable":"signed-out"},
+          {"value":"david:claude/basic","runtime":"david:claude","tier":"basic","model":"haiku","unavailable":"offline"}
+        ]}
+        """.utf8))
+        #expect(options.map(\.isAvailable) == [true, false, false])
+        #expect(options[0].shownLabel == "claude · Basic · haiku")
+        #expect(options[1].shownLabel == "codex · Basic · luna (not signed in)")
+        #expect(options[2].shownLabel.hasSuffix("(offline)"))
+        #expect(ModelChoiceText.saved("old/basic") == "old/basic (not available)")
+
+        let prefs = try JSONDecoder().decode(ModelPreferences.self, from: Data("""
+        {"defaultModel":"codex/basic","options":[{"value":"claude/basic","runtime":"claude"},{"value":"codex/basic","runtime":"codex","unavailable":"signed-out"}]}
+        """.utf8))
+        #expect(prefs.canPick("claude/basic"))
+        #expect(prefs.canPick(""))
+        #expect(!prefs.canPick("codex/basic"))
+        #expect(!prefs.canPick("gone/basic"))
+    }
+
     @Test func aMissingKeyIsAnEmptyList() throws {
         #expect(try Hub.rows(TaskRun.self, "runs", from: Data(#"{"ok":true}"#.utf8)).isEmpty)
         let runs = try Hub.rows(TaskRun.self, "runs", from: Data(#"{"runs":[{"id":7,"taskId":"t1","startedAt":1000,"endedAt":3500,"status":"ok","trigger":"event","eventIds":[1,2]}]}"#.utf8))

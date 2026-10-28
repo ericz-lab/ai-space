@@ -95,12 +95,35 @@ struct ModelChoice: Decodable, Hashable, Identifiable {
     var tier: String?
     var model: String?
     var capabilities: Capabilities?
+    /// Why it is shown but cannot be picked: `signed-out` or `offline` (docs/model-machines.md#inventory).
+    var unavailable: String?
 
     var id: String { value }
     var label: String {
         let parts = [runtime, tier.map { $0.prefix(1).uppercased() + $0.dropFirst() }, model].compactMap { $0 }.filter { !$0.isEmpty }
         return parts.isEmpty ? value : parts.joined(separator: " · ")
     }
+    var isAvailable: Bool { (unavailable ?? "").isEmpty }
+    /// The label with the reason it cannot be picked.
+    var shownLabel: String { ModelChoiceText.label(label, unavailable: unavailable) }
+}
+
+/// How every model picker shows a choice (src/web/model-choices.tsx): the Space already left out
+/// what is missing on its machine; one that is not signed in, or on a peer that is offline, comes
+/// with `unavailable` and is shown greyed with the reason; a saved choice that is no longer
+/// offered stays selected, marked, so nothing is rewritten behind the person's back.
+enum ModelChoiceText {
+    static func reason(_ unavailable: String?) -> String? {
+        guard let unavailable, !unavailable.isEmpty else { return nil }
+        return unavailable == "offline" ? String(localized: "offline") : String(localized: "not signed in")
+    }
+
+    static func label(_ label: String, unavailable: String?) -> String {
+        reason(unavailable).map { "\(label) (\($0))" } ?? label
+    }
+
+    /// A saved value the Space no longer offers.
+    static func saved(_ value: String) -> String { "\(value) (\(String(localized: "not available")))" }
 }
 
 // MARK: Tasks (docs/scheduler.md)

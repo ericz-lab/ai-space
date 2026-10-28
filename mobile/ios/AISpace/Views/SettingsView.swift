@@ -218,12 +218,13 @@ struct SettingsSectionPage: View {
                 SettingsCard {
                     LabeledContent("Default model") {
                         Picker("Default model", selection: Binding(get: { m.defaultModel ?? "" }, set: { value in
-                            Task { await settings.setDefaultModel(value.isEmpty ? nil : value) }
+                            guard m.canPick(value) else { return }
+                    Task { await settings.setDefaultModel(value.isEmpty ? nil : value) }
                         })) {
                             Text("Environment defaults").tag("")
-                            ForEach(m.options) { Text(verbatim: $0.label).tag($0.value) }
+                            ForEach(m.options) { o in Text(verbatim: o.shownLabel).tag(o.value).disabled(!o.isAvailable) }
                             if let current = m.defaultModel, !m.options.contains(where: { $0.value == current }) {
-                                Text(verbatim: current).tag(current)
+                                Text(verbatim: ModelChoiceText.saved(current)).tag(current)
                             }
                         }
                         .labelsHidden()
