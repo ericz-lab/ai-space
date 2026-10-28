@@ -34,11 +34,13 @@ import {
   statusSummary,
   untilTime,
 } from "../core/settings.ts";
+import { type CliInfo, type MachineInventory, cliCell, cliColumns, decodeInventory, lastChecked, machineNote } from "../core/inventory.ts";
+import type { Tone } from "../core/settings.ts";
 import { resolveUrl } from "../core/url.ts";
 import { lang, logError, openExternally, sleep, t, tw } from "./env.ts";
 import { iconWidget } from "./icons.ts";
 import type { Space } from "./model.ts";
-import { type Ctx, badge, choiceRow, confirm, errorText, expander, linkRow, plain, row, waiting } from "./settings-kit.ts";
+import { type Ctx, badge, choiceRow, confirm, errorText, expander, linkRow, note, plain, row, table, waiting } from "./settings-kit.ts";
 
 /**
  * The sections of Settings that show the Space itself, each the web panel's (src/web/App.tsx):
@@ -82,9 +84,97 @@ export function modelsSection(page: any, ctx: Ctx, space: Space): void {
     }, effective());
     group.add(picker.row);
   });
+  machineClis(page, space);
   const more = new Adw.PreferencesGroup();
   more.add(linkRow(tw("settings.appModels"), () => ctx.open("appModels")));
   page.add(more);
+}
+
+/**
+ * The agent CLIs on each machine (MachineClis.tsx): one row per machine, one column per CLI, with
+ * its version, sign-in and runtime. A CLI found here that no runtime uses can be added to
+ * runtimes.yaml (the Space allows it to its operator only); a peer's row is only shown.
+ */
+function machineClis(page: any, space: Space): void {
+  const group = new Adw.PreferencesGroup({ title: tw("clis.title"), description: tw("clis.help") });
+  const recheck = new Gtk.Button({ label: tw("clis.recheck"), valign: Gtk.Align.CENTER, css_classes: ["flat"] });
+  group.set_header_suffix(recheck);
+  const holder = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 8 });
+  group.add(holder);
+  page.add(group);
+  let rows: MachineInventory[] | undefined;
+  let busy = false;
+  let error = "";
+  let added = "";
+  // Kinds added here and not running until ai-space restarts: their button goes.
+  const pending: string[] = [];
+  const draw = () => {
+    for (let c = holder.get_first_child(); c; c = holder.get_first_child()) holder.remove(c);
+    recheck.set_sensitive(!busy);
+    recheck.set_label(busy ? tw("clis.checking") : tw("clis.recheck"));
+    if (!rows) holder.append(note(error ? tw("common.unavailable", { error }) : tw("common.loading"), { error: Boolean(error) }));
+    else {
+      const columns = cliColumns(rows);
+      const cell = (c: CliInfo | undefined, canAdd: boolean): any => {
+        const st = cliCell(c, canAdd);
+        if (st.kind === "dim") return new Gtk.Label({ label: tw(st.text), xalign: 0, valign: Gtk.Align.START, css_classes: ["dim-label", "caption"], ...(st.tip ? { tooltip_text: st.tip } : {}) });
+        const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 2, ...(st.tip ? { tooltip_text: st.tip } : {}) });
+        box.append(new Gtk.Label({ label: st.version, xalign: 0, css_classes: ["heading"] }));
+        const tone: Tone = st.signTone === "ok" ? "ok" : st.signTone === "warn" ? "paused" : "unknown";
+        box.append(badge(tone, tw(st.sign)));
+        if (st.runtime === "add") {
+          const add = new Gtk.Button({ label: tw("clis.add"), halign: Gtk.Align.START, sensitive: !busy });
+          add.connect("clicked", () => void addCli(c!.kind));
+          box.append(add);
+        } else box.append(new Gtk.Label({ label: tw(st.runtime.text, st.runtime.names !== undefined ? { names: st.runtime.names } : {}), xalign: 0, css_classes: ["caption", "dim-label"] }));
+        return box;
+      };
+      const machineCell = (r: MachineInventory) => {
+        const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, valign: Gtk.Align.START });
+        box.append(new Gtk.Label({ label: r.machine || tw("runtimes.thisMachine"), xalign: 0 }));
+        const n = machineNote(r);
+        if (n) box.append(new Gtk.Label({ label: n === "ssh" ? "ssh" : tw(n), xalign: 0, css_classes: ["caption", "dim-label"] }));
+        return box;
+      };
+      holder.append(
+        table(
+          [tw("clis.machine"), ...columns],
+          rows.map((r) => ({
+            cells: [machineCell(r), ...columns.map((name) => (r.old ? new Gtk.Label({ label: "—", xalign: 0, css_classes: ["dim-label"] }) : cell(r.clis.find((x) => x.cli === name), r.via === "local" && !pending.includes(r.clis.find((x) => x.cli === name)?.kind ?? ""))))],
+            ...(r.stale || r.reachable === false ? { dim: true } : {}),
+          })),
+          { numeric: () => false },
+        ),
+      );
+      const checked = lastChecked(rows);
+      if (checked) holder.append(note(tw("clis.checked", { time: relTime(checked, lang) })));
+      if (added) holder.append(note(tw("clis.added", { name: added })));
+      if (error) holder.append(note(error, { error: true }));
+    }
+  };
+  const run = async (fn: () => Promise<void>) => {
+    busy = true;
+    error = "";
+    draw();
+    try {
+      await fn();
+    } catch (e) {
+      error = errorText(e);
+    } finally {
+      busy = false;
+      draw();
+    }
+  };
+  const load = () => run(async () => void (rows = decodeInventory(await space.client.get("/api/model/inventory"))));
+  const addCli = (kind: string) =>
+    run(async () => {
+      const r = (await space.client.send("POST", "/api/model/runtimes", { kind })) as { runtime?: string };
+      added = r.runtime ?? kind;
+      pending.push(kind);
+      rows = decodeInventory(await space.client.get("/api/model/inventory"));
+    });
+  recheck.connect("clicked", () => void run(async () => void (rows = decodeInventory(await space.client.send("POST", "/api/model/status/probe", {})))));
+  void load();
 }
 
 // ------------------------------------------------------------------ automation and usage

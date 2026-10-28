@@ -35,6 +35,11 @@ import {
   taskCounts,
   taskModels,
   taskStatus,
+  usageHeader,
+  appModelPath,
+  decodePeerModels,
+  peerAppIcon,
+  usagePeerNotes,
   webText,
 } from "./settings.ts";
 
@@ -89,11 +94,16 @@ test("model pickers list what the panel's selects list", () => {
   });
   expect(modelChoices(p.options, p.defaultModel, "Environment defaults", "en")).toEqual([
     { value: "", label: "Environment defaults" },
-    { value: "gone", label: "gone" },
+    { value: "gone", label: "gone (not available)", disabled: true },
     { value: "c:s", label: "claude · Advanced · sonnet" },
     { value: "o:m", label: "openai · Basic · mini" },
   ]);
   expect(modelChoices(p.options.slice(0, 1), null, "-", "en", false).map((c) => c.label)).toEqual(["-", "Advanced · sonnet"]);
+  const greyed = modelChoices([{ value: "c:s", runtime: "claude", tier: "advanced", model: "sonnet", unavailable: "signed-out" }, { value: "d:x", runtime: "david", tier: "basic", model: "x", unavailable: "offline" }], "c:s", "-", "zh");
+  expect(greyed.slice(1)).toEqual([
+    { value: "c:s", label: `claude · ${MESSAGES.zh["modelTier.advanced"]} · sonnet (${MESSAGES.zh["models.signedOut"]})`, disabled: true },
+    { value: "d:x", label: `david · ${MESSAGES.zh["modelTier.basic"]} · x (${MESSAGES.zh["models.offline"]})`, disabled: true },
+  ]);
   expect(decodePreferences({}).defaultModel).toBeNull();
   const task = { target: { kind: "agent" } } as TaskInfo;
   expect(taskModels(p.options, task).map((o) => o.value)).toEqual(["c:s"]);
@@ -176,4 +186,29 @@ test("feedback settings read as the panel writes them, with safe defaults", () =
   const empty = decodeFeedback(null);
   expect(empty.settings).toEqual({ enabled: false, appsDefault: true, apps: {}, mode: "auto", machine: "", model: "", effort: "xhigh", errors: true });
   expect(empty.shortcut).toBe("Alt+Shift+F");
+});
+
+test("model usage names the Space and the peers whose rows are missing or old", () => {
+  const u = decodeUsage({ backend: "ai-space", space: "home", peers: [{ name: "david", ok: true }, { name: "eric", ok: false, error: "timeout", asOf: "2026-10-27T10:00:00Z" }, { name: "box", ok: false, error: "no route" }, { ok: false }] });
+  expect(usageHeader(u, "en")).toBe("Space home · " + webText("en", "usage.backend", { backend: "ai-space" }));
+  expect(usageHeader(decodeUsage({ backend: "x" }), "en")).toBe(webText("en", "usage.backend", { backend: "x" }));
+  const notes = usagePeerNotes(u, "en");
+  expect(notes).toHaveLength(2);
+  expect(notes[0]).toStartWith("eric did not answer (timeout); its figures are from ");
+  expect(notes[1]).toBe("box is not included: no route");
+  expect(usagePeerNotes(u, "zh")[1]).toBe("未包含 box：no route");
+});
+
+test("app models: a peer's apps, an older core, a peer that fails", () => {
+  const json = "application/json";
+  const ok = decodePeerModels("david", { status: 200, contentType: json, body: JSON.stringify({ ok: true, apps: [{ app: "notes", rows: [{ tag: null, model: "m", source: "default" }] }], options: [{ value: "c:s", runtime: "claude", tier: "basic", model: "s", unavailable: "offline" }] }) });
+  expect(ok.apps?.map((a) => a.app)).toEqual(["notes"]);
+  expect(ok.options?.[0]?.unavailable).toBe("offline");
+  expect(decodePeerModels("david", { status: 404, contentType: json, body: '{"ok":false,"error":"not found"}' })).toEqual({ peer: "david", old: true });
+  expect(decodePeerModels("david", { status: 200, contentType: "text/html", body: "<!doctype html>" })).toEqual({ peer: "david", old: true });
+  expect(decodePeerModels("david", { status: 404, contentType: json, body: '{"ok":false,"error":"unknown peer david"}' })).toEqual({ peer: "david", error: "unknown peer david" });
+  expect(decodePeerModels("david", { status: 502, contentType: "text/plain", body: "bad gateway" })).toEqual({ peer: "david", error: "HTTP 502" });
+  expect(appModelPath("my app")).toBe("/api/panel/apps/my%20app/model");
+  expect(appModelPath("notes", "david")).toBe("/api/peers/david/apps/notes/model");
+  expect(peerAppIcon("david", "notes")).toBe("/api/peers/david/apps/notes/icon");
 });

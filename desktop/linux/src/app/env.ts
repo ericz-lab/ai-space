@@ -130,6 +130,8 @@ export type Prefs = {
   chosenRuntimes: Record<string, string>;
   window: { width: number; height: number; maximized: boolean };
   lastAgent?: string;
+  /** The machine chosen last in the chat for each agent on several machines, by `app/name`: the peer's name, or "" for this machine. */
+  agentMachines?: Record<string, string>;
   /** Settings › Peer: how the hub reaches this computer (the tunnel itself lives in its unit file). */
   peer?: { reach: "ssh" | "address"; target: string; hubPort: number; address: string; headers: string };
   /** Settings › Appearance: light, dark, or the desktop's choice. */

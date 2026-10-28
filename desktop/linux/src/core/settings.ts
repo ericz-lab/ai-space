@@ -9,6 +9,7 @@ import { type Key as WebKey, type Lang, translate } from "../../../../src/web/me
  */
 
 export type { BackupInfo, CapabilityApp, DeliveryInfo, EventInfo, PeerInfo, RunInfo, ServiceInfo, TaskInfo, UsageRow, WebKey };
+import { dateTime as dateTimeOf } from "../../../../src/web/api.ts";
 export { dateTime, fmtDuration, relTime, scheduleText, untilTime } from "../../../../src/web/api.ts";
 export { activityBars, activityRange, type UsageWindow } from "../../../../src/web/activity-range.ts";
 
@@ -90,9 +91,10 @@ export function backupState(b: BackupInfo): { tone: Tone; key: WebKey } {
 
 // ------------------------------------------------------------------ models
 
-export type ModelOption = { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string; capabilities?: { agent: boolean; complete: boolean } };
+export type ModelOption = { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string; capabilities?: { agent: boolean; complete: boolean }; unavailable?: "signed-out" | "offline" };
 export type Preferences = { defaultModel: string | null; appDefault: string; baseDefault: string; options: ModelOption[] };
-export type Choice = { value: string; label: string };
+/** `disabled`: shown greyed, not selectable (an unavailable model, a saved one no longer offered). */
+export type Choice = { value: string; label: string; disabled?: boolean };
 
 export function decodePreferences(raw: unknown): Preferences {
   const d = field(raw, "defaultModel");
@@ -105,15 +107,20 @@ export function decodePreferences(raw: unknown): Preferences {
 }
 
 /**
- * The entries of a model picker, as the panel's selects list them: the empty choice first, the
- * current value when no option has it (so it is not lost), then the options, runtime by runtime.
+ * The entries of a model picker, as the panel's selects list them (src/web/model-choices.tsx): the
+ * empty choice first, the current value when no option has it (kept, marked not available, so
+ * nothing is rewritten behind the person's back), then the options, runtime by runtime; one that
+ * is not signed in or on an offline peer is greyed with the reason.
  */
 export function modelChoices(options: ModelOption[], current: string | null | undefined, empty: string, lang: Lang, withRuntime = true): Choice[] {
   const out: Choice[] = [{ value: "", label: empty }];
-  if (current && !options.some((o) => o.value === current)) out.push({ value: current, label: current });
+  if (current && !options.some((o) => o.value === current)) out.push({ value: current, label: `${current} (${webText(lang, "models.savedMissing")})`, disabled: true });
   const runtimes = [...new Set(options.map((o) => o.runtime))];
   for (const r of runtimes)
-    for (const o of options.filter((x) => x.runtime === r)) out.push({ value: o.value, label: `${withRuntime || runtimes.length > 1 ? `${o.runtime} · ` : ""}${webText(lang, `modelTier.${o.tier}` as WebKey)} · ${o.model}` });
+    for (const o of options.filter((x) => x.runtime === r)) {
+      const label = `${withRuntime || runtimes.length > 1 ? `${o.runtime} · ` : ""}${webText(lang, `modelTier.${o.tier}` as WebKey)} · ${o.model}`;
+      out.push(o.unavailable ? { value: o.value, label: `${label} (${webText(lang, o.unavailable === "offline" ? "models.offline" : "models.signedOut")})`, disabled: true } : { value: o.value, label });
+    }
   return out;
 }
 
@@ -125,6 +132,35 @@ export const decodeAppModels = (raw: unknown) => ({
   apps: listOf<AppModels>(raw, "apps").map((a) => ({ app: String(a.app), rows: objects(a.rows) as AppModelRow[] })),
   options: listOf<ModelOption>(raw, "options"),
 });
+
+/** A peer's part of App models (AppModels.tsx): its rows and its own choices, or why there are none. */
+export type PeerModels = { peer: string; apps?: AppModels[]; options?: ModelOption[]; error?: string; old?: boolean };
+
+/** Where an app's override is saved: the panel's route here, the peer's own through the hub for a peer app. */
+export const appModelPath = (app: string, peer?: string) => (peer ? `/api/peers/${encodeURIComponent(peer)}/apps/${encodeURIComponent(app)}/model` : `/api/panel/apps/${encodeURIComponent(app)}/model`);
+
+/** A peer app's icon on the peer, for an app the hub's own list leaves out. */
+export const peerAppIcon = (peer: string, app: string) => `/api/peers/${encodeURIComponent(peer)}/apps/${encodeURIComponent(app)}/icon`;
+
+/**
+ * `GET /api/peers/:peer/model/apps` as AppModels.tsx's `loadPeerModels` reads it: a peer whose
+ * core has no such route (a 404 other than "unknown peer", or its page instead of JSON) is old,
+ * not failed.
+ */
+export function decodePeerModels(peer: string, a: { status: number; body: string; contentType: string }): PeerModels {
+  let d: unknown;
+  try {
+    d = JSON.parse(a.body);
+  } catch {
+    d = undefined;
+  }
+  const error = typeof field(d, "error") === "string" ? (field(d, "error") as string) : "";
+  if (a.status === 404 && !/^unknown peer/.test(error)) return { peer, old: true };
+  if (a.status >= 200 && a.status < 300 && !a.contentType.includes("json")) return { peer, old: true };
+  if (d === undefined || field(d, "ok") !== true) return { peer, error: error || `HTTP ${a.status}` };
+  const { apps, options } = decodeAppModels(d);
+  return { peer, apps, options };
+}
 
 // ------------------------------------------------------------------ feedback
 
@@ -247,6 +283,10 @@ export type Totals = { calls: number; errors: number; inputTokens: number; cache
 export type UsageInfo = {
   window: string;
   backend: string;
+  /** The Space whose ledger this is (096ba00). */
+  space?: string;
+  /** On a hub: each peer, whether its rows are in, and from when. */
+  peers?: { name: string; ok: boolean; asOf?: string; error?: string }[];
   totals: Totals;
   byTag: (Totals & { app: string; tag: string; model: string; machine?: string })[];
   byModel: (Totals & { model: string; machine?: string })[];
@@ -261,6 +301,8 @@ export type CallInfo = {
   tag: string;
   model: string;
   machine?: string;
+  /** The peer this call comes from, on a hub (its app is then `<peer>/<app>`). */
+  peer?: string;
   modelSource?: string;
   backend: string;
   status: "ok" | "error";
@@ -282,12 +324,27 @@ export function decodeUsage(raw: unknown): UsageInfo {
   return {
     window: String(field(raw, "window") ?? ""),
     backend: String(field(raw, "backend") ?? ""),
+    ...(typeof field(raw, "space") === "string" && field(raw, "space") ? { space: field(raw, "space") as string } : {}),
+    ...(Array.isArray(field(raw, "peers")) ? { peers: listOf<NonNullable<UsageInfo["peers"]>[number]>(raw, "peers").filter((p) => typeof p?.name === "string") } : {}),
     totals: totals(field(raw, "totals")),
     byTag: listOf<UsageInfo["byTag"][number]>(raw, "byTag"),
     byModel: listOf<UsageInfo["byModel"][number]>(raw, "byModel"),
     byBackend: listOf<UsageInfo["byBackend"][number]>(raw, "byBackend"),
     history: { ...(typeof field(h, "firstAt") === "string" ? { firstAt: field(h, "firstAt") as string } : {}), totals: totals(field(h, "totals")), days: listOf<UsageInfo["history"]["days"][number]>(h, "days") },
   };
+}
+
+/** The page's header: the Space, then the backend (Usage.tsx); its tooltip is `usage.spaceHint`. */
+export function usageHeader(u: UsageInfo, lang: Lang): string {
+  const backend = translate(lang, "usage.backend", { backend: u.backend });
+  return u.space ? `${translate(lang, "usage.space", { space: u.space })} · ${backend}` : backend;
+}
+
+/** One line per peer whose rows are missing or old (Usage.tsx). */
+export function usagePeerNotes(u: UsageInfo, lang: Lang): string[] {
+  return (u.peers ?? [])
+    .filter((p) => !p.ok)
+    .map((p) => (p.asOf ? translate(lang, "usage.peerStale", { peer: p.name, error: p.error ?? "", time: dateTimeOf(p.asOf, lang) }) : translate(lang, "usage.peerMissing", { peer: p.name, error: p.error ?? "" })));
 }
 
 /** 1234 → 1.2K, 1234567 → 1.23M, 2689400000 → 2.69B; a missing figure is a dash (Usage.tsx). */

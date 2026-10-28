@@ -1,11 +1,12 @@
 import Adw from "gi://Adw?version=1";
 import Gtk from "gi://Gtk?version=4.0";
 import Pango from "gi://Pango";
+import { groupById } from "../core/agents.ts";
 import { type Agent, pickText } from "../core/catalogue.ts";
 import type { SessionInfo } from "../core/conversation.ts";
 import { relativeTime } from "../core/format.ts";
 import { ChatView } from "./chat-view.ts";
-import { lang, prefs, savePrefs, t } from "./env.ts";
+import { lang, prefs, savePrefs, t, tw } from "./env.ts";
 import { iconWidget } from "./icons.ts";
 import type { AppModel, Space } from "./model.ts";
 
@@ -30,7 +31,7 @@ export class ChatPage {
     private readonly model: AppModel,
     onLink: (uri: string) => void,
   ) {
-    this.view = new ChatView(model, { onLink });
+    this.view = new ChatView(model, { onLink, onMachine: (agent) => this.choose(agent) });
     const side = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL });
     const fresh = new Gtk.Button({ margin_top: 10, margin_bottom: 4, margin_start: 10, margin_end: 10 });
     const freshContent = new Adw.ButtonContent({ icon_name: "list-add-symbolic", label: t("newConversation") });
@@ -52,7 +53,7 @@ export class ChatPage {
     this.agentList.add_css_class("navigation-sidebar");
     this.agentList.connect("row-activated", (_l: unknown, row: any) => {
       const agent = this.space?.catalogue?.agentInfo.find((a) => a.id === row.agentId);
-      if (agent) this.choose(agent);
+      if (agent && this.space) this.choose(this.model.preferredAgent(this.space, agent));
       if (this.split.get_collapsed()) this.split.set_show_sidebar(false);
     });
     side.append(this.agentList);
@@ -112,18 +113,23 @@ export class ChatPage {
   }
 
   private selectRow(): void {
+    // A row stands for the agent on every machine.
+    const g = this.agent && groupById(this.space?.catalogue?.agentGroups ?? [], this.agent.id);
+    const ids = g ? g.machines.map((m) => m.id) : [this.agent?.id];
     for (let row = this.agentList.get_first_child(); row; row = row.get_next_sibling()) {
-      if (row.agentId === this.agent?.id) this.agentList.select_row(row);
+      if (ids.includes(row.agentId)) this.agentList.select_row(row);
     }
   }
 
   private renderAgents(): void {
     const agents = this.space?.catalogue?.agentInfo ?? [];
-    const key = JSON.stringify(agents.map((a) => [a.id, a.title, a.avatar]));
+    // One row per agent, whatever the number of machines it runs on; the composer picks the machine.
+    const groups = this.space?.catalogue?.agentGroups ?? [];
+    const key = JSON.stringify(groups.map((g) => [g.primary.id, g.primary.title, g.primary.avatar, g.machines.map((m) => m.peer ?? "")]));
     if (key !== this.agentsKey) {
       this.agentsKey = key;
       this.agentList.remove_all();
-      for (const a of agents) {
+      for (const { primary: a, machines } of groups) {
         const row = new Gtk.ListBoxRow() as any;
         row.agentId = a.id;
         const box = new Gtk.Box({ spacing: 10, margin_top: 4, margin_bottom: 4 });
@@ -131,8 +137,9 @@ export class ChatPage {
         const text = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, valign: Gtk.Align.CENTER });
         const title = new Gtk.Label({ label: pickText(a.title, a.i18n, "title", lang), xalign: 0, ellipsize: Pango.EllipsizeMode.END });
         text.append(title);
-        if (a.peer) {
-          const peer = new Gtk.Label({ label: a.peer, xalign: 0, ellipsize: Pango.EllipsizeMode.END });
+        const where = machines.length > 1 ? machines.map((m) => m.peer ?? tw("agents.thisMachine")).join(lang === "zh" ? "、" : ", ") : a.peer;
+        if (where) {
+          const peer = new Gtk.Label({ label: where, xalign: 0, ellipsize: Pango.EllipsizeMode.END });
           peer.add_css_class("caption");
           peer.add_css_class("dim-label");
           text.append(peer);
@@ -147,11 +154,13 @@ export class ChatPage {
     const still = this.agent && agents.find((a) => a.id === this.agent!.id);
     if (still) {
       this.agent = still;
+      // The machine menu and the offline note follow the catalogue.
+      this.view.show(this.space, still);
       this.selectRow();
       return;
     }
     const last = agents.find((a) => a.id === prefs.lastAgent);
-    const pick = last ?? this.model.assistant(this.space);
+    const pick = last ? this.model.preferredAgent(this.space, last) : this.model.assistant(this.space);
     if (pick) this.choose(pick);
     else this.view.show(this.space, undefined);
   }

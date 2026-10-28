@@ -1,5 +1,6 @@
 import GLib from "gi://GLib";
 import { type Agent, type Catalogue, NotASpaceError, agentBase, decodeCatalogue } from "../core/catalogue.ts";
+import { groupById, groupKeyOf, preferredMachine } from "../core/agents.ts";
 import { type Identity, type SpaceState, SpaceError, classifyIdentity, classifyLayout } from "../core/check.ts";
 import { ChangeGate } from "../core/change.ts";
 import { type Connection, ConnectionList, decodeConnections, encodeConnections } from "../core/connections.ts";
@@ -380,10 +381,23 @@ export class AppModel {
     return conv;
   }
 
+  /** The machine an agent's tile opens (any variant given): the one chosen last when it answers, else the group's own (agents.ts). */
+  preferredAgent(space: Space, agent: Agent): Agent {
+    const g = groupById(space.catalogue?.agentGroups ?? [], agent.id);
+    return g ? preferredMachine(g, prefs.agentMachines?.[g.key]) : agent;
+  }
+
+  /** The person picked this machine for this agent in a chat: tiles open it next time. */
+  rememberMachine(agent: Agent): void {
+    prefs.agentMachines = { ...(prefs.agentMachines ?? {}), [groupKeyOf(agent)]: agent.peer ?? "" };
+    savePrefs();
+  }
+
   /** Space Assistant, or the first agent the Space lists. */
   assistant(space: Space): Agent | undefined {
     const agents = space.catalogue?.agentInfo ?? [];
-    return agents.find((a) => a.id === "space/assistant") ?? agents.find((a) => !a.peer) ?? agents[0];
+    const found = agents.find((a) => a.id === "space/assistant") ?? agents.find((a) => !a.peer) ?? agents[0];
+    return found && this.preferredAgent(space, found);
   }
 
   // Polling: the current Space every 30 s (its catalogue every other time), the inbox of the others too.
