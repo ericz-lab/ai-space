@@ -1,8 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <!-- Runtime-neutral logic of the Windows client: the floating ball's rules, the catalogue, the
-       Space API and a chat turn's events. No Windows API, so it builds and tests on any OS. -->
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <RootNamespace>AISpace.Core</RootNamespace>
-  </PropertyGroup>
-</Project>

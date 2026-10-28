@@ -57,19 +57,6 @@ jobs:
       - run: dotnet test desktop/windows/AISpace.Core.Tests
       - run: dotnet build desktop/windows/AISpace -c Release
 
-  windows-ball:
-    name: Windows floating ball
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-      # WPF builds on Linux with EnableWindowsTargeting; running it needs Windows.
-      - run: dotnet test desktop/windows/Core.Tests
-      - run: dotnet build desktop/windows/App
-
   native:
     name: Mac and iPhone clients
     runs-on: macos-26
