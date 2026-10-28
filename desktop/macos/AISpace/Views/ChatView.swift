@@ -104,28 +104,7 @@ struct ChatView: View {
         catch { chat.imageError = String(localized: "Could not read this image.") }
     }
 
-    private func appendImage(_ data: Data, name: String) {
-        guard data.count <= 40 * 1024 * 1024, let source = NSBitmapImageRep(data: data), source.pixelsWide > 0, source.pixelsHigh > 0,
-              source.pixelsWide <= 16000, source.pixelsHigh <= 16000 else {
-            chat.imageError = String(localized: "Could not read this image.")
-            return
-        }
-        let prefix = [UInt8](data.prefix(12))
-        let mediaType: String?
-        if prefix.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]) { mediaType = "image/png" }
-        else if prefix.starts(with: [255, 216, 255]) { mediaType = "image/jpeg" }
-        else if prefix.starts(with: Array("GIF8".utf8)) { mediaType = "image/gif" }
-        else if prefix.starts(with: Array("RIFF".utf8)) && Array(prefix.suffix(4)) == Array("WEBP".utf8) { mediaType = "image/webp" }
-        else { mediaType = nil }
-        guard let bytes = mediaType == nil ? source.representation(using: .png, properties: [:]) : data else { return }
-        let image = ChatImage(name: String(name.prefix(80)) + (mediaType == nil ? ".png" : ""), mediaType: mediaType ?? "image/png", bytes: bytes)
-        guard ChatImage.validate(chat.images + [image]) else {
-            chat.imageError = String(localized: "Add up to 4 images, 5 MB each and 10 MB in total.")
-            return
-        }
-        chat.images.append(image)
-        chat.imageError = nil
-    }
+    private func appendImage(_ data: Data, name: String) { chat.attach(data, name: name) }
 
     private func importImages(_ providers: [NSItemProvider]) {
         guard providers.count + chat.images.count + chat.pendingImageImports <= 4 else {
@@ -245,7 +224,7 @@ private struct ChatIntro: View {
     }
 }
 
-private struct MessageRow: View {
+struct MessageRow: View {
     let message: ChatMessage
     /// Present on the last reply when it failed and its message can go again.
     let retry: (() -> Void)?
@@ -859,7 +838,7 @@ struct FailureCard: View {
     }
 }
 
-private struct ChatImagePreview: View {
+struct ChatImagePreview: View {
     let image: ChatImage
     var body: some View {
         if let picture = NSImage(data: image.bytes) {
@@ -868,5 +847,33 @@ private struct ChatImagePreview: View {
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                 .help(image.name).accessibilityLabel(Text(image.name))
         }
+    }
+}
+
+@MainActor
+extension ChatController {
+    /// Adds a picture to the next message: PNG, JPEG, GIF or WebP as it is, anything else as PNG,
+    /// within the size the Space takes. The composer and the floating ball both come here.
+    func attach(_ data: Data, name: String) {
+        guard data.count <= 40 * 1024 * 1024, let source = NSBitmapImageRep(data: data), source.pixelsWide > 0, source.pixelsHigh > 0,
+              source.pixelsWide <= 16000, source.pixelsHigh <= 16000 else {
+            imageError = String(localized: "Could not read this image.")
+            return
+        }
+        let prefix = [UInt8](data.prefix(12))
+        let mediaType: String?
+        if prefix.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]) { mediaType = "image/png" }
+        else if prefix.starts(with: [255, 216, 255]) { mediaType = "image/jpeg" }
+        else if prefix.starts(with: Array("GIF8".utf8)) { mediaType = "image/gif" }
+        else if prefix.starts(with: Array("RIFF".utf8)) && Array(prefix.suffix(4)) == Array("WEBP".utf8) { mediaType = "image/webp" }
+        else { mediaType = nil }
+        guard let bytes = mediaType == nil ? source.representation(using: .png, properties: [:]) : data else { return }
+        let image = ChatImage(name: String(name.prefix(80)) + (mediaType == nil ? ".png" : ""), mediaType: mediaType ?? "image/png", bytes: bytes)
+        guard ChatImage.validate(images + [image]) else {
+            imageError = String(localized: "Add up to 4 images, 5 MB each and 10 MB in total.")
+            return
+        }
+        images.append(image)
+        imageError = nil
     }
 }

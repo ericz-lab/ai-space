@@ -68,6 +68,20 @@ final class PictureSharing {
         } else { model?.report(String(localized: "Copy one picture first.")) }
     }
 
+    /// A picture dropped on the floating ball: the editor opens on it, in front of the app it came from.
+    func take(_ data: Data) {
+        show()
+        NSApp.activate()
+        receive(data)
+    }
+
+    /// A drop the ball could not read: the editor opens and says why.
+    func refuse(_ message: String) {
+        show()
+        NSApp.activate()
+        model?.report(message)
+    }
+
     private func receive(_ data: Data) {
         guard let model, !model.busy, !model.receiving else { return }
         model.beginImport()

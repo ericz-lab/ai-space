@@ -144,6 +144,7 @@ struct SettingsPage: View {
             spaces
             if model.local.available { LocalSettingsSection(model: model, local: model.local) }
             general
+            FloatingBallSettings(connection: connection, loader: loader, prefs: prefs)
             more
         case .appearance:
             appearance
@@ -761,3 +762,67 @@ struct FeedbackSections: View {
         return parts.joined(separator: " · ")
     }
 }
+
+/// The floating ball on this Mac: shown or not, and what each of its four sections opens in the
+/// selected Space (an app hands the text and pictures to its own agent, or to Space Assistant).
+/// Each Space keeps its own choice, on this Mac.
+struct FloatingBallSettings: View {
+    let connection: Connection
+    @ObservedObject var loader: CatalogueLoader
+    @ObservedObject var prefs: Preferences
+
+    var body: some View {
+        Section {
+            Toggle("Show the floating ball", isOn: $prefs.floatingBall)
+            if prefs.floatingBall {
+                ForEach(FloatingBallRules.Section.allCases, id: \.self) { section in
+                    Picker(position(section), selection: binding(section)) {
+                        Text("Default (\(defaultTitle(section)))").tag("")
+                        Text("None").tag(FloatingBallRules.emptySlot)
+                        if let catalogue = loader.catalogue {
+                            Divider()
+                            ForEach(catalogue.apps) { entry in Text(verbatim: label(entry)).tag(entry.key) }
+                            Divider()
+                            ForEach(catalogue.agents) { entry in Text(verbatim: label(entry)).tag(entry.key) }
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("Floating Ball")
+        } footer: {
+            Text("A small ball over every app. Rest the pointer on it for four sections: click one to hand text and pictures to that app's agent (Space Assistant when the app has none), or drop a picture on it. Each Space keeps its own sections on this Mac.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    private func position(_ section: FloatingBallRules.Section) -> LocalizedStringKey {
+        switch section {
+        case .keep: "Top"
+        case .assistant: "Right"
+        case .todo: "Bottom"
+        case .design: "Left"
+        }
+    }
+
+    private func defaultTitle(_ section: FloatingBallRules.Section) -> String {
+        guard let catalogue = loader.catalogue else { return section.fallbackTitle }
+        let pool = section == .assistant ? catalogue.agents : catalogue.apps
+        return FloatingBallRules.ref(for: section, among: pool.map(\.ref)).flatMap { ref in pool.first { $0.ref == ref } }?.displayTitle()
+            ?? section.fallbackTitle
+    }
+
+    private func label(_ entry: CatalogueEntry) -> String {
+        entry.peer.map { "\(entry.displayTitle()) · \($0)" } ?? entry.displayTitle()
+    }
+
+    private func binding(_ section: FloatingBallRules.Section) -> Binding<String> {
+        Binding(
+            get: { FloatingBallRules.slot(section, in: prefs.floatingBallSlots[connection.id.uuidString]) ?? "" },
+            set: { key in
+                prefs.floatingBallSlots[connection.id.uuidString] = FloatingBallRules.setting(
+                    section, to: key.isEmpty ? nil : key, in: prefs.floatingBallSlots[connection.id.uuidString])
+            })
+    }
+}
+
