@@ -47,7 +47,9 @@
     "ios:test": "mobile/ios/scripts/test.sh",
     "ios:xcode": "mobile/ios/scripts/swiftterm.sh && xcodegen generate --spec mobile/ios/project.yml",
     "android:build": "cd mobile/android && ./gradlew :app:assembleDebug",
-    "android:test": "cd mobile/android && ./gradlew :app:testDebugUnitTest"
+    "android:test": "cd mobile/android && ./gradlew :app:testDebugUnitTest",
+    "windows:test": "dotnet test desktop/windows/Core.Tests",
+    "windows:build": "dotnet build desktop/windows/App"
   },
   "devDependencies": {
     "@types/bun": "1.4.0",

@@ -83,7 +83,8 @@ login that does not depend on Cloudflare Access.
 ## AI Space Client
 
 **Contains** the native client: the Mac app (`desktop/macos/`), the Linux app (`desktop/linux/`),
-the iPhone app (`mobile/ios/`), the Android app (`mobile/android/`).
+the iPhone app (`mobile/ios/`), the Android app (`mobile/android/`), and on Windows a smaller
+tray app with the floating ball and Quick Chat (`desktop/windows/`).
 
 **Installs** as a signed, notarized `.app` in a `.dmg` on the Mac, and from a tarball whose
 `install.sh` installs it for the user on Linux ([linux-desktop.md](linux-desktop.md)). Phones
@@ -104,7 +105,8 @@ API answer, not because a port answered ([macos-desktop.md](macos-desktop.md#con
 
 **Today:** the Mac, Linux and iPhone clients connect to existing Spaces. A release tag builds the
 Linux app into tarballs for x64 and arm64, and the Mac app into a `.dmg`, signed and notarized once the Developer ID secrets are configured
-([release.md](release.md)). Missing: the Developer ID certificate itself, the Share extension in
+([release.md](release.md)). The Windows tray app builds and is tested in CI but has not been run on
+Windows nor packaged yet. Missing: the Developer ID certificate itself, the Share extension in
 the release build, and store or test-channel distribution for the phones.
 
 ## AI Space Local
