@@ -668,3 +668,4 @@
 "Fix %lld waiting now" = "现在修这 %lld 条";
 "Refresh" = "刷新";
 "Sent %lld to the Fix Engineer." = "已交给修复工程师：%lld 条。";
+"Permission: %@" = "权限：%@";
