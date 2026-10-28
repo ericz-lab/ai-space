@@ -98,9 +98,25 @@ export function row(title: string, subtitle?: string, tooltip?: string): any {
 export function choiceRow(title: string, choices: Choice[], value: string, onPick: (value: string) => void, subtitle?: string): { row: any; set(value: string): void } {
   const model = Gtk.StringList.new(choices.map((c) => c.label));
   const row = plain(new Adw.ComboRow({ model }), title, subtitle);
+  // A disabled choice is drawn greyed in the list and cannot be picked (model-choices.tsx).
+  if (choices.some((c) => c.disabled)) {
+    const factory = new Gtk.SignalListItemFactory();
+    factory.connect("setup", (_f: unknown, item: any) => item.set_child(new Gtk.Label({ xalign: 0, ellipsize: Pango.EllipsizeMode.END })));
+    factory.connect("bind", (_f: unknown, item: any) => {
+      const c = choices[item.get_position()];
+      const label = item.get_child();
+      label.set_label(c?.label ?? "");
+      label.set_sensitive(!c?.disabled);
+      item.set_activatable(!c?.disabled);
+      item.set_selectable(!c?.disabled);
+    });
+    row.set_list_factory(factory);
+  }
   let quiet = true;
+  let current = value;
   const set = (v: string) => {
     quiet = true;
+    current = v;
     row.set_selected(Math.max(0, choices.findIndex((c) => c.value === v)));
     quiet = false;
   };
@@ -108,7 +124,11 @@ export function choiceRow(title: string, choices: Choice[], value: string, onPic
   row.connect("notify::selected", () => {
     if (quiet) return;
     const c = choices[row.get_selected()];
-    if (c) onPick(c.value);
+    if (c?.disabled) return set(current);
+    if (c) {
+      current = c.value;
+      onPick(c.value);
+    }
   });
   return { row, set };
 }

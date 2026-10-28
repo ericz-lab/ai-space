@@ -91,11 +91,16 @@ test("model pickers list what the panel's selects list", () => {
   });
   expect(modelChoices(p.options, p.defaultModel, "Environment defaults", "en")).toEqual([
     { value: "", label: "Environment defaults" },
-    { value: "gone", label: "gone" },
+    { value: "gone", label: "gone (not available)", disabled: true },
     { value: "c:s", label: "claude · Advanced · sonnet" },
     { value: "o:m", label: "openai · Basic · mini" },
   ]);
   expect(modelChoices(p.options.slice(0, 1), null, "-", "en", false).map((c) => c.label)).toEqual(["-", "Advanced · sonnet"]);
+  const greyed = modelChoices([{ value: "c:s", runtime: "claude", tier: "advanced", model: "sonnet", unavailable: "signed-out" }, { value: "d:x", runtime: "david", tier: "basic", model: "x", unavailable: "offline" }], "c:s", "-", "zh");
+  expect(greyed.slice(1)).toEqual([
+    { value: "c:s", label: `claude · ${MESSAGES.zh["modelTier.advanced"]} · sonnet (${MESSAGES.zh["models.signedOut"]})`, disabled: true },
+    { value: "d:x", label: `david · ${MESSAGES.zh["modelTier.basic"]} · x (${MESSAGES.zh["models.offline"]})`, disabled: true },
+  ]);
   expect(decodePreferences({}).defaultModel).toBeNull();
   const task = { target: { kind: "agent" } } as TaskInfo;
   expect(taskModels(p.options, task).map((o) => o.value)).toEqual(["c:s"]);

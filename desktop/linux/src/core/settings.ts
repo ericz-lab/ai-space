@@ -91,9 +91,10 @@ export function backupState(b: BackupInfo): { tone: Tone; key: WebKey } {
 
 // ------------------------------------------------------------------ models
 
-export type ModelOption = { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string; capabilities?: { agent: boolean; complete: boolean } };
+export type ModelOption = { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string; capabilities?: { agent: boolean; complete: boolean }; unavailable?: "signed-out" | "offline" };
 export type Preferences = { defaultModel: string | null; appDefault: string; baseDefault: string; options: ModelOption[] };
-export type Choice = { value: string; label: string };
+/** `disabled`: shown greyed, not selectable (an unavailable model, a saved one no longer offered). */
+export type Choice = { value: string; label: string; disabled?: boolean };
 
 export function decodePreferences(raw: unknown): Preferences {
   const d = field(raw, "defaultModel");
@@ -106,15 +107,20 @@ export function decodePreferences(raw: unknown): Preferences {
 }
 
 /**
- * The entries of a model picker, as the panel's selects list them: the empty choice first, the
- * current value when no option has it (so it is not lost), then the options, runtime by runtime.
+ * The entries of a model picker, as the panel's selects list them (src/web/model-choices.tsx): the
+ * empty choice first, the current value when no option has it (kept, marked not available, so
+ * nothing is rewritten behind the person's back), then the options, runtime by runtime; one that
+ * is not signed in or on an offline peer is greyed with the reason.
  */
 export function modelChoices(options: ModelOption[], current: string | null | undefined, empty: string, lang: Lang, withRuntime = true): Choice[] {
   const out: Choice[] = [{ value: "", label: empty }];
-  if (current && !options.some((o) => o.value === current)) out.push({ value: current, label: current });
+  if (current && !options.some((o) => o.value === current)) out.push({ value: current, label: `${current} (${webText(lang, "models.savedMissing")})`, disabled: true });
   const runtimes = [...new Set(options.map((o) => o.runtime))];
   for (const r of runtimes)
-    for (const o of options.filter((x) => x.runtime === r)) out.push({ value: o.value, label: `${withRuntime || runtimes.length > 1 ? `${o.runtime} · ` : ""}${webText(lang, `modelTier.${o.tier}` as WebKey)} · ${o.model}` });
+    for (const o of options.filter((x) => x.runtime === r)) {
+      const label = `${withRuntime || runtimes.length > 1 ? `${o.runtime} · ` : ""}${webText(lang, `modelTier.${o.tier}` as WebKey)} · ${o.model}`;
+      out.push(o.unavailable ? { value: o.value, label: `${label} (${webText(lang, o.unavailable === "offline" ? "models.offline" : "models.signedOut")})`, disabled: true } : { value: o.value, label });
+    }
   return out;
 }
 
