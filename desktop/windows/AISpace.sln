@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AISpace.Core", "Core\AISpace.Core.csproj", "{FB38B87B-A36F-41A9-8C72-0814F94D87C9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AISpace.Core.Tests", "Core.Tests\AISpace.Core.Tests.csproj", "{A7C97C96-D80C-449F-A6E8-82FDA363BDC5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AISpace.FloatingBall", "App\AISpace.FloatingBall.csproj", "{F3401E58-9857-45E3-A3BE-9B418456BE9F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FB38B87B-A36F-41A9-8C72-0814F94D87C9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FB38B87B-A36F-41A9-8C72-0814F94D87C9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FB38B87B-A36F-41A9-8C72-0814F94D87C9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FB38B87B-A36F-41A9-8C72-0814F94D87C9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A7C97C96-D80C-449F-A6E8-82FDA363BDC5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A7C97C96-D80C-449F-A6E8-82FDA363BDC5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A7C97C96-D80C-449F-A6E8-82FDA363BDC5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A7C97C96-D80C-449F-A6E8-82FDA363BDC5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F3401E58-9857-45E3-A3BE-9B418456BE9F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F3401E58-9857-45E3-A3BE-9B418456BE9F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F3401E58-9857-45E3-A3BE-9B418456BE9F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F3401E58-9857-45E3-A3BE-9B418456BE9F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

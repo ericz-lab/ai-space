@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The Windows client: the floating ball, Quick Chat and their settings, in a tray app.
+       WPF for the windows, Windows Forms only for the tray icon. Builds on Linux too
+       (EnableWindowsTargeting); it runs on Windows 10 and 11. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- WPF and Windows Forms share type names (Application, Point, ...): every file says what it uses. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>AISpace</AssemblyName>
+    <RootNamespace>AISpace.Windows</RootNamespace>
+    <ApplicationIcon>AppIcon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>AI Space</Product>
+    <!-- The DPI mode is WPF's, set in app.manifest; the Windows Forms analyzer only knows its own API. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Core\AISpace.Core.csproj" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="AppMark.png" />
+    <EmbeddedResource Include="AppIcon.ico" LogicalName="AppIcon.ico" />
+  </ItemGroup>
+</Project>
