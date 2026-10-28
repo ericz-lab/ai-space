@@ -63,7 +63,7 @@ private struct ConnectionSummary: View {
             }
             ForEach(live.running.prefix(3)) { run in
                 Button {
-                    model.showMainWindow(connection: connection.id, .hub(.chat(agent: agentID(run))))
+                    model.showRun(run, agent: agentID(run), connection: connection.id)
                 } label: {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)

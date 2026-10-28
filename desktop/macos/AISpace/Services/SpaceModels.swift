@@ -113,6 +113,10 @@ struct ChatRun: Decodable, Identifiable, Hashable {
     var status: String
     var startedAt: Double
     var lastSeq: Int
+    /// The stored session the turn continues, if any.
+    var sessionId: String? = nil
+    /// The session the runtime named for the turn, once it has.
+    var sid: String? = nil
 }
 
 struct RunsResponse: Decodable {

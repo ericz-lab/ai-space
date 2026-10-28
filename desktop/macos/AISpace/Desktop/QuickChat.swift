@@ -4,9 +4,9 @@ import UniformTypeIdentifiers
 
 /// A floating panel over whatever app is in front, opened by the global shortcut or a section of
 /// the floating ball: type or paste text and pictures, read the reply, press Esc or click
-/// elsewhere. The conversation is the same one the main window shows. Drawn to Design Studio's
-/// spec (design 12): 380 pt wide, rounded glass, only the header and the field while the
-/// conversation is empty (96 pt), growing upward with the replies to at most 420 pt.
+/// elsewhere. The conversation is the agent's one on show, the same one the main window shows.
+/// Drawn to Design Studio's spec (design 12): 380 pt wide, rounded glass, only the header and the
+/// field while the conversation is empty (96 pt), growing upward with the replies to at most 420 pt.
 @MainActor
 final class QuickChat: NSObject, NSWindowDelegate {
     static let width: CGFloat = 380
@@ -148,9 +148,9 @@ struct QuickChatView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 AgentPicker(model: model, state: state)
-                if let chat = model.quickChatController { WorkingMark(chat: chat) }
+                if let chats = model.quickChats { WorkingMark(chats: chats) }
                 Spacer(minLength: 8)
-                if let chat = model.quickChatController { NewChatButton(chat: chat) }
+                if let chats = model.quickChats { NewChatButton(chats: chats) }
                 // Kept for its key (⌘O).
                 Button("") { model.openQuickChatInMainWindow(); close() }
                     .keyboardShortcut("o", modifiers: .command)
@@ -160,9 +160,8 @@ struct QuickChatView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 40)
-            if let chat = model.quickChatController {
-                FloatingChatBody(chat: chat, icons: model.quickChatResolvedRef.flatMap { model.icons($0.connection) })
-                    .id(chat.agent.id)
+            if let chats = model.quickChats {
+                QuickChatThread(chats: chats, icons: model.quickChatResolvedRef.flatMap { model.icons($0.connection) })
             } else {
                 NoAgent(model: model).frame(height: 120)
             }
@@ -194,14 +193,26 @@ private struct ThreadHeight: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
-/// New Conversation (⌘N) beside Close, drawn as Close is.
+/// New Conversation (⌘N) beside Close, drawn as Close is. A turn still running carries on in
+/// the conversation it leaves, which the main window's sidebar lists.
 private struct NewChatButton: View {
-    @ObservedObject var chat: ChatController
+    @ObservedObject var chats: AgentChats
 
     var body: some View {
-        RoundHeaderButton(symbol: "square.and.pencil", size: 9, help: "New Conversation (⌘N)") { chat.newConversation() }
+        RoundHeaderButton(symbol: "square.and.pencil", size: 9, help: "New Conversation (⌘N)") { chats.newConversation() }
             .keyboardShortcut("n", modifiers: .command)
-            .disabled(chat.busy || chat.messages.isEmpty)
+            .disabled(chats.current.blank)
+    }
+}
+
+/// The agent's conversation on show; another one shown starts the thread and field afresh.
+private struct QuickChatThread: View {
+    @ObservedObject var chats: AgentChats
+    let icons: IconStore?
+
+    var body: some View {
+        FloatingChatBody(chat: chats.current, icons: icons)
+            .id(chats.current.id)
     }
 }
 
@@ -417,12 +428,13 @@ final class Hover: ObservableObject {
     @Published var on = false
 }
 
-/// A small spinner beside the agent while its turn runs, so the header says it is working.
+/// A small spinner beside the agent while a turn runs in the conversation on show, so the header
+/// says it is working.
 private struct WorkingMark: View {
-    @ObservedObject var chat: ChatController
+    @ObservedObject var chats: AgentChats
 
     var body: some View {
-        if chat.busy {
+        if chats.current.busy {
             ProgressView().controlSize(.small).help("Working")
         }
     }

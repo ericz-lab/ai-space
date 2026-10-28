@@ -150,7 +150,7 @@ final class AppModel: ObservableObject {
     private var iconStores: [UUID: IconStore] = [:]
     private var settingsLoaders: [UUID: SettingsLoader] = [:]
     private var terminals: [UUID: TerminalStore] = [:]
-    private var chats: [AgentRef: ChatController] = [:]
+    private var chats: [AgentRef: AgentChats] = [:]
     private var watchers: Set<AnyCancellable> = []
     private var wake: NSObjectProtocol?
 
@@ -761,19 +761,27 @@ final class AppModel: ObservableObject {
     /// Whether a conversation already open in this app is running a turn.
     func isChatBusy(_ ref: AgentRef) -> Bool { chats[ref]?.busy == true }
 
-    func chat(_ ref: AgentRef) -> ChatController? {
+    /// The agent's conversations on this Mac; made on first use, following its turns running on
+    /// the Space.
+    func conversations(_ ref: AgentRef) -> AgentChats? {
         if let c = chats[ref] { return c }
         guard let live = lives[ref.connection], let agent = live.agent(ref.agent) else { return nil }
-        let c = ChatController(agent: agent, api: live.api)
+        let c = AgentChats(agent: agent, api: live.api)
         c.onTurnEnded = { [weak self] in
             guard let self, let connection = self.store.connection(ref.connection) else { return }
             let catalogue = self.loader(for: connection)
             Task { await catalogue.refresh(afterCurrent: true) }
             Task { await live.refresh(catalogue: true) }
         }
-        c.attachRunning(live.running)
+        c.attach(live.running)
         chats[ref] = c
         return c
+    }
+
+    /// Opens the conversation of a turn running on the Space (the menu bar's working list).
+    func showRun(_ run: ChatRun, agent: String, connection: UUID) {
+        conversations(AgentRef(connection: connection, agent: agent))?.show(run: run)
+        showMainWindow(connection: connection, .hub(.chat(agent: agent)))
     }
 
     /// The agent Quick Chat talks to: the last one picked, else the first of the selected connection.
@@ -785,7 +793,10 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    var quickChatController: ChatController? { quickChatResolvedRef.flatMap(chat) }
+    /// The conversations of the agent Quick Chat talks to; it shows the one on show.
+    var quickChats: AgentChats? { quickChatResolvedRef.flatMap { conversations($0) } }
+
+    var quickChatController: ChatController? { quickChats?.current }
 
     var quickChatLive: SpaceLive? { quickChatResolvedRef.flatMap { lives[$0.connection] } }
 
@@ -802,19 +813,18 @@ final class AppModel: ObservableObject {
     }
 
     /// The Home box's question for Space Assistant (docs/panel.md#omnibox): a new conversation on
-    /// the selected Space, shown in the main window. While the assistant still answers, the
-    /// question waits in the field for Return instead of stopping that turn.
+    /// the selected Space, shown in the main window. While the assistant still answers another
+    /// question, this one starts a conversation beside it; that turn carries on.
     func ask(_ text: String) {
         guard let c = selected, let agent = lives[c.id]?.agents.first(where: { $0.app == "space" && $0.peer == nil }),
-              let chat = chat(AgentRef(connection: c.id, agent: agent.id)) else { return }
+              let chats = conversations(AgentRef(connection: c.id, agent: agent.id)) else { return }
         query = ""
-        if chat.busy {
-            chat.draft = chat.draft.isEmpty ? text : chat.draft + "\n\n" + text
-        } else {
-            chat.newConversation()
-            chat.draft = text
-            chat.send()
-        }
+        chats.newConversation()
+        let chat = chats.current
+        chat.images = []
+        chat.imageError = nil
+        chat.draft = text
+        chat.send()
         destination = .hub(.chat(agent: agent.id))
     }
 
