@@ -118,6 +118,9 @@ final class FloatingBall: NSObject, NSWindowDelegate {
         state.highlighted = nil
         state.shown = false
         state.expanded = true
+        // The dial draws its own soft shadow; the window's would trace that shadow's faint
+        // pixels as a grainy ring around the disc.
+        panel.hasShadow = false
         panel.setFrame(NSRect(x: center.x - d / 2, y: center.y - d / 2, width: d, height: d), display: true)
         panel.invalidateShadow()
         DispatchQueue.main.async { [state] in
@@ -139,6 +142,7 @@ final class FloatingBall: NSObject, NSWindowDelegate {
         state.shown = false
         state.expanded = false
         state.highlighted = nil
+        panel.hasShadow = true
         state.dragging = false
         let d = FloatingBallRules.diameter
         if let center {
