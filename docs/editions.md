@@ -50,7 +50,9 @@ What differs is how each one is packaged, installed, started and updated.
    It never installs or upgrades an agent CLI silently.
 5. **Mac first.** Each edition is published only for the systems and CPU architectures that were
    built and tested. Mac on Apple Silicon is first. Linux x64 and arm64 follow for Server, then for
-   Client and Local (a GNOME/GTK desktop app). Windows and Intel Macs are accepted one by one.
+   Client and Local (a GNOME/GTK desktop app). Windows x64 and arm64 are built for Client and
+   Local (Local through WSL 2) and go out once they pass the install checks on Windows
+   ([release.md](release.md#checks-before-publishing)). Intel Macs are accepted one by one.
 
 ## AI Space Server
 
@@ -83,11 +85,13 @@ login that does not depend on Cloudflare Access.
 ## AI Space Client
 
 **Contains** the native client: the Mac app (`desktop/macos/`), the Linux app (`desktop/linux/`),
-the iPhone app (`mobile/ios/`), the Android app (`mobile/android/`).
+the Windows app (`desktop/windows/`), the iPhone app (`mobile/ios/`), the Android app
+(`mobile/android/`).
 
 **Installs** as a signed, notarized `.app` in a `.dmg` on the Mac, and from a tarball whose
-`install.sh` installs it for the user on Linux ([linux-desktop.md](linux-desktop.md)). Phones
-install through their stores or a test channel.
+`install.sh` installs it for the user on Linux ([linux-desktop.md](linux-desktop.md)), and from a
+zip whose program installs itself for the user on Windows ([windows-desktop.md](windows-desktop.md)).
+Phones install through their stores or a test channel.
 
 **Phones are Client only.** iOS and Android do not get a Server or Local edition: a phone cannot keep
 the Space service, its scheduler and the apps' processes running in the background. Server and
@@ -102,8 +106,9 @@ Git and no developer tools on the client machine.
 behind its access layer. A connection counts only after the client has checked the panel and a known
 API answer, not because a port answered ([macos-desktop.md](macos-desktop.md#connections-and-first-launch)).
 
-**Today:** the Mac, Linux and iPhone clients connect to existing Spaces. A release tag builds the
-Linux app into tarballs for x64 and arm64, and the Mac app into a `.dmg`, signed and notarized once the Developer ID secrets are configured
+**Today:** the Mac, Linux, Windows and iPhone clients connect to existing Spaces. A release tag
+builds the Linux app into tarballs and the Windows app into zip files (not signed yet), for x64 and
+arm64, and the Mac app into a `.dmg`, signed and notarized once the Developer ID secrets are configured
 ([release.md](release.md)). Missing: the Developer ID certificate itself, the Share extension in
 the release build, and store or test-channel distribution for the phones.
 
@@ -114,7 +119,9 @@ templates, the PTY helper), a pinned Bun, and the bundled apps as packages ([app
 
 **Installs** as a signed, notarized `.app` in a `.dmg`. A `.pkg` is used only if a system-level
 component proves necessary. On Linux it is the Linux app's tarball with the service inside; the
-background helper is a systemd user service ([local.md](local.md#on-linux)).
+background helper is a systemd user service ([local.md](local.md#on-linux)). On Windows it is the
+Windows app's zip carrying the Linux release, which it sets up as that systemd user service inside
+WSL 2 ([local.md](local.md#on-windows)).
 
 **First launch** creates the workspace, starts the Space service as a background helper the app owns,
 installs the bundled apps from the packages inside the bundle (no Git, no network clone), and opens
@@ -151,7 +158,10 @@ the others. Updates inside the app are built ([local.md](local.md#updates)); sig
 installation and live launchd timing still need release acceptance testing. The Linux app has the
 same Local edition (`bun release/linux.ts`): the same `space local` commands, a systemd user
 service, the device credential in the desktop's keyring ([local.md](local.md#on-linux)); a live
-setup on a clean desktop still needs release acceptance testing.
+setup on a clean desktop still needs release acceptance testing. The Windows app has it through
+WSL 2 (`bun release/windows.ts`): the Linux service in a WSL distribution, systemd and lingering
+turned on there, a hidden `wsl.exe` that keeps the distribution up, the device credential in
+Credential Manager ([local.md](local.md#on-windows)); it has not yet been run on Windows.
 
 ## Service identity
 

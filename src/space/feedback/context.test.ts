@@ -109,6 +109,7 @@ describe("clientOf", () => {
     expect(clientOf("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 AISpaceDesktop/1.2").kind).toBe("mac-client");
     expect(clientOf(`${SAFARI_IPHONE} AISpaceMobile/1.0`).kind).toBe("iphone-client");
     expect(clientOf("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36 AISpaceMobile/1.0").kind).toBe("android-client");
+    expect(clientOf("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0 AISpaceWindows/0.1.0")).toEqual({ kind: "windows-client", os: "Windows", browser: "webview", version: "0.1.0" });
   });
 
   test("anything else is a browser on a desktop, a phone or a tablet", () => {
@@ -123,5 +124,6 @@ describe("clientOf", () => {
     expect(clientLabel(c)).toBe("Desktop browser (Chrome · Linux)");
     expect(clientLabel(c, "zh")).toBe("桌面浏览器 (Chrome · Linux)");
     expect(clientLabel(clientOf("x AISpaceLinux/1"), "zh")).toBe("Linux 客户端");
+    expect(clientLabel(clientOf("x AISpaceWindows/1"))).toBe("Windows client");
   });
 });

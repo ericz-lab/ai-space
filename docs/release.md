@@ -1,7 +1,8 @@
 # Releases
 
 Status: implemented for the Server edition (Linux x64 and arm64), the Client edition and the Local
-edition (Mac, Apple Silicon; Linux x64 and arm64; [editions.md](editions.md)). Updates inside an installed app are a
+edition (Mac, Apple Silicon; Linux x64 and arm64; Windows x64 and arm64, not signed yet;
+[editions.md](editions.md)). Updates inside an installed app are a
 separate piece of work: a newer Local app is installed over the old one and its Settings offer the
 update ([local.md](local.md)).
 
@@ -21,12 +22,15 @@ person: the pipeline ends in a draft GitHub Release.
 | `ai-space-linux-client-<version>-x64.tar.gz` | Client | The Linux app ([linux-desktop.md](linux-desktop.md)); `./install.sh` in it installs it for the user |
 | `ai-space-linux-local-<version>-x64.tar.gz` | Local | The Linux app with the service inside ([local.md](local.md#on-linux)) |
 | `ai-space-linux-client-…-arm64.tar.gz`, `ai-space-linux-local-…-arm64.tar.gz` | Client, Local | The same for arm64 |
+| `ai-space-windows-client-<version>-x64.zip` | Client | The Windows app ([windows-desktop.md](windows-desktop.md)), not signed; `AISpace.exe` in it runs and offers to install itself for the user |
+| `ai-space-windows-local-<version>-x64.zip` | Local | The Windows app with the Linux release it sets up in WSL 2 ([local.md](local.md#on-windows)) |
+| `ai-space-windows-client-…-arm64.zip`, `ai-space-windows-local-…-arm64.zip` | Client, Local | The same for arm64 |
 | `SHA256SUMS` | | `sha256sum -c SHA256SUMS --ignore-missing` checks a download |
 | `manifest.json` | | Version, commit, the run that built it, every file's size and SHA-256 |
 
 Only systems and architectures that are built and checked are published. Not yet: the Mac Share
 extension (it needs an Xcode build with a development team, `desktop:share:build`), Intel Macs,
-Windows, a Server edition for macOS.
+a signed Windows app, a Server edition for macOS or Windows.
 
 ## Cutting a release
 
@@ -42,7 +46,8 @@ The tag must equal `package.json`'s version, or the run stops at its first job. 
 (`.github/workflows/release.yml`):
 
 1. **check**: the same checks as every push (`check.yml`: typecheck and tests on Linux; the Mac and
-   iPhone clients' tests and a Mac build on macOS).
+   iPhone clients' tests and a Mac build on macOS; the Windows client's tests and build on
+   Windows).
 2. **server** (x64 and arm64, each on its own runner): `bun release/server.ts` builds the archive
    from committed files, then `bun release/smoke.ts` unpacks it, starts it with `PATH=/usr/bin:/bin`
    (no Bun of the machine's), checks `/healthz`, `GET /api/space`, the panel page and `space help`,
@@ -50,7 +55,8 @@ The tag must equal `package.json`'s version, or the run stops at its first job. 
 3. **client**: `desktop/macos/scripts/package.sh` builds the app, puts it in a DMG, and when the
    signing secrets exist signs it, notarizes it with `notarytool`, staples the ticket and checks it
    with `spctl`. A signed build without notarization credentials fails instead of shipping.
-4. **draft release**: `bun release/manifest.ts` writes `SHA256SUMS`, `manifest.json` and the notes;
+4. **linux** and **windows**: the Linux and Windows apps ([below](#linux-app), [below](#windows-app)).
+5. **draft release**: `bun release/manifest.ts` writes `SHA256SUMS`, `manifest.json` and the notes;
    the draft is created, or refreshed when a rerun built the same commit. A published release, or a
    draft holding another commit's files, is never overwritten.
 
@@ -165,6 +171,26 @@ terminal page, the icon, the launcher and `install.sh`; for Local also the relea
 `src/space/terminal/pty_helper.c`. Nothing is signed: Linux has no counterpart of the Mac's
 notarization, so `SHA256SUMS` is what a download is checked against.
 
+## Windows app
+
+Two jobs after the checks. **windows-bundle** runs on Linux x64 and arm64:
+`bun desktop/windows/build.ts --bundle-only` makes the Linux release the Local edition sets up in
+WSL (the release tree of `release/server.ts`, edition `local`, with `runtime/space-pty`, as
+`bundle.tar.gz` and its `RELEASE.json`), kept on the run only. **windows** runs on Windows for x64
+and arm64, where the program file gets its icon and version: `bun release/windows.ts --arch <arch>
+--bundle <dir>` publishes the app self-contained (`dotnet publish -r win-<arch> --self-contained`)
+once per edition, the Local one with that bundle in `local\`, and zips each into one folder. The
+build refuses a bundle of another version or CPU. By hand:
+
+```bash
+bun desktop/windows/build.ts --bundle-only --out bundle      # on Linux, the CPU of the Windows it is for
+bun release/windows.ts --arch x64 --bundle bundle            # dist/ai-space-windows-{client,local}-<version>-x64.zip
+```
+
+On Linux `release:windows` builds the bundle itself when `--bundle` is left out, and the app
+without its icon. Nothing is signed yet; SmartScreen asks once, and `SHA256SUMS` is what a download
+is checked against.
+
 ## Checks before publishing
 
 - The tag's run is green, and `manifest.json` names the tag's commit.
@@ -173,5 +199,10 @@ notarization, so `SHA256SUMS` is what a download is checked against.
 - On a GNOME desktop (Ubuntu 24.04): unpack the Linux client, `./install.sh`, open it from the app
   grid, connect it to a Space, send a chat message, open a terminal; with the Local tarball, set up
   the Space on that machine and see `systemctl --user status ai-space-local` running.
+- On Windows 11 and Windows 10 (x64; arm64 when there is one): unzip the client, run `AISpace.exe`,
+  install it, connect it to a Space, get an inbox notification and open it, open Quick Chat with
+  its shortcut, open an `aispace://inbox` link; with the Local zip, set up the Space in a fresh
+  WSL 2 Ubuntu, see `systemctl --user status ai-space-local` running in it, close every terminal
+  and see the Space still answer; uninstall from Installed apps.
 - On a clean Mac: open the DMG, drag the app to Applications, open it without a Gatekeeper warning,
   connect it to a Space.
