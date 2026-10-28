@@ -14,4 +14,21 @@
     <string name="app_models_peer_old">%1$s 的 core 版本较旧，更新后才会在这里列出它的应用。</string>
     <string name="app_models_peer_down">%1$s 没有响应：%2$s</string>
     <string name="app_models_empty">尚未安装应用。</string>
+    <string name="clis_title">各机器上的 AI CLI</string>
+    <string name="clis_help">每台机器装了哪些智能体 CLI。没装的 CLI 不会出现在任何模型选项里；装了但未登录的会置灰显示，登录后可选。</string>
+    <string name="clis_peer">对等机器</string>
+    <string name="clis_recheck">重新检测</string>
+    <string name="clis_checking">检测中…</string>
+    <string name="clis_checked">检测于 %1$s</string>
+    <string name="clis_missing">未安装</string>
+    <string name="clis_unknown">尚未检测</string>
+    <string name="clis_signed_in">已登录</string>
+    <string name="clis_signed_out">未登录</string>
+    <string name="clis_runtime">运行时：%1$s</string>
+    <string name="clis_not_configured">那台机器未配置</string>
+    <string name="clis_add">加到 runtimes.yaml</string>
+    <string name="clis_added">已添加为运行时 %1$s，重启 ai-space 后生效。</string>
+    <string name="clis_unreachable">无法连接</string>
+    <string name="clis_offline">离线 · 上次的结果</string>
+    <string name="clis_old">旧版 ai-space：无清单</string>
 </resources>

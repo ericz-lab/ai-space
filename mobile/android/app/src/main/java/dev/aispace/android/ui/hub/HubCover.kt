@@ -135,6 +135,7 @@ fun HubCover(model: AppModel, connection: Connection, page: HubPage, loader: Cat
                 HubPage.Events -> EventsPage(api)
                 HubPage.Packages -> PackagesPage(model, connection, api)
                 HubPage.Feedback -> FeedbackPage(model, connection, api)
+                HubPage.MachineClis -> MachineClisPage(api)
                 HubPage.Terminal -> TerminalPage(model.terminal(connection))
                 is HubPage.Chat -> {
                     val catalogue by loader.catalogue.collectAsState()

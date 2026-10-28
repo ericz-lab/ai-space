@@ -88,6 +88,7 @@ sealed class HubPage {
     data object Events : HubPage()
     data object Packages : HubPage()
     data object Feedback : HubPage()
+    data object MachineClis : HubPage()
     data object Terminal : HubPage()
     /** The agents to talk to, or one agent's conversation by its catalogue key. */
     data class Chat(val agent: String?) : HubPage()

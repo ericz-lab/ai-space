@@ -49,6 +49,7 @@ import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CropSquare
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Feedback
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Inbox
@@ -583,7 +584,14 @@ private fun LazyListScope.models(
 ) {
     sectionTitle("models") { stringResource(R.string.settings_models) }
     if (m != null) defaultModel(m, status, saving, saveError, choose)
-    card("app-models", rows = listOf(pageRow("app-models", R.string.settings_app_models, Icons.Outlined.Memory, HubPage.AppModels, model)), spaced = m != null)
+    card(
+        "app-models",
+        rows = listOf(
+            pageRow("app-models", R.string.settings_app_models, Icons.Outlined.Memory, HubPage.AppModels, model),
+            pageRow("clis", R.string.clis_title, Icons.Outlined.Dns, HubPage.MachineClis, model),
+        ),
+        spaced = m != null,
+    )
 }
 
 private fun LazyListScope.defaultModel(

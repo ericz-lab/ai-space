@@ -22,6 +22,8 @@ import dev.aispace.android.core.InboxFilter
 import dev.aispace.android.core.InboxPage
 import dev.aispace.android.core.InboxSummary
 import dev.aispace.android.core.InboxThread
+import dev.aispace.android.core.Inventory
+import dev.aispace.android.core.MachineInventory
 import dev.aispace.android.core.Json
 import dev.aispace.android.core.JsonReader
 import dev.aispace.android.core.int
@@ -565,5 +567,39 @@ class FeedbackStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope)
         } finally {
             isFixing = false
         }
+    }
+}
+
+/**
+ * The agent CLIs on each machine (src/web/MachineClis.tsx): read, checked again on demand, and a CLI
+ * found on the Space's own machine added to runtimes.yaml (operator only; the Space refuses others).
+ */
+class MachineClisStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope) {
+    var machines by mutableStateOf<List<MachineInventory>>(emptyList())
+        private set
+
+    /** The runtime the last add created; it is offered once ai-space restarts. */
+    var added by mutableStateOf<String?>(null)
+        private set
+
+    /** Kinds added here and not running until ai-space restarts: their button goes. */
+    var pending by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    override suspend fun load() {
+        machines = Inventory.decode(api.text(Inventory.PATH))
+    }
+
+    /** Probes every runtime and CLI again now; the answer is the fresh list. */
+    suspend fun recheck() {
+        save { machines = Inventory.decode(api.send("POST", Inventory.PROBE, JSONObject())) }
+    }
+
+    suspend fun add(kind: String) {
+        save {
+            added = Inventory.addedRuntime(api.send("POST", Inventory.ADD, Inventory.addBody(kind))) ?: kind
+            pending = pending + kind
+        }
+        refresh()
     }
 }

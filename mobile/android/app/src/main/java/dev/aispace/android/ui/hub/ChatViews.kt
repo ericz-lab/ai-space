@@ -132,6 +132,8 @@ import dev.aispace.android.AppModel
 import dev.aispace.android.R
 import dev.aispace.android.core.AgentGroups
 import dev.aispace.android.core.Catalogue
+import dev.aispace.android.core.Inventory
+import dev.aispace.android.core.MachineInventory
 import dev.aispace.android.core.CatalogueEntry
 import dev.aispace.android.core.ChatActivity
 import dev.aispace.android.core.ChatApproval
@@ -152,6 +154,7 @@ import dev.aispace.android.live.IconImages
 import dev.aispace.android.ui.common.EntryIcon
 import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.ThemeTokens
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
@@ -172,9 +175,23 @@ internal fun AgentChat(
     val base = ChatRoute.base(agent.ref, agent.peer) ?: return false
     val group = catalogue.agentGroup(agent.key)
     val machines = group?.machines ?: listOf(agent)
+    // Which agent CLIs each machine has, for the machine menu; read when there is a choice.
+    var inventory by remember(group?.key) { mutableStateOf<List<MachineInventory>>(emptyList()) }
+    LaunchedEffect(group?.key, machines.size > 1) {
+        if (machines.size > 1) {
+            inventory = try {
+                Inventory.decode(model.loader(connection).api.text(Inventory.PATH))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
     ChatPage(
         agent, model.chat(connection, base), icons,
         machines = machines,
+        machineClis = { m -> Inventory.machine(inventory, m.peer)?.usableClis ?: emptyList() },
         onMachine = { m ->
             if (m.key != agent.key && !AgentGroups.isOffline(m)) {
                 group?.let { model.rememberMachine(connection, it.key, m.peer) }
@@ -246,6 +263,7 @@ internal fun ChatPage(
     store: ChatStore,
     icons: IconImages,
     machines: List<CatalogueEntry> = listOf(agent),
+    machineClis: (CatalogueEntry) -> List<String> = { emptyList() },
     onMachine: (CatalogueEntry) -> Unit = {},
 ) {
     // A machine that does not answer is shown, and nothing is sent there.
@@ -295,6 +313,7 @@ internal fun ChatPage(
         ChatHead(
             agent, icons, store, running,
             machines = machines,
+            machineClis = machineClis,
             onMachine = onMachine,
             history = history,
             onHistory = { history = !history },
@@ -415,6 +434,7 @@ private fun ChatHead(
     store: ChatStore,
     running: Boolean,
     machines: List<CatalogueEntry>,
+    machineClis: (CatalogueEntry) -> List<String>,
     onMachine: (CatalogueEntry) -> Unit,
     history: Boolean,
     onHistory: () -> Unit,
@@ -456,7 +476,7 @@ private fun ChatHead(
             HeadButton(Icons.Outlined.EditNote, stringResource(R.string.chat_new_conversation), enabled = !running) { onNew() }
         }
         // The same agent on several machines: the machine it runs on, switched here (`.chat-machine`).
-        if (machines.size > 1) MachineMenu(agent, machines, onMachine)
+        if (machines.size > 1) MachineMenu(agent, machines, machineClis, onMachine)
         // The history button opens the past sessions under the head (`.chat-hist`).
         if (history) {
             val sessions = store.sessions
@@ -501,12 +521,22 @@ private fun ChatHead(
  * An offline machine is listed, greyed, and cannot be picked; each machine keeps its own conversation.
  */
 @Composable
-private fun MachineMenu(agent: CatalogueEntry, machines: List<CatalogueEntry>, onMachine: (CatalogueEntry) -> Unit) {
+private fun MachineMenu(
+    agent: CatalogueEntry,
+    machines: List<CatalogueEntry>,
+    clis: (CatalogueEntry) -> List<String>,
+    onMachine: (CatalogueEntry) -> Unit,
+) {
     val t = AiTheme.tokens
     var open by remember { mutableStateOf(false) }
     val here = stringResource(R.string.chat_this_machine)
     val offline = stringResource(R.string.chat_machine_offline)
-    fun label(m: CatalogueEntry) = (m.peer ?: here) + if (AgentGroups.isOffline(m)) " ($offline)" else ""
+    // "david · claude, codex (offline)": the machine, the CLIs it can chat with, whether it answers.
+    fun label(m: CatalogueEntry): String {
+        val found = clis(m)
+        return (m.peer ?: here) + (if (found.isNotEmpty()) " · " + found.joinToString(", ") else "") +
+            if (AgentGroups.isOffline(m)) " ($offline)" else ""
+    }
     Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
         Row(
             Modifier.clip(RoundedCornerShape(8.dp)).background(t.text.copy(alpha = 0.06f))

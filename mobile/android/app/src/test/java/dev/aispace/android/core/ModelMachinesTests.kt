@@ -116,4 +116,53 @@ class ModelMachinesTests {
         assertEquals("/api/peers/david/model/apps", PeerAppModels.path("david"))
         assertEquals("/api/peers/david/apps/voice/icon", PeerAppModels.iconPath("david", "voice"))
     }
+
+    private val inventory = """
+    {"ok":true,"machines":[
+      {"machine":"","via":"local","reachable":true,"clis":[
+        {"cli":"claude","kind":"claude-code","installed":true,"signedIn":true,"version":"2.1.0","path":"/usr/bin/claude","checkedAt":"2026-10-27T01:00:00.000Z","configured":true,"runtimes":["claude"]},
+        {"cli":"codex","kind":"codex","installed":true,"signedIn":false,"version":"0.9","checkedAt":"2026-10-27T02:00:00.000Z","configured":false,"runtimes":[]},
+        {"cli":"dsh","kind":"deepseek-harness","installed":false,"configured":false,"runtimes":[]}
+      ]},
+      {"machine":"gpu","via":"ssh","reachable":false,"clis":[{"cli":"claude","kind":"claude-code","configured":true,"runtimes":["gpu-claude"]}]},
+      {"machine":"david","via":"peer","stale":true,"clis":[{"cli":"codex","kind":"codex","installed":true,"configured":false,"runtimes":[]}]},
+      {"machine":"old","via":"peer","old":true,"clis":[]},
+      {"via":"peer"}
+    ]}
+    """.trimIndent()
+
+    @Test fun readsTheAgentClisByMachine() {
+        val rows = Inventory.decode(inventory)
+        assertEquals(listOf("", "gpu", "david", "old"), rows.map { it.machine })
+        assertEquals(listOf("claude", "codex", "dsh"), Inventory.cliNames(rows))
+        val here = rows[0]
+        assertEquals(
+            listOf(CliInfo.State.SignedIn, CliInfo.State.SignedOut, CliInfo.State.Missing),
+            here.clis.map { it.state },
+        )
+        assertEquals(CliInfo.State.Unknown, rows[1].cli("claude")?.state)
+        assertEquals(CliInfo.State.Installed, rows[2].cli("codex")?.state)
+        assertEquals(
+            listOf(MachineInventory.Note.None, MachineInventory.Note.Unreachable, MachineInventory.Note.Offline, MachineInventory.Note.Old),
+            rows.map { it.note },
+        )
+        assertEquals(listOf(false, true, true, false), rows.map { it.isOff })
+        assertEquals("2026-10-27T02:00:00.000Z", Inventory.lastChecked(rows))
+        assertEquals(listOf("claude"), here.usableClis)
+        assertEquals(listOf("codex"), Inventory.machine(rows, "david")?.usableClis)
+        assertEquals("", Inventory.machine(rows, null)?.machine)
+    }
+
+    @Test fun onlyAClisFoundHereAndUnusedCanBeAdded() {
+        val rows = Inventory.decode(inventory)
+        val here = rows[0]
+        assertEquals(listOf(false, true, false), here.clis.map { here.canAdd(it) })
+        // Added since the Space started: the button goes until a restart.
+        assertEquals(false, here.canAdd(here.cli("codex")!!, setOf("codex")))
+        // A peer's CLI is changed there.
+        assertEquals(false, rows[2].canAdd(rows[2].cli("codex")!!))
+        assertEquals("""{"kind":"codex"}""", Inventory.addBody("codex").toString())
+        assertEquals("codex", Inventory.addedRuntime("""{"ok":true,"runtime":"codex"}"""))
+        assertNull(Inventory.addedRuntime("<html>"))
+    }
 }
