@@ -63,7 +63,8 @@ class CatalogueTests {
 
     @Test fun readsTheHomeScreenAndTheDomain() {
         val c = Fixture.catalogue
-        assertEquals(listOf("app:todo", "builtin:inbox", "agent:space/assistant", "app:todo", "widget:todo/today", "app:gone"), c.homePins)
+        // As the panel shows them: a repeated key once (agent-groups.ts `canonicalItems`), a gone one kept.
+        assertEquals(listOf("app:todo", "builtin:inbox", "agent:space/assistant", "widget:todo/today", "app:gone"), c.homePins)
         assertEquals(listOf("home", "s2"), c.screens?.map { it.id })
         assertEquals(listOf("app:docs"), c.screens?.last()?.items)
         assertEquals("example.com", c.domain)

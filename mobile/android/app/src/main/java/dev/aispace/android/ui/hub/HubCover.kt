@@ -80,7 +80,6 @@ import androidx.compose.ui.unit.dp
 import dev.aispace.android.AppModel
 import dev.aispace.android.HubPage
 import dev.aispace.android.R
-import dev.aispace.android.core.ChatRoute
 import dev.aispace.android.core.Connection
 import dev.aispace.android.core.InboxThread
 import dev.aispace.android.core.ModelChoice
@@ -137,13 +136,8 @@ fun HubCover(model: AppModel, connection: Connection, page: HubPage, loader: Cat
                 HubPage.Terminal -> TerminalPage(model.terminal(connection))
                 is HubPage.Chat -> {
                     val catalogue by loader.catalogue.collectAsState()
-                    val agent = catalogue?.agents?.firstOrNull { it.key == page.agent }
-                    val base = agent?.let { ChatRoute.base(it.ref, it.peer) }
-                    if (agent != null && base != null) {
-                        ChatPage(agent, model.chat(connection, base), icons)
-                    } else {
-                        AgentsPage(model, connection, loader, icons)
-                    }
+                    val shown = page.agent?.let { key -> AgentChat(model, connection, catalogue, key, icons) { model.hubPage = HubPage.Chat(it.key) } }
+                    if (shown != true) AgentsPage(model, connection, loader, icons)
                 }
             }
         }
@@ -171,6 +165,11 @@ internal class HubNav {
 
     fun push(dest: HubDest) {
         stack.add(dest)
+    }
+
+    /** Puts [dest] in place of the page on top, or pushes it from the first page. */
+    fun replace(dest: HubDest) {
+        if (stack.isEmpty()) stack.add(dest) else stack[stack.size - 1] = dest
     }
 
     /** One page back, or the cover closes from its first page. */

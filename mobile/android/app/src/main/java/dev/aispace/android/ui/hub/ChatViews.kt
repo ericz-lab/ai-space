@@ -73,6 +73,7 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -85,6 +86,8 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -127,6 +130,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import dev.aispace.android.AppModel
 import dev.aispace.android.R
+import dev.aispace.android.core.AgentGroups
+import dev.aispace.android.core.Catalogue
 import dev.aispace.android.core.CatalogueEntry
 import dev.aispace.android.core.ChatActivity
 import dev.aispace.android.core.ChatApproval
@@ -140,7 +145,6 @@ import dev.aispace.android.core.ChatTools
 import dev.aispace.android.core.ToolVariant
 import dev.aispace.android.core.ChatRoute
 import dev.aispace.android.core.Connection
-import dev.aispace.android.core.Reach
 import dev.aispace.android.live.CatalogueLoader
 import dev.aispace.android.live.ChatImages
 import dev.aispace.android.live.ChatStore
@@ -150,7 +154,38 @@ import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.ThemeTokens
 import kotlinx.coroutines.launch
 
-/** The agents of the Space, each leading to its conversation. */
+/**
+ * An agent's conversation by its entry key, with the machines it runs on: switching machine calls
+ * [onSwitch] with that machine's variant, which keeps its own conversation. False when the key is
+ * not an agent the catalogue lists.
+ */
+@Composable
+internal fun AgentChat(
+    model: AppModel,
+    connection: Connection,
+    catalogue: Catalogue?,
+    key: String,
+    icons: IconImages,
+    onSwitch: (CatalogueEntry) -> Unit,
+): Boolean {
+    val agent = catalogue?.agents?.firstOrNull { it.key == key } ?: return false
+    val base = ChatRoute.base(agent.ref, agent.peer) ?: return false
+    val group = catalogue.agentGroup(agent.key)
+    val machines = group?.machines ?: listOf(agent)
+    ChatPage(
+        agent, model.chat(connection, base), icons,
+        machines = machines,
+        onMachine = { m ->
+            if (m.key != agent.key && !AgentGroups.isOffline(m)) {
+                group?.let { model.rememberMachine(connection, it.key, m.peer) }
+                onSwitch(m)
+            }
+        },
+    )
+    return true
+}
+
+/** The agents of the Space, once each whatever the machines, each leading to its conversation. */
 @Composable
 internal fun AgentsPage(model: AppModel, connection: Connection, loader: CatalogueLoader, icons: IconImages) {
     val nav = LocalHubNav.current
@@ -158,30 +193,43 @@ internal fun AgentsPage(model: AppModel, connection: Connection, loader: Catalog
     val listState = rememberLazyListState()
     val top = nav.top
     if (top is HubDest.Agent) {
-        val agent = catalogue?.agents?.firstOrNull { it.key == top.key }
-        val base = agent?.let { ChatRoute.base(it.ref, it.peer) }
-        if (agent != null && base != null) {
-            ChatPage(agent, model.chat(connection, base), icons)
-            return
-        }
+        if (AgentChat(model, connection, catalogue, top.key, icons) { nav.replace(HubDest.Agent(it.key)) }) return
     }
     HubScaffold(stringResource(R.string.hub_chat)) { padding ->
-        val agents = catalogue?.agents ?: emptyList()
+        val groups = catalogue?.agentGroups ?: emptyList()
         HubList(padding, onRefresh = { loader.refresh() }, state = listState) {
-            if (agents.isEmpty()) group(key = "none") { NoteCell(stringResource(R.string.hub_no_agents)) }
-            groupItems(agents.filter { ChatRoute.base(it.ref, it.peer) != null }, key = { "agent:${it.key}" }) { agent ->
-                Cell(onClick = { nav.push(HubDest.Agent(agent.key)) }, enabled = agent.reach != Reach.peerOffline, chevron = true) {
+            if (groups.isEmpty()) group(key = "none") { NoteCell(stringResource(R.string.hub_no_agents)) }
+            groupItems(groups.filter { ChatRoute.base(it.primary.ref, it.primary.peer) != null }, key = { "agent:${it.key}" }) { g ->
+                val agent = g.primary
+                val online = g.machines.any { !AgentGroups.isOffline(it) }
+                Cell(onClick = { nav.push(HubDest.Agent(model.preferredAgent(connection, agent).key)) }, enabled = online, chevron = true) {
                     EntryIcon(agent.icon, Icons.Filled.Person, icons, size = 40.dp, isRound = true)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(agent.displayTitle(), color = AiTheme.tokens.text)
                         agent.displayDetail()?.let {
                             Text(it, style = MaterialTheme.typography.bodySmall, color = AiTheme.tokens.secondaryText, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         }
+                        if (g.machines.size > 1) {
+                            Text(
+                                stringResource(R.string.chat_on_machines, machineNames(g.machines)),
+                                style = MaterialTheme.typography.labelSmall, color = AiTheme.tokens.secondaryText,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/** "this machine, david (offline)", the machines of an agent in their order. */
+@Composable
+private fun machineNames(machines: List<CatalogueEntry>): String {
+    val here = stringResource(R.string.chat_this_machine)
+    val offline = stringResource(R.string.chat_machine_offline)
+    val sep = stringResource(R.string.chat_machine_separator)
+    return machines.joinToString(sep) { m -> (m.peer ?: here) + if (AgentGroups.isOffline(m)) " ($offline)" else "" }
 }
 
 /**
@@ -193,7 +241,15 @@ internal fun AgentsPage(model: AppModel, connection: Connection, loader: Catalog
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun ChatPage(agent: CatalogueEntry, store: ChatStore, icons: IconImages) {
+internal fun ChatPage(
+    agent: CatalogueEntry,
+    store: ChatStore,
+    icons: IconImages,
+    machines: List<CatalogueEntry> = listOf(agent),
+    onMachine: (CatalogueEntry) -> Unit = {},
+) {
+    // A machine that does not answer is shown, and nothing is sent there.
+    val offline = AgentGroups.isOffline(agent)
     val scope = rememberCoroutineScope()
     val t = AiTheme.tokens
     val draft by store.draft.collectAsState()
@@ -238,6 +294,8 @@ internal fun ChatPage(agent: CatalogueEntry, store: ChatStore, icons: IconImages
     ) {
         ChatHead(
             agent, icons, store, running,
+            machines = machines,
+            onMachine = onMachine,
             history = history,
             onHistory = { history = !history },
             onNew = {
@@ -266,6 +324,14 @@ internal fun ChatPage(agent: CatalogueEntry, store: ChatStore, icons: IconImages
                 stringResource(R.string.hub_unavailable, it),
                 style = MaterialTheme.typography.bodySmall,
                 color = ThemeTokens.danger,
+                modifier = Modifier.padding(horizontal = 18.dp).padding(bottom = 6.dp),
+            )
+        }
+        if (offline) {
+            Text(
+                stringResource(R.string.chat_machine_offline_note, agent.peer ?: stringResource(R.string.chat_this_machine)),
+                style = MaterialTheme.typography.bodySmall,
+                color = t.secondaryText,
                 modifier = Modifier.padding(horizontal = 18.dp).padding(bottom = 6.dp),
             )
         }
@@ -335,7 +401,7 @@ internal fun ChatPage(agent: CatalogueEntry, store: ChatStore, icons: IconImages
                 },
             )
             // A message written during a turn joins it, so Send stays while the turn runs; Stop is in the head.
-            val canSend = store.canSend && reading == 0
+            val canSend = store.canSend && reading == 0 && !offline
             SendButton(enabled = canSend) { store.send() }
         }
     }
@@ -348,6 +414,8 @@ private fun ChatHead(
     icons: IconImages,
     store: ChatStore,
     running: Boolean,
+    machines: List<CatalogueEntry>,
+    onMachine: (CatalogueEntry) -> Unit,
     history: Boolean,
     onHistory: () -> Unit,
     onNew: () -> Unit,
@@ -387,6 +455,8 @@ private fun ChatHead(
             HeadButton(Icons.Outlined.History, stringResource(R.string.chat_history), on = history, enabled = !running) { onHistory() }
             HeadButton(Icons.Outlined.EditNote, stringResource(R.string.chat_new_conversation), enabled = !running) { onNew() }
         }
+        // The same agent on several machines: the machine it runs on, switched here (`.chat-machine`).
+        if (machines.size > 1) MachineMenu(agent, machines, onMachine)
         // The history button opens the past sessions under the head (`.chat-hist`).
         if (history) {
             val sessions = store.sessions
@@ -423,6 +493,46 @@ private fun ChatHead(
             }
         }
         HorizontalDivider(color = t.hairline)
+    }
+}
+
+/**
+ * The chat's machine menu: the machine this conversation runs on, and the others the agent runs on.
+ * An offline machine is listed, greyed, and cannot be picked; each machine keeps its own conversation.
+ */
+@Composable
+private fun MachineMenu(agent: CatalogueEntry, machines: List<CatalogueEntry>, onMachine: (CatalogueEntry) -> Unit) {
+    val t = AiTheme.tokens
+    var open by remember { mutableStateOf(false) }
+    val here = stringResource(R.string.chat_this_machine)
+    val offline = stringResource(R.string.chat_machine_offline)
+    fun label(m: CatalogueEntry) = (m.peer ?: here) + if (AgentGroups.isOffline(m)) " ($offline)" else ""
+    Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
+        Row(
+            Modifier.clip(RoundedCornerShape(8.dp)).background(t.text.copy(alpha = 0.06f))
+                .clickable(role = Role.DropdownList) { open = true }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(Icons.Outlined.Computer, contentDescription = null, tint = t.secondaryText, modifier = Modifier.size(16.dp))
+            Text(stringResource(R.string.chat_machine), style = MaterialTheme.typography.labelMedium, color = t.secondaryText)
+            Text(label(agent), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = t.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.Outlined.ExpandMore, contentDescription = stringResource(R.string.chat_machine_title), tint = t.secondaryText, modifier = Modifier.size(16.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for (m in machines) {
+                val down = AgentGroups.isOffline(m) && m.key != agent.key
+                DropdownMenuItem(
+                    text = { Text(label(m), fontWeight = if (m.key == agent.key) FontWeight.SemiBold else FontWeight.Normal) },
+                    enabled = !down,
+                    onClick = {
+                        open = false
+                        onMachine(m)
+                    },
+                )
+            }
+        }
     }
 }
 

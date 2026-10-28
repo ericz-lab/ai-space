@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import dev.aispace.android.core.AgentGroups
 import dev.aispace.android.core.CatalogueCache
 import dev.aispace.android.core.CatalogueEntry
 import dev.aispace.android.core.ChatRoute
@@ -363,6 +364,10 @@ class AppModel(private val context: Context) {
         val l = CatalogueLoader(connection, cache, profile.cookies, scope)
         l.onCatalogue = { catalogue ->
             screens.seed(connection.id, catalogue.panelScreens)
+            // A layout copied with one key per machine for the same agent shows it once.
+            val shown = screens.screens(connection.id)
+            val merged = AgentGroups.canonicalScreens(shown, catalogue.agentGroups)
+            if (merged != shown) screens.edit(connection.id) { merged }
             icons[connection.id]?.retryFailed()
             backdrops[connection.id]?.retryFailed()
             publishQuickActions()
@@ -394,6 +399,23 @@ class AppModel(private val context: Context) {
             // A settled turn may have installed or changed an app: the library catches up without a pull.
             ChatStore(loader(connection).api, base, scope) { loaders[connection.id]?.let { l -> scope.launch { l.refresh() } } }
         }
+
+    /**
+     * The machine last chosen in the chat for an agent on several machines: a peer's name, "" for
+     * the Space's own machine, null when never chosen. Kept on this phone, per Space.
+     */
+    fun rememberedMachine(connection: Connection, group: String): String? =
+        prefs.getString("chat-machine:${connection.id}:$group", null)
+
+    fun rememberMachine(connection: Connection, group: String, peer: String?) {
+        prefs.edit().putString("chat-machine:${connection.id}:$group", peer ?: "").apply()
+    }
+
+    /** The variant of an agent a tile opens ([AgentGroups.preferred]); the entry itself outside the catalogue. */
+    fun preferredAgent(connection: Connection, entry: CatalogueEntry): CatalogueEntry {
+        val group = loaders[connection.id]?.catalogue?.value?.agentGroup(entry.key) ?: return entry
+        return AgentGroups.preferred(group, rememberedMachine(connection, group.key))
+    }
 
     /** Universal search of the Space's first screen; closing a sheet does not abandon a run it started. */
     fun omnibox(connection: Connection): OmniboxStore {
@@ -595,8 +617,8 @@ class AppModel(private val context: Context) {
         val connection = selected ?: return
         val url = entry.pageURL(connection.url)
         if (url == null) {
-            // An agent has no page: it is talked to.
-            if (entry.kind == EntryKind.agent) hubPage = HubPage.Chat(entry.key) else openWebPanel()
+            // An agent has no page: it is talked to, on the machine chosen for it last time.
+            if (entry.kind == EntryKind.agent) hubPage = HubPage.Chat(preferredAgent(connection, entry).key) else openWebPanel()
             return
         }
         open(url, entry.displayTitle(), entry.key, connection)

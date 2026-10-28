@@ -71,6 +71,8 @@ data class AgentInfo(
     val i18n: I18n? = null,
     val avatar: String? = null,
     val runtime: String? = null,
+    /** Set on a peer's agent while that machine does not answer. */
+    val stale: Boolean? = null,
 ) {
     fun displayTitle(lang: String = Lang.current): String = Lang.pick(title, i18n, Lang.title, lang)
 
@@ -93,6 +95,7 @@ data class AgentInfo(
                 i18n = I18nReader.read(o),
                 avatar = o.str("avatar"),
                 runtime = o.str("runtime"),
+                stale = o.bool("stale"),
             )
         }
     }
