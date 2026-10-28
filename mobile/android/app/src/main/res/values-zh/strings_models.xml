@@ -9,4 +9,9 @@
     <string name="usage_origin_peer">替其他空间调用</string>
     <string name="usage_peer_missing">未包含 %1$s：%2$s</string>
     <string name="usage_peer_stale">%1$s 没有响应（%2$s），显示的是 %3$s 的数据</string>
+    <string name="app_models_here">本机</string>
+    <string name="app_models_on_peer">%1$s 上</string>
+    <string name="app_models_peer_old">%1$s 的 core 版本较旧，更新后才会在这里列出它的应用。</string>
+    <string name="app_models_peer_down">%1$s 没有响应：%2$s</string>
+    <string name="app_models_empty">尚未安装应用。</string>
 </resources>

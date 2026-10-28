@@ -616,6 +616,52 @@ data class AppModelRows(val app: String, val rows: List<Row>) {
     }
 }
 
+/**
+ * One peer's part of the App models page, on a hub (docs/peers.md): its apps' rows and its own
+ * choices, since the calls run there; or why there are none. Read through
+ * `GET /api/peers/:peer/model/apps`, which an older core does not have.
+ */
+data class PeerAppModels(
+    val peer: String,
+    /** null while it is being read, or when it could not be. */
+    val apps: List<AppModelRows>? = null,
+    val options: List<ModelChoice> = emptyList(),
+    val error: String? = null,
+    /** The peer runs a core without the route. */
+    val old: Boolean = false,
+) {
+    val isLoading: Boolean get() = apps == null && error == null && !old
+
+    /** The same peer with one app's rows as a save answered them. */
+    fun replacing(rows: AppModelRows): PeerAppModels = copy(apps = apps?.map { if (it.app == rows.app) rows else it })
+
+    companion object {
+        /** A success's body: an older core answers a path it does not know with its page, not JSON. */
+        fun answer(peer: String, body: String): PeerAppModels {
+            val o = Json.obj(body) ?: return PeerAppModels(peer, old = true)
+            if (o.bool("ok") == false) return PeerAppModels(peer, error = o.str("error") ?: "not ok")
+            val apps = o.arr("apps")?.let { Json.lossy(it, AppModelRows) } ?: emptyList()
+            val options = o.arr("options")?.let { Json.lossy(it, ModelChoice) } ?: emptyList()
+            return PeerAppModels(peer, apps, options)
+        }
+
+        /** A refusal: a 404 that is not the hub's "unknown peer" means the peer's core has no such route. */
+        fun failure(peer: String, code: Int, message: String): PeerAppModels =
+            if (code == 404 && !message.startsWith("unknown peer")) PeerAppModels(peer, old = true)
+            else PeerAppModels(peer, error = message.ifEmpty { "HTTP $code" })
+
+        fun path(peer: String): String = "/api/peers/${SpacePath.escape(peer)}/model/apps"
+
+        /** Where an app's override is set: the Space's own route, or the peer's through the hub. */
+        fun savePath(app: String, peer: String?): String =
+            if (peer == null) "/api/panel/apps/${SpacePath.escape(app)}/model"
+            else "/api/peers/${SpacePath.escape(peer)}/apps/${SpacePath.escape(app)}/model"
+
+        /** A peer app's icon on the peer, for one the hub's list leaves out. */
+        fun iconPath(peer: String, app: String): String = "/api/peers/${SpacePath.escape(peer)}/apps/${SpacePath.escape(app)}/icon"
+    }
+}
+
 // Events (docs/events.md)
 
 data class SpaceEvent(

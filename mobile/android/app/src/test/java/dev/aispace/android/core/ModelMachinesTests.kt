@@ -89,4 +89,31 @@ class ModelMachinesTests {
         assertEquals("Todo", labels["todo"]?.title)
         assertEquals("Voice (david)", labels["voice"]?.title)
     }
+
+    @Test fun readsAPeersAppModelsOrWhyThereAreNone() {
+        val ok = PeerAppModels.answer(
+            "david",
+            """{"ok":true,"apps":[{"app":"voice","rows":[{"tag":null,"model":"claude/basic","source":"default"}]}],
+              "options":[{"value":"claude/basic","runtime":"claude","tier":"basic","model":"haiku"}]}""",
+        )
+        assertEquals(listOf("voice"), ok.apps?.map { it.app })
+        assertEquals(listOf("claude/basic"), ok.options.map { it.value })
+        assertEquals(false, ok.isLoading)
+        // An older core answers with its page, or with a 404 that is not the hub's own.
+        assertEquals(true, PeerAppModels.answer("david", "<!doctype html><html></html>").old)
+        assertEquals(true, PeerAppModels.failure("david", 404, "not found").old)
+        assertEquals("unknown peer: david", PeerAppModels.failure("david", 404, "unknown peer: david").error)
+        assertEquals("fetch failed", PeerAppModels.failure("david", 502, "fetch failed").error)
+        assertEquals("timeout", PeerAppModels.answer("david", """{"ok":false,"error":"timeout"}""").error)
+        assertEquals(true, PeerAppModels("david").isLoading)
+        val saved = ok.replacing(AppModelRows("voice", listOf(AppModelRows.Row(model = "codex/basic", override = "codex/basic"))))
+        assertEquals("codex/basic", saved.apps?.single()?.rows?.single()?.override)
+    }
+
+    @Test fun aPeersAppIsSavedAndDrawnThroughTheHub() {
+        assertEquals("/api/panel/apps/todo/model", PeerAppModels.savePath("todo", null))
+        assertEquals("/api/peers/david/apps/voice/model", PeerAppModels.savePath("voice", "david"))
+        assertEquals("/api/peers/david/model/apps", PeerAppModels.path("david"))
+        assertEquals("/api/peers/david/apps/voice/icon", PeerAppModels.iconPath("david", "voice"))
+    }
 }

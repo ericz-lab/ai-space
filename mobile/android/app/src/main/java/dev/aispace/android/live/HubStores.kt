@@ -29,6 +29,8 @@ import dev.aispace.android.core.ModelCall
 import dev.aispace.android.core.ModelChoice
 import dev.aispace.android.core.ModelUsage
 import dev.aispace.android.core.PackageCatalogue
+import dev.aispace.android.core.PeerAppModels
+import dev.aispace.android.core.PeerStatus
 import dev.aispace.android.core.SpaceApi
 import dev.aispace.android.core.SpaceApiError
 import dev.aispace.android.core.SpaceEvent
@@ -330,28 +332,68 @@ class AppModelsStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope
     var options by mutableStateOf<List<ModelChoice>>(emptyList())
         private set
 
+    /** On a hub, each peer's apps, by name; each read on its own so a slow peer holds up only its part. */
+    var peers by mutableStateOf<List<PeerAppModels>>(emptyList())
+        private set
+
     override suspend fun load() {
         coroutineScope {
             val names = async { fetchLabels() }
+            val peerNames = async {
+                try { Hub.rows("peers", api.text("/api/peers"), PeerStatus).map { it.name }.sorted() } catch (e: CancellationException) { throw e } catch (e: Exception) { emptyList() }
+            }
             val data = api.text("/api/model/apps")
             names.await()
             options = try { Hub.rows("options", data, ModelChoice) } catch (e: Exception) { emptyList() }
             apps = Hub.rows("apps", data, AppModelRows)
+            val listed = peerNames.await()
+            // A peer read before keeps its rows while it is read again.
+            peers = listed.map { name -> peers.firstOrNull { it.peer == name } ?: PeerAppModels(name) }
+            for (name in listed) scope.launch { loadPeer(name) }
         }
     }
+
+    private suspend fun loadPeer(name: String) {
+        val fresh = try {
+            PeerAppModels.answer(name, api.text(PeerAppModels.path(name)))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SpaceApiError.Http) {
+            PeerAppModels.failure(name, e.code, e.msg)
+        } catch (e: Exception) {
+            PeerAppModels(name, error = HubStore.message(e))
+        }
+        peers = peers.map { if (it.peer == name) fresh else it }
+    }
+
+    /** An app's title: by its id (`<peer>/<app>` on a peer), else its bare name. */
+    fun title(app: String, peer: String?): String = labels[peer?.let { "$it/$app" } ?: app]?.displayTitle() ?: app
+
+    /** The app's icon: the hub's label, else the peer's own icon route. */
+    fun icon(app: String, peer: String?): String? =
+        labels[peer?.let { "$it/$app" } ?: app]?.icon ?: peer?.let { PeerAppModels.iconPath(it, app) }
 
     /** The apps by title. */
     val sorted: List<AppModelRows>
         get() = apps.sortedWith { a, b -> HubStore.titleOrder.compare(title(a.app), title(b.app)) }
 
-    /** Sets the panel's override for an app's calls, or for one tag of them; null clears it. */
-    suspend fun setModel(app: String, tag: String?, value: String?) {
+    fun sorted(peer: PeerAppModels): List<AppModelRows> =
+        (peer.apps ?: emptyList()).sortedWith { a, b -> HubStore.titleOrder.compare(title(a.app, peer.peer), title(b.app, peer.peer)) }
+
+    /**
+     * Sets the panel's override for an app's calls, or for one tag of them; null clears it. A peer's
+     * app is saved on the peer, through the hub.
+     */
+    suspend fun setModel(app: String, tag: String?, value: String?, peer: String? = null) {
         save {
             val body = JSONObject().put("model", value ?: JSONObject.NULL)
             if (tag != null) body.put("tag", tag)
-            val answer = api.send("PATCH", "/api/panel/apps/${SpacePath.escape(app)}/model", body)
+            val answer = api.send("PATCH", PeerAppModels.savePath(app, peer), body)
             val fresh = HubStore.decodeOrNull(answer, AppModelRows)
-            if (fresh != null) apps = apps.map { if (it.app == app) fresh else it }
+            if (fresh != null) {
+                if (peer == null) apps = apps.map { if (it.app == app) fresh else it }
+                else peers = peers.map { if (it.peer == peer) it.replacing(fresh) else it }
+            }
         }
     }
 }

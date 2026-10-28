@@ -9,4 +9,9 @@
     <string name="usage_origin_peer">for other spaces</string>
     <string name="usage_peer_missing">%1$s is not included: %2$s</string>
     <string name="usage_peer_stale">%1$s did not answer (%2$s); its figures are from %3$s</string>
+    <string name="app_models_here">This machine</string>
+    <string name="app_models_on_peer">On %1$s</string>
+    <string name="app_models_peer_old">%1$s runs an older core; update it to list its apps here.</string>
+    <string name="app_models_peer_down">%1$s is not answering: %2$s</string>
+    <string name="app_models_empty">No apps installed.</string>
 </resources>

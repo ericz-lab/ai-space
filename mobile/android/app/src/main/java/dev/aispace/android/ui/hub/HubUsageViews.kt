@@ -16,6 +16,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import dev.aispace.android.core.ModelChoice
+import dev.aispace.android.core.AppModelRows
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -296,35 +299,76 @@ internal fun AppModelsPage(api: SpaceApi, icons: IconImages) {
     LaunchedEffect(store) { store.refresh() }
     HubScaffold(stringResource(R.string.hub_app_models)) { padding ->
         val apps = store.sorted
-        val labels = store.labels
+        val peers = store.peers
         HubList(padding, onRefresh = { store.refresh() }) {
             group(key = "notice", footer = { Text(stringResource(R.string.hub_app_models_footer)) }) {
                 HubNotice(store)
             }
-            for (app in apps) {
-                groupItems(
-                    app.rows,
-                    key = { "am:${app.app}:${it.id}" },
-                    headerContent = { AppHeader(labels[app.app]?.icon, store.title(app.app), icons) },
-                ) { row ->
-                    ModelMenu(
-                        options = store.options,
-                        current = row.override,
-                        none = stringResource(R.string.hub_no_override),
-                        disabled = store.isSaving,
-                        pick = { value -> scope.launch { store.setModel(app.app, row.tag, value) } },
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(row.tag ?: stringResource(R.string.hub_all_calls), color = AiTheme.tokens.text)
-                            Text(
-                                listOfNotNull(row.model, modelSource(row.source)).joinToString(" · "),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = AiTheme.tokens.secondaryText,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+            // On a hub the Space's own apps come first, under this machine's name; each peer's follow under its own.
+            if (peers.isNotEmpty() && apps.isNotEmpty()) item(key = "am-here") { MachineHeading(stringResource(R.string.app_models_here)) }
+            appModelGroups(store, apps, null, store.options, icons) { app, tag, value -> scope.launch { store.setModel(app, tag, value) } }
+            for (p in peers) {
+                item(key = "am-peer:${p.peer}") { MachineHeading(stringResource(R.string.app_models_on_peer, p.peer)) }
+                // Reading, an older core, unreachable, or nothing to set: a note in place of its apps.
+                if (p.isLoading || p.old || p.error != null || p.apps.isNullOrEmpty()) {
+                    group(key = "am-note:${p.peer}") {
+                        val error = p.error
+                        when {
+                            p.isLoading -> NoteCell(stringResource(R.string.hub_loading))
+                            p.old -> NoteCell(stringResource(R.string.app_models_peer_old, p.peer))
+                            error != null -> NoteCell(stringResource(R.string.app_models_peer_down, p.peer, error), ThemeTokens.danger)
+                            else -> NoteCell(stringResource(R.string.app_models_empty))
                         }
                     }
+                } else {
+                    // The peer's own choices: its calls run there.
+                    appModelGroups(store, store.sorted(p), p.peer, p.options, icons) { app, tag, value -> scope.launch { store.setModel(app, tag, value, p.peer) } }
+                }
+            }
+        }
+    }
+}
+
+/** A machine's name over its apps. */
+@Composable
+private fun MachineHeading(text: String) {
+    Text(
+        text, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = AiTheme.tokens.text,
+        modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 16.dp, bottom = 2.dp),
+    )
+}
+
+/** One card per app: the row for the whole app, then one per purpose, each with its override menu. */
+private fun LazyListScope.appModelGroups(
+    store: AppModelsStore,
+    apps: List<AppModelRows>,
+    peer: String?,
+    options: List<ModelChoice>,
+    icons: IconImages,
+    pick: (String, String?, String?) -> Unit,
+) {
+    for (app in apps) {
+        groupItems(
+            app.rows,
+            key = { "am:${peer ?: ""}:${app.app}:${it.id}" },
+            headerContent = { AppHeader(store.icon(app.app, peer), store.title(app.app, peer), icons) },
+        ) { row ->
+            ModelMenu(
+                options = options,
+                current = row.override,
+                none = stringResource(R.string.hub_no_override),
+                disabled = store.isSaving,
+                pick = { value -> pick(app.app, row.tag, value) },
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(row.tag ?: stringResource(R.string.hub_all_calls), color = AiTheme.tokens.text)
+                    Text(
+                        listOfNotNull(row.model, modelSource(row.source)).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AiTheme.tokens.secondaryText,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
