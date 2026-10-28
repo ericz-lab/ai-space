@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
     private lazy var quickChat = QuickChat(model: model)
     private lazy var hotKey = HotKey { [weak self] in self?.quickChat.toggle() }
-    private lazy var floatingBall = FloatingBall(model: model)
+    private lazy var floatingBall = FloatingBall(model: model) { [weak self] agent, text in self?.quickChat.show(agent: agent, text: text) }
     private var watchers: Set<AnyCancellable> = []
     private var activity: NSObjectProtocol?
 

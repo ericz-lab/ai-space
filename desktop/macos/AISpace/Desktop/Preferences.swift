@@ -61,6 +61,9 @@ final class Preferences: ObservableObject {
     /// The floating ball over every app that takes a dropped picture (FloatingBall.swift); off
     /// until the operator turns it on.
     @Published var floatingBall: Bool { didSet { defaults.set(floatingBall, forKey: "floatingBall") } }
+    /// The ball's four sections for each Space (connection id → entry keys, top, right, bottom,
+    /// left): "" keeps the section's default app, "-" leaves it empty (FloatingBallRules).
+    @Published var floatingBallSlots: [String: [String]] { didSet { defaults.set(floatingBallSlots, forKey: "floatingBallSlots") } }
     /// Where the ball last stood, in screen points; nil until it was moved.
     var floatingBallOrigin: CGPoint? {
         get {
@@ -83,6 +86,7 @@ final class Preferences: ObservableObject {
         themeID = defaults.string(forKey: "theme") ?? ThemePreset.aurora.id
         showsWidgets = !defaults.bool(forKey: "hidesWidgets")
         floatingBall = defaults.bool(forKey: "floatingBall")
+        floatingBallSlots = defaults.dictionary(forKey: "floatingBallSlots") as? [String: [String]] ?? [:]
         Theme.current = ThemePreset.named(themeID)
     }
 }

@@ -124,6 +124,13 @@
 "Show the floating ball" = "显示悬浮球";
 "A small ball over every app. Drop a picture on it to keep the picture in an app of the Space; drag the ball to move it, click it for Pending Shares. Space → Floating Ball shows or hides it too." = "一个浮在所有应用之上的小球。把图片拖到球上，就能把它保存到 Space 的某个应用；拖动小球可以移动位置，点一下打开“待保存分享”。“Space → 悬浮球”菜单也可以显示或隐藏它。";
 "Floating Ball" = "悬浮球";
+"Save this to %@:" = "把下面的内容存进 %@：";
+"None" = "无";
+"Top" = "上";
+"Right" = "右";
+"Bottom" = "下";
+"Left" = "左";
+"A small ball over every app. Rest the pointer on it for four sections: click one to hand text and pictures to that app's agent (Space Assistant when the app has none), or drop a picture on it. Each Space keeps its own sections on this Mac." = "浮在所有应用之上的小球。鼠标停在上面会展开四个分区：点一个，把文字和图片交给该应用的 agent（应用没有 agent 时交给 Space 助手），也可以把图片直接拖到分区上。每个空间在这台 Mac 上各自保存自己的分区。";
 "Hide Floating Ball" = "隐藏悬浮球";
 "Drop a picture here to keep it in an app of the Space." = "把图片拖到这里，保存到 Space 的某个应用。";
 "Show in the menu bar" = "在菜单栏中显示";
