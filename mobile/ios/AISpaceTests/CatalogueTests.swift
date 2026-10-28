@@ -51,6 +51,69 @@ enum Fixture {
     static var catalogue: Catalogue { try! Catalogue.decode(payload()) }
 }
 
+struct AgentGroupsTests {
+    /// The same agent here, on an offline peer and on a peer that answers, and an agent on peers only, the offline one first.
+    static let agents = """
+    {"ok":true,"agents":[
+      {"id":"ops/engineer","app":"ops","name":"engineer","title":"Engineer","avatar":"🛠"},
+      {"id":"lab/ops/engineer","peer":"lab","app":"ops","name":"engineer","title":"Engineer","stale":true},
+      {"id":"david/ops/engineer","peer":"david","app":"ops","name":"engineer","title":"Engineer"},
+      {"id":"lab/draw/illustrator","peer":"lab","app":"draw","name":"illustrator","title":"Illustrator","stale":true},
+      {"id":"david/draw/illustrator","peer":"david","app":"draw","name":"illustrator","title":"Illustrator"},
+      {"id":"space/assistant","app":"space","name":"assistant","title":"Space Assistant"},
+      {"id":"david/space/assistant","peer":"david","app":"space","name":"assistant","title":"Space Assistant"}
+    ]}
+    """
+
+    var catalogue: Catalogue { try! Catalogue.decode(Fixture.payload(agents: Self.agents, peers: nil)) }
+
+    @Test func listsAnAgentOnceWhateverItsMachines() {
+        let c = catalogue
+        #expect(c.agentGroups.map(\.key) == ["ops/engineer", "draw/illustrator", "space/assistant"])
+        // The local variant stands for its group; on peers only, the first one that answers.
+        #expect(c.agents.map(\.ref) == ["ops/engineer", "david/draw/illustrator", "space/assistant"])
+        #expect(c.agentGroups[0].machines.map(\.peer) == [nil, "lab", "david"])
+        #expect(c.agentGroups[1].machines.map(\.isOffline) == [true, false])
+        #expect(c.agentGroups[2].isShared)
+        // Every variant is still found by its own key, for its own conversation.
+        #expect(c.agent("agent:lab/ops/engineer")?.isOffline == true)
+        #expect(c.entry("agent:david/space/assistant")?.peer == "david")
+        #expect(c.agentGroup(c.agent("agent:david/ops/engineer")!)?.key == "ops/engineer")
+    }
+
+    @Test func keysAnAgentWithoutItsPeer() {
+        #expect(AgentGroups.key(ref: "david/ops/engineer", peer: "david") == "ops/engineer")
+        #expect(AgentGroups.key(ref: "ops/engineer", peer: nil) == "ops/engineer")
+    }
+
+    @Test func opensTheMachinePickedLastWhileItAnswers() {
+        let g = catalogue.agentGroups[0]
+        #expect(AgentGroups.preferred(g, remembered: nil).ref == "ops/engineer")
+        #expect(AgentGroups.preferred(g, remembered: "david").ref == "david/ops/engineer")
+        #expect(AgentGroups.preferred(g, remembered: "").ref == "ops/engineer")
+        // Offline, or gone: the primary, and the choice is kept for when it answers.
+        #expect(AgentGroups.preferred(g, remembered: "lab").ref == "ops/engineer")
+        #expect(AgentGroups.preferred(g, remembered: "elsewhere").ref == "ops/engineer")
+    }
+
+    @Test func pointsAgentsPinnedPerMachineAtTheirGroup() {
+        let items = ["app:todo", "agent:david/ops/engineer", "agent:ops/engineer", "agent:lab/draw/illustrator", "agent:gone/one"]
+        #expect(AgentGroups.canonical(items, catalogue.agentGroups) == ["app:todo", "agent:ops/engineer", "agent:david/draw/illustrator", "agent:gone/one"])
+    }
+
+    @Test func remembersTheMachinePerSpaceAndAgent() {
+        let defaults = UserDefaults(suiteName: "AgentGroupsTests")!
+        defaults.removePersistentDomain(forName: "AgentGroupsTests")
+        let space = UUID()
+        #expect(MachineChoice.remembered("ops/engineer", space: space, defaults: defaults) == nil)
+        MachineChoice.remember("ops/engineer", peer: "david", space: space, defaults: defaults)
+        MachineChoice.remember("space/assistant", peer: nil, space: space, defaults: defaults)
+        #expect(MachineChoice.remembered("ops/engineer", space: space, defaults: defaults) == "david")
+        #expect(MachineChoice.remembered("space/assistant", space: space, defaults: defaults) == "")
+        #expect(MachineChoice.remembered("ops/engineer", space: UUID(), defaults: defaults) == nil)
+    }
+}
+
 struct CatalogueTests {
     let space = URL(string: "https://space.example.com/")!
 

@@ -49,6 +49,29 @@ struct HubModelsTests {
         #expect(options[0].label == "claude · Basic · haiku")
     }
 
+    @Test func greysAChoiceThatCannotBePicked() throws {
+        let options = try Hub.rows(ModelChoice.self, "options", from: Data("""
+        {"ok":true,"options":[
+          {"value":"claude/basic","runtime":"claude","tier":"basic","model":"haiku"},
+          {"value":"codex/basic","runtime":"codex","tier":"basic","model":"luna","unavailable":"signed-out"},
+          {"value":"david:claude/basic","runtime":"david:claude","tier":"basic","model":"haiku","unavailable":"offline"}
+        ]}
+        """.utf8))
+        #expect(options.map(\.isAvailable) == [true, false, false])
+        #expect(options[0].shownLabel == "claude · Basic · haiku")
+        #expect(options[1].shownLabel == "codex · Basic · luna (not signed in)")
+        #expect(options[2].shownLabel.hasSuffix("(offline)"))
+        #expect(ModelChoiceText.saved("old/basic") == "old/basic (not available)")
+
+        let prefs = try JSONDecoder().decode(ModelPreferences.self, from: Data("""
+        {"defaultModel":"codex/basic","options":[{"value":"claude/basic","runtime":"claude"},{"value":"codex/basic","runtime":"codex","unavailable":"signed-out"}]}
+        """.utf8))
+        #expect(prefs.canPick("claude/basic"))
+        #expect(prefs.canPick(""))
+        #expect(!prefs.canPick("codex/basic"))
+        #expect(!prefs.canPick("gone/basic"))
+    }
+
     @Test func aMissingKeyIsAnEmptyList() throws {
         #expect(try Hub.rows(TaskRun.self, "runs", from: Data(#"{"ok":true}"#.utf8)).isEmpty)
         let runs = try Hub.rows(TaskRun.self, "runs", from: Data(#"{"runs":[{"id":7,"taskId":"t1","startedAt":1000,"endedAt":3500,"status":"ok","trigger":"event","eventIds":[1,2]}]}"#.utf8))
@@ -72,6 +95,33 @@ struct HubModelsTests {
         #expect(usage.daysRecorded(now: ISO8601.parse("2026-10-13T12:00:00.000Z")!) == 13)
     }
 
+    @Test func readsAHubsUsageWithItsPeersCalls() throws {
+        let usage = try Hub.decode(ModelUsage.self, from: Data("""
+        {"ok":true,"window":"24h","backend":"local","space":"home","totals":{"calls":2},
+         "byTag":[{"calls":1,"app":"david/draw","tag":"image","model":"gpt-6-luna","machine":"david"},{"calls":1,"app":"todo","tag":"plan","model":"haiku"}],
+         "byModel":[{"calls":1,"model":"gpt-6-luna","machine":"david"}],
+         "peers":[{"name":"david","ok":true},{"name":"lab","ok":false,"asOf":"2026-10-27T01:00:00.000Z","error":"timeout"},{"name":"old","ok":false,"error":"no ledger"}]}
+        """.utf8))
+        #expect(usage.space == "home")
+        #expect(usage.byTag?.elements.map(\.modelOn) == ["david:gpt-6-luna", "haiku"])
+        #expect(usage.byModel?.elements.first?.modelOn == "david:gpt-6-luna")
+        #expect(usage.peersOff.map(\.name) == ["lab", "old"])
+        #expect(usage.peersOff.first?.asOf != nil)
+
+        let calls = try Hub.rows(ModelCall.self, "calls", from: Data("""
+        {"ok":true,"calls":[
+          {"id":7,"app":"david/draw","model":"gpt-6-luna","machine":"david","peer":"david","origin":"peer","status":"ok"},
+          {"id":7,"app":"todo","model":"haiku","status":"error","error":"boom"}
+        ]}
+        """.utf8))
+        #expect(calls.map(\.modelOn) == ["david:gpt-6-luna", "haiku"])
+        // The same id from two ledgers stays two rows.
+        #expect(Set(calls.map(\.key)).count == 2)
+
+        let labels = try Hub.rows(AppLabel.self, "apps", from: Data(#"{"apps":[{"id":"david/draw","name":"draw","title":"Draw"},{"name":"todo","title":"Todo"}]}"#.utf8))
+        #expect(labels.map { $0.id ?? $0.name } == ["david/draw", "todo"])
+    }
+
     @Test func drawsAppUsageByTimeWhenMeasuredAndByOpensOtherwise() throws {
         let rows = try Hub.rows(AppUsageRow.self, "usage", from: Data("""
         {"ok":true,"usage":[
@@ -85,6 +135,112 @@ struct HubModelsTests {
         #expect(rows[0].averageMs == 30000)
         #expect(rows[1].averageMs == nil)
         #expect(rows[1].id == "agent:space/assistant")
+    }
+
+    @Test func readsAPeersAppModelsOrWhyThereAreNone() {
+        let fine = PeerAppModels.read(peer: "david", data: Data(#"{"ok":true,"apps":[{"app":"draw","rows":[{"tag":null,"model":"codex/basic","source":"default"}]}],"options":[{"value":"codex/basic","runtime":"codex","tier":"basic","model":"luna"}]}"#.utf8))
+        #expect(fine.apps?.map(\.app) == ["draw"])
+        #expect(fine.options?.map(\.value) == ["codex/basic"])
+        #expect(!fine.isLoading && !fine.old && fine.error == nil)
+        // An older core answers with its page.
+        #expect(PeerAppModels.read(peer: "david", data: Data("<!doctype html><title>ai-space</title>".utf8)).old)
+        #expect(PeerAppModels.read(peer: "david", data: Data(#"{"ok":false,"error":"timeout"}"#.utf8)).error == "timeout")
+        #expect(PeerAppModels(peer: "david").isLoading)
+        #expect(PeerAppModels.isOlderCore(status: 404, error: "not found"))
+        #expect(!PeerAppModels.isOlderCore(status: 404, error: "unknown peer: david"))
+        #expect(!PeerAppModels.isOlderCore(status: 502, error: "bad gateway"))
+    }
+
+    @Test func readsTheAgentCLIsOfEachMachine() throws {
+        let rows = try MachineInventory.decode(Data("""
+        {"ok":true,"machines":[
+          {"machine":"","via":"local","clis":[
+            {"cli":"claude","kind":"claude-code","installed":true,"signedIn":true,"version":"2.1.0","path":"/usr/local/bin/claude","checkedAt":"2026-10-27T01:00:00.000Z","configured":true,"runtimes":["claude"]},
+            {"cli":"codex","kind":"codex","installed":true,"signedIn":false,"checkedAt":"2026-10-27T02:00:00.000Z","configured":false,"runtimes":[]},
+            {"cli":"dsh","kind":"deepseek","installed":false,"configured":false,"runtimes":[]}
+          ]},
+          {"machine":"david","via":"peer","stale":true,"clis":[{"cli":"claude","kind":"claude-code","installed":true,"configured":false,"runtimes":[]},{"oops":1}]},
+          {"machine":"old","via":"peer","old":true,"clis":[]},
+          {"machine":"gpu","via":"ssh","reachable":false,"clis":[{"cli":"codex","kind":"codex","configured":false,"runtimes":[]}]}
+        ]}
+        """.utf8))
+        #expect(rows.map(\.machine) == ["", "david", "old", "gpu"])
+        let here = rows[0]
+        #expect(here.entries.map(\.state) == [.signedIn, .signedOut, .missing])
+        // Only a CLI found here, installed and not yet a runtime, can be added; not one just added.
+        #expect(here.entries.map { here.canAdd($0, pending: []) } == [false, true, false])
+        #expect(!here.canAdd(here.entries[1], pending: ["codex"]))
+        #expect(!rows[1].canAdd(rows[1].entries[0], pending: []))
+        #expect(rows[1].entries.count == 1)
+        #expect(rows[1].entries[0].state == .installed)
+        #expect(rows[3].entries[0].state == .unknown)
+        #expect(rows.map(\.isOff) == [false, true, false, true])
+        #expect(rows.map(\.note) == [nil, "Offline · last known", "Older ai-space: no list", "Unreachable"])
+        #expect(MachineInventory.lastChecked(rows) == ISO8601.parse("2026-10-27T02:00:00.000Z"))
+    }
+
+    static let feedback = """
+    {"settings":{"enabled":true,"appsDefault":true,"apps":{"notes":"off","bad":"maybe"},"mode":"later","machine":"","model":"claude/intermediate","effort":"huge","errors":false},
+     "apps":[{"app":"notes","title":"Notes","zh":"笔记","status":"active","enabled":false},{"app":"todo","title":"Todo","status":"active","enabled":true}],
+     "peers":[{"name":"david","ok":true,"synced":false,"error":"timeout","apps":[{"app":"draw","title":"Draw","status":"active","enabled":true}],"counts":{"later":2}},
+              {"name":"lab","ok":false,"synced":false,"error":"fetch failed","apps":[],"counts":{}}],
+     "machines":[{"value":"","label":"home"},{"value":"david","label":"david"}],
+     "models":[{"value":"claude/intermediate","runtime":"claude","tier":"intermediate","model":"opus"}],
+     "counts":{"later":3,"queued":0},"shortcut":"Alt+Shift+F"}
+    """
+
+    @Test func readsTheFeedbackSettingsLeniently() throws {
+        let v = try Hub.decode(FeedbackView.self, from: Data(Self.feedback.utf8))
+        #expect(v.settings.enabled && v.settings.mode == "later" && !v.settings.errors)
+        // A switch or effort it does not know falls back.
+        #expect(v.settings.apps == ["notes": "off"])
+        #expect(v.settings.effort == "xhigh")
+        #expect(v.apps.map { $0.displayTitle(lang: "zh") } == ["笔记", "Todo"])
+        #expect(v.peers.map(\.waiting) == [2, 0])
+        #expect(v.waiting == 3)
+        #expect(v.title("draw", peer: "david") == "Draw")
+        #expect(v.title("gone", peer: nil) == "gone")
+        // An older Space without peers still reads.
+        let old = try Hub.decode(FeedbackView.self, from: Data(#"{"settings":{},"apps":[],"machines":[],"models":[],"counts":{}}"#.utf8))
+        #expect(old.peers.isEmpty && !old.settings.enabled && old.settings.appsDefault && old.shortcut == "Alt+Shift+F")
+    }
+
+    @Test func showsAFeedbackChoiceAtOnceAsTheSpaceAppliesIt() throws {
+        let v = try Hub.decode(FeedbackView.self, from: Data(Self.feedback.utf8))
+        // Back to the default: the app's own switch goes, and it follows the default again.
+        let back = v.applying(.app("notes", "default"))
+        #expect(back.settings.apps["notes"] == nil)
+        #expect(back.apps.map(\.enabled) == [true, true])
+        // The main switch off hides every app, a peer's that answers too; one that does not is left as it was.
+        let off = v.applying(.enabled(false))
+        #expect(off.apps.allSatisfy { $0.enabled == false })
+        #expect(off.peers[0].appList.map(\.enabled) == [false])
+        #expect(off.peers[1] == v.peers[1])
+        let hidden = v.applying(.appsDefault(false))
+        #expect(hidden.apps.map(\.enabled) == [false, false])
+        #expect(FeedbackChange.app("todo", "on").json["apps"] as? [String: String] == ["todo": "on"])
+        #expect(FeedbackChange.model("").json["model"] as? String == "")
+    }
+
+    @Test func readsTheRecentFeedbackAndWhatCanBeFixed() throws {
+        let items = try Hub.rows(FeedbackItem.self, "items", from: Data("""
+        {"ok":true,"items":[
+          {"id":1,"peer":"","app":"notes","text":"Button is cut","status":"later","path":"/","todoId":9,"todoPeer":"","todoUrl":null,"runId":null,"runMachine":"","note":null,"createdAt":1790000000000},
+          {"id":1,"peer":"david","app":"draw","text":"Slow","status":"failed","todoId":4,"todoUrl":"https://todo.example.com/4","runMachine":"david","note":"build failed\\nmore","createdAt":1790000000000},
+          {"id":2,"peer":"","app":"notes","text":"Typo","status":"fixing","todoId":5,"createdAt":1790000000000},
+          {"id":3,"peer":"","app":"notes","text":"Nice","status":"accepted","todoId":6,"createdAt":1790000000000},
+          {"id":4,"peer":"","app":"notes","text":"No task","status":"recorded","todoId":null,"note":"no todo app","createdAt":1790000000000}
+        ]}
+        """.utf8))
+        #expect(items.map(\.peerName) == [nil, "david", nil, nil, nil])
+        #expect(Set(items.map(\.key)).count == 5)
+        #expect(items.map(\.canFix) == [true, true, false, false, false])
+        #expect(items.map(\.isActive) == [false, false, true, false, false])
+        #expect(items[1].shownNote == "build failed")
+        #expect(items[4].shownNote == "no todo app")
+        #expect(items[0].shownNote == nil)
+        #expect(FeedbackItem.statusText("accepted") == "Accepted")
+        #expect(FeedbackItem.statusText("dropped") == "Dropped in ai-todo")
     }
 
     @Test func readsAppModelsEventsAndPackages() throws {

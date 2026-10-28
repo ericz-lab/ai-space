@@ -85,4 +85,6 @@
     <string name="settings_section_status">运行状态</string>
     <string name="settings_section_packages">安装包</string>
     <string name="settings_section_account">账户</string>
+    <string name="settings_section_feedback">反馈</string>
+    <string name="settings_feedback">反馈按钮与修复</string>
 </resources>

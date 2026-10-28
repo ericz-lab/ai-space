@@ -10,6 +10,8 @@ struct ChatView: View {
     @ObservedObject var chat: ChatController
     let icons: IconStore?
     let compact: Bool
+    /// The machine of an agent whose machine does not answer: nothing is sent until it does.
+    var offlineMachine: String? = nil
     @FocusState private var focused: Bool
     @StateObject private var voice = VoiceInput()
     @ObservedObject private var preferences = Preferences.shared
@@ -70,6 +72,10 @@ struct ChatView: View {
                 }.frame(maxWidth: Self.column + 32)
             }
             if let error = chat.imageError { Text(error).font(.caption).foregroundStyle(Theme.danger) }
+            if let offlineMachine {
+                Text("\(offlineMachine) is offline. Pick another machine, or wait until it answers again.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             composer
         }
         .onDrop(of: [UTType.image.identifier, UTType.fileURL.identifier], isTargeted: nil) { providers in
@@ -164,7 +170,7 @@ struct ChatView: View {
             ChatTextInput(text: $chat.draft, focused: Binding(get: { focused }, set: { focused = $0 }),
                           placeholder: placeholder,
                           onImage: { appendImage($0, name: "Image") },
-                          onImageFile: { importImage(url: $0) }, onSend: { chat.send() })
+                          onImageFile: { importImage(url: $0) }, onSend: { if offlineMachine == nil { chat.send() } })
                 .overlay(alignment: .topLeading) {
                     if chat.draft.isEmpty {
                         Text(placeholder).foregroundStyle(.tertiary)
@@ -181,7 +187,7 @@ struct ChatView: View {
             }
             // A message written during a turn joins it; Stop stays beside Send so the turn can
             // still be ended while the field is in use.
-            let empty = (chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chat.images.isEmpty) || chat.pendingImageImports > 0
+            let empty = (chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chat.images.isEmpty) || chat.pendingImageImports > 0 || offlineMachine != nil
             if chat.busy {
                 Button { chat.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 26)) }
                     .buttonStyle(.borderless).foregroundStyle(Theme.danger)

@@ -13,16 +13,26 @@ import dev.aispace.android.core.AppUsageRow
 import dev.aispace.android.core.CapabilityApp
 import dev.aispace.android.core.DecodingException
 import dev.aispace.android.core.EventDelivery
+import dev.aispace.android.core.Feedback
+import dev.aispace.android.core.FeedbackItem
+import dev.aispace.android.core.FeedbackPatch
+import dev.aispace.android.core.FeedbackView
 import dev.aispace.android.core.Hub
 import dev.aispace.android.core.InboxFilter
 import dev.aispace.android.core.InboxPage
 import dev.aispace.android.core.InboxSummary
 import dev.aispace.android.core.InboxThread
+import dev.aispace.android.core.Inventory
+import dev.aispace.android.core.MachineInventory
+import dev.aispace.android.core.Json
 import dev.aispace.android.core.JsonReader
+import dev.aispace.android.core.int
 import dev.aispace.android.core.ModelCall
 import dev.aispace.android.core.ModelChoice
 import dev.aispace.android.core.ModelUsage
 import dev.aispace.android.core.PackageCatalogue
+import dev.aispace.android.core.PeerAppModels
+import dev.aispace.android.core.PeerStatus
 import dev.aispace.android.core.SpaceApi
 import dev.aispace.android.core.SpaceApiError
 import dev.aispace.android.core.SpaceEvent
@@ -159,9 +169,7 @@ open class HubStore(val api: SpaceApi, protected val scope: CoroutineScope) {
             askedLabels = false
             return
         }
-        val map = LinkedHashMap<String, AppLabel>()
-        for (a in apps) map.putIfAbsent(a.name, a)
-        labels = map
+        labels = AppLabel.index(apps)
     }
 
     fun title(app: String): String = labels[app]?.displayTitle() ?: app
@@ -326,28 +334,68 @@ class AppModelsStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope
     var options by mutableStateOf<List<ModelChoice>>(emptyList())
         private set
 
+    /** On a hub, each peer's apps, by name; each read on its own so a slow peer holds up only its part. */
+    var peers by mutableStateOf<List<PeerAppModels>>(emptyList())
+        private set
+
     override suspend fun load() {
         coroutineScope {
             val names = async { fetchLabels() }
+            val peerNames = async {
+                try { Hub.rows("peers", api.text("/api/peers"), PeerStatus).map { it.name }.sorted() } catch (e: CancellationException) { throw e } catch (e: Exception) { emptyList() }
+            }
             val data = api.text("/api/model/apps")
             names.await()
             options = try { Hub.rows("options", data, ModelChoice) } catch (e: Exception) { emptyList() }
             apps = Hub.rows("apps", data, AppModelRows)
+            val listed = peerNames.await()
+            // A peer read before keeps its rows while it is read again.
+            peers = listed.map { name -> peers.firstOrNull { it.peer == name } ?: PeerAppModels(name) }
+            for (name in listed) scope.launch { loadPeer(name) }
         }
     }
+
+    private suspend fun loadPeer(name: String) {
+        val fresh = try {
+            PeerAppModels.answer(name, api.text(PeerAppModels.path(name)))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SpaceApiError.Http) {
+            PeerAppModels.failure(name, e.code, e.msg)
+        } catch (e: Exception) {
+            PeerAppModels(name, error = HubStore.message(e))
+        }
+        peers = peers.map { if (it.peer == name) fresh else it }
+    }
+
+    /** An app's title: by its id (`<peer>/<app>` on a peer), else its bare name. */
+    fun title(app: String, peer: String?): String = labels[peer?.let { "$it/$app" } ?: app]?.displayTitle() ?: app
+
+    /** The app's icon: the hub's label, else the peer's own icon route. */
+    fun icon(app: String, peer: String?): String? =
+        labels[peer?.let { "$it/$app" } ?: app]?.icon ?: peer?.let { PeerAppModels.iconPath(it, app) }
 
     /** The apps by title. */
     val sorted: List<AppModelRows>
         get() = apps.sortedWith { a, b -> HubStore.titleOrder.compare(title(a.app), title(b.app)) }
 
-    /** Sets the panel's override for an app's calls, or for one tag of them; null clears it. */
-    suspend fun setModel(app: String, tag: String?, value: String?) {
+    fun sorted(peer: PeerAppModels): List<AppModelRows> =
+        (peer.apps ?: emptyList()).sortedWith { a, b -> HubStore.titleOrder.compare(title(a.app, peer.peer), title(b.app, peer.peer)) }
+
+    /**
+     * Sets the panel's override for an app's calls, or for one tag of them; null clears it. A peer's
+     * app is saved on the peer, through the hub.
+     */
+    suspend fun setModel(app: String, tag: String?, value: String?, peer: String? = null) {
         save {
             val body = JSONObject().put("model", value ?: JSONObject.NULL)
             if (tag != null) body.put("tag", tag)
-            val answer = api.send("PATCH", "/api/panel/apps/${SpacePath.escape(app)}/model", body)
+            val answer = api.send("PATCH", PeerAppModels.savePath(app, peer), body)
             val fresh = HubStore.decodeOrNull(answer, AppModelRows)
-            if (fresh != null) apps = apps.map { if (it.app == app) fresh else it }
+            if (fresh != null) {
+                if (peer == null) apps = apps.map { if (it.app == app) fresh else it }
+                else peers = peers.map { if (it.peer == peer) it.replacing(fresh) else it }
+            }
         }
     }
 }
@@ -448,6 +496,110 @@ class InboxStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope) {
 
     suspend fun readAll() {
         save { api.send("POST", "/api/inbox/read-all", JSONObject()) }
+        refresh()
+    }
+}
+
+/**
+ * Settings → Feedback (src/web/FeedbackSettings.tsx). A switch or menu shows its new value at once
+ * and stays usable while the change is saved; only the answer to the newest save is kept, so a
+ * slower earlier one cannot undo a later choice.
+ */
+class FeedbackStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope) {
+    var view by mutableStateOf<FeedbackView?>(null)
+        private set
+    var items by mutableStateOf<List<FeedbackItem>>(emptyList())
+        private set
+
+    /** What the last fix asked for started, until the next one. */
+    var notice by mutableStateOf<String?>(null)
+        private set
+    var isFixing by mutableStateOf(false)
+        private set
+    private var saves = 0
+
+    override suspend fun load() {
+        coroutineScope {
+            val recent = async {
+                try { api.text("/api/panel/feedback?limit=20") } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            }
+            val fresh = Hub.decode(api.text("/api/panel/feedback/settings"), FeedbackView)
+            val r = recent.await()
+            view = fresh
+            if (r != null) items = try { Hub.rows("items", r, FeedbackItem) } catch (e: Exception) { items }
+        }
+    }
+
+    /** While something is being fixed or queued, the page reads again now and then. */
+    val isMoving: Boolean get() = items.any { it.isMoving }
+
+    fun save(patch: FeedbackPatch) {
+        val n = ++saves
+        view = view?.withPatch(patch)
+        saveError = null
+        scope.launch {
+            try {
+                val answer = api.send("PUT", "/api/panel/feedback/settings", patch.toJson())
+                if (n == saves) HubStore.decodeOrNull(answer, FeedbackView)?.let { view = it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                saveError = HubStore.message(e)
+                refresh()
+            }
+        }
+    }
+
+    /** Hands waiting feedback to the Fix Engineer now: everything here, a peer's, or some by id. */
+    suspend fun fix(peer: String? = null, ids: List<Int>? = null) {
+        if (isFixing) return
+        isFixing = true
+        try {
+            val answer = api.send("POST", "/api/panel/feedback/fix", Feedback.fixBody(peer, ids))
+            val queued = Json.obj(answer)?.int("queued") ?: 0
+            notice = HubText.get(R.string.feedback_started, queued)
+            saveError = null
+            refresh()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            saveError = HubStore.message(e)
+        } finally {
+            isFixing = false
+        }
+    }
+}
+
+/**
+ * The agent CLIs on each machine (src/web/MachineClis.tsx): read, checked again on demand, and a CLI
+ * found on the Space's own machine added to runtimes.yaml (operator only; the Space refuses others).
+ */
+class MachineClisStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope) {
+    var machines by mutableStateOf<List<MachineInventory>>(emptyList())
+        private set
+
+    /** The runtime the last add created; it is offered once ai-space restarts. */
+    var added by mutableStateOf<String?>(null)
+        private set
+
+    /** Kinds added here and not running until ai-space restarts: their button goes. */
+    var pending by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    override suspend fun load() {
+        machines = Inventory.decode(api.text(Inventory.PATH))
+    }
+
+    /** Probes every runtime and CLI again now; the answer is the fresh list. */
+    suspend fun recheck() {
+        save { machines = Inventory.decode(api.send("POST", Inventory.PROBE, JSONObject())) }
+    }
+
+    suspend fun add(kind: String) {
+        save {
+            added = Inventory.addedRuntime(api.send("POST", Inventory.ADD, Inventory.addBody(kind))) ?: kind
+            pending = pending + kind
+        }
         refresh()
     }
 }

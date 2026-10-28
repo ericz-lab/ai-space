@@ -1,6 +1,7 @@
 import Adw from "gi://Adw?version=1";
 import Gdk from "gi://Gdk?version=4.0";
 import Gtk from "gi://Gtk?version=4.0";
+import { groupById } from "../core/agents.ts";
 import { type Agent, pickText } from "../core/catalogue.ts";
 import { ChatView } from "./chat-view.ts";
 import { lang, prefs, t } from "./env.ts";
@@ -46,7 +47,7 @@ export class QuickChat {
 
   private ensure(): void {
     if (this.window) return;
-    this.view = new ChatView(this.model, { compact: true, onLink: (uri) => {
+    this.view = new ChatView(this.model, { compact: true, onMachine: (agent) => this.choose(agent), onLink: (uri) => {
       const space = this.model.current;
       if (space) {
         this.main().openUrl(space, uri);
@@ -59,7 +60,8 @@ export class QuickChat {
     this.picker.add_css_class("flat");
     this.picker.connect("notify::selected", () => {
       const a = this.agents[this.picker.get_selected()];
-      if (a && a.id !== this.agent?.id) this.choose(a);
+      const space = this.model.current;
+      if (a && space && a.id !== this.groupPrimary()) this.choose(this.model.preferredAgent(space, a));
     });
     header.set_title_widget(this.picker);
     const fresh = new Gtk.Button({ icon_name: "list-add-symbolic", tooltip_text: t("newConversation") });
@@ -91,13 +93,24 @@ export class QuickChat {
   private renderAgents(): void {
     if (!this.window) return;
     const space = this.model.current;
-    this.agents = space?.catalogue?.agentInfo ?? [];
-    const keep = this.agent && this.agents.find((a) => a.id === this.agent!.id);
-    const pick = keep ?? this.agents.find((a) => a.id === prefs.lastAgent) ?? (space ? this.model.assistant(space) : undefined);
+    // One entry per agent (its group's primary); the composer's machine menu picks the machine.
+    const groups = space?.catalogue?.agentGroups ?? [];
+    this.agents = groups.map((g) => g.primary);
+    const all = space?.catalogue?.agentInfo ?? [];
+    const keep = this.agent && all.find((a) => a.id === this.agent!.id);
+    const last = all.find((a) => a.id === prefs.lastAgent);
+    const pick = keep ?? (space && last ? this.model.preferredAgent(space, last) : undefined) ?? (space ? this.model.assistant(space) : undefined);
+    this.agent = pick;
     this.picker.set_model(Gtk.StringList.new(this.agents.map((a) => pickText(a.title, a.i18n, "title", lang))));
-    const at = pick ? this.agents.indexOf(pick) : -1;
+    const at = this.agents.findIndex((a) => a.id === this.groupPrimary());
     if (at >= 0) this.picker.set_selected(at);
     this.choose(pick);
+  }
+
+  /** The id of the entry standing for the chosen agent's group. */
+  private groupPrimary(): string | undefined {
+    const g = this.agent && groupById(this.model.current?.catalogue?.agentGroups ?? [], this.agent.id);
+    return g ? g.primary.id : this.agent?.id;
   }
 
   private choose(agent: Agent | undefined): void {

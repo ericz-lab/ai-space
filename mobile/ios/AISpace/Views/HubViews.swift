@@ -66,8 +66,8 @@ struct HubPageContent: View {
         case .packages: PackagesPage(model: model, connection: connection, api: api)
         case .terminal: TerminalPage(store: model.terminal(for: connection))
         case .chat(let key):
-            if let agent = loader.catalogue?.agents.first(where: { $0.key == key }), let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) {
-                ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons, backdrop: model.backdrops(for: connection))
+            if let key, loader.catalogue?.agent(key) != nil {
+                AgentChat(model: model, connection: connection, loader: loader, icons: icons, key: key)
             } else {
                 AgentsPage(model: model, connection: connection, loader: loader, icons: icons)
             }
@@ -169,12 +169,16 @@ struct ModelMenu<Label: View>: View {
     @ViewBuilder let label: () -> Label
 
     var body: some View {
-        Picker(selection: Binding(get: { current ?? "" }, set: { pick($0.isEmpty ? nil : $0) })) {
+        Picker(selection: Binding(get: { current ?? "" }, set: { value in
+            // A greyed choice is shown, not picked (ModelChoiceText).
+            guard value.isEmpty || options.first(where: { $0.value == value })?.isAvailable != false else { return }
+            pick(value.isEmpty ? nil : value)
+        })) {
             Text(verbatim: none).tag("")
             if let current, !current.isEmpty, !options.contains(where: { $0.value == current }) {
-                Text(verbatim: current).tag(current)
+                Text(verbatim: ModelChoiceText.saved(current)).tag(current)
             }
-            ForEach(options) { Text(verbatim: $0.label).tag($0.value) }
+            ForEach(options) { o in Text(verbatim: o.shownLabel).tag(o.value).disabled(!o.isAvailable) }
         } label: {
             label()
         }

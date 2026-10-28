@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A section of Settings, as the panel's section nav and the Mac's have them.
 enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
-    case general, appearance, models, automation, usage, status, packages, account
+    case general, appearance, models, automation, feedback, usage, status, packages, account
 
     var id: String { rawValue }
 
@@ -12,6 +12,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .appearance: return "Appearance"
         case .models: return "Models"
         case .automation: return "Automation"
+        case .feedback: return "Feedback"
         case .usage: return "Usage"
         case .status: return "Status"
         case .packages: return "Packages"
@@ -25,6 +26,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .appearance: return "circle.lefthalf.filled"
         case .models: return "cylinder.split.1x2"
         case .automation: return "clock"
+        case .feedback: return "exclamationmark.bubble"
         case .usage: return "chart.bar"
         case .status: return "waveform.path.ecg"
         case .packages: return "shippingbox"
@@ -34,8 +36,8 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
 }
 
 /// Settings as the panel's (src/web/App.tsx, SettingsNav.tsx) and the Mac's, opened from its tile
-/// over the pages: the sections in their order, General, Appearance, Models, Automation, Usage,
-/// Status, Packages and Account, each an icon and a title in one glass card, drawn as the panel
+/// over the pages: the sections in their order, General, Appearance, Models, Automation, Feedback,
+/// Usage, Status, Packages and Account, each an icon and a title in one glass card, drawn as the panel
 /// draws its cards over the Space's backdrop. A section opens as a page of its own with its rows
 /// in such cards, and a row there that leads to a page of the Space opens it further in, as the
 /// panel shows those pages inside Settings.
@@ -127,6 +129,7 @@ struct SettingsSectionPage: View {
                 case .appearance: appearance
                 case .models: models
                 case .automation: automation
+                case .feedback: FeedbackCards(api: loader.api)
                 case .usage: usage
                 case .status: status
                 case .packages: packages
@@ -218,12 +221,13 @@ struct SettingsSectionPage: View {
                 SettingsCard {
                     LabeledContent("Default model") {
                         Picker("Default model", selection: Binding(get: { m.defaultModel ?? "" }, set: { value in
+                            guard m.canPick(value) else { return }
                             Task { await settings.setDefaultModel(value.isEmpty ? nil : value) }
                         })) {
                             Text("Environment defaults").tag("")
-                            ForEach(m.options) { Text(verbatim: $0.label).tag($0.value) }
+                            ForEach(m.options) { o in Text(verbatim: o.shownLabel).tag(o.value).disabled(!o.isAvailable) }
                             if let current = m.defaultModel, !m.options.contains(where: { $0.value == current }) {
-                                Text(verbatim: current).tag(current)
+                                Text(verbatim: ModelChoiceText.saved(current)).tag(current)
                             }
                         }
                         .labelsHidden()
@@ -249,6 +253,7 @@ struct SettingsSectionPage: View {
                     }
                 }
             }
+            MachineClisCard(api: loader.api)
         }
     }
 
@@ -496,6 +501,313 @@ struct SettingsSectionPage: View {
         case .signInNeeded: return String(localized: "Signed out")
         case .unreachable: return String(localized: "Cannot reach this Space")
         case .incompatible: return String(localized: "Not an ai-space panel")
+        }
+    }
+}
+
+// MARK: Feedback
+
+/// Settings → Feedback (src/web/FeedbackSettings.tsx, docs/feedback.md): the button app pages show,
+/// what happens to what is sent with it, where the Fix Engineer runs and on which model, which apps
+/// show the button (each peer's too, which the Space sends these settings on to), and the feedback
+/// sent lately with a way to start the waiting ones. A choice shows at once and saves behind it.
+private struct FeedbackCards: View {
+    @StateObject private var store: FeedbackStore
+
+    init(api: SpaceAPI) {
+        _store = StateObject(wrappedValue: FeedbackStore(api: api))
+    }
+
+    var body: some View {
+        SectionCards {
+            if let view = store.view {
+                settings(view)
+                apps(view)
+                ForEach(view.peers) { peer(view, $0) }
+                recent(view)
+                if let reason = store.saveError {
+                    Label { Text(verbatim: reason) } icon: { Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning) }
+                        .font(.footnote)
+                }
+            } else {
+                SettingsCard {
+                    if let error = store.error {
+                        Text("Unavailable: \(error)").font(.footnote).foregroundStyle(Theme.danger).settingsRow()
+                    } else {
+                        ProgressView().settingsRow()
+                    }
+                }
+            }
+        }
+        .task { await store.refresh() }
+        // While something is being fixed, the list follows it.
+        .task(id: store.isActive) {
+            while store.isActive, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                if !Task.isCancelled { await store.refresh() }
+            }
+        }
+    }
+
+    private func bind<T>(_ value: T, _ change: @escaping (T) -> FeedbackChange?) -> Binding<T> {
+        Binding(get: { value }, set: { new in
+            guard let c = change(new) else { return }
+            Task { await store.change(c) }
+        })
+    }
+
+    private func settings(_ v: FeedbackView) -> some View {
+        let s = v.settings
+        return VStack(alignment: .leading, spacing: 4) {
+            SettingsCard {
+                Toggle("Feedback button on app pages", isOn: bind(s.enabled) { .enabled($0) }).settingsRow(vertical: 6)
+                CardDivider()
+                LabeledContent("What happens to feedback") {
+                    Picker("What happens to feedback", selection: bind(s.mode) { .mode($0) }) {
+                        Text("Fix it right away").tag("auto")
+                        Text("Record it, fix later together").tag("later")
+                    }
+                    .labelsHidden()
+                }
+                .settingsRow(vertical: 6)
+                CardDivider()
+                LabeledContent("Fix on") {
+                    Picker("Fix on", selection: bind(s.machine) { .machine($0) }) {
+                        ForEach(v.machines) { m in
+                            Text(verbatim: m.value.isEmpty ? String(localized: "\(m.label) (this machine)") : m.label).tag(m.value)
+                        }
+                    }
+                    .labelsHidden()
+                }
+                .settingsRow(vertical: 6)
+                CardDivider()
+                LabeledContent("Fix Engineer model") {
+                    Picker("Fix Engineer model", selection: bind(s.model) { value in
+                        value.isEmpty || v.models.first(where: { $0.value == value })?.isAvailable == true ? FeedbackChange.model(value) : nil
+                    }) {
+                        Text("Default chat model").tag("")
+                        if !s.model.isEmpty, !v.models.contains(where: { $0.value == s.model }) {
+                            Text(verbatim: ModelChoiceText.saved(s.model)).tag(s.model)
+                        }
+                        ForEach(v.models) { o in Text(verbatim: o.shownLabel).tag(o.value).disabled(!o.isAvailable) }
+                    }
+                    .labelsHidden()
+                }
+                .settingsRow(vertical: 6)
+                CardDivider()
+                LabeledContent("Effort") {
+                    Picker("Effort", selection: bind(s.effort) { .effort($0) }) {
+                        Text("High").tag("high")
+                        Text("Extra high").tag("xhigh")
+                        Text("Max").tag("max")
+                    }
+                    .labelsHidden()
+                }
+                .settingsRow(vertical: 6)
+                CardDivider()
+                Toggle("Attach recent script errors", isOn: bind(s.errors) { .errors($0) }).settingsRow(vertical: 6)
+                CardDivider()
+                LabeledContent("Shortcut") { Text(verbatim: v.shortcut).font(.subheadline.monospaced()).foregroundStyle(.secondary) }
+                    .settingsRow()
+            }
+            SettingsNote("A small button in the corner of each app page (Alt+Shift+F): people describe a problem, pick the element, add a picture, and it becomes an ai-todo task. Off until you turn it on.")
+            SettingsNote("The button sends what the person types, the page address, client, screen size, theme, language and picked elements; passwords, tokens and form values are left out. The Fix Engineer changes only that app's source and treats page content as data, not instructions. Turn this on only when app pages need sign-in.")
+        }
+    }
+
+    private func appRow(_ a: FeedbackApp, _ s: FeedbackSettings) -> some View {
+        LabeledContent {
+            Picker(selection: bind(s.apps[a.app] ?? "default") { .app(a.app, $0) }) {
+                Text("Default (\(s.appsDefault ? String(localized: "On") : String(localized: "Off")))").tag("default")
+                Text("On").tag("on")
+                Text("Off").tag("off")
+            } label: {
+                Text(verbatim: a.displayTitle())
+            }
+            .labelsHidden()
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: a.displayTitle())
+                Text(a.enabled == true ? "Button shown" : "Button hidden").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .settingsRow(vertical: 6)
+    }
+
+    private func apps(_ v: FeedbackView) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SettingsCard {
+                CardHead("Apps")
+                Toggle("Show on apps by default", isOn: bind(v.settings.appsDefault) { .appsDefault($0) }).settingsRow(vertical: 6)
+                ForEach(v.apps) { a in
+                    CardDivider()
+                    appRow(a, v.settings)
+                }
+            }
+            SettingsNote("An app shows the button when the main switch is on and the app is on — by its own setting, or by the default.")
+        }
+    }
+
+    /// A peer's apps follow these settings: the Space sends them there (docs/feedback.md#apps-on-a-peer).
+    private func peer(_ v: FeedbackView, _ p: FeedbackPeer) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SettingsCard {
+                CardHead("Apps on \(p.name)")
+                if p.ok != true {
+                    Text("Can't reach \(p.name): \(p.error ?? "")").font(.footnote).foregroundStyle(Theme.danger).settingsRow(vertical: 8)
+                } else if p.appList.isEmpty {
+                    Text("No apps with a page on \(p.name).").font(.footnote).foregroundStyle(.secondary).settingsRow(vertical: 8)
+                }
+                if p.ok == true {
+                    ForEach(p.appList) { a in
+                        CardDivider()
+                        appRow(a, v.settings)
+                    }
+                    if p.synced != true {
+                        Text("Not sent to \(p.name) yet: \(p.error ?? ""). It is tried again the next time this page opens.")
+                            .font(.footnote).foregroundStyle(Theme.danger).settingsRow(vertical: 8)
+                    }
+                }
+            }
+            if p.ok == true, !p.appList.isEmpty {
+                SettingsNote("These apps run on \(p.name). Their pages ask \(p.name), so the choices above and these switches are sent to \(p.name) each time this page opens or changes. Fix on: the app's own machine, unless \(p.name) also knows the one chosen above.")
+            }
+        }
+    }
+
+    private func recent(_ v: FeedbackView) -> some View {
+        SettingsCard {
+            CardHead("Recent feedback")
+            if store.items.isEmpty {
+                Text("Nothing sent yet.").font(.footnote).foregroundStyle(.secondary).settingsRow(vertical: 8)
+            }
+            ForEach(store.items, id: \.key) { i in
+                CardDivider()
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        (Text(verbatim: v.title(i.app, peer: i.peerName)).bold() + Text(verbatim: " " + i.text)).lineLimit(4)
+                        Text(verbatim: Self.meta(i)).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                        if let url = i.todoUrl.flatMap(URL.init(string:)), let n = i.todoId {
+                            Link(destination: url) { Text("task #\(n)") }.font(.caption)
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    if i.canFix {
+                        Button { Task { await store.fix(peer: i.peerName, ids: [i.id]) } } label: { Text(i.status == "later" ? "Fix now" : "Fix again") }
+                            .font(.caption).disabled(store.fixing)
+                    }
+                }
+                .settingsRow(vertical: 8)
+            }
+            CardDivider()
+            VStack(alignment: .leading, spacing: 8) {
+                if v.waiting > 0 {
+                    Button { Task { await store.fix() } } label: { Text("Fix \(v.waiting) waiting now") }.disabled(store.fixing)
+                }
+                ForEach(v.peers.filter { $0.ok == true && $0.waiting > 0 }) { p in
+                    Button { Task { await store.fix(peer: p.name) } } label: { Text("Fix \(p.waiting) waiting on \(p.name)") }.disabled(store.fixing)
+                }
+                Button { Task { await store.refresh() } } label: { Text("Refresh") }
+                if let notice = store.notice { Text(verbatim: notice).font(.footnote).foregroundStyle(.secondary) }
+            }
+            .font(.subheadline)
+            .settingsRow(vertical: 10)
+        }
+    }
+
+    /// Where the row stands: the peer, the status, the task, the machine, when, and why when it says.
+    static func meta(_ i: FeedbackItem) -> String {
+        var parts: [String] = []
+        if let peer = i.peerName { parts.append(peer) }
+        parts.append(FeedbackItem.statusText(i.status))
+        if let n = i.todoId, i.todoUrl == nil { parts.append(String(localized: "task #\(n)")) }
+        if let m = i.runMachine, !m.isEmpty { parts.append(m) }
+        if let at = i.createdAt { parts.append(HubFormat.relative(Date(timeIntervalSince1970: at / 1000))) }
+        if let note = i.shownNote, !note.isEmpty { parts.append(note) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: Agent CLIs by machine
+
+/// Settings → Models (src/web/MachineClis.tsx): which agent CLIs each machine has, with its
+/// version, whether it is signed in and which runtime uses it. A CLI found on the Space's own
+/// machine that no runtime uses can be added to runtimes.yaml; a peer's row is only shown.
+private struct MachineClisCard: View {
+    @StateObject private var store: MachineClisStore
+
+    init(api: SpaceAPI) {
+        _store = StateObject(wrappedValue: MachineClisStore(api: api))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SettingsCard {
+                CardHead("AI CLIs by machine")
+                if let error = store.error {
+                    Text("Unavailable: \(error)").font(.footnote).foregroundStyle(Theme.danger).settingsRow()
+                } else if !store.loaded {
+                    ProgressView().settingsRow()
+                }
+                ForEach(store.machines) { m in
+                    CardDivider()
+                    machineRows(m).settingsRow(vertical: 10)
+                }
+                CardDivider()
+                HStack {
+                    if let at = MachineInventory.lastChecked(store.machines) {
+                        Text("Checked \(HubFormat.relative(at))").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Button { Task { await store.recheck() } } label: { Text(store.isSaving ? "Checking…" : "Check again") }
+                        .disabled(store.isSaving)
+                }
+                .settingsRow(vertical: 8)
+                if let added = store.added {
+                    Text("Added as runtime \(added). Restart ai-space to offer it.").font(.footnote).foregroundStyle(.secondary).settingsRow(vertical: 8)
+                }
+                if let reason = store.saveError {
+                    Label { Text(verbatim: reason) } icon: { Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning) }
+                        .font(.footnote).settingsRow(vertical: 8)
+                }
+            }
+            SettingsNote("The agent CLIs each machine has. A CLI that is missing is left out of every model choice; one that is not signed in is shown greyed until it is.")
+        }
+        .task { await store.refresh() }
+    }
+
+    private func machineRows(_ m: MachineInventory) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(verbatim: m.machine.isEmpty ? String(localized: "This machine") : m.machine).font(.subheadline.weight(.semibold))
+                if let note = m.note { Text(verbatim: note).font(.caption).foregroundStyle(.secondary) }
+            }
+            ForEach(m.entries) { c in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(verbatim: c.cli).font(.subheadline.monospaced())
+                    Text(verbatim: Self.status(c)).font(.caption).foregroundStyle(c.state == .signedIn ? Theme.success : Color.secondary)
+                    Spacer(minLength: 6)
+                    if m.canAdd(c, pending: store.pending), let kind = c.kind {
+                        Button("Add to runtimes.yaml") { Task { await store.add(kind) } }
+                            .font(.caption).disabled(store.isSaving)
+                    } else if c.installed == true {
+                        Text(verbatim: c.configured == true ? String(localized: "Runtime: \((c.runtimes ?? []).joined(separator: ", "))") : String(localized: "Not a runtime there"))
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .opacity(m.isOff ? 0.6 : 1)
+            }
+        }
+    }
+
+    /// Its version and sign-in, or why there is none.
+    static func status(_ c: CliInfo) -> String {
+        switch c.state {
+        case .unknown: return String(localized: "Not checked yet")
+        case .missing: return String(localized: "Not installed")
+        case .signedIn: return [c.version, String(localized: "Signed in")].compactMap { $0 }.joined(separator: " · ")
+        case .signedOut: return [c.version, String(localized: "Not signed in")].compactMap { $0 }.joined(separator: " · ")
+        case .installed: return c.version ?? "✓"
         }
     }
 }

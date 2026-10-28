@@ -87,10 +87,14 @@ export const FILE_NAME_PATTERN = /^[a-z0-9]+\.(png|jpe?g|gif|webp)$/;
 /** Text of the answer as it is produced; a runtime that cannot stream never calls it and the caller gets the whole answer at the end. */
 export type OnDelta = (text: string) => void;
 
-/** `model`: the concrete model, when another space resolved the tier (a peer runtime). */
+/**
+ * `model`: the concrete model, when another space resolved the tier (a peer runtime). `served`: what
+ * an upstream gateway said answered the call (magpie's `X-Magpie-Model`, `provider/model`), recorded
+ * in the call's trace.
+ */
 export type CompleteOutcome =
-  | { ok: true; text: string; usage?: Usage; costUsd?: number; backend: Backend; model?: string }
-  | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend; model?: string };
+  | { ok: true; text: string; usage?: Usage; costUsd?: number; backend: Backend; model?: string; served?: string }
+  | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend; model?: string; served?: string };
 
 /** Write authorisation tiers a chat turn or an agent task may ask for; absent means read-only (the headless default). */
 export const PERMISSION_MODES = ["acceptEdits", "bypassPermissions", "plan"] as const;
@@ -333,7 +337,16 @@ export type RuntimesConfig = {
   runtimes: RuntimeSpec[];
   /** ssh logins that answer as `<machine>:<runtime>/<model>`; empty when absent. */
   machines?: MachineSpec[];
+  /**
+   * Explicit fallback lists (`fallback:` in runtimes.yaml, docs/model-machines.md#fallback): a call
+   * whose model is the key tries the entries in order when it fails on quota, rate or transport
+   * before any output. Keys and entries are `[machine:]runtime/<tier>`; no entry is a higher tier.
+   */
+  fallback?: Record<string, string[]>;
 };
+
+/** `[machine:]runtime/<tier>`: what a fallback key or entry names. */
+export const FALLBACK_MODEL_PATTERN = /^(?:([a-z0-9][a-z0-9._-]{0,63}):)?([a-z][a-z0-9-]{0,31})\/(basic|junior|intermediate|advanced)$/;
 
 /** Not supported by this runtime: the operation names what was asked. */
 export class Unsupported extends Error {

@@ -80,10 +80,10 @@ import androidx.compose.ui.unit.dp
 import dev.aispace.android.AppModel
 import dev.aispace.android.HubPage
 import dev.aispace.android.R
-import dev.aispace.android.core.ChatRoute
 import dev.aispace.android.core.Connection
 import dev.aispace.android.core.InboxThread
 import dev.aispace.android.core.ModelChoice
+import dev.aispace.android.core.ModelChoices
 import dev.aispace.android.core.SpaceEvent
 import dev.aispace.android.live.CatalogueLoader
 import dev.aispace.android.live.HubStore
@@ -134,16 +134,13 @@ fun HubCover(model: AppModel, connection: Connection, page: HubPage, loader: Cat
                 HubPage.AppModels -> AppModelsPage(api, icons)
                 HubPage.Events -> EventsPage(api)
                 HubPage.Packages -> PackagesPage(model, connection, api)
+                HubPage.Feedback -> FeedbackPage(model, connection, api)
+                HubPage.MachineClis -> MachineClisPage(api)
                 HubPage.Terminal -> TerminalPage(model.terminal(connection))
                 is HubPage.Chat -> {
                     val catalogue by loader.catalogue.collectAsState()
-                    val agent = catalogue?.agents?.firstOrNull { it.key == page.agent }
-                    val base = agent?.let { ChatRoute.base(it.ref, it.peer) }
-                    if (agent != null && base != null) {
-                        ChatPage(agent, model.chat(connection, base), icons)
-                    } else {
-                        AgentsPage(model, connection, loader, icons)
-                    }
+                    val shown = page.agent?.let { key -> AgentChat(model, connection, catalogue, key, icons) { model.hubPage = HubPage.Chat(it.key) } }
+                    if (shown != true) AgentsPage(model, connection, loader, icons)
                 }
             }
         }
@@ -171,6 +168,11 @@ internal class HubNav {
 
     fun push(dest: HubDest) {
         stack.add(dest)
+    }
+
+    /** Puts [dest] in place of the page on top, or pushes it from the first page. */
+    fun replace(dest: HubDest) {
+        if (stack.isEmpty()) stack.add(dest) else stack[stack.size - 1] = dest
     }
 
     /** One page back, or the cover closes from its first page. */
@@ -525,7 +527,13 @@ internal fun ModelMenu(
     label: @Composable () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
-    val shown = if (current.isNullOrEmpty()) none else options.firstOrNull { it.value == current }?.label ?: current
+    val missing = ModelChoices.savedMissing(current, options.map { it.value })
+    val savedMissing = stringResource(R.string.models_saved_missing)
+    val shown = when {
+        current.isNullOrEmpty() -> none
+        missing != null -> "$missing ($savedMissing)"
+        else -> options.firstOrNull { it.value == current }?.let { choiceLabel(it.label, it.unavailable) } ?: current
+    }
     Box {
         Cell(onClick = { open = true }, enabled = !disabled) {
             Box(Modifier.weight(1f)) { label() }
@@ -538,16 +546,26 @@ internal fun ModelMenu(
                 if (value != current) pick(value)
             }
             ModelChoiceItem(none, on = current.isNullOrEmpty()) { choose(null) }
-            if (!current.isNullOrEmpty() && options.none { it.value == current }) ModelChoiceItem(current, on = true) { choose(current) }
-            for (o in options) ModelChoiceItem(o.label, on = o.value == current) { choose(o.value) }
+            if (missing != null) ModelChoiceItem("$missing ($savedMissing)", on = true, enabled = false) {}
+            for (o in options) {
+                ModelChoiceItem(choiceLabel(o.label, o.unavailable), on = o.value == current, enabled = o.unavailable == null) { choose(o.value) }
+            }
         }
     }
 }
 
 @Composable
-private fun ModelChoiceItem(text: String, on: Boolean, onClick: () -> Unit) {
+private fun ModelChoiceItem(text: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     val check: @Composable () -> Unit = { Icon(Icons.Filled.Check, contentDescription = null) }
-    DropdownMenuItem(text = { Text(text) }, onClick = onClick, trailingIcon = if (on) check else null)
+    DropdownMenuItem(text = { Text(text) }, onClick = onClick, enabled = enabled, trailingIcon = if (on) check else null)
+}
+
+/** A choice's label, with why it cannot be picked when it cannot: "claude · Basic · haiku (not signed in)". */
+@Composable
+internal fun choiceLabel(label: String, unavailable: String?): String = when (ModelChoices.reason(unavailable)) {
+    null -> label
+    ModelChoices.Reason.Offline -> "$label (${stringResource(R.string.models_offline)})"
+    ModelChoices.Reason.SignedOut -> "$label (${stringResource(R.string.models_signed_out)})"
 }
 
 // Formats

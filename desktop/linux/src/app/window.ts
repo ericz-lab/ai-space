@@ -356,7 +356,7 @@ export class MainWindow {
   openEntry(space: Space, entry: Entry): void {
     if (entry.kind === "agent") {
       const agent = space.catalogue?.agentInfo.find((a) => a.id === entry.ref);
-      if (agent) return this.openChat(agent);
+      if (agent) return this.openChat(this.model.preferredAgent(space, agent));
     }
     if (this.tabs.openEntry(space, entry)) this.show("pages");
   }
@@ -417,7 +417,7 @@ export class MainWindow {
     if (link.kind === "inbox") this.show("inbox");
     else if (link.kind === "chat") {
       const agent = link.agent ? space.catalogue?.agentInfo.find((a) => a.id === link.agent || `${a.app}/${a.name}` === link.agent || a.name === link.agent) : undefined;
-      this.openChat(agent, link.text !== undefined ? { draft: link.text } : {});
+      this.openChat(agent && this.model.preferredAgent(space, agent), link.text !== undefined ? { draft: link.text } : {});
     } else if (link.kind === "open") {
       const app = space.catalogue?.apps.find((a) => a.ref === link.app || pickText(a.title, a.i18n, "title", lang) === link.app);
       if (app) this.openEntry(space, app);

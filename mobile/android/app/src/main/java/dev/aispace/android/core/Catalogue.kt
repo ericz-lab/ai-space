@@ -256,11 +256,28 @@ data class Catalogue(
     val domain: String? = null,
     val fetchedAt: Instant = Times.distantPast,
 ) {
+    /** Every entry, each machine's variant of an agent included, for looking one up by its key. */
     val entries: List<CatalogueEntry> get() = apps + agents + widgets.map { entry(it) }
 
-    /** The panel's screens as a browser shows them: the stored ones, or the home screen it would seed. */
+    /** The same agent on several machines, once ([AgentGroups]). */
+    val agentGroups: List<AgentGroup> by lazy { AgentGroups.group(agents) }
+
+    /** One entry per agent: the one that stands for its group. */
+    val shownAgents: List<CatalogueEntry> get() = agentGroups.map { it.primary }
+
+    /** What the library and search show: every app and widget, and each agent once. */
+    val searchEntries: List<CatalogueEntry> get() = apps + shownAgents + widgets.map { entry(it) }
+
+    /** The group of an agent's variant, by its entry key. */
+    fun agentGroup(key: String): AgentGroup? = AgentGroups.byKey(agentGroups, key)
+
+    /**
+     * The panel's screens as a browser shows them: the stored ones, or the home screen it would seed;
+     * an agent pinned once per machine shows once.
+     */
     val panelScreens: List<PanelScreen>
-        get() = screens ?: Screens.seed(apps.map { it.ref }, agents.map { it.ref }, widgets.map { it.id })
+        get() = screens?.let { AgentGroups.canonicalScreens(it, agentGroups) }
+            ?: Screens.seed(apps.map { it.ref }, shownAgents.map { it.ref }, widgets.map { it.id })
 
     /** Entry keys pinned to the panel's home screen, in order. */
     val homePins: List<String> get() = panelScreens.firstOrNull()?.items ?: emptyList()
@@ -328,7 +345,7 @@ data class Catalogue(
         fun entry(a: AgentInfo, offlinePeers: Set<String> = emptySet()): CatalogueEntry = CatalogueEntry(
             kind = EntryKind.agent, ref = a.id, title = a.title, detail = a.description, i18n = a.i18n,
             icon = a.avatar, peer = a.peer, link = null,
-            reach = if (a.peer != null && a.peer in offlinePeers) Reach.peerOffline else Reach.unknown,
+            reach = if (a.stale == true || (a.peer != null && a.peer in offlinePeers)) Reach.peerOffline else Reach.unknown,
         )
 
         fun entry(w: CatalogWidget): CatalogueEntry = CatalogueEntry(

@@ -4,13 +4,15 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import Pango from "gi://Pango";
+import { machinesOf } from "../core/agents.ts";
 import { type Agent, pickText } from "../core/catalogue.ts";
+import { type MachineInventory, decodeInventory, usableClis } from "../core/inventory.ts";
 import { type ChatImage, type ChatStep, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_IMAGES_BYTES, PERMISSIONS, type Permission, granting, imageType, questionAnswer, retryable } from "../core/chat.ts";
 import type { ChatMessage, Conversation } from "../core/conversation.ts";
 import { markdownBlocks } from "../core/markdown.ts";
 import { allCommands, stepGroups, toolSummary, toolVariant } from "../../../../src/web/chat-steps.ts";
 import type { Key } from "../core/i18n.ts";
-import { coalesce, lang, prefs, savePrefs, t } from "./env.ts";
+import { coalesce, lang, prefs, savePrefs, t, tw } from "./env.ts";
 import { iconWidget } from "./icons.ts";
 import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
@@ -86,7 +88,11 @@ function base64(bytes: Uint8Array): string {
   return GLib.base64_encode(bytes);
 }
 
-export type ChatViewOptions = { compact?: boolean; onLink: (uri: string) => void };
+/** `onMachine`: the person picked another machine's variant of the agent in the machine menu. */
+export type ChatViewOptions = { compact?: boolean; onLink: (uri: string) => void; onMachine?: (agent: Agent) => void };
+
+// The agent CLIs each machine has, named in the machine menu; read once a minute at most, per Space.
+const inventories = new Map<string, { at: number; rows: MachineInventory[] }>();
 
 export class ChatView {
   readonly widget: any;
@@ -102,6 +108,10 @@ export class ChatView {
   private readonly sendButton: any;
   private readonly permission: any;
   private readonly error: any;
+  private readonly machine: any;
+  private readonly offline: any;
+  private machines: Agent[] = [];
+  private machinesKey = "";
   private space: Space | undefined;
   private agent: Agent | undefined;
   private conv: Conversation | undefined;
@@ -146,6 +156,10 @@ export class ChatView {
     this.error = new Gtk.Label({ xalign: 0, wrap: true, visible: false, margin_start: 6 });
     this.error.add_css_class("error");
     composer.append(this.error);
+    // A machine that does not answer cannot take a message (the web's chat.machineOfflineNote).
+    this.offline = new Gtk.Label({ xalign: 0, wrap: true, visible: false, margin_start: 6, margin_top: 4 });
+    this.offline.add_css_class("dim-label");
+    composer.append(this.offline);
     this.attachments = new Gtk.Box({ spacing: 6, visible: false, margin_start: 4, margin_top: 4 });
     composer.append(this.attachments);
     this.input = new Gtk.TextView({ wrap_mode: Gtk.WrapMode.WORD_CHAR, accepts_tab: false, top_margin: 6, bottom_margin: 6, left_margin: 6, right_margin: 6 });
@@ -180,6 +194,13 @@ export class ChatView {
       savePrefs();
     });
     bar.append(this.permission);
+    // The same agent on several machines: which one this conversation talks to.
+    this.machine = Gtk.DropDown.new_from_strings([]);
+    this.machine.set_tooltip_text(tw("chat.machineTitle"));
+    this.machine.add_css_class("flat");
+    this.machine.set_visible(false);
+    this.machine.connect("notify::selected", () => this.pickMachine(this.machines[this.machine.get_selected()]));
+    bar.append(this.machine);
     bar.append(new Gtk.Box({ hexpand: true }));
     this.stopButton = new Gtk.Button({ icon_name: "media-playback-stop-symbolic", tooltip_text: t("stop"), visible: false });
     this.stopButton.add_css_class("circular");
@@ -223,7 +244,54 @@ export class ChatView {
     const old = this.emptyAvatar.get_first_child();
     if (old) this.emptyAvatar.remove(old);
     if (agent) this.emptyAvatar.append(iconWidget(agent.avatar, 72, space?.client, "avatar-default-symbolic"));
+    this.renderMachines();
     this.render();
+  }
+
+  private renderMachines(): void {
+    const agent = this.agent;
+    const groups = this.space?.catalogue?.agentGroups ?? [];
+    this.machines = agent ? machinesOf(groups, agent) : [];
+    if (agent && !this.machines.some((m) => m.id === agent.id)) this.machines = [agent, ...this.machines];
+    const several = this.machines.length > 1;
+    this.machine.set_visible(several);
+    this.offline.set_text(agent?.stale ? tw("chat.machineOfflineNote", { machine: agent.peer ?? tw("chat.thisMachine") }) : "");
+    this.offline.set_visible(Boolean(agent?.stale));
+    this.sendButton.set_sensitive(!agent?.stale);
+    if (!several || !this.space) return;
+    const inv = inventories.get(this.space.conn.id);
+    const rows = inv?.rows ?? [];
+    const labels = this.machines.map((m) => {
+      const clis = usableClis(rows, m.peer);
+      return `${m.peer ?? tw("chat.thisMachine")}${clis.length ? ` · ${clis.join(", ")}` : ""}${m.stale ? ` (${tw("chat.machineOffline")})` : ""}`;
+    });
+    const key = JSON.stringify(labels);
+    if (key !== this.machinesKey) {
+      this.machinesKey = key;
+      this.machine.set_model(Gtk.StringList.new(labels));
+    }
+    const at = this.machines.findIndex((m) => m.id === agent!.id);
+    if (this.machine.get_selected() !== at) this.machine.set_selected(at);
+    if (!inv || Date.now() - inv.at > 60_000) {
+      const space = this.space;
+      inventories.set(space.conn.id, { at: Date.now(), rows });
+      void space.client.get("/api/model/inventory").then((body) => {
+        inventories.set(space.conn.id, { at: Date.now(), rows: decodeInventory(body) });
+        if (this.space === space) this.renderMachines();
+      }, () => {});
+    }
+  }
+
+  private pickMachine(m: Agent | undefined): void {
+    const agent = this.agent;
+    if (!m || !agent || m.id === agent.id) return;
+    // An offline machine is listed but not picked: back to the one in use.
+    if (m.stale) {
+      this.machine.set_selected(this.machines.findIndex((x) => x.id === agent.id));
+      return;
+    }
+    this.model.rememberMachine(m);
+    this.o.onMachine?.(m);
   }
 
   focus(): void {
@@ -242,7 +310,7 @@ export class ChatView {
 
   send(): void {
     const text = this.draft();
-    if (!this.conv || (!text.trim() && !this.images.length)) return;
+    if (!this.conv || this.agent?.stale || (!text.trim() && !this.images.length)) return;
     this.conv.send(text, this.images);
     this.input.get_buffer().set_text("", -1);
     this.images = [];

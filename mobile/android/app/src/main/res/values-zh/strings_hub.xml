@@ -230,4 +230,14 @@
     <string name="terminal_closed_shutdown">已关闭：ai-space 已停止</string>
     <string name="terminal_closed">已关闭</string>
     <string name="terminal_connection_lost">连接已断开</string>
+    <string name="chat_machine">机器</string>
+    <string name="chat_machine_title">智能体所在的机器</string>
+    <string name="chat_this_machine">本机</string>
+    <string name="chat_machine_offline">离线</string>
+    <string name="chat_machine_separator">、</string>
+    <string name="chat_on_machines">位于 %1$s</string>
+    <string name="chat_machine_offline_note">%1$s 当前离线。请换一台机器，或等它恢复后再发。</string>
+    <string name="models_signed_out">未登录</string>
+    <string name="models_offline">离线</string>
+    <string name="models_saved_missing">不可用</string>
 </resources>

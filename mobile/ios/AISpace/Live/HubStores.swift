@@ -83,7 +83,8 @@ class HubStore: ObservableObject {
             askedLabels = false
             return
         }
-        labels = Dictionary(apps.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        // Keyed by id: a peer's app is `<peer>/<app>`, as its calls and model rows name it.
+        labels = Dictionary(apps.map { ($0.id ?? $0.name, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
     func title(_ app: String) -> String { labels[app]?.displayTitle ?? app }
@@ -212,28 +213,159 @@ final class AppUsageStore: HubStore {
 final class AppModelsStore: HubStore {
     @Published private(set) var apps: [AppModelRows] = []
     @Published private(set) var options: [ModelChoice] = []
+    /// On a hub, each peer's apps after the local ones, each peer read on its own so a slow one
+    /// holds up only its part.
+    @Published private(set) var peers: [PeerAppModels] = []
 
     override func load() async throws {
         async let names: Void = fetchLabels()
+        async let peerList = try? api.data("/api/peers")
         let data = try await api.data("/api/model/apps")
         await names
         options = (try? Hub.rows(ModelChoice.self, "options", from: data)) ?? []
         apps = try Hub.rows(AppModelRows.self, "apps", from: data)
+        let peerNames = ((await peerList).flatMap { try? Hub.rows(PeerStatus.self, "peers", from: $0) } ?? []).map(\.name).sorted()
+        peers = peerNames.map { name in peers.first { $0.peer == name } ?? PeerAppModels(peer: name) }
+        for name in peerNames {
+            Task {
+                let fresh = await loadPeer(name)
+                if let i = peers.firstIndex(where: { $0.peer == name }) { peers[i] = fresh }
+            }
+        }
+    }
+
+    private func loadPeer(_ peer: String) async -> PeerAppModels {
+        do {
+            return PeerAppModels.read(peer: peer, data: try await api.data("/api/peers/\(SpacePath.escape(peer))/model/apps"))
+        } catch SpaceAPIError.http(let status, let text) where PeerAppModels.isOlderCore(status: status, error: text) {
+            return PeerAppModels(peer: peer, old: true)
+        } catch {
+            return PeerAppModels(peer: peer, error: Self.message(error))
+        }
     }
 
     /// The apps by title.
-    var sorted: [AppModelRows] {
-        apps.sorted { title($0.app).localizedCaseInsensitiveCompare(title($1.app)) == .orderedAscending }
+    var sorted: [AppModelRows] { sorted(apps) }
+
+    func sorted(_ apps: [AppModelRows], peer: String? = nil) -> [AppModelRows] {
+        apps.sorted { title($0.app, peer: peer).localizedCaseInsensitiveCompare(title($1.app, peer: peer)) == .orderedAscending }
     }
 
-    /// Sets the panel's override for an app's calls, or for one tag of them; nil clears it.
-    func setModel(app: String, tag: String?, _ value: String?) async {
+    /// A peer's app by its own title when the hub lists it (`<peer>/<app>`), else by its name.
+    func title(_ app: String, peer: String?) -> String {
+        guard let peer else { return title(app) }
+        return labels["\(peer)/\(app)"]?.displayTitle ?? app
+    }
+
+    /// The hub's icon for a peer's app, else the peer's own (the hub's list leaves out a peer app
+    /// with the same link as a local one).
+    func icon(_ app: String, peer: String?) -> String? {
+        guard let peer else { return labels[app]?.icon }
+        return labels["\(peer)/\(app)"]?.icon ?? "/api/peers/\(SpacePath.escape(peer))/apps/\(SpacePath.escape(app))/icon"
+    }
+
+    /// Sets the panel's override for an app's calls, or for one tag of them; nil clears it. A peer's
+    /// app is saved on that peer, where its calls run.
+    func setModel(app: String, peer: String? = nil, tag: String?, _ value: String?) async {
         await save {
             var body: [String: Any] = ["model": value ?? NSNull()]
             if let tag { body["tag"] = tag }
-            let answer = try await api.send("PATCH", "/api/panel/apps/\(SpacePath.escape(app))/model", json: body)
-            if let fresh = try? Hub.decode(AppModelRows.self, from: answer), let i = apps.firstIndex(where: { $0.app == app }) { apps[i] = fresh }
+            let path = peer.map { "/api/peers/\(SpacePath.escape($0))/apps/\(SpacePath.escape(app))/model" } ?? "/api/panel/apps/\(SpacePath.escape(app))/model"
+            let answer = try await api.send("PATCH", path, json: body)
+            guard let fresh = try? Hub.decode(AppModelRows.self, from: answer) else { return }
+            if let peer {
+                if let p = peers.firstIndex(where: { $0.peer == peer }), let i = peers[p].apps?.firstIndex(where: { $0.app == app }) { peers[p].apps?[i] = fresh }
+            } else if let i = apps.firstIndex(where: { $0.app == app }) {
+                apps[i] = fresh
+            }
         }
+    }
+}
+
+/// Settings → Models: the agent CLIs on each machine (src/web/MachineClis.tsx), checked again on
+/// demand, and a CLI found on the Space's own machine added as a runtime.
+final class MachineClisStore: HubStore {
+    @Published private(set) var machines: [MachineInventory] = []
+    /// The runtime just added; ai-space offers it after a restart.
+    @Published private(set) var added: String?
+    /// Kinds added here and not running until ai-space restarts.
+    @Published private(set) var pending: Set<String> = []
+
+    override func load() async throws {
+        machines = try MachineInventory.decode(try await api.data("/api/model/inventory"))
+    }
+
+    /// Probes every runtime and CLI again now; the answer is the fresh list.
+    func recheck() async {
+        await save { machines = try MachineInventory.decode(try await api.send("POST", "/api/model/status/probe", json: [:])) }
+    }
+
+    /// Adds the CLI of this kind found on the Space's own machine to runtimes.yaml.
+    func add(_ kind: String) async {
+        await save {
+            struct Added: Decodable { var runtime: String }
+            let answer = try await api.send("POST", "/api/model/runtimes", json: ["kind": kind])
+            added = (try? Hub.decode(Added.self, from: answer))?.runtime ?? kind
+            pending.insert(kind)
+        }
+        await refresh()
+    }
+}
+
+/// Settings → Feedback (src/web/FeedbackSettings.tsx, docs/feedback.md): the button on app pages,
+/// what happens to what is sent with it, where the Fix Engineer runs and on which model, which apps
+/// show the button (a peer's too, on a hub), and the feedback sent lately.
+final class FeedbackStore: HubStore {
+    @Published private(set) var view: FeedbackView?
+    @Published private(set) var items: [FeedbackItem] = []
+    /// What the last Fix now said.
+    @Published private(set) var notice: String?
+    @Published private(set) var fixing = false
+    /// Only the answer to the newest change is shown, so a slower earlier one cannot undo a later choice.
+    private var saves = 0
+
+    override func load() async throws {
+        async let recent = try? api.data("/api/panel/feedback?limit=20")
+        view = try Hub.decode(FeedbackView.self, from: try await api.data("/api/panel/feedback/settings"))
+        if let data = await recent { items = (try? Hub.rows(FeedbackItem.self, "items", from: data)) ?? items }
+    }
+
+    /// Something is being fixed: the list is read again while it is.
+    var isActive: Bool { items.contains(where: \.isActive) }
+
+    /// Shows the change at once and saves it; the menu stays usable meanwhile.
+    func change(_ change: FeedbackChange) async {
+        guard let current = view else { return }
+        saves += 1
+        let n = saves
+        view = current.applying(change)
+        saveError = nil
+        do {
+            let answer = try await api.send("PUT", "/api/panel/feedback/settings", json: change.json)
+            if n == saves, let fresh = try? Hub.decode(FeedbackView.self, from: answer) { view = fresh }
+        } catch {
+            saveError = Self.message(error)
+            await refresh()
+        }
+    }
+
+    /// Starts waiting feedback now: one row (`ids`), or everything waiting here or on a peer.
+    func fix(peer: String? = nil, ids: [Int]? = nil) async {
+        fixing = true
+        defer { fixing = false }
+        var body: [String: Any] = [:]
+        if let peer { body["peer"] = peer }
+        if let ids { body["ids"] = ids }
+        do {
+            struct Queued: Decodable { var queued: Int }
+            let answer = try await api.send("POST", "/api/panel/feedback/fix", json: body)
+            let n = (try? Hub.decode(Queued.self, from: answer))?.queued ?? 0
+            notice = String(localized: "Sent \(n) to the Fix Engineer.")
+            saveError = nil
+        } catch {
+            saveError = Self.message(error)
+        }
+        await refresh()
     }
 }
 

@@ -26,6 +26,8 @@ import {
   byApp,
   callTokens,
   catalogueApps,
+  fallbackNote,
+  traceLines,
   dateTime,
   dayKey,
   decodeAppModels,
@@ -50,8 +52,16 @@ import {
   type AppModelRow,
   type WebKey,
   modelOn,
+  usageHeader,
+  usagePeerNotes,
+  type AppModels,
+  type PeerModels,
+  appModelPath,
+  decodePeerModels,
+  peerAppIcon,
 } from "../core/settings.ts";
 import { lang, tw } from "./env.ts";
+import { iconWidget } from "./icons.ts";
 import type { Space } from "./model.ts";
 import { colors } from "./widget-card.ts";
 import { type Ctx, badge, cards, choiceRow, detailPage, errorText, expander, heading, note, row, segmented, table } from "./settings-kit.ts";
@@ -71,36 +81,77 @@ export function appModelsPage(ctx: Ctx, space: Space): any {
   return detailPage(
     tw("appModels.title"),
     async (body) => {
-      const [raw, labels] = await Promise.all([space.client.get("/api/model/apps"), ctx.labels()]);
+      const [raw, labels, peersRaw] = await Promise.all([
+        space.client.get("/api/model/apps"),
+        ctx.labels(),
+        // A Space without peers answers with an empty list.
+        space.client.get("/api/peers").catch(() => ({})),
+      ]);
       const data = decodeAppModels(raw);
-      const title = (app: string) => labels.get(app)?.title ?? app;
-      for (const a of [...data.apps].sort((x, y) => title(x.app).localeCompare(title(y.app), lang))) {
-        const group = new Adw.PreferencesGroup({ title: title(a.app) });
-        const subtitle = (r: AppModelRow) => [r.model, sourceText(r.source), r.manifest ? tw("appModels.declared", { model: r.manifest }) : ""].filter(Boolean).join(" · ");
-        const pickers = new Map<string, ReturnType<typeof choiceRow>>();
-        for (const r of a.rows) {
-          const picker = choiceRow(r.tag ?? tw("appModels.allTags"), modelChoices(data.options, r.override, tw("appModels.noOverride"), lang, false), r.override ?? "", (value) => {
-            picker.row.set_sensitive(false);
-            void space.client
-              .send("PATCH", `/api/panel/apps/${encodeURIComponent(a.app)}/model`, { ...(r.tag === null ? {} : { tag: r.tag }), model: value || null })
-              .then((next) => {
-                // The answer is the app's rows again: the layer that now decides each one.
-                for (const n of decodeAppModels({ apps: [next] }).apps[0]?.rows ?? []) pickers.get(n.tag ?? "")?.row.set_subtitle(subtitle(n));
-              })
-              .catch((e) => {
-                ctx.toast(errorText(e));
-                picker.set(r.override ?? "");
-              })
-              .finally(() => picker.row.set_sensitive(true));
-          }, subtitle(r));
-          pickers.set(r.tag ?? "", picker);
-          group.add(picker.row);
-        }
-        body.append(group);
+      const peers = listOf<{ name?: string }>(peersRaw, "peers")
+        .map((p) => p.name)
+        .filter((n): n is string => typeof n === "string")
+        .sort();
+      if (peers.length) body.append(heading(tw("appModels.here")));
+      appModelGroups(ctx, space, body, data.apps, data.options, labels);
+      // Each peer's apps under its name, after the local ones; each read on its own, so a slow one holds up only its part.
+      for (const peer of peers) {
+        body.append(heading(tw("appModels.onPeer", { peer })));
+        const part = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 18 });
+        const wait = note(tw("common.loading"));
+        part.append(wait);
+        body.append(part);
+        void space.client
+          .answer("GET", `/api/peers/${encodeURIComponent(peer)}/model/apps`)
+          .then(
+            (a) => decodePeerModels(peer, a),
+            (e) => ({ peer, error: errorText(e) }) as PeerModels,
+          )
+          .then((m) => {
+            part.remove(wait);
+            if (m.old) part.append(note(tw("appModels.peerOld", { peer })));
+            else if (m.error) part.append(note(tw("appModels.peerDown", { peer, error: m.error }), { error: true }));
+            else if (!m.apps?.length) part.append(note(tw("appModels.empty")));
+            else appModelGroups(ctx, space, part, m.apps, m.options ?? [], labels, peer);
+          });
       }
+      if (!data.apps.length && !peers.length) body.append(note(tw("appModels.empty")));
     },
     { subtitle: tw("appModels.summary") },
   );
+}
+
+/** One group per app: the app-wide row (with the app's icon), then one per tag, each a picker that saves at once. */
+function appModelGroups(ctx: Ctx, space: Space, into: any, apps: AppModels[], options: ModelOption[], labels: Map<string, { title: string; icon: string }>, peer?: string): void {
+  const keyOf = (app: string) => (peer ? `${peer}/${app}` : app);
+  const title = (app: string) => labels.get(keyOf(app))?.title ?? app;
+  for (const a of [...apps].sort((x, y) => title(x.app).localeCompare(title(y.app), lang))) {
+    const group = new Adw.PreferencesGroup({ title: title(a.app) });
+    const subtitle = (r: AppModelRow) => [r.model, sourceText(r.source), r.manifest ? tw("appModels.declared", { model: r.manifest }) : ""].filter(Boolean).join(" · ");
+    const pickers = new Map<string, ReturnType<typeof choiceRow>>();
+    // A peer app the hub's list leaves out still has its icon on the peer.
+    const icon = labels.get(keyOf(a.app))?.icon || (peer ? peerAppIcon(peer, a.app) : "");
+    for (const r of a.rows) {
+      const picker = choiceRow(r.tag ?? tw("appModels.allTags"), modelChoices(options, r.override, tw("appModels.noOverride"), lang, false), r.override ?? "", (value) => {
+        picker.row.set_sensitive(false);
+        void space.client
+          .send("PATCH", appModelPath(a.app, peer), { ...(r.tag === null ? {} : { tag: r.tag }), model: value || null })
+          .then((next) => {
+            // The answer is the app's rows again: the layer that now decides each one.
+            for (const n of decodeAppModels({ apps: [next] }).apps[0]?.rows ?? []) pickers.get(n.tag ?? "")?.row.set_subtitle(subtitle(n));
+          })
+          .catch((e) => {
+            ctx.toast(errorText(e));
+            picker.set(r.override ?? "");
+          })
+          .finally(() => picker.row.set_sensitive(true));
+      }, subtitle(r));
+      if (r.tag === null) picker.row.add_prefix(iconWidget(icon || undefined, 28, space.client, "application-x-executable-symbolic"));
+      pickers.set(r.tag ?? "", picker);
+      group.add(picker.row);
+    }
+    into.append(group);
+  }
 }
 
 // ------------------------------------------------------------------ tasks
@@ -346,15 +397,16 @@ export function usagePage(ctx: Ctx, space: Space): any {
       ctx.labels(),
     ]);
     const label = (app: string) => labels.get(app)?.title ?? app;
-    body.append(
-      heading(
-        tw("usage.backend", { backend: usage.backend }),
-        segmented(MODEL_WINDOWS, window, (w) => w, (w) => {
-          window = w;
-          reload();
-        }),
-      ),
+    const head = heading(
+      usageHeader(usage, lang),
+      segmented(MODEL_WINDOWS, window, (w) => w, (w) => {
+        window = w;
+        reload();
+      }),
     );
+    head.set_tooltip_text(tw("usage.spaceHint"));
+    body.append(head);
+    for (const line of usagePeerNotes(usage, lang)) body.append(note(line));
     body.append(note(tw("usage.costNote")));
     const tot = usage.totals;
     body.append(
@@ -418,8 +470,10 @@ export function usagePage(ctx: Ctx, space: Space): any {
       const group = new Adw.PreferencesGroup({ title: tw("usage.recent") });
       for (const c of calls) {
         const tokens = callTokens(c);
-        const tip = c.error || `${c.app}/${c.tag} · ${c.backend}${c.modelSource ? ` · ${sourceText(c.modelSource)}` : ""}`;
-        const r = row(modelOn(c), [`${label(c.app)} · ${c.tag}`, relTime(c.startedAt, lang), c.error ?? ""].filter(Boolean).join(" · "), tip);
+        // A fallback says from which model in the subtitle; the trace, when there is one, is the tooltip's tail.
+        const fell = fallbackNote(c, lang);
+        const tip = [c.error || `${c.app}/${c.tag} · ${c.backend}${c.modelSource ? ` · ${sourceText(c.modelSource)}` : ""}`, ...(c.trace ? ["", tw("usage.trace"), ...traceLines(c.trace, lang)] : [])].join("\n");
+        const r = row(modelOn(c), [`${label(c.app)} · ${c.tag}`, fell ? `↪ ${fell}` : "", relTime(c.startedAt, lang), c.error ?? ""].filter(Boolean).join(" · "), tip);
         r.add_prefix(badge(c.status === "ok" ? "ok" : "down"));
         r.add_suffix(new Gtk.Label({ label: [tokens !== undefined ? fmtTokens(tokens) : "", c.costUsd !== undefined ? fmtCost(c.costUsd) : "", fmtDuration(c.durationMs, lang)].filter(Boolean).join(" · "), css_classes: ["caption", "dim-label", "numeric"] }));
         group.add(r);

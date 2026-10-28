@@ -2,6 +2,7 @@ import { rank, opensByDefault, type Candidate } from "../../../../src/space/shor
 import type { WidgetBlock } from "../../../../src/space/panel/blocks.ts";
 import type { Screen } from "../../../../src/space/panel/layout.ts";
 import { seedScreens } from "../../../../src/web/screens.ts";
+import { type AgentGroup, groupAgents, primaryIds } from "./agents.ts";
 import { escapeSegment, resolveUrl } from "./url.ts";
 
 /**
@@ -27,7 +28,7 @@ export type EntryKind = "app" | "agent" | "widget";
 /** Whether an entry can be expected to answer (the iPhone's `Reach`). */
 export type Reach = "up" | "down" | "unknown" | "link" | "peer-offline" | "paused";
 
-export type Agent = { id: string; app: string; name: string; title: string; description?: string; i18n?: I18n; avatar?: string; peer?: string; runtime?: string };
+export type Agent = { id: string; app: string; name: string; title: string; description?: string; i18n?: I18n; avatar?: string; peer?: string; runtime?: string; stale?: boolean };
 
 export type Widget = {
   id: string;
@@ -62,6 +63,8 @@ export type Entry = {
   /** An emoji, an http(s) URL, or a path on the Space. */
   icon?: string;
   peer?: string;
+  /** An agent on several machines: every machine's name ("" for this one), the entry standing for them all. */
+  machines?: string[];
   /** The page to open: the app's `url` or the widget's `link`, `{lang}` not filled in yet. */
   link?: string;
   reach: Reach;
@@ -73,7 +76,9 @@ export type Catalogue = {
   apps: Entry[];
   agents: Entry[];
   widgets: Widget[];
+  /** Every machine's variant of every agent; `agents` holds one entry per group. */
   agentInfo: Agent[];
+  agentGroups: AgentGroup<Agent>[];
   peers: Peer[];
   /** The panel's screens, home first; absent while the Space has stored none. */
   screens?: Screen[];
@@ -122,14 +127,26 @@ export function decodeCatalogue(raw: { apps: unknown; agents: unknown; widgets: 
   }
 
   const agentInfo: Agent[] = [];
-  const agents: Entry[] = [];
   for (const a of rows(raw.agents, "agents", "/api/agents")) {
     const id = str(a.id), app = str(a.app), name = str(a.name), title = str(a.title);
     if (!id || !app || !name || title === undefined) continue;
     const peer = str(a.peer);
-    agentInfo.push({ id, app, name, title, description: str(a.description), i18n: i18nOf(a.i18n), avatar: str(a.avatar), peer, runtime: str(a.runtime) });
-    agents.push({ kind: "agent", ref: id, title, detail: str(a.description), i18n: i18nOf(a.i18n), icon: str(a.avatar), peer, reach: peer && offline.has(peer) ? "peer-offline" : "unknown" });
+    const stale = a.stale === true || Boolean(peer && offline.has(peer));
+    agentInfo.push({ id, app, name, title, description: str(a.description), i18n: i18nOf(a.i18n), avatar: str(a.avatar), peer, runtime: str(a.runtime), ...(stale ? { stale } : {}) });
   }
+  // The same agent on several machines is one entry (agents.ts); the chat picks the machine.
+  const agentGroups = groupAgents(agentInfo);
+  const agents: Entry[] = agentGroups.map(({ primary: a, machines }) => ({
+    kind: "agent",
+    ref: a.id,
+    title: a.title,
+    detail: a.description,
+    i18n: a.i18n,
+    icon: a.avatar,
+    peer: a.peer,
+    ...(machines.length > 1 ? { machines: machines.map((m) => m.peer ?? "") } : {}),
+    reach: a.stale ? "peer-offline" : "unknown",
+  }));
 
   const widgets: Widget[] = [];
   for (const w of rows(raw.widgets, "widgets", "/api/widgets")) {
@@ -148,7 +165,7 @@ export function decodeCatalogue(raw: { apps: unknown; agents: unknown; widgets: 
   const builtinIcons: Record<string, string> = {};
   if (isObj(raw.apps) && isObj(raw.apps.builtins)) for (const [k, v] of Object.entries(raw.apps.builtins)) if (typeof v === "string") builtinIcons[k] = v;
 
-  return { apps, agents, widgets, agentInfo, peers, ...(screens ? { screens } : {}), ...(domain ? { domain } : {}), builtinIcons };
+  return { apps, agents, widgets, agentInfo, agentGroups, peers, ...(screens ? { screens } : {}), ...(domain ? { domain } : {}), builtinIcons };
 }
 
 export function widgetEntry(w: Widget): Entry {
@@ -156,6 +173,19 @@ export function widgetEntry(w: Widget): Entry {
 }
 
 export const allEntries = (c: Catalogue): Entry[] => [...c.apps, ...c.agents, ...c.widgets.map(widgetEntry)];
+
+/**
+ * Every entry by its key, an agent also under each of its machines' keys, so a screen pinned
+ * with one machine's variant shows the agent's single entry.
+ */
+export function entriesByKey(c: Catalogue): Map<string, Entry> {
+  const byKey = new Map(allEntries(c).map((e) => [entryKey(e), e]));
+  for (const [variant, primary] of primaryIds(c.agentGroups)) {
+    const e = byKey.get(`agent:${primary}`);
+    if (e && variant !== primary) byKey.set(`agent:${variant}`, e);
+  }
+  return byKey;
+}
 
 /** The panel's screens as a browser shows them: the stored ones, or the home screen it would seed. */
 export function panelScreens(c: Catalogue): Screen[] {

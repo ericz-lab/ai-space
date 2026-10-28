@@ -344,7 +344,7 @@ internal fun OmniboxResults(
     val resultTitle = stringResource(R.string.omnibox_result)
 
     val resolution = if (store.resolvedText == query) store.resolution else null
-    val entries = remember(query, catalogue) { OmniboxRules.rank(query, (catalogue?.entries ?: emptyList()) + builtinEntries).take(6) }
+    val entries = remember(query, catalogue) { OmniboxRules.rank(query, (catalogue?.searchEntries ?: emptyList()) + builtinEntries).take(6) }
     val strong = resolution?.intents?.filter { it.kind != "action" || it.strong == true } ?: emptyList()
     val loose = (resolution?.intents?.filter { it.kind == "action" && it.strong != true } ?: emptyList()).take(3)
 

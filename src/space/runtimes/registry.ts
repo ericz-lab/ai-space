@@ -71,6 +71,7 @@ export class RuntimeRegistry {
   private readonly specs = new Map<string, RuntimeSpec>();
   private readonly machines = new Map<string, MachineSpec>();
   private readonly machineAdapters = new Map<string, RuntimeAdapter>();
+  private readonly fallback = new Map<string, string[]>();
   private remote: RemoteRuntimes | undefined;
   private availability: AvailabilityOf | undefined;
   private readonly deps: RegistryDeps;
@@ -92,6 +93,7 @@ export class RuntimeRegistry {
       this.specs.set(spec.name, spec);
       this.models.set(spec.name, { ...TIER_DEFAULTS[spec.kind], ...spec.models });
     }
+    for (const [key, list] of Object.entries(config.fallback ?? {})) this.fallback.set(key, [...list]);
     if (config.default === undefined) this.default = undefined;
     else {
       const def = this.byName.get(config.default);
@@ -184,6 +186,21 @@ export class RuntimeRegistry {
     return resolved;
   }
 
+  /**
+   * The fallback list for a model as a request names it (docs/model-machines.md#fallback): a bare
+   * tier is looked up on the default runtime (`basic` → `codex/basic`). Empty when there is none.
+   */
+  fallbackFor(model: string): { key: string; entries: string[] } | undefined {
+    const key = model.includes("/") || !this.default ? model : `${this.default.name}/${model}`;
+    const entries = this.fallback.get(key);
+    return entries ? { key, entries } : undefined;
+  }
+
+  /** Every fallback list, as runtimes.yaml gives them. */
+  fallbacks(): Record<string, string[]> {
+    return Object.fromEntries(this.fallback);
+  }
+
   list(): RuntimeView[] {
     return [...this.byName.values()].map((r) => ({ name: r.name, kind: r.kind, backend: r.backend, capabilities: r.capabilities, default: r === this.default }));
   }
@@ -229,7 +246,8 @@ export class RuntimeRegistry {
       .map((r) => `${r.name} (${r.kind}, ${r.backend})${r.default ? "*" : ""}`)
       .join(", ");
     const machines = this.machineList().map((m) => `${m.name} (ssh:${m.ssh})`);
-    return machines.length ? `${runtimes} · machines ${machines.join(", ")}` : runtimes;
+    const fallback = [...this.fallback].map(([key, list]) => `${key} → ${list.join(", ")}`);
+    return [runtimes, ...(machines.length ? [`machines ${machines.join(", ")}`] : []), ...(fallback.length ? [`fallback ${fallback.join("; ")}`] : [])].join(" · ");
   }
 }
 

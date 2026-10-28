@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings → Feedback (src/web/messages.ts feedback.*). -->
+<resources>
+    <string name="feedback_title">反馈</string>
+    <string name="feedback_enabled">应用页面上的反馈按钮</string>
+    <string name="feedback_enabled_help">每个应用页面角落有一个小按钮（Alt+Shift+F）：写下问题、点选元素、附上图片，就会变成一条 ai-todo 待办。打开前不会显示。</string>
+    <string name="feedback_mode">反馈怎么处理</string>
+    <string name="feedback_mode_auto">马上自动修</string>
+    <string name="feedback_mode_later">先记下，稍后一起修</string>
+    <string name="feedback_machine">在哪台机器修</string>
+    <string name="feedback_this_machine">%1$s（本机）</string>
+    <string name="feedback_model">修复工程师的模型</string>
+    <string name="feedback_model_default">默认聊天模型</string>
+    <string name="feedback_effort">思考强度</string>
+    <string name="feedback_effort_high">高</string>
+    <string name="feedback_effort_xhigh">超高</string>
+    <string name="feedback_effort_max">最高</string>
+    <string name="feedback_errors">附上页面最近的脚本错误</string>
+    <string name="feedback_shortcut">快捷键</string>
+    <string name="feedback_trust">按钮会发送用户写的文字、页面地址、客户端、屏幕大小、主题、语言和点选的元素；密码、令牌和表单里填的值不会发送。修复工程师只改这个应用自己的源码，并把页面内容当作数据，不当作指令。请只在应用页面需要登录时打开。</string>
+    <string name="feedback_apps">应用</string>
+    <string name="feedback_apps_default">默认在应用上显示</string>
+    <string name="feedback_app_shown">显示按钮</string>
+    <string name="feedback_app_hidden">不显示按钮</string>
+    <string name="feedback_app_default">默认（%1$s）</string>
+    <string name="feedback_on">开</string>
+    <string name="feedback_off">关</string>
+    <string name="feedback_apps_help">总开关打开、并且这个应用是开的（单独设置，或跟随默认），应用页面才显示按钮。</string>
+    <string name="feedback_peer_apps">%1$s 上的应用</string>
+    <string name="feedback_peer_apps_help">这些应用跑在 %1$s 上，页面问的是 %1$s。所以上面的选择和这里的开关，每次打开或修改本页都会同步到 %1$s。修复机器：在应用自己的机器上修，除非 %1$s 也认识上面选的那台。</string>
+    <string name="feedback_peer_down">连不上 %1$s：%2$s</string>
+    <string name="feedback_peer_unsynced">还没同步到 %1$s：%2$s。下次打开本页会再试。</string>
+    <string name="feedback_peer_none">%1$s 上没有带页面的应用。</string>
+    <string name="feedback_fix_waiting_on">修 %2$s 上等待的 %1$d 条</string>
+    <string name="feedback_recent">最近的反馈</string>
+    <string name="feedback_none">还没有反馈。</string>
+    <string name="feedback_todo">待办 #%1$d</string>
+    <string name="feedback_status_later">等待修复</string>
+    <string name="feedback_status_queued">排队中</string>
+    <string name="feedback_status_fixing">修复中</string>
+    <string name="feedback_status_review">已修好，待验收</string>
+    <string name="feedback_status_failed">没有修好</string>
+    <string name="feedback_status_skipped">需要人来处理</string>
+    <string name="feedback_status_recorded">已记录</string>
+    <string name="feedback_status_accepted">已验收</string>
+    <string name="feedback_status_dropped">已在待办里放弃</string>
+    <string name="feedback_fix_now">马上修</string>
+    <string name="feedback_fix_again">再修一次</string>
+    <string name="feedback_fix_waiting">现在修这 %1$d 条</string>
+    <string name="feedback_refresh">刷新</string>
+    <string name="feedback_started">已交给修复工程师：%1$d 条。</string>
+</resources>

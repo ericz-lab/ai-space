@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Models across machines: usage with peers, peer app models, the agent CLIs by machine (src/web/messages.ts). -->
+<resources>
+    <string name="usage_space">Space %1$s</string>
+    <string name="usage_space_hint">Calls made by this Space\'s apps, including those it sent to another machine. On a hub, the peers\' apps are here too, as peer/app; the model shows machine:model when another machine ran it.</string>
+    <string name="usage_origin_task">agent tasks</string>
+    <string name="usage_origin_run">api calls</string>
+    <string name="usage_origin_import">imported</string>
+    <string name="usage_origin_peer">for other spaces</string>
+    <string name="usage_peer_missing">%1$s is not included: %2$s</string>
+    <string name="usage_peer_stale">%1$s did not answer (%2$s); its figures are from %3$s</string>
+    <string name="app_models_here">This machine</string>
+    <string name="app_models_on_peer">On %1$s</string>
+    <string name="app_models_peer_old">%1$s runs an older core; update it to list its apps here.</string>
+    <string name="app_models_peer_down">%1$s is not answering: %2$s</string>
+    <string name="app_models_empty">No apps installed.</string>
+    <string name="clis_title">AI CLIs by machine</string>
+    <string name="clis_help">The agent CLIs each machine has. A CLI that is missing is left out of every model choice; one that is not signed in is shown greyed until it is.</string>
+    <string name="clis_peer">peer</string>
+    <string name="clis_recheck">Check again</string>
+    <string name="clis_checking">Checking…</string>
+    <string name="clis_checked">Checked %1$s</string>
+    <string name="clis_missing">Not installed</string>
+    <string name="clis_unknown">Not checked yet</string>
+    <string name="clis_signed_in">Signed in</string>
+    <string name="clis_signed_out">Not signed in</string>
+    <string name="clis_runtime">Runtime: %1$s</string>
+    <string name="clis_not_configured">Not a runtime there</string>
+    <string name="clis_add">Add to runtimes.yaml</string>
+    <string name="clis_added">Added as runtime %1$s. Restart ai-space to offer it.</string>
+    <string name="clis_unreachable">Unreachable</string>
+    <string name="clis_offline">Offline · last known</string>
+    <string name="clis_old">Older ai-space: no list</string>
+</resources>

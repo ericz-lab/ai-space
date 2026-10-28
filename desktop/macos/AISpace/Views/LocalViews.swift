@@ -172,7 +172,7 @@ struct LocalDefaultModelPicker: View {
             } else {
                 Picker("Default model", selection: $choice) {
                     Text("Choose a model…").tag(nil as String?)
-                    ForEach(options) { Text(verbatim: $0.label).tag(Optional($0.value)) }
+                    ForEach(options) { o in Text(verbatim: o.shownLabel).tag(Optional(o.value)).disabled(!o.isAvailable) }
                 }
                 .pickerStyle(.menu)
                 .controlSize(.large)
@@ -185,7 +185,7 @@ struct LocalDefaultModelPicker: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-        .onChange(of: options) { _, new in if let c = choice, !new.contains(where: { $0.value == c }) { choice = nil } }
+        .onChange(of: options) { _, new in if let c = choice, new.first(where: { $0.value == c })?.isAvailable != true { choice = nil } }
     }
 }
 
@@ -205,13 +205,13 @@ struct LocalModelChoice: View {
             if let m = settings.settings?.models {
                 Picker("Default model", selection: $choice) {
                     Text("Choose a model…").tag(nil as String?)
-                    ForEach(m.options) { Text(verbatim: $0.label).tag(Optional($0.value)) }
+                    ForEach(m.options) { o in Text(verbatim: o.shownLabel).tag(Optional(o.value)).disabled(!o.isAvailable) }
                 }
                 .pickerStyle(.menu)
                 .controlSize(.large)
                 .frame(maxWidth: .infinity)
                 .labelsHidden()
-                .onAppear { if choice == nil { choice = m.options.first(where: { $0.tier == "intermediate" })?.value } }
+                .onAppear { if choice == nil { choice = m.options.first(where: { $0.tier == "intermediate" && $0.isAvailable })?.value } }
             } else {
                 ProgressView().controlSize(.small)
             }

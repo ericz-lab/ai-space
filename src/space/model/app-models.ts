@@ -24,7 +24,8 @@ import { APP_PATTERN, MODEL_PATTERN, TAG_PATTERN } from "./types.ts";
 
 export type AppModelSpec = { default?: string; tags: Record<string, string> };
 export type ModelSource = "request" | "choice" | "override-tag" | "override-app" | "manifest-tag" | "manifest-default" | "default";
-export type ResolvedModel = { model: string; source: ModelSource };
+/** `skipped`: the layers above the chosen one that named a model this space cannot run (the call's trace shows them). */
+export type ResolvedModel = { model: string; source: ModelSource; skipped?: { source: ModelSource; model: string }[] };
 
 /**
  *   model:
@@ -75,8 +76,14 @@ export class AppModels {
 
   /** The model for a call of `app` with `tag` that names none itself. Without a tag only the app-wide layers apply. */
   resolve(app: string, tag?: string): ResolvedModel {
-    for (const layer of this.layers(app, tag)) if (layer.model && this.opts.runnable(layer.model)) return { model: layer.model, source: layer.source };
-    return { model: this.opts.fallback(), source: "default" };
+    const skipped: { source: ModelSource; model: string }[] = [];
+    const out = (r: ResolvedModel): ResolvedModel => (skipped.length ? { ...r, skipped } : r);
+    for (const layer of this.layers(app, tag)) {
+      if (!layer.model) continue;
+      if (this.opts.runnable(layer.model)) return out({ model: layer.model, source: layer.source });
+      skipped.push({ source: layer.source, model: layer.model });
+    }
+    return out({ model: this.opts.fallback(), source: "default" });
   }
 
   private layers(app: string, tag: string | undefined): { model: string | undefined; source: ModelSource }[] {

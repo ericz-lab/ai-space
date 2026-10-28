@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { API_MODELS, apiCost, createAnthropicApi } from "./anthropic-api.ts";
+import { API_MODELS, apiCost, createAnthropicApi, retryAfterSeconds } from "./anthropic-api.ts";
 import type { CompleteInput } from "./types.ts";
 
 const input = (over: Partial<CompleteInput> = {}): CompleteInput => ({ prompt: "hello", system: "Be brief.", model: "haiku", tag: "t", tools: [], timeoutMs: 5000, maxTokens: 100, ...over });
@@ -46,5 +46,31 @@ describe("anthropic-api runtime", () => {
   test("apiCost uses the list prices", () => {
     expect(apiCost("claude-sonnet-5", { inputTokens: 1e6, cacheWriteTokens: 1e6, cacheReadTokens: 1e6, outputTokens: 1e6 })).toBeCloseTo(2 + 2.5 + 0.2 + 10);
     expect(apiCost("nope", { inputTokens: 1, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 })).toBeUndefined();
+  });
+});
+
+describe("a gateway that speaks the Messages API (magpie, docs/runtimes.md#magpie)", () => {
+  const answer = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+    (async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } })) as unknown as typeof fetch;
+  const gateway = (f: typeof fetch) => createAnthropicApi({ name: "magpie", kind: "anthropic-api", apiKey: "magpie-ai-space", apiUrl: "http://127.0.0.1:3425/v1/messages" }, { fetch: f });
+
+  test("its provider/model id is sent as is, and what it says served the call comes back", async () => {
+    let sent: Record<string, unknown> = {};
+    const f = (async (_url: string, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ content: [{ type: "text", text: "hi" }], usage: { input_tokens: 3, output_tokens: 1 } }), { headers: { "x-magpie-provider": "anthropic", "x-magpie-model": "anthropic/claude-haiku-4-5" } });
+    }) as unknown as typeof fetch;
+    const r = await gateway(f).complete(input({ model: "cheap-group" }));
+    expect(sent.model).toBe("cheap-group");
+    expect(r).toMatchObject({ ok: true, text: "hi", served: "anthropic/claude-haiku-4-5", costUsd: undefined });
+  });
+
+  test("a refusal keeps its Retry-After, in seconds or as a date, where the failure reader finds it", async () => {
+    expect(await gateway(answer(429, { error: { message: "all members are resting" } }, { "retry-after": "30" })).complete(input())).toMatchObject({ ok: false, error: "API 429: all members are resting (retry after 30s)" });
+    expect(await gateway(answer(503, { error: { message: "down" } })).complete(input())).toMatchObject({ ok: false, error: "API 503: down" });
+    expect(retryAfterSeconds("2.2")).toBe(3);
+    expect(retryAfterSeconds(new Date(Date.now() + 90_000).toUTCString())).toBeGreaterThanOrEqual(89);
+    expect(retryAfterSeconds("soon")).toBeUndefined();
+    expect(retryAfterSeconds(null)).toBeUndefined();
   });
 });
