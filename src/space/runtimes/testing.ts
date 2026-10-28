@@ -2,7 +2,9 @@
  * A stand-in for `claude -p --output-format json` for tests: reads the prompt on
  * stdin and answers with the CLI's result envelope. FAKE_MODEL_MODE picks the
  * behaviour: `ok` (default), `plain` (text without the envelope, like an older
- * CLI), `error` (an is_error envelope), `exit` (non-zero exit), `hang` (never
+ * CLI), `error` (an is_error envelope), `refused` (an is_error envelope and exit 1
+ * with nothing on stderr, as the CLI does when its login has lapsed; in the stream
+ * after the init line), `exit` (non-zero exit), `hang` (never
  * answers, for timeouts), `slow` (the first delta, a pause of FAKE_MODEL_DELAY_MS,
  * then the rest: an answer a test can walk away from and come back to). The answer echoes the prompt and the arguments so a
  * test can check what reached the runtime. Asked for `stream-json`, it prints
@@ -34,6 +36,11 @@ if (import.meta.main) {
   if (mode === "error") {
     console.log(JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: "simulated runtime failure", usage: { input_tokens: 5, output_tokens: 0 } }));
     process.exit(0);
+  }
+  if (mode === "refused") {
+    if (args.includes("stream-json")) console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "fake" }));
+    console.log(JSON.stringify({ type: "result", subtype: "success", is_error: true, terminal_reason: "api_error", result: "Failed to authenticate: OAuth session expired and could not be refreshed", modelUsage: {} }));
+    process.exit(1);
   }
   const files = [...prompt.matchAll(/^- ([a-z0-9]+\.[a-z]+): (.+)$/gm)].map(([, name, path]) => `${name}=${Bun.file(path!).size || "missing"}`);
   const result = `answer to: ${prompt} [args: ${args.join(" ")}]${process.env.MAX_THINKING_TOKENS !== undefined ? ` [thinking: ${process.env.MAX_THINKING_TOKENS}]` : ""}${files.length ? ` [files: ${files.join(" ")}]` : ""}`;

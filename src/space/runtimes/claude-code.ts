@@ -38,9 +38,10 @@ import { assertCompletionMode, CHAT_EFFORTS, FILE_NAME_PATTERN, PERMISSION_MODES
  * bytes from a pipe), runs the CLI, and removes the directory.
  *
  * The CLI answers with one json envelope: the text under `result`, token counts
- * under `usage`, its own cost figure; `is_error` marks a failed run that exited
- * 0. An older CLI answering in plain text still works, with no usage recorded
- * (nothing is estimated).
+ * under `usage`, its own cost figure; `is_error` marks a failed run, and its
+ * `result` is the reason the caller sees, whether the CLI exited 0 or not (a
+ * lapsed login exits 1 with nothing on stderr). An older CLI answering in plain
+ * text still works, with no usage recorded (nothing is estimated).
  */
 
 export { PERMISSION_MODES };
@@ -83,7 +84,7 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
       const r = await spawnCollect(cmd, { cwd: run.cwd, env: run.env, stdin: run.prompt, signal: run.signal });
       const output = joinOutput(r.stdout, r.stderr);
       if (r.timedOut || r.aborted) return { ok: false, error: "timed out", output, timedOut: true, backend: "local" };
-      if (r.code !== 0) return { ok: false, error: `exit code ${r.code}`, output, timedOut: false, backend: "local" };
+      if (r.code !== 0) return { ok: false, error: reportedError(r.stdout.trim()) ?? `exit code ${r.code}`, output, timedOut: false, backend: "local" };
       const parsed = parseCliOutput(r.stdout);
       if (!parsed) return { ok: true, output, timedOut: false, backend: "local" };
       if (parsed.error !== undefined) return { ok: false, error: parsed.error, output, usage: parsed.usage, costUsd: parsed.costUsd, timedOut: false, backend: "local" };
@@ -201,6 +202,22 @@ export function parseCliOutput(raw: string): { text?: string; error?: string; us
   return { text, usage, costUsd };
 }
 
+/**
+ * The reason an `is_error` envelope gives, or undefined. The CLI reports most failures
+ * (a lapsed login, a refused request) this way and exits 1 with nothing on stderr, so a
+ * failed run's raw output would otherwise be all the caller sees.
+ */
+export function reportedError(raw: string): string | undefined {
+  let j: CliResult;
+  try {
+    j = JSON.parse(raw) as CliResult;
+  } catch {
+    return undefined;
+  }
+  if (!j || typeof j !== "object" || j.type !== "result" || !j.is_error) return undefined;
+  return (j.result || j.subtype || "").trim() || undefined;
+}
+
 type StreamEvent = { type?: string; event?: { type?: string; delta?: { type?: string; text?: string } } };
 
 /**
@@ -241,7 +258,7 @@ async function runCompletion(cmd: string[], input: CompleteInput, stdin: string 
   if (r.aborted) return { ok: false, error: "aborted", backend };
   const out = r.stdout.trim();
   const err = r.stderr.trim();
-  if (r.code !== 0) return { ok: false, error: (err || out || `exited with ${r.code}`).slice(-800), backend };
+  if (r.code !== 0) return { ok: false, error: (reportedError(result ?? out) || err || out || `exited with ${r.code}`).slice(-800), backend };
   const parsed = parseCliOutput(result ?? out);
   if (!parsed) {
     // A CLI without `--output-format json`: the whole output is the answer, no usage is known.
@@ -300,8 +317,10 @@ function chatStream(cmd: string[], t: ChatTurn, cb: ChatCallbacks): { kill: () =
   }
 
   let sessionSeen = false;
+  let reported: string | undefined;
   const stderr = new Response(proc.stderr).text();
   const emit = (line: string) => {
+    if (line.includes('"is_error":true')) reported = reportedError(line) ?? reported;
     if (!sessionSeen && cb.onSession && line.includes('"session_id"')) {
       try {
         const ev = JSON.parse(line) as { session_id?: unknown };
@@ -320,7 +339,7 @@ function chatStream(cmd: string[], t: ChatTurn, cb: ChatCallbacks): { kill: () =
     await pumpLines(proc.stdout, emit).catch(() => {});
     const code = await proc.exited;
     const err = (await stderr).trim();
-    cb.onFinish(code === 0 ? null : (err || `runtime exited with ${code}`).slice(-800));
+    cb.onFinish(code === 0 ? null : (reported || err || `runtime exited with ${code}`).slice(-800));
   })();
 
   return { kill: () => proc.kill() };
