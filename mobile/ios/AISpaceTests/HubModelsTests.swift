@@ -95,6 +95,33 @@ struct HubModelsTests {
         #expect(usage.daysRecorded(now: ISO8601.parse("2026-10-13T12:00:00.000Z")!) == 13)
     }
 
+    @Test func readsAHubsUsageWithItsPeersCalls() throws {
+        let usage = try Hub.decode(ModelUsage.self, from: Data("""
+        {"ok":true,"window":"24h","backend":"local","space":"home","totals":{"calls":2},
+         "byTag":[{"calls":1,"app":"david/draw","tag":"image","model":"gpt-6-luna","machine":"david"},{"calls":1,"app":"todo","tag":"plan","model":"haiku"}],
+         "byModel":[{"calls":1,"model":"gpt-6-luna","machine":"david"}],
+         "peers":[{"name":"david","ok":true},{"name":"lab","ok":false,"asOf":"2026-10-27T01:00:00.000Z","error":"timeout"},{"name":"old","ok":false,"error":"no ledger"}]}
+        """.utf8))
+        #expect(usage.space == "home")
+        #expect(usage.byTag?.elements.map(\.modelOn) == ["david:gpt-6-luna", "haiku"])
+        #expect(usage.byModel?.elements.first?.modelOn == "david:gpt-6-luna")
+        #expect(usage.peersOff.map(\.name) == ["lab", "old"])
+        #expect(usage.peersOff.first?.asOf != nil)
+
+        let calls = try Hub.rows(ModelCall.self, "calls", from: Data("""
+        {"ok":true,"calls":[
+          {"id":7,"app":"david/draw","model":"gpt-6-luna","machine":"david","peer":"david","origin":"peer","status":"ok"},
+          {"id":7,"app":"todo","model":"haiku","status":"error","error":"boom"}
+        ]}
+        """.utf8))
+        #expect(calls.map(\.modelOn) == ["david:gpt-6-luna", "haiku"])
+        // The same id from two ledgers stays two rows.
+        #expect(Set(calls.map(\.key)).count == 2)
+
+        let labels = try Hub.rows(AppLabel.self, "apps", from: Data(#"{"apps":[{"id":"david/draw","name":"draw","title":"Draw"},{"name":"todo","title":"Todo"}]}"#.utf8))
+        #expect(labels.map { $0.id ?? $0.name } == ["david/draw", "todo"])
+    }
+
     @Test func drawsAppUsageByTimeWhenMeasuredAndByOpensOtherwise() throws {
         let rows = try Hub.rows(AppUsageRow.self, "usage", from: Data("""
         {"ok":true,"usage":[

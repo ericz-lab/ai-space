@@ -75,6 +75,8 @@ enum JSONValue: Decodable, Hashable {
 
 /// An app's name and icon for a heading; `GET /api/apps?all=1` also names headless and hidden apps.
 struct AppLabel: Decodable, Hashable {
+    /// The layout id: a peer's app is `<peer>/<app>`, as its calls and model rows name it.
+    var id: String?
     var name: String
     var title: String
     var i18n: I18n?
@@ -250,8 +252,13 @@ struct ModelUsageRow: Decodable, Hashable {
     var backend: String?
     var origin: String?
     var day: String?
+    /// The machine that ran the calls, when not the Space's own (docs/model-machines.md#ledger).
+    var machine: String?
 
-    private enum CodingKeys: String, CodingKey { case app, tag, model, backend, origin, day }
+    /// The model with the machine that ran it: `david:gpt-6-luna` (Usage.tsx `modelOn`).
+    var modelOn: String? { model.map { ModelMachine.on($0, machine) } }
+
+    private enum CodingKeys: String, CodingKey { case app, tag, model, backend, origin, day, machine }
 
     init(from decoder: Decoder) throws {
         totals = try ModelTotals(from: decoder)
@@ -262,6 +269,14 @@ struct ModelUsageRow: Decodable, Hashable {
         backend = try? c.decode(String.self, forKey: .backend)
         origin = try? c.decode(String.self, forKey: .origin)
         day = try? c.decode(String.self, forKey: .day)
+        machine = try? c.decode(String.self, forKey: .machine)
+    }
+}
+
+enum ModelMachine {
+    static func on(_ model: String, _ machine: String?) -> String {
+        guard let machine, !machine.isEmpty else { return model }
+        return "\(machine):\(model)"
     }
 }
 
@@ -272,13 +287,27 @@ struct ModelUsage: Decodable, Hashable {
         var days: Lossy<ModelUsageRow>?
     }
 
+    /// On a hub: each peer, whether its rows are in, and from when.
+    struct Peer: Decodable, Hashable {
+        var name: String
+        var ok: Bool?
+        var asOf: String?
+        var error: String?
+    }
+
     var window: String?
     var backend: String?
+    /// The Space whose ledger this is; its apps' calls, including those it sent to another machine.
+    var space: String?
+    var peers: Lossy<Peer>?
     var totals: ModelTotals
     var byApp: Lossy<ModelUsageRow>?
     var byTag: Lossy<ModelUsageRow>?
     var byModel: Lossy<ModelUsageRow>?
     var history: History?
+
+    /// The peers whose rows are stale or missing.
+    var peersOff: [Peer] { (peers?.elements ?? []).filter { $0.ok != true } }
 
     /// Whole days since the first recorded call, at least one.
     func daysRecorded(now: Date = Date()) -> Int {
@@ -316,15 +345,25 @@ struct ModelCall: Decodable, Hashable, Identifiable {
     }
 
     var id: Int
+    /// `<peer>/<app>` for a peer's call on a hub.
     var app: String
     var tag: String?
     var model: String?
+    /// The machine that ran it, when not this one.
+    var machine: String?
+    /// The peer this call comes from, on a hub.
+    var peer: String?
+    var origin: String?
     var status: String?
     var error: String?
     var startedAt: String?
     var durationMs: Double?
     var usage: Tokens?
     var costUsd: Double?
+
+    var modelOn: String? { model.map { ModelMachine.on($0, machine) } }
+    /// Two calls from different peers may share an id.
+    var key: String { "\(peer ?? "")#\(id)" }
 }
 
 // MARK: App usage (docs/usage.md)

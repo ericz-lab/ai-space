@@ -573,3 +573,8 @@
 /* Model choices */
 "not signed in" = "未登录";
 "not available" = "不可用";
+
+/* Model usage with peers */
+"Space %@" = "Space %@";
+"%@ did not answer (%@); its figures are from %@" = "%@ 没有响应（%@），显示的是 %@ 的数据";
+"%@ is not included: %@" = "未包含 %@：%@";

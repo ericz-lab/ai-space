@@ -83,7 +83,8 @@ class HubStore: ObservableObject {
             askedLabels = false
             return
         }
-        labels = Dictionary(apps.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        // Keyed by id: a peer's app is `<peer>/<app>`, as its calls and model rows name it.
+        labels = Dictionary(apps.map { ($0.id ?? $0.name, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
     func title(_ app: String) -> String { labels[app]?.displayTitle ?? app }

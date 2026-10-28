@@ -59,7 +59,7 @@ struct ModelUsageOverview: View {
                     LabeledContent {
                         Text(verbatim: [HubFormat.count(r.totals.calls) + " " + String(localized: "calls"), HubFormat.tokens(r.totals.tokens)].joined(separator: " · "))
                     } label: {
-                        Text(verbatim: r.model ?? "—").lineLimit(1)
+                        Text(verbatim: r.modelOn ?? "—").lineLimit(1)
                     }
                 }
             }
