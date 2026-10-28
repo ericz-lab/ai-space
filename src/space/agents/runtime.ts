@@ -78,3 +78,44 @@ export function runResponse(runs: RunRegistry, id: string, after = 0, opts: { he
     },
   });
 }
+
+/**
+ * Server-sent events about an agent's runs, or every agent's when `agent` is null
+ * (docs/runtimes.md#background-work), so an open chat finds the turns an agent starts by itself:
+ * first the runs going now and every conversation's background jobs, then each run's start and end
+ * (`{"type":"run","run"}`) and each change of a conversation's jobs
+ * (`{"type":"jobs","agent","sessionId","jobs"}`, the whole list) as they happen.
+ */
+export function watchResponse(runs: RunRegistry, agent: string | null, opts: { heartbeatMs?: number } = {}): Response {
+  const mine = (a: string) => agent === null || a === agent;
+  const enc = new TextEncoder();
+  let unwatch: (() => void) | null = null;
+  let beat: ReturnType<typeof setInterval> | undefined;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const write = (chunk: string) => {
+        try {
+          controller.enqueue(enc.encode(chunk));
+        } catch {
+          clearInterval(beat);
+          unwatch?.();
+        }
+      };
+      const send = (news: unknown) => write(`data: ${JSON.stringify(news)}\n\n`);
+      beat = setInterval(() => write(": keepalive\n\n"), opts.heartbeatMs ?? HEARTBEAT_MS);
+      write(": watching\n\n"); // the headers go out with the first bytes
+      for (const run of runs.running()) if (mine(run.agent)) send({ type: "run", run });
+      for (const jobs of runs.jobsOf(agent)) send({ type: "jobs", ...jobs });
+      unwatch = runs.watch((news) => {
+        if (mine(news.type === "run" ? news.run.agent : news.agent)) send(news);
+      });
+    },
+    cancel() {
+      clearInterval(beat);
+      unwatch?.();
+    },
+  });
+  return new Response(stream, {
+    headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive", "x-accel-buffering": "no" },
+  });
+}

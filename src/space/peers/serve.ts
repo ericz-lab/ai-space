@@ -36,7 +36,8 @@ import type { PeerModelInfo } from "./client.ts";
  *   POST /api/peer/agents/:app/:agent/runs/:id/stop = /api/agents/:app/:agent/runs/:id/stop
  *   POST /api/peer/agents/:app/:agent/runs/:id/steer = /api/agents/:app/:agent/runs/:id/steer
  *   POST /api/peer/agents/:app/:agent/runs/:id/approvals/:rid = /api/agents/:app/:agent/runs/:id/approvals/:rid
- *   GET  /api/peer/terminal                        = /api/terminal            ┐ only when the terminal is
+ *   GET  /api/peer/agents/:app/:agent/watch        = /api/agents/:app/:agent/watch
+ *   GET  /api/peer/terminal                       = /api/terminal            ┐ only when the terminal is
  *   POST /api/peer/terminal/sessions               = /api/terminal/sessions   │ enabled here; the snapshot
  *   DELETE /api/peer/terminal/sessions/:id         = /api/terminal/sessions/:id │ says so with `terminal: true`
  *   GET  /api/peer/terminal/ws                     = /api/terminal/ws         ┘ (docs/terminal.md)
@@ -280,6 +281,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     "/api/peer/agents/:app/:agent/runs/:id/stop": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id/stop", "POST")) },
     "/api/peer/agents/:app/:agent/runs/:id/steer": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id/steer", "POST")) },
     "/api/peer/agents/:app/:agent/runs/:id/approvals/:rid": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/runs/:id/approvals/:rid", "POST")) },
+    "/api/peer/agents/:app/:agent/watch": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/watch", "GET")) },
     ...(opts.terminal
       ? {
           "/api/peer/terminal": { GET: guard(mirror(opts.terminal, "/api/terminal", "GET")) },

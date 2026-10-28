@@ -303,6 +303,7 @@ describe("through a hub", () => {
     "/api/agents/:app/:agent/runs/:id/stop": { POST: gone },
     "/api/agents/:app/:agent/runs/:id/steer": { POST: gone },
     "/api/agents/:app/:agent/runs/:id/approvals/:rid": { POST: gone },
+    "/api/agents/:app/:agent/watch": { GET: gone },
   };
 
   beforeAll(async () => {

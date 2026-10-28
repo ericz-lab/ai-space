@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { monitorInput, toolErrorText } from "./tool-text.ts";
+import { monitorInput, taskNotice, toolErrorText } from "./tool-text.ts";
 import { parseClaudeTranscript } from "./transcripts.ts";
 
 /** What Claude Code answers when a model calls Monitor before loading its schema. */
@@ -30,5 +30,33 @@ test("a restored transcript shows Monitor calls and their rejection cleanly", ()
   expect(ai?.role === "ai" && ai.steps).toEqual([
     { kind: "tool", name: "Monitor", input: WATCH, output: "InputValidationError: Monitor failed due to the following issue:\nThe required parameter `description` is missing", failed: true },
     { kind: "tool", name: "Monitor", input: `job done\n${WATCH}`, output: "Monitor started (task b1).", failed: false },
+  ]);
+});
+
+test("a background job's report reads as one line with the rest under it", () => {
+  expect(taskNotice('<task-notification>\n<task-id>b1</task-id>\n<summary>Monitor event: "ticks"</summary>\n<event>tick 2\nmore</event>\n</task-notification>')).toEqual({ taskId: "b1", summary: 'Monitor event: "ticks"', event: "tick 2\nmore", line: 'Monitor event: "ticks": tick 2', detail: 'Monitor event: "ticks"\ntick 2\nmore' });
+  expect(taskNotice("<task-notification><task-id>b2</task-id><tool-use-id>t1</tool-use-id><status>completed</status><summary>done</summary></task-notification>")).toMatchObject({ taskId: "b2", toolUseId: "t1", status: "completed", line: "done" });
+  expect(taskNotice("hello <task-notification>")).toBeNull();
+});
+
+test("a restored session keeps each background report before the reply that answered it", async () => {
+  // Claude Code 2.1.312's record of a Monitor (three ticks) and a background Bash (fixtures/).
+  const jsonl = await Bun.file(new URL("./fixtures/claude-background-transcript.jsonl", import.meta.url)).text();
+  const msgs = parseClaudeTranscript(jsonl);
+  expect(msgs.map((m) => m.role)).toEqual(["user", "ai"]);
+  const steps = msgs[1]!.role === "ai" ? msgs[1]!.steps ?? [] : [];
+  expect(steps.map((s) => (s.kind === "tool" ? `tool ${s.name}` : s.kind === "notice" ? `notice ${s.text}` : `text ${s.text}`))).toEqual([
+    "tool ToolSearch",
+    "tool Monitor",
+    "tool Bash",
+    'notice Monitor event: "三次 tick 测试": tick 1',
+    "text started",
+    'notice Monitor event: "三次 tick 测试": tick 2',
+    "text Monitor 通知：tick 2。",
+    'notice Monitor event: "三次 tick 测试": tick 3',
+    "text Monitor 通知：tick 3。",
+    'notice Monitor "三次 tick 测试" stream ended',
+    'notice Background command "后台等待20秒后输出" completed (exit code 0)',
+    "text 两条通知：Monitor 的流已结束（三次 tick 全部收到），以及后台 Bash 命令 `sleep 20; echo bgdone` 已完成（退出码 0）。",
   ]);
 });

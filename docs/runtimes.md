@@ -277,7 +277,7 @@ image-only calls retain their tool restrictions.
 
 Motivation: a one-shot chat turn (`claude -p`, `codex exec`) cannot ask before an action its permission tier does not cover, so the action was refused and the person had to raise the tier and ask again; and a message written while the agent worked waited for the whole turn to end. A turn that stays connected to its runtime can do both.
 
-A chat request with `interactive: true` (every client sends it: the panel, the Mac, the iPhone and Android) goes to a process the runtime keeps for the conversation instead of a CLI started for the turn. The process stays open after the turn; the conversation's next turn reuses it when it names the same session and matches the process's working directory, system prompt, tool list and environment (a different identity starts a new process with `--resume` or `session/resume`). Model and tier may change from turn to turn: the process switches in place. An idle process is closed after 10 minutes, at most 6 idle ones are kept per runtime (oldest out first), and all of them close when ai-space shuts down. A request without the flag (a client older than its Space) keeps the one-shot path.
+A chat request with `interactive: true` (every client sends it: the panel, the Mac, the iPhone and Android) goes to a process the runtime keeps for the conversation instead of a CLI started for the turn. The process stays open after the turn; the conversation's next turn reuses it when it names the same session and matches the process's working directory, system prompt, tool list and environment (a different identity starts a new process with `--resume` or `session/resume`). Model and tier may change from turn to turn: the process switches in place. An idle process is closed after 10 minutes, at most 6 idle ones are kept per runtime (oldest out first), and all of them close when ai-space shuts down; one whose background jobs still run is kept longer ([Background work](#background-work)). A request without the flag (a client older than its Space) keeps the one-shot path.
 
 | | Claude Code | Codex CLI | DeepSeek Harness |
 | --- | --- | --- | --- |
@@ -303,6 +303,30 @@ The turn's events are the runtime's, translated into Claude Code's `stream-json`
 The answers and the added messages go through the run ([panel.md](panel.md#background-runs)). Nothing waits for an approval except the turn: an unanswered one lasts until the run's timeout, a stop or a shutdown, which deny it.
 
 Tested with Claude Code 2.1.302, Codex 0.163 and DeepSeek Harness 0.2.1-rc.2: the protocols are the runtimes' own, Codex's app-server marked experimental and ACP's automation surface intended for programmatic clients. `src/space/runtimes/live.test.ts` runs Claude Code and Codex against stand-ins (`testing-live.ts`), `deepseek-live.test.ts` runs DeepSeek Harness against `testing-dsh-acp.ts`; approvals, steering where supported, stop and reuse were also checked against the real CLIs.
+
+## Background work
+
+Motivation: Claude Code's agent can leave work running after its turn: a Bash call with `run_in_background: true` returns at once and reports when the command ends, and a Monitor watches a command or a socket and reports each line it prints. Each report makes the agent answer in a turn of its own. ai-space ended a conversation's run at the turn's `result` and dropped everything the process said between turns, and closed an idle process after 10 minutes, which also stopped its jobs; so the agent's answers never reached the person. DeepSeek Harness has the same idea (a job registry; a finished job wakes an idle agent, with a cap on wakes in a row; the web shows the session's jobs as one list).
+
+What Claude Code 2.1.312 writes on stdout, recorded in `src/space/runtimes/fixtures/claude-background.jsonl` (a Monitor of three ticks and a `sleep 20` in the background):
+
+| event | meaning |
+| --- | --- |
+| `system` `task_started` `{task_id, tool_use_id, description, task_type}` | a job started; a Monitor is a `local_bash` task too, told apart by its tool call |
+| `system` `background_tasks_changed` `{tasks}` | the jobs still running, the whole list |
+| `system` `task_updated` `{task_id, patch: {status, end_time}}`, `system` `task_notification` `{task_id, tool_use_id, status, summary}` | a job ended (`completed`, `failed`, `killed`) |
+| `user` `<task-notification>…` with `isReplay` and `origin.kind: "task-notification"` | a report the agent read during a turn (a Monitor event: `<event>`; an end: `<status>`) |
+| `system` `init`, the reply, `result` with `origin.kind: "task-notification"` | between turns, the turn the CLI starts by itself for a report; the report itself is not replayed. Two reports at once can make an empty turn (`num_turns: 0`) |
+
+How ai-space follows it:
+
+- **Turns of the agent's own.** Between turns `ClaudeLive` holds the CLI's events until one says something (a reply, a job's end), then hands the turn to the last turn's `onWake`; a turn that says nothing makes no run. The run registry makes it a run with `trigger: "background"`, an empty message and the conversation's session, with its own events, stop and steering ([panel.md](panel.md#background-runs)); it counts toward the agent's active time, not as an open. While it runs, the conversation is busy (a new message is a 409; the panel steers it into that turn instead). A report read during the person's turn is shown in that turn and never mistaken for a message the person added. When the CLI answers a report just before it reads the person's next message, that turn goes on to its own result.
+- **Limit.** At most 20 turns of its own in a row, counted from the person's last message; the 21st run only says the next ones are not shown, and the ones after it run unseen until the person writes again.
+- **Jobs.** The process keeps its jobs (`id`, `kind` bash, monitor, agent or other, `description`, `status`, start and end, the tool call, the last summary) from those events and reports the whole list on each change; the registry keeps the last list per conversation and `GET …/watch` sends it.
+- **Idle time.** A process with a job still running, or in a turn of its own, is not closed after 10 minutes; it stays up to `SPACE_CHAT_BACKGROUND_MINUTES` (120 by default, Claude Code's own limit on a background command outside an interactive session) after the person's last turn, and is never among the idle ones closed first when there are more than 6. After its jobs end it is closed 10 minutes after it last said anything.
+- **Transcripts.** The session file keeps each report as a user message (`<task-notification>`, between turns) or as a queued command (during one); a restored conversation shows them as notices before the reply that answered them.
+
+Codex has no background jobs over `app-server`, and DeepSeek Harness's ACP profile was not checked for a turn it starts by itself; their processes drop what comes between turns, as before, and report no jobs. Stopping a single job from the panel (Claude Code's `TaskStop`) is not offered yet; closing the conversation's process stops them all.
 
 ## Codex agent runs
 

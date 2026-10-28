@@ -1,7 +1,7 @@
 import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
-import { ChatSteps, historySteps, stepGroups, submitsChat, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
-import { Glyph, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
+import { applyJobs, ChatSteps, historySteps, stepGroups, submitsChat, type ChatJob, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
+import { Glyph, JobsBadge, NoticeStep, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type AgentGroup, groupAgents, groupKeyOf, groupOf, preferredMachine, rememberMachine } from "./agent-groups.ts";
@@ -24,6 +24,10 @@ import { localized, useLang } from "./i18n.ts";
 //   gets it queued in the page and sent next, in order. ⏹ stops the current run.
 // - An action the permission tier does not cover waits for the person: an approval card in the reply.
 // - Model and write-permission tier are picked in the header and remembered in localStorage.
+// - Background work (docs/runtimes.md#background-work): one stream per space (`GET …/agents/watch`) says
+//   when an agent starts a turn by itself to answer a background job's report; the conversation it
+//   belongs to attaches to it like to any run. The same stream carries each conversation's job list:
+//   the header's badge, and the end of a Monitor or background command row.
 
 // User messages render as text; URLs inside become links without HTML injection.
 const linkNodes = (text: string) =>
@@ -47,8 +51,8 @@ const toolHint = (input: Record<string, unknown> = {}) => {
 
 const Ava = ({ icon, fallback = "✨" }: { icon?: string; fallback?: string }) => (isImgIcon(icon) ? <img src={icon} alt="" /> : <>{icon || fallback}</>);
 
-type Msg = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean; pending?: string[]; historic?: boolean };
-type Conv = { agent: AgentInfo | null; msgs: Msg[]; sid: string | null; busy: boolean; queued: number };
+type Msg = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean; pending?: string[]; historic?: boolean; background?: boolean };
+type Conv = { agent: AgentInfo | null; msgs: Msg[]; sid: string | null; busy: boolean; queued: number; jobs?: ChatJob[] };
 /** A message of a restored transcript; `steps` keeps the assistant's text and tool calls in order. */
 type HistoryMessage = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; steps?: HistoryStep[] };
 const fromHistory = (m: HistoryMessage): Msg => {
@@ -59,8 +63,12 @@ const fromHistory = (m: HistoryMessage): Msg => {
 const EMPTY_CONV: Conv = { agent: null, msgs: [], sid: null, busy: false, queued: 0 };
 /** The turn a conversation is following: its run (once the server named it) and the stream's abort. */
 type Active = { ctrl: AbortController; typer: { target: string }; base: string; runId: string | null; stopRequested: boolean };
-type Runner = { queue: QueuedChatTurn[]; running: boolean; active: Active | null };
-type TurnSource = { kind: "new"; turn: QueuedChatTurn } | { kind: "attach"; runId: string };
+/** `attach`: runs the agent started by itself while a turn was being followed, followed next. */
+type Runner = { queue: QueuedChatTurn[]; attach: { base: string; source: TurnSource }[]; running: boolean; active: Active | null };
+/** A turn to follow: a new message, or a run on the server (`background`: one the agent started by itself). */
+type TurnSource = { kind: "new"; turn: QueuedChatTurn } | { kind: "attach"; runId: string; background?: boolean };
+/** What `GET …/watch` sends (docs/runtimes.md#background-work). */
+type WatchNews = { type: "run"; run: ChatRun } | { type: "jobs"; agent?: string; sessionId: string; jobs: ChatJob[] };
 const RECONNECT_TRIES = 5;
 /** Runs that ended this long ago (seconds) still come back after a page load. */
 const RESTORE_RECENT_S = 1800;
@@ -137,7 +145,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     return () => observer.disconnect();
   }, [input, open]);
   const runnersRef = useRef<Record<string, Runner>>({});
-  const runner = (k: string): Runner => (runnersRef.current[k] ||= { queue: [], running: false, active: null });
+  const runner = (k: string): Runner => (runnersRef.current[k] ||= { queue: [], attach: [], running: false, active: null });
 
   const key = agent.id;
   // The same agent on several machines: one entry in the agents list, and a machine menu in the
@@ -185,7 +193,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     const previousRuntime = (selectedBaseModel || agent.runtime).split("/")[0];
     const nextRuntime = (value || agent.runtime).split("/")[0];
     if (previousRuntime !== nextRuntime) {
-      patch(key, (v) => ({ ...v, msgs: [], sid: null }));
+      patch(key, (v) => ({ ...v, msgs: [], sid: null, jobs: undefined }));
       setHist(null);
     }
     saveBaseChoice(key, value);
@@ -232,9 +240,10 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   // is attached by id. A dropped stream reattaches after the last event seen; only ⏹ stops the run.
   const runTurn = async (turnKey: string, chatBase: string, source: TurnSource) => {
     let aiIdx = -1;
+    const background = source.kind === "attach" && !!source.background;
     patch(turnKey, (v) => {
       aiIdx = v.msgs.length;
-      return { ...v, msgs: [...v.msgs, { role: "ai", text: "", tools: [], denied: [], status: tRef.current(source.kind === "new" ? "chat.starting" : "chat.reconnecting"), live: true }] };
+      return { ...v, msgs: [...v.msgs, { role: "ai", text: "", tools: [], denied: [], status: tRef.current(source.kind === "new" ? "chat.starting" : background ? "chat.backgroundReply" : "chat.reconnecting"), live: true, ...(background ? { background } : {}) }] };
     });
     const upd = (fn: (m: Extract<Msg, { role: "ai" }>) => Msg) =>
       patch(turnKey, (v) => {
@@ -407,7 +416,13 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     r.running = true;
     patch(k, (v) => ({ ...v, busy: true }));
     if (first) await runTurn(k, chatBase, first);
-    while (r.queue.length) {
+    while (r.queue.length || r.attach.length) {
+      // A turn the agent started by itself runs now; the person's next message would wait for it anyway.
+      const attach = r.attach.shift();
+      if (attach) {
+        await runTurn(k, attach.base, attach.source);
+        continue;
+      }
       const turn = r.queue.shift()!;
       const queued = r.queue.length; // read before the lazy state update runs
       patch(k, (v) => ({ ...v, queued }));
@@ -452,6 +467,13 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
         }
       }
       if (runner(k).running || convsRef.current[k]?.msgs.length) continue;
+      attachedRef.current.add(run.id);
+      // A turn the agent started by itself has no message of the person's; one that has ended is in the transcript already.
+      if (run.trigger === "background") {
+        patch(k, (v) => ({ ...v, agent: v.agent || a, msgs: history, sid: run.sid ?? run.sessionId }));
+        if (run.status === "running") void drain(k, b, { kind: "attach", runId: run.id, background: true });
+        continue;
+      }
       patch(k, (v) => ({ ...v, agent: v.agent || a, msgs: [...history, { role: "user", text: run.message }], sid: run.sid ?? run.sessionId }));
       void drain(k, b, { kind: "attach", runId: run.id });
     }
@@ -462,6 +484,52 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     restoredRef.current = true;
     void restoreRuns(agents);
   }, [agents]);
+
+  // Background work: the runs agents start by themselves, and their conversations' jobs.
+  const attachedRef = useRef(new Set<string>());
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
+  const onNews = (peer: string | undefined, news: WatchNews) => {
+    const agentId = news.type === "run" ? news.run.agent : news.agent;
+    const candidates = [...agentsRef.current, ...Object.values(convsRef.current).flatMap((c) => (c.agent ? [c.agent] : []))];
+    const a = candidates.find((x) => (x.peer ?? undefined) === peer && `${x.app}/${x.name}` === agentId);
+    if (!a) return;
+    const k = a.id;
+    const conv = convsRef.current[k];
+    if (!conv?.sid) return;
+    if (news.type === "jobs") {
+      if (news.sessionId !== conv.sid) return;
+      patch(k, (v) => ({ ...v, jobs: news.jobs, msgs: v.msgs.map((m) => (m.role === "ai" && m.steps && !m.live ? { ...m, steps: applyJobs(m.steps, news.jobs) } : m)) }));
+      return;
+    }
+    const run = news.run;
+    if (run.trigger !== "background" || run.status !== "running" || (run.sessionId !== conv.sid && run.sid !== conv.sid)) return;
+    if (attachedRef.current.has(run.id)) return;
+    attachedRef.current.add(run.id);
+    const source: TurnSource = { kind: "attach", runId: run.id, background: true };
+    if (runner(k).running) runner(k).attach.push({ base: agentBase(a), source });
+    else void drain(k, agentBase(a), source);
+  };
+  const newsRef = useRef(onNews);
+  newsRef.current = onNews;
+  // One stream for this space's agents for as long as the page is open; a peer's agent shown in the
+  // chat gets its own, through the peer route.
+  useEffect(() => {
+    const es = new EventSource("/api/agents/watch");
+    es.onmessage = (e) => {
+      try { newsRef.current(undefined, JSON.parse(e.data) as WatchNews); } catch { /* a frame we do not know */ }
+    };
+    return () => es.close();
+  }, []);
+  const shownPeer = agent.peer;
+  useEffect(() => {
+    if (!shownPeer || !open) return;
+    const es = new EventSource(`${agentBase(agent)}/watch`);
+    es.onmessage = (e) => {
+      try { newsRef.current(shownPeer, JSON.parse(e.data) as WatchNews); } catch { /* a frame we do not know */ }
+    };
+    return () => es.close();
+  }, [shownPeer, open, key]);
 
   const send = (text: string, intentId?: string, images?: ChatImage[]) => {
     patch(key, (v) => ({ ...v, agent: agent || v.agent, msgs: [...v.msgs, { role: "user", text, images }] }));
@@ -475,7 +543,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     if (!ask || ask.id === askedRef.current) return;
     askedRef.current = ask.id;
     if (!runner(key).running) {
-      patch(key, (v) => ({ ...v, msgs: [], sid: null }));
+      patch(key, (v) => ({ ...v, msgs: [], sid: null, jobs: undefined }));
       setHist(null);
     }
     setStick(true);
@@ -549,6 +617,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   const leave = (k: string) => {
     const r = runner(k);
     r.queue = [];
+    r.attach = [];
     if (r.active) {
       void stopRun(r.active);
       r.active.ctrl.abort();
@@ -557,7 +626,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
 
   const reset = () => {
     leave(key);
-    patch(key, (v) => ({ ...v, msgs: [], sid: null }));
+    patch(key, (v) => ({ ...v, msgs: [], sid: null, jobs: undefined }));
     setHist(null);
     inputRef.current?.focus();
   };
@@ -606,7 +675,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     } catch (e) {
       msgs = [{ role: "ai", text: t("chat.transcriptUnavailable", { error: (e as Error).message }), tools: [], denied: [] }];
     }
-    patch(key, (v) => ({ ...v, sid: s.sid, msgs }));
+    patch(key, (v) => ({ ...v, sid: s.sid, msgs, jobs: undefined }));
     setStick(true);
     inputRef.current?.focus();
   };
@@ -677,6 +746,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
             </span>
             <b>{shown.title}</b>
             <span className="chat-sub">{conv.busy ? `${t("chat.thinking")}${conv.queued ? t("chat.queued", { n: conv.queued }) : ""}` : conv.sid ? t("chat.inSession") : t("chat.newSession")}</span>
+            <JobsBadge jobs={conv.jobs ?? []} />
             {conv.busy && (
               <button className="chat-hbtn" title={t("chat.interrupt")} aria-label={t("chat.interrupt")} onClick={stop}>
                 <Glyph name="stop" size={15} />
@@ -751,6 +821,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
           {conv.msgs.map((m, i) => (
             <div key={i} className={`msg ${m.role}`}>
               {m.role === "ai" ? <>
+                {m.background && <div className="chat-bg-label"><Glyph name="notice" size={12} weight={1.3} />{t("chat.backgroundRun")}</div>}
                 {m.steps?.length ? stepGroups(m.steps).map((step) => Array.isArray(step) ?
                   step.length > 1 && m.historic ?
                   <ToolGroup key={step[0]!.id} steps={step} folded /> :
@@ -759,6 +830,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
                   <div key={step.id} className={`md ${step.state === "running" ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(step.text) }} /> :
                   step.kind === "approval" && step.questions ? <QuestionStep key={step.id} step={step} onAnswer={m.live ? (answers) => answer(key, step.id.slice("approval:".length), answers ? "allow" : "deny", answers ?? undefined) : undefined} /> :
                   step.kind === "approval" ? <ApprovalStep key={step.id} step={step} onAnswer={m.live ? (decision) => answer(key, step.id.slice("approval:".length), decision) : undefined} /> :
+                  step.kind === "notice" ? <NoticeStep key={step.id} step={step} /> :
                   <div key={step.id} className="chat-steer"><b>↳ {t("chat.steerYou")}</b> {linkNodes(step.text)}</div>
                 ) : <>
                   {m.tools.length > 0 && <div className="chat-tools">{m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}</div>}
