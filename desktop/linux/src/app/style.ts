@@ -82,6 +82,8 @@ window.quick-chat { background: transparent; }
 .qc-hint.dim { color: alpha(@window_fg_color, 0.3); }
 .qc-agent-row { padding: 6px 8px; border-radius: 8px; }
 .qc-avatar { border-radius: 99px; }
+.qc-round.qc-open { background: alpha(#ff9500, 0.18); color: #ff9500; }
+.qc-round > button, menubutton.qc-round > button { min-width: 20px; min-height: 20px; padding: 0; border-radius: 99px; background: transparent; }
 .qc-stop { min-width: 20px; min-height: 20px; padding: 0; color: @error_color; }
 .qc-field textview { min-height: 20px; }
 `;

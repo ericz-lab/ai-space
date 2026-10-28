@@ -6,9 +6,11 @@ import Gtk from "gi://Gtk?version=4.0";
 import Pango from "gi://Pango";
 import { groupById } from "../core/agents.ts";
 import { type Agent, pickText } from "../core/catalogue.ts";
+import { PERMISSIONS, type Permission } from "../core/chat.ts";
+import type { Key } from "../core/i18n.ts";
 import { CHAT_WIDTH, withLead } from "../core/floating-ball.ts";
 import { ChatView } from "./chat-view.ts";
-import { DEBUG, lang, log, prefs, t } from "./env.ts";
+import { DEBUG, lang, log, prefs, savePrefs, t } from "./env.ts";
 import { iconWidget } from "./icons.ts";
 import type { AppModel } from "./model.ts";
 import { installStyles } from "./style.ts";
@@ -28,6 +30,12 @@ import type { MainWindow } from "./window.ts";
  * Where XWayland is there, the panel is an X11 window: a Wayland window can neither be placed nor
  * kept above others, and the ball process (an X11 client) places this one beside itself (`placer`).
  */
+const PERMISSION_ICON: Record<Permission, string> = {
+  "": "changes-prevent-symbolic",
+  acceptEdits: "document-edit-symbolic",
+  bypassPermissions: "changes-allow-symbolic",
+};
+
 export class QuickChat {
   /** Set by the floating ball while it runs: puts the panel's X11 window beside the ball. */
   placer: ((xid: number, width: number, height: number) => void) | undefined;
@@ -41,6 +49,9 @@ export class QuickChat {
   private list: any;
   private spinner: any;
   private fresh: any;
+  private permission: any;
+  private permissionMenu: any;
+  private permissionList: any;
   /** Opened from the floating ball: kept beside it as it grows. */
   private near = false;
 
@@ -186,7 +197,21 @@ export class QuickChat {
     this.spinner = new Gtk.Spinner({ visible: false, valign: Gtk.Align.CENTER });
     header.append(this.spinner);
     header.append(new Gtk.Box({ hexpand: true }));
-    this.fresh = this.roundButton("document-edit-symbolic", `${t("newConversation")} (Ctrl+N)`, () => {
+    // The permission of the next messages, shared with the main window's picker.
+    this.permissionList = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ["navigation-sidebar"] });
+    this.permissionList.connect("row-activated", (_l: unknown, row: any) => {
+      prefs.permission = PERMISSIONS[row.get_index()] ?? "";
+      savePrefs();
+      this.permissionMenu.popdown();
+      this.renderPermission();
+      this.view?.redraw();
+    });
+    this.permissionMenu = new Gtk.Popover({ child: this.permissionList, has_arrow: false });
+    this.permissionMenu.connect("show", () => this.renderPermission());
+    this.permission = new Gtk.MenuButton({ popover: this.permissionMenu, valign: Gtk.Align.CENTER });
+    this.permission.add_css_class("qc-round");
+    header.append(this.permission);
+    this.fresh = this.roundButton("document-new-symbolic", `${t("newConversation")} (Ctrl+N)`, () => {
       this.view?.conversation?.newConversation();
       this.view?.focus();
     });
@@ -214,6 +239,7 @@ export class QuickChat {
       if (!(state & Gdk.ModifierType.CONTROL_MASK)) return false;
       if (keyval === Gdk.KEY_n) this.view?.conversation?.newConversation();
       else if (keyval === Gdk.KEY_j) picker.popup();
+      else if (keyval === Gdk.KEY_p) this.permission.popup();
       else if (keyval === Gdk.KEY_o) {
         this.hide();
         const main = this.main();
@@ -228,7 +254,7 @@ export class QuickChat {
     this.window.connect("notify::is-active", () => {
       if (this.window.is_active) return;
       GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
-        if (this.window.is_visible() && !this.window.is_active && !this.popover.get_visible()) this.hide();
+        if (this.window.is_visible() && !this.window.is_active && !this.popover.get_visible() && !this.permissionMenu.get_visible()) this.hide();
         return GLib.SOURCE_REMOVE;
       });
     });
@@ -304,11 +330,30 @@ export class QuickChat {
     this.renderBusy();
   }
 
+  /** The permission button: a lock (ask first), a pencil (edit files) or an orange open lock (all). */
+  private renderPermission(): void {
+    const current = (PERMISSIONS.includes(prefs.permission as Permission) ? prefs.permission : "") as Permission;
+    this.permission.set_child(new Gtk.Image({ icon_name: PERMISSION_ICON[current], pixel_size: 10 }));
+    if (current === "bypassPermissions") this.permission.add_css_class("qc-open");
+    else this.permission.remove_css_class("qc-open");
+    this.permission.set_tooltip_text(`${t("permission")}: ${t(`perm.${current}` as Key)} (Ctrl+P)`);
+    this.permissionList.remove_all();
+    for (const p of PERMISSIONS) {
+      const row = new Gtk.Box({ spacing: 10 });
+      row.add_css_class("qc-agent-row");
+      row.append(new Gtk.Image({ icon_name: PERMISSION_ICON[p] }));
+      row.append(new Gtk.Label({ label: t(`perm.${p}` as Key), xalign: 0, hexpand: true }));
+      if (p === current) row.append(new Gtk.Image({ icon_name: "object-select-symbolic", css_classes: ["accent"] }));
+      this.permissionList.append(row);
+    }
+  }
+
   /** The spinner while a turn runs; New Conversation only when there is one to leave and nothing runs. */
   private renderBusy(): void {
     const conv = this.view?.conversation;
     this.spinner.set_visible(Boolean(conv?.busy));
     this.spinner.set_spinning(Boolean(conv?.busy));
     this.fresh.set_sensitive(Boolean(conv && !conv.busy && conv.messages.length));
+    this.renderPermission();
   }
 }

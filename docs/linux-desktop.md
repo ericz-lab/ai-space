@@ -145,7 +145,7 @@ Quick Chat is drawn as the Mac's (Design Studio's design 12): a 380 px panel wit
 corners and no title bar, a 40 px header (the agent with its list, a spinner while it works,
 New Conversation, Close) and the field with "↩ Send" in it; it is about 96 px high while empty and
 grows with the replies, the thread scrolling past 324 px. Escape or a click elsewhere hides it;
-Ctrl+N starts a new conversation, Ctrl+J lists the agents, Ctrl+O moves it to the main window.
+Ctrl+N starts a new conversation, Ctrl+J lists the agents, Ctrl+P picks the permission (the round button: a lock to ask before changes, a pencil to edit files, an orange open lock for all; shared with the main window), Ctrl+O moves it to the main window.
 Where XWayland is there the panel is an X11 window of the app (GTK 4 opens XWayland's display
 beside its Wayland one), so the ball can place it: 12 px beside the ball, on its left when there is
 room, its bottom 48 px under the ball's middle so it grows upward, and above other windows.
