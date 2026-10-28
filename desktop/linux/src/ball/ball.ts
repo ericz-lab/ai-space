@@ -116,6 +116,7 @@ function place(): void {
 let openTimer = 0;
 let closeTimer = 0;
 let animTimer = 0;
+let watchTimer = 0;
 
 function stop(id: number): number {
   if (id) GLib.source_remove(id);
@@ -130,6 +131,7 @@ function expand(): void {
   expanded = true;
   highlighted = undefined;
   put(c.x - DIAL_WINDOW / 2, c.y - DIAL_WINDOW / 2, DIAL_WINDOW);
+  watch();
   // Only the disc's scale animates, never the window's place.
   scale = 0.35;
   animTimer = stop(animTimer);
@@ -147,6 +149,7 @@ function collapse(center?: Point): void {
   openTimer = stop(openTimer);
   closeTimer = stop(closeTimer);
   animTimer = stop(animTimer);
+  watchTimer = stop(watchTimer);
   if (!expanded) return;
   expanded = false;
   dragging = false;
@@ -163,6 +166,43 @@ function closeSoon(ms = 350): void {
     closeTimer = 0;
     collapse();
     return GLib.SOURCE_REMOVE;
+  });
+}
+
+/**
+ * Whether the pointer is on the ball, or on the open dial, right now. Growing, moving or reshaping
+ * the window sends crossing events of its own under XWayland, with no real move behind them, so the
+ * dial opens and closes on where the pointer is, not on those events. XWayland names no window under
+ * a pointer that is over a Wayland window.
+ */
+function pointerOver(): boolean {
+  try {
+    const [w, x, y] = Gdk.Display.get_default().get_default_seat().get_pointer().get_window_at_position();
+    if (!w || w.get_toplevel() !== win.get_window()) return false;
+    const size = expanded ? DIAL_WINDOW : DIAMETER;
+    const r = expanded ? DIAL_DIAMETER / 2 + 2 : DIAMETER / 2;
+    return Math.hypot(x - size / 2, y - size / 2) <= r;
+  } catch {
+    return false;
+  }
+}
+
+/** While the dial is open: it closes once the pointer has been off it for a moment. */
+function watch(): void {
+  watchTimer = stop(watchTimer);
+  let away = 0;
+  watchTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 120, () => {
+    if (!expanded) {
+      watchTimer = 0;
+      return GLib.SOURCE_REMOVE;
+    }
+    if (pressed || dragging || pointerOver()) away = 0;
+    else if (++away >= 3) {
+      watchTimer = 0;
+      collapse();
+      return GLib.SOURCE_REMOVE;
+    }
+    return GLib.SOURCE_CONTINUE;
   });
 }
 
@@ -192,7 +232,7 @@ win.connect("enter-notify-event", () => {
   // A short rest, so a pointer passing over the ball does not open the dial.
   openTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
     openTimer = 0;
-    if (!pressed && !moving) expand();
+    if (!pressed && !moving && pointerOver()) expand();
     return GLib.SOURCE_REMOVE;
   });
   return false;
@@ -202,7 +242,7 @@ win.connect("leave-notify-event", (_w: unknown, event: any) => {
   // A crossing into the window's own parts (an inferior) is not leaving it.
   if (event.get_crossing_detail?.() === Gdk.NotifyType.INFERIOR) return false;
   openTimer = stop(openTimer);
-  if (expanded && !pressed && !dragging) closeSoon();
+  // Closing is `watch`'s: this may come from the window's own resize, with the pointer still on it.
   if (highlighted) {
     highlighted = undefined;
     win.queue_draw();
