@@ -94,10 +94,10 @@ export class FloatingBall {
       // Not Linux's /proc: the gjs on PATH.
     }
     const env = GLib.environ_setenv(GLib.get_environ(), "GDK_BACKEND", "x11", true);
-    let pid: number, stdinFd: number, stdoutFd: number;
+    let pid: number, stdinFd: number, stdoutFd: number, stderrFd: number;
     try {
       // Plain pipes wrapped here, so the streams are GioUnix's where GLib has it (unix-streams.ts).
-      [, pid, stdinFd, stdoutFd] = GLib.spawn_async_with_pipes(null, [gjs, "-m", path(APP_ROOT, "ball.js")], env, GLib.SpawnFlags.DO_NOT_REAP_CHILD, null) as [boolean, number, number, number, number];
+      [, pid, stdinFd, stdoutFd, stderrFd] = GLib.spawn_async_with_pipes(null, [gjs, "-m", path(APP_ROOT, "ball.js")], env, GLib.SpawnFlags.DO_NOT_REAP_CHILD, null) as [boolean, number, number, number, number];
     } catch (e) {
       logError(e, "could not start the floating ball");
       return;
@@ -122,6 +122,22 @@ export class FloatingBall {
       });
     };
     read();
+    // The ball's own messages go to the app's: unread, they were lost, and a full pipe would stop the ball.
+    const errors = new Gio.DataInputStream({ base_stream: new InputStream({ fd: stderrFd, close_fd: true }) });
+    const readErrors = () => {
+      errors.read_line_async(GLib.PRIORITY_LOW, null, (_s: unknown, res: unknown) => {
+        let line: string | null = null;
+        try {
+          [line] = errors.read_line_finish_utf8(res);
+        } catch {
+          line = null;
+        }
+        if (line === null) return;
+        printerr(line);
+        readErrors();
+      });
+    };
+    readErrors();
     GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, () => {
       GLib.spawn_close_pid(pid);
       proc.exited = true;

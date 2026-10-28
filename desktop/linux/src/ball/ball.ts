@@ -67,6 +67,8 @@ const visual = win.get_screen().get_rgba_visual();
 if (visual) win.set_visual(visual);
 win.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK);
 win.connect("delete-event", () => true);
+win.set_size_request(DIAL_WINDOW, DIAL_WINDOW);
+win.resize(DIAL_WINDOW, DIAL_WINDOW);
 
 // Geometry
 
@@ -78,45 +80,56 @@ function workArea(p: Point): Rect {
   return { x: r.x, y: r.y, width: r.width, height: r.height };
 }
 
-function windowRect(): Rect {
-  const [x, y] = win.get_position();
-  const [w, h] = win.get_size();
-  return { x, y, width: w, height: h };
-}
-
 /** The person is dragging the ball. */
 let moving = false;
 
-function put(x: number, y: number, size: number): void {
-  win.set_size_request(size, size);
-  win.resize(size, size);
-  win.move(Math.round(x), Math.round(y));
-  shape(size);
-  win.queue_draw();
+/**
+ * The window is always the dial's size and only moves when the ball does: the ball is drawn at
+ * `offset` inside it, and the dial in its middle. Growing or moving the window under a resting
+ * pointer made XWayland send the window a leave and then nothing more (no motion, no clicks), and
+ * on a monitor's edge the grown window showed on the next monitor for a moment. Opening and closing
+ * the dial now changes only where clicks land (the input shape).
+ */
+const W = DIAL_WINDOW;
+/** The ball's top-left inside the window. */
+let offset: Point = { x: (W - DIAMETER) / 2, y: (W - DIAMETER) / 2 };
+/** The dial's centre inside the window. */
+let hub: Point = { x: W / 2, y: W / 2 };
+
+/** The ball with its top-left at `o` (screen); the window around it, all on the ball's monitor, with the dial fitting it. */
+function layout(o: Point): void {
+  const center = { x: o.x + DIAMETER / 2, y: o.y + DIAMETER / 2 };
+  const area = workArea(center);
+  const c = dialCenter(center, area);
+  const clamp = (v: number, lo: number, hi: number) => Math.round(Math.max(lo, Math.min(v, hi)));
+  const wx = clamp(c.x - W / 2, area.x, area.x + area.width - W), wy = clamp(c.y - W / 2, area.y, area.y + area.height - W);
+  offset = { x: Math.round(o.x) - wx, y: Math.round(o.y) - wy };
+  hub = { x: Math.round(c.x) - wx, y: Math.round(c.y) - wy };
+  win.move(wx, wy);
+  shape();
 }
 
-/** Clicks and drops land only on the disc: the corners of the window let them through. */
-function shape(size: number): void {
-  const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, size, size);
+/** Clicks and drops land only on the ball, or on the open dial: the rest of the window lets them through. */
+function shape(): void {
+  const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, W, W);
   const cr = new Cairo.Context(surface);
-  const r = expanded ? DIAL_DIAMETER / 2 + 2 : size / 2;
-  cr.arc(size / 2, size / 2, r, 0, 2 * Math.PI);
+  if (expanded) cr.arc(hub.x, hub.y, DIAL_DIAMETER / 2 + 2, 0, 2 * Math.PI);
+  else cr.arc(offset.x + DIAMETER / 2, offset.y + DIAMETER / 2, DIAMETER / 2, 0, 2 * Math.PI);
   cr.fill();
   cr.$dispose();
   win.input_shape_combine_region(Gdk.cairo_region_create_from_surface(surface));
+  win.queue_draw();
 }
 
 /** The ball at its saved place, on the monitor that still has it. */
 function place(): void {
   const at = saved ?? { x: 0, y: 0 };
-  const o = origin(saved, { width: DIAMETER, height: DIAMETER }, workArea(saved ? { x: at.x + DIAMETER / 2, y: at.y + DIAMETER / 2 } : at));
-  put(o.x, o.y, DIAMETER);
+  layout(origin(saved, { width: DIAMETER, height: DIAMETER }, workArea(saved ? { x: at.x + DIAMETER / 2, y: at.y + DIAMETER / 2 } : at)));
 }
 
 let openTimer = 0;
 let closeTimer = 0;
 let animTimer = 0;
-let watchTimer = 0;
 
 function stop(id: number): number {
   if (id) GLib.source_remove(id);
@@ -126,13 +139,10 @@ function stop(id: number): number {
 function expand(): void {
   closeTimer = stop(closeTimer);
   if (expanded) return;
-  const r = windowRect();
-  const c = dialCenter({ x: r.x + r.width / 2, y: r.y + r.height / 2 }, workArea({ x: r.x + r.width / 2, y: r.y + r.height / 2 }));
   expanded = true;
   highlighted = undefined;
-  put(c.x - DIAL_WINDOW / 2, c.y - DIAL_WINDOW / 2, DIAL_WINDOW);
-  watch();
-  // Only the disc's scale animates, never the window's place.
+  shape();
+  // Only the disc's scale animates; the window stays where it is.
   scale = 0.35;
   animTimer = stop(animTimer);
   animTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, () => {
@@ -144,23 +154,23 @@ function expand(): void {
   });
 }
 
-/** Back to the ball: at its saved place, or centred on `center` when the dial is dragged away. */
+/** Back to the ball: at its place, or centred on `center` when the dial is dragged away. */
 function collapse(center?: Point): void {
   openTimer = stop(openTimer);
   closeTimer = stop(closeTimer);
   animTimer = stop(animTimer);
-  watchTimer = stop(watchTimer);
   if (!expanded) return;
   expanded = false;
   dragging = false;
   highlighted = undefined;
   scale = 1;
-  if (center) put(center.x - DIAMETER / 2, center.y - DIAMETER / 2, DIAMETER);
-  else place();
+  if (center) layout({ x: center.x - DIAMETER / 2, y: center.y - DIAMETER / 2 });
+  else shape();
 }
 
 /** The dial closes a moment after the pointer (or a drag) leaves it. */
 function closeSoon(ms = 350): void {
+  log(`closing in ${ms}ms`);
   closeTimer = stop(closeTimer);
   closeTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
     closeTimer = 0;
@@ -169,44 +179,11 @@ function closeSoon(ms = 350): void {
   });
 }
 
-/**
- * Whether the pointer is on the ball, or on the open dial, right now. Growing, moving or reshaping
- * the window sends crossing events of its own under XWayland, with no real move behind them, so the
- * dial opens and closes on where the pointer is, not on those events. XWayland names no window under
- * a pointer that is over a Wayland window.
- */
-function pointerOver(): boolean {
-  try {
-    const [w, x, y] = Gdk.Display.get_default().get_default_seat().get_pointer().get_window_at_position();
-    if (!w || w.get_toplevel() !== win.get_window()) return false;
-    const size = expanded ? DIAL_WINDOW : DIAMETER;
-    const r = expanded ? DIAL_DIAMETER / 2 + 2 : DIAMETER / 2;
-    return Math.hypot(x - size / 2, y - size / 2) <= r;
-  } catch {
-    return false;
-  }
-}
+/** Debug (`AISPACE_BALL_DEBUG=1`): the pointer events and what the ball made of them, on stderr. */
+const DEBUG = Boolean(GLib.getenv("AISPACE_BALL_DEBUG"));
+const log = (what: string) => DEBUG && printerr(`[ai-space-ball] ${(GLib.get_monotonic_time() / 1000).toFixed(0)} ${what} expanded=${expanded} pressed=${Boolean(pressed)} moving=${moving}`);
 
-/** While the dial is open: it closes once the pointer has been off it for a moment. */
-function watch(): void {
-  watchTimer = stop(watchTimer);
-  let away = 0;
-  watchTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 120, () => {
-    if (!expanded) {
-      watchTimer = 0;
-      return GLib.SOURCE_REMOVE;
-    }
-    if (pressed || dragging || pointerOver()) away = 0;
-    else if (++away >= 3) {
-      watchTimer = 0;
-      collapse();
-      return GLib.SOURCE_REMOVE;
-    }
-    return GLib.SOURCE_CONTINUE;
-  });
-}
-
-const sectionUnder = (x: number, y: number): Section | undefined => (expanded ? sectionAt({ x, y }, { x: DIAL_WINDOW / 2, y: DIAL_WINDOW / 2 }) : undefined);
+const sectionUnder = (x: number, y: number): Section | undefined => (expanded ? sectionAt({ x, y }, hub) : undefined);
 const usable = (s: Section) => sections[s]?.usable === true;
 
 /** An X11 startup id stamped with the event's time, so the app's window may come to the front for this click. */
@@ -226,38 +203,44 @@ function startupId(time: number): string | undefined {
 let pressed: { x: number; y: number; ox: number; oy: number } | undefined;
 
 win.connect("enter-notify-event", () => {
+  log("enter");
   closeTimer = stop(closeTimer);
-  if (expanded || pressed) return false;
-  openTimer = stop(openTimer);
-  // A short rest, so a pointer passing over the ball does not open the dial.
-  openTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
-    openTimer = 0;
-    if (!pressed && !moving && pointerOver()) expand();
-    return GLib.SOURCE_REMOVE;
-  });
   return false;
 });
 
 win.connect("leave-notify-event", (_w: unknown, event: any) => {
   // A crossing into the window's own parts (an inferior) is not leaving it.
   if (event.get_crossing_detail?.() === Gdk.NotifyType.INFERIOR) return false;
+  log("leave");
   openTimer = stop(openTimer);
-  // Closing is `watch`'s: this may come from the window's own resize, with the pointer still on it.
   if (highlighted) {
     highlighted = undefined;
     win.queue_draw();
   }
+  if (expanded && !pressed && !dragging) closeSoon();
   return false;
 });
 
 win.connect("motion-notify-event", (_w: unknown, event: any) => {
   const [, x, y] = event.get_coords();
+  closeTimer = stop(closeTimer);
+  // The dial opens on the pointer moving on the ball, after a short rest so a pointer passing
+  // over it does not open it.
+  if (!expanded && !pressed && !moving && !openTimer) {
+    log("motion on the ball: opening soon");
+    openTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
+      openTimer = 0;
+      if (!pressed && !moving) expand();
+      return GLib.SOURCE_REMOVE;
+    });
+  }
   if (pressed) {
     const [, rx, ry] = event.get_root_coords();
     if (!moving && Math.abs(rx - pressed.x) + Math.abs(ry - pressed.y) > 3) {
       // Moving the open dial moves the ball: it closes under the pointer and follows from there.
       if (expanded) collapse({ x: rx, y: ry });
       moving = true;
+      log("drag starts");
       const [ox, oy] = win.get_position();
       pressed = { ...pressed, x: rx, y: ry, ox, oy };
     }
@@ -276,6 +259,7 @@ win.connect("motion-notify-event", (_w: unknown, event: any) => {
 
 win.connect("button-press-event", (_w: unknown, event: any) => {
   const [, button] = event.get_button();
+  log(`press ${button}`);
   if (event.get_event_type() !== Gdk.EventType.BUTTON_PRESS) return true;
   if (button === 3) {
     menu(event);
@@ -291,6 +275,7 @@ win.connect("button-press-event", (_w: unknown, event: any) => {
 });
 
 win.connect("button-release-event", (_w: unknown, event: any) => {
+  log("release");
   if (!pressed) return true;
   pressed = undefined;
   if (moving) {
@@ -311,10 +296,11 @@ win.connect("button-release-event", (_w: unknown, event: any) => {
 
 /** After the person moved the ball: back inside the monitor it was left on, and remembered. */
 function settle(): void {
-  const now = windowRect();
-  const o = origin({ x: now.x, y: now.y }, { width: DIAMETER, height: DIAMETER }, workArea({ x: now.x + DIAMETER / 2, y: now.y + DIAMETER / 2 }));
+  const [wx, wy] = win.get_position();
+  const now = { x: wx + offset.x, y: wy + offset.y };
+  const o = origin(now, { width: DIAMETER, height: DIAMETER }, workArea({ x: now.x + DIAMETER / 2, y: now.y + DIAMETER / 2 }));
   saved = o;
-  put(o.x, o.y, DIAMETER);
+  layout(o);
   send({ type: "moved", origin: o });
 }
 
@@ -654,9 +640,13 @@ win.connect("draw", (_w: unknown, cr: any) => {
   cr.setSourceRGBA(0, 0, 0, 0);
   cr.paint();
   cr.setOperator(Cairo.Operator.OVER);
-  const [size] = win.get_size();
-  if (expanded) drawDial(cr, size);
-  else drawBall(cr, size);
+  if (expanded) {
+    cr.translate(hub.x - W / 2, hub.y - W / 2);
+    drawDial(cr, W);
+  } else {
+    cr.translate(offset.x, offset.y);
+    drawBall(cr, DIAMETER);
+  }
   cr.$dispose();
   return true;
 });
