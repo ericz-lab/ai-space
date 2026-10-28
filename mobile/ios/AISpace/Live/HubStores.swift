@@ -282,6 +282,36 @@ final class AppModelsStore: HubStore {
     }
 }
 
+/// Settings → Models: the agent CLIs on each machine (src/web/MachineClis.tsx), checked again on
+/// demand, and a CLI found on the Space's own machine added as a runtime.
+final class MachineClisStore: HubStore {
+    @Published private(set) var machines: [MachineInventory] = []
+    /// The runtime just added; ai-space offers it after a restart.
+    @Published private(set) var added: String?
+    /// Kinds added here and not running until ai-space restarts.
+    @Published private(set) var pending: Set<String> = []
+
+    override func load() async throws {
+        machines = try MachineInventory.decode(try await api.data("/api/model/inventory"))
+    }
+
+    /// Probes every runtime and CLI again now; the answer is the fresh list.
+    func recheck() async {
+        await save { machines = try MachineInventory.decode(try await api.send("POST", "/api/model/status/probe", json: [:])) }
+    }
+
+    /// Adds the CLI of this kind found on the Space's own machine to runtimes.yaml.
+    func add(_ kind: String) async {
+        await save {
+            struct Added: Decodable { var runtime: String }
+            let answer = try await api.send("POST", "/api/model/runtimes", json: ["kind": kind])
+            added = (try? Hub.decode(Added.self, from: answer))?.runtime ?? kind
+            pending.insert(kind)
+        }
+        await refresh()
+    }
+}
+
 final class EventsStore: HubStore {
     @Published private(set) var events: [SpaceEvent] = []
     @Published private(set) var capabilities: [CapabilityApp] = []

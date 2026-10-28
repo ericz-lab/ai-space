@@ -488,6 +488,91 @@ struct PeerAppModels: Hashable, Identifiable {
     static func isOlderCore(status: Int, error: String) -> Bool { status == 404 && !error.hasPrefix("unknown peer") }
 }
 
+// MARK: Agent CLIs by machine (docs/model-machines.md#inventory)
+
+/// One agent CLI on one machine (`GET /api/model/inventory`): whether it is there, its version,
+/// whether it is signed in, and which runtimes use it. Fields not yet probed are absent.
+struct CliInfo: Decodable, Hashable, Identifiable {
+    var cli: String
+    var kind: String?
+    var installed: Bool?
+    var signedIn: Bool?
+    var version: String?
+    /// Where it was found; only on the Space's own row.
+    var path: String?
+    var detail: String?
+    var checkedAt: String?
+    var configured: Bool?
+    var runtimes: [String]?
+
+    var id: String { cli }
+
+    enum State: Equatable {
+        case unknown, missing, signedIn, signedOut
+        /// Installed; whether it is signed in is not known.
+        case installed
+    }
+
+    var state: State {
+        guard let installed else { return .unknown }
+        if !installed { return .missing }
+        switch signedIn {
+        case true?: return .signedIn
+        case false?: return .signedOut
+        case nil: return .installed
+        }
+    }
+}
+
+/// One machine's agent CLIs: the Space's own (`via` local), a `machines:` entry over ssh, or a peer.
+struct MachineInventory: Decodable, Hashable, Identifiable {
+    /// "" for the Space's own machine.
+    var machine: String
+    var via: String?
+    /// False when the ssh login failed.
+    var reachable: Bool?
+    /// A peer that does not answer: its row is its last snapshot.
+    var stale: Bool?
+    /// A peer that runs an older ai-space, whose snapshot has no list.
+    var old: Bool?
+    var clis: Lossy<CliInfo>?
+
+    var id: String { machine }
+    var isLocal: Bool { via == "local" }
+    var isOff: Bool { stale == true || reachable == false }
+    var entries: [CliInfo] { old == true ? [] : clis?.elements ?? [] }
+
+    /// A CLI found on the Space's own machine that no runtime uses can be added to runtimes.yaml
+    /// (operator only); a peer's row is changed on that peer. A kind just added waits for a restart.
+    func canAdd(_ c: CliInfo, pending: Set<String>) -> Bool {
+        guard isLocal, c.installed == true, c.configured != true, let kind = c.kind else { return false }
+        return !pending.contains(kind)
+    }
+
+    /// What the row says about the machine itself (MachineClis.tsx `machineNote`).
+    var note: String? {
+        if old == true { return String(localized: "Older ai-space: no list") }
+        if stale == true { return String(localized: "Offline · last known") }
+        if reachable == false { return String(localized: "Unreachable") }
+        switch via {
+        case "ssh": return "ssh"
+        case "peer": return String(localized: "peer")
+        default: return nil
+        }
+    }
+
+    /// When the CLIs were last probed, on any machine.
+    static func lastChecked(_ rows: [MachineInventory]) -> Date? {
+        rows.flatMap(\.entries).compactMap { $0.checkedAt.flatMap(ISO8601.parse) }.max()
+    }
+
+    /// The answer of `GET /api/model/inventory` and of a re-probe.
+    static func decode(_ data: Data) throws -> [MachineInventory] {
+        struct Body: Decodable { var machines: Lossy<MachineInventory> }
+        return try Hub.decode(Body.self, from: data).machines.elements
+    }
+}
+
 // MARK: Events (docs/events.md)
 
 struct SpaceEvent: Decodable, Hashable, Identifiable {

@@ -151,6 +151,34 @@ struct HubModelsTests {
         #expect(!PeerAppModels.isOlderCore(status: 502, error: "bad gateway"))
     }
 
+    @Test func readsTheAgentCLIsOfEachMachine() throws {
+        let rows = try MachineInventory.decode(Data("""
+        {"ok":true,"machines":[
+          {"machine":"","via":"local","clis":[
+            {"cli":"claude","kind":"claude-code","installed":true,"signedIn":true,"version":"2.1.0","path":"/usr/local/bin/claude","checkedAt":"2026-10-27T01:00:00.000Z","configured":true,"runtimes":["claude"]},
+            {"cli":"codex","kind":"codex","installed":true,"signedIn":false,"checkedAt":"2026-10-27T02:00:00.000Z","configured":false,"runtimes":[]},
+            {"cli":"dsh","kind":"deepseek","installed":false,"configured":false,"runtimes":[]}
+          ]},
+          {"machine":"david","via":"peer","stale":true,"clis":[{"cli":"claude","kind":"claude-code","installed":true,"configured":false,"runtimes":[]},{"oops":1}]},
+          {"machine":"old","via":"peer","old":true,"clis":[]},
+          {"machine":"gpu","via":"ssh","reachable":false,"clis":[{"cli":"codex","kind":"codex","configured":false,"runtimes":[]}]}
+        ]}
+        """.utf8))
+        #expect(rows.map(\.machine) == ["", "david", "old", "gpu"])
+        let here = rows[0]
+        #expect(here.entries.map(\.state) == [.signedIn, .signedOut, .missing])
+        // Only a CLI found here, installed and not yet a runtime, can be added; not one just added.
+        #expect(here.entries.map { here.canAdd($0, pending: []) } == [false, true, false])
+        #expect(!here.canAdd(here.entries[1], pending: ["codex"]))
+        #expect(!rows[1].canAdd(rows[1].entries[0], pending: []))
+        #expect(rows[1].entries.count == 1)
+        #expect(rows[1].entries[0].state == .installed)
+        #expect(rows[3].entries[0].state == .unknown)
+        #expect(rows.map(\.isOff) == [false, true, false, true])
+        #expect(rows.map(\.note) == [nil, "Offline · last known", "Older ai-space: no list", "Unreachable"])
+        #expect(MachineInventory.lastChecked(rows) == ISO8601.parse("2026-10-27T02:00:00.000Z"))
+    }
+
     @Test func readsAppModelsEventsAndPackages() throws {
         let models = try Hub.rows(AppModelRows.self, "apps", from: Data(#"{"apps":[{"app":"notes","rows":[{"tag":null,"model":"codex/basic","source":"default"},{"tag":"image","manifest":"codex/intermediate","override":"claude/basic","model":"claude/basic","source":"override-tag"}]}]}"#.utf8))
         #expect(models[0].rows.map(\.id) == ["", "image"])

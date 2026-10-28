@@ -148,6 +148,7 @@ struct SettingsPage: View {
         case .models:
             models
             pages("Apps", [("App models", "cpu", .appModels)])
+            MachineClisSection(api: loader.api)
         case .automation:
             TasksOverview(api: loader.api) { detail = .tasks }
             EventsOverview(api: loader.api) { detail = .events }
@@ -486,6 +487,84 @@ struct SettingsPage: View {
         case .signInNeeded: return String(localized: "Signed out")
         case .unreachable: return String(localized: "Cannot reach this Space")
         case .incompatible: return String(localized: "Not an ai-space panel")
+        }
+    }
+}
+
+/// Settings → Models (src/web/MachineClis.tsx): which agent CLIs each machine has, with its
+/// version, whether it is signed in and which runtime uses it. A CLI found on the Space's own
+/// machine that no runtime uses can be added to runtimes.yaml; a peer's row is only shown.
+struct MachineClisSection: View {
+    @StateObject private var store: MachineClisStore
+
+    init(api: SpaceAPI) {
+        _store = StateObject(wrappedValue: MachineClisStore(api: api))
+    }
+
+    var body: some View {
+        Section {
+            if let error = store.error {
+                Label { Text("Unavailable: \(error)") } icon: { Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning) }
+            } else if !store.loaded {
+                ProgressView().controlSize(.small)
+            }
+            ForEach(store.machines) { m in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Text(verbatim: m.machine.isEmpty ? String(localized: "This machine") : m.machine).fontWeight(.semibold)
+                        if let note = m.note { Text(verbatim: note).font(.caption).foregroundStyle(.secondary) }
+                    }
+                    ForEach(m.entries) { c in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(verbatim: c.cli).font(.body.monospaced()).frame(minWidth: 56, alignment: .leading)
+                            Text(verbatim: Self.status(c)).font(.callout).foregroundStyle(c.state == .signedIn ? Theme.success : .secondary)
+                                .help([c.path, c.detail].compactMap { $0 }.joined(separator: "\n"))
+                            Spacer(minLength: 8)
+                            if m.canAdd(c, pending: store.pending), let kind = c.kind {
+                                Button("Add to runtimes.yaml") { Task { await store.add(kind) } }
+                                    .controlSize(.small).disabled(store.isSaving)
+                            } else if c.installed == true {
+                                Text(verbatim: c.configured == true ? String(localized: "Runtime: \((c.runtimes ?? []).joined(separator: ", "))") : String(localized: "Not a runtime there"))
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                        .opacity(m.isOff ? 0.6 : 1)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            HStack {
+                if let at = MachineInventory.lastChecked(store.machines) {
+                    Text("Checked \(HubFormat.relative(at))").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { Task { await store.recheck() } } label: { Text(store.isSaving ? "Checking…" : "Check again") }
+                    .disabled(store.isSaving)
+            }
+            if let added = store.added {
+                Text("Added as runtime \(added). Restart ai-space to offer it.").font(.callout).foregroundStyle(.secondary)
+            }
+            if let reason = store.saveError {
+                Label { Text(verbatim: reason) } icon: { Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.warning) }
+                    .font(.callout)
+            }
+        } header: {
+            Text("AI CLIs by machine")
+        } footer: {
+            Text("The agent CLIs each machine has. A CLI that is missing is left out of every model choice; one that is not signed in is shown greyed until it is.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+        .task { await store.refresh() }
+    }
+
+    /// Its version and sign-in, or why there is none.
+    static func status(_ c: CliInfo) -> String {
+        switch c.state {
+        case .unknown: return String(localized: "Not checked yet")
+        case .missing: return String(localized: "Not installed")
+        case .signedIn: return [c.version, String(localized: "Signed in")].compactMap { $0 }.joined(separator: " · ")
+        case .signedOut: return [c.version, String(localized: "Not signed in")].compactMap { $0 }.joined(separator: " · ")
+        case .installed: return c.version ?? "✓"
         }
     }
 }

@@ -584,3 +584,22 @@
 "%@ is not answering: %@" = "%@ 没有响应：%@";
 "No apps installed." = "尚未安装应用。";
 "On %@" = "%@ 上";
+
+/* Agent CLIs by machine */
+"AI CLIs by machine" = "各机器上的 AI CLI";
+"The agent CLIs each machine has. A CLI that is missing is left out of every model choice; one that is not signed in is shown greyed until it is." = "每台机器装了哪些智能体 CLI。没装的 CLI 不会出现在任何模型选项里；装了但未登录的会置灰显示，登录后可选。";
+"Check again" = "重新检测";
+"Checking…" = "检测中…";
+"Checked %@" = "检测于 %@";
+"Not installed" = "未安装";
+"Not checked yet" = "尚未检测";
+"Signed in" = "已登录";
+"Not signed in" = "未登录";
+"Runtime: %@" = "运行时：%@";
+"Not a runtime there" = "那台机器未配置";
+"Add to runtimes.yaml" = "加到 runtimes.yaml";
+"Added as runtime %@. Restart ai-space to offer it." = "已添加为运行时 %@，重启 ai-space 后生效。";
+"Unreachable" = "无法连接";
+"Offline · last known" = "离线 · 上次的结果";
+"Older ai-space: no list" = "旧版 ai-space：无清单";
+"peer" = "对等机器";
