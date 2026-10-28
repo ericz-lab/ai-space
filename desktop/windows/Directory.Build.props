@@ -1,0 +1,11 @@
+<Project>
+  <!-- Shared by the Core library, its tests and the WPF app (desktop/windows/README.md). -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+</Project>
