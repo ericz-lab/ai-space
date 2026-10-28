@@ -12,6 +12,8 @@ export type { BackupInfo, CapabilityApp, DeliveryInfo, EventInfo, PeerInfo, RunI
 import { dateTime as dateTimeOf } from "../../../../src/web/api.ts";
 export { dateTime, fmtDuration, relTime, scheduleText, untilTime } from "../../../../src/web/api.ts";
 export { activityBars, activityRange, type UsageWindow } from "../../../../src/web/activity-range.ts";
+export { fallbackNote, traceLines } from "../../../../src/web/call-trace.ts";
+import type { CallTrace } from "../../../../src/web/call-trace.ts";
 
 export const webText = (lang: Lang, key: WebKey, vars?: Record<string, string | number>) => translate(lang, key, vars);
 
@@ -311,6 +313,10 @@ export type CallInfo = {
   durationMs: number;
   usage?: { inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number };
   costUsd?: number;
+  /** The first choice when another candidate of its fallback list answered (docs/model.md#trace). */
+  fallbackFrom?: string;
+  tries?: number;
+  trace?: CallTrace;
 };
 export const MODEL_WINDOWS = ["5h", "24h", "7d", "30d"] as const;
 export type Metric = "tokens" | "costUsd" | "calls";

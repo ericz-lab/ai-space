@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { type AppInfo, dateTime, fmtDuration, getJson, relTime } from "./api.ts";
+import { type CallTrace, fallbackNote, traceLines } from "./call-trace.ts";
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
 
 // Usage window (a floating panel): what the model service recorded, read-only.
@@ -10,6 +11,7 @@ import { type Key, type Lang, localized, useLang } from "./i18n.ts";
 // - Rows are app → tag → model, largest first; a model table and the last calls follow.
 // - On a hub the peers' calls are in too: the app as `<peer>/<app>` (who started it), the model as
 //   `<machine>:<model>` when another machine ran it (docs/model-machines.md#ledger).
+// - A call that fell back says from which model; one with a trace opens to how it was placed (docs/model.md#trace).
 // Token figures are what the runtime reported; a call with none shows a dash, nothing is estimated.
 
 type Totals = { calls: number; errors: number; inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number; tokens: number; costUsd: number; durationMs: number };
@@ -46,6 +48,10 @@ type CallInfo = {
   durationMs: number;
   usage?: { inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number };
   costUsd?: number;
+  /** The first choice when another candidate of its fallback list answered. */
+  fallbackFrom?: string;
+  tries?: number;
+  trace?: CallTrace;
 };
 
 const WINDOWS = ["5h", "24h", "7d", "30d"] as const;
@@ -369,7 +375,9 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
                 <span className="svc-name">{t("usage.recent")}</span>
               </div>
               <div className="runs">
-                {calls.map((c) => (
+                {calls.map((c) => {
+                  const note = fallbackNote(c, lang as Lang);
+                  return (
                   <div key={c.id} className="runrow" title={c.error || `${c.app}/${c.tag} · ${c.backend}${c.modelSource ? ` · ${t(`appModels.source.${c.modelSource}` as Key)}` : ""}`}>
                     <div className="run-line">
                       <span className={`status ${c.status === "ok" ? "ok" : "down"} usage-model`} title={modelOn(c)}>
@@ -378,6 +386,7 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
                       </span>
                       <span className="usage-call">
                         {label(c.app)} · {c.tag}
+                        {note && <span className="usage-fallback"> · ↪ {note}</span>}
                       </span>
                       <span className="run-time" title={dateTime(c.startedAt, lang)}>
                         {relTime(c.startedAt, lang)}
@@ -389,8 +398,19 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
                       </span>
                     </div>
                     {c.error && <div className="run-err">{c.error}</div>}
+                    {c.trace && (
+                      <details className="usage-trace">
+                        <summary>{t("usage.trace")}</summary>
+                        <ol>
+                          {traceLines(c.trace, lang as Lang).map((line, i) => (
+                            <li key={i}>{line}</li>
+                          ))}
+                        </ol>
+                      </details>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           )}

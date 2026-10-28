@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { MODEL_COST_SQL } from "./pricing.ts";
-import { type CallStatus, type ModelCall, type ModelCallInput, type Origin, type Usage, type UsageTotals } from "./types.ts";
+import { type CallStatus, type CallTrace, type ModelCall, type ModelCallInput, type Origin, type Usage, type UsageTotals } from "./types.ts";
 
 /**
  * The ledger: one row per model call, in ai-space's own database next to the
@@ -34,7 +34,16 @@ CREATE INDEX IF NOT EXISTS model_calls_started ON model_calls(started_at DESC);
 CREATE INDEX IF NOT EXISTS model_calls_app_started ON model_calls(app, started_at DESC);
 `;
 
-const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [{ table: "model_calls", column: "runtime", ddl: "TEXT" }, { table: "model_calls", column: "mode", ddl: "TEXT" }, { table: "model_calls", column: "model_source", ddl: "TEXT" }, { table: "model_calls", column: "machine", ddl: "TEXT" }];
+const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [
+  { table: "model_calls", column: "runtime", ddl: "TEXT" },
+  { table: "model_calls", column: "mode", ddl: "TEXT" },
+  { table: "model_calls", column: "model_source", ddl: "TEXT" },
+  { table: "model_calls", column: "machine", ddl: "TEXT" },
+  // Fallback and trace (docs/model.md#trace): the first choice when another answered, how many runtimes were tried, the decision as JSON.
+  { table: "model_calls", column: "fallback_from", ddl: "TEXT" },
+  { table: "model_calls", column: "tries", ddl: "INTEGER" },
+  { table: "model_calls", column: "trace", ddl: "TEXT" },
+];
 
 /** Days of ledger kept; 0 keeps everything (the default: the ledger is the history the panel shows). */
 export const DEFAULT_RETENTION_DAYS = 0;
@@ -61,6 +70,9 @@ type Row = {
   cache_read_tokens: number | null;
   output_tokens: number | null;
   cost_usd: number | null;
+  fallback_from: string | null;
+  tries: number | null;
+  trace: string | null;
   effective_cost_usd: number | null;
 };
 
@@ -144,8 +156,8 @@ export class ModelStore {
     const r = this.db
       .query(
         `INSERT INTO model_calls (app, tag, model, runtime, machine, mode, model_source, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
-                                  input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, cost_usd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                  input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, cost_usd, fallback_from, tries, trace)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         c.app,
@@ -168,6 +180,9 @@ export class ModelStore {
         c.usage?.cacheReadTokens ?? null,
         c.usage?.outputTokens ?? null,
         c.costUsd ?? null,
+        c.fallbackFrom ?? null,
+        c.tries ?? null,
+        c.trace ? JSON.stringify(c.trace) : null,
       );
     if (this.retentionMs) this.db.query("DELETE FROM model_calls WHERE started_at < ?").run(c.startedAt - this.retentionMs);
     return { ...c, id: Number(r.lastInsertRowid), costUsd: this.get(Number(r.lastInsertRowid))?.costUsd };
@@ -328,5 +343,18 @@ function rowToCall(r: Row): ModelCall {
     outputChars: r.output_chars ?? undefined,
     usage,
     costUsd: r.effective_cost_usd ?? undefined,
+    ...(r.fallback_from ? { fallbackFrom: r.fallback_from } : {}),
+    ...(r.tries !== null && r.tries !== undefined ? { tries: r.tries } : {}),
+    ...(r.trace ? traceOf(r.trace) : {}),
   };
+}
+
+/** The stored trace, or nothing when it does not read back (a row is never lost to it). */
+function traceOf(text: string): { trace?: CallTrace } {
+  try {
+    const t = JSON.parse(text) as CallTrace;
+    return t && typeof t === "object" && Array.isArray(t.tries) ? { trace: t } : {};
+  } catch {
+    return {};
+  }
 }

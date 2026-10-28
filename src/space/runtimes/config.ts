@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type MachineSpec, type ModelTier, type RuntimeKind, type RuntimeSpec, type RuntimesConfig, type TierModels } from "./types.ts";
+import { FALLBACK_MODEL_PATTERN, MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type MachineSpec, type ModelTier, type RuntimeKind, type RuntimeSpec, type RuntimesConfig, type TierModels } from "./types.ts";
 
 /**
  * Which runtimes a space has: `<workspace>/runtimes.yaml`, or, when the file
@@ -30,6 +30,8 @@ import { MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN,
  *   machines:                     # optional: ssh logins that answer as `<machine>:<runtime>/<model>`
  *     bare:
  *       ssh: bare-alias           # an alias from the operator's ~/.ssh/config
+ *   fallback:                     # optional: where a call goes when its model's account or link fails
+ *     codex/basic: [box:codex/basic, dsh/basic]   # tiers only, never a higher one than the key's
  *
  * A runtime's own `ssh:` still works (answers on that machine under the runtime's own name) and
  * draws a warning: naming the machine shows in the model string where the call runs
@@ -61,7 +63,7 @@ export function parseRuntimesYaml(text: string, env: Record<string, string | und
     throw new Error(`${RUNTIMES_FILE}: invalid YAML: ${(e as Error).message}`);
   }
   if (!isRecord(doc)) throw new Error(`${RUNTIMES_FILE}: must be a mapping`);
-  for (const key of Object.keys(doc)) if (key !== "default" && key !== "runtimes" && key !== "machines") throw new Error(`${RUNTIMES_FILE}: unknown key "${key}"`);
+  for (const key of Object.keys(doc)) if (key !== "default" && key !== "runtimes" && key !== "machines" && key !== "fallback") throw new Error(`${RUNTIMES_FILE}: unknown key "${key}"`);
   if (!isRecord(doc.runtimes) || Object.keys(doc.runtimes).length === 0) throw new Error(`${RUNTIMES_FILE}: runtimes must be a non-empty mapping`);
 
   const warnings: string[] = [];
@@ -79,7 +81,9 @@ export function parseRuntimesYaml(text: string, env: Record<string, string | und
         const models: TierModels = {};
         for (const [tier, model] of Object.entries(raw.models)) {
           if (!(MODEL_TIERS as readonly string[]).includes(tier)) throw new Error(`${RUNTIMES_FILE}: unknown model tier ${tier}`);
-          if (typeof model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(model) || (MODEL_TIERS as readonly string[]).includes(model)) throw new Error(`${RUNTIMES_FILE}: ${tier} must name a concrete model`);
+          // An API runtime's model never meets a shell: a gateway's `provider/model` id (magpie's) is taken as is.
+          const id = kind === "anthropic-api" ? /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/ : /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+          if (typeof model !== "string" || !id.test(model) || (MODEL_TIERS as readonly string[]).includes(model)) throw new Error(`${RUNTIMES_FILE}: ${tier} must name a concrete model`);
           models[tier as ModelTier] = model;
         }
         spec.models = models;
@@ -94,7 +98,60 @@ export function parseRuntimesYaml(text: string, env: Record<string, string | und
   // No `default`: no runtime takes a bare model name; every model names its runtime.
   const def = doc.default;
   if (def !== undefined && (typeof def !== "string" || !runtimes.some((r) => r.name === def))) throw new Error(`${RUNTIMES_FILE}: default must name a configured runtime`);
-  return { config: { ...(def !== undefined ? { default: def as string } : {}), runtimes, ...(machines.length ? { machines } : {}) }, warnings };
+  const skipped = new Set(Object.keys(doc.runtimes).filter((n) => !runtimes.some((r) => r.name === n)));
+  const fallback = parseFallback(doc.fallback, runtimes, machines, skipped, warnings);
+  return { config: { ...(def !== undefined ? { default: def as string } : {}), runtimes, ...(machines.length ? { machines } : {}), ...(Object.keys(fallback).length ? { fallback } : {}) }, warnings };
+}
+
+/**
+ * `fallback:` (docs/model-machines.md#fallback): `[machine:]runtime/<tier>` → a list of the same.
+ * Tiers only, so cost is comparable: an entry above its key's tier is refused, and so is a runtime
+ * this file does not configure (on this machine or a `machines:` login). A machine that is not under
+ * `machines:` is taken for a peer, checked when a call uses it. An entry naming a runtime that was
+ * skipped for a missing key is dropped with a warning, like the runtime itself.
+ */
+function parseFallback(raw: unknown, runtimes: RuntimeSpec[], machines: MachineSpec[], skipped: Set<string>, warnings: string[]): Record<string, string[]> {
+  if (raw === undefined || raw === null) return {};
+  if (!isRecord(raw)) throw new Error(`${RUNTIMES_FILE}: fallback must map a model to a list of models`);
+  const rank = (tier: string) => (MODEL_TIERS as readonly string[]).indexOf(tier);
+  /** The model's tier, or undefined when it names a runtime that was skipped. */
+  const check = (model: string, where: string): string | undefined => {
+    const m = FALLBACK_MODEL_PATTERN.exec(model);
+    if (!m) throw new Error(`${where}: ${model} must be [machine:]runtime/<tier> (basic, junior, intermediate or advanced)`);
+    const [, machine, runtime, tier] = m;
+    const spec = runtimes.find((r) => r.name === runtime);
+    if (!machine || machines.some((x) => x.name === machine)) {
+      if (!spec && skipped.has(runtime!)) return undefined;
+      if (!spec) throw new Error(`${where}: runtime ${runtime} is not configured`);
+      if (machine && spec.kind === "anthropic-api") throw new Error(`${where}: runtime ${runtime} (anthropic-api) cannot run on another machine`);
+    }
+    return tier;
+  };
+  const out: Record<string, string[]> = {};
+  for (const [key, list] of Object.entries(raw)) {
+    const ctx = `${RUNTIMES_FILE}: fallback ${key}`;
+    const keyTier = check(key, `${RUNTIMES_FILE}: fallback`);
+    if (!Array.isArray(list) || list.length === 0 || !list.every((e) => typeof e === "string")) throw new Error(`${ctx} must be a non-empty list of models`);
+    if (keyTier === undefined) {
+      warnings.push(`fallback ${key} skipped: its runtime was skipped`);
+      continue;
+    }
+    const entries: string[] = [];
+    for (const raw of list as string[]) {
+      const entry = raw.trim();
+      const tier = check(entry, ctx);
+      if (entry === key) throw new Error(`${ctx}: lists itself`);
+      if (entries.includes(entry)) throw new Error(`${ctx}: lists ${entry} twice`);
+      if (tier === undefined) {
+        warnings.push(`fallback ${key}: ${entry} dropped: its runtime was skipped`);
+        continue;
+      }
+      if (rank(tier) > rank(keyTier)) throw new Error(`${ctx}: ${entry} is a higher tier than ${keyTier}; a fallback never raises cost`);
+      entries.push(entry);
+    }
+    if (entries.length) out[key] = entries;
+  }
+  return out;
 }
 
 function parseMachines(raw: unknown): MachineSpec[] {

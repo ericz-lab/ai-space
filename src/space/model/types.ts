@@ -1,4 +1,5 @@
 import type { Backend, CompleteInput, CompleteOutcome, CompletionMode, ImageInput, ImageOutcome, Usage } from "../runtimes/types.ts";
+import type { FailureKind } from "./failure.ts";
 
 /**
  * Data model of the model service: what an app asks for, what one call
@@ -78,9 +79,66 @@ export type ModelCall = {
   outputChars?: number;
   usage?: Usage;
   costUsd?: number;
+  /** The first choice, `[machine:]runtime/model`, when another candidate of its fallback list answered. */
+  fallbackFrom?: string;
+  /** How many runtimes were tried; absent on rows that never ran (a refused request, a task, an import). */
+  tries?: number;
+  /** How the call was placed, when there was more to it than the row says (below). */
+  trace?: CallTrace;
 };
 
 export type ModelCallInput = Omit<ModelCall, "id">;
+
+/**
+ * The decision behind a call (docs/model.md#trace), written where it was made with the values it
+ * was made from. Kept only when it says more than the row: a fallback list, a layer skipped, more
+ * than one try, or an upstream gateway naming what served it. A row without one ran its first and
+ * only candidate: its runtime, machine, model and `modelSource` are the whole story.
+ */
+export type CallTrace = {
+  /** Layers above the one that chose, which named a model this space cannot run. */
+  skippedLayers?: { source: string; model: string }[];
+  /** The first choice, then its fallback list, in the order they were considered. */
+  candidates?: TraceCandidate[];
+  /** Each runtime tried, in order. */
+  tries: TraceTry[];
+  /** Why the chain stopped where it did. */
+  stop?: TraceStop;
+};
+
+/**
+ * `answered`: a try succeeded. `not-switched`: the failure was not one a call moves on for (auth,
+ * a bad request, a timeout). `streamed`: output had reached the caller. `no-time`: the request's
+ * timeout was spent. `exhausted`: every candidate failed. `aborted`: the caller went away.
+ */
+export const TRACE_STOPS = ["answered", "not-switched", "streamed", "no-time", "exhausted", "aborted"] as const;
+export type TraceStop = (typeof TRACE_STOPS)[number];
+
+export type TraceCandidate = {
+  /** As configured: `[machine:]runtime/tier`, or the request's own model for the first choice. */
+  model: string;
+  /** Put after the others before anything was tried, and why; never dropped. */
+  later?: "resting" | "signed-out" | "unreachable" | "not-installed";
+  restKind?: FailureKind;
+  until?: string;
+  /** Not tried at all: it cannot take this call, or names nothing this space knows. */
+  skipped?: string;
+};
+
+export type TraceTry = {
+  runtime: string;
+  machine?: string;
+  /** The model as that runtime was asked (a tier resolved here, or a peer's tier). */
+  model: string;
+  ok: boolean;
+  error?: string;
+  kind?: FailureKind;
+  ms: number;
+  /** Output had reached the caller when it failed, so the call could not move on. */
+  streamed?: boolean;
+  /** What an upstream gateway said answered it (magpie's `provider/model`). */
+  served?: string;
+};
 
 /** Sums over a set of calls. */
 export type UsageTotals = {

@@ -7,6 +7,11 @@ import { Unsupported } from "./types.ts";
  * no agent runs or chats. Aliases the CLI understands are mapped to model ids;
  * anything else is passed to the API as is. Cost is computed from the list
  * prices below for the models listed, and left unknown otherwise.
+ *
+ * `url` may point at a gateway that speaks the same API, such as magpie on this machine
+ * (docs/runtimes.md#magpie): its `provider/model` ids come from the runtime's `models:` pins, and
+ * what it says answered (`X-Magpie-Model`) goes into the call's trace as `served`. A refusal's
+ * Retry-After is kept in the error (`retry after 30s`), where failure.ts reads when to try again.
  */
 
 export const DEFAULT_API_URL = "https://api.anthropic.com/v1/messages";
@@ -72,7 +77,12 @@ async function runApi(input: CompleteInput, o: { apiKey: string; apiUrl: string;
     usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
     error?: { message?: string };
   };
-  if (!res.ok) return { ok: false, error: `API ${res.status}: ${body.error?.message ?? "request failed"}`, backend };
+  const served = res.headers.get("x-magpie-model")?.trim().slice(0, 200) || undefined;
+  const upstream = served ? { served } : {};
+  if (!res.ok) {
+    const wait = retryAfterSeconds(res.headers.get("retry-after"));
+    return { ok: false, error: `API ${res.status}: ${body.error?.message ?? "request failed"}${wait !== undefined ? ` (retry after ${wait}s)` : ""}`, backend, ...upstream };
+  }
   const u = body.usage;
   const usage: Usage | undefined = u
     ? { inputTokens: u.input_tokens ?? 0, cacheWriteTokens: u.cache_creation_input_tokens ?? 0, cacheReadTokens: u.cache_read_input_tokens ?? 0, outputTokens: u.output_tokens ?? 0 }
@@ -83,6 +93,15 @@ async function runApi(input: CompleteInput, o: { apiKey: string; apiUrl: string;
     .map((c) => c.text!)
     .join("\n")
     .trim();
-  if (!text) return { ok: false, error: "empty answer", usage, costUsd, backend };
-  return { ok: true, text, usage, costUsd, backend };
+  if (!text) return { ok: false, error: "empty answer", usage, costUsd, backend, ...upstream };
+  return { ok: true, text, usage, costUsd, backend, ...upstream };
+}
+
+/** Retry-After as whole seconds: a number of seconds, or an HTTP date. */
+export function retryAfterSeconds(value: string | null, now = Date.now()): number | undefined {
+  const v = value?.trim();
+  if (!v) return undefined;
+  if (/^\d+(?:\.\d+)?$/.test(v)) return Math.ceil(Number(v));
+  const at = Date.parse(v);
+  return Number.isFinite(at) && at > now ? Math.ceil((at - now) / 1000) : undefined;
 }

@@ -1,6 +1,6 @@
 # Model calls by machine
 
-Status: implemented, except [fallback](#fallback) and per-caller budgets, which stay proposals. It builds on [runtimes.md](runtimes.md) (the adapters and `runtimes.yaml`), [model.md](model.md) (the model service and its ledger) and [peers.md](peers.md) (one panel over several machines). Code: `src/space/runtimes/registry.ts` (the machine prefix, `machines:`), `src/space/peers/model.ts` (the peer runtime), `src/space/model/api.ts` (`createPeerModelRoutes`), `src/space/model/health.ts` and `machines.ts` (the status table), `src/web/SettingsStatus.tsx` (its rows in Settings → Status). The [migration](#migration) at the end says what an operator does on an existing space.
+Status: implemented, except per-caller budgets, which stay a proposal. It builds on [runtimes.md](runtimes.md) (the adapters and `runtimes.yaml`), [model.md](model.md) (the model service and its ledger) and [peers.md](peers.md) (one panel over several machines). Code: `src/space/runtimes/registry.ts` (the machine prefix, `machines:`), `src/space/peers/model.ts` (the peer runtime), `src/space/model/api.ts` (`createPeerModelRoutes`), `src/space/model/health.ts` and `machines.ts` (the status table), `src/space/model/failure.ts` (failure causes and rests), `src/space/model/service.ts` (the fallback chain), `src/web/SettingsStatus.tsx` (its rows in Settings → Status). The [migration](#migration) at the end says what an operator does on an existing space.
 
 ## Problem
 
@@ -163,13 +163,25 @@ Recent calls from a peer carry `peer` and `peerId` (the peer's own id); their `i
 - **reachable**: false when ssh to a `machines:` login (or a runtime's own ssh host) fails; installed and signed in are then unknown.
 - **installed**: the CLI is found on the `PATH` the service actually runs with, not the operator's login shell. Over ssh, on that machine's login `PATH`, as the adapters run it.
 - **signed in**: probes that spend no tokens, at boot and every hour: `claude auth status` (its `loggedIn`), `codex login status` (exit 0), and for DeepSeek Harness the API key in the harness home's `.env` or, with `provider: deepseek-account`, its `.credentials.yaml`. An API runtime is signed in when its key is set.
-- **limited until**: set for one hour when a call fails with a quota or rate error (`usage limit`, `429`, `rate limit`, `at capacity`, `quota`, `overloaded`). It is cleared by the next successful call.
+- **limited until**, with its cause: a failed call is sorted into one of six causes by its message (`src/space/model/failure.ts`), and four of them rest the cell:
+
+  | cause | read from | rest |
+  | --- | --- | --- |
+  | `credit` | `credit balance is too low`, `insufficient balance`, `insufficient_quota`, `API 402`, 余额不足 | 30 min |
+  | `quota` | `usage limit`, `hit your limit`, `limit reached`, `quota` (unless per minute), 额度 | 15 min |
+  | `rate` | `rate limit`, `429`, `too many requests`, `overloaded`, `529`, `at capacity`, a per-minute quota | 1 min, doubling on each one in a row up to 30 min |
+  | `transport` | `connection refused` or `reset`, `broken pipe`, `ssh:`, `fetch failed`, the link dropped, HTTP 5xx | 1 min, doubling up to 10 min |
+  | `auth` | `401`, `403`, `not logged in`, `invalid api key`, a peer that rejected the token, `Permission denied (publickey)` | none: the hourly probe says signed out |
+  | `other` | anything else: a bad request, a timeout, an aborted call | none |
+
+  When the message names when the limit resets, that time is the rest instead (`restSaid`): Claude's `limit reached|<unix time>` and `resets 3pm (America/Los_Angeles)`, Codex's `try again at 3:05 PM` (in this machine's zone) and `resets_in_seconds`, an API's `Retry-After`, `try again in 2h 5m`, or an ISO time. A time already past or more than eight days off is not trusted. A rest never shortens a longer one already set; a run of rate or transport failures starts over when the next one comes 30 min after the last rest ended. The next successful call clears the rest, the cause and the run.
+- **last error**: the last failure's message and cause (`lastErrorKind`), also for causes that do not rest.
 - **last success**: the time of the last call that succeeded.
 - **version**: the CLI's `--version`, read in the same probe (over ssh, in the same round trip).
 
 For a runtime with its own `ssh:`, both machines get a cell: this one, where its chats and agent tasks run, and the ssh host, where its answers go. On the deployment above, that is exactly the pair that differed.
 
-Settings → Status shows the table. A cell is **used** when a default (the space's, `SPACE_MODEL_DEFAULT`, the runtimes.yaml default), an app override, a manifest's `model:` or an agent's declared runtime points at it. A used cell that is unreachable, not installed, not signed in or limited is a problem: red (limited is amber) and counted in the section's issues. An unused one with the same state is grey. `GET /api/model/status` returns the cells as `machines`, each with `used` and `problem`, and `servesPeers`, the runtimes this space offers. `GET /api/model/usage` adds `byMachine`.
+Settings → Status shows the table; a resting cell names its cause (quota used up, rate limited, …) and its tooltip says until when, and the fallback lists are listed under it. A cell is **used** when a default (the space's, `SPACE_MODEL_DEFAULT`, the runtimes.yaml default), an app override, a manifest's `model:` or an agent's declared runtime points at it. A used cell that is unreachable, not installed, not signed in or limited is a problem: red (limited is amber) and counted in the section's issues. An unused one with the same state is grey. `GET /api/model/status` returns the cells as `machines`, each with `used`, `problem`, `restKind`, `restSaid` and `lastErrorKind`, `servesPeers`, the runtimes this space offers, and `fallback`, the lists below. `GET /api/model/usage` adds `byMachine`.
 
 ## Inventory
 
@@ -185,14 +197,23 @@ Settings → Models shows the inventory as a table (machine × CLI): version, si
 
 ## Fallback
 
-Not built yet; this is the intended shape. Without a fallback, behaviour does not change: a call goes to the machine and runtime it names, and fails there. A fallback is always written out explicitly:
+Without a fallback list, behaviour does not change: a call goes to the machine and runtime it names, and fails there. A fallback is always written out explicitly, in `runtimes.yaml`:
 
 ```yaml
 fallback:
   codex/basic: [box:codex/basic, dsh/basic]
+  intermediate: [claude/intermediate]     # a bare tier means the default runtime's: codex/intermediate here
 ```
 
-A call whose resolved model has a fallback list tries the entries in order. It skips an entry whose status cell is `limited` or not signed in, and moves to the next entry only on a quota, rate or transport error, never on a model error. The ledger row records the entry that answered and has a `fallback_from` column naming the first choice. An entry that resolves to a more expensive tier is refused when the configuration is loaded, so a fallback never raises cost silently.
+**Loading.** The key and every entry are `[machine:]runtime/tier`. Each must name a configured runtime: here or on a `machines:` login (a peer's runtimes are checked when called, since the peer decides what it offers). The API runtime has no machine. An entry may not repeat itself or its key, and its tier may not be above the key's (`basic` < `junior` < `intermediate` < `advanced`), so a fallback never raises cost. A list that breaks a rule fails the load; an entry whose runtime was skipped for a missing key is dropped with a warning.
+
+**Which calls.** A call to `/api/model/run` whose resolved model is a key: the request's own model, or the one its app's layers chose (`codex/basic`, or a bare `basic` on a space whose default runtime is `codex`). A call another space forwarded here (`origin: peer`) does not fall back here: the caller's list decides. Image calls do not fall back.
+
+**Order.** The first choice, then the entries as written. Before anything runs, an entry that rests, is signed out, unreachable or not installed (as this space knows the cell: its own probes and the calls it sent there) moves after the others, in its own order, and is still tried: its rest may have ended, and dropping it could leave no candidate. An entry that cannot take this call is skipped with the reason: [placement](#placement) (full mode or machine tools on another machine), tools the runtime refuses (any for the API runtime, other than web tools for Codex and DeepSeek Harness), files (the API runtime, DeepSeek Harness).
+
+**When it moves on.** Only after a `credit`, `quota`, `rate` or `transport` failure ([status](#status)), and only while no output has reached the caller: once a streamed call has sent its first `delta`, a failure ends it there, so the caller never sees two halves. A refused sign-in, a bad request, a timeout or an abort ends the call. The candidates share the request's `timeoutMs`: the first gets all of it, each later one what is left, and none starts with less than 5 s left. The call holds one slot of the concurrency cap throughout.
+
+**Never silent.** The ledger row names the runtime and machine that answered, `fallback_from` the first choice and `tries` how many ran; the [trace](model.md#trace) has every candidate and try. The caller gets the same row as `call` in the answer (and `done` or `error` when streaming), and the service log says which entry it tried next and why.
 
 ## What does not change
 
@@ -211,7 +232,7 @@ What an operator does on a space that borrows another space's login over a runti
 3. **Move overrides.** On this space, set the default and the app overrides to `<peer>:codex/...`, check that calls arrive (the ledger's `machine` column, the peer's own rows), then remove `ssh:` from the runtime so that a bare `codex/...` means this machine.
 4. **Machines without ai-space** move from a runtime's `ssh:` to `machines:`.
 
-Not built: **fallback** lists and per-caller budgets ([open questions](#open-questions)).
+Not built: per-caller budgets ([open questions](#open-questions)).
 
 ### Apps
 
@@ -230,4 +251,5 @@ The goal for app code: call `/api/model/run` and `/api/model/image` only, start 
 ## Open questions
 
 - Should a peer be able to set a budget per calling space (calls or cost per day), or do its own cap and the `SPACE_PEER_MODEL` list suffice? Deferred: the list and the cap for now.
-- Fallback as described above: deferred until the status table has run for a while and shows how often a cell is limited.
+- Should fallback lists be per app or tag, not only per model? One list per model for now: the same model fails the same way whoever calls it.
+- Lanes: one concurrency cap per runtime or machine instead of one for the service, so a runtime that is slow or resting does not hold the slots of the others.

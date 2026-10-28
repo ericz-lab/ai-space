@@ -73,10 +73,14 @@ test("layers resolve in order: tag override, app override, manifest tag, manifes
   } finally { close(); }
 });
 
-test("a layer this space cannot run falls through to the next", () => {
+test("a layer this space cannot run falls through to the next, and the trace is told which", () => {
   const { appModels, state, close } = setup({ feed: { default: "missing/advanced", tags: { translate: "gemini/basic" } } }, "claude/junior");
   try {
-    expect(appModels.resolve("feed", "translate")).toEqual({ model: "claude/junior", source: "default" });
+    expect(appModels.resolve("feed", "translate")).toEqual({
+      model: "claude/junior",
+      source: "default",
+      skipped: [{ source: "manifest-tag", model: "gemini/basic" }, { source: "manifest-default", model: "missing/advanced" }],
+    });
     state.fallback = "sonnet";
     expect(appModels.qualify("basic")).toBe("basic");
   } finally { close(); }

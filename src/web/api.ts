@@ -104,7 +104,12 @@ export type MachineCell = {
   detail?: string;
   checkedAt?: string;
   limitedUntil?: string;
+  /** Why it rests (docs/model-machines.md#status); absent on an older Space's cell. */
+  restKind?: "credit" | "quota" | "rate" | "transport";
+  /** The rest's end came from the runtime's own words. */
+  restSaid?: boolean;
   lastError?: string;
+  lastErrorKind?: "credit" | "quota" | "rate" | "auth" | "transport" | "other";
   lastOkAt?: string;
   used: boolean;
   problem?: "unreachable" | "not installed" | "not signed in" | "limited";

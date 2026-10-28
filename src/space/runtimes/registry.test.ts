@@ -163,3 +163,50 @@ runtimes:
     expect(() => api.resolve("advanced")).toThrow(/no model for tier/);
   });
 });
+
+describe("fallback lists (docs/model-machines.md#fallback)", () => {
+  const base = "default: codex\nruntimes:\n  codex: { kind: codex-cli }\n  dsh: { kind: deepseek-harness }\n  api: { kind: anthropic-api, apiKeyEnv: K }\nmachines:\n  bare: { ssh: bare-alias }\n";
+
+  test("are read as written: tiers, a machines: login and a peer machine checked when used", () => {
+    const { config, warnings } = parseRuntimesYaml(`${base}fallback:\n  codex/basic: [bare:codex/basic, box:codex/basic, dsh/basic]\n  codex/advanced: [dsh/intermediate]\n`, { K: "k" });
+    expect(warnings).toEqual([]);
+    expect(config.fallback).toEqual({ "codex/basic": ["bare:codex/basic", "box:codex/basic", "dsh/basic"], "codex/advanced": ["dsh/intermediate"] });
+    const reg = new RuntimeRegistry(config);
+    // A bare tier is looked up on the default runtime; a concrete model or another runtime has no list.
+    expect(reg.fallbackFor("basic")).toEqual({ key: "codex/basic", entries: ["bare:codex/basic", "box:codex/basic", "dsh/basic"] });
+    expect(reg.fallbackFor("codex/basic")?.key).toBe("codex/basic");
+    expect(reg.fallbackFor("codex/gpt-6-luna")).toBeUndefined();
+    expect(reg.fallbackFor("dsh/basic")).toBeUndefined();
+    expect(reg.fallbacks()).toEqual(config.fallback!);
+    expect(reg.describe()).toContain("fallback codex/basic → bare:codex/basic, box:codex/basic, dsh/basic");
+  });
+
+  test("never raise cost, name only configured runtimes and tiers, and never list themselves twice", () => {
+    const bad = (fallback: string) => () => parseRuntimesYaml(`${base}fallback:\n${fallback}\n`, { K: "k" });
+    expect(bad("  codex/basic: [dsh/junior]")).toThrow(/higher tier .* never raises cost/);
+    expect(bad("  codex/basic: [nope/basic]")).toThrow(/runtime nope is not configured/);
+    expect(bad("  codex/basic: [bare:nope/basic]")).toThrow(/runtime nope is not configured/);
+    expect(bad("  codex/basic: [bare:api/basic]")).toThrow(/cannot run on another machine/);
+    expect(bad("  codex/basic: [dsh/deepseek-flash]")).toThrow(/runtime\/<tier>/);
+    expect(bad("  codex/gpt-6-luna: [dsh/basic]")).toThrow(/runtime\/<tier>/);
+    expect(bad("  codex/basic: [codex/basic]")).toThrow(/lists itself/);
+    expect(bad("  codex/basic: [dsh/basic, dsh/basic]")).toThrow(/twice/);
+    expect(bad("  codex/basic: []")).toThrow(/non-empty list/);
+    expect(bad("  codex/basic: dsh/basic")).toThrow(/non-empty list/);
+  });
+
+  test("an entry on a runtime skipped for its missing key is dropped with a warning, like the runtime", () => {
+    const { config, warnings } = parseRuntimesYaml(`${base}fallback:\n  codex/basic: [api/basic, dsh/basic]\n  api/basic: [dsh/basic]\n`, {});
+    expect(config.fallback).toEqual({ "codex/basic": ["dsh/basic"] });
+    expect(warnings).toContain("fallback codex/basic: api/basic dropped: its runtime was skipped");
+    expect(warnings).toContain("fallback api/basic skipped: its runtime was skipped");
+  });
+
+  test("an API runtime's tier pins may be a gateway's provider/model id; a CLI's may not", () => {
+    const { config } = parseRuntimesYaml("runtimes:\n  magpie: { kind: anthropic-api, apiKeyEnv: M, url: 'http://127.0.0.1:3425/v1/messages', models: { basic: anthropic/claude-haiku-4-5, junior: cheap-group } }\n", { M: "magpie-ai-space" });
+    const reg = new RuntimeRegistry(config);
+    expect(reg.resolve("magpie/basic").model).toBe("anthropic/claude-haiku-4-5");
+    expect(reg.resolve("magpie/junior").model).toBe("cheap-group");
+    expect(() => parseRuntimesYaml("runtimes:\n  codex: { kind: codex-cli, models: { basic: openai/gpt-6-luna } }\n")).toThrow(/concrete model/);
+  });
+});

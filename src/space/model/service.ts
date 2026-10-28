@@ -2,8 +2,9 @@ import { assertCompletionMode, type OnDelta, type RuntimeAdapter } from "../runt
 import { RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
 import type { ModelStore } from "./store.ts";
 import type { ModelSource } from "./app-models.ts";
+import { classifyFailure, REST_KINDS } from "./failure.ts";
 import type { RuntimeHealth } from "./health.ts";
-import { type ImageRunInput, type ImageRunOutcome, type ModelCall, type Origin, type RunInput, type RunOutcome, type Usage } from "./types.ts";
+import { type CallTrace, type ImageRunInput, type ImageRunOutcome, type ModelCall, type Origin, type RunInput, type RunOutcome, type TraceCandidate, type TraceStop, type TraceTry, type Usage } from "./types.ts";
 
 /**
  * The service: resolves a request's model to one of the configured runtimes
@@ -12,6 +13,13 @@ import { type ImageRunInput, type ImageRunOutcome, type ModelCall, type Origin, 
  * to the ledger. The cap exists because every call is a process (or an API
  * request) and an app in a loop must not start fifty of them; excess calls
  * wait in order.
+ *
+ * Fallback (docs/model-machines.md#fallback): when runtimes.yaml lists a fallback for the model a
+ * call names, the call moves to the next entry only when the one it tried failed on credit, quota,
+ * rate or transport, and only while nothing of the answer has reached the caller. Candidates that
+ * rest, are signed out or cannot be reached go last, never dropped; one that cannot take this call
+ * (full mode, tools, files, another machine) is skipped. The row names the first choice
+ * (`fallbackFrom`), how many runtimes were tried, and the trace of the decision.
  *
  * Shutdown: `drain` waits for the calls in flight, because an app is blocked on
  * each of them; the ones still running when the grace is over are written to the
@@ -30,6 +38,12 @@ export type ModelServiceOptions = {
 };
 
 export type RunResult = { outcome: RunOutcome; call: ModelCall };
+
+/** Which layer chose the model, and the layers above it that named a model this space cannot run (app-models.ts). */
+export type CallChoice = ModelSource | { source: ModelSource; skipped?: { source: ModelSource; model: string }[] };
+
+/** Less time than this left of the request's timeout: no further candidate is started. */
+export const MIN_TRY_MS = 5_000;
 export type ImageResult = { outcome: ImageRunOutcome; call: ModelCall };
 
 /** Recorded for a call the process could not finish: a restart, or a drain that ran out of grace. */
@@ -54,6 +68,36 @@ function assertPlace(runtime: RuntimeAdapter, input: Pick<RunInput, "mode" | "to
   const why = runtime.machine ? needsLocal(input) : undefined;
   if (why) throw new Error(`this call uses ${why} and needs this machine's environment, so it cannot run on ${runtime.machine}; send it without tools (or with WebSearch/WebFetch only), or hand the work to an agent on the machine that has the data`);
 }
+
+/** What every runtime that answers a call checks first; a failure here is the request's, never a reason to fall back. */
+function assertTakes(runtime: RuntimeAdapter, input: RunInput): void {
+  assertPlace(runtime, input);
+  assertCompletionMode(input);
+  if (input.serviceTier !== undefined && runtime.kind !== "codex-cli") throw new Error("serviceTier requires a local Codex streaming runtime");
+  if (input.mode === "full" && runtime.kind !== "codex-cli" && runtime.kind !== "claude-code") throw new Error(`runtime ${runtime.name} does not support full completion mode`);
+}
+
+/**
+ * Why a fallback entry cannot take this call, so it is skipped rather than tried: the checks every
+ * runtime makes, then the tools and files its adapter would refuse (the first choice's adapter
+ * reports those itself, as before).
+ */
+function whyNot(runtime: RuntimeAdapter, input: RunInput): string | undefined {
+  if (!runtime.capabilities.complete) return `runtime ${runtime.name} does not answer requests`;
+  try {
+    assertTakes(runtime, input);
+  } catch (e) {
+    return (e as Error).message;
+  }
+  const local = input.tools.filter((t) => !WEB_TOOLS.has(t.split("(")[0]!));
+  if (input.tools.length && runtime.kind === "anthropic-api") return "the API runtime takes no tools";
+  if (local.length && (runtime.kind === "codex-cli" || runtime.kind === "deepseek-harness")) return `runtime ${runtime.name} answers with WebSearch/WebFetch only`;
+  if (input.files?.length && (runtime.kind === "anthropic-api" || runtime.kind === "deepseek-harness")) return `runtime ${runtime.name} takes no files`;
+  return undefined;
+}
+
+/** One candidate of a call: the first choice or a fallback entry, resolved here. */
+type Candidate = { label: string; runtime?: RuntimeAdapter; model?: string; note: TraceCandidate; first?: true };
 
 type Inflight = { mode?: RunInput["mode"]; app: string; tag: string; model: string; promptChars: number; startedAt: number };
 
@@ -110,7 +154,7 @@ export class ModelService {
    * With `onDelta`, the runtime hands the text over as it is produced when it can; the outcome
    * still carries the whole answer. `source` is recorded with the call: which layer chose the model.
    */
-  async run(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, source?: ModelSource, origin: Origin = "run"): Promise<RunResult> {
+  async run(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, source?: CallChoice, origin: Origin = "run"): Promise<RunResult> {
     const p = this.execute(app, input, signal, onDelta, source, origin);
     this.inflight.set(p, { mode: input.mode ?? (input.tools.length || input.files?.length ? undefined : "slim"), app, tag: input.tag, model: input.model, promptChars: input.prompt.length, startedAt: this.now() });
     try {
@@ -201,43 +245,141 @@ export class ModelService {
     return { finished: started - left.length, interrupted: left.length };
   }
 
-  private async execute(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, source?: ModelSource, origin: Origin = "run"): Promise<RunResult> {
+  private async execute(app: string, input: RunInput, signal?: AbortSignal, onDelta?: OnDelta, choice?: CallChoice, origin: Origin = "run"): Promise<RunResult> {
+    const source = typeof choice === "object" ? choice.source : choice;
+    const skippedLayers = typeof choice === "object" && choice.skipped?.length ? choice.skipped : undefined;
     let target: { runtime: RuntimeAdapter; model: string } | undefined;
     try {
       target = this.resolve(input.model);
-      assertPlace(target.runtime, input);
-      assertCompletionMode(input);
-      if (input.serviceTier !== undefined && target.runtime.kind !== "codex-cli") throw new Error("serviceTier requires a local Codex streaming runtime");
-      if (input.mode === "full" && target.runtime.kind !== "codex-cli" && target.runtime.kind !== "claude-code") {
-        throw new Error(`runtime ${target.runtime.name} does not support full completion mode`);
-      }
+      assertTakes(target.runtime, input);
     } catch (e) {
       // Recorded too: an app asking for a runtime this space lacks, or for this machine's environment
       // on another, shows up in the ledger as its own error (under that runtime and machine when known).
       const outcome: RunOutcome = { ok: false, error: (e as Error).message, backend: (target?.runtime.backend ?? this.backend) as RunOutcome["backend"] };
-      return { outcome, call: this.record(app, target ? { ...input, model: target.model } : input, target?.runtime, outcome, this.now(), 0, source, origin) };
+      return { outcome, call: this.record(app, target ? { ...input, model: target.model } : input, target?.runtime, outcome, this.now(), 0, source, origin, skippedLayers ? { trace: { skippedLayers, tries: [] } } : {}) };
     }
+    const candidates = this.candidates(input, target, origin);
     if (!(await this.acquire(signal))) {
       // Cancelled while queued: it never ran, but the ledger still shows the request.
       const outcome: RunOutcome = { ok: false, error: "aborted", backend: target.runtime.backend };
-      return { outcome, call: this.record(app, { ...input, model: target.model }, target.runtime, outcome, this.now(), 0, source, origin) };
+      return { outcome, call: this.record(app, { ...input, model: target.model }, target.runtime, outcome, this.now(), 0, source, origin, skippedLayers ? { trace: { skippedLayers, tries: [] } } : {}) };
     }
     const startedAt = this.now();
-    let outcome: RunOutcome;
+    const deadline = startedAt + input.timeoutMs;
+    const tries: TraceTry[] = [];
+    let outcome: RunOutcome = { ok: false, error: "no candidate could take this call", backend: target.runtime.backend };
+    let used: Candidate = candidates[0]!;
+    let stop: TraceStop = "exhausted";
     try {
-      outcome = await target.runtime.complete({ ...input, model: target.model, caller: app }, signal, onDelta);
-    } catch (e) {
-      outcome = { ok: false, error: (e as Error).message ?? String(e), backend: target.runtime.backend };
+      for (const c of candidates) {
+        if (!c.runtime || c.model === undefined || c.note.skipped) continue;
+        if (tries.length) {
+          if (signal?.aborted) {
+            stop = "aborted";
+            break;
+          }
+          if (deadline - this.now() < MIN_TRY_MS) {
+            stop = "no-time";
+            break;
+          }
+          this.log(`${app}/${input.tag}: ${used.label} failed (${tries.at(-1)!.kind}); trying ${c.label}`);
+        }
+        // Output that reached the caller pins the call to this runtime: the caller sees one answer, never two halves.
+        let streamed = false;
+        const relay: OnDelta | undefined = onDelta && ((text) => {
+          streamed = true;
+          onDelta(text);
+        });
+        const t0 = this.now();
+        let o: RunOutcome;
+        try {
+          o = await c.runtime.complete({ ...input, model: c.model, caller: app, timeoutMs: tries.length ? deadline - t0 : input.timeoutMs }, signal, relay);
+        } catch (e) {
+          o = { ok: false, error: (e as Error).message ?? String(e), backend: c.runtime.backend };
+        }
+        const failure = o.ok ? undefined : classifyFailure(o.error, this.now());
+        this.health?.note(c.runtime.machine ?? "", c.runtime.name, o.ok ? undefined : o.error, failure);
+        tries.push({
+          runtime: c.runtime.name, ...(c.runtime.machine ? { machine: c.runtime.machine } : {}), model: o.model ?? c.model, ok: o.ok,
+          ...(o.ok ? {} : { error: o.error.slice(0, 200), kind: failure!.kind }), ms: Math.max(0, this.now() - t0),
+          ...(streamed && !o.ok ? { streamed: true } : {}), ...(o.served ? { served: o.served } : {}),
+        });
+        outcome = o;
+        used = c;
+        if (o.ok) {
+          stop = "answered";
+          break;
+        }
+        this.log(`${app}/${input.tag} (${c.runtime.name}/${c.model}, ${o.backend}): ${o.error}`);
+        if (streamed) {
+          stop = "streamed";
+          break;
+        }
+        if (!REST_KINDS.has(failure!.kind)) {
+          stop = "not-switched";
+          break;
+        }
+      }
     } finally {
       this.release();
     }
-    const call = this.record(app, { ...input, model: target.model }, target.runtime, outcome, startedAt, Math.max(0, this.now() - startedAt), source, origin);
-    this.health?.note(target.runtime.machine ?? "", target.runtime.name, outcome.ok ? undefined : outcome.error);
-    if (!outcome.ok) this.log(`${app}/${input.tag} (${target.runtime.name}/${target.model}, ${outcome.backend}): ${outcome.error}`);
+    const first = candidates.find((c) => c.first)!;
+    const fellBack = used !== first;
+    const informative = candidates.length > 1 || tries.length > 1 || Boolean(skippedLayers) || tries.some((t) => t.served);
+    const trace: CallTrace | undefined = informative
+      ? { ...(skippedLayers ? { skippedLayers } : {}), ...(candidates.length > 1 ? { candidates: candidates.map((c) => c.note) } : {}), tries, stop }
+      : undefined;
+    const call = this.record(app, { ...input, model: used.model ?? target.model }, used.runtime ?? target.runtime, outcome, startedAt, Math.max(0, this.now() - startedAt), source, origin, {
+      ...(fellBack && tries.length ? { fallbackFrom: first.label } : {}),
+      ...(tries.length ? { tries: tries.length } : {}),
+      ...(trace ? { trace } : {}),
+    });
+    if (fellBack && outcome.ok) this.log(`${app}/${input.tag}: answered by ${used.label}, fallback from ${first.label}`);
     return { outcome, call };
   }
 
-  private record(app: string, input: RunInput, runtime: RuntimeAdapter | undefined, outcome: RunOutcome, startedAt: number, durationMs: number, source?: ModelSource, origin: Origin = "run"): ModelCall {
+  /**
+   * The first choice, then its fallback list (docs/model-machines.md#fallback), each resolved here.
+   * One that cannot take this call is kept with the reason it is skipped; one that rests, is signed
+   * out, unreachable or not installed goes after the others, in its own order, and is still tried.
+   * A call another space forwarded here does not fall back here: the caller's own list decides, and
+   * the peer offers only the runtimes it chose (SPACE_PEER_MODEL).
+   */
+  private candidates(input: RunInput, first: { runtime: RuntimeAdapter; model: string }, origin: Origin): Candidate[] {
+    const list = origin === "peer" ? undefined : this.runtimes.fallbackFor(input.model);
+    const head: Candidate = { label: list?.key ?? input.model, runtime: first.runtime, model: first.model, note: { model: list?.key ?? input.model }, first: true };
+    if (!list) return [head];
+    const all: Candidate[] = [head];
+    for (const entry of list.entries) {
+      let r: { runtime: RuntimeAdapter; model: string };
+      try {
+        r = this.runtimes.resolve(entry);
+      } catch (e) {
+        all.push({ label: entry, note: { model: entry, skipped: (e as Error).message } });
+        continue;
+      }
+      const why = whyNot(r.runtime, input);
+      all.push({ label: entry, runtime: r.runtime, model: r.model, note: { model: entry, ...(why ? { skipped: why } : {}) } });
+    }
+    for (const c of all) if (c.runtime && !c.note.skipped) Object.assign(c.note, this.stateOf(c.runtime));
+    // The order they are tried in, each group in its configured order; the skipped ones close the trace.
+    return [...all.filter((c) => !c.note.skipped && !c.note.later), ...all.filter((c) => !c.note.skipped && c.note.later), ...all.filter((c) => c.note.skipped)];
+  }
+
+  /** Why a candidate goes last, as this space knows its cell: its own probes and the calls it sent there. */
+  private stateOf(runtime: RuntimeAdapter): Pick<TraceCandidate, "later" | "restKind" | "until"> {
+    if (!this.health) return {};
+    const machine = runtime.machine ?? "";
+    const rest = this.health.resting(machine, runtime.name);
+    if (rest) return { later: "resting", until: rest.until, ...(rest.kind ? { restKind: rest.kind } : {}) };
+    const c = this.health.get(machine, runtime.name);
+    if (c?.reachable === false) return { later: "unreachable" };
+    if (c?.installed === false) return { later: "not-installed" };
+    if (c?.signedIn === false) return { later: "signed-out" };
+    return {};
+  }
+
+  private record(app: string, input: RunInput, runtime: RuntimeAdapter | undefined, outcome: RunOutcome, startedAt: number, durationMs: number, source?: ModelSource, origin: Origin = "run", extra: Pick<ModelCall, "fallbackFrom" | "tries" | "trace"> = {}): ModelCall {
     return this.store.add({
       app,
       tag: input.tag,
@@ -257,6 +399,7 @@ export class ModelService {
       outputChars: outcome.ok ? outcome.text.length : undefined,
       usage: outcome.usage,
       costUsd: outcome.costUsd,
+      ...extra,
     });
   }
 
