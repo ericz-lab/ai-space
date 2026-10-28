@@ -9,6 +9,7 @@ import { type Key as WebKey, type Lang, translate } from "../../../../src/web/me
  */
 
 export type { BackupInfo, CapabilityApp, DeliveryInfo, EventInfo, PeerInfo, RunInfo, ServiceInfo, TaskInfo, UsageRow, WebKey };
+import { dateTime as dateTimeOf } from "../../../../src/web/api.ts";
 export { dateTime, fmtDuration, relTime, scheduleText, untilTime } from "../../../../src/web/api.ts";
 export { activityBars, activityRange, type UsageWindow } from "../../../../src/web/activity-range.ts";
 
@@ -247,6 +248,10 @@ export type Totals = { calls: number; errors: number; inputTokens: number; cache
 export type UsageInfo = {
   window: string;
   backend: string;
+  /** The Space whose ledger this is (096ba00). */
+  space?: string;
+  /** On a hub: each peer, whether its rows are in, and from when. */
+  peers?: { name: string; ok: boolean; asOf?: string; error?: string }[];
   totals: Totals;
   byTag: (Totals & { app: string; tag: string; model: string; machine?: string })[];
   byModel: (Totals & { model: string; machine?: string })[];
@@ -261,6 +266,8 @@ export type CallInfo = {
   tag: string;
   model: string;
   machine?: string;
+  /** The peer this call comes from, on a hub (its app is then `<peer>/<app>`). */
+  peer?: string;
   modelSource?: string;
   backend: string;
   status: "ok" | "error";
@@ -282,12 +289,27 @@ export function decodeUsage(raw: unknown): UsageInfo {
   return {
     window: String(field(raw, "window") ?? ""),
     backend: String(field(raw, "backend") ?? ""),
+    ...(typeof field(raw, "space") === "string" && field(raw, "space") ? { space: field(raw, "space") as string } : {}),
+    ...(Array.isArray(field(raw, "peers")) ? { peers: listOf<NonNullable<UsageInfo["peers"]>[number]>(raw, "peers").filter((p) => typeof p?.name === "string") } : {}),
     totals: totals(field(raw, "totals")),
     byTag: listOf<UsageInfo["byTag"][number]>(raw, "byTag"),
     byModel: listOf<UsageInfo["byModel"][number]>(raw, "byModel"),
     byBackend: listOf<UsageInfo["byBackend"][number]>(raw, "byBackend"),
     history: { ...(typeof field(h, "firstAt") === "string" ? { firstAt: field(h, "firstAt") as string } : {}), totals: totals(field(h, "totals")), days: listOf<UsageInfo["history"]["days"][number]>(h, "days") },
   };
+}
+
+/** The page's header: the Space, then the backend (Usage.tsx); its tooltip is `usage.spaceHint`. */
+export function usageHeader(u: UsageInfo, lang: Lang): string {
+  const backend = translate(lang, "usage.backend", { backend: u.backend });
+  return u.space ? `${translate(lang, "usage.space", { space: u.space })} · ${backend}` : backend;
+}
+
+/** One line per peer whose rows are missing or old (Usage.tsx). */
+export function usagePeerNotes(u: UsageInfo, lang: Lang): string[] {
+  return (u.peers ?? [])
+    .filter((p) => !p.ok)
+    .map((p) => (p.asOf ? translate(lang, "usage.peerStale", { peer: p.name, error: p.error ?? "", time: dateTimeOf(p.asOf, lang) }) : translate(lang, "usage.peerMissing", { peer: p.name, error: p.error ?? "" })));
 }
 
 /** 1234 → 1.2K, 1234567 → 1.23M, 2689400000 → 2.69B; a missing figure is a dash (Usage.tsx). */

@@ -35,6 +35,8 @@ import {
   taskCounts,
   taskModels,
   taskStatus,
+  usageHeader,
+  usagePeerNotes,
   webText,
 } from "./settings.ts";
 
@@ -176,4 +178,15 @@ test("feedback settings read as the panel writes them, with safe defaults", () =
   const empty = decodeFeedback(null);
   expect(empty.settings).toEqual({ enabled: false, appsDefault: true, apps: {}, mode: "auto", machine: "", model: "", effort: "xhigh", errors: true });
   expect(empty.shortcut).toBe("Alt+Shift+F");
+});
+
+test("model usage names the Space and the peers whose rows are missing or old", () => {
+  const u = decodeUsage({ backend: "ai-space", space: "home", peers: [{ name: "david", ok: true }, { name: "eric", ok: false, error: "timeout", asOf: "2026-10-27T10:00:00Z" }, { name: "box", ok: false, error: "no route" }, { ok: false }] });
+  expect(usageHeader(u, "en")).toBe("Space home · " + webText("en", "usage.backend", { backend: "ai-space" }));
+  expect(usageHeader(decodeUsage({ backend: "x" }), "en")).toBe(webText("en", "usage.backend", { backend: "x" }));
+  const notes = usagePeerNotes(u, "en");
+  expect(notes).toHaveLength(2);
+  expect(notes[0]).toStartWith("eric did not answer (timeout); its figures are from ");
+  expect(notes[1]).toBe("box is not included: no route");
+  expect(usagePeerNotes(u, "zh")[1]).toBe("未包含 box：no route");
 });

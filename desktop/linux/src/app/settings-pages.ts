@@ -50,6 +50,8 @@ import {
   type AppModelRow,
   type WebKey,
   modelOn,
+  usageHeader,
+  usagePeerNotes,
 } from "../core/settings.ts";
 import { lang, tw } from "./env.ts";
 import type { Space } from "./model.ts";
@@ -346,15 +348,16 @@ export function usagePage(ctx: Ctx, space: Space): any {
       ctx.labels(),
     ]);
     const label = (app: string) => labels.get(app)?.title ?? app;
-    body.append(
-      heading(
-        tw("usage.backend", { backend: usage.backend }),
-        segmented(MODEL_WINDOWS, window, (w) => w, (w) => {
-          window = w;
-          reload();
-        }),
-      ),
+    const head = heading(
+      usageHeader(usage, lang),
+      segmented(MODEL_WINDOWS, window, (w) => w, (w) => {
+        window = w;
+        reload();
+      }),
     );
+    head.set_tooltip_text(tw("usage.spaceHint"));
+    body.append(head);
+    for (const line of usagePeerNotes(usage, lang)) body.append(note(line));
     body.append(note(tw("usage.costNote")));
     const tot = usage.totals;
     body.append(
