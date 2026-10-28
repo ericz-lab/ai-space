@@ -15,7 +15,7 @@ struct AISpaceApp: App {
                     .tabItem { Label("Connections", systemImage: "network") }
             }
         }
-        .commands { SpaceCommands(model: delegate.model, store: delegate.model.store, showWindow: delegate.showWindow) }
+        .commands { SpaceCommands(model: delegate.model, store: delegate.model.store, prefs: prefs, showWindow: delegate.showWindow) }
 
         // MenuBarExtra writes this binding on every update; writing the same value back would
         // republish the preferences and re-render the app in a loop.
@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
     private lazy var quickChat = QuickChat(model: model)
     private lazy var hotKey = HotKey { [weak self] in self?.quickChat.toggle() }
+    private lazy var floatingBall = FloatingBall(model: model)
     private var watchers: Set<AnyCancellable> = []
     private var activity: NSObjectProtocol?
 
@@ -73,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 NSLog("ai-space: the Quick Chat shortcut \(shortcut.label) is taken by another app")
             }
         }.store(in: &watchers)
+        Preferences.shared.$floatingBall.sink { [weak self] on in self?.floatingBall.set(visible: on) }.store(in: &watchers)
 
         // Inbox notifications and the menu bar need the 30-second refresh while the window is
         // hidden; App Nap would otherwise stretch it to minutes. Idle sleep stays allowed.
@@ -168,6 +170,7 @@ final class ServicesProvider: NSObject {
 struct SpaceCommands: Commands {
     @ObservedObject var model: AppModel
     @ObservedObject var store: ConnectionStore
+    @ObservedObject var prefs: Preferences
     let showWindow: () -> Void
 
     var body: some Commands {
@@ -184,6 +187,7 @@ struct SpaceCommands: Commands {
             Button("Share Picture…") { model.pictureSharing.choose() }
             Button("Paste Picture") { model.pictureSharing.paste() }
             Button("Pending Shares") { model.pictureSharing.show() }
+            Toggle("Floating Ball", isOn: $prefs.floatingBall)
             Divider()
             Button("Back to Space") { model.showMainWindow(.launcher) }
                 .keyboardShortcut("h", modifiers: [.command, .shift])

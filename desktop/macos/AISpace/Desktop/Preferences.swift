@@ -58,6 +58,20 @@ final class Preferences: ObservableObject {
     }
     /// Widget cards on the screens; they stay pinned and stay in the library when off.
     @Published var showsWidgets: Bool { didSet { defaults.set(!showsWidgets, forKey: "hidesWidgets") } }
+    /// The floating ball over every app that takes a dropped picture (FloatingBall.swift); off
+    /// until the operator turns it on.
+    @Published var floatingBall: Bool { didSet { defaults.set(floatingBall, forKey: "floatingBall") } }
+    /// Where the ball last stood, in screen points; nil until it was moved.
+    var floatingBallOrigin: CGPoint? {
+        get {
+            guard let xy = defaults.array(forKey: "floatingBallOrigin") as? [Double], xy.count == 2 else { return nil }
+            return CGPoint(x: xy[0], y: xy[1])
+        }
+        set {
+            if let p = newValue { defaults.set([Double(p.x), Double(p.y)], forKey: "floatingBallOrigin") }
+            else { defaults.removeObject(forKey: "floatingBallOrigin") }
+        }
+    }
 
     private init() {
         chatPermission = ChatPermission(rawValue: defaults.string(forKey: "chat-perm") ?? "") ?? .readOnly
@@ -68,6 +82,7 @@ final class Preferences: ObservableObject {
         appearance = Appearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
         themeID = defaults.string(forKey: "theme") ?? ThemePreset.aurora.id
         showsWidgets = !defaults.bool(forKey: "hidesWidgets")
+        floatingBall = defaults.bool(forKey: "floatingBall")
         Theme.current = ThemePreset.named(themeID)
     }
 }

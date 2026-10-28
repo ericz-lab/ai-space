@@ -121,6 +121,11 @@
 "Off" = "关闭";
 "Quick Chat shortcut" = "快速对话快捷键";
 "Opens a chat with an agent over any app. Services > Ask ai-space sends selected text to it, and Shortcuts can open aispace://chat?agent=<app>/<agent>&text=… — a message is never sent without you." = "在任何应用之上打开与智能体的对话。“服务 > Ask ai-space”会把选中的文字放进去，快捷指令也可以打开 aispace://chat?agent=<app>/<agent>&text=…。消息不会在未经你确认时发出。";
+"Show the floating ball" = "显示悬浮球";
+"A small ball over every app. Drop a picture on it to keep the picture in an app of the Space; drag the ball to move it, click it for Pending Shares. Space → Floating Ball shows or hides it too." = "一个浮在所有应用之上的小球。把图片拖到球上，就能把它保存到 Space 的某个应用；拖动小球可以移动位置，点一下打开“待保存分享”。“Space → 悬浮球”菜单也可以显示或隐藏它。";
+"Floating Ball" = "悬浮球";
+"Hide Floating Ball" = "隐藏悬浮球";
+"Drop a picture here to keep it in an app of the Space." = "把图片拖到这里，保存到 Space 的某个应用。";
 "Show in the menu bar" = "在菜单栏中显示";
 "Notify me of new inbox messages" = "收件箱有新消息时通知我";
 "The unread count also shows on the Dock icon. Notifications follow the Space's inbox; nothing is sent twice." = "未读数也会显示在 Dock 图标上。通知跟随 Space 的收件箱，同一条不会重复提醒。";
