@@ -583,7 +583,7 @@ private struct FeedbackCards: View {
                 CardDivider()
                 LabeledContent("Fix Engineer model") {
                     Picker("Fix Engineer model", selection: bind(s.model) { value in
-                        value.isEmpty || v.models.first(where: { $0.value == value })?.isAvailable == true ? .model(value) : nil
+                        value.isEmpty || v.models.first(where: { $0.value == value })?.isAvailable == true ? FeedbackChange.model(value) : nil
                     }) {
                         Text("Default chat model").tag("")
                         if !s.model.isEmpty, !v.models.contains(where: { $0.value == s.model }) {
@@ -785,7 +785,7 @@ private struct MachineClisCard: View {
             ForEach(m.entries) { c in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(verbatim: c.cli).font(.subheadline.monospaced())
-                    Text(verbatim: Self.status(c)).font(.caption).foregroundStyle(c.state == .signedIn ? Theme.success : .secondary)
+                    Text(verbatim: Self.status(c)).font(.caption).foregroundStyle(c.state == .signedIn ? Theme.success : Color.secondary)
                     Spacer(minLength: 6)
                     if m.canAdd(c, pending: store.pending), let kind = c.kind {
                         Button("Add to runtimes.yaml") { Task { await store.add(kind) } }

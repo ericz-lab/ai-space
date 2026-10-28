@@ -30,17 +30,17 @@ struct ModelUsagePage: View {
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
                         if let space = store.usage?.space, !space.isEmpty {
-                        // The ledger is the open Space's own; apps running on a peer are in the peer's.
-                        Text("Space \(space)")
-                    }
-                    if let backend = store.usage?.backend { Text("Backend: \(backend)") }
-                    ForEach(store.usage?.peersOff ?? [], id: \.name) { p in
-                        if let at = p.asOf.flatMap(ISO8601.parse) {
-                            Text("\(p.name) did not answer (\(p.error ?? "")); its figures are from \(at.formatted(date: .abbreviated, time: .shortened))")
-                        } else {
-                            Text("\(p.name) is not included: \(p.error ?? "")")
+                            // The ledger is the open Space's own; apps running on a peer are in the peer's.
+                            Text("Space \(space)")
                         }
-                    }
+                        if let backend = store.usage?.backend { Text("Backend: \(backend)") }
+                        ForEach(store.usage?.peersOff ?? [], id: \.name) { p in
+                            if let at = p.asOf.flatMap(ISO8601.parse) {
+                                Text("\(p.name) did not answer (\(p.error ?? "")); its figures are from \(at.formatted(date: .abbreviated, time: .shortened))")
+                            } else {
+                                Text("\(p.name) is not included: \(p.error ?? "")")
+                            }
+                        }
                         Text("Costs include GPT estimates at standard API rates, not subscription charges. Unknown costs are excluded from totals.")
                     }
                 }
@@ -69,7 +69,7 @@ struct ModelUsagePage: View {
                                 HStack(spacing: 6) {
                                     Dot(color: call.status == "ok" ? Theme.success : Theme.danger)
                                     // `machine:model` stays on one line, cut at the end.
-                                Text(verbatim: call.modelOn ?? "").foregroundStyle(Theme.text).lineLimit(1).truncationMode(.tail)
+                                    Text(verbatim: call.modelOn ?? "").foregroundStyle(Theme.text).lineLimit(1).truncationMode(.tail)
                                     Spacer(minLength: 8)
                                     if let date = call.startedAt.flatMap(ISO8601.parse) {
                                         Text(verbatim: HubFormat.relative(date)).font(.caption).foregroundStyle(.secondary)

@@ -521,7 +521,7 @@ struct MachineClisSection: View {
                     ForEach(m.entries) { c in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(verbatim: c.cli).font(.body.monospaced()).frame(minWidth: 56, alignment: .leading)
-                            Text(verbatim: Self.status(c)).font(.callout).foregroundStyle(c.state == .signedIn ? Theme.success : .secondary)
+                            Text(verbatim: Self.status(c)).font(.callout).foregroundStyle(c.state == .signedIn ? Theme.success : Color.secondary)
                                 .help([c.path, c.detail].compactMap { $0 }.joined(separator: "\n"))
                             Spacer(minLength: 8)
                             if m.canAdd(c, pending: store.pending), let kind = c.kind {
@@ -632,7 +632,7 @@ struct FeedbackSections: View {
                 }
             }
             Picker("Fix Engineer model", selection: bind(s.model) { value in
-                value.isEmpty || v.models.first(where: { $0.value == value })?.isAvailable == true ? .model(value) : nil
+                value.isEmpty || v.models.first(where: { $0.value == value })?.isAvailable == true ? FeedbackChange.model(value) : nil
             }) {
                 Text("Default chat model").tag("")
                 if !s.model.isEmpty, !v.models.contains(where: { $0.value == s.model }) {
