@@ -457,6 +457,37 @@ struct AppModelRows: Decodable, Hashable, Identifiable {
     var id: String { app }
 }
 
+/// One peer's part of App models (src/web/AppModels.tsx `PeerModels`): its apps' rows and its own
+/// choices, since their calls run there, or why there are none. Read through
+/// `GET /api/peers/:peer/model/apps`; a peer app is keyed `<peer>/<app>`.
+struct PeerAppModels: Hashable, Identifiable {
+    var peer: String
+    var apps: [AppModelRows]?
+    var options: [ModelChoice]?
+    var error: String?
+    /// Its core does not have the route yet.
+    var old = false
+
+    var id: String { peer }
+    var isLoading: Bool { apps == nil && error == nil && !old }
+
+    /// The peer's answer. An older core answers a path it does not know with its page, not JSON.
+    static func read(peer: String, data: Data) -> PeerAppModels {
+        struct Body: Decodable {
+            var ok: Bool?
+            var error: String?
+            var apps: Lossy<AppModelRows>?
+            var options: Lossy<ModelChoice>?
+        }
+        guard let body = try? JSONDecoder().decode(Body.self, from: data) else { return PeerAppModels(peer: peer, old: true) }
+        if body.ok == false { return PeerAppModels(peer: peer, error: body.error ?? "") }
+        return PeerAppModels(peer: peer, apps: body.apps?.elements ?? [], options: body.options?.elements ?? [])
+    }
+
+    /// A 404 that is not about the peer itself: a core without the route, not a failure.
+    static func isOlderCore(status: Int, error: String) -> Bool { status == 404 && !error.hasPrefix("unknown peer") }
+}
+
 // MARK: Events (docs/events.md)
 
 struct SpaceEvent: Decodable, Hashable, Identifiable {

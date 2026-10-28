@@ -213,27 +213,71 @@ final class AppUsageStore: HubStore {
 final class AppModelsStore: HubStore {
     @Published private(set) var apps: [AppModelRows] = []
     @Published private(set) var options: [ModelChoice] = []
+    /// On a hub, each peer's apps after the local ones, each peer read on its own so a slow one
+    /// holds up only its part.
+    @Published private(set) var peers: [PeerAppModels] = []
 
     override func load() async throws {
         async let names: Void = fetchLabels()
+        async let peerList = try? api.data("/api/peers")
         let data = try await api.data("/api/model/apps")
         await names
         options = (try? Hub.rows(ModelChoice.self, "options", from: data)) ?? []
         apps = try Hub.rows(AppModelRows.self, "apps", from: data)
+        let peerNames = ((await peerList).flatMap { try? Hub.rows(PeerStatus.self, "peers", from: $0) } ?? []).map(\.name).sorted()
+        peers = peerNames.map { name in peers.first { $0.peer == name } ?? PeerAppModels(peer: name) }
+        for name in peerNames {
+            Task {
+                let fresh = await loadPeer(name)
+                if let i = peers.firstIndex(where: { $0.peer == name }) { peers[i] = fresh }
+            }
+        }
+    }
+
+    private func loadPeer(_ peer: String) async -> PeerAppModels {
+        do {
+            return PeerAppModels.read(peer: peer, data: try await api.data("/api/peers/\(SpacePath.escape(peer))/model/apps"))
+        } catch SpaceAPIError.http(let status, let text) where PeerAppModels.isOlderCore(status: status, error: text) {
+            return PeerAppModels(peer: peer, old: true)
+        } catch {
+            return PeerAppModels(peer: peer, error: Self.message(error))
+        }
     }
 
     /// The apps by title.
-    var sorted: [AppModelRows] {
-        apps.sorted { title($0.app).localizedCaseInsensitiveCompare(title($1.app)) == .orderedAscending }
+    var sorted: [AppModelRows] { sorted(apps) }
+
+    func sorted(_ apps: [AppModelRows], peer: String? = nil) -> [AppModelRows] {
+        apps.sorted { title($0.app, peer: peer).localizedCaseInsensitiveCompare(title($1.app, peer: peer)) == .orderedAscending }
     }
 
-    /// Sets the panel's override for an app's calls, or for one tag of them; nil clears it.
-    func setModel(app: String, tag: String?, _ value: String?) async {
+    /// A peer's app by its own title when the hub lists it (`<peer>/<app>`), else by its name.
+    func title(_ app: String, peer: String?) -> String {
+        guard let peer else { return title(app) }
+        return labels["\(peer)/\(app)"]?.displayTitle ?? app
+    }
+
+    /// The hub's icon for a peer's app, else the peer's own (the hub's list leaves out a peer app
+    /// with the same link as a local one).
+    func icon(_ app: String, peer: String?) -> String? {
+        guard let peer else { return labels[app]?.icon }
+        return labels["\(peer)/\(app)"]?.icon ?? "/api/peers/\(SpacePath.escape(peer))/apps/\(SpacePath.escape(app))/icon"
+    }
+
+    /// Sets the panel's override for an app's calls, or for one tag of them; nil clears it. A peer's
+    /// app is saved on that peer, where its calls run.
+    func setModel(app: String, peer: String? = nil, tag: String?, _ value: String?) async {
         await save {
             var body: [String: Any] = ["model": value ?? NSNull()]
             if let tag { body["tag"] = tag }
-            let answer = try await api.send("PATCH", "/api/panel/apps/\(SpacePath.escape(app))/model", json: body)
-            if let fresh = try? Hub.decode(AppModelRows.self, from: answer), let i = apps.firstIndex(where: { $0.app == app }) { apps[i] = fresh }
+            let path = peer.map { "/api/peers/\(SpacePath.escape($0))/apps/\(SpacePath.escape(app))/model" } ?? "/api/panel/apps/\(SpacePath.escape(app))/model"
+            let answer = try await api.send("PATCH", path, json: body)
+            guard let fresh = try? Hub.decode(AppModelRows.self, from: answer) else { return }
+            if let peer {
+                if let p = peers.firstIndex(where: { $0.peer == peer }), let i = peers[p].apps?.firstIndex(where: { $0.app == app }) { peers[p].apps?[i] = fresh }
+            } else if let i = apps.firstIndex(where: { $0.app == app }) {
+                apps[i] = fresh
+            }
         }
     }
 }

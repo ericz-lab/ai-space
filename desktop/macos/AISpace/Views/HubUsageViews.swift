@@ -296,27 +296,53 @@ struct AppModelsPage: View {
             } footer: {
                 Text("The model an app's calls run on when they name none. A choice here overrides what the app declares, for every device; “No override” returns to it.")
             }
-            ForEach(store.sorted) { app in
+            appSections(store.sorted, options: store.options, peer: nil)
+            // On a hub, each peer's apps under its name, offered the peer's own choices (src/web/AppModels.tsx).
+            ForEach(store.peers) { p in
                 Section {
-                    ForEach(app.rows) { row in
-                        ModelMenu(options: store.options, current: row.override, none: String(localized: "No override"), disabled: store.isSaving,
-                                  pick: { value in Task { await store.setModel(app: app.app, tag: row.tag, value) } }) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(verbatim: row.tag ?? String(localized: "All calls")).foregroundStyle(Theme.text)
-                                Text(verbatim: [row.model, source(row.source)].compactMap { $0 }.joined(separator: " · "))
-                                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            }
-                        }
+                    if p.isLoading {
+                        ProgressView()
+                    } else if p.old {
+                        Text("\(p.peer) runs an older core; update it to list its apps here.").font(.footnote).foregroundStyle(.secondary)
+                    } else if let error = p.error {
+                        Text("\(p.peer) is not answering: \(error)").font(.footnote).foregroundStyle(Theme.danger)
+                    } else if p.apps?.isEmpty == true {
+                        Text("No apps installed.").font(.footnote).foregroundStyle(.secondary)
                     }
                 } header: {
-                    HStack(spacing: 8) {
-                        EntryIcon(icon: store.labels[app.app]?.icon, fallback: "shippingbox", icons: icons, size: 20)
-                        Text(verbatim: store.title(app.app))
+                    Text("On \(p.peer)")
+                }
+                appSections(store.sorted(p.apps ?? [], peer: p.peer), options: p.options ?? [], peer: p.peer)
+            }
+        }
+        .hubPage("App models", store)
+    }
+
+    /// One section per app: the app-wide row and one per tag, each a model menu saved at once.
+    private func appSections(_ apps: [AppModelRows], options: [ModelChoice], peer: String?) -> some View {
+        ForEach(apps) { app in
+            Section {
+                ForEach(app.rows) { row in
+                    ModelMenu(options: options, current: row.override, none: String(localized: "No override"), disabled: store.isSaving,
+                              pick: { value in Task { await store.setModel(app: app.app, peer: peer, tag: row.tag, value) } }) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: row.tag ?? String(localized: "All calls")).foregroundStyle(Theme.text)
+                            Text(verbatim: [row.model, source(row.source)].compactMap { $0 }.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                }
+            } header: {
+                HStack(spacing: 8) {
+                    EntryIcon(icon: store.icon(app.app, peer: peer), fallback: "shippingbox", icons: icons, size: 20)
+                    Text(verbatim: store.title(app.app, peer: peer))
+                    if let peer {
+                        Spacer(minLength: 4)
+                        Text(verbatim: peer).foregroundStyle(.secondary)
                     }
                 }
             }
         }
-        .hubPage("App models", store)
     }
 
     /// The layer that chose the model a row runs on.

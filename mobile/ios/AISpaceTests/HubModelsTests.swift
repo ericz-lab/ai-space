@@ -137,6 +137,20 @@ struct HubModelsTests {
         #expect(rows[1].id == "agent:space/assistant")
     }
 
+    @Test func readsAPeersAppModelsOrWhyThereAreNone() {
+        let fine = PeerAppModels.read(peer: "david", data: Data(#"{"ok":true,"apps":[{"app":"draw","rows":[{"tag":null,"model":"codex/basic","source":"default"}]}],"options":[{"value":"codex/basic","runtime":"codex","tier":"basic","model":"luna"}]}"#.utf8))
+        #expect(fine.apps?.map(\.app) == ["draw"])
+        #expect(fine.options?.map(\.value) == ["codex/basic"])
+        #expect(!fine.isLoading && !fine.old && fine.error == nil)
+        // An older core answers with its page.
+        #expect(PeerAppModels.read(peer: "david", data: Data("<!doctype html><title>ai-space</title>".utf8)).old)
+        #expect(PeerAppModels.read(peer: "david", data: Data(#"{"ok":false,"error":"timeout"}"#.utf8)).error == "timeout")
+        #expect(PeerAppModels(peer: "david").isLoading)
+        #expect(PeerAppModels.isOlderCore(status: 404, error: "not found"))
+        #expect(!PeerAppModels.isOlderCore(status: 404, error: "unknown peer: david"))
+        #expect(!PeerAppModels.isOlderCore(status: 502, error: "bad gateway"))
+    }
+
     @Test func readsAppModelsEventsAndPackages() throws {
         let models = try Hub.rows(AppModelRows.self, "apps", from: Data(#"{"apps":[{"app":"notes","rows":[{"tag":null,"model":"codex/basic","source":"default"},{"tag":"image","manifest":"codex/intermediate","override":"claude/basic","model":"claude/basic","source":"override-tag"}]}]}"#.utf8))
         #expect(models[0].rows.map(\.id) == ["", "image"])

@@ -525,3 +525,9 @@
 "Space %@" = "Space %@";
 "%@ did not answer (%@); its figures are from %@" = "%@ 没有响应（%@），显示的是 %@ 的数据";
 "%@ is not included: %@" = "未包含 %@：%@";
+
+/* App models on peers */
+"%@ runs an older core; update it to list its apps here." = "%@ 的 core 版本较旧，更新后才会在这里列出它的应用。";
+"%@ is not answering: %@" = "%@ 没有响应：%@";
+"No apps installed." = "尚未安装应用。";
+"On %@" = "%@ 上";
