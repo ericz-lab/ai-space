@@ -85,6 +85,7 @@ object DebugLaunch {
                 "appModels" -> HubPage.AppModels
                 "events" -> HubPage.Events
                 "packages" -> HubPage.Packages
+                "feedback" -> HubPage.Feedback
                 "terminal" -> HubPage.Terminal
                 "chat" -> HubPage.Chat(null)
                 else -> if (it.startsWith("chat:")) HubPage.Chat(it.removePrefix("chat:")) else null

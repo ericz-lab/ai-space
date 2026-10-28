@@ -49,6 +49,7 @@ import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CropSquare
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Feedback
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Inventory2
@@ -197,6 +198,7 @@ fun SettingsPage(
             appearance(model)
             models(model, space?.models, status, saving, saveError) { value -> scope.launch { settings.setDefaultModel(value) } }
             automation(model)
+            feedback(model)
             usage(model)
             spaceStatus(connection, status, space, loading, peers)
             if (peers.isNotEmpty()) peerRows(peers)
@@ -688,6 +690,15 @@ private fun LazyListScope.automation(model: AppModel) {
             pageRow("tasks", R.string.settings_tasks, Icons.Outlined.Schedule, HubPage.Tasks, model),
             pageRow("events", R.string.settings_events, Icons.Outlined.Bolt, HubPage.Events, model),
         ),
+    )
+}
+
+/** Feedback: the button on app pages and the Fix Engineer. */
+private fun LazyListScope.feedback(model: AppModel) {
+    section(
+        "feedback",
+        header = { stringResource(R.string.settings_section_feedback) },
+        rows = listOf(pageRow("feedback", R.string.settings_feedback, Icons.Outlined.Feedback, HubPage.Feedback, model)),
     )
 }
 

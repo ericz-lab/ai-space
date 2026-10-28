@@ -13,12 +13,18 @@ import dev.aispace.android.core.AppUsageRow
 import dev.aispace.android.core.CapabilityApp
 import dev.aispace.android.core.DecodingException
 import dev.aispace.android.core.EventDelivery
+import dev.aispace.android.core.Feedback
+import dev.aispace.android.core.FeedbackItem
+import dev.aispace.android.core.FeedbackPatch
+import dev.aispace.android.core.FeedbackView
 import dev.aispace.android.core.Hub
 import dev.aispace.android.core.InboxFilter
 import dev.aispace.android.core.InboxPage
 import dev.aispace.android.core.InboxSummary
 import dev.aispace.android.core.InboxThread
+import dev.aispace.android.core.Json
 import dev.aispace.android.core.JsonReader
+import dev.aispace.android.core.int
 import dev.aispace.android.core.ModelCall
 import dev.aispace.android.core.ModelChoice
 import dev.aispace.android.core.ModelUsage
@@ -449,5 +455,75 @@ class InboxStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope) {
     suspend fun readAll() {
         save { api.send("POST", "/api/inbox/read-all", JSONObject()) }
         refresh()
+    }
+}
+
+/**
+ * Settings → Feedback (src/web/FeedbackSettings.tsx). A switch or menu shows its new value at once
+ * and stays usable while the change is saved; only the answer to the newest save is kept, so a
+ * slower earlier one cannot undo a later choice.
+ */
+class FeedbackStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope) {
+    var view by mutableStateOf<FeedbackView?>(null)
+        private set
+    var items by mutableStateOf<List<FeedbackItem>>(emptyList())
+        private set
+
+    /** What the last fix asked for started, until the next one. */
+    var notice by mutableStateOf<String?>(null)
+        private set
+    var isFixing by mutableStateOf(false)
+        private set
+    private var saves = 0
+
+    override suspend fun load() {
+        coroutineScope {
+            val recent = async {
+                try { api.text("/api/panel/feedback?limit=20") } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            }
+            val fresh = Hub.decode(api.text("/api/panel/feedback/settings"), FeedbackView)
+            val r = recent.await()
+            view = fresh
+            if (r != null) items = try { Hub.rows("items", r, FeedbackItem) } catch (e: Exception) { items }
+        }
+    }
+
+    /** While something is being fixed or queued, the page reads again now and then. */
+    val isMoving: Boolean get() = items.any { it.isMoving }
+
+    fun save(patch: FeedbackPatch) {
+        val n = ++saves
+        view = view?.withPatch(patch)
+        saveError = null
+        scope.launch {
+            try {
+                val answer = api.send("PUT", "/api/panel/feedback/settings", patch.toJson())
+                if (n == saves) HubStore.decodeOrNull(answer, FeedbackView)?.let { view = it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                saveError = HubStore.message(e)
+                refresh()
+            }
+        }
+    }
+
+    /** Hands waiting feedback to the Fix Engineer now: everything here, a peer's, or some by id. */
+    suspend fun fix(peer: String? = null, ids: List<Int>? = null) {
+        if (isFixing) return
+        isFixing = true
+        try {
+            val answer = api.send("POST", "/api/panel/feedback/fix", Feedback.fixBody(peer, ids))
+            val queued = Json.obj(answer)?.int("queued") ?: 0
+            notice = HubText.get(R.string.feedback_started, queued)
+            saveError = null
+            refresh()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            saveError = HubStore.message(e)
+        } finally {
+            isFixing = false
+        }
     }
 }

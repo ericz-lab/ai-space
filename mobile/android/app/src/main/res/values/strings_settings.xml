@@ -90,4 +90,6 @@
     <string name="settings_section_status">Status</string>
     <string name="settings_section_packages">Packages</string>
     <string name="settings_section_account">Account</string>
+    <string name="settings_section_feedback">Feedback</string>
+    <string name="settings_feedback">Feedback button and fixes</string>
 </resources>
