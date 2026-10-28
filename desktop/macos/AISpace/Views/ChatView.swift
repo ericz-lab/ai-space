@@ -83,8 +83,6 @@ struct ChatView: View {
             return true
         }
         .onAppear { focused = true }
-        .task { if !compact { await chat.loadSessions() } }
-        .task(id: chat.busy) { if !compact, !chat.busy { await chat.loadSessions() } }
     }
 
     private func chooseImages() {
