@@ -237,4 +237,7 @@
     <string name="chat_machine_separator">", "</string>
     <string name="chat_on_machines">On %1$s</string>
     <string name="chat_machine_offline_note">%1$s is offline. Pick another machine, or wait until it answers again.</string>
+    <string name="models_signed_out">not signed in</string>
+    <string name="models_offline">offline</string>
+    <string name="models_saved_missing">not available</string>
 </resources>

@@ -108,6 +108,7 @@ import dev.aispace.android.HubPage
 import dev.aispace.android.R
 import dev.aispace.android.core.Connection
 import dev.aispace.android.core.Lang
+import dev.aispace.android.core.ModelChoices
 import dev.aispace.android.core.ModelPreferences
 import dev.aispace.android.core.PeerStatus
 import dev.aispace.android.core.SpaceBackup
@@ -120,6 +121,7 @@ import dev.aispace.android.live.LoaderStatus
 import dev.aispace.android.live.SettingsLoader
 import dev.aispace.android.ui.common.EntryIcon
 import dev.aispace.android.ui.home.HomeType
+import dev.aispace.android.ui.hub.choiceLabel
 import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.Appearance
 import dev.aispace.android.ui.theme.ThemePreset
@@ -605,8 +607,15 @@ private fun LazyListScope.defaultModel(
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                val missing = ModelChoices.savedMissing(current, m.options.map { it.value })
+                val savedMissing = stringResource(R.string.models_saved_missing)
+                val shown = when {
+                    current == null -> environment
+                    missing != null -> "$missing ($savedMissing)"
+                    else -> m.options.firstOrNull { it.value == current }?.let { choiceLabel(it.label, it.unavailable) } ?: current
+                }
                 Text(
-                    current?.let { m.label(it) } ?: environment, style = HomeType.body, color = t.secondaryText,
+                    shown, style = HomeType.body, color = t.secondaryText,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                 )
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = t.secondaryText, modifier = Modifier.size(18.dp))
@@ -616,14 +625,14 @@ private fun LazyListScope.defaultModel(
                     open = false
                     choose(null)
                 }
+                ModelChoices.savedMissing(current, m.options.map { it.value })?.let { missing ->
+                    ModelChoice("$missing (${stringResource(R.string.models_saved_missing)})", true, enabled = false) { open = false }
+                }
                 m.options.forEach { option ->
-                    ModelChoice(option.label, current == option.value) {
+                    ModelChoice(choiceLabel(option.label, option.unavailable), current == option.value, enabled = option.unavailable == null) {
                         open = false
                         choose(option.value)
                     }
-                }
-                if (current != null && m.options.none { it.value == current }) {
-                    ModelChoice(current, true) { open = false }
                 }
             }
         }
@@ -649,10 +658,11 @@ private fun LazyListScope.defaultModel(
 }
 
 @Composable
-private fun ModelChoice(label: String, on: Boolean, onClick: () -> Unit) {
+private fun ModelChoice(label: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     DropdownMenuItem(
         text = { Text(label) },
         onClick = onClick,
+        enabled = enabled,
         leadingIcon = if (on) {
             { Icon(Icons.Filled.Check, contentDescription = null) }
         } else {

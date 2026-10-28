@@ -89,13 +89,17 @@ data class AppLabel(val name: String, val title: String, val i18n: I18n? = null,
     }
 }
 
-/** A runtime and tier a task or an app's calls may run on. */
+/**
+ * A runtime and tier a task or an app's calls may run on. [unavailable] says why it is shown but
+ * cannot be picked (docs/model-machines.md#inventory): `signed-out` or `offline`; null is offered.
+ */
 data class ModelChoice(
     val value: String,
     val runtime: String? = null,
     val tier: String? = null,
     val model: String? = null,
     val capabilities: Capabilities? = null,
+    val unavailable: String? = null,
 ) {
     data class Capabilities(val agent: Boolean? = null, val complete: Boolean? = null) {
         companion object : JsonReader<Capabilities> {
@@ -114,9 +118,32 @@ data class ModelChoice(
                 tier = o.str("tier"),
                 model = o.str("model"),
                 capabilities = o.obj("capabilities")?.let { Capabilities.from(it) },
+                unavailable = o.str("unavailable"),
             )
         }
     }
+}
+
+/**
+ * How every model picker shows its choices (src/web/model-choices.tsx): the Space already left out
+ * what is missing on its machine; a choice that is not signed in, or on a peer that is offline,
+ * comes with `unavailable` and is shown greyed; a saved value no longer offered stays shown, marked,
+ * so nothing is rewritten behind the person's back.
+ */
+object ModelChoices {
+    /** Why a choice cannot be picked, as the menu marks it. */
+    enum class Reason { SignedOut, Offline }
+
+    /** The reason of an `unavailable` value; an unknown one still greys the choice. */
+    fun reason(unavailable: String?): Reason? = when (unavailable) {
+        null, "" -> null
+        "offline" -> Reason.Offline
+        else -> Reason.SignedOut
+    }
+
+    /** The saved value when the Space no longer offers it: shown on its own row, marked, not pickable. */
+    fun savedMissing(current: String?, offered: List<String>): String? =
+        current?.takeIf { it.isNotEmpty() && it !in offered }
 }
 
 // Tasks (docs/scheduler.md)

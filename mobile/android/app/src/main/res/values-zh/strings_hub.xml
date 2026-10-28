@@ -237,4 +237,7 @@
     <string name="chat_machine_separator">、</string>
     <string name="chat_on_machines">位于 %1$s</string>
     <string name="chat_machine_offline_note">%1$s 当前离线。请换一台机器，或等它恢复后再发。</string>
+    <string name="models_signed_out">未登录</string>
+    <string name="models_offline">离线</string>
+    <string name="models_saved_missing">不可用</string>
 </resources>

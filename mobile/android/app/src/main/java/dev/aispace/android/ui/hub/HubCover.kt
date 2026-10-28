@@ -83,6 +83,7 @@ import dev.aispace.android.R
 import dev.aispace.android.core.Connection
 import dev.aispace.android.core.InboxThread
 import dev.aispace.android.core.ModelChoice
+import dev.aispace.android.core.ModelChoices
 import dev.aispace.android.core.SpaceEvent
 import dev.aispace.android.live.CatalogueLoader
 import dev.aispace.android.live.HubStore
@@ -524,7 +525,13 @@ internal fun ModelMenu(
     label: @Composable () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
-    val shown = if (current.isNullOrEmpty()) none else options.firstOrNull { it.value == current }?.label ?: current
+    val missing = ModelChoices.savedMissing(current, options.map { it.value })
+    val savedMissing = stringResource(R.string.models_saved_missing)
+    val shown = when {
+        current.isNullOrEmpty() -> none
+        missing != null -> "$missing ($savedMissing)"
+        else -> options.firstOrNull { it.value == current }?.let { choiceLabel(it.label, it.unavailable) } ?: current
+    }
     Box {
         Cell(onClick = { open = true }, enabled = !disabled) {
             Box(Modifier.weight(1f)) { label() }
@@ -537,16 +544,26 @@ internal fun ModelMenu(
                 if (value != current) pick(value)
             }
             ModelChoiceItem(none, on = current.isNullOrEmpty()) { choose(null) }
-            if (!current.isNullOrEmpty() && options.none { it.value == current }) ModelChoiceItem(current, on = true) { choose(current) }
-            for (o in options) ModelChoiceItem(o.label, on = o.value == current) { choose(o.value) }
+            if (missing != null) ModelChoiceItem("$missing ($savedMissing)", on = true, enabled = false) {}
+            for (o in options) {
+                ModelChoiceItem(choiceLabel(o.label, o.unavailable), on = o.value == current, enabled = o.unavailable == null) { choose(o.value) }
+            }
         }
     }
 }
 
 @Composable
-private fun ModelChoiceItem(text: String, on: Boolean, onClick: () -> Unit) {
+private fun ModelChoiceItem(text: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     val check: @Composable () -> Unit = { Icon(Icons.Filled.Check, contentDescription = null) }
-    DropdownMenuItem(text = { Text(text) }, onClick = onClick, trailingIcon = if (on) check else null)
+    DropdownMenuItem(text = { Text(text) }, onClick = onClick, enabled = enabled, trailingIcon = if (on) check else null)
+}
+
+/** A choice's label, with why it cannot be picked when it cannot: "claude · Basic · haiku (not signed in)". */
+@Composable
+internal fun choiceLabel(label: String, unavailable: String?): String = when (ModelChoices.reason(unavailable)) {
+    null -> label
+    ModelChoices.Reason.Offline -> "$label (${stringResource(R.string.models_offline)})"
+    ModelChoices.Reason.SignedOut -> "$label (${stringResource(R.string.models_signed_out)})"
 }
 
 // Formats
