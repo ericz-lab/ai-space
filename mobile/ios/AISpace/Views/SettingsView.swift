@@ -119,6 +119,8 @@ struct SettingsSectionPage: View {
     let section: SettingsSection
     /// The status rows, shown first as on the panel, where the section has a page of its own.
     @State private var statusOpen = true
+    /// The saved Space whose row is swiped open, so only one is open at a time.
+    @State private var swipedSpace: UUID?
 
     var body: some View {
         ScrollView {
@@ -394,26 +396,27 @@ struct SettingsSectionPage: View {
         SectionCards {
             SettingsCard {
                 ForEach(model.store.connections) { c in
-                    Button { model.select(c.id) } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(verbatim: c.name)
-                                Text(verbatim: c.url.absoluteString).font(.footnote).foregroundStyle(Color.secondary).lineLimit(1)
+                    // Swipe left to remove, as a row of an iOS list.
+                    SwipeToRemove(isOpen: Binding(get: { swipedSpace == c.id }, set: { swipedSpace = $0 ? c.id : nil }),
+                                  onRemove: { withAnimation(.snappy) { model.remove(c.id) } }) { tapConsumed in
+                        Button { if !tapConsumed() && !closeSwiped() { model.select(c.id) } } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(verbatim: c.name)
+                                    Text(verbatim: c.url.absoluteString).font(.footnote).foregroundStyle(Color.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                if c.id == connection.id { Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityLabel(Text("Selected")) }
                             }
-                            Spacer()
-                            if c.id == connection.id { Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityLabel(Text("Selected")) }
                         }
-                    }
-                    .buttonStyle(SettingsRowStyle())
-                    .contextMenu {
-                        Button(role: .destructive) { model.remove(c.id) } label: { Label("Remove", systemImage: "trash") }
+                        .buttonStyle(SettingsRowStyle())
                     }
                     CardDivider()
                 }
-                Button { model.showingAdd = true } label: { Label("Add a Space", systemImage: "plus").foregroundStyle(Theme.accent) }
+                Button { if !closeSwiped() { model.showingAdd = true } } label: { Label("Add a Space", systemImage: "plus").foregroundStyle(Theme.accent) }
                     .buttonStyle(SettingsRowStyle())
             }
-            SettingsNote("Touch and hold a Space to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
+            SettingsNote("Swipe a Space to the left to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
             SettingsCard {
                 Button(role: .destructive) { model.confirmingSignOut = true } label: { Text("Sign Out").foregroundStyle(Theme.danger) }
                     .buttonStyle(SettingsRowStyle())
@@ -425,6 +428,14 @@ struct SettingsSectionPage: View {
             }
             SettingsNote("The sign-in belongs to whatever stands in front of your Space (for example Cloudflare Access). The app stores no password or token; the session lives in this Space's own web data, apart from Safari.")
         }
+    }
+
+    /// Closes the swiped-open row, as a tap anywhere else in the card does on an iOS list; true
+    /// when one was open, and the tap then does nothing more.
+    private func closeSwiped() -> Bool {
+        guard swipedSpace != nil else { return false }
+        withAnimation(.snappy) { swipedSpace = nil }
+        return true
     }
 
     private func row(dot: Color, title: String, detail: String?, value: String) -> some View {
@@ -875,6 +886,81 @@ private struct SettingsNote: View {
     var body: some View {
         Text(text).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A row of a card that slides left over a red Remove area, as a row of an iOS list did before
+/// iOS 26: the area grows with the finger, its label coming in with the row's edge, and the row
+/// rests open at the area's width. A List draws iOS 26's own swipe instead, a button that pops
+/// in, and a swipe outside a List needs iOS 27 (swipeActionsContainer), so it is drawn here.
+///
+/// The area is the row's background, so it never sizes the row. A tap on the row while it is
+/// open, or right after a swipe, closes it instead of acting: the content asks `tapConsumed()`.
+private struct SwipeToRemove<Content: View>: View {
+    @Binding var isOpen: Bool
+    let onRemove: () -> Void
+    @ViewBuilder let content: (_ tapConsumed: @escaping () -> Bool) -> Content
+
+    /// The finger's sideways travel while a swipe is under way; back to zero, animated, when the
+    /// swipe ends or is taken over by the scroll view.
+    @GestureState(resetTransaction: Transaction(animation: .snappy)) private var travel: CGFloat = 0
+    /// When the row last moved under the finger, so the tap that ends a swipe does not count.
+    @State private var lastSwipe = Date.distantPast
+    /// The Remove area's width when the row rests open.
+    private let width: CGFloat = 88
+
+    /// How far the row has moved left: the finger's travel from where it rests, held at the
+    /// right edge and, past the area's width, slowed as a scroll view's edge is.
+    private var offset: CGFloat {
+        let x = (isOpen ? -width : 0) + travel
+        guard x < -width else { return min(0, x) }
+        let past = -x - width
+        return -width - past / (1 + past / 120)
+    }
+
+    var body: some View {
+        content(tapConsumed)
+            .offset(x: offset)
+            .background(alignment: .trailing) {
+                Theme.danger
+                    .overlay(alignment: .leading) {
+                        Text("Remove").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                            .lineLimit(1).fixedSize()
+                            .frame(width: width)
+                    }
+                    .frame(width: max(0, -offset), alignment: .leading)
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.snappy) { isOpen = false }
+                        onRemove()
+                    }
+                    .accessibilityHidden(true)
+            }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 12)
+                    .updating($travel) { drag, travel, _ in
+                        if abs(drag.translation.width) > abs(drag.translation.height) { travel = drag.translation.width }
+                    }
+                    .onChanged { drag in
+                        if abs(drag.translation.width) > abs(drag.translation.height) { lastSwipe = .now }
+                    }
+                    .onEnded { drag in
+                        guard abs(drag.translation.width) > abs(drag.translation.height) else { return }
+                        lastSwipe = .now
+                        let end = (isOpen ? -width : 0) + drag.predictedEndTranslation.width
+                        withAnimation(.snappy) { isOpen = end < -width / 2 }
+                    }
+            )
+            .accessibilityAction(named: Text("Remove"), onRemove)
+    }
+
+    /// True when a tap on the row should not act: it ends a swipe, or closes the open row.
+    private func tapConsumed() -> Bool {
+        if Date.now.timeIntervalSince(lastSwipe) < 0.35 { return true }
+        guard isOpen else { return false }
+        withAnimation(.snappy) { isOpen = false }
+        return true
     }
 }
 
