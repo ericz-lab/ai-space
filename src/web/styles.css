@@ -842,6 +842,37 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 }
 @keyframes tool-shimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
 @media (prefers-reduced-motion: reduce) { .chat-tool.running :is(.chat-tool-title, .chat-tool-summary, .chat-tool-cue) { animation: none; color: var(--text); background: none; } }
+/* Background work (docs/runtimes.md#background-work): a call whose job goes on, a job's report, a turn the agent started by itself. */
+.chat-tool.background .chat-tool-sep { background: var(--link); opacity: 1; }
+.chat-tool.background .chat-tool-cue { color: var(--link); }
+.chat-tool.stopped .chat-tool-cue { opacity: 0.8; }
+.chat-notice { min-width: 0; margin: 2px 0; }
+.chat-notice .chat-tool-row { color: var(--muted); }
+.chat-notice .chat-tool-glyph { color: var(--link); }
+.chat-notice .chat-tool-summary { font: inherit; font-size: 12px; }
+.chat-notice .chat-tool-row:not(:disabled):hover, .chat-notice.open .chat-tool-row { color: var(--text); background: color-mix(in srgb, var(--text) 5%, transparent); }
+.chat-notice .chat-tool-row:not(:disabled):hover .chat-tool-glyph, .chat-notice.open .chat-tool-glyph { opacity: 0; }
+.chat-notice .chat-tool-row:not(:disabled):hover .chat-tool-chevron, .chat-notice.open .chat-tool-chevron { opacity: 1; }
+.chat-notice.open .chat-tool-chevron { transform: rotate(180deg); }
+.chat-bg-label { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; font-size: 11px; color: var(--link); }
+.chat-jobs { position: relative; flex: none; }
+.chat-jobs-badge {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; font: inherit; font-size: 11px; color: var(--muted);
+  background: color-mix(in srgb, var(--text) 5%, transparent); border: 1px solid var(--hairline); border-radius: 11px; cursor: pointer;
+}
+.chat-jobs-badge.running { color: var(--link); border-color: color-mix(in srgb, var(--link) 40%, transparent); }
+.chat-jobs-badge:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.chat-jobs-list {
+  position: absolute; z-index: 5; top: 28px; right: 0; width: min(320px, calc(100vw - 32px)); max-height: 260px; overflow: auto; padding: 4px;
+  background: var(--solid); border: 1px solid var(--hairline); border-radius: 10px; box-shadow: var(--shadow);
+}
+.chat-job { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; padding: 6px 8px; font-size: 12px; border-radius: 6px; }
+.chat-job + .chat-job { border-top: 1px solid var(--hairline); }
+.chat-job-kind { color: var(--muted); font-size: 11px; }
+.chat-job-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-job-status { grid-column: 2; color: var(--muted); font-size: 11px; }
+.chat-job.running .chat-job-status { color: var(--link); }
+.chat-job.failed .chat-job-status { color: var(--danger); }
 .chat-tool-io { margin: 4px 0 6px 24px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--code-bg); overflow: hidden; }
 .chat-tool-io > div { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 12px; padding: 10px 12px; max-height: 180px; overflow: auto; }
 .chat-tool-io > div + div { border-top: 1px solid var(--hairline); }

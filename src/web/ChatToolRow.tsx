@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { allCommands, toolSummary, toolVariant, type ChatStep, type ToolVariant } from "./chat-steps.ts";
+import { allCommands, toolSummary, toolVariant, type ChatJob, type ChatStep, type ToolVariant } from "./chat-steps.ts";
 import { useLang } from "./i18n.ts";
 
 /** Line glyphs on a 16px grid, drawn in the row's text color (after DeepSeek Harness's tool rows). */
-const GLYPHS: Record<ToolVariant | "chevron" | "shield" | "question" | "history" | "compose" | "stop" | "send" | "down" | "attach", ReactNode> = {
+const GLYPHS: Record<ToolVariant | "chevron" | "shield" | "question" | "history" | "compose" | "stop" | "send" | "down" | "attach" | "notice", ReactNode> = {
+  notice: <><circle cx="8" cy="8" r="1.8" /><path d="M5 5A4.2 4.2 0 0 0 5 11" /><path d="M11 5A4.2 4.2 0 0 1 11 11" /><path d="M2.8 2.8A7.3 7.3 0 0 0 2.8 13.2" /><path d="M13.2 2.8A7.3 7.3 0 0 1 13.2 13.2" /></>,
   bash: <><path d="M3 4L7 8L3 12" /><path d="M9 12H13" /></>,
   read: <><path d="M4.9 5.9H11.1" /><path d="M4.9 9H8.3" /><rect x="2.5" y="1.8" width="11" height="12.4" rx="1.2" /></>,
   write: <><path d="M8.9 2.2H4.2C3.1 2.2 2.2 3.1 2.2 4.2V11.8C2.2 12.9 3.1 13.8 4.2 13.8H11.8C12.9 13.8 13.8 12.9 13.8 11.8V7.9" /><path d="M7.8 8.2L13.9 2.1" /></>,
@@ -13,6 +14,7 @@ const GLYPHS: Record<ToolVariant | "chevron" | "shield" | "question" | "history"
   code: <><path d="M6.3 1.5L4.5 14.5" /><path d="M11.5 1.5L9.7 14.5" /><path d="M2.4 5.5H14.1" /><path d="M1.9 10.5H13.6" /></>,
   task: <path d="M8 1.8L9.5 6.5L14.2 8L9.5 9.5L8 14.2L6.5 9.5L1.8 8L6.5 6.5Z" />,
   plan: <><path d="M5.5 4H13.5" /><path d="M5.5 8H13.5" /><path d="M5.5 12H13.5" /><circle cx="2.8" cy="4" r=".6" /><circle cx="2.8" cy="8" r=".6" /><circle cx="2.8" cy="12" r=".6" /></>,
+  monitor: <><path d="M1.5 8H4.4L6 4.5L8.6 11.5L10.4 8H14.5" /></>,
   other: <><circle cx="8" cy="8" r="1.8" /><path d="M8 1.5V4.2M8 11.8V14.5M1.5 8H4.2M11.8 8H14.5M3.4 3.4L5.3 5.3M10.7 10.7L12.6 12.6M3.4 12.6L5.3 10.7M10.7 5.3L12.6 3.4" /></>,
   chevron: <path d="M4 6L7.3 9.3C7.7 9.7 8.3 9.7 8.7 9.3L12 6" />,
   history: <><path d="M2.6 8A5.4 5.4 0 1 0 4.2 4.2" /><path d="M2.4 2.4V4.6H4.6" /><path d="M8 5V8L10.2 9.4" /></>,
@@ -39,7 +41,7 @@ export function WorkStep({ step }: { step: ChatStep }) {
   const title = variant === "other" ? step.name.replace(/^mcp__/, "").replace(/__/g, " · ") : t(`chat.tool.${variant}`);
   const summary = toolSummary(step.text);
   const expandable = !!step.output || step.text.trim() !== summary;
-  const cue = step.state === "failed" || step.state === "incomplete" || step.state === "running" ? t(`chat.step.${step.state}`) : "";
+  const cue = step.state === "failed" || step.state === "incomplete" || step.state === "running" || step.state === "background" || step.state === "stopped" ? t(`chat.step.${step.state}`) : "";
   return <div className={`chat-tool ${step.state}${open ? " open" : ""}`} aria-label={step.name}>
     <button type="button" className="chat-tool-row" disabled={!expandable} aria-expanded={expandable ? open : undefined} onClick={() => setOpen(!open)} title={step.text || step.name}>
       <span className="chat-tool-lead"><Glyph name={variant} className="chat-tool-glyph" />{expandable && <Glyph name="chevron" className="chat-tool-chevron" />}</span>
@@ -52,6 +54,46 @@ export function WorkStep({ step }: { step: ChatStep }) {
       {step.output && <div className={step.state === "failed" ? "failed" : ""}><span>{t("chat.step.out")}</span><pre>{step.output}{step.output.length >= 12000 && <small>{"\n"}{t("chat.step.truncated")}</small>}</pre></div>}
     </div>}
   </div>;
+}
+
+/**
+ * A background job's report the agent read (a Monitor event, a command that ended): a quiet line
+ * with the report, its full text one click away (docs/runtimes.md#background-work).
+ */
+export function NoticeStep({ step }: { step: ChatStep }) {
+  const { t } = useLang();
+  const [open, setOpen] = useState(false);
+  const expandable = !!step.output && step.output.trim() !== step.text.trim();
+  return <div className={`chat-notice${open ? " open" : ""}`}>
+    <button type="button" className="chat-tool-row" disabled={!expandable} aria-expanded={expandable ? open : undefined} onClick={() => setOpen(!open)} title={step.text}>
+      <span className="chat-tool-lead"><Glyph name="notice" className="chat-tool-glyph" />{expandable && <Glyph name="chevron" className="chat-tool-chevron" />}</span>
+      <span className="chat-tool-title">{t("chat.notice")}</span>
+      <span className="chat-tool-sep" aria-hidden="true" />
+      <span className="chat-tool-summary">{step.text}</span>
+    </button>
+    {open && <div className="chat-tool-io"><div><pre>{step.output}</pre></div></div>}
+  </div>;
+}
+
+/** A conversation's background jobs (docs/runtimes.md#background-work): a count in the header that opens the list. */
+export function JobsBadge({ jobs }: { jobs: ChatJob[] }) {
+  const { t, lang } = useLang();
+  const [open, setOpen] = useState(false);
+  if (!jobs.length) return null;
+  const running = jobs.filter((j) => j.status === "running").length;
+  const time = (ms: number) => new Date(ms).toLocaleTimeString(lang === "zh" ? "zh-CN" : "en", { hour: "2-digit", minute: "2-digit" });
+  return <span className="chat-jobs">
+    <button type="button" className={`chat-jobs-badge${running ? " running" : ""}`} aria-expanded={open} title={t("chat.jobs")} onClick={() => setOpen(!open)}>
+      <Glyph name="monitor" size={13} weight={1.3} />{running ? t("chat.jobs.count", { n: running }) : t("chat.jobs")}
+    </button>
+    {open && <div className="chat-jobs-list" role="list" aria-label={t("chat.jobs")}>
+      {[...jobs].reverse().map((j) => <div key={j.id} role="listitem" className={`chat-job ${j.status}`} title={j.summary || j.description}>
+        <span className="chat-job-kind">{t(`chat.jobs.kind.${j.kind}`)}</span>
+        <span className="chat-job-desc">{j.description || j.id}</span>
+        <span className="chat-job-status">{t(`chat.jobs.status.${j.status}`)} · {time(j.endedAt ?? j.startedAt)}</span>
+      </div>)}
+    </div>}
+  </span>;
 }
 
 /**

@@ -499,7 +499,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       return c ? (path, init) => c.request(path, init) : undefined;
     })),
     machines: () => peers.names(),
-    deploy: (app) => deployFromOrigin(ws.home, app),
+    deploy: (app) => {
+      const repo = registry.get(app)?.manifest.repo;
+      return deployFromOrigin(ws.home, app, repo ? { repo } : {});
+    },
   });
   feedback.resume();
   const feedbackScript = buildFeedbackScript({ dev: process.env.SPACE_DEV === "1" });
@@ -643,6 +646,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       "/api/agents/:app/:agent/runs/:id/stop": "app",
       "/api/agents/:app/:agent/runs/:id/steer": "app",
       "/api/agents/:app/:agent/runs/:id/approvals/:rid": "app",
+      "/api/agents/:app/:agent/watch": "app",
       "/api/agents/:app/:agent/sessions": "app",
       "/api/agents/:app/:agent/sessions/:sid": "app",
       "/api/checks": "app-read",

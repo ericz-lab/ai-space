@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS feedback (
   todo_url    TEXT,
   run_id      TEXT,
   run_machine TEXT NOT NULL DEFAULT '',
+  fix_machine TEXT,
   note        TEXT,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
@@ -41,6 +42,7 @@ type Row = {
   todo_url: string | null;
   run_id: string | null;
   run_machine: string;
+  fix_machine: string | null;
   note: string | null;
   created_at: number;
   updated_at: number;
@@ -57,6 +59,7 @@ const fromRow = (r: Row): FeedbackRow => ({
   todoPeer: r.todo_peer,
   todoUrl: r.todo_url,
   runId: r.run_id,
+  fixMachine: r.fix_machine,
   runMachine: r.run_machine,
   note: r.note,
   createdAt: r.created_at,
@@ -104,6 +107,8 @@ export function mergeSettings(cur: FeedbackSettings, patch: unknown): FeedbackSe
 export class FeedbackStore {
   constructor(private readonly db: Database, private readonly now: () => number = Date.now) {
     db.exec(SCHEMA);
+    // Added after the first release: a space.db from then has no column for the person's machine.
+    if (!db.query<{ name: string }, []>("PRAGMA table_info(feedback)").all().some((c) => c.name === "fix_machine")) db.exec("ALTER TABLE feedback ADD COLUMN fix_machine TEXT");
   }
 
   settings(): FeedbackSettings {
@@ -130,12 +135,12 @@ export class FeedbackStore {
     return next;
   }
 
-  add(r: { app: string; text: string; context: PageContext; client: ClientInfo; status: Status }): FeedbackRow {
+  add(r: { app: string; text: string; context: PageContext; client: ClientInfo; status: Status; fixMachine?: string | null }): FeedbackRow {
     const at = this.now();
     const id = Number(
       this.db
-        .query("INSERT INTO feedback (app, text, context, client, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run(r.app, r.text, JSON.stringify(r.context), JSON.stringify(r.client), r.status, at, at).lastInsertRowid,
+        .query("INSERT INTO feedback (app, text, context, client, status, fix_machine, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(r.app, r.text, JSON.stringify(r.context), JSON.stringify(r.client), r.status, r.fixMachine ?? null, at, at).lastInsertRowid,
     );
     return this.get(id)!;
   }

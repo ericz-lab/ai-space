@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TranscriptMessage, TranscriptStep } from "./types.ts";
+import { monitorInput, taskNotice, toolErrorText } from "./tool-text.ts";
 
 /**
  * Past chat sessions, read back from each runtime's own records so restoring
@@ -34,14 +35,21 @@ export function parseClaudeTranscript(jsonl: string): TranscriptMessage[] {
   const msgs: TranscriptMessage[] = [];
   const calls = new Map<string, ToolStep>();
   for (const line of jsonl.split("\n")) {
-    let ev: { type?: string; isMeta?: boolean; message?: { content?: unknown } };
+    let ev: { type?: string; isMeta?: boolean; message?: { content?: unknown }; attachment?: { type?: string; prompt?: unknown; commandMode?: unknown } };
     try {
       ev = JSON.parse(line);
     } catch {
       continue;
     }
     const content = ev?.message?.content;
+    // A background job's report taken in during a turn is kept as the queued command it was.
+    if (ev.type === "attachment" && ev.attachment?.type === "queued_command" && ev.attachment.commandMode === "task-notification" && typeof ev.attachment.prompt === "string") {
+      addNotices(msgs, ev.attachment.prompt);
+      continue;
+    }
     if (ev.type === "user" && !ev.isMeta) {
+      // One the agent answered in a turn of its own is a user message of the CLI's.
+      if (typeof content === "string" && addNotices(msgs, content)) continue;
       const text =
         typeof content === "string"
           ? content
@@ -58,6 +66,7 @@ export function parseClaudeTranscript(jsonl: string): TranscriptMessage[] {
           if (step) {
             step.output = clip(resultText(b.content));
             step.failed = b.is_error === true;
+            if (step.failed) step.output = clip(toolErrorText(resultText(b.content)));
           }
         }
       }
@@ -176,10 +185,23 @@ function addText(msgs: TranscriptMessage[], text: string): void {
   (last.steps ??= []).push({ kind: "text", text });
 }
 
+/** Every `<task-notification>` in `text` as a notice step of the agent's message; false when there is none. */
+function addNotices(msgs: TranscriptMessage[], text: string): boolean {
+  const blocks = text.match(/<task-notification>[\s\S]*?<\/task-notification>/g) ?? [];
+  let added = false;
+  for (const block of blocks) {
+    const notice = taskNotice(block);
+    if (!notice) continue;
+    (lastAi(msgs).steps ??= []).push({ kind: "notice", text: notice.line, detail: notice.detail });
+    added = true;
+  }
+  return added;
+}
+
 function addTool(msgs: TranscriptMessage[], name: string, input: unknown, output = "", failed = false): ToolStep {
   const last = lastAi(msgs);
   last.tools.push({ name, hint: toolHint(input) });
-  const step: ToolStep = { kind: "tool", name, input: stepInput(input), output: clip(output), failed };
+  const step: ToolStep = { kind: "tool", name, input: clip(monitorInput(name, input) ?? stepInput(input)), output: clip(output), failed };
   (last.steps ??= []).push(step);
   return step;
 }

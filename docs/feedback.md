@@ -12,7 +12,7 @@ One script, `GET /_space/feedback.js` (`src/web/feedback-widget/`, bundled at bo
 - **Theme and language follow the page:** `data-theme` / `data-color-scheme` / `data-mode` or a `dark`/`light` class on `<html>` or `<body>`, else the system; Chinese when `<html lang>` starts with `zh`, else English. It watches those attributes and redraws when they change.
 - **Drag** the button anywhere; the spot is kept per app in `localStorage` (`space-feedback.pos.<app>`). Double-click puts it back in the corner. A press that moves less than 4 px is a click.
 - **Alt+Shift+F** opens and closes it from anywhere on the page. The key is matched by its physical position (`KeyboardEvent.code === "KeyF"`), so a Mac's Option layer (Option+Shift+F types "Ï") does not get in the way. **Esc** closes it or cancels picking. **Ctrl+Enter** (⌘ Enter on a Mac) sends.
-- **The card** (320 px; a bottom sheet under 520 px): the text, **Pick element** (hover outlines an element with its selector; a click picks it; up to five), **Screenshot** (the browser's own screen-capture prompt with the current tab preferred; desktop browsers only), **Attach** (a PNG, JPEG or WebP up to 3 MB; pasting an image into the text works too; two at most), **Fix now | Fix later** (preset from Settings), **Send**. A grey footer shows what goes with it: app, theme, page, client. **Hide on this page** hides the button until the tab is closed. The last three pieces of feedback of this app show with their state and a link to their task.
+- **The card** (320 px; a bottom sheet under 520 px): the text, **Pick element** (hover outlines an element with its selector; a click picks it; up to five), **Screenshot** (the browser's own screen-capture prompt with the current tab preferred; desktop browsers only), **Attach** (a PNG, JPEG or WebP up to 3 MB; pasting an image into the text works too; two at most), **Fix now | Fix later** (preset from Settings), **Fix on** (only when the space has peers: this machine or one of its peers, preset from Settings; the last one picked is kept per app in `localStorage`, `space-feedback.machine.<app>`), **Send**. A grey footer shows what goes with it: app, theme, page, client. **Hide on this page** hides the button until the tab is closed. The last three pieces of feedback of this app show with their state and a link to their task.
 - It never runs inside a frame, never twice on one page, and never reads input values, cookies or storage.
 
 ### Adding it to an app
@@ -74,7 +74,7 @@ Settings choose its model (default `claude/intermediate`) and effort (`high`, `x
 
 ### On another machine
 
-Settings → Feedback → **Fix on** can name a peer ([peers.md](peers.md)). The space starts the engineer there through `/api/peer/agents/space/ui-fixer/chat` and polls the run. There the engineer clones the app into its own `app-src/<app>/` when missing, commits, and pushes to `origin` main; it does not deploy. When it reports a pushed fix, the app's machine fast-forwards its `app-src/<app>` from `origin` and pushes to its `deploy` remote (`deploy.ts`); anything unexpected (local changes, another branch, no deploy remote) stops it, and the task says why. The peer must run an ai-space that has the Fix Engineer.
+Settings → Feedback → **Fix on** can name a peer ([peers.md](peers.md)), and the button's **Fix on** can pick one for a single piece of feedback: the row keeps that choice (`fix_machine`; empty follows Settings), **Fix again** runs it there too, and one run takes only rows bound for the same machine (the others wait for the next run). The space starts the engineer there through `/api/peer/agents/space/ui-fixer/chat` and polls the run. There the engineer clones the app into its own `app-src/<app>/` when missing, commits, and pushes to `origin` main; it does not deploy. When it reports a pushed fix, the app's machine fast-forwards its `app-src/<app>` from `origin` and pushes to its `deploy` remote (`deploy.ts`). A missing `app-src/<app>` is cloned from the manifest's `repo:` first, with the host's `~/<app>.git` as its `deploy` remote when that repository exists. Anything unexpected (a clone that fails, local changes, another branch, no deploy remote) stops it, and the task says why. The peer must run an ai-space that has the Fix Engineer.
 
 ## Apps on a peer
 
@@ -109,9 +109,9 @@ Settings → Feedback (web panel and the Linux client): the switch, **What happe
 
 ```
 GET  /_space/feedback.js                 the button's script (public)
-GET  /_space/feedback/config             { enabled, mode, errors, app, client, shortcut } for X-Space-App (public)
+GET  /_space/feedback/config             { enabled, mode, errors, app, client, shortcut, machine?, machines? } for X-Space-App (public)
 GET  /_space/feedback/recent             the app's last five (public; empty while off)
-POST /_space/feedback                    { text, mode?: now|later, context, images?: [{name, data}] } → 201 { id, status, todoId, todoUrl } (public, same origin)
+POST /_space/feedback                    { text, mode?: now|later, machine?, context, images?: [{name, data}] } → 201 { id, status, todoId, todoUrl } (public, same origin)
 GET  /api/panel/feedback/settings        settings, apps with their state, machines, models, counts, peers (owner)
 PUT  /api/panel/feedback/settings        a settings patch, sent on to the peers (owner)
 GET  /api/panel/feedback?limit=          recent feedback of every app, the peers' with `peer` (owner)
@@ -126,7 +126,7 @@ POST /api/peer/feedback/fix              ┘
 
 ```sql
 feedback_settings(key, value)          -- one JSON value: enabled, appsDefault, apps, mode, machine, model, effort, errors
-feedback(id, app, text, context, client, status, todo_id, todo_peer, todo_url, run_id, run_machine, note, created_at, updated_at)
+feedback(id, app, text, context, client, status, todo_id, todo_peer, todo_url, run_id, run_machine, fix_machine, note, created_at, updated_at)
 ```
 
 At boot a fix that was running on this machine is marked failed (its process is gone); one running on a peer is watched again.

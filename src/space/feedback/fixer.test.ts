@@ -1,5 +1,8 @@
-import { describe, expect, test } from "bun:test";
-import { deployFromOrigin, type Runner } from "./deploy.ts";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { deployFromOrigin, gitRunner, type Runner } from "./deploy.ts";
 import type { RunRegistry } from "../agents/runs.ts";
 import { FIXER_ID, fixerPort, localFixer, peerFixer, sseData } from "./fixer.ts";
 
@@ -81,12 +84,16 @@ describe("peer fixer", () => {
 });
 
 describe("deploy from origin", () => {
-  /** git as a script: each command's answer by its first words. */
-  const fake = (answers: Record<string, { code: number; out: string }>) => {
+  // deployFromOrigin checks that app-src/<app> exists before it runs git.
+  const home = mkdtempSync(join(tmpdir(), "space-deploy-"));
+  mkdirSync(join(home, "app-src", "ai-todo"), { recursive: true });
+  afterAll(() => rmSync(home, { recursive: true, force: true }));
+
+  /** git as a script: each command's answer by its first words. A command run outside the app's checkout is marked with its folder. */
+  const fake = (answers: Record<string, { code: number; out: string }>, app = "ai-todo") => {
     const ran: string[] = [];
     const run: Runner = async (args, opts) => {
-      ran.push(args.join(" "));
-      expect(opts.cwd).toBe("/w/app-src/ai-todo");
+      ran.push(opts.cwd === join(home, "app-src", app) ? args.join(" ") : `(${opts.cwd.slice(home.length + 1)}) ${args.join(" ")}`);
       const key = Object.keys(answers).find((k) => args.join(" ").startsWith(k));
       return key ? answers[key]! : { code: 0, out: "" };
     };
@@ -95,7 +102,7 @@ describe("deploy from origin", () => {
 
   test("fast-forwards from origin, then pushes to the deploy remote", async () => {
     const { run, ran } = fake({ "rev-parse --abbrev-ref": { code: 0, out: "main" } });
-    const r = await deployFromOrigin("/w", "ai-todo", run);
+    const r = await deployFromOrigin(home, "ai-todo", { run });
     expect(r.ok).toBe(true);
     expect(ran).toEqual(["rev-parse --show-toplevel", "rev-parse --abbrev-ref HEAD", "status --porcelain", "remote get-url deploy", "pull --ff-only origin main", "push deploy HEAD:main"]);
   });
@@ -110,9 +117,49 @@ describe("deploy from origin", () => {
       [{ "rev-parse --abbrev-ref": { code: 0, out: "main" }, push: { code: 1, out: "check failed" } }, "deploy push failed"],
     ];
     for (const [answers, why] of cases) {
-      const r = await deployFromOrigin("/w", "ai-todo", fake(answers).run);
+      const r = await deployFromOrigin(home, "ai-todo", { run: fake(answers).run });
       expect(r.ok).toBe(false);
       expect(r.log.split("\n")[0]).toContain(why);
     }
+  });
+
+  test("clones a missing checkout from the manifest's repo, then deploys through the host's bare repository", async () => {
+    const gitDir = join(home, "keep.git");
+    mkdirSync(gitDir, { recursive: true });
+    const { run, ran } = fake({ "rev-parse --abbrev-ref": { code: 0, out: "main" } }, "keep");
+    const r = await deployFromOrigin(home, "keep", { repo: "https://example.com/keep.git", gitDir, run });
+    expect(r.ok).toBe(true);
+    expect(ran).toEqual([
+      "(app-src) clone https://example.com/keep.git keep",
+      `remote add deploy ${gitDir}`,
+      "rev-parse --show-toplevel", "rev-parse --abbrev-ref HEAD", "status --porcelain", "remote get-url deploy", "pull --ff-only origin main", "push deploy HEAD:main",
+    ]);
+  });
+
+  test("says the checkout is missing only when it cannot be cloned", async () => {
+    const none = fake({}, "keep");
+    const r1 = await deployFromOrigin(home, "keep", { run: none.run });
+    expect(r1.log.split("\n")[0]).toBe("no source checkout at app-src/keep, and the manifest names no repo to clone");
+    expect(none.ran).toEqual([]);
+
+    const denied = fake({ clone: { code: 128, out: "Authentication failed" } }, "keep");
+    const r2 = await deployFromOrigin(home, "keep", { repo: "https://example.com/keep.git", run: denied.run });
+    expect(r2.ok).toBe(false);
+    expect(r2.log.split("\n")[0]).toBe("no source checkout at app-src/keep, and cloning https://example.com/keep.git failed");
+    expect(r2.log).toContain("Authentication failed");
+    expect(denied.ran).toEqual(["(app-src) clone https://example.com/keep.git keep"]);
+  });
+
+  test("a clone without the host's bare repository stops at the missing deploy remote", async () => {
+    const { run, ran } = fake({ "rev-parse --abbrev-ref": { code: 0, out: "main" }, "remote get-url deploy": { code: 2, out: "" } }, "keep");
+    const r = await deployFromOrigin(home, "keep", { repo: "https://example.com/keep.git", gitDir: join(home, "nowhere.git"), run });
+    expect(r.log.split("\n")[0]).toContain("has no deploy remote");
+    expect(ran.some((c) => c.startsWith("remote add"))).toBe(false);
+  });
+
+  test("git that cannot start is a failed step, not a throw", async () => {
+    const r = await gitRunner(["status"], { cwd: join(home, "missing"), timeoutMs: 5_000 });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("ENOENT");
   });
 });

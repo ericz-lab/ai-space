@@ -18,6 +18,7 @@ function row(over: Partial<FeedbackRow> = {}): FeedbackRow {
     todoId: 312,
     todoPeer: "",
     todoUrl: "https://todo.example.com/?todo=312",
+    fixMachine: null,
     runId: null,
     runMachine: "",
     note: null,
@@ -129,5 +130,16 @@ describe("prompt", () => {
     expect(finalText(lines)).toBe("second");
     expect(finalText([...lines, JSON.stringify({ type: "result", result: "final" })])).toBe("final");
     expect(finalText([])).toBe("");
+  });
+});
+
+describe("store upgrade", () => {
+  test("a space.db from before the machine choice gets its column, and old rows follow Settings", () => {
+    const db = new Database(":memory:");
+    db.exec(`CREATE TABLE feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, app TEXT NOT NULL, text TEXT NOT NULL, context TEXT NOT NULL, client TEXT NOT NULL, status TEXT NOT NULL, todo_id INTEGER, todo_peer TEXT NOT NULL DEFAULT '', todo_url TEXT, run_id TEXT, run_machine TEXT NOT NULL DEFAULT '', note TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
+    db.query("INSERT INTO feedback (app, text, context, client, status, created_at, updated_at) VALUES ('a', 't', ?, ?, 'later', 1, 1)").run(JSON.stringify(parseContext({})), JSON.stringify(client));
+    const store = new FeedbackStore(db);
+    expect(store.get(1)!.fixMachine).toBeNull();
+    expect(store.add({ app: "a", text: "u", context: parseContext({}), client, status: "later", fixMachine: "hub" }).fixMachine).toBe("hub");
   });
 });

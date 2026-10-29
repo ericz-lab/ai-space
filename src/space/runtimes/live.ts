@@ -15,6 +15,8 @@ import type { AgentQuestion, ApprovalDecision, ChatCallbacks, ChatHandle, ChatTu
  * A question the agent asks (`tool` "AskUserQuestion") is an approval request with `questions`;
  * the person answers it with `allow` and `answers` (question id → chosen labels or typed text).
  *   {"type":"steer","text"}  the agent has read a message the person added to the turn
+ *   {"type":"notice","kind":"limit","text"}  the agent's turns of its own after background reports
+ *                                            are no longer shown (docs/runtimes.md#background-work)
  */
 
 /** An idle process is closed this long after its last turn. */
@@ -23,6 +25,17 @@ export const LIVE_IDLE_MS = 10 * 60_000;
 export const LIVE_MAX_IDLE = 6;
 /** A stop that the runtime has not answered by then kills the process. */
 export const LIVE_STOP_GRACE_MS = 4_000;
+/**
+ * A process whose background jobs still run is kept past the idle time, up to this long after its
+ * last turn (SPACE_CHAT_BACKGROUND_MINUTES; default 2 hours, Claude Code's own cap on a background
+ * command in a non-interactive run). Closing the process stops its jobs.
+ */
+export const LIVE_BACKGROUND_MS = backgroundMs(process.env.SPACE_CHAT_BACKGROUND_MINUTES);
+
+export function backgroundMs(minutes: string | undefined): number {
+  const n = Number(minutes);
+  return minutes !== undefined && minutes.trim() !== "" && Number.isFinite(n) && n >= 0 ? n * 60_000 : 120 * 60_000;
+}
 
 export interface LiveProcess {
   /** Conversation the process holds (the runtime's session id); null until it reports one. */
@@ -30,7 +43,12 @@ export interface LiveProcess {
   /** What a turn must share with the process to reuse it: directory, identity, environment. */
   readonly fingerprint: string;
   readonly alive: boolean;
+  /** A turn runs: the person's, or one the process started by itself. */
   readonly busy: boolean;
+  /** Background jobs (docs/runtimes.md#background-work) still run; a runtime without them leaves it out. */
+  readonly background?: boolean;
+  /** When the process last said anything (ms); the idle time counts from it when given. */
+  readonly lastActive?: number;
   /** Run one turn. Only called on an idle, live process. */
   turn(turn: ChatTurn, cb: ChatCallbacks): ChatHandle;
   close(): void;
@@ -46,7 +64,7 @@ export function liveFingerprint(turn: ChatTurn): string {
 export class LivePool {
   private readonly procs = new Map<LiveProcess, { timer?: ReturnType<typeof setTimeout>; idleSince: number }>();
 
-  constructor(private readonly opts: { idleMs?: number; maxIdle?: number } = {}) {}
+  constructor(private readonly opts: { idleMs?: number; maxIdle?: number; backgroundMs?: number } = {}) {}
 
   /**
    * A turn on this pool: the idle process holding the turn's session when it matches, else a new
@@ -84,12 +102,33 @@ export class LivePool {
     const entry = this.procs.get(p);
     if (!entry) return;
     if (!p.alive) return void this.procs.delete(p);
-    clearTimeout(entry.timer);
     entry.idleSince = Date.now();
-    entry.timer = setTimeout(() => this.drop(p, true), this.opts.idleMs ?? LIVE_IDLE_MS);
-    entry.timer.unref?.();
-    const idle = [...this.procs.entries()].filter(([q]) => !q.busy).sort(([, a], [, b]) => a.idleSince - b.idleSince);
+    this.arm(p, this.opts.idleMs ?? LIVE_IDLE_MS);
+    // A process with background work is not idle: its jobs would die with it.
+    const idle = [...this.procs.entries()].filter(([q]) => !q.busy && !q.background).sort(([, a], [, b]) => a.idleSince - b.idleSince);
     while (idle.length > (this.opts.maxIdle ?? LIVE_MAX_IDLE)) this.drop(idle.shift()![0], true);
+  }
+
+  /**
+   * Close the process once it has been quiet for the idle time. A turn it started by itself, or a
+   * background job still running, keeps it, up to the background limit after the person's last turn.
+   */
+  private arm(p: LiveProcess, ms: number): void {
+    const entry = this.procs.get(p);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => {
+      if (!this.procs.has(p)) return;
+      if (!p.alive) return this.drop(p, false);
+      const idleMs = this.opts.idleMs ?? LIVE_IDLE_MS;
+      const now = Date.now();
+      const held = (p.busy || p.background) && now - entry.idleSince < (this.opts.backgroundMs ?? LIVE_BACKGROUND_MS);
+      const quiet = now - Math.max(entry.idleSince, p.lastActive ?? 0);
+      if (held) this.arm(p, idleMs);
+      else if (quiet < idleMs && !p.busy && !p.background) this.arm(p, idleMs - quiet);
+      else this.drop(p, true);
+    }, Math.max(1, ms));
+    entry.timer.unref?.();
   }
 
   private drop(p: LiveProcess, close: boolean): void {

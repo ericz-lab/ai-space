@@ -22,7 +22,7 @@ import { APPROVAL_DECISIONS, CHAT_EFFORTS, MODEL_TIERS, type ApprovalDecision, t
 import type { Manifest, ManifestAgent } from "../scheduler/manifest.ts";
 import { loadAppEnv } from "../scheduler/targets.ts";
 import type { Workspace } from "../workspace.ts";
-import { MODEL_RE, SESSION_ID_RE, runResponse } from "./runtime.ts";
+import { MODEL_RE, SESSION_ID_RE, runResponse, watchResponse } from "./runtime.ts";
 import { splitMachine } from "../runtimes/registry.ts";
 import { RunBusyError, RunClosedError, RunRegistry, RunStateError } from "./runs.ts";
 import type { SessionStore } from "./sessions.ts";
@@ -41,6 +41,8 @@ import { fixerSystemPrompt } from "../feedback/prompt.ts";
  *   POST /api/agents/:app/:agent/runs/:id/stop     stop a running turn
  *   POST /api/agents/:app/:agent/runs/:id/steer    { message, images? } add a message to a running interactive turn
  *   POST /api/agents/:app/:agent/runs/:id/approvals/:rid  { decision: allow|deny } answer the turn's approval request
+ *   GET  /api/agents/watch                         SSE: the same as below, for every agent on this space
+ *   GET  /api/agents/:app/:agent/watch             SSE: the agent's runs starting and ending (also those it starts by itself) and its conversations' background jobs
  *   GET  /api/agents/:app/:agent/sessions         recent sessions
  *   GET  /api/agents/:app/:agent/sessions/:sid    restored transcript
  *
@@ -456,6 +458,14 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
 
     "/api/agents/:app/:agent/runs/:id": {
       GET: wrap((req) => json({ ok: true, run: runOf(req) })),
+    },
+
+    "/api/agents/watch": {
+      GET: wrap(() => watchResponse(runs, null, { heartbeatMs: opts.heartbeatMs })),
+    },
+
+    "/api/agents/:app/:agent/watch": {
+      GET: wrap((req) => watchResponse(runs, `${req.params.app}/${req.params.agent}`, { heartbeatMs: opts.heartbeatMs })),
     },
 
     "/api/agents/:app/:agent/runs/:id/events": {

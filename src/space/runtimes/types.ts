@@ -193,6 +193,34 @@ export type ChatCallbacks = {
   onSession?: (sid: string) => void;
   /** Process ended; `error` is null on a clean exit. */
   onFinish: (error: string | null) => void;
+  /**
+   * A live process started a turn by itself after this one ended: a background job it launched
+   * (Claude Code's `run_in_background` Bash, a Monitor) reported back and the agent answers it
+   * (docs/runtimes.md#background-work). `handle` stops or steers that turn; the answer is the
+   * turn's own callbacks (their `onWake` and `onJobs` are ignored), or null to let it pass unseen.
+   * The process keeps the last turn's hooks, so a wake reaches whoever ran the conversation last.
+   */
+  onWake?: (handle: ChatHandle) => ChatCallbacks | null;
+  /** The conversation's background jobs changed: the whole list, oldest first. */
+  onJobs?: (jobs: BackgroundJob[]) => void;
+};
+
+/**
+ * Work a live conversation left running between turns: a Bash command run in the background, a
+ * Monitor watching a command or socket, a background subagent. `status` stays `running` until
+ * the runtime reports the end.
+ */
+export type BackgroundJob = {
+  id: string;
+  kind: "bash" | "monitor" | "agent" | "other";
+  description: string;
+  status: "running" | "completed" | "failed" | "stopped";
+  startedAt: number;
+  endedAt: number | null;
+  /** The tool call that started it, so the panel can tie the job to its row. */
+  toolUseId?: string;
+  /** The runtime's last word on it (`Background command "…" completed (exit code 0)`). */
+  summary?: string;
 };
 
 export type Capabilities = {
@@ -233,7 +261,11 @@ export type ImageOutcome =
  */
 export type TranscriptMessage = { role: "user"; text: string } | { role: "ai"; text: string; tools: { name: string; hint: string }[]; steps?: TranscriptStep[] };
 
-export type TranscriptStep = { kind: "text"; text: string } | { kind: "tool"; name: string; input: string; output: string; failed: boolean };
+export type TranscriptStep =
+  | { kind: "text"; text: string }
+  | { kind: "tool"; name: string; input: string; output: string; failed: boolean }
+  /** A background job's report the agent answered (Claude Code's `<task-notification>`): one line, and the full text. */
+  | { kind: "notice"; text: string; detail: string };
 
 export type RuntimeAdapter = {
   readonly name: string;

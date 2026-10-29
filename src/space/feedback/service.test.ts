@@ -88,6 +88,8 @@ describe("switches", () => {
       errors: true,
       app: { name: "ai-todo", title: "AI Todo", zh: "AI 待办" },
       client: { kind: "desktop-browser", en: "Desktop browser (Chrome · Linux)", zh: "桌面浏览器 (Chrome · Linux)" },
+      machine: "",
+      machines: [{ value: "", label: "home" }, { value: "hub", label: "hub" }],
       shortcut: "Alt+Shift+F",
     });
     store.saveSettings({ appsDefault: false, apps: { "ai-todo": "on" } });
@@ -221,6 +223,40 @@ describe("fixing", () => {
     expect(deploys).toEqual(["ai-todo"]);
     expect(store.get(1)).toMatchObject({ status: "review", runMachine: "hub" });
     expect(todo.calls.some((c) => String((c.body as { content?: string }).content ?? "").includes("Deployed on home") || String((c.body as { content?: string }).content ?? "").includes("已在 home"))).toBe(true);
+  });
+
+  test("the page picks the machine: that row runs there, whatever Settings say", async () => {
+    const { service, fixer, store } = setup();
+    store.saveSettings({ machine: "hub" });
+    expect(service.config("ai-todo", UA)).toMatchObject({ machine: "hub" });
+    await service.submit("ai-todo", body("here please", { machine: "" }), UA);
+    expect(store.get(1)!.fixMachine).toBe("");
+    expect(fixer.starts[0]!.machine).toBe("");
+    await expect(service.submit("ai-todo", body("x", { machine: "elsewhere" }), UA)).rejects.toThrow(FeedbackError);
+  });
+
+  test("one run goes to one machine: rows meant for another wait for the next run", async () => {
+    const { service, fixer, store } = setup();
+    store.saveSettings({ mode: "later" });
+    await service.submit("ai-todo", body("one", { machine: "hub" }), UA);
+    await service.submit("ai-todo", body("two"), UA);
+    await service.submit("ai-todo", body("three", { machine: "hub" }), UA);
+    expect(service.fix({ app: "ai-todo" })).toEqual({ queued: 3 });
+    expect(fixer.starts).toHaveLength(1);
+    expect(fixer.starts[0]!.machine).toBe("hub");
+    expect(fixer.starts[0]!.body.message).toContain("are 2 pieces");
+    expect(store.get(2)!.status).toBe("queued");
+    await fixer.end("run-1", { text: RESULT("not-fixed") });
+    for (let i = 0; i < 50 && fixer.starts.length < 2; i++) await Bun.sleep(1);
+    expect(fixer.starts[1]!.machine).toBe("");
+    await fixer.end("run-2", { text: RESULT("not-fixed") });
+    await service.idle();
+    // Fix again keeps the person's machine.
+    service.fix({ ids: [1] });
+    await until(() => fixer.starts.length === 3);
+    expect(fixer.starts[2]!.machine).toBe("hub");
+    await fixer.end("run-3", { text: RESULT("not-fixed") });
+    await service.idle();
   });
 
   test("on a peer: a failed deploy leaves the feedback failed with the reason", async () => {

@@ -3,20 +3,51 @@
  * (docs/runtimes.md#live-chat) adds two kinds: an approval the agent waits for (`name` the tool,
  * `text` what it wants to do, `output` why) and a message the person added while it ran. An
  * approval with `questions` is a question the agent asks; `answers` is what the person chose.
+ *
+ * Background work (docs/runtimes.md#background-work): a Bash call with `run_in_background` or a
+ * Monitor returns at once and goes on; its row says `background` until the job's end is known (a
+ * `task_notification` event in the stream, or the conversation's job list: `applyJobs`). A job's
+ * report the agent answers is a `notice` step: the `<task-notification>` message, the CLI's
+ * `task_notification` event, or ai-space's own `notice` event.
  */
+import { monitorInput, taskNotice, toolErrorText } from "../space/runtimes/tool-text.ts";
+
 export type ChatQuestion = { id: string; header: string; question: string; options: { label: string; description: string }[]; multiSelect: boolean };
 export type ChatStep = {
   id: string;
-  kind: "text" | "tool" | "approval" | "steer";
+  kind: "text" | "tool" | "approval" | "steer" | "notice";
   name: string;
   text: string;
   output: string;
-  state: "running" | "completed" | "failed" | "incomplete" | "waiting" | "allowed" | "denied" | "cancelled";
+  state: "running" | "background" | "completed" | "failed" | "incomplete" | "stopped" | "waiting" | "allowed" | "denied" | "cancelled";
   questions?: ChatQuestion[];
   answers?: Record<string, string[]>;
 };
+/** A conversation's background job as `GET …/watch` reports it (`BackgroundJob` on the server). */
+export type ChatJob = { id: string; kind: "bash" | "monitor" | "agent" | "other"; description: string; status: "running" | "completed" | "failed" | "stopped"; startedAt: number; endedAt: number | null; toolUseId?: string; summary?: string };
 type Block = { type: string; id?: string; name?: string; text?: string; input?: unknown; tool_use_id?: string; content?: unknown; is_error?: boolean };
-type Event = { type: string; message?: { content?: Block[] }; event?: { delta?: { type?: string; text?: string } }; id?: string; tool?: string; title?: string; detail?: string; decision?: string; text?: string; questions?: ChatQuestion[]; answers?: Record<string, string[]> };
+type Event = {
+  type: string;
+  subtype?: string;
+  message?: { content?: Block[] | string };
+  event?: { delta?: { type?: string; text?: string } };
+  id?: string;
+  tool?: string;
+  title?: string;
+  detail?: string;
+  decision?: string;
+  text?: string;
+  questions?: ChatQuestion[];
+  answers?: Record<string, string[]>;
+  task_id?: string;
+  tool_use_id?: string;
+  status?: string;
+  summary?: string;
+  kind?: string;
+};
+/** A job's end as a tool row's state. */
+const endState = (status: string | undefined): ChatStep["state"] | undefined =>
+  status === "completed" ? "completed" : status === "failed" ? "failed" : status === "stopped" || status === "killed" ? "stopped" : undefined;
 const detail = (value: unknown): string => {
   if (value == null) return "";
   if (typeof value === "string") return value.slice(0, 12000);
@@ -60,22 +91,51 @@ export class ChatSteps {
       this.steps.push({ id: `steer:${++this.serial}`, kind: "steer", name: "", text: event.text ?? "", output: "", state: "completed" });
     }
     if (event.type === "stream_event" && event.event?.delta?.type === "text_delta") this.text(event.event.delta.text ?? "", false);
-    for (const block of event.message?.content ?? []) {
+    // A background job's report: the message the agent read, the CLI's own event, or ai-space's.
+    if (event.type === "user" && typeof event.message?.content === "string") {
+      const notice = taskNotice(event.message.content);
+      if (notice) this.notice(notice.status ? `notice:${notice.taskId}:${notice.status}` : `notice:${++this.serial}`, notice.line, notice.detail, notice.toolUseId, notice.status);
+    }
+    if (event.type === "system" && event.subtype === "task_notification" && event.task_id) {
+      this.notice(`notice:${event.task_id}:${event.status ?? ""}`, event.summary || event.task_id, [event.summary, event.status && `status: ${event.status}`].filter(Boolean).join("\n"), event.tool_use_id, event.status);
+    }
+    if (event.type === "notice" && event.text) this.notice(`notice:${++this.serial}`, event.text, "");
+    for (const block of Array.isArray(event.message?.content) ? event.message.content : []) {
       if (event.type === "assistant" && block.type === "text" && block.text) this.text(block.text, true);
       if (event.type === "assistant" && block.type === "tool_use" && block.id) {
         const id = `tool:${block.id}`;
         const input = block.input && typeof block.input === "object" ? block.input as Record<string, unknown> : {};
-        const hint = detail(input.command ?? input.file_path ?? input.path ?? input.query ?? input.url ?? block.input);
+        const hint = monitorInput(block.name ?? "", input) ?? detail(input.command ?? input.file_path ?? input.path ?? input.query ?? input.url ?? block.input);
         const current = this.steps.find((s) => s.id === id);
         if (current) { if (hint) current.text = hint; }
         else this.steps.push({ id, kind: "tool", name: block.name ?? "tool", text: hint, output: "", state: "running" });
+        if (toolVariant(block.name ?? "") === "monitor" || input.run_in_background === true) this.backgrounded.add(id);
       }
       if (event.type === "user" && block.type === "tool_result") {
         const current = this.steps.find((s) => s.id === `tool:${block.tool_use_id}`);
-        if (current) { current.output = detail(block.content); current.state = block.is_error ? "failed" : "completed"; }
+        if (current) {
+          current.output = block.is_error ? toolErrorText(detail(block.content)) : detail(block.content);
+          // A job that already reported its end keeps that state.
+          const ended = this.ended.get(current.id);
+          current.state = block.is_error ? "failed" : ended ?? (this.backgrounded.has(current.id) ? "background" : "completed");
+        }
       }
     }
     if (event.type === "done") this.finish();
+  }
+
+  /** Calls that started background work, by step id; and the jobs whose end is known. */
+  private readonly backgrounded = new Set<string>();
+  private readonly ended = new Map<string, ChatStep["state"]>();
+
+  private notice(id: string, text: string, output: string, toolUseId?: string, status?: string) {
+    const end = endState(status);
+    if (toolUseId && end) {
+      this.ended.set(`tool:${toolUseId}`, end);
+      const row = this.steps.find((s) => s.id === `tool:${toolUseId}`);
+      if (row && (row.state === "background" || row.state === "running")) row.state = end;
+    }
+    if (!this.steps.some((s) => s.id === id)) this.steps.push({ id, kind: "notice", name: "", text: text.slice(0, 300), output: output.slice(0, 12000), state: "completed" });
   }
 
   finish() {
@@ -88,14 +148,33 @@ export class ChatSteps {
   snapshot(): ChatStep[] { return this.steps.map((step) => ({ ...step })); }
 }
 
+/**
+ * A conversation's job list applied to its tool rows: a row still `background` takes its job's
+ * end. Returns the same array when nothing changed.
+ */
+export function applyJobs(steps: ChatStep[], jobs: ChatJob[]): ChatStep[] {
+  let changed = false;
+  const next = steps.map((step) => {
+    if (step.state !== "background") return step;
+    const job = jobs.find((j) => j.toolUseId && `tool:${j.toolUseId}` === step.id);
+    const end = endState(job?.status);
+    if (!end) return step;
+    changed = true;
+    return { ...step, state: end };
+  });
+  return changed ? next : steps;
+}
+
 /** A restored transcript's ordered steps (`TranscriptStep` on the server) as the panel draws them. */
-export type HistoryStep = { kind: "text"; text: string } | { kind: "tool"; name: string; input: string; output: string; failed: boolean };
-export const historySteps = (steps: HistoryStep[]): ChatStep[] => steps.map((step, i) => step.kind === "text"
+export type HistoryStep = { kind: "text"; text: string } | { kind: "tool"; name: string; input: string; output: string; failed: boolean } | { kind: "notice"; text: string; detail: string };
+export const historySteps = (steps: HistoryStep[]): ChatStep[] => steps.map((step, i): ChatStep => step.kind === "text"
   ? { id: `history:${i}`, kind: "text", name: "", text: step.text, output: "", state: "completed" }
+  : step.kind === "notice"
+  ? { id: `history:${i}`, kind: "notice", name: "", text: step.text, output: step.detail, state: "completed" }
   : { id: `history:${i}`, kind: "tool", name: step.name, text: step.input, output: step.output, state: step.failed ? "failed" : "completed" });
 
 /** How a tool row is drawn: its icon, its localized title, and the one-line summary beside it. */
-export type ToolVariant = "bash" | "read" | "write" | "edit" | "search" | "web" | "code" | "task" | "plan" | "other";
+export type ToolVariant = "bash" | "read" | "write" | "edit" | "search" | "web" | "code" | "task" | "plan" | "monitor" | "other";
 const VARIANTS: [RegExp, ToolVariant][] = [
   [/^(bash|pwsh|shell|exec|exec_command|command|command_execution|local_shell|run_command|terminal)$/i, "bash"],
   [/^(read|read_file|read_image|view|notebookread|cat)$/i, "read"],
@@ -106,6 +185,7 @@ const VARIANTS: [RegExp, ToolVariant][] = [
   [/^(run_code|code)$/i, "code"],
   [/^(task|agent|subagent|spawn_agent|send_message|wait_agent)$/i, "task"],
   [/^(todowrite|todo_write|update_plan)$/i, "plan"],
+  [/^monitor$/i, "monitor"],
 ];
 export const toolVariant = (name: string): ToolVariant => {
   const bare = name.replace(/^mcp__.*__/, "");

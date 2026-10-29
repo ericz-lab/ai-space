@@ -145,6 +145,8 @@ export type ChatRun = {
   startedAt: number;
   finishedAt: number | null;
   lastSeq: number;
+  /** `background`: the agent started the turn by itself to answer a background job (absent from older Spaces). */
+  trigger?: "user" | "background";
 };
 
 export async function getJson<T>(path: string): Promise<T> {

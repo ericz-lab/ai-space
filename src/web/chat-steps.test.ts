@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ChatSteps, allCommands, historySteps, submitsChat, toolSummary, toolVariant } from "./chat-steps.ts";
+import { ChatSteps, allCommands, applyJobs, historySteps, submitsChat, toolSummary, toolVariant } from "./chat-steps.ts";
 
 const tool = (id: string) => ({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: "pwd" } }] } });
 test("Codex work preserves text order, repeated tools and separate results", () => {
@@ -92,4 +92,80 @@ test("a folded run names commands only when every call in it is one", () => {
   expect(allCommands(run(["Bash", "Read"]))).toBe(false);
   expect(allCommands(run(["Read"]))).toBe(false);
   expect(allCommands([])).toBe(false);
+});
+test("Monitor is an optional tool: drawn with its description, a rejection without the schema dump", () => {
+  expect(toolVariant("Monitor")).toBe("monitor");
+  const turn = new ChatSteps();
+  turn.apply({ type: "assistant", message: { content: [{ type: "tool_use", id: "m", name: "Monitor", input: { description: "build finishes", command: "until test -f done; do sleep 5; done", timeout_ms: 60000 } }] } });
+  turn.apply({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "m", content: [{ type: "text", text: "Monitor started (task b1)." }] }] } });
+  turn.apply({ type: "assistant", message: { content: [{ type: "tool_use", id: "n", name: "Monitor", input: { command: "tail -f log" } }] } });
+  turn.apply({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "n", is_error: true, content: "<tool_use_error>InputValidationError: Monitor failed due to the following issue:\nThe required parameter `description` is missing\n\nThis tool's schema was not sent to the API. For reference, this tool's input schema is: {\"type\":\"object\"}</tool_use_error>" }] } });
+  turn.finish();
+  // A started watch runs on in the background until its job's end is known.
+  expect(turn.steps[0]).toMatchObject({ kind: "tool", state: "background", output: "Monitor started (task b1)." });
+  expect(toolSummary(turn.steps[0]!.text)).toBe("build finishes");
+  expect(turn.steps[1]).toMatchObject({ state: "failed", text: "tail -f log", output: "InputValidationError: Monitor failed due to the following issue:\nThe required parameter `description` is missing" });
+  // A runtime without Monitor never sends one: a turn of other tools is untouched.
+  const plain = new ChatSteps();
+  plain.apply(tool("a"));
+  plain.finish();
+  expect(plain.steps.map((s) => toolVariant(s.name))).toEqual(["bash"]);
+});
+
+// Claude Code 2.1.312's stdout for a Monitor and a background Bash (src/space/runtimes/fixtures).
+const recorded = async () => (await Bun.file(new URL("../space/runtimes/fixtures/claude-background.jsonl", import.meta.url)).text()).trim().split("\n").map((l) => JSON.parse(l));
+/** The recording cut into turns at each result: the person's, then the CLI's own. */
+const turnsOf = (events: { type: string }[]) => events.reduce<{ type: string }[][]>((turns, ev) => {
+  turns[turns.length - 1]!.push(ev);
+  if (ev.type === "result") turns.push([]);
+  return turns;
+}, [[]]).filter((t) => t.length);
+
+test("a Monitor and a background command show as running in the background; a report the agent read is a notice", async () => {
+  const [first, ...wakes] = turnsOf(await recorded());
+  const turn = new ChatSteps();
+  for (const ev of first!) turn.apply(ev);
+  turn.apply({ type: "done" });
+  expect(turn.steps.map((s) => [s.kind, s.kind === "tool" ? toolVariant(s.name) : "", s.state])).toEqual([
+    ["tool", "search", "completed"],
+    ["tool", "monitor", "background"],
+    ["tool", "bash", "background"],
+    ["notice", "", "completed"],
+    ["text", "", "completed"],
+  ]);
+  expect(turn.steps[3]!.text).toBe('Monitor event: "三次 tick 测试": tick 1');
+
+  // The CLI's own turns: the job ends come as its events, once each.
+  const later = new ChatSteps();
+  for (const ev of wakes.flat()) later.apply(ev);
+  const notices = later.steps.filter((s) => s.kind === "notice").map((s) => s.text);
+  expect(notices).toEqual(['Monitor "三次 tick 测试" stream ended', 'Background command "后台等待20秒后输出" completed (exit code 0)']);
+
+  // The rows of the first turn take their jobs' end from the conversation's job list.
+  const toolUse = (n: number) => turn.steps[n]!.id.slice("tool:".length);
+  const jobs = [
+    { id: "a", kind: "monitor" as const, description: "", status: "completed" as const, startedAt: 1, endedAt: 2, toolUseId: toolUse(1) },
+    { id: "b", kind: "bash" as const, description: "", status: "running" as const, startedAt: 1, endedAt: null, toolUseId: toolUse(2) },
+  ];
+  const steps = turn.snapshot();
+  const next = applyJobs(steps, jobs);
+  expect(next.map((s) => s.state)).toEqual(["completed", "completed", "background", "completed", "completed"]);
+  expect(applyJobs(next, jobs)).toBe(next);
+  expect(applyJobs(next, [{ ...jobs[1]!, status: "stopped" }])[2]!.state).toBe("stopped");
+});
+
+test("a background job's end in the same turn settles its row; the limit notice is a notice", () => {
+  const turn = new ChatSteps();
+  turn.apply({ type: "assistant", message: { content: [{ type: "tool_use", id: "bg", name: "Bash", input: { command: "sleep 1", run_in_background: true } }] } });
+  turn.apply({ type: "system", subtype: "task_notification", task_id: "j1", tool_use_id: "bg", status: "failed", summary: "Background command failed" });
+  turn.apply({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "bg", content: "Command running in background" }] } });
+  // The same end told again by the message the agent read is not a second notice.
+  turn.apply({ type: "user", message: { content: "<task-notification>\n<task-id>j1</task-id>\n<status>failed</status>\n<summary>Background command failed</summary>\n</task-notification>" } });
+  turn.apply({ type: "notice", kind: "limit", text: "The next ones run without being shown." });
+  expect(turn.steps.map((s) => [s.kind, s.state, s.text])).toEqual([
+    ["tool", "failed", "sleep 1"],
+    ["notice", "completed", "Background command failed"],
+    ["notice", "completed", "The next ones run without being shown."],
+  ]);
+  expect(historySteps([{ kind: "notice", text: "Monitor event: tick", detail: "tick 2" }])).toEqual([{ id: "history:0", kind: "notice", name: "", text: "Monitor event: tick", output: "tick 2", state: "completed" }]);
 });
