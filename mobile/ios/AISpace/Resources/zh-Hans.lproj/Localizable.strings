@@ -93,6 +93,7 @@
 "Spaces" = "Space";
 "Selected" = "已选中";
 "Remove" = "移除";
+"More" = "更多";
 "Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server." = "在这里移除 Space，只会让这台 iPhone 忘记它的地址、登录状态和屏幕布局，服务器上不会有任何变化。";
 "Session" = "会话";
 "Status" = "状态";
@@ -509,4 +510,4 @@
 "No services" = "没有服务";
 "Shown" = "已展开";
 "Hidden" = "已收起";
-"Touch and hold a Space to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server." = "按住一个 Space 可以移除它。在这里移除 Space，只会让这台 iPhone 忘记它的地址、登录状态和屏幕布局，服务器上不会有任何变化。";
+"Use a Space's … button to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server." = "点 Space 右侧的 … 按钮可以移除它。在这里移除 Space，只会让这台 iPhone 忘记它的地址、登录状态和屏幕布局，服务器上不会有任何变化。";

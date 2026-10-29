@@ -389,17 +389,29 @@ struct SettingsSectionPage: View {
         SectionCards {
             SettingsCard {
                 ForEach(model.store.connections) { c in
-                    Button { model.select(c.id) } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(verbatim: c.name)
-                                Text(verbatim: c.url.absoluteString).font(.footnote).foregroundStyle(Color.secondary).lineLimit(1)
+                    // Removing has a visible button of its own, as on Android: a long press alone
+                    // is easy to miss in a card that is not a List and has no swipe.
+                    HStack(spacing: 0) {
+                        Button { model.select(c.id) } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(verbatim: c.name)
+                                    Text(verbatim: c.url.absoluteString).font(.footnote).foregroundStyle(Color.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                if c.id == connection.id { Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityLabel(Text("Selected")) }
                             }
-                            Spacer()
-                            if c.id == connection.id { Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityLabel(Text("Selected")) }
                         }
+                        .buttonStyle(SettingsRowStyle())
+                        Menu {
+                            Button(role: .destructive) { model.remove(c.id) } label: { Label("Remove", systemImage: "trash") }
+                        } label: {
+                            Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
+                                .frame(width: 44, height: 44).contentShape(Rectangle())
+                        }
+                        .accessibilityLabel(Text("More"))
+                        .padding(.trailing, 6)
                     }
-                    .buttonStyle(SettingsRowStyle())
                     .contextMenu {
                         Button(role: .destructive) { model.remove(c.id) } label: { Label("Remove", systemImage: "trash") }
                     }
@@ -408,7 +420,7 @@ struct SettingsSectionPage: View {
                 Button { model.showingAdd = true } label: { Label("Add a Space", systemImage: "plus").foregroundStyle(Theme.accent) }
                     .buttonStyle(SettingsRowStyle())
             }
-            SettingsNote("Touch and hold a Space to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
+            SettingsNote("Use a Space's … button to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
             SettingsCard {
                 Button(role: .destructive) { model.confirmingSignOut = true } label: { Text("Sign Out").foregroundStyle(Theme.danger) }
                     .buttonStyle(SettingsRowStyle())
