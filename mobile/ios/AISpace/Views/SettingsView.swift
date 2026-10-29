@@ -389,10 +389,9 @@ struct SettingsSectionPage: View {
         SectionCards {
             SettingsCard {
                 ForEach(model.store.connections) { c in
-                    // Removing has a visible button of its own, as on Android: a long press alone
-                    // is easy to miss in a card that is not a List and has no swipe.
-                    HStack(spacing: 0) {
-                        Button { model.select(c.id) } label: {
+                    // Swipe left to remove, as a row of an iOS list; a long press still works.
+                    SwipeToRemove(onRemove: { model.remove(c.id) }) { swiped in
+                        Button { if !swiped() { model.select(c.id) } } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(verbatim: c.name)
@@ -403,14 +402,6 @@ struct SettingsSectionPage: View {
                             }
                         }
                         .buttonStyle(SettingsRowStyle())
-                        Menu {
-                            Button(role: .destructive) { model.remove(c.id) } label: { Label("Remove", systemImage: "trash") }
-                        } label: {
-                            Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
-                                .frame(width: 44, height: 44).contentShape(Rectangle())
-                        }
-                        .accessibilityLabel(Text("More"))
-                        .padding(.trailing, 6)
                     }
                     .contextMenu {
                         Button(role: .destructive) { model.remove(c.id) } label: { Label("Remove", systemImage: "trash") }
@@ -420,7 +411,7 @@ struct SettingsSectionPage: View {
                 Button { model.showingAdd = true } label: { Label("Add a Space", systemImage: "plus").foregroundStyle(Theme.accent) }
                     .buttonStyle(SettingsRowStyle())
             }
-            SettingsNote("Use a Space's … button to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
+            SettingsNote("Swipe a Space to the left to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
             SettingsCard {
                 Button(role: .destructive) { model.confirmingSignOut = true } label: { Text("Sign Out").foregroundStyle(Theme.danger) }
                     .buttonStyle(SettingsRowStyle())
@@ -575,6 +566,60 @@ private struct SettingsNote: View {
     var body: some View {
         Text(text).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// A row of a card that slides left to show a Remove button, as a row of an iOS list does. The
+/// cards are not a List, so the swipe is drawn here. A tap while it is open closes it: the content
+/// asks `swiped()` first and does nothing when it returns true.
+private struct SwipeToRemove<Content: View>: View {
+    let onRemove: () -> Void
+    @ViewBuilder let content: (_ swiped: @escaping () -> Bool) -> Content
+    @State private var offset: CGFloat = 0
+    @State private var open = false
+    private let width: CGFloat = 88
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button {
+                withAnimation(.snappy) { offset = 0; open = false }
+                onRemove()
+            } label: {
+                Text("Remove").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(width: max(0, -offset))
+            .frame(maxHeight: .infinity)
+            .background(Theme.danger)
+            .opacity(offset < 0 ? 1 : 0)
+            .accessibilityHidden(!open)
+            content { close() }
+                .offset(x: offset)
+        }
+        .clipped()
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 16)
+                .onChanged { drag in
+                    guard abs(drag.translation.width) > abs(drag.translation.height) else { return }
+                    let x = (open ? -width : 0) + drag.translation.width
+                    offset = min(0, max(-width * 1.4, x))
+                }
+                .onEnded { drag in
+                    let x = (open ? -width : 0) + drag.predictedEndTranslation.width
+                    withAnimation(.snappy) {
+                        open = x < -width / 2
+                        offset = open ? -width : 0
+                    }
+                }
+        )
+        .accessibilityAction(named: Text("Remove"), onRemove)
+    }
+
+    /// Closes an open row; true when it was open.
+    private func close() -> Bool {
+        guard open else { return false }
+        withAnimation(.snappy) { offset = 0; open = false }
+        return true
     }
 }
 
