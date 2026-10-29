@@ -15,6 +15,7 @@ where Linux allows, and says below where it does less.
 | Terminal | Shells on the Space's machine and its peers, one tab each: xterm.js in a web view whose page counts as the Space's origin, speaking the panel's protocol ([terminal.md](terminal.md)); a passphrase is asked natively and kept in memory |
 | Apps | The Space's pages in tabs: apps, the web panel, links from the inbox or a chat. A link to another app opens in that app's tab, a link off the Space in the browser. A tab moves to a window of its own and back |
 | Quick Chat | A small window with one conversation: `ai-space --quick-chat` shows it or hides it. GNOME and KDE let no app register a global shortcut, so Settings shows the command to bind under Keyboard › Custom Shortcuts |
+| Floating ball | A small round ball over every window and every workspace, off until Settings › General › Floating Ball turns it on ([below](#floating-ball)). Resting the pointer on it opens a dial of four sections around a hub; each Space sets its own sections on this computer (an app or an agent, Default, or None; the defaults are Keep, Space Assistant, Todo and Design Studio). Clicking a section opens Quick Chat on its agent (an app's own agent, else Space Assistant told where the work goes); a picture dropped on a section opens it with the picture attached, one dropped on the hub opens Space Assistant with it. Drag the ball to move it (its place is remembered); right-click for Quick Chat, Settings and Hide |
 | Settings | Laid out as the web panel's Settings, in its words: the sections on the left, one on the right, and the pages a section opens inside it with Back ([below](#settings)). Then This Computer (the Local edition) and Peer, this computer as a peer of a Space used elsewhere ([below](#peer)) |
 
 The window has Home, Chat, Inbox, Terminal and Apps in the header (in a bar at the bottom on a
@@ -46,6 +47,7 @@ desktop/linux/
   src/app/        GTK glue (GJS only): window, views, HTTP (libsoup), web views (WebKit),
                   the Local manager, notifications
   src/main.ts     the entry point (`gjs -m main.js`)
+  src/ball/       the floating ball's own process (`gjs -m ball.js`, GTK 3 on X11)
   terminal/       the terminal page: xterm.js and the session glue, bundled for the browser
   share/          the desktop entry and AppStream metadata
   build.ts        the build (below)
@@ -96,11 +98,63 @@ What the app keeps:
 | --- | --- |
 | `~/.config/ai-space/connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
 | `~/.config/ai-space/screens.json` | Home's screens, per saved Space |
-| `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand, the machine chosen for each agent on several machines, appearance, language, widgets on screens, the Settings section shown last |
+| `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand, the machine chosen for each agent on several machines, appearance, language, widgets on screens, the Settings section shown last, the floating ball (on or off, its place, each Space's sections) |
 | `~/.local/share/ai-space/desktop/<connection>/` | each Space's web data: cookies (its sign-in), storage, cache |
 | `~/.cache/ai-space/catalogue-<connection>.json` | the last catalogue, shown marked as such while the Space cannot be reached |
 | `~/.config/autostart/dev.ai_space.Desktop.desktop` | Start at login (`ai-space --background`) |
 | `~/.config/systemd/user/ai-space-peer-tunnel.service` | the peer tunnel, when one was started in Settings › Peer (remove it there) |
+
+## Floating ball
+
+The Mac's floating ball ([macos-desktop.md](macos-desktop.md), `FloatingBall.swift`), with its
+rules ported to `src/core/floating-ball.ts` and tested with `bun test` (the Mac's
+`FloatingBallRulesTests`, with y pointing down as on X11 and GTK).
+
+GNOME on Wayland gives a Wayland window no way to stay above the others or to place itself, and
+Mutter has no layer-shell (wlroots and KDE have one; GNOME does not). The choices were:
+
+| Way | Why not, or why |
+| --- | --- |
+| A GTK 4 window on Wayland | No keep-above, no position: the ball would sit wherever the desktop put it, under the app in front |
+| Layer-shell (`gtk4-layer-shell`) | Not on GNOME; a second code path for KDE and wlroots only |
+| A GNOME Shell extension | Truly above everything on Wayland, but the person must install and enable it, log out and in on Wayland, and it breaks with Shell versions |
+| **An X11 window through XWayland** | Chosen. XWayland runs on every GNOME and KDE session, an X11 window places itself, and Mutter passes drag and drop between Wayland and X11 windows. On an X11 session it is the same window |
+
+So the ball is a second process, `ball.js` (`src/ball/ball.ts`), run by the same GJS with
+`GDK_BACKEND=x11` and GTK 3 (GTK 4 cannot place a window or keep it above on any backend). Its
+window is override-redirect: Mutter leaves it alone and stacks it above every window it manages,
+full-screen ones included, on every workspace, and never gives it the keyboard. (A managed window
+kept above was marked as wanting attention, "is ready", whenever it appeared over the focused
+window.) The ball therefore places and moves itself, inside the work area of the monitor it is on
+(`origin`, `dialCenter`), and only the disc takes clicks and drops: the window's corners let them
+through (an input shape).
+
+The ball knows no Space. The app (`src/app/floating-ball.ts`) starts it when the preference is on,
+writes what each section shows (`ToBall`: titles, icons as PNG files in the cache, which sections
+can take work, the words in the app's language) as JSON lines on its stdin, and reads what the
+person did on its stdout (`FromBall`, checked by `decodeFromBall`): a section clicked, a picture
+dropped, the ball moved, a menu item. A picture dropped as data (a browser's) is written to
+`$XDG_RUNTIME_DIR/ai-space-drops/` (mode 0600); the app reads it and removes it, and removes no
+other file. A file dragged from the file manager is read where it is; links, text and several
+files are refused, with a notification. Quick Chat then opens on the section's agent with the
+picture attached; the click's time goes with it as an X11 startup id, which the window presents
+with so the desktop may bring it to the front. If the ball ends by itself it is started again,
+at most three times a minute; it ends with the app.
+
+Quick Chat is drawn as the Mac's (Design Studio's design 12): a 380 px panel with rounded
+corners and no title bar, a 40 px header (the agent with its list, a spinner while it works,
+New Conversation, Close) and the field with "↩ Send" in it; it is about 96 px high while empty and
+grows with the replies, the thread scrolling past 324 px. Escape or a click elsewhere hides it;
+Ctrl+N starts a new conversation, Ctrl+J lists the agents, Ctrl+P picks the permission (the round button: a lock to ask before changes, a pencil to edit files, an orange open lock for all; shared with the main window), Ctrl+O moves it to the main window.
+Where XWayland is there the panel is an X11 window of the app (GTK 4 opens XWayland's display
+beside its Wayland one), so the ball can place it: 12 px beside the ball, on its left when there is
+room, its bottom 48 px under the ball's middle so it grows upward, and above other windows.
+
+Limits: with no XWayland (rare; `DISPLAY` unset) Settings says the ball cannot run, and Quick
+Chat is a Wayland window the desktop places. Opened by its shortcut, Quick Chat also goes where
+the desktop puts it. Pictures
+promised by a source without data or a file (XDND direct save) are not taken. There is no Share
+Picture editor on Linux, so a picture dropped on the hub goes to Space Assistant in Quick Chat.
 
 ## Settings
 
@@ -163,8 +217,11 @@ all, and Settings shows the command that turns it on.
 without a person at the screen: `--page <home|chat|inbox|terminal>`, `--action <name>` (a window
 action such as `new-terminal`, `panel`, `search` or `next-screen`, an app action as
 `app.settings`, `ask=<text>`, `query=<text>` to type into the command box, or
-`settings=<section>[/<page>]`, such as `settings=usage/activity`; repeatable) and `--screenshot <file.png>`, which saves the window after
-`AISPACE_SCREENSHOT_DELAY` milliseconds (4000) and quits. `AISPACE_LOCAL_BUNDLE` points the Local
+`settings=<section>[/<page>]`, such as `settings=usage/activity`, or `ball=<json>`, a line as if the
+floating ball had sent it, such as `ball={"type":"open","section":"todo"}`; repeatable) and `--screenshot <file.png>`, which saves the window
+(Quick Chat when it is open) after `AISPACE_SCREENSHOT_DELAY` milliseconds (4000) and quits.
+`AISPACE_BALL_SHOT=<file.png>` makes the floating ball draw itself and its open dial into a PNG
+whenever the app sends it the dial, which needs no screenshot permission from the desktop. `AISPACE_LOCAL_BUNDLE` points the Local
 manager at another release tree.
 
 ## Memory

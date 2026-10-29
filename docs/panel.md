@@ -128,6 +128,20 @@ Making a pack is the `space:app-icons` skill's job: the operator describes a sty
 
 Every client (the panel, the Mac, the iPhone and Android) sends `interactive: true`: on Claude Code, Codex and DeepSeek Harness the turn then runs in a process kept for the conversation ([runtimes.md](runtimes.md#live-chat)), and two things change. An action the tier does not cover is no longer refused: the reply shows an approval card (what the agent wants to run or edit, and why), and the agent waits for Allow or Deny; the default tier reads "ask before changes". And a message sent while the reply is being written goes into that turn where the runtime takes one (Claude Code and Codex): it shows under the reply as waiting, then as the person's line once the agent has read it (after its current step). When the turn cannot take it (a runtime without live chat or without steering, or the turn just ended), the client queues it as the next message, as before.
 
+### Panel links
+
+A link can open one of the panel's windows once the page is up, through the address's fragment
+(`src/web/panel-link.ts`): `#inbox`, `#terminal`, `#settings`, `#shortcuts`, and
+`#chat=<app>/<agent>&text=…` for an agent's chat (`#chat` alone opens the chat on the agent it
+shows). The agent is found by its id, else by app and name on the machine chosen last for it, the
+local one by default; an agent the Space does not have leaves the chat on the agent it shows. The
+text goes into the message field after whatever is there and is never sent, so a link from any
+page cannot make an agent act; it is capped at 20,000 characters. The panel removes the fragment
+once read and handles a later change of it the same way, so a desktop client that keeps the page
+open opens another window by changing the fragment, without reloading. The Windows client opens
+its Inbox, Chat and Terminal entries and `aispace://chat` links this way
+([windows-desktop.md](windows-desktop.md)).
+
 ### Background runs
 
 A turn is a run owned by the server, not by the request that started it (`src/space/agents/runs.ts`). The chat route creates the run, answers with its id in `x-run-id` and streams it; the browser closing, refreshing or losing its connection only detaches that stream. Three things end a run: the operator's stop (⏹ in the chat, `POST …/runs/:id/stop`), the timeout (`SPACE_CHAT_TIMEOUT_MINUTES`, 60 by default, 0 for none), and the service shutting down, which gives running turns `SPACE_DRAIN_SECONDS` to finish, as it does task runs, and then stops the rest as `interrupted`. A stopped runtime that has not exited 5 s after the kill is closed anyway.
@@ -265,7 +279,7 @@ src/space/terminal/ the web terminal: PTY backends, tickets and sessions, audit 
 src/space/usage/    store.ts (usage_opens, usage_sessions), service.ts, api.ts, script.ts (the heartbeat script) (usage.md)
 src/space/agents/   runtime.ts (a run as SSE), runs.ts (background runs, agent_runs), sessions.ts (chat_sessions),
                     transcript.ts, api.ts (routes, space agent)
-src/web/            index.html, main.tsx (language root), App.tsx, screens.ts (screen operations), Library.tsx, ScreenNav.tsx (edges, dock, hint), Activity.tsx (App usage), Chat.tsx, Tasks.tsx, Inbox.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
+src/web/            index.html, main.tsx (language root), App.tsx, screens.ts (screen operations), panel-link.ts (links into the panel), Library.tsx, ScreenNav.tsx (edges, dock, hint), Activity.tsx (App usage), Chat.tsx, Tasks.tsx, Inbox.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
                     theme.ts (appearance: presets, resolution, storage), ThemeSettings.tsx (its settings rows),
                     i18n.ts (dictionaries, language choice), styles.css, api.ts, routes.ts (HTML import + public files),
                     public/ (PWA shell, pet sprite)

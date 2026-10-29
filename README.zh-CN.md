@@ -61,7 +61,7 @@
 - 💾 **存储与备份。** 每个 app 一个 SQLite 或 PostgreSQL 数据库加一个对象存储；每日快照到任意 S3 桶，每周校验，可恢复。→ [storage](docs/storage.md) · [backup](docs/backup.md)
 - 🛠️ **服务托管。** ai-space 可以把每个 app 的服务作为 systemd 用户单元（macOS 上是 LaunchAgent）运行，并与 manifest 保持一致。→ [supervision](docs/supervision.md)
 - 🖥️ **面板。** App 启动器、agent 聊天、widget、任务历史、收件箱，支持中英文；统计每个 app 和 agent 的打开次数与使用时长。→ [panel](docs/panel.md) · [usage](docs/usage.md)
-- 💻 **桌面应用。** Mac 和 Linux（GTK）原生客户端：应用库、agent 对话、收件箱通知、终端和 app 页面；它们的本地版还会把空间作为后台服务运行在这台电脑上。→ [Mac](docs/macos-desktop.md) · [Linux](docs/linux-desktop.md) · [本地版](docs/local.md)
+- 💻 **桌面应用。** Mac、Linux（GTK）和 Windows 原生客户端：应用库、agent 对话、收件箱通知、终端和 app 页面；它们的本地版还会把空间作为后台服务运行在这台电脑上（Windows 上运行在 WSL 2 里）。→ [Mac](docs/macos-desktop.md) · [Linux](docs/linux-desktop.md) · [Windows](docs/windows-desktop.md) · [本地版](docs/local.md)
 - 🌐 **Peers。** 多台机器共用一个面板。→ [peers](docs/peers.md)
 - ⌨️ **Web 终端**（默认关闭），以及覆盖全部 API 能力的 **`space` 命令行**。→ [terminal](docs/terminal.md) · [cli](docs/cli.md)
 

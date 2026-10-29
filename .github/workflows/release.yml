@@ -1,4 +1,4 @@
-# Builds the Server, Client and Local editions (Mac and Linux) from one commit and one version (docs/release.md).
+# Builds the Server, Client and Local editions (Mac, Linux and Windows) from one commit and one version (docs/release.md).
 #
 # A tag vX.Y.Z (equal to package.json's version, set with `bun run set-version`) builds, checks and
 # packages everything, then creates a draft GitHub Release with the artifacts, SHA256SUMS and
@@ -107,6 +107,73 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  # The Windows Local edition carries a Linux release for WSL 2, built on Linux of the same CPU.
+  windows-bundle:
+    name: windows local bundle ${{ matrix.arch }}
+    needs: [version, check]
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: version
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          bun run set-version "$VERSION"
+          git -c user.name=release -c user.email=release@localhost commit -qam "release $VERSION" || true
+      - run: bun desktop/windows/build.ts --bundle-only --out bundle
+      # Not a release file: the windows job puts it inside the app.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wsl-bundle-${{ matrix.arch }}
+          path: bundle/
+          if-no-files-found: error
+
+  windows:
+    name: windows app ${{ matrix.arch }}
+    needs: [version, windows-bundle]
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    # Built on Windows, where the program file gets its icon and version.
+    runs-on: windows-2025
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: bun install --frozen-lockfile
+      - name: version
+        run: bun run set-version "${{ needs.version.outputs.version }}"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wsl-bundle-${{ matrix.arch }}
+          path: bundle
+      - run: bun release/windows.ts --out dist --arch ${{ matrix.arch }} --bundle bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: dist/*.zip
+          if-no-files-found: error
+
   client:
     name: client macOS
     needs: [version, check]
@@ -194,7 +261,7 @@ jobs:
 
   release:
     name: draft release
-    needs: [version, server, linux, client, local]
+    needs: [version, server, linux, windows, client, local]
     if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -208,6 +275,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          # The release files only, not the WSL bundles the Windows app carries inside.
+          pattern: "{server,linux,windows,client,local}-*"
           merge-multiple: true
       - name: checksums and manifest
         run: bun release/manifest.ts dist --version "${{ needs.version.outputs.version }}" --commit "$GITHUB_SHA" --run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

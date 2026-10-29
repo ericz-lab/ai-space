@@ -6,6 +6,7 @@ import Gtk from "gi://Gtk?version=4.0";
 import { parseDeepLink } from "../core/desktop.ts";
 import type { Detail, Section } from "../core/settings.ts";
 import { APP_ID, APP_ROOT, log, logError, path, prefs, readTextSync, t } from "./env.ts";
+import { FloatingBall } from "./floating-ball.ts";
 import { Notifier } from "./inbox.ts";
 import { LocalManager } from "./local-manager.ts";
 import { startMemoryStats } from "./memory.ts";
@@ -35,6 +36,7 @@ export class Application {
   private local!: LocalManager;
   private main: MainWindow | undefined;
   private quick!: QuickChat;
+  private ball!: FloatingBall;
   private started = false;
 
   constructor() {
@@ -70,6 +72,12 @@ export class Application {
     this.model = new AppModel();
     this.local = new LocalManager(this.model);
     this.quick = new QuickChat(this.app, this.model, () => this.window());
+    this.ball = new FloatingBall(this.app, this.model, this.quick, () => {
+      const main = this.window();
+      main.present();
+      showSettings(main.window, this.model, this.local, "general");
+    });
+    this.app.connect("shutdown", () => this.ball.stop());
     const notifier = new Notifier(this.app, this.model, (space, item) => this.window().openInboxItem(space, item));
     this.model.onFreshInbox = (space, items) => notifier.post(space, items);
 
@@ -84,6 +92,11 @@ export class Application {
     act("settings", () => showSettings(this.window().window, this.model, this.local), ["<Control>comma"]);
     act("peer-settings", () => showSettings(this.window().window, this.model, this.local, "peer"));
     act("about", () => this.about());
+    // Settings › General changed the floating ball: shown or not, or its sections.
+    act("floating-ball-sync", () => {
+      this.ball.sync();
+      this.ball.refresh();
+    });
 
     if (this.local.available) {
       void this.local.refresh().then(async () => {
@@ -93,6 +106,7 @@ export class Application {
     }
     this.model.refreshAll();
     this.model.startPolling();
+    this.ball.sync();
     startMemoryStats();
   }
 
@@ -139,6 +153,7 @@ export class Application {
           const [name, arg] = a.split("=", 2) as [string, string | undefined];
           if (name === "ask" && arg && this.model.current) main.ask(this.model.current, arg);
           else if (name === "query" && arg !== undefined) main.home.setQuery(arg);
+          else if (name === "ball" && arg) this.ball.debug(a.slice("ball=".length));
           else if (name === "settings" && arg) {
             const [section, detail] = arg.split("/") as [Section, Detail | undefined];
             showSettings(main.window, this.model, this.local, section, detail);
@@ -151,7 +166,8 @@ export class Application {
     if (has("screenshot")) {
       const file = new TextDecoder().decode(options.lookup_value("screenshot", null).get_bytestring() as Uint8Array).replace(/\0$/, "");
       main.present();
-      this.screenshot(main.window, file);
+      // Quick Chat when an action opened it, else the main window.
+      this.screenshot(() => this.quick.shown ?? main.window, file);
       return;
     }
     if (has("background") && !cmd.get_is_remote()) {
@@ -162,9 +178,10 @@ export class Application {
   }
 
   /** Debug: the window as a PNG after it has had time to load, then quit. */
-  private screenshot(window: any, file: string): void {
+  private screenshot(which: () => any, file: string): void {
     let tries = 0;
     const shoot = () => {
+      const window = which();
       try {
         const paintable = new Gtk.WidgetPaintable({ widget: window });
         const snapshot = Gtk.Snapshot.new();

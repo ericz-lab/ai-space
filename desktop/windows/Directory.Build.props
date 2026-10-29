@@ -1,0 +1,15 @@
+<Project>
+  <!-- Shared by every project of the Windows client (docs/windows-desktop.md). -->
+  <PropertyGroup>
+    <!-- A copy of package.json's version: `bun run set-version <x.y.z>` rewrites it (src/space/version.ts). -->
+    <Version>0.1.0</Version>
+    <Product>AI Space</Product>
+    <Company>ai-space</Company>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- The client is built on Linux too (CI, release): the Windows targeting packs come from NuGet. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <SatelliteResourceLanguages>en;zh-Hans</SatelliteResourceLanguages>
+  </PropertyGroup>
+</Project>

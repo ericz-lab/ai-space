@@ -9,6 +9,7 @@ import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTim
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
 import { localized, useLang } from "./i18n.ts";
+import { withDraft } from "./panel-link.ts";
 
 // Chat window (a floating panel). The server streams the runtime's stream-json events over SSE.
 // - Every turn is a background run on the server (docs/panel.md#chat): closing or refreshing the page
@@ -84,8 +85,10 @@ async function stopRun(a: Active): Promise<void> {
 
 /** A question from the home screen's box; a new `id` sends `text` once. */
 export type Ask = { id: number; text: string; intentId?: string };
+/** Text from a link into the panel (panel-link.ts); a new `id` adds it to the message field, unsent. */
+export type Draft = { id: number; text: string };
 
-export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask, onTurnSettled }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void; ask?: Ask | null; onTurnSettled?: () => void }) {
+export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask, draft, onTurnSettled }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void; ask?: Ask | null; draft?: Draft | null; onTurnSettled?: () => void }) {
   const { lang, t } = useLang();
   // Status lines are written into the message state while a turn streams, so they read `t` through a
   // ref: a language change mid-turn applies from the next status on.
@@ -549,6 +552,14 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     setStick(true);
     send(ask.text, ask.intentId);
   }, [ask]);
+
+  const draftedRef = useRef(0);
+  useEffect(() => {
+    if (!draft || draft.id === draftedRef.current) return;
+    draftedRef.current = draft.id;
+    setInput((cur) => withDraft(cur, draft.text));
+    inputRef.current?.focus();
+  }, [draft]);
 
   const submit = () => {
     const text = input.trim();

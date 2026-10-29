@@ -27,6 +27,7 @@ export const VERSION_COPIES: VersionCopy[] = [
   { path: "mobile/ios/AISpace.xcodeproj/project.pbxproj", pattern: /(MARKETING_VERSION = )([^;]+)(;)/g },
   { path: "mobile/ios/scripts/build.sh", pattern: /(s\/\$\(MARKETING_VERSION\)\/)([^/]+)(\/)/ },
   { path: "mobile/android/app/build.gradle.kts", pattern: /(versionName = ")([^"]+)(")/ },
+  { path: "desktop/windows/Directory.Build.props", pattern: /(<Version>)([^<]+)(<\/Version>)/ },
 ];
 
 /** Every version a copy holds; empty when the pattern no longer matches the file. */

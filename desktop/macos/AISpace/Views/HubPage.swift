@@ -97,21 +97,8 @@ struct HubPageContent: View {
             SettingsPage(model: model, connection: connection, loader: loader, settings: model.settings(for: connection), icons: icons, prefs: model.prefs)
                 .navigationTitle(Text("Settings"))
         case .chat(let agent):
-            if let agent, let chat = model.chat(AgentRef(connection: connection.id, agent: agent)) {
-                let entry = loader.catalogue?.agent("agent:\(agent)")
-                let group = entry.flatMap { loader.catalogue?.agentGroup($0) }
-                HStack(spacing: 0) {
-                    ChatSidebar(model: model, connection: connection, loader: loader, icons: icons, chat: chat, current: agent)
-                    Divider()
-                    VStack(spacing: 0) {
-                        if let group, group.isShared {
-                            MachineMenu(model: model, connection: connection, group: group, current: agent)
-                        }
-                        ChatView(chat: chat, icons: icons, compact: false,
-                                 offlineMachine: entry?.isOffline == true ? entry?.peer ?? String(localized: "This machine") : nil)
-                    }
-                }
-                .navigationTitle(Text(verbatim: chat.agent.displayTitle))
+            if let agent, let live = model.lives[connection.id], let chats = model.conversations(AgentRef(connection: connection.id, agent: agent)) {
+                AgentChatPage(model: model, connection: connection, loader: loader, icons: icons, live: live, chats: chats, agent: agent)
             } else if agent != nil, model.lives[connection.id]?.status == .unknown {
                 Connecting()
             } else {
@@ -165,24 +152,57 @@ struct AgentsPage: View {
     }
 }
 
+/// One agent's conversations in the main window: the sidebar, and the conversation on show. A
+/// conversation keeps running while another one is shown.
+struct AgentChatPage: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    @ObservedObject var loader: CatalogueLoader
+    let icons: IconStore
+    let live: SpaceLive
+    @ObservedObject var chats: AgentChats
+    /// The agent on show, by its id.
+    let agent: String
+
+    var body: some View {
+        let entry = loader.catalogue?.agent("agent:\(agent)")
+        let group = entry.flatMap { loader.catalogue?.agentGroup($0) }
+        HStack(spacing: 0) {
+            ChatSidebar(model: model, connection: connection, loader: loader, icons: icons, live: live, chats: chats, current: agent)
+            Divider()
+            VStack(spacing: 0) {
+                if let group, group.isShared {
+                    MachineMenu(model: model, connection: connection, group: group, current: agent)
+                }
+                ChatView(chat: chats.current, icons: icons, compact: false,
+                         offlineMachine: entry?.isOffline == true ? entry?.peer ?? String(localized: "This machine") : nil)
+                    .id(chats.current.id)
+            }
+        }
+        .navigationTitle(Text(verbatim: chats.agent.displayTitle))
+    }
+}
+
 /// Beside the main window's conversation (src/web/Chat.tsx `chat-side`): New Conversation, the
-/// agents to switch to (a busy one marked) and the shown agent's recent sessions, kept in view
-/// rather than behind a menu.
+/// agents to switch to (a busy one marked) and the shown agent's conversations, kept in view
+/// rather than behind a menu: the ones open here and not stored yet, then the stored ones, each
+/// marked while a turn runs in it, here or on another client.
 struct ChatSidebar: View {
     @ObservedObject var model: AppModel
     let connection: Connection
     @ObservedObject var loader: CatalogueLoader
     let icons: IconStore
-    @ObservedObject var chat: ChatController
+    @ObservedObject var live: SpaceLive
+    @ObservedObject var chats: AgentChats
     /// The agent on show, by its id.
     let current: String
 
     var body: some View {
         let groups = loader.catalogue?.agentGroups ?? []
-        let locked = chat.busy || chat.pendingImageImports > 0
+        let rows = chats.rows(running: live.running)
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
-                Button { chat.newConversation() } label: {
+                Button { chats.newConversation() } label: {
                     Label("New Conversation", systemImage: "square.and.pencil")
                         .font(.callout.weight(.medium))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -191,7 +211,7 @@ struct ChatSidebar: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.text)
-                .disabled(locked)
+                .disabled(chats.current.blank)
                 .help("New Conversation")
                 // One entry per agent whatever its machines; the menu above the chat picks the machine.
                 if groups.count > 1 {
@@ -211,30 +231,43 @@ struct ChatSidebar: View {
                     }
                 }
                 heading("Recent")
-                if chat.sessions.isEmpty {
+                if rows.isEmpty {
                     Text("No earlier chats").font(.callout).foregroundStyle(.secondary).padding(.horizontal, 8)
                 }
-                ForEach(chat.sessions.prefix(30)) { session in
-                    let title = session.title.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "Untitled")
-                    item(on: session.sid == chat.sessionID, action: { Task { await chat.open(session) } }) {
+                ForEach(rows.prefix(30)) { row in
+                    let title = row.title ?? (row.sid == nil ? String(localized: "New Conversation") : String(localized: "Untitled"))
+                    item(on: row.conversation == chats.current.id, action: { pick(row) }) {
                         Text(verbatim: title).lineLimit(1)
                         Spacer(minLength: 4)
-                        if let ts = session.ts {
+                        if row.busy {
+                            Circle().fill(Theme.accent).frame(width: 7, height: 7).help("Working")
+                        } else if let ts = row.ts {
                             Text(verbatim: Times.ago(Date(timeIntervalSince1970: ts / 1000))).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
                     .help(title)
-                    .disabled(locked)
                 }
             }
             .padding(10)
         }
         .frame(width: 230)
         .background(.thinMaterial)
+        .task { await chats.loadSessions() }
+        // A turn started on the web panel or another device shows up as a conversation here.
+        .onReceive(live.$running) { chats.attach($0) }
+    }
+
+    /// Shows a row's conversation: the open one, else the stored session loaded.
+    private func pick(_ row: ChatRoster.Row) {
+        if let id = row.conversation, let chat = chats.conversation(id) {
+            chats.show(chat)
+        } else if let sid = row.sid, let session = chats.sessions.first(where: { $0.sid == sid }) {
+            Task { await chats.open(session) }
+        }
     }
 
     private func busy(_ ref: String) -> Bool {
-        if ref == current { return chat.busy }
+        if ref == current { return chats.busy }
         if model.isChatBusy(AgentRef(connection: connection.id, agent: ref)) { return true }
         let running = model.lives[connection.id]?.running ?? []
         return running.contains { $0.agent == ref || ref.hasSuffix("/" + $0.agent) }

@@ -3,13 +3,16 @@ import type { ClientInfo, ClientKind } from "./types.ts";
 /**
  * Which client a page runs in, from its `User-Agent`. The native clients add a token of their own
  * to their web views: `AISpaceDesktop/<v>` (Mac), `AISpaceMobile/<v>` (iPhone and Android) and
- * `AISpaceLinux/<v>` (Linux, WebKitGTK); anything else is a browser, on a phone, a tablet or a desktop.
+ * `AISpaceLinux/<v>` (Linux, WebKitGTK) and `AISpaceWindows/<v>` (Windows, WebView2); anything else
+ * is a browser, on a phone, a tablet or a desktop.
  */
 export function clientOf(ua: string): ClientInfo {
   const u = ua.slice(0, 1000);
   const os = osOf(u);
   const token = (name: string) => new RegExp(`${name}/([\\w.-]+)`).exec(u)?.[1];
   const native = (kind: ClientKind, v: string | undefined): ClientInfo => ({ kind, os, browser: "webview", ...(v ? { version: v.slice(0, 32) } : {}) });
+  const windows = token("AISpaceWindows");
+  if (windows !== undefined) return native("windows-client", windows);
   const linux = token("AISpaceLinux");
   if (linux !== undefined) return native("linux-client", linux);
   const desktop = token("AISpaceDesktop");
@@ -49,6 +52,7 @@ const KIND_LABEL: Record<ClientKind, { en: string; zh: string }> = {
   "iphone-client": { en: "iPhone client", zh: "iPhone 客户端" },
   "android-client": { en: "Android client", zh: "Android 客户端" },
   "linux-client": { en: "Linux client", zh: "Linux 客户端" },
+  "windows-client": { en: "Windows client", zh: "Windows 客户端" },
 };
 
 /** "Desktop browser (Chrome · Linux)", "Linux 客户端": the line the button shows and the todo keeps. */

@@ -89,7 +89,12 @@ function base64(bytes: Uint8Array): string {
 }
 
 /** `onMachine`: the person picked another machine's variant of the agent in the machine menu. */
-export type ChatViewOptions = { compact?: boolean; onLink: (uri: string) => void; onMachine?: (agent: Agent) => void };
+/**
+ * `floating`: Quick Chat's look (the Mac's, Design Studio's design 12): no empty page, a thread
+ * that only shows once there is a conversation and scrolls past 324 px, and a field with "↩ Send"
+ * inside it and no controls under it.
+ */
+export type ChatViewOptions = { compact?: boolean; floating?: boolean; onLink: (uri: string) => void; onMachine?: (agent: Agent) => void };
 
 // The agent CLIs each machine has, named in the machine menu; read once a minute at most, per Space.
 const inventories = new Map<string, { at: number; rows: MachineInventory[] }>();
@@ -110,6 +115,8 @@ export class ChatView {
   private readonly error: any;
   private readonly machine: any;
   private readonly offline: any;
+  private readonly placeholder: any;
+  private readonly sendHint: any;
   private machines: Agent[] = [];
   private machinesKey = "";
   private space: Space | undefined;
@@ -125,8 +132,11 @@ export class ChatView {
     private readonly model: AppModel,
     private readonly o: ChatViewOptions,
   ) {
-    this.widget = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, vexpand: true, hexpand: true });
-    this.list = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 14, margin_top: 16, margin_bottom: 16, margin_start: 16, margin_end: 16 });
+    const floating = Boolean(o.floating);
+    this.widget = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, vexpand: !floating, hexpand: true });
+    if (floating) this.widget.add_css_class("qc");
+    const pad = floating ? 12 : 16;
+    this.list = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: floating ? 8 : 14, margin_top: pad, margin_bottom: pad, margin_start: pad, margin_end: pad });
     const clamp = new Adw.Clamp({ maximum_size: 760, tightening_threshold: 600, child: this.list });
     // Before the first message: the agent's avatar, name and what it does.
     this.empty = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 12, vexpand: true, valign: Gtk.Align.CENTER, margin_start: 24, margin_end: 24 });
@@ -139,7 +149,13 @@ export class ChatView {
     const stack = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, vexpand: true });
     stack.append(this.empty);
     stack.append(clamp);
-    this.scroller = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, vexpand: true, child: stack });
+    if (floating) {
+      this.empty.set_visible(false);
+      stack.set_vexpand(false);
+    }
+    this.scroller = floating
+      ? new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, propagate_natural_height: true, max_content_height: 324, visible: false, child: stack })
+      : new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, vexpand: true, child: stack });
     // Follow the reply while the person is at the bottom; leave the view alone once they scroll up.
     const adj = this.scroller.get_vadjustment();
     adj.connect("value-changed", () => (this.stick = adj.get_value() + adj.get_page_size() >= adj.get_upper() - 40));
@@ -149,10 +165,12 @@ export class ChatView {
     this.widget.append(this.scroller);
 
     // The composer.
-    const composerClamp = new Adw.Clamp({ maximum_size: 760, tightening_threshold: 600, margin_start: 12, margin_end: 12, margin_bottom: 12 });
+    const composerClamp = new Adw.Clamp({ maximum_size: 760, tightening_threshold: 600, margin_start: 12, margin_end: 12, margin_bottom: floating ? 10 : 12 });
     const composer = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 4 });
-    composer.add_css_class("card");
-    composer.add_css_class("composer");
+    if (!floating) {
+      composer.add_css_class("card");
+      composer.add_css_class("composer");
+    }
     this.error = new Gtk.Label({ xalign: 0, wrap: true, visible: false, margin_start: 6 });
     this.error.add_css_class("error");
     composer.append(this.error);
@@ -178,8 +196,17 @@ export class ChatView {
       return false;
     });
     this.input.add_controller(keys);
-    const inputScroll = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, propagate_natural_height: true, max_content_height: 180, min_content_height: 36, child: this.input });
-    composer.append(inputScroll);
+    // In the small field, no scrollbar (its least height would make the field taller): it still scrolls.
+    const inputScroll = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, vscrollbar_policy: floating ? Gtk.PolicyType.EXTERNAL : Gtk.PolicyType.AUTOMATIC, propagate_natural_height: true, max_content_height: floating ? 120 : 180, min_content_height: floating ? 0 : 36, hexpand: true, child: this.input });
+    // What to type, while the field is empty (a text view has no placeholder of its own).
+    this.placeholder = new Gtk.Label({ xalign: 0, halign: Gtk.Align.START, valign: Gtk.Align.START, can_target: false, margin_start: 6, margin_top: 6, ellipsize: Pango.EllipsizeMode.END });
+    this.placeholder.add_css_class("dim-label");
+    this.placeholder.set_visible(floating);
+    const field = new Gtk.Overlay({ child: inputScroll, hexpand: true });
+    field.add_overlay(this.placeholder);
+    this.input.get_buffer().connect("changed", () => this.renderPlaceholder());
+    this.sendHint = new Gtk.Label({ label: `↩ ${t("send")}`, valign: Gtk.Align.END, margin_bottom: 5 });
+    this.sendHint.add_css_class("qc-hint");
     const bar = new Gtk.Box({ spacing: 6 });
     const attach = new Gtk.Button({ icon_name: "mail-attachment-symbolic", tooltip_text: t("attachImage") });
     attach.add_css_class("flat");
@@ -211,7 +238,27 @@ export class ChatView {
     this.sendButton.add_css_class("suggested-action");
     this.sendButton.connect("clicked", () => this.send());
     bar.append(this.sendButton);
-    composer.append(bar);
+    if (floating) {
+      // The field: the text, then "↩ Send" or Stop, in one rounded box.
+      const row = new Gtk.Box({ spacing: 6 });
+      row.add_css_class("qc-field");
+      row.append(field);
+      row.append(this.sendHint);
+      bar.remove(this.stopButton);
+      this.stopButton.remove_css_class("circular");
+      this.stopButton.add_css_class("flat");
+      this.stopButton.add_css_class("qc-stop");
+      this.stopButton.set_valign(Gtk.Align.END);
+      row.append(this.stopButton);
+      composer.append(row);
+      const focus = new Gtk.EventControllerFocus();
+      focus.connect("enter", () => row.add_css_class("focused"));
+      focus.connect("leave", () => row.remove_css_class("focused"));
+      this.input.add_controller(focus);
+    } else {
+      composer.append(field);
+      composer.append(bar);
+    }
     composerClamp.set_child(composer);
     this.widget.append(composerClamp);
 
@@ -303,7 +350,12 @@ export class ChatView {
     this.focus();
   }
 
-  private draft(): string {
+  /** A picture added to the next message, as one attached by hand (the floating ball's drop). */
+  attachImage(name: string, bytes: Uint8Array): void {
+    this.addImage(name, bytes);
+  }
+
+  draft(): string {
     const b = this.input.get_buffer();
     return b.get_text(b.get_start_iter(), b.get_end_iter(), false);
   }
@@ -407,8 +459,11 @@ export class ChatView {
   private render(): void {
     const conv = this.conv;
     const messages = conv?.messages ?? [];
-    this.empty.set_visible(messages.length === 0);
+    if (this.o.floating) this.scroller.set_visible(messages.length > 0);
+    else this.empty.set_visible(messages.length === 0);
     this.stopButton.set_visible(Boolean(conv?.busy));
+    this.sendHint.set_visible(Boolean(this.o.floating) && !conv?.busy);
+    this.renderPlaceholder();
     this.showError(conv?.error);
     const name = this.agent ? pickText(this.agent.title, this.agent.i18n, "title", lang) : "";
     this.input.set_tooltip_text(t("messagePlaceholder", { agent: name }));
@@ -436,6 +491,17 @@ export class ChatView {
         this.rows.push({ id: m.id, sig, widget });
       }
     });
+  }
+
+  /** "Hand it to …" while the field is empty; "Add to the reply…" while a reply runs. */
+  private renderPlaceholder(): void {
+    if (!this.o.floating) return;
+    const name = this.agent ? pickText(this.agent.title, this.agent.i18n, "title", lang) : "";
+    this.placeholder.set_text(this.conv?.busy ? t("quickChatAdd") : t("quickChatHandTo", { agent: name }));
+    this.placeholder.set_visible(this.draft().length === 0);
+    const empty = !this.draft().trim() && !this.images.length;
+    if (empty) this.sendHint.add_css_class("dim");
+    else this.sendHint.remove_css_class("dim");
   }
 
   private link = (uri: string): boolean => {

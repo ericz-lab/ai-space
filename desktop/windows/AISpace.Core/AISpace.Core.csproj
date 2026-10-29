@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The client's rules, free of Windows APIs so they build and run their tests on any system:
+       the Mac client's Services/ (desktop/macos/AISpace/Services), ported. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>AISpace.Core</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AISpace.Core.Tests" />
+  </ItemGroup>
+</Project>

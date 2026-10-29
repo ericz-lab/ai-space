@@ -8,6 +8,13 @@ declare module "gi://*" {
   export default lib;
 }
 
+// GJS's cairo module (the floating ball draws with it).
+declare module "cairo" {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Cairo: any;
+  export default Cairo;
+}
+
 declare module "system" {
   const System: { programArgs: string[]; programInvocationName: string; exit(code: number): never; gc(): void };
   export default System;

@@ -3,8 +3,11 @@ import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import { type Appearance, type Detail, type Section, APPEARANCES, SECTION_LABEL, WEB_SECTIONS, appearanceOf, decodeAuth, hasAccount } from "../core/settings.ts";
 import type { Connection } from "../core/connections.ts";
+import { type Entry, entryKey, pickText } from "../core/catalogue.ts";
+import { EMPTY_SLOT, FALLBACK_TITLE, SECTIONS, type Section as BallSection, refFor, setting, slot } from "../core/floating-ball.ts";
+import { FloatingBall } from "./floating-ball.ts";
 import { LANGS } from "../../../../src/web/messages.ts";
-import { APP_ID, APP_ROOT, exists, logError, path, prefs, savePrefs, t, tw, writeText } from "./env.ts";
+import { APP_ID, APP_ROOT, exists, lang, logError, path, prefs, savePrefs, t, tw, writeText } from "./env.ts";
 import type { LocalManager } from "./local-manager.ts";
 import { LocalPanel } from "./local-view.ts";
 import type { AppModel } from "./model.ts";
@@ -362,6 +365,7 @@ function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) =>
   const quick = new Adw.PreferencesGroup({ title: t("quickChat"), description: t("quickChatHint") });
   quick.add(commandRow(`${launcher()} --quick-chat`, toast));
   page.add(quick);
+  page.add(floatingBallGroup(ctx, model));
 
   // The launcher turned WebKit's sandbox off because the system blocks what it needs.
   if (GLib.getenv("AISPACE_WEB_SANDBOX") === "off") {
@@ -376,6 +380,58 @@ function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) =>
   aboutRow.connect("activated", () => ctx.dialog.get_root()?.get_application()?.lookup_action("about")?.activate(null));
   about.add(aboutRow);
   page.add(about);
+}
+
+/**
+ * The floating ball on this computer: shown or not, and what each of its four sections opens in
+ * the current Space (an app hands the text and pictures to its own agent, or to Space Assistant).
+ * Each Space keeps its own choice (the Mac's FloatingBallSettings).
+ */
+function floatingBallGroup(ctx: Ctx, model: AppModel): any {
+  const available = FloatingBall.available;
+  const group = new Adw.PreferencesGroup({ title: t("floatingBall"), description: available ? t("floatingBallHint") : t("floatingBallNoDisplay") });
+  const sync = () => ctx.dialog.get_root()?.get_application()?.lookup_action("floating-ball-sync")?.activate(null);
+  const show = new Adw.SwitchRow({ title: t("floatingBallShow"), active: available && Boolean(prefs.floatingBall), sensitive: available });
+  if (available && GLib.getenv("WAYLAND_DISPLAY")) show.set_subtitle(t("floatingBallWayland"));
+  group.add(show);
+  const space = model.current;
+  const catalogue = space?.catalogue;
+  const rows: any[] = [];
+  if (space && catalogue) {
+    const label = (e: Entry) => {
+      const title = pickText(e.title, e.i18n, "title", lang);
+      return e.peer ? `${title} · ${e.peer}` : title;
+    };
+    const position: Record<BallSection, string> = { keep: t("ballTop"), assistant: t("ballRight"), todo: t("ballBottom"), design: t("ballLeft") };
+    for (const section of SECTIONS) {
+      const pool = section === "assistant" ? catalogue.agents : catalogue.apps;
+      const ref = refFor(section, pool.map((e) => e.ref));
+      const fallback = pool.find((e) => e.ref === ref);
+      const choices = [
+        { value: "", label: t("ballDefault", { name: fallback ? label(fallback) : FALLBACK_TITLE[section] }) },
+        { value: EMPTY_SLOT, label: t("ballNone") },
+        ...catalogue.apps.map((e) => ({ value: entryKey(e), label: label(e) })),
+        ...catalogue.agents.map((e) => ({ value: entryKey(e), label: label(e) })),
+      ];
+      const current = slot(section, prefs.floatingBallSlots?.[space.conn.id]) ?? "";
+      const row = choiceRow(position[section], choices, current, (value) => {
+        const slots = prefs.floatingBallSlots ?? {};
+        prefs.floatingBallSlots = { ...slots, [space.conn.id]: setting(section, value || undefined, slots[space.conn.id]) };
+        savePrefs();
+        sync();
+      }).row;
+      row.set_visible(show.get_active());
+      group.add(row);
+      rows.push(row);
+    }
+  }
+  show.connect("notify::active", () => {
+    prefs.floatingBall = show.get_active();
+    savePrefs();
+    sync();
+    for (const r of rows) r.set_visible(show.get_active());
+  });
+  return group;
 }
 
 /** A saved Space's address and name, changed in a dialog over Settings; the address is checked as when connecting. */

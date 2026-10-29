@@ -19,11 +19,13 @@ struct ChatMessage: Identifiable, Equatable {
     var historic = false
 }
 
-/// One native conversation with an agent, shared by the main window and Quick Chat. Each turn is
-/// a background run on the Space: a dropped stream reattaches after the last event it saw, and
-/// only Stop ends the run, so closing a window or losing the network never resends a prompt.
+/// One native conversation with an agent; an agent's conversations are held by `AgentChats`, and
+/// the one it shows is the one the main window and Quick Chat show. Each turn is a background
+/// run on the Space: a dropped stream reattaches after the last event it saw, and only Stop ends
+/// the run, so closing a window or losing the network never resends a prompt.
 @MainActor
-final class ChatController: ObservableObject {
+final class ChatController: ObservableObject, Identifiable {
+    let id = UUID()
     let agent: AgentInfo
     let api: SpaceAPI
     @Published private(set) var messages: [ChatMessage] = []
@@ -33,18 +35,21 @@ final class ChatController: ObservableObject {
     @Published var imageError: String?
     @Published var pendingImageImports = 0
     @Published private(set) var error: String?
-    /// The agent's stored conversations, newest first, to pick one up again.
-    @Published private(set) var sessions: [ChatSessionInfo] = []
 
     /// A turn may install or change apps, even when it ends with an error or Stop.
     var onTurnEnded: () -> Void = {}
 
     /// The stored conversation on show; nil for a new one until its first reply names it.
     @Published private(set) var sessionID: String?
-    private var runID: String?
+    /// The run of the turn in progress; nil between turns and before the Space names a new one.
+    private(set) var runID: String? {
+        didSet { if let runID { runIDs.insert(runID) } }
+    }
+    /// Every run this conversation started or followed, so the same run is never followed twice.
+    private(set) var runIDs: Set<String> = []
     private var task: Task<Void, Never>?
-    /// One thread's identity: New Conversation and opening an earlier chat start another one, so a
-    /// late answer for a steer of the old thread cannot land in the new one.
+    /// One thread's identity: loading an earlier chat starts another one, so a late answer for a
+    /// steer of the old thread cannot land in it.
     private var conversation = UUID()
     /// Turns written while another one runs that the running turn could not take (`/steer` refused,
     /// or none was open yet): each keeps the message it belongs to, so its reply is inserted right
@@ -66,9 +71,27 @@ final class ChatController: ObservableObject {
         self.api = api
     }
 
-    /// Picks up a turn of this agent still running on the server, from any client.
-    func attachRunning(_ runs: [ChatRun]) {
-        guard !busy, messages.isEmpty, let run = runs.first(where: { $0.agent == "\(agent.app)/\(agent.name)" && $0.status == "running" }) else { return }
+    /// Something was said in it: what New Conversation leaves behind.
+    var hasMessages: Bool { !messages.isEmpty }
+
+    /// Nothing said in it yet and nothing running (ChatRoster.Item.blank).
+    var blank: Bool { !hasMessages && !busy }
+
+    /// Text or pictures wait in the field.
+    var composing: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty || pendingImageImports > 0
+    }
+
+    /// Its name before it is stored: the first line of the first thing the person said.
+    var title: String? {
+        messages.first { $0.role == .user }.flatMap { ChatRoster.title($0.text) }
+    }
+
+    /// Follows a turn of this agent running on the Space, started on any client; the turn's
+    /// message is shown as the person's, under whatever the conversation already holds.
+    func follow(_ run: ChatRun) {
+        guard !busy else { return }
+        if sessionID == nil { sessionID = run.sessionId }
         messages.append(ChatMessage(role: .user, text: run.message))
         start(source: .attach(run.id))
     }
@@ -194,13 +217,8 @@ final class ChatController: ObservableObject {
         Task { try? await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/stop", json: [:]) }
     }
 
-    func loadSessions() async {
-        guard let data = try? await api.data("\(agent.base)/sessions") else { return }
-        sessions = (try? Hub.rows(ChatSessionInfo.self, "sessions", from: data)) ?? []
-    }
-
-    /// Shows a stored conversation; the next message continues it.
-    func open(_ session: ChatSessionInfo) async {
+    /// Loads a stored conversation; the next message continues it.
+    func load(_ session: ChatSessionInfo) async {
         guard !busy, pendingImageImports == 0 else { return }
         do {
             let stored = try Hub.rows(ChatHistoryMessage.self, "messages", from: try await api.data("\(agent.base)/sessions/\(SpacePath.escape(session.sid))"))
@@ -217,16 +235,6 @@ final class ChatController: ObservableObject {
         } catch {
             self.error = HubStore.message(error)
         }
-    }
-
-    func newConversation() {
-        guard !busy, pendingImageImports == 0 else { return }
-        messages = []
-        images = []
-        imageError = nil
-        sessionID = nil
-        conversation = UUID()
-        error = nil
     }
 
     private enum Source {

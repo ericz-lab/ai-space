@@ -67,10 +67,30 @@ const CSS = `
 .run-output { font-size: 0.88em; padding: 8px 12px; }
 .setnote { font-size: 0.92em; }
 .sidebar-heading { font-weight: 700; font-size: 0.85em; margin: 12px 12px 4px; }
+window.quick-chat { background: transparent; }
+.qc-panel { border-radius: 16px; background: alpha(@window_bg_color, 0.96); border: 1px solid alpha(@window_fg_color, 0.1); }
+.qc, .qc-panel { font-size: 13px; }
+.qc-agent { padding: 3px 6px; min-height: 0; border-radius: 7px; }
+.qc-agent-name { font-weight: 600; }
+.qc-round { min-width: 20px; min-height: 20px; padding: 0; border-radius: 99px; background: alpha(#78787f, 0.14); color: alpha(@window_fg_color, 0.6); }
+.qc-round:hover { background: alpha(#78787f, 0.24); }
+.qc-round:disabled { opacity: 0.4; }
+.qc-field { padding: 8px 10px; border-radius: 10px; background: alpha(@view_bg_color, 0.7); border: 1px solid alpha(@window_fg_color, 0.08); }
+.qc-field.focused { border-color: alpha(@accent_color, 0.6); }
+.qc-field textview, .qc-field textview text { background: transparent; }
+.qc-hint { font-size: 11px; color: alpha(@window_fg_color, 0.55); }
+.qc-hint.dim { color: alpha(@window_fg_color, 0.3); }
+.qc-agent-row { padding: 6px 8px; border-radius: 8px; }
+.qc-avatar { border-radius: 99px; }
+.qc-round.qc-open { background: alpha(#ff9500, 0.18); color: #ff9500; }
+.qc-round > button, menubutton.qc-round > button { min-width: 20px; min-height: 20px; padding: 0; border-radius: 99px; background: transparent; }
+.qc-stop { min-width: 20px; min-height: 20px; padding: 0; color: @error_color; }
+.qc-field textview { min-height: 20px; }
 `;
 
-export function installStyles(): void {
+/** On the default display, or on another one the app shows windows on (Quick Chat's X11 one). */
+export function installStyles(display: any = Gdk.Display.get_default()): void {
   const provider = new Gtk.CssProvider();
   provider.load_from_string(CSS);
-  Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+  Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
