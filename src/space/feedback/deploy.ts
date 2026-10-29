@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
 /**
@@ -12,7 +13,14 @@ import { join } from "node:path";
 export type Runner = (args: string[], opts: { cwd: string; timeoutMs: number }) => Promise<{ code: number; out: string }>;
 
 export const gitRunner: Runner = async (args, opts) => {
-  const p = Bun.spawn(["git", ...args], { cwd: opts.cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+  const spawn = () => Bun.spawn(["git", ...args], { cwd: opts.cwd, stdout: "pipe", stderr: "pipe", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+  let p: ReturnType<typeof spawn>;
+  try {
+    p = spawn();
+  } catch (e) {
+    // Bun throws instead of exiting non-zero when git cannot start, e.g. a missing cwd.
+    return { code: -1, out: (e as Error).message };
+  }
   const timer = setTimeout(() => p.kill(), opts.timeoutMs);
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   clearTimeout(timer);
@@ -28,6 +36,8 @@ export async function deployFromOrigin(home: string, app: string, run: Runner = 
     return r;
   };
   const fail = (why: string) => ({ ok: false, log: [why, ...log].join("\n") });
+  // Without the folder, git cannot even start and Bun reports it as a missing `git` binary.
+  if (!(await stat(dir).then((s) => s.isDirectory(), () => false))) return fail(`no source checkout at app-src/${app} on this machine; deploy by hand from where the source lives`);
   if ((await step(["rev-parse", "--show-toplevel"])).code !== 0) return fail(`no source checkout at app-src/${app}`);
   const branch = (await step(["rev-parse", "--abbrev-ref", "HEAD"])).out.trim();
   if (branch !== "main") return fail(`app-src/${app} is on ${branch || "no branch"}, not main`);
