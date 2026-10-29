@@ -44,21 +44,31 @@ struct MainTabs: View {
         // Measure the safe viewport outside the scroll view. A horizontal scroll view resolves
         // safe areas into content margins; nested pages keep that layout size while their
         // scrolling content can pass behind the frosted status area.
-        GeometryReader { viewport in
-            PagerScroll(position: model.pager) {
-                // Not lazy: a lazy row makes the page being swiped to, with all its tiles and
-                // cards, in the middle of the swipe. Each page is lazy down its own length.
-                HStack(spacing: 0) {
-                    HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens)
-                        .frame(width: viewport.size.width, height: viewport.size.height)
-                        .id(Pager.home)
-                    ForEach(all) { screen in
-                        HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens, screenID: screen.id)
+        // Until the Space's library has loaded once (signed out, unreachable), the screens have
+        // nothing to show: only Home, with the card that says why, is on show.
+        Observing(loader) { loader in
+            let open = loader.catalogue != nil
+            GeometryReader { viewport in
+                PagerScroll(position: model.pager) {
+                    // Not lazy: a lazy row makes the page being swiped to, with all its tiles and
+                    // cards, in the middle of the swipe. Each page is lazy down its own length.
+                    HStack(spacing: 0) {
+                        HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens)
                             .frame(width: viewport.size.width, height: viewport.size.height)
-                            .id(screen.id)
+                            .id(Pager.home)
+                        ForEach(open ? all : []) { screen in
+                            HomeView(model: model, connection: connection, loader: loader, icons: icons, store: screens, screenID: screen.id)
+                                .frame(width: viewport.size.width, height: viewport.size.height)
+                                .id(screen.id)
+                        }
                     }
+                    .scrollTargetLayout()
                 }
-                .scrollTargetLayout()
+                // Made again when the screens come or go, so it lies on the page on show.
+                .id(open)
+            }
+            .onChange(of: open, initial: true) { _, open in
+                if !open && model.pagerID != Pager.home { model.pagerID = Pager.home }
             }
         }
         // Keep one status effect outside the pager so adjacent pages never overlap their glass.
@@ -141,4 +151,18 @@ private struct PagerScroll<Pages: View>: View {
                 }
         }
     }
+}
+
+/// Reads an observable object so the content is made again when it changes, for a view that
+/// gets the object from a lookup rather than as a property of its own.
+private struct Observing<Object: ObservableObject, Content: View>: View {
+    @ObservedObject var object: Object
+    @ViewBuilder let content: (Object) -> Content
+
+    init(_ object: Object, @ViewBuilder content: @escaping (Object) -> Content) {
+        self.object = object
+        self.content = content
+    }
+
+    var body: some View { content(object) }
 }

@@ -502,17 +502,32 @@ struct StatusCard: View {
         case .signInNeeded:
             card(icon: "person.badge.key", tint: Theme.accent, title: Text("Sign in to \(connection.url.host ?? connection.name)"),
                  detail: Text("Your Space is behind a sign-in. It opens on the Panel tab and is kept for this Space only.")) {
-                Button("Sign In") { model.signIn() }.buttonStyle(.borderedProminent)
+                HStack {
+                    Button("Sign In") { model.signIn() }.buttonStyle(.borderedProminent)
+                    spacesButton
+                }
             }
         case .unreachable(let reason):
             card(icon: "wifi.exclamationmark", tint: Theme.warning, title: Text("Cannot reach this Space"), detail: Text(verbatim: reason)) {
-                Button("Retry") { Task { await loader.refresh() } }.buttonStyle(.bordered)
+                HStack {
+                    Button("Retry") { Task { await loader.refresh() } }.buttonStyle(.bordered)
+                    spacesButton
+                }
             }
         case .incompatible(let reason):
             card(icon: "exclamationmark.triangle", tint: Theme.danger, title: Text("This address is not an ai-space panel"), detail: Text(verbatim: reason)) {
-                Button("Retry") { Task { await loader.refresh() } }.buttonStyle(.bordered)
+                HStack {
+                    Button("Retry") { Task { await loader.refresh() } }.buttonStyle(.bordered)
+                    spacesButton
+                }
             }
         }
+    }
+
+    /// Settings is a tile of the library; a Space whose library never loaded has none, so the
+    /// card leads to the saved Spaces itself, to remove this one or switch to another.
+    private var spacesButton: some View {
+        Button("Manage Spaces") { model.openSpaces() }.buttonStyle(.bordered)
     }
 
     private func card<Action: View>(icon: String, tint: Color, title: Text, detail: Text, @ViewBuilder action: () -> Action) -> some View {

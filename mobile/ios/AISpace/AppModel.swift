@@ -431,6 +431,13 @@ final class AppModel: ObservableObject {
         objectWillChange.send()
     }
 
+    /// Settings opened at Account, where the saved Spaces are switched, added and removed: the way
+    /// out of a Space whose library never loaded, which has no Settings tile to tap.
+    func openSpaces() {
+        showingSettings = true
+        settingsPath = NavigationPath([SettingsSection.account])
+    }
+
     func signIn() {
         closeWebPanelAfterSignIn = true
         openWebPanel()
