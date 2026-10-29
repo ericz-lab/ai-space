@@ -119,21 +119,27 @@ struct SettingsSectionPage: View {
     @State private var statusOpen = true
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                SettingsHeading(section.title)
-                switch section {
-                case .general: general
-                case .appearance: appearance
-                case .models: models
-                case .automation: automation
-                case .usage: usage
-                case .status: status
-                case .packages: packages
-                case .account: account
+        Group {
+            if section == .account {
+                account
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        SettingsHeading(section.title)
+                        switch section {
+                        case .general: general
+                        case .appearance: appearance
+                        case .models: models
+                        case .automation: automation
+                        case .usage: usage
+                        case .status: status
+                        case .packages: packages
+                        case .account: EmptyView()
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 40)
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 40)
         }
         .settingsChrome(Text(section.title))
         .refreshable {
@@ -384,45 +390,71 @@ struct SettingsSectionPage: View {
     // MARK: Account
 
     /// The Spaces saved on this phone and the sign-in of the one on show: on the panel, Account
-    /// is the sign-in of the Space it is served from.
+    /// is the sign-in of the Space it is served from. Drawn as a List, not cards: a saved Space is
+    /// removed by swiping it left, and only a List row swipes as the system's do before iOS 27
+    /// (swipeActionsContainer). Its rows sit on the cards' glass, padded as the cards' rows.
     private var account: some View {
-        SectionCards {
-            SettingsCard {
+        List {
+            Section {
+                SettingsHeading(section.title)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+            Section {
                 ForEach(model.store.connections) { c in
-                    // Swipe left to remove, as a row of an iOS list; a long press still works.
-                    SwipeToRemove(onRemove: { model.remove(c.id) }) { swiped in
-                        Button { if !swiped() { model.select(c.id) } } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(verbatim: c.name)
-                                    Text(verbatim: c.url.absoluteString).font(.footnote).foregroundStyle(Color.secondary).lineLimit(1)
-                                }
-                                Spacer()
-                                if c.id == connection.id { Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityLabel(Text("Selected")) }
+                    Button { model.select(c.id) } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(verbatim: c.name).foregroundStyle(Theme.text)
+                                Text(verbatim: c.url.absoluteString).font(.footnote).foregroundStyle(Color.secondary).lineLimit(1)
                             }
+                            Spacer()
+                            if c.id == connection.id { Image(systemName: "checkmark").foregroundStyle(Theme.accent).accessibilityLabel(Text("Selected")) }
                         }
-                        .buttonStyle(SettingsRowStyle())
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) { model.remove(c.id) } label: { Label("Remove", systemImage: "trash") }
                     }
                     .contextMenu {
                         Button(role: .destructive) { model.remove(c.id) } label: { Label("Remove", systemImage: "trash") }
                     }
-                    CardDivider()
+                    .accountRow()
                 }
-                Button { model.showingAdd = true } label: { Label("Add a Space", systemImage: "plus").foregroundStyle(Theme.accent) }
-                    .buttonStyle(SettingsRowStyle())
+                Button { model.showingAdd = true } label: {
+                    // Not a Label: a List sets a Label's icon in a wide column of its own.
+                    HStack(spacing: 10) {
+                        Image(systemName: "plus")
+                        Text("Add a Space")
+                    }
+                    .foregroundStyle(Theme.accent)
+                }
+                .accountRow()
+            } footer: {
+                SettingsNote("Swipe a Space to the left to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
+                    .accountFooter()
             }
-            SettingsNote("Swipe a Space to the left to remove it. Removing a Space here forgets its address, sign-in and screens on this iPhone. Nothing changes on the server.")
-            SettingsCard {
+            Section {
                 Button(role: .destructive) { model.confirmingSignOut = true } label: { Text("Sign Out").foregroundStyle(Theme.danger) }
-                    .buttonStyle(SettingsRowStyle())
                     .confirmationDialog(Text("Sign out of \(connection.name)?"), isPresented: $model.confirmingSignOut, titleVisibility: .visible) {
                         Button("Sign Out", role: .destructive) { model.signOut(connection) }
                     } message: {
                         Text("This clears the Space's cookies and saved pages from this iPhone.")
                     }
+                    .accountRow()
+            } footer: {
+                SettingsNote("The sign-in belongs to whatever stands in front of your Space (for example Cloudflare Access). The app stores no password or token; the session lives in this Space's own web data, apart from Safari.")
+                    .accountFooter()
             }
-            SettingsNote("The sign-in belongs to whatever stands in front of your Space (for example Cloudflare Access). The app stores no password or token; the session lives in this Space's own web data, apart from Safari.")
         }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(12)
+        .contentMargins(.horizontal, 16, for: .scrollContent)
+        .contentMargins(.top, 4, for: .scrollContent)
+        .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListHeaderHeight, 0)
+        .environment(\.defaultMinListRowHeight, 0)
     }
 
     private func row(dot: Color, title: String, detail: String?, value: String) -> some View {
@@ -569,60 +601,6 @@ private struct SettingsNote: View {
     }
 }
 
-/// A row of a card that slides left to show a Remove button, as a row of an iOS list does. The
-/// cards are not a List, so the swipe is drawn here. A tap while it is open closes it: the content
-/// asks `swiped()` first and does nothing when it returns true.
-private struct SwipeToRemove<Content: View>: View {
-    let onRemove: () -> Void
-    @ViewBuilder let content: (_ swiped: @escaping () -> Bool) -> Content
-    @State private var offset: CGFloat = 0
-    @State private var open = false
-    private let width: CGFloat = 88
-
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            Button {
-                withAnimation(.snappy) { offset = 0; open = false }
-                onRemove()
-            } label: {
-                Text("Remove").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(width: max(0, -offset))
-            .frame(maxHeight: .infinity)
-            .background(Theme.danger)
-            .opacity(offset < 0 ? 1 : 0)
-            .accessibilityHidden(!open)
-            content { close() }
-                .offset(x: offset)
-        }
-        .clipped()
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 16)
-                .onChanged { drag in
-                    guard abs(drag.translation.width) > abs(drag.translation.height) else { return }
-                    let x = (open ? -width : 0) + drag.translation.width
-                    offset = min(0, max(-width * 1.4, x))
-                }
-                .onEnded { drag in
-                    let x = (open ? -width : 0) + drag.predictedEndTranslation.width
-                    withAnimation(.snappy) {
-                        open = x < -width / 2
-                        offset = open ? -width : 0
-                    }
-                }
-        )
-        .accessibilityAction(named: Text("Remove"), onRemove)
-    }
-
-    /// Closes an open row; true when it was open.
-    private func close() -> Bool {
-        guard open else { return false }
-        withAnimation(.snappy) { offset = 0; open = false }
-        return true
-    }
-}
-
 /// A row that is a button: the card's padding, and a faint fill while pressed.
 private struct SettingsRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -635,6 +613,20 @@ private struct SettingsRowStyle: ButtonStyle {
 }
 
 private extension View {
+    /// A row of Account's List drawn as a card's row: the card's font and padding over its glass.
+    func accountRow() -> some View {
+        font(.subheadline)
+            .frame(minHeight: 20)
+            .listRowInsets(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+            .listRowBackground(Rectangle().fill(.regularMaterial))
+            .listRowSeparatorTint(Theme.hairline)
+    }
+
+    /// A note under a section of Account's List, placed as a note under a card.
+    func accountFooter() -> some View {
+        listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
+    }
+
     /// A card's row: 14 points in from its edges as a widget card's, at least 44 tall.
     func settingsRow(vertical: CGFloat = 12) -> some View {
         padding(.horizontal, 14).padding(.vertical, vertical)
