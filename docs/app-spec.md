@@ -552,7 +552,7 @@ Environment, always:
 | `SPACE_API_URL` | Base URL of the Space API, loopback. Written to `space.env`. |
 | `SPACE_NAME` | What this space calls itself ([machines.md](machines.md)); the name a hub and other machines know it by. Written to `space.env`. |
 | `SPACE_APP_TOKEN` | Per-app bearer token for the Space API; identifies the app on `POST /api/notify`, `POST /api/events`, `GET /api/events/stream`, `POST /api/call/*`, `POST /api/model/run` and the `/api/chat/*` routes. Written to `space.env`. |
-| `PORT` | For services: the declared port. |
+| `PORT` | For services, and for the app's http and command tasks: the declared `service.port`. |
 | `SPACE_TRIGGER` | For task runs: `schedule`, `manual` or `event`. With events, `SPACE_EVENT` (the latest) and `SPACE_EVENTS` (all) as JSON. |
 
 Environment, when declared: `DATABASE_URL` (or `DATABASE_URL_<NAME>` for several), `BLOB_URL`, `S3_*`.

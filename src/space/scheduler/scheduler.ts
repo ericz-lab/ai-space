@@ -95,6 +95,8 @@ export class Scheduler {
   private readonly onFinish?: SchedulerOptions["onFinish"];
   private readonly onPublish?: SchedulerOptions["onPublish"];
   private readonly appDirs = new Map<string, string>();
+  /** Each synced app's `service.port`, handed to its tasks as `PORT`. */
+  private readonly appPorts = new Map<string, number>();
   /** Apps whose tasks ai-space itself contributes (`space`): a workspace sync must not forget them. */
   private readonly builtin = new Set<string>();
   private readonly inflight = new Map<string, { promise: Promise<void>; controller: AbortController }>();
@@ -251,6 +253,7 @@ export class Scheduler {
     if (dir === undefined && !this.leftovers().includes(app)) return undefined;
     const summary = this.syncManifest({ app, dir: dir ?? "", spec: 1, status: "archived", agents: [], widgets: [], tasks: [] });
     this.appDirs.delete(app);
+    this.appPorts.delete(app);
     return summary;
   }
 
@@ -344,7 +347,7 @@ export class Scheduler {
     const timeout = setTimeout(() => controller.abort(), task.timeoutMs);
     const env = this.envFor ? this.envFor(task.app) : Promise.resolve(undefined);
     const p = env
-      .then((extra) => this.runner({ ...task, target: effectiveTarget(task) }, { appDir: this.appDirs.get(task.app), env: extra, signal: controller.signal, trigger, events }))
+      .then((extra) => this.runner({ ...task, target: effectiveTarget(task) }, { appDir: this.appDirs.get(task.app), port: this.appPorts.get(task.app), env: extra, signal: controller.signal, trigger, events }))
       .catch((e): RunResult => ({ status: "error", error: (e as Error).message ?? String(e) }))
       .then((result) => {
         clearTimeout(timeout);
@@ -564,6 +567,8 @@ export class Scheduler {
   syncManifest(manifest: Manifest, extra: ManifestTask[] = []): SyncSummary {
     const now = this.now();
     this.appDirs.set(manifest.app, manifest.dir);
+    if (manifest.service?.port !== undefined) this.appPorts.set(manifest.app, manifest.service.port);
+    else this.appPorts.delete(manifest.app);
     const summary: SyncSummary = { app: manifest.app, created: [], updated: [], orphaned: [] };
     const seen = new Set<string>();
 

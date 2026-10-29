@@ -36,6 +36,8 @@ export type RunContext = {
   appDir?: string;
   /** Extra variables for command/agent targets, layered over the app's `.env` (storage's space.env). */
   env?: Record<string, string>;
+  /** The app's declared `service.port`: `PORT` for its tasks, as its service sees it. */
+  port?: number;
   signal: AbortSignal;
   /** Why the run started; default schedule. */
   trigger?: RunTrigger;
@@ -76,8 +78,9 @@ export async function runTarget(target: Target, ctx: RunContext): Promise<RunRes
 // ---------------------------------------------------------------- http
 
 async function runHttp(target: Extract<Target, { kind: "http" }>, ctx: RunContext): Promise<RunResult> {
+  const vars = await placeholderEnv(ctx.appDir, ctx);
   const headers: Record<string, string> = { "x-space-trigger": ctx.trigger ?? "schedule" };
-  for (const [k, v] of Object.entries(target.headers ?? {})) headers[k] = interpolate(v);
+  for (const [k, v] of Object.entries(target.headers ?? {})) headers[k] = interpolate(v, vars);
   if (target.model) {
     for (const key of Object.keys(headers)) if (key.toLowerCase() === "x-space-model") delete headers[key];
     headers["x-space-model"] = target.model;
@@ -90,7 +93,7 @@ async function runHttp(target: Extract<Target, { kind: "http" }>, ctx: RunContex
       ? { ...((target.body as Record<string, unknown> | undefined) ?? {}), event: eventPayload(events[events.length - 1]!), events: events.map(eventPayload) }
       : target.body;
   if (merged !== undefined && target.method !== "GET") {
-    body = typeof merged === "string" ? interpolate(merged) : JSON.stringify(merged);
+    body = typeof merged === "string" ? interpolate(merged, vars) : JSON.stringify(merged);
     if (!Object.keys(headers).some((k) => k.toLowerCase() === "content-type")) {
       headers["content-type"] = "application/json";
     }
@@ -99,7 +102,7 @@ async function runHttp(target: Extract<Target, { kind: "http" }>, ctx: RunContex
   // deadline; Bun's shorter connection idle timeout must not end the wait early.
   // Jobs are infrequent and may hit a busy application's expired idle connection.
   // Start a fresh connection; retrying a dropped POST could execute a job twice.
-  const res = await fetch(interpolate(target.url), { method: target.method, headers, body, signal: ctx.signal, timeout: false, keepalive: false });
+  const res = await fetch(interpolate(target.url, vars), { method: target.method, headers, body, signal: ctx.signal, timeout: false, keepalive: false });
   const raw = await res.text();
   const text = truncate(raw);
   if (!res.ok) return { status: "error", error: `HTTP ${res.status}`, output: text };
@@ -126,10 +129,10 @@ function parseVerdict(raw: string): { status: RunStatus; error?: string } | unde
 
 async function runCommand(target: Extract<Target, { kind: "command" }>, ctx: RunContext): Promise<RunResult> {
   const cwd = target.cwd ?? ctx.appDir ?? process.cwd();
-  const env = { ...process.env, ...(await loadAppEnv(cwd)), ...(ctx.env ?? {}), ...(target.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []), ...(target.model ? { SPACE_TASK_MODEL: target.model } : {}) };
-  // ${VAR} placeholders resolve from the scheduler environment, same as http targets,
+  const env = { ...(await placeholderEnv(cwd, ctx)), ...(target.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []), ...(target.model ? { SPACE_TASK_MODEL: target.model } : {}) };
+  // ${VAR} placeholders resolve from the same environment as http targets,
   // so machine-specific paths (a venv python, a token) stay out of the manifest.
-  const r = await spawnCollect(["sh", "-c", interpolate(target.command)], { cwd, env, signal: ctx.signal });
+  const r = await spawnCollect(["sh", "-c", interpolate(target.command, env)], { cwd, env, signal: ctx.signal });
   const output = truncate(joinOutput(r.stdout, r.stderr));
   if (r.aborted || r.timedOut) return { status: "error", error: "timed out", output };
   if (r.code !== 0) return { status: "error", error: `exit code ${r.code}`, output };
@@ -177,7 +180,21 @@ function joinOutput(stdout: string, stderr: string): string {
 
 // ---------------------------------------------------------------- env helpers
 
-/** Resolve `${VAR}` and `${VAR:-default}` from the scheduler's own environment. */
+/**
+ * What an app's http and command tasks see: the scheduler's environment, the
+ * app's `.env`, the space's variables for the app (`space.env`), and `PORT`
+ * when the app declares a service, so `http://127.0.0.1:${PORT}/...` reaches it.
+ */
+async function placeholderEnv(dir: string | undefined, ctx: RunContext): Promise<Record<string, string | undefined>> {
+  return {
+    ...process.env,
+    ...(dir ? await loadAppEnv(dir) : {}),
+    ...(ctx.env ?? {}),
+    ...(ctx.port !== undefined ? { PORT: String(ctx.port) } : {}),
+  };
+}
+
+/** Resolve `${VAR}` and `${VAR:-default}`, by default from the scheduler's own environment. */
 export function interpolate(text: string, env: Record<string, string | undefined> = process.env): string {
   return text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (_, name: string, def?: string) => {
     const v = env[name];
