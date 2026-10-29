@@ -1,5 +1,8 @@
-import { describe, expect, test } from "bun:test";
-import { deployFromOrigin, type Runner } from "./deploy.ts";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { deployFromOrigin, gitRunner, type Runner } from "./deploy.ts";
 import type { RunRegistry } from "../agents/runs.ts";
 import { FIXER_ID, fixerPort, localFixer, peerFixer, sseData } from "./fixer.ts";
 
@@ -81,12 +84,17 @@ describe("peer fixer", () => {
 });
 
 describe("deploy from origin", () => {
+  // deployFromOrigin checks that app-src/<app> exists before it runs git.
+  const home = mkdtempSync(join(tmpdir(), "space-deploy-"));
+  mkdirSync(join(home, "app-src", "ai-todo"), { recursive: true });
+  afterAll(() => rmSync(home, { recursive: true, force: true }));
+
   /** git as a script: each command's answer by its first words. */
   const fake = (answers: Record<string, { code: number; out: string }>) => {
     const ran: string[] = [];
     const run: Runner = async (args, opts) => {
       ran.push(args.join(" "));
-      expect(opts.cwd).toBe("/w/app-src/ai-todo");
+      expect(opts.cwd).toBe(join(home, "app-src", "ai-todo"));
       const key = Object.keys(answers).find((k) => args.join(" ").startsWith(k));
       return key ? answers[key]! : { code: 0, out: "" };
     };
@@ -95,7 +103,7 @@ describe("deploy from origin", () => {
 
   test("fast-forwards from origin, then pushes to the deploy remote", async () => {
     const { run, ran } = fake({ "rev-parse --abbrev-ref": { code: 0, out: "main" } });
-    const r = await deployFromOrigin("/w", "ai-todo", run);
+    const r = await deployFromOrigin(home, "ai-todo", run);
     expect(r.ok).toBe(true);
     expect(ran).toEqual(["rev-parse --show-toplevel", "rev-parse --abbrev-ref HEAD", "status --porcelain", "remote get-url deploy", "pull --ff-only origin main", "push deploy HEAD:main"]);
   });
@@ -110,9 +118,23 @@ describe("deploy from origin", () => {
       [{ "rev-parse --abbrev-ref": { code: 0, out: "main" }, push: { code: 1, out: "check failed" } }, "deploy push failed"],
     ];
     for (const [answers, why] of cases) {
-      const r = await deployFromOrigin("/w", "ai-todo", fake(answers).run);
+      const r = await deployFromOrigin(home, "ai-todo", fake(answers).run);
       expect(r.ok).toBe(false);
       expect(r.log.split("\n")[0]).toContain(why);
     }
+  });
+
+  test("names a missing source checkout before git runs", async () => {
+    const { run, ran } = fake({});
+    const r = await deployFromOrigin(home, "keep", run);
+    expect(r.ok).toBe(false);
+    expect(r.log.split("\n")[0]).toContain("no source checkout at app-src/keep");
+    expect(ran).toEqual([]);
+  });
+
+  test("git that cannot start is a failed step, not a throw", async () => {
+    const r = await gitRunner(["status"], { cwd: join(home, "missing"), timeoutMs: 5_000 });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("ENOENT");
   });
 });
