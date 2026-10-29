@@ -120,6 +120,8 @@ export class FeedbackService {
       mode: s.mode,
       errors: s.errors,
       app: { name: app, title: info!.title, zh: info!.zhTitle ?? info!.title },
+      // Where the fix may run, when there is a choice: this machine first, then its peers.
+      ...(this.opts.machines().length ? { machine: this.machineFor(s.machine), machines: [{ value: "", label: this.opts.name }, ...this.opts.machines().map((m) => ({ value: m, label: m }))] } : {}),
       client: { kind: client.kind, en: clientLabel(client, "en"), zh: clientLabel(client, "zh") },
       shortcut: "Alt+Shift+F",
     };
@@ -194,6 +196,12 @@ export class FeedbackService {
     if (!text) throw new FeedbackError(400, "text is required");
     if (text.length > LIMITS.text) throw new FeedbackError(400, `text is longer than ${LIMITS.text} characters`);
     const mode = b.mode === "later" ? "later" : b.mode === "now" ? "auto" : s.mode;
+    // The page may name the machine the fix runs on: this one ("") or a peer; left out, Settings decide.
+    let fixMachine: string | null = null;
+    if (b.machine !== undefined && b.machine !== null) {
+      if (typeof b.machine !== "string" || (b.machine && !this.opts.machines().includes(b.machine))) throw new FeedbackError(400, "machine must be this space or one of its peers");
+      fixMachine = b.machine;
+    }
     let images;
     try {
       images = parseImages(b.images);
@@ -206,7 +214,7 @@ export class FeedbackService {
     if (repeated) return { id: repeated.id, status: repeated.status, todoId: repeated.todoId, todoUrl: repeated.todoUrl, repeated: true };
     if (this.store.countSince(app, this.now() - 3600_000) >= LIMITS.perHour) throw new FeedbackError(429, `at most ${LIMITS.perHour} pieces of feedback per app in an hour`);
 
-    let row = this.store.add({ app, text, context, client: clientOf(ua), status: mode === "later" ? "later" : "queued" });
+    let row = this.store.add({ app, text, context, client: clientOf(ua), status: mode === "later" ? "later" : "queued", fixMachine });
     const sink = this.opts.todo();
     if (!sink) {
       row = this.store.patch(row.id, { status: "recorded", note: "no ai-todo on this space or its peers" })!;
@@ -221,7 +229,8 @@ export class FeedbackService {
       row = this.store.patch(row.id, { status: "recorded", note: `ai-todo: ${(e as Error).message}`.slice(0, 500) })!;
       return { id: row.id, status: row.status, todoId: null, todoUrl: null };
     }
-    const fixer = s.machine ? `Fix Engineer: space/ui-fixer on ${s.machine}.` : "Fix Engineer: space/ui-fixer.";
+    const runOn = fixMachine ?? s.machine;
+    const fixer = runOn ? `Fix Engineer: space/ui-fixer on ${runOn}.` : "Fix Engineer: space/ui-fixer.";
     await sink.plan(row.todoId!, todoPlan(row, titleFor(info, row), { images: images.length, fixer })).catch((e) => this.log(`#${row.id}: plan: ${(e as Error).message}`));
     if (images.length) await sink.record(row.todoId!, say(langOf(row), "screenshot"), images).catch((e) => this.log(`#${row.id}: picture: ${(e as Error).message}`));
     if (row.status === "queued") this.schedule(app);
@@ -272,12 +281,28 @@ export class FeedbackService {
     (this.opts.log ?? ((l: string) => console.error(`[feedback] ${l}`)))(line);
   }
 
-  /** Start the app's queued feedback unless a fix of the app is running; that one starts the next. */
+  /** A row's machine: the person's choice, else Settings'. */
+  private machineOf(r: FeedbackRow, s = this.settings()): string {
+    return r.fixMachine ?? s.machine;
+  }
+
+  /** The default the button shows: Settings' machine while it is still a peer, else this one. */
+  private machineFor(m: string): string {
+    return m && this.opts.machines().includes(m) ? m : "";
+  }
+
+  /**
+   * Start the app's queued feedback unless a fix of the app is running; that one starts the next.
+   * One run goes to one machine: the oldest row's; rows meant for another machine wait for the next.
+   */
   private schedule(app: string): void {
     if (this.active.has(app)) return;
-    const rows = this.store.list({ app, status: ["queued"], limit: 20 }).reverse();
-    if (!rows.length) return;
-    const done = this.dispatch(app, rows)
+    const s = this.settings();
+    const queued = this.store.list({ app, status: ["queued"], limit: 100 }).reverse();
+    if (!queued.length) return;
+    const machine = this.machineOf(queued[0]!, s);
+    const rows = queued.filter((r) => this.machineOf(r, s) === machine).slice(0, 20);
+    const done = this.dispatch(app, rows, machine)
       .catch((e) => this.log(`${app}: ${(e as Error).message}`))
       .finally(() => this.afterRun(app));
     this.active.set(app, done);
@@ -288,7 +313,7 @@ export class FeedbackService {
     this.schedule(app);
   }
 
-  private async dispatch(app: string, rows: FeedbackRow[]): Promise<void> {
+  private async dispatch(app: string, rows: FeedbackRow[], machine: string): Promise<void> {
     const s = this.settings();
     const info = this.opts.app(app);
     const sink = this.opts.todo();
@@ -300,7 +325,6 @@ export class FeedbackService {
       }
     };
     if (!info) return fail(`${app} is no longer registered here`);
-    const machine = s.machine;
     if (machine && !this.opts.machines().includes(machine)) return fail(`the Fix Engineer's machine ${machine} is not a peer of this space`);
     // A second try carries the task's records: the last attempt's report, the person's reason for rejecting it.
     const history = new Map<number, string[]>();

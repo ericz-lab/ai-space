@@ -95,6 +95,8 @@ export type FeedbackRow = {
   todoId: number | null;
   todoPeer: string;
   todoUrl: string | null;
+  /** Where the person asked the fix to run ("" here, else a peer); null follows Settings. */
+  fixMachine: string | null;
   /** The engineer's run, and the machine it ran on ("" here). */
   runId: string | null;
   runMachine: string;

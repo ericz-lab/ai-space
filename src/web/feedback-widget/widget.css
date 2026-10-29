@@ -164,6 +164,10 @@ textarea:focus-visible { outline-offset: 0; border-color: var(--accent); }
 .seg button:active { background: var(--press); }
 .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--rule-strong); }
 .seg button:focus-visible { outline-offset: 1px; }
+.machine { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 12px; }
+.machine span { white-space: nowrap; }
+.machine select { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+.machine select:focus-visible { outline-offset: 1px; }
 .send-row { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
 .note { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; }
 .note.err { color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-rule); border-radius: 8px; padding: 6px 10px; }
@@ -223,6 +227,8 @@ a.recent-row:active { background: var(--press); }
 .coarse .chip { height: 44px; }
 .coarse .chip .icon-btn { width: 40px; height: 40px; }
 .coarse .seg button { height: 40px; padding: 0 16px; }
+.coarse .machine { font-size: 13px; }
+.coarse .machine select { height: 40px; font-size: 16px; }
 .coarse .send-row .primary { flex: 1; height: 44px; }
 .coarse .link { min-height: 44px; font-size: 13px; }
 .coarse .recent-row { min-height: 44px; }

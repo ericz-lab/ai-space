@@ -7,7 +7,8 @@ import css from "./widget.css";
  * It asks `/_space/feedback/config` whether this app shows it; off, it adds nothing to the page.
  * On, it draws one small button in its own closed shadow root, bottom right, which the person can
  * drag (the spot is kept per app); a click or Alt+Shift+F opens a card: a sentence, picked
- * elements, a screenshot or a picture, "fix now" or "fix later", and the page's context shown in
+ * elements, a screenshot or a picture, "fix now" or "fix later", the machine the fix runs on (when
+ * the space has peers), and the page's context shown in
  * one grey line. Everything is sent to `/_space/feedback` on the page's own origin; the router
  * names the app. Colours and language follow the page.
  */
@@ -20,6 +21,9 @@ type Config = {
   app?: { name: string; title: string; zh: string };
   client?: { kind: string; en: string; zh: string };
   shortcut?: string;
+  /** Where the fix may run, sent only when the space has peers: "" is the space itself. */
+  machine?: string;
+  machines?: { value: string; label: string }[];
 };
 type Recent = { id: number; text: string; status: string; todoId: number | null; todoUrl: string | null };
 type Image = { name: string; type: string; data: string; bytes: number };
@@ -84,6 +88,7 @@ function mount(cfg: Config, errors: string[]): void {
   const app = cfg.app!;
   const POS_KEY = `space-feedback.pos.${app.name}`;
   const HIDE_KEY = `space-feedback.hidden.${app.name}`;
+  const MACHINE_KEY = `space-feedback.machine.${app.name}`;
   const store = {
     get: (s: Storage | undefined, k: string) => {
       try { return s?.getItem(k) ?? null; } catch { return null; }
@@ -119,6 +124,14 @@ function mount(cfg: Config, errors: string[]): void {
   let sent: { todoId: number | null; todoUrl: string | null; later: boolean } | null = null;
   let recent: Recent[] = [];
   let hidden = store.get(session, HIDE_KEY) === "1";
+  // The machine the fix runs on: the last one picked for this app while the space still has it, else the space's default.
+  const machines = cfg.machines && cfg.machines.length > 1 ? cfg.machines : [];
+  let machine: string | null = machines.length
+    ? (() => {
+        const kept = store.get(local, MACHINE_KEY);
+        return kept !== null && machines.some((m) => m.value === kept) ? kept : cfg.machine ?? "";
+      })()
+    : null;
 
   // ---- the button
   const fab = el("button", { class: "fab", type: "button", html: ICONS.fab });
@@ -272,6 +285,17 @@ function mount(cfg: Config, errors: string[]): void {
       el("button", { type: "button", "aria-pressed": String(mode === "now"), onclick: () => { mode = "now"; render(); } }, t("now")),
       el("button", { type: "button", "aria-pressed": String(mode === "later"), onclick: () => { mode = "later"; render(); } }, t("later")),
     );
+    const where = machine === null
+      ? null
+      : (() => {
+          const select = el("select", { "aria-label": t("machine"), onchange: (e: Event) => { machine = (e.target as HTMLSelectElement).value; store.set(local, MACHINE_KEY, machine); } });
+          for (const m of machines) {
+            const o = el("option", { value: m.value }, m.value ? m.label : t("thisMachine", { name: m.label }));
+            o.selected = m.value === machine;
+            select.append(o);
+          }
+          return el("label", { class: "machine" }, el("span", {}, t("machine")), select);
+        })();
     const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
     const send = el("button", { class: "primary", type: "button", disabled: sending, onclick: () => void submit() }, sending ? t("sending") : t("send"));
     const parts: (Node | null)[] = [
@@ -280,6 +304,7 @@ function mount(cfg: Config, errors: string[]): void {
       file,
       picked.length || images.length ? chips : null,
       seg,
+      where,
       el("div", { class: "send-row" }, coarse() ? null : el("kbd", {}, isMac ? "⌘ Enter" : "Ctrl+Enter"), send),
       message ? el("p", { class: `note${message.ok ? "" : " err"}`, role: message.ok ? "status" : "alert" }, message.text) : null,
     ];
@@ -455,6 +480,7 @@ function mount(cfg: Config, errors: string[]): void {
     const body = {
       text,
       mode,
+      ...(machine !== null ? { machine } : {}),
       context: {
         url: location.href,
         title: document.title,
