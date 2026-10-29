@@ -33,22 +33,37 @@ struct ChatTextInputTests {
         #expect(editor.contentHeight(for: 40) > editor.contentHeight(for: 300))
     }
 
-    @Test func theScrollViewKeepsTheEditorAsWideAsTheField() {
-        let scroll = ChatTextScrollView(frame: NSRect(x: 0, y: 0, width: 280, height: 40))
-        scroll.hasHorizontalScroller = false
-        let editor = ChatTextEditor(frame: NSRect(x: 0, y: 0, width: 70, height: 20))
-        editor.isVerticallyResizable = true
-        editor.isHorizontallyResizable = false
-        editor.textContainer?.widthTracksTextView = true
-        scroll.documentView = editor
+    @Test func theFieldsEditorIsOnTextKit1() {
+        let (_, editor) = ChatTextEditor.makeField()
+        #expect(editor.textLayoutManager == nil)
+        #expect(editor.layoutManager != nil)
+    }
+
+    @Test func theEditorIsAlwaysAsWideAsTheField() {
+        let (scroll, editor) = ChatTextEditor.makeField()
+        scroll.frame = NSRect(x: 0, y: 0, width: 280, height: 40)
         editor.string = String(repeating: "输入较长的文字会", count: 6)
-        scroll.contentView.scroll(to: NSPoint(x: 120, y: 0))
-        scroll.tile()
-        #expect(editor.frame.width == scroll.contentSize.width)
+        #expect(editor.frame.width == scroll.contentView.bounds.width)
+        // What a measurement at an unbounded width used to do to the live editor.
+        editor.setFrameSize(NSSize(width: 35_184_372_088_832, height: editor.frame.height))
+        #expect(editor.frame.width == scroll.contentView.bounds.width)
+        editor.scrollRangeToVisible(NSRange(location: (editor.string as NSString).length, length: 0))
         #expect(scroll.contentView.bounds.origin.x == 0)
         scroll.setFrameSize(NSSize(width: 200, height: 40))
-        scroll.tile()
-        #expect(editor.frame.width == scroll.contentSize.width)
+        #expect(editor.frame.width == scroll.contentView.bounds.width)
+    }
+
+    @Test func theMeasuredHeightIsTheEditorsOwn() {
+        let (scroll, editor) = ChatTextEditor.makeField()
+        scroll.frame = NSRect(x: 0, y: 0, width: 289, height: 20)
+        let width = scroll.contentView.bounds.width
+        guard let layout = editor.layoutManager, let container = editor.textContainer else { Issue.record("no TextKit 1 layout"); return }
+        for text in ["", "的色放阿斯", String(repeating: "这是一段比较长的中文输入", count: 3), "Hello\n", String(repeating: "long message ", count: 12)] {
+            editor.string = text
+            layout.ensureLayout(for: container)
+            let laidOut = max(20, ceil(max(layout.usedRect(for: container).maxY, layout.extraLineFragmentRect.maxY)))
+            #expect(editor.contentHeight(for: width) == laidOut, "\(text)")
+        }
     }
 
     @Test func screenshotPasteReachesTheComposerAndLeavesTextAlone() {
