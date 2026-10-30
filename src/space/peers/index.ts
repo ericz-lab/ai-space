@@ -7,3 +7,4 @@ export { LEDGER_TIMEOUT_MS, PeerLedgers } from "./ledgers.ts";
 export { mergeAgent, mergeAgents, mergeApps, mergeServices, mergeWidgets, peerId, peerRoute } from "./merge.ts";
 export { createPeerServeRoutes, type PeerServeOptions } from "./serve.ts";
 export { PeerStore } from "./store.ts";
+export { RenameError, checkRename, renameEnvText, renamePeer, renamePeerData, type PeerRenameOptions, type PeerRenamed, type RenameCounts } from "./rename.ts";

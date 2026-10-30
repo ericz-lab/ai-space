@@ -2,13 +2,16 @@ import type { LayoutStore } from "../panel/layout.ts";
 import type { AppRegistry } from "../panel/registry.ts";
 import type { PeerHub } from "./hub.ts";
 import { peerId } from "./merge.ts";
+import { RenameError, type PeerRenamed, type RenameCounts } from "./rename.ts";
 import { sameOrigin } from "../auth.ts";
 import { bridge, wantsWebSocket } from "../terminal/api.ts";
 
 /**
  * The hub side of peers, shaped as a Bun.serve `routes` table.
  *
- *   GET   /api/peers                                    every peer: health, snapshot time, counts, duplicates
+ *   GET   /api/peers                                    every peer: id, health, snapshot time, counts, duplicates
+ *   POST  /api/peers/:peer/rename                       { to }: rename the peer and move what this hub keeps under its
+ *                                                       name, then publish space/peer.renamed (docs/peers.md#renaming-a-peer)
  *   PATCH /api/peers/:peer/apps/:app                    { hidden }: hide a peer app on this panel only
  *   DELETE /api/peers/:peer/apps/:app                   uninstall the app on the peer (forwarded), refresh its snapshot
  *   GET   /api/peers/:peer/model/apps                   the peer's app-model rows and its own choices (forwarded)
@@ -41,6 +44,8 @@ export type PeerApiOptions = {
   hub: PeerHub;
   layout: LayoutStore;
   registry: AppRegistry;
+  /** Renaming a peer (rename.ts `renamePeer` with the hub's database and `.env`); absent = 404. */
+  rename?: (from: string, to: string) => Promise<PeerRenamed & { moved: RenameCounts }>;
 };
 
 // The server argument only matters to the app proxy, which may upgrade the request to a socket.
@@ -83,6 +88,21 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
       GET: () => {
         const peers = hub.status().map((s) => ({ ...s, duplicates: duplicatesOf(s.name) }));
         return json({ ok: true, peers, asOf: new Date().toISOString() });
+      },
+    },
+
+    "/api/peers/:peer/rename": {
+      POST: async (req) => {
+        if (!opts.rename) return error(404, "renaming peers is not available here");
+        const from = req.params.peer ?? "";
+        if (!hub.get(from)) return error(404, `unknown peer: ${from}`);
+        const body = (await req.json().catch(() => ({}))) as { to?: unknown };
+        if (typeof body.to !== "string" || !body.to.trim()) return error(400, "to must be the new peer name");
+        try {
+          return json({ ok: true, ...(await opts.rename(from, body.to.trim())) });
+        } catch (e) {
+          return error(e instanceof RenameError ? 400 : 500, (e as Error).message);
+        }
       },
     },
 

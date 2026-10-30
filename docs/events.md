@@ -145,6 +145,16 @@ POST /api/consumers/:name/rotate          a new credential
 DELETE /api/consumers/:name               revoke
 ```
 
+## Events of ai-space itself
+
+ai-space publishes under the reserved app name `space`. Subscribe like to any app's event (`consumes: [{ event: space/peer.renamed }]`).
+
+### peer.renamed
+
+`space/peer.renamed` `{ from, to, id }`: the operator renamed a peer of this hub (`space peer rename`, [peers.md](peers.md#renaming-a-peer)). By the time it is published, ai-space has already moved its own state (the `.env` line, snapshots, cursors, layout, ledgers); `id` is the peer's stable id (`/api/peers` shows it too), `null` when the peer is an older ai-space that sends none.
+
+An app that keeps data per peer moves its own rows from `from` to `to`, in one transaction, and treats a second delivery of the same event as done (the rows under `from` are gone). Better still, it keys the data by `id` and keeps the name only for display; then the event only changes the label. A copy mirrored from another hub carries `peer` and is about that hub's peers, not this one's: ignore it.
+
 ## Migrating a point-to-point link
 
 Before: Pulse holds Insight's URL and a push token, POSTs each clue to `insight/api/leads`, retries by itself; Insight validates the token.

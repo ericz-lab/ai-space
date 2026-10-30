@@ -27,7 +27,7 @@ space backup  run | ls | verify | restore
 space chat    ls | import
 space event   ls | emit
 space consumer ls | show | add | rotate | rm
-space peer    ls
+space peer    ls | rename
 space router  show | sync
 space api     <METHOD> <path> [body]  the escape hatch: one raw call with the token added
 space init | setup | start | install-defaults
@@ -100,6 +100,7 @@ Rules:
 | `space consumer add NAME --event E [--filter k=v1,v2] [--call APP/CAP] [--description D]` | create one; `--filter` applies to every event and call; or a JSON body, `-`, `--json-file`; prints the token once | `POST /api/consumers` |
 | `space consumer rotate NAME [--yes]` / `rm NAME [--yes]` | a new token, or revoke; both end the old token and its open streams at once | `POST /api/consumers/:name/rotate`, `DELETE /api/consumers/:name` |
 | `space peer ls` | health, snapshot age, app counts | `GET /api/peers` |
+| `space peer rename OLD NEW` | rename a peer: its `.env` lines and everything the hub keeps under its name; publishes `space/peer.renamed` ([peers.md](peers.md#renaming-a-peer)) | `POST /api/peers/:peer/rename` |
 | `space router show` / `sync` | routes with status; write and reload | `GET /api/router`, `POST /api/router/sync` |
 | `space api METHOD PATH [BODY\|-] [--app]` | one call with the operator token (`--app`: the app's own); JSON pretty-printed, SSE one line per event | any |
 | `space init` / `setup` / `start` / `install-defaults` | the lifecycle commands, unchanged; `setup` is the basic configuration, `setup github` / `ingress` / `backup` / `notifications` / `peers` one optional extension each ([install.md](install.md)) | disk |

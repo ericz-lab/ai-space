@@ -123,6 +123,6 @@ function envToName(rest: string): string {
   return rest.toLowerCase().replace(/_/g, "-");
 }
 
-function nameToEnv(name: string): string {
+export function nameToEnv(name: string): string {
   return name.toUpperCase().replace(/-/g, "_");
 }
