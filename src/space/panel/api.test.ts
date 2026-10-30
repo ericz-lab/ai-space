@@ -35,6 +35,7 @@ const fakeFetch = (async (input: string | URL | Request) => {
       blocks: [
         { type: "metric", label: "Notes", value: 12, url: "/?filter=today" },
         { type: "metric", label: "Bad link", value: 1, url: "javascript:alert(1)" },
+        { type: "tanks", label: "Tanks", tanks: [{ label: "a", value: 1, max: 2, url: "/?a=1" }, { label: "b", value: 1, max: 2, url: "javascript:alert(1)" }] },
         { type: "nope", label: "x" },
       ],
     });
@@ -223,9 +224,11 @@ describe("panel api", () => {
       blocks: [
         { type: "metric", label: "Notes", value: 12, url: "https://notes.example.com/?filter=today" },
         { type: "metric", label: "Bad link", value: 1 },
+        { type: "tanks", label: "Tanks", tanks: [{ label: "a", value: 1, max: 2, url: "https://notes.example.com/?a=1" }, { label: "b", value: 1, max: 2 }] },
       ],
     });
     expect(byId["notes/recent"].blocks[1]).not.toHaveProperty("url");
+    expect(byId["notes/recent"].blocks[2].tanks[1]).not.toHaveProperty("url");
     expect(byId["notes/broken"]).toMatchObject({ ok: false, error: "db locked" });
     expect(byId["docs/w"]).toMatchObject({ ok: false, error: expect.stringContaining("no service") });
     expect(byId["notes/board"]).toMatchObject({ kind: "embed", ok: true });

@@ -86,7 +86,8 @@ export class WidgetFeed {
     try {
       const init = { signal: AbortSignal.timeout(this.opts.timeoutMs ?? 8_000) };
       const r = await (local ? local(m.app, w.source, init) : (this.opts.fetch ?? fetch)(url!, init));
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      // An unread body keeps a package app's lease, which blocks its upgrade.
+      if (!r.ok) { await r.body?.cancel().catch(() => {}); throw new Error(`HTTP ${r.status}`); }
       const j = (await r.json()) as { ok?: unknown; items?: unknown; error?: unknown; blocks?: unknown; asOf?: unknown; staleAfter?: unknown };
       if (j.ok !== true || !Array.isArray(j.items)) throw new Error(typeof j.error === "string" ? j.error : "response is not { ok: true, items: [] }");
       const items = j.items.slice(0, MAX_ITEMS).map((it: Record<string, unknown>) => ({
@@ -97,7 +98,16 @@ export class WidgetFeed {
       const out: WidgetData = { ok: true, items };
       const blocks = sanitizeBlocks(j.blocks);
       if (blocks)
-        out.blocks = blocks.map((b) => {
+        out.blocks = blocks.map((block) => {
+          let b = block;
+          // A tank's link resolves against the app's public URL like the block's own.
+          if (b.type === "tanks")
+            b = { ...b, tanks: b.tanks.map((k) => {
+              if (!k.url) return k;
+              const { url, ...rest } = k;
+              const abs = contentLink(m, url);
+              return abs ? { ...rest, url: abs } : rest;
+            }) };
           if (!b.url) return b;
           const { url, ...rest } = b;
           const abs = contentLink(m, url);
