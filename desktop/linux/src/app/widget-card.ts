@@ -3,7 +3,7 @@ import Gtk from "gi://Gtk?version=4.0";
 import { type Widget, pickText } from "../core/catalogue.ts";
 import { relativeTime } from "../core/format.ts";
 import { resolveUrl } from "../core/url.ts";
-import { type Tone, type WidgetBlock, cardBody, deltaText, embedHeight, embedPath, fraction, gaugeSegments, isOutdated, itemsFor, position, rowsFor, shown, spark, toneOf, txt } from "../core/widgets.ts";
+import { type Tone, type WidgetBlock, cardBody, deltaText, embedHeight, embedPath, fraction, gaugeSegments, isOutdated, itemsFor, position, rowsFor, shown, spark, tankLevel, tankValue, toneOf, txt } from "../core/widgets.ts";
 import { lang, t } from "./env.ts";
 import { iconWidget } from "./icons.ts";
 import type { Space } from "./model.ts";
@@ -152,6 +152,100 @@ function gaugeScale(b: Extract<WidgetBlock, { type: "gauge" }>): any {
   });
 }
 
+/** One cylinder filled to value / max in its tone (the accent without one), spilling over past max; drawn in a 64 x 84 box like the panel's. */
+function tankShape(k: Extract<WidgetBlock, { type: "tanks" }>["tanks"][number], width: number): any {
+  const height = Math.round((width * 84) / 64);
+  return drawing(height, (cr, w, h, area) => {
+    const { fg, accent } = colors(area);
+    const sx = w / 64, sy = h / 84;
+    const l = 8, r = 56, top = 12, bottom = 72, rx = 24, ry = 6, cx = 32;
+    const ellipse = (x: number, y: number, ex: number, ey: number) => {
+      cr.save();
+      cr.translate(x * sx, y * sy);
+      cr.scale(ex * sx, ey * sy);
+      cr.arc(0, 0, 1, 0, 2 * Math.PI);
+      cr.restore();
+    };
+    const side = (x1: number, x2: number, y: number) => {
+      cr.rectangle(x1 * sx, y * sy, (x2 - x1) * sx, (bottom - y) * sy);
+      ellipse((x1 + x2) / 2, bottom, (x2 - x1) / 2, ry);
+    };
+    const color = k.tone && k.tone !== "neutral" ? TONES[k.tone] : accent;
+    const level = tankLevel(k);
+    cr.setSourceRGBA(...alpha(fg, 0.14));
+    ellipse(cx, bottom + ry + 3, rx + 4, 3);
+    cr.fill();
+    cr.setSourceRGBA(...alpha(fg, 0.09));
+    side(l, r, top);
+    cr.fill();
+    if (k.value !== null && level > 0.002) {
+      const y = bottom - Math.min(1, level) * (bottom - top);
+      cr.setSourceRGBA(...color);
+      side(l + 1.5, r - 1.5, y);
+      cr.fill();
+      cr.save();
+      cr.rectangle((cx + 8) * sx, 0, (r - cx - 8) * sx, h);
+      cr.clip();
+      cr.setSourceRGBA(0, 0, 0, 0.14);
+      side(l + 1.5, r - 1.5, y);
+      cr.fill();
+      cr.restore();
+      cr.setSourceRGBA(...color);
+      ellipse(cx, y, rx - 1.5, ry - 0.8);
+      cr.fill();
+      cr.setSourceRGBA(1, 1, 1, 0.28);
+      ellipse(cx, y, rx - 1.5, ry - 0.8);
+      cr.fill();
+    }
+    cr.setSourceRGBA(1, 1, 1, 0.22);
+    cr.rectangle((l + 5) * sx, (top + 4) * sy, 3 * sx, (bottom - top - 5) * sy);
+    cr.fill();
+    cr.setSourceRGBA(...alpha(fg, 0.07));
+    ellipse(cx, top, rx, ry);
+    cr.fill();
+    cr.setSourceRGBA(...alpha(fg, 0.32));
+    cr.setLineWidth(1.2);
+    ellipse(cx, top, rx, ry);
+    cr.stroke();
+    if (level > 1) {
+      cr.setSourceRGBA(...color);
+      ellipse(cx - 6, top, 7, 3.5);
+      cr.fill();
+      roundRect(cr, (cx - 9) * sx, top * sy, 6 * sx, 20 * sy, 3 * sx);
+      cr.fill();
+    }
+  }, width);
+}
+
+/** Up to three tanks side by side, each with its name and a short value (WidgetBlocks.tsx `Tanks`). */
+function tanksRow(b: Extract<WidgetBlock, { type: "tanks" }>, small: boolean): any {
+  const box = new Gtk.Box({ spacing: small ? 10 : 8, homogeneous: true });
+  for (const k of b.tanks) {
+    const value = tankValue(k, lang);
+    const v = label(value ?? t("widgetNoData"), small ? ["caption", "numeric"] : ["wb-row-value", "numeric"], { xalign: small ? 0 : 0.5, max_width_chars: 12 });
+    if (value === undefined) v.add_css_class("dim-label");
+    const name = label(txt(k.label, lang), ["caption", "dim-label"], { xalign: small ? 0 : 0.5, max_width_chars: 14 });
+    if (small) {
+      const cell = new Gtk.Box({ spacing: 6 });
+      cell.append(tankShape(k, 22));
+      const text = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, valign: Gtk.Align.CENTER });
+      text.append(name);
+      text.append(v);
+      cell.append(text);
+      box.append(cell);
+    } else {
+      const cell = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 2, halign: Gtk.Align.CENTER });
+      const shape = tankShape(k, 48);
+      shape.set_halign(Gtk.Align.CENTER);
+      cell.append(shape);
+      cell.append(name);
+      cell.append(v);
+      box.append(cell);
+    }
+  }
+  return box;
+}
+
 function dot(tone: Tone | undefined, size: number): any {
   return drawing(size, (cr, w, h, area) => {
     cr.setSourceRGBA(...(tone ? TONES[tone] : alpha(colors(area).fg, 0.45)));
@@ -183,6 +277,8 @@ function hero(b: WidgetBlock): any {
     line.append(label(value ?? "", ["wb-status"], { wrap: true, lines: 2, hexpand: true }));
     box.append(line);
     if (b.time) box.append(label(relativeTime(b.time, lang), ["caption", "dim-label", "numeric"]));
+  } else if (b.type === "tanks") {
+    box.append(tanksRow(b, false));
   } else {
     const line = new Gtk.Box({ spacing: 8 });
     const v = label(value ?? t("widgetNoData"), ["wb-hero"]);
@@ -216,6 +312,11 @@ function row(b: WidgetBlock): any {
     line.append(d);
   }
   line.append(label(txt(b.label, lang), ["wb-row-label"], { hexpand: true }));
+  if (b.type === "tanks") {
+    box.append(line);
+    box.append(tanksRow(b, true));
+    return box;
+  }
   const value = shown(b, lang);
   const v = label(value ?? t("widgetNoData"), ["wb-row-value", "numeric"], { max_width_chars: 22, xalign: 1 });
   if (value === undefined) v.add_css_class("dim-label");

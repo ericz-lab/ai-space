@@ -127,6 +127,8 @@ internal fun BlockHero(block: WidgetBlock) {
             block.time?.let { Times.parse(it) }?.let { date ->
                 Text(Times.ago(date), style = HomeType.caption.tabular(), color = t.faint)
             }
+        } else if (block.type == WidgetBlock.Kind.tanks) {
+            TanksView(block, small = false)
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val color = when {
@@ -174,12 +176,14 @@ internal fun BlockRow(block: WidgetBlock) {
                 block.label.text(), style = HomeType.subheadline, color = t.text.copy(alpha = 0.78f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(end = 2.dp),
             )
-            Text(
-                value ?: stringResource(R.string.home_no_data),
-                style = HomeType.subheadline.tabular(), fontWeight = FontWeight.Medium,
-                color = if (value == null) t.secondaryText else if (toned) tone!!.color(t) else t.text,
-                maxLines = 1,
-            )
+            if (block.type != WidgetBlock.Kind.tanks) {
+                Text(
+                    value ?: stringResource(R.string.home_no_data),
+                    style = HomeType.subheadline.tabular(), fontWeight = FontWeight.Medium,
+                    color = if (value == null) t.secondaryText else if (toned) tone!!.color(t) else t.text,
+                    maxLines = 1,
+                )
+            }
             val delta = block.delta
             if (block.type == WidgetBlock.Kind.metric && delta != null) BlockDelta(delta, showsLabel = false)
             if (block.type == WidgetBlock.Kind.status) {
@@ -190,6 +194,7 @@ internal fun BlockRow(block: WidgetBlock) {
         }
         when (block.type) {
             WidgetBlock.Kind.trend -> Spark(block, 22.dp)
+            WidgetBlock.Kind.tanks -> TanksView(block, small = true)
             WidgetBlock.Kind.progress -> ProgressBar(block)
             WidgetBlock.Kind.gauge -> GaugeScale(block)
             else -> {}
@@ -399,6 +404,79 @@ internal fun GaugeScale(block: WidgetBlock) {
             val center = Offset(w * position, size.height / 2)
             drawCircle(edge, radius = 6.dp.toPx() + 3.dp.toPx(), center = center)
             drawCircle(marker, radius = 6.dp.toPx(), center = center)
+        }
+    }
+}
+
+/** Up to three upright tanks side by side, each with its name and a short value (WidgetBlocks.tsx `Tanks`). */
+@Composable
+internal fun TanksView(block: WidgetBlock, small: Boolean) {
+    val t = AiTheme.tokens
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if (small) 10.dp else 8.dp), verticalAlignment = Alignment.Bottom) {
+        for (tank in block.tanks.orEmpty()) {
+            val value = tank.shown()
+            val valueText = value ?: stringResource(R.string.home_no_data)
+            val valueColor = if (value == null) t.secondaryText else t.text
+            if (small) {
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TankShape(tank, Modifier.size(22.dp, 29.dp))
+                    Column {
+                        Text(tank.label.text(), style = HomeType.caption, color = t.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(valueText, style = HomeType.caption.tabular(), fontWeight = FontWeight.SemiBold, color = valueColor, maxLines = 1)
+                    }
+                }
+            } else {
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    TankShape(tank, Modifier.size(48.dp, 63.dp))
+                    Text(tank.label.text(), style = HomeType.caption, color = t.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(valueText, style = HomeType.subheadline.tabular(), fontWeight = FontWeight.SemiBold, color = valueColor, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One cylinder filled to value / max in its tone (the accent without one); past max it fills and
+ * spills over the rim. Drawn in the web panel's units, a 64 x 84 box.
+ */
+@Composable
+internal fun TankShape(tank: WidgetBlock.Tank, modifier: Modifier) {
+    val t = AiTheme.tokens
+    val tone = tank.tone
+    val color = if (tone != null && tone != BlockTone.neutral) tone.color(t) else t.accent
+    val ink = t.text
+    val level = tank.level.toFloat()
+    val hasValue = tank.value != null
+    Canvas(modifier.clearAndSetSemantics {}) {
+        val sx = size.width / 64f
+        val sy = size.height / 84f
+        val l = 8f; val r = 56f; val top = 12f; val bottom = 72f; val rx = 24f; val ry = 6f; val cx = 32f
+        fun oval(x: Float, y: Float, ex: Float, ey: Float) = Rect((x - ex) * sx, (y - ey) * sy, (x + ex) * sx, (y + ey) * sy)
+        fun side(x1: Float, x2: Float, y: Float) = Path().apply {
+            addRect(Rect(x1 * sx, y * sy, x2 * sx, bottom * sy))
+            addOval(Rect(x1 * sx, (bottom - ry) * sy, x2 * sx, (bottom + ry) * sy))
+        }
+        drawOval(ink.copy(alpha = 0.14f), topLeft = oval(cx, bottom + ry + 3, rx + 4, 3f).topLeft, size = oval(cx, bottom + ry + 3, rx + 4, 3f).size)
+        drawPath(side(l, r, top), ink.copy(alpha = 0.09f))
+        drawPath(side(l, r, top), ink.copy(alpha = 0.22f), style = Stroke(1.dp.toPx()))
+        if (hasValue && level > 0.002f) {
+            val y = bottom - min(1f, level) * (bottom - top)
+            val liquid = side(l + 1.5f, r - 1.5f, y)
+            drawPath(liquid, color)
+            clipPath(Path().apply { addRect(Rect((cx + 8) * sx, 0f, r * sx, size.height)) }) { drawPath(liquid, Color.Black.copy(alpha = 0.14f)) }
+            val surface = oval(cx, y, rx - 1.5f, ry - 0.8f)
+            drawOval(color, topLeft = surface.topLeft, size = surface.size)
+            drawOval(Color.White.copy(alpha = 0.28f), topLeft = surface.topLeft, size = surface.size)
+        }
+        drawRect(Color.White.copy(alpha = 0.22f), topLeft = Offset((l + 5) * sx, (top + 4) * sy), size = Size(3 * sx, (bottom - top - 5) * sy))
+        val rim = oval(cx, top, rx, ry)
+        drawOval(ink.copy(alpha = 0.07f), topLeft = rim.topLeft, size = rim.size)
+        drawOval(ink.copy(alpha = 0.32f), topLeft = rim.topLeft, size = rim.size, style = Stroke(1.2.dp.toPx()))
+        if (level > 1f) {
+            val pool = oval(cx - 6, top, 7f, 3.5f)
+            drawOval(color, topLeft = pool.topLeft, size = pool.size)
+            drawRoundRect(color, topLeft = Offset((cx - 9) * sx, top * sy), size = Size(6 * sx, 20 * sy), cornerRadius = CornerRadius(3 * sx))
         }
     }
 }

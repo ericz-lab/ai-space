@@ -195,6 +195,28 @@ class WidgetBlocksTests {
         assertEquals("Fear & Greed", blocks[0].label.text(lang = "fr"))
     }
 
+    @Test fun decodesTanksWithTheirLevels() {
+        val widgets = """
+        {"ok":true,"widgets":[{"id":"r2/usage","app":"r2","name":"usage","title":"Usage","kind":"items","size":"2x1","ok":true,"items":[],"blocks":[
+          {"type":"tanks","label":"Nearest 10 GB","tanks":[
+            {"label":"a","value":7.5,"max":10,"display":"7.5 GB","tone":"warning"},
+            {"label":"b","value":12,"max":10,"tone":"negative"},
+            {"label":"c","value":null,"max":10}]}
+        ]}]}
+        """.trimIndent()
+        val block = Catalogue.decode(Fixture.payload(widgets = widgets)).widgets.first().blocks!!.first()
+        assertEquals(WidgetBlock.Kind.tanks, block.type)
+        assertEquals(null, block.shown(lang = "en"))
+        val tanks = block.tanks!!
+        assertEquals(3, tanks.size)
+        assertEquals("7.5 GB", tanks[0].shown(lang = "en"))
+        assertEquals(BlockTone.warning, tanks[0].tone)
+        assertEquals(1.2, tanks[1].level, 1e-9)
+        assertEquals("120%", tanks[1].shown(lang = "en"))
+        assertEquals(0.0, tanks[2].level, 1e-9)
+        assertEquals(null, tanks[2].shown(lang = "en"))
+    }
+
     @Test fun leadsWithTheValueAsThePanelWritesIt() {
         val blocks = blocks
         assertEquals("57 Greed", blocks[0].shown(lang = "en"))

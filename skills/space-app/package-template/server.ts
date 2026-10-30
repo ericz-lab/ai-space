@@ -9,6 +9,9 @@ Bun.serve({
   port,
   // Bun closes a request idle for 10 s by default; a stream or a model call can be quiet longer.
   idleTimeout: 255,
+  // Without this Bun serves the page in development mode, whose hot-reload socket stays open while
+  // the page is; the Space counts that as use and refuses to upgrade or stop the app.
+  development: false,
   routes: {
     "/": page,
     "/healthz": new Response("ok"),

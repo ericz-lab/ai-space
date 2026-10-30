@@ -18,11 +18,15 @@ export type TrendBlock = Common & Numeric & { type: "trend"; style: "line" | "ba
 export type ProgressBlock = Common & Numeric & { type: "progress"; value: number | null; max: number; display?: BlockText };
 export type GaugeBlock = Common & { type: "gauge"; value: number | null; min: number; max: number; display?: BlockText; zones?: { to: number; tone: Tone; label?: BlockText }[] };
 export type StatusBlock = Common & { type: "status"; value: BlockText; time?: string };
-export type WidgetBlock = MetricBlock | TrendBlock | ProgressBlock | GaugeBlock | StatusBlock;
+/** One upright tank of a `tanks` block: `value` of `max`, filled to their ratio and spilling over past it. */
+export type Tank = { label: BlockText; value: number | null; max: number; display?: BlockText; tone?: Tone; url?: string };
+export type TanksBlock = Common & Numeric & { type: "tanks"; tanks: Tank[] };
+export type WidgetBlock = MetricBlock | TrendBlock | ProgressBlock | GaugeBlock | StatusBlock | TanksBlock;
 
 export const MAX_BLOCKS = 12;
 const MAX_POINTS = 90;
 const MAX_ZONES = 8;
+export const MAX_TANKS = 3;
 const MAX_TEXT = 160;
 const TONES = new Set<string>(["positive", "negative", "warning", "neutral"]);
 const FORMATS = new Set<string>(["number", "compact", "currency", "percent"]);
@@ -113,6 +117,22 @@ export function sanitizeBlock(r: unknown): WidgetBlock | undefined {
             .sort((a, b) => a.to - b.to)
         : undefined;
       return opt({ type: "gauge" as const, ...c, value, min, max, display: text(r.display), zones: zones?.length ? zones : undefined });
+    }
+    case "tanks": {
+      if (!Array.isArray(r.tanks)) return undefined;
+      const tanks: Tank[] = [];
+      for (const k of r.tanks) {
+        if (!isObj(k)) continue;
+        const label = text(k.label);
+        const value = numOrNull(k.value);
+        const max = num(k.max) ?? 100;
+        if (!label || value === undefined || max <= 0) continue;
+        tanks.push(opt({ label, value, max, display: text(k.display), tone: typeof k.tone === "string" && TONES.has(k.tone) ? (k.tone as Tone) : undefined,
+          url: typeof k.url === "string" && k.url.length <= 2048 ? k.url : undefined }));
+        if (tanks.length >= MAX_TANKS) break;
+      }
+      if (!tanks.length) return undefined;
+      return opt({ type: "tanks" as const, ...c, ...numeric(r), tanks });
     }
     case "status": {
       const value = text(r.value);

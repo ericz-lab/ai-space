@@ -86,8 +86,32 @@ data class WidgetBlock(
     val max: Double? = null,
     val zones: List<Zone>? = null,
     val time: String? = null,
+    val tanks: List<Tank>? = null,
 ) {
-    enum class Kind { metric, trend, progress, gauge, status }
+    enum class Kind { metric, trend, progress, gauge, status, tanks }
+
+    /** One upright tank of a `tanks` block: `value` of `max`, spilling over past it. */
+    data class Tank(
+        val label: BlockText,
+        val value: Double?,
+        val max: Double,
+        val display: BlockText? = null,
+        val tone: BlockTone? = null,
+        val url: String? = null,
+    ) {
+        /** How full the tank is, 0 and up; above 1 it spills over. */
+        val level: Double get() = if (value == null || max <= 0) 0.0 else Math.max(0.0, value / max)
+
+        /** The app's own text, else the share of `max` in percent (WidgetBlocks.tsx `tankValue`). */
+        fun shown(lang: String = Lang.current): String? =
+            display?.text(lang) ?: value?.let { if (max > 0) BlockFormat.string(it / max * 100, BlockNumber(format = "percent", decimals = 0), lang) else null }
+
+        companion object : JsonReader<Tank> {
+            override fun from(o: JSONObject): Tank? {
+                return Tank(BlockText.read(o, "label") ?: return null, o.dbl("value"), o.dbl("max") ?: 100.0, BlockText.read(o, "display"), BlockTone.of(o.opt("tone")), o.str("url"))
+            }
+        }
+    }
 
     data class Delta(
         val value: Double,
@@ -137,6 +161,7 @@ data class WidgetBlock(
         Kind.gauge -> display?.text(lang) ?: value?.let { BlockFormat.string(it, BlockNumber(), lang) }
         Kind.trend -> points?.lastOrNull { it.v != null }?.v?.let { BlockFormat.string(it, number, lang, signed = signed == true) }
         Kind.status -> statusText?.text(lang)
+        Kind.tanks -> null
     }
 
     /** The tone the value is drawn in: the block's own, or for a gauge the zone its value is in. */
@@ -187,6 +212,7 @@ data class WidgetBlock(
                 max = o.dbl("max"),
                 zones = Json.all(o.arr("zones"), Zone),
                 time = o.str("time"),
+                tanks = Json.all(o.arr("tanks"), Tank),
             )
         }
     }

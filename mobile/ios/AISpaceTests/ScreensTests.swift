@@ -159,6 +159,28 @@ struct WidgetBlocksTests {
         #expect(blocks[5].shown(lang: "en") == nil)
     }
 
+    @Test func decodesTanksWithTheirLevels() {
+        let widgets = """
+        {"ok":true,"widgets":[{"id":"r2/usage","app":"r2","name":"usage","title":"Usage","kind":"items","size":"2x1","ok":true,"items":[],"blocks":[
+          {"type":"tanks","label":"Nearest 10 GB","tanks":[
+            {"label":"a","value":7.5,"max":10,"display":"7.5 GB","tone":"warning"},
+            {"label":"b","value":12,"max":10,"tone":"negative"},
+            {"label":"c","value":null,"max":10}]}
+        ]}]}
+        """
+        let block = (try? Catalogue.decode(Fixture.payload(widgets: widgets)))?.widgets.first?.blocks?.elements.first
+        #expect(block?.type == .tanks)
+        #expect(block?.shown(lang: "en") == nil)
+        let tanks = block?.tanks ?? []
+        #expect(tanks.count == 3)
+        #expect(tanks[0].shown(lang: "en") == "7.5 GB")
+        #expect(tanks[0].tone == .warning)
+        #expect(tanks[1].level == 1.2)
+        #expect(tanks[1].shown(lang: "en") == "120%")
+        #expect(tanks[2].level == 0)
+        #expect(tanks[2].shown(lang: "en") == nil)
+    }
+
     @Test func writesNumbersInTheReadersUnits() {
         #expect(BlockFormat.string(1234.5, BlockNumber(), lang: "en") == "1,234.5")
         #expect(BlockFormat.string(12.345, BlockNumber(format: "percent"), lang: "en") == "12.3%")

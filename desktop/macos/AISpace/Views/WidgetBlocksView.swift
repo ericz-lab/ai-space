@@ -63,6 +63,8 @@ struct BlockHero: View {
                 if let date = block.time.flatMap(Times.parse) {
                     Text(verbatim: Times.ago(date)).font(.caption).monospacedDigit().foregroundStyle(.tertiary)
                 }
+            } else if block.type == .tanks {
+                TanksView(block: block)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(verbatim: value ?? missing())
@@ -102,10 +104,12 @@ struct BlockRow: View {
                 }
                 Text(verbatim: block.label.text()).font(.subheadline).foregroundStyle(Theme.text.opacity(0.78)).lineLimit(1)
                 Spacer(minLength: 8)
+                if block.type != .tanks {
                 Text(verbatim: value ?? missing())
                     .font(.subheadline.weight(.medium)).monospacedDigit()
                     .foregroundStyle(value == nil ? Color.secondary : (toned ? tone!.color : Theme.text))
                     .lineLimit(1).layoutPriority(1)
+                }
                 if block.type == .metric, let delta = block.delta { BlockDelta(delta: delta, showsLabel: false) }
                 if block.type == .status, let date = block.time.flatMap(Times.parse) {
                     Text(verbatim: Times.ago(date)).font(.caption).monospacedDigit().foregroundStyle(.tertiary).lineLimit(1)
@@ -114,6 +118,7 @@ struct BlockRow: View {
             switch block.type {
             case .trend: Spark(block: block).frame(height: 22)
             case .progress: ProgressBar(block: block)
+            case .tanks: TanksView(block: block, small: true)
             case .gauge: GaugeScale(block: block)
             default: EmptyView()
             }
@@ -321,5 +326,83 @@ struct GaugeScale: View {
             from = z.to
             return s
         }
+    }
+}
+
+/// Up to three upright tanks side by side, each with its name and a short value (WidgetBlocks.tsx `Tanks`).
+struct TanksView: View {
+    let block: WidgetBlock
+    var small = false
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: small ? 10 : 8) {
+            ForEach(Array((block.tanks ?? []).enumerated()), id: \.offset) { _, tank in
+                let name = tank.label.text()
+                let value = tank.shown()
+                if small {
+                    HStack(spacing: 6) {
+                        TankShape(tank: tank).frame(width: 22, height: 29)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(verbatim: name).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(verbatim: value ?? missing()).font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(value == nil ? Color.secondary : Theme.text).lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(spacing: 2) {
+                        TankShape(tank: tank).frame(width: 48, height: 63)
+                        Text(verbatim: name).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                        Text(verbatim: value ?? missing()).font(.subheadline.weight(.semibold)).monospacedDigit().foregroundStyle(value == nil ? Color.secondary : Theme.text).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// One cylinder filled to value / max in the tank's tone (the accent without one); past max it fills
+/// and spills over the rim. Drawn in the web panel's units, a 64 x 84 box.
+struct TankShape: View {
+    let tank: WidgetBlock.Tank
+
+    var body: some View {
+        Canvas { ctx, size in
+            let sx = size.width / 64, sy = size.height / 84
+            let l = 8.0, r = 56.0, top = 12.0, bottom = 72.0, rx = 24.0, ry = 6.0, cx = 32.0
+            func rect(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> CGRect { CGRect(x: x * sx, y: y * sy, width: w * sx, height: h * sy) }
+            func ellipse(_ x: Double, _ y: Double, _ ex: Double, _ ey: Double) -> Path { Path(ellipseIn: rect(x - ex, y - ey, ex * 2, ey * 2)) }
+            /// The side from height `y` down, with the rounded bottom.
+            func side(_ x1: Double, _ x2: Double, _ y: Double) -> Path {
+                var p = Path(rect(x1, y, x2 - x1, bottom - y))
+                p.addPath(Path(ellipseIn: rect(x1, bottom - ry, x2 - x1, ry * 2)))
+                return p
+            }
+            let level = tank.level
+            let color = tank.tone.flatMap { $0 == .neutral ? nil : $0.color } ?? Theme.accent
+            ctx.fill(ellipse(cx, bottom + ry + 3, rx + 4, 3), with: .color(Theme.text.opacity(0.14)))
+            ctx.fill(side(l, r, top), with: .color(Theme.text.opacity(0.09)))
+            ctx.stroke(side(l, r, top), with: .color(Theme.text.opacity(0.22)), lineWidth: 1)
+            if tank.value != nil, level > 0.002 {
+                let y = bottom - min(1, level) * (bottom - top)
+                ctx.fill(side(l + 1.5, r - 1.5, y), with: .color(color))
+                var shade = ctx
+                shade.clip(to: Path(rect(cx + 8, 0, r - cx - 8, 84)))
+                shade.fill(side(l + 1.5, r - 1.5, y), with: .color(.black.opacity(0.14)))
+                ctx.fill(ellipse(cx, y, rx - 1.5, ry - 0.8), with: .color(color))
+                ctx.fill(ellipse(cx, y, rx - 1.5, ry - 0.8), with: .color(.white.opacity(0.28)))
+            }
+            ctx.fill(Path(rect(l + 5, top + 4, 3, bottom - top - 5)), with: .color(.white.opacity(0.22)))
+            ctx.fill(ellipse(cx, top, rx, ry), with: .color(Theme.text.opacity(0.07)))
+            ctx.stroke(ellipse(cx, top, rx, ry), with: .color(Theme.text.opacity(0.32)), lineWidth: 1.2)
+            if level > 1 {
+                var spill = Path()
+                spill.addEllipse(in: rect(cx - 13, top - 3, 14, 7))
+                spill.addRoundedRect(in: rect(cx - 9, top, 6, 20), cornerSize: CGSize(width: 3 * sx, height: 3 * sy))
+                ctx.fill(spill, with: .color(color))
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
