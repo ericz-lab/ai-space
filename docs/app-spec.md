@@ -230,6 +230,7 @@ Fields every block may carry: `label` (required), `caption` (a short line under 
 | `progress` | `value` (number or `null`), `max`, `format`, `currency`, `unit`, `display` | A bar from 0 to `max`. Say in `label` or `caption` whether it counts used or remaining. |
 | `gauge` | `value` (number or `null`), `min`, `max`, `zones: [{ to, tone, label }]`, `display` | A scale with a marker, zones colored by tone (fear and greed, a temperature). |
 | `status` | `value` (text), `time` (ISO 8601) | A dot in the block's tone, a word and when it happened. |
+| `tanks` | `tanks: [{ label, value, max, display, tone, url }]` (1 to 3; `value` a number or `null`, `max` above 0, 100 by default) | Upright cylinders side by side, each filled to `value / max` in its `tone` (the accent without one) and spilling over the rim past `max`, with its label and a short value under it: `display`, else the share of `max` in percent. For a few things each measured against its own limit, such as accounts against a storage quota; as the hero of a card without rows it spans the whole card. |
 
 `format` is `number` (default), `compact` (14.6M), `currency` (`currency` is an ISO code, USD by default) or `percent` (the value is already in percent: `27` is 27%). `decimals` fixes the fraction digits. `display` replaces the formatted value with the app's own text when a number alone would mislead. The panel formats numbers in the reader's language.
 

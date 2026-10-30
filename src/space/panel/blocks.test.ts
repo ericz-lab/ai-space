@@ -53,6 +53,28 @@ describe("widget blocks", () => {
     expect(g).toEqual({ type: "gauge", label: "F&G", value: 64, min: 0, max: 100, zones: [{ to: 25, tone: "negative", label: "Fear" }, { to: 100, tone: "positive" }] });
   });
 
+  test("tanks keep at most three valid tanks and need one", () => {
+    const b = sanitizeBlock({
+      type: "tanks", label: "R2", unit: "GB",
+      tanks: [
+        { label: "a", value: 7.5, max: 10, tone: "warning", display: "7.5 GB" },
+        { label: "", value: 1, max: 10 },
+        { label: "b", value: null, max: 10, tone: "bright" },
+        { label: "c", value: 12, max: 10 },
+        { label: "d", value: 1, max: 0 },
+        { label: "e", value: 1, max: 10 },
+        { label: "f", value: 1, max: 10 },
+      ],
+    });
+    expect(b).toEqual({ type: "tanks", label: "R2", unit: "GB", tanks: [
+      { label: "a", value: 7.5, max: 10, tone: "warning", display: "7.5 GB" },
+      { label: "b", value: null, max: 10 },
+      { label: "c", value: 12, max: 10 },
+    ] });
+    expect(sanitizeBlock({ type: "tanks", label: "R2", tanks: [] })).toBeUndefined();
+    expect(sanitizeBlock({ type: "tanks", label: "R2" })).toBeUndefined();
+  });
+
   test("status takes a text value and an ISO time", () => {
     expect(sanitizeBlock({ type: "status", label: "Sync", value: "ok", tone: "positive", time: "2026-10-08T01:00:00Z" })).toEqual({ type: "status", label: "Sync", value: "ok", tone: "positive", time: "2026-10-08T01:00:00Z" });
     expect(sanitizeBlock({ type: "status", label: "Sync", value: "ok", time: "later" })).toEqual({ type: "status", label: "Sync", value: "ok" });

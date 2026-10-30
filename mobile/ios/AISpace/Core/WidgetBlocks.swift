@@ -38,7 +38,7 @@ struct BlockNumber: Decodable, Hashable {
 
 struct WidgetBlock: Decodable, Hashable {
     enum Kind: String, Decodable {
-        case metric, trend, progress, gauge, status
+        case metric, trend, progress, gauge, status, tanks
     }
 
     struct Delta: Decodable, Hashable {
@@ -56,6 +56,45 @@ struct WidgetBlock: Decodable, Hashable {
     struct Point: Decodable, Hashable {
         var t: String
         var v: Double?
+    }
+
+    /// One upright tank of a `tanks` block: `value` of `max`, spilling over past it.
+    struct Tank: Decodable, Hashable {
+        var label: BlockText
+        var value: Double?
+        var max: Double
+        var display: BlockText?
+        var tone: BlockTone?
+        var url: String?
+
+        private enum CodingKeys: String, CodingKey { case label, value, max, display, tone, url }
+
+        init(label: BlockText, value: Double?, max: Double, display: BlockText? = nil, tone: BlockTone? = nil, url: String? = nil) {
+            (self.label, self.value, self.max, self.display, self.tone, self.url) = (label, value, max, display, tone, url)
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            label = try c.decode(BlockText.self, forKey: .label)
+            value = try? c.decode(Double.self, forKey: .value)
+            max = (try? c.decode(Double.self, forKey: .max)) ?? 100
+            display = try? c.decode(BlockText.self, forKey: .display)
+            tone = try? c.decode(BlockTone.self, forKey: .tone)
+            url = try? c.decode(String.self, forKey: .url)
+        }
+
+        /// How full the tank is, 0…; above 1 it spills over.
+        var level: Double {
+            guard let value, max > 0 else { return 0 }
+            return Swift.max(0, value / max)
+        }
+
+        /// The app's own text, else the share of `max` in percent (WidgetBlocks.tsx `tankValue`).
+        func shown(lang: String = Lang.current) -> String? {
+            if let display { return display.text(lang: lang) }
+            guard let value, max > 0 else { return nil }
+            return BlockFormat.string(value / max * 100, BlockNumber(format: "percent", decimals: 0), lang: lang)
+        }
     }
 
     struct Zone: Decodable, Hashable {
@@ -83,9 +122,10 @@ struct WidgetBlock: Decodable, Hashable {
     var max: Double?
     var zones: [Zone]?
     var time: String?
+    var tanks: [Tank]?
 
     private enum CodingKeys: String, CodingKey {
-        case type, label, caption, url, tone, value, display, delta, style, signed, points, min, max, zones, time
+        case type, label, caption, url, tone, value, display, delta, style, signed, points, min, max, zones, time, tanks
     }
 
     init(from decoder: Decoder) throws {
@@ -110,6 +150,7 @@ struct WidgetBlock: Decodable, Hashable {
         max = try? c.decode(Double.self, forKey: .max)
         zones = try? c.decode([Zone].self, forKey: .zones)
         time = try? c.decode(String.self, forKey: .time)
+        tanks = try? c.decode([Tank].self, forKey: .tanks)
     }
 
     /// The value the block leads with, or nil when the app could not obtain it (WidgetBlocks.tsx `shown`).
@@ -125,6 +166,8 @@ struct WidgetBlock: Decodable, Hashable {
             return points?.last { $0.v != nil }?.v.map { BlockFormat.string($0, number, lang: lang, signed: signed == true) }
         case .status:
             return statusText?.text(lang: lang)
+        case .tanks:
+            return nil
         }
     }
 

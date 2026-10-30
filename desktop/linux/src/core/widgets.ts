@@ -1,4 +1,4 @@
-import type { BlockText, Format, GaugeBlock, ProgressBlock, Tone, TrendBlock, WidgetBlock } from "../../../../src/space/panel/blocks.ts";
+import type { BlockText, Format, GaugeBlock, ProgressBlock, Tank, Tone, TrendBlock, WidgetBlock } from "../../../../src/space/panel/blocks.ts";
 import type { Widget } from "./catalogue.ts";
 import { escapeSegment } from "./url.ts";
 
@@ -9,7 +9,7 @@ import { escapeSegment } from "./url.ts";
  * page. The numbers read as the panel writes them. Pure: the GTK card draws what this returns.
  */
 
-export type { Tone, WidgetBlock };
+export type { Tank, Tone, WidgetBlock };
 
 /** Compact rows beside the hero, per card size (WidgetBlocks.tsx `ROWS`). */
 const ROWS: Record<string, number> = { "1x1": 2, "2x1": 4, "1x2": 6, "2x2": 10 };
@@ -71,8 +71,19 @@ export function shown(b: WidgetBlock, lang: string): string | undefined {
     }
     case "status":
       return txt(b.value, lang);
+    case "tanks":
+      return undefined;
   }
 }
+
+/** A tank's short value: the app's own text, else its share of `max` in percent (WidgetBlocks.tsx `tankValue`). */
+export function tankValue(k: Tank, lang: string): string | undefined {
+  if (k.display) return txt(k.display, lang);
+  return k.value === null ? undefined : fmt((k.value / k.max) * 100, { format: "percent", decimals: 0 }, lang);
+}
+
+/** How full a tank is, 0 and up; above 1 it spills over. */
+export const tankLevel = (k: Tank) => (k.value === null || !(k.max > 0) ? 0 : Math.max(0, k.value / k.max));
 
 /** A metric's change, arrow first; colored only when the app says whether it is good or bad. */
 export function deltaText(b: WidgetBlock, lang: string, withLabel: boolean): { text: string; tone?: Tone } | undefined {

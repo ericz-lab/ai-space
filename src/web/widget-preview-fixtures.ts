@@ -2,6 +2,17 @@ import type { WidgetBlock } from "./WidgetBlocks.tsx";
 
 // Fixed demonstration data; this preview never reads a live Space.
 export const previewCards: { title: string; icon: string; color: string; size?: string; blocks: WidgetBlock[] }[] = [
+  { "title": "R2 Monitor · Usage", "icon": "R2", "color": "#f38020", "size": "2x1", "blocks": [
+    { "type": "tanks", "label": { "en": "Nearest 10 GB", "zh": "最接近 10 GB" }, "tanks": [
+      { "label": "yansense", "value": 7.47, "max": 10, "display": "7.47 GB", "tone": "warning" },
+      { "label": "Kandicakirlamon", "value": 7.26, "max": 10, "display": "7.26 GB", "tone": "warning" },
+      { "label": "studio", "value": 11.2, "max": 10, "display": "11.2 GB", "tone": "negative" } ] } ] },
+  { "title": "R2 Monitor · Small", "icon": "R2", "color": "#f38020", "size": "1x1", "blocks": [
+    { "type": "tanks", "label": { "en": "Nearest 10 GB", "zh": "最接近 10 GB" }, "tanks": [
+      { "label": "yansense", "value": 7.47, "max": 10, "display": "7.47 GB", "tone": "warning" },
+      { "label": "Kandicakirlamon", "value": 7.26, "max": 10, "display": "7.26 GB", "tone": "warning" },
+      { "label": "studio", "value": 11.2, "max": 10, "display": "11.2 GB", "tone": "negative" } ] },
+    { "type": "metric", "label": "Total", "value": 14.7, "unit": "GB" } ] },
   {
     "title": "BTC Macro · Indicators",
     "icon": "₿",

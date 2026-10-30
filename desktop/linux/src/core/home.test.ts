@@ -3,7 +3,7 @@ import type { GaugeBlock, TrendBlock, WidgetBlock } from "../../../../src/space/
 import { fmt as webFmt, isOutdated as webOutdated, txt as webTxt } from "../../../../src/web/WidgetBlocks.tsx";
 import { decodeCatalogue } from "./catalogue.ts";
 import { HOME, copyPanel, decodeScreenFile, edit, forget, move, newScreen, pin, rename, reset, screenTitle, screensOf, seed, unpin } from "./screens.ts";
-import { cardBody, deltaText, embedPath, fmt, fraction, gaugeSegments, isOutdated, itemsFor, position, rowsFor, shown, spark, toneOf, txt } from "./widgets.ts";
+import { cardBody, deltaText, embedPath, fmt, fraction, gaugeSegments, isOutdated, itemsFor, position, rowsFor, shown, spark, tankLevel, tankValue, toneOf, txt } from "./widgets.ts";
 
 test("numbers and texts read as the panel writes them", () => {
   const cases: [number, Parameters<typeof fmt>[1], boolean][] = [
@@ -35,6 +35,12 @@ test("block values, tones and shapes", () => {
   expect(toneOf(gauge)).toBe("warning");
   expect(position(gauge, 70)).toBe(0.7);
   expect(gaugeSegments(gauge)).toEqual([{ start: 0, end: 0.5, tone: "positive" }, { start: 0.5, end: 0.8, tone: "warning" }, { start: 0.8, end: 1, tone: "negative" }]);
+  const tanks: WidgetBlock = { type: "tanks", label: "Nearest 10 GB", tanks: [{ label: "a", value: 7.5, max: 10, display: "7.5 GB" }, { label: "b", value: 12, max: 10 }, { label: "c", value: null, max: 10 }] };
+  expect(shown(tanks, "en")).toBeUndefined();
+  if (tanks.type === "tanks") {
+    expect(tanks.tanks.map((k) => tankValue(k, "en"))).toEqual(["7.5 GB", "120%", undefined]);
+    expect(tanks.tanks.map(tankLevel)).toEqual([0.75, 1.2, 0]);
+  }
   const line: TrendBlock = { type: "trend", label: "t", style: "line", points: [{ t: "a", v: 1 }, { t: "b", v: null }, { t: "c", v: 3 }, { t: "d", v: 2 }] };
   expect(shown(line, "en")).toBe("2");
   const s = spark(line);

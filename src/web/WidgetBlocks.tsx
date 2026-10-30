@@ -1,4 +1,4 @@
-import type { BlockText, Format, GaugeBlock, MetricBlock, ProgressBlock, StatusBlock, Tone, TrendBlock, WidgetBlock } from "../space/panel/blocks.ts";
+import type { BlockText, Format, GaugeBlock, MetricBlock, ProgressBlock, StatusBlock, Tank, TanksBlock, Tone, TrendBlock, WidgetBlock } from "../space/panel/blocks.ts";
 import { relTime } from "./api.ts";
 import { LOCALE, type Lang, useLang } from "./i18n.ts";
 
@@ -61,7 +61,70 @@ function shown(b: WidgetBlock, lang: Lang): string | undefined {
     }
     case "status":
       return txt(b.value, lang);
+    case "tanks":
+      return undefined;
   }
+}
+
+/** A tank's short value: the app's own text, else its share of `max` in percent. */
+export function tankValue(k: Tank, n: Num, lang: Lang): string | undefined {
+  if (k.display) return txt(k.display, lang);
+  return k.value === null ? undefined : fmt((k.value / k.max) * 100, { ...n, format: "percent", decimals: 0, unit: undefined }, lang);
+}
+
+/** Tank geometry in its own units (viewBox 0 0 64 84): straight sides, elliptical top and bottom. */
+const TK = { l: 8, r: 56, top: 12, bottom: 72, rx: 24, ry: 6 };
+
+/** One upright cylinder filled to value / max in the tank's tone (the accent without one); past max it fills and spills over the rim. */
+function TankSvg({ k, label }: { k: Tank; label: string }) {
+  const { l, r, top, bottom, rx, ry } = TK;
+  const f = k.value === null ? 0 : Math.max(0, k.value / k.max);
+  const y = bottom - Math.min(1, f) * (bottom - top);
+  const color = k.tone && k.tone !== "neutral" ? TONE_VAR[k.tone] : "var(--accent)";
+  const cx = (l + r) / 2;
+  const side = (x1: number, x2: number, yy: number) => `M${x1} ${yy}V${bottom}A${rx} ${ry} 0 0 0 ${x2} ${bottom}V${yy}Z`;
+  return (
+    <svg className="wb-tank" viewBox="0 0 64 84" role="img" aria-label={label}>
+      <ellipse cx={cx} cy={bottom + ry + 3} rx={rx + 4} ry={3} className="wb-tank-shadow" />
+      <path d={side(l, r, top)} className="wb-tank-body" />
+      {k.value !== null && f > 0.002 && (
+        <g>
+          <path d={side(l + 1.5, r - 1.5, y)} fill={color} />
+          <path d={side(cx + 8, r - 1.5, y)} fill="#000" opacity={0.14} />
+          <ellipse cx={cx} cy={y} rx={rx - 1.5} ry={ry - 0.8} fill={color} />
+          <ellipse cx={cx} cy={y} rx={rx - 1.5} ry={ry - 0.8} fill="#fff" opacity={0.28} />
+        </g>
+      )}
+      <path d={`M${l + 5} ${top + 4}V${bottom - 1}h3V${top + 5}Z`} fill="#fff" opacity={0.22} />
+      <ellipse cx={cx} cy={top} rx={rx} ry={ry} className="wb-tank-rim" />
+      {f > 1 && <path d={`M${cx - 12} ${top + 1}q5-4 12-1q1 9-1 20q-2 5-4 0q-1-9-7-19Z`} fill={color} />}
+    </svg>
+  );
+}
+
+/** Up to three tanks side by side, each with its label and a short value. */
+function Tanks({ b, lang, small }: { b: TanksBlock; lang: Lang; small?: boolean }) {
+  const { t } = useLang();
+  return (
+    <span className={`wb-tankrow${small ? " small" : ""}`}>
+      {b.tanks.map((k, i) => {
+        const name = txt(k.label, lang);
+        const value = tankValue(k, b, lang);
+        const body = (
+          <>
+            <TankSvg k={k} label={`${name}: ${value ?? t("widget.noData")}`} />
+            <span className="wb-tank-name" title={name}>{name}</span>
+            <span className={`wb-tank-value${value === undefined ? " missing" : ""}`}>{value ?? t("widget.noData")}</span>
+          </>
+        );
+        return k.url ? (
+          <a key={i} className="wb-tank-cell" href={k.url} target="_blank" rel="noopener noreferrer">{body}</a>
+        ) : (
+          <span key={i} className="wb-tank-cell">{body}</span>
+        );
+      })}
+    </span>
+  );
 }
 
 /** A link wrapper when the block has a target, a plain element otherwise. */
@@ -208,6 +271,8 @@ function Hero({ b, lang }: { b: WidgetBlock; lang: Lang }) {
           </span>
           {b.time && <span className="wb-time">{relTime(b.time, lang)}</span>}
         </>
+      ) : b.type === "tanks" ? (
+        <Tanks b={b} lang={lang} />
       ) : (
         <span className={`wb-hero-value${value === undefined ? " missing" : ""}`} style={{ color: b.type === "gauge" && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}>
           {value ?? t("widget.noData")}
@@ -234,17 +299,20 @@ function Row({ b, lang }: { b: WidgetBlock; lang: Lang }) {
           {b.type === "status" && <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />}
           <span className="wb-lt">{txt(b.label, lang)}</span>
         </span>
-        <span className={`wb-row-value${value === undefined ? " missing" : ""}`} style={{ color: (b.type === "gauge" || b.type === "metric") && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}>
-          <span className="wb-v" title={value}>
-            {value ?? t("widget.noData")}
+        {b.type !== "tanks" && (
+          <span className={`wb-row-value${value === undefined ? " missing" : ""}`} style={{ color: (b.type === "gauge" || b.type === "metric") && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}>
+            <span className="wb-v" title={value}>
+              {value ?? t("widget.noData")}
+            </span>
+            {b.type === "metric" && b.delta && <Delta d={{ ...b.delta, label: undefined }} lang={lang} />}
+            {b.type === "status" && b.time && <span className="wb-time">{relTime(b.time, lang)}</span>}
           </span>
-          {b.type === "metric" && b.delta && <Delta d={{ ...b.delta, label: undefined }} lang={lang} />}
-          {b.type === "status" && b.time && <span className="wb-time">{relTime(b.time, lang)}</span>}
-        </span>
+        )}
       </span>
       {b.type === "trend" && <Spark b={b} lang={lang} />}
       {b.type === "progress" && <Bar b={b} />}
       {b.type === "gauge" && <Scale b={b} lang={lang} />}
+      {b.type === "tanks" && <Tanks b={b} lang={lang} small />}
     </Box>
   );
 }
