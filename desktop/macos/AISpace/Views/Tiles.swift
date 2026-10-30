@@ -166,7 +166,7 @@ struct WidgetCard: View {
             .buttonStyle(.plain)
             rows.padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 14)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // The panel's cards are borderless glass; colour inside a card is data.
         .glass(bordered: false)
         .opacity(widget.stale == true ? 0.6 : 1)
