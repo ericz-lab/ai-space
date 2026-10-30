@@ -14,7 +14,7 @@ import type { PeerModelInfo } from "./client.ts";
  * snapshot that bundles the four lists a hub merges. What changes the peer is
  * what its own panel could change: an uninstall, an app's model override.
  *
- *   GET  /api/peer/snapshot                        { ok, name, apps, services, widgets, agents (the space agent too), inventory, asOf }
+ *   GET  /api/peer/snapshot                        { ok, name, id, apps, services, widgets, agents (the space agent too), inventory, asOf }
  *   GET  /api/peer/apps/:app/icon                  = /api/apps/:app/icon
  *   GET  /api/peer/model/apps                      = /api/model/apps: every app's model rows and this space's choices ┐ when the
  *   PATCH /api/peer/apps/:app/model                = /api/panel/apps/:app/model {tag?, model}                         ┘ routes are given
@@ -65,6 +65,8 @@ export type PeerServeOptions = {
   token: string;
   /** What this space calls itself (`SPACE_NAME`). */
   name: string;
+  /** This space's stable id (`/api/space`): a hub follows the peer by it through a rename on either side. */
+  id?: string;
   /** Package grants use a separate channel; legacy credentials must not inherit their access. */
   allowApp?: (app: string) => boolean;
   panel: Routes;
@@ -152,6 +154,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
         return json({
           ok: true,
           name: opts.name,
+          ...(opts.id ? { id: opts.id } : {}),
           apps: own(apps.apps as { peer?: string }[]),
           services: own(services.services as { peer?: string }[]),
           widgets: own(widgets.widgets as { peer?: string }[]),

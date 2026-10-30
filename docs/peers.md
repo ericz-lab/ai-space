@@ -66,7 +66,7 @@ Present only when `SPACE_HUB_TOKEN` is set; every route requires `Authorization:
 
 | Route | Mirrors | Notes |
 | --- | --- | --- |
-| `GET /api/peer/snapshot` | `/api/apps`, `/api/services`, `/api/widgets`, `/api/agents` | One call: `{ ok, name, apps, services, widgets, agents, asOf }`. Apps are the peer's visible ones (its own hidden set and `archived` applied, `manifestOnly` and `url` included; entries the peer itself merged from its own peers are left out, so a hub of hubs lists each app once), agents and widgets likewise, widgets with their current items payload, services with health. The space agent (`space/assistant`) is included: the hub groups it with its own, so the chat can pick the machine ([Agents on several machines](#agents-on-several-machines)). `inventory` is the peer's agent CLIs ([model-machines.md](model-machines.md#inventory)). |
+| `GET /api/peer/snapshot` | `/api/apps`, `/api/services`, `/api/widgets`, `/api/agents` | One call: `{ ok, name, id, apps, services, widgets, agents, asOf }`. `id` is the peer's stable id, the one its `/api/space` gives the operator; it survives a rename on either side ([Renaming a peer](#renaming-a-peer)). Apps are the peer's visible ones (its own hidden set and `archived` applied, `manifestOnly` and `url` included; entries the peer itself merged from its own peers are left out, so a hub of hubs lists each app once), agents and widgets likewise, widgets with their current items payload, services with health. The space agent (`space/assistant`) is included: the hub groups it with its own, so the chat can pick the machine ([Agents on several machines](#agents-on-several-machines)). `inventory` is the peer's agent CLIs ([model-machines.md](model-machines.md#inventory)). |
 | `DELETE /api/peer/apps/:app` | `DELETE /api/apps/:app` | Uninstall on the peer: its stop command, its directory, its registry ([panel.md](panel.md#arranging-hiding-and-uninstalling-apps)). The hub refreshes the snapshot right after. |
 | `GET /api/peer/events?since&limit` | the scheduler's events | The events published on this machine after an id, oldest first, with `latestId`; the hub mirrors them after every snapshot ([events.md](events.md#across-machines-peers)). Mirrored events are not exported again. |
 | `POST /api/peer/call/:app/:capability` | `POST /api/call/:app/:capability` | A call from the hub, run on this machine's bus as the caller named in `x-space-caller` (`<hub name>/<app>`). The snapshot carries `capabilities` so the hub knows what to forward. |
@@ -97,6 +97,7 @@ Module `src/space/peers/`:
 | `config.ts` | `SPACE_PEER_*` parsing: name, URL, token, extra headers, refresh. |
 | `client.ts` | One client per peer: `refresh()` on its own timer with the last good snapshot kept, `health()`, `forward(req, path)` for the proxied routes. Timeouts: 8 s for a snapshot, none for a chat stream (it stays open as long as the peer's does; the browser leaving detaches it, the turn goes on on the peer), 8 s for the other forwards. |
 | `store.ts` | The last good snapshot per peer in `space.db` (`peer_snapshots`), so a hub restart while a peer is down still lists its apps, muted. A peer dropped from `.env` loses its row at boot. |
+| `rename.ts` | `space peer rename`: the checks, the `.env` rewrite and the move of every row kept under the peer's name, in one transaction ([Renaming a peer](#renaming-a-peer)). |
 | `merge.ts` | Turns a snapshot into hub views: prefixes ids, sets `peer`, rewrites icon, avatar and embed routes to the hub's proxy, applies the hub's hidden set, marks stale entries. |
 | `hub.ts` | Every configured peer and the merged lists the panel appends. |
 | `serve.ts` | The peer side (`/api/peer/*`). |
@@ -107,13 +108,40 @@ What changed in the existing modules:
 
 - **Views** (`panel/view.ts`, `panel/widgets.ts`): `AppView` gained `id`; `AppView`, `AgentView`, `WidgetView` and `ServiceView` gained an optional `peer`, apps and widgets an optional `stale`. Ids of peer entries carry the prefix (`david/media`, `david/media/assistant`, `david/media/latest`); `name` and `app` stay the bare names so the web UI can build peer routes from `peer` plus `name`. `icon`, `avatar` and `appIcon` of peer entries are the hub's proxy routes when they were file routes on the peer, and unchanged when they are emoji or absolute URLs. A peer app is never `manifestOnly` on the hub: it cannot be deleted from there.
 - **Lists** (`panel/api.ts`, `agents/api.ts`): `GET /api/apps`, `/api/services`, `/api/widgets`, `/api/agents` append the merged peer entries after the local ones, then apply the hub's layout order (`orderBy` puts unlisted local entries before unlisted peer entries) and hidden set. The hub's `hidden` and `order` lists take the prefixed ids, so the operator can hide or reorder a peer app on the hub without touching the peer; `PATCH /api/peers/:peer/apps/:app { hidden }` does the hiding and only touches `panel_kv`. `?all=1` includes hub-hidden peer apps.
-- **`GET /api/services`** carries a second list, `peers`: one entry per peer with `health` (`ok` when the last refresh succeeded within two refresh periods, `down` otherwise), `asOf`, `error`, `stale` and counts. `GET /api/peers` returns the same plus `duplicates`.
+- **`GET /api/services`** carries a second list, `peers`: one entry per peer with `health` (`ok` when the last refresh succeeded within two refresh periods, `down` otherwise), `asOf`, `error`, `stale` and counts. `GET /api/peers` returns the same plus `duplicates` and the peer's `id` from its snapshot (absent until the first snapshot, or from an older peer). Apps read it with their app token: it is the key to keep per-peer data under, since the name can change.
 - **Widgets**: items widgets come with their payload in the snapshot, so the hub fetches nothing per widget; the peer's cache and `refresh` apply, the hub's snapshot refresh adds at most one period of delay. Embed widgets load through `/api/peers/:peer/widgets/:app/:name/embed`, which streams the peer's proxied page; the iframe sandbox is the same.
 - **Chat** (`web/Chat.tsx`): the route base becomes `/api/peers/<peer>/agents/<app>/<agent>` when the agent has a `peer`, else the local one. Everything else is identical: the SSE events, `sessionId`, model and permission mode are the peer's. The hub records nothing in its `chat_sessions` for peer agents; the sessions list is forwarded.
 - **App models** (`web/AppModels.tsx`): Settings → Models lists this machine's apps, then each peer's under its name, read from the peer through the hub. An app's page on a peer offers the peer's own choices and saves on the peer, where its calls run. A peer whose core has no such route reads "older core"; one that does not answer shows the error.
 - **Create and delete**: unchanged and local. A peer app cannot be created or deleted from the hub.
 
 Proxy routes on the hub, all under `/api/peers/:peer/`, forward to the peer's `/api/peer/` with the bearer and extra headers added and the response streamed back as is (status, `content-type`, body). They accept only the paths in the table above; anything else under `/api/peers/` is 404 on the hub without a call to the peer.
+
+## Renaming a peer
+
+A peer's name is only its `SPACE_PEER_<NAME>` line in the hub's `.env`, but the hub keeps its own state under that name. Editing the line by hand makes a new peer: the old name's snapshot and cursor are pruned at the next start, and hidden apps, tile order and ledger rows stay behind under the old name. Rename instead:
+
+```bash
+space peer rename OLD NEW         # POST /api/peers/OLD/rename { "to": "NEW" } with the operator token
+```
+
+The running hub does it in one step, without a restart: it checks the new name (a peer name that survives the round trip through an env key, not a local app's or another peer's, not `model`), stops the peer's client, and in one `space.db` transaction moves everything it keeps under the name and rewrites the `.env` lines; if any part fails, nothing changes. What moves (`peers/rename.ts`):
+
+| Where | What |
+| --- | --- |
+| `.env` | `SPACE_PEER_<OLD>` and its `_TOKEN`, `_HEADERS`, `_REFRESH`, renamed in place; `SPACE_CHAT_MODEL` and `SPACE_MODEL_DEFAULT` values that name the peer as their machine (`old:codex/basic`) |
+| `peer_snapshots`, `peer_cursors` | the cached snapshot (the apps stay listed while the peer is down) and the event cursor (nothing is mirrored twice) |
+| `events.peer` | the origin of the events mirrored from the peer |
+| `panel_kv` layout | hidden apps, tile order, widget sizes, hidden widgets and screens: every `old/<id>` |
+| `model_calls` | `machine`, backend `peer:old`, and the rows the peer sent here (`old/<app>`) |
+| model choices | `old:runtime/tier` in app overrides, chat model choices and the default model preference |
+| `bus_calls` | calls forwarded to the peer's apps and the ones it made here (`old/<app>`) |
+| `shortcut_patterns`, `shortcut_runs` | rows keyed by the peer |
+| `feedback` | the to-do's peer, the run and fix machines, and the fix machine in the settings |
+| `usage_*` | opens and time of the peer's entries (`old/<id>`) |
+
+Then a new client starts under the new name from the moved snapshot, and the hub publishes `space/peer.renamed` `{ from, to, id }` ([events.md](events.md#peerrenamed)). `id` is the peer's stable id from its snapshot, `null` for an older peer that sends none.
+
+Not moved: the peer's own `SPACE_NAME` (the name it gives itself, which other hubs and its forwarded callers use), a peer set in the service's environment rather than the workspace `.env` (refused: rename it where it is set), `runtimes.yaml` (it names ssh machines, not peers), and what apps keep under the name: they follow the event.
 
 ## Failure and staleness
 

@@ -17,6 +17,8 @@ import type { PeerStore } from "./store.ts";
 export type PeerSnapshot = {
   /** What the peer calls itself (`SPACE_NAME`); informative only. */
   name: string;
+  /** The peer's stable id (its `/api/space` id); absent from an older peer. Survives renames on both sides. */
+  id?: string;
   apps: AppView[];
   services: ServiceView[];
   widgets: WidgetView[];
@@ -57,6 +59,8 @@ export type PeerHealth = "ok" | "down";
 
 export type PeerStatus = {
   name: string;
+  /** The peer's stable id from its snapshot, when it sent one (docs/peers.md#renaming-a-peer). */
+  id?: string;
   url: string;
   health: PeerHealth;
   /** Time of the snapshot on show, when there is one. */
@@ -110,6 +114,7 @@ export class PeerClient {
     const s = this.snapshot;
     return {
       name: this.name,
+      ...(s?.id ? { id: s.id } : {}),
       url: this.config.url,
       health: this.health(),
       ...(s ? { asOf: s.asOf } : {}),
@@ -131,6 +136,12 @@ export class PeerClient {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+  }
+
+  /** Stop, then wait for a refresh under way, so nothing is written under this name afterwards. */
+  async settle(): Promise<void> {
+    this.stop();
+    await this.inFlight?.catch(() => {});
   }
 
   /** Fetch the snapshot once; a failure keeps the previous snapshot and records the reason. */
@@ -230,6 +241,7 @@ export function parseSnapshot(j: unknown): PeerSnapshot {
   for (const k of ["apps", "services", "widgets", "agents"]) if (!Array.isArray(o[k])) throw new Error(`snapshot has no ${k} list`);
   return {
     name: typeof o.name === "string" ? o.name : "",
+    ...(typeof o.id === "string" && o.id ? { id: o.id.slice(0, 200) } : {}),
     apps: o.apps as AppView[],
     services: o.services as ServiceView[],
     widgets: o.widgets as WidgetView[],

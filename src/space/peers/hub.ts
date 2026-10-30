@@ -10,9 +10,13 @@ import { mergeAgents, mergeApps, mergeServices, mergeWidgets } from "./merge.ts"
  * append after its local entries. Reads never wait on a peer.
  */
 export class PeerHub {
-  private readonly clients = new Map<string, PeerClient>();
+  private clients = new Map<string, PeerClient>();
+  private started = false;
 
-  constructor(configs: PeerConfig[], opts: PeerClientOptions = {}) {
+  constructor(
+    configs: PeerConfig[],
+    private readonly opts: PeerClientOptions = {},
+  ) {
     for (const c of configs) this.clients.set(c.name, new PeerClient(c, opts));
     opts.store?.prune(configs.map((c) => c.name));
   }
@@ -26,11 +30,35 @@ export class PeerHub {
   }
 
   start(): void {
+    this.started = true;
     for (const c of this.clients.values()) c.start();
   }
 
   stop(): void {
+    this.started = false;
     for (const c of this.clients.values()) c.stop();
+  }
+
+  /**
+   * Rename a peer in place (docs/peers.md#renaming-a-peer). `move` runs between the old client's
+   * last write and the new one's first read: it moves the stored rows, so the new client starts
+   * from the old one's snapshot and event cursor. When `move` throws, the old client goes on.
+   */
+  async rename(from: string, to: string, move: () => void): Promise<PeerClient> {
+    const old = this.clients.get(from);
+    if (!old) throw new Error(`unknown peer: ${from}`);
+    if (this.clients.has(to)) throw new Error(`peer ${to} already exists`);
+    await old.settle();
+    try {
+      move();
+    } catch (e) {
+      if (this.started) old.start();
+      throw e;
+    }
+    const next = new PeerClient({ ...old.config, name: to }, this.opts);
+    this.clients = new Map([...this.clients].map(([n, c]): [string, PeerClient] => (n === from ? [to, next] : [n, c])).sort(([a], [b]) => a.localeCompare(b)));
+    if (this.started) next.start();
+    return next;
   }
 
   refreshAll(): Promise<void> {

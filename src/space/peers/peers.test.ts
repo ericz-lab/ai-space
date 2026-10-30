@@ -160,7 +160,7 @@ widgets:
   });
   peerBus.syncApp("media", { events: { publishes: [{ name: "clip.added" }], consumes: [] }, provides: [{ name: "clip", method: "POST", path: "/api/clip", timeoutMs: 5000 }] });
   // The peer routes may upgrade a socket (the terminal's), so the server declares a websocket handler.
-  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents, appModels: peerAppModels, ledger: { "/api/peer/model/usage": { GET: () => Response.json({ ok: true, name: "peer-box" }) }, "/api/peer/model/calls": { GET: () => Response.json({ ok: true, name: "peer-box", calls: [] }) } }, allowApp: (app) => app !== "secret", inventory: () => ({ machine: "", via: "local", clis: [{ cli: "claude", kind: "claude-code", installed: true, signedIn: true, version: "2.1.3", configured: true, runtimes: ["claude"] }, { cli: "codex", kind: "codex-cli", installed: true, signedIn: false, configured: false, runtimes: [] }, { cli: "dsh", kind: "deepseek-harness", installed: false, configured: false, runtimes: [] }] }) }) }, websocket: terminalWebSocket });
+  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", id: "peer-space-id", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents, appModels: peerAppModels, ledger: { "/api/peer/model/usage": { GET: () => Response.json({ ok: true, name: "peer-box" }) }, "/api/peer/model/calls": { GET: () => Response.json({ ok: true, name: "peer-box", calls: [] }) } }, allowApp: (app) => app !== "secret", inventory: () => ({ machine: "", via: "local", clis: [{ cli: "claude", kind: "claude-code", installed: true, signedIn: true, version: "2.1.3", configured: true, runtimes: ["claude"] }, { cli: "codex", kind: "codex-cli", installed: true, signedIn: false, configured: false, runtimes: [] }, { cli: "dsh", kind: "deepseek-harness", installed: false, configured: false, runtimes: [] }] }) }) }, websocket: terminalWebSocket });
   peerBase = `http://127.0.0.1:${peerServer.port}`;
 
   // ---- the hub: a local app, a link app that duplicates the peer's app, and the peer
@@ -259,6 +259,8 @@ describe("peer side", () => {
     const r = await get(peerBase, "/api/peer/snapshot", { headers: { authorization: "Bearer s3cret" } });
     expect(r.status).toBe(200);
     expect(r.body.name).toBe("peer-box");
+    // The stable id (`/api/space`): a hub follows the peer by it through a rename.
+    expect(r.body.id).toBe("peer-space-id");
     expect(r.body.apps.map((a: Body) => a.name)).toEqual(["media"]);
     expect(r.body.agents.map((a: Body) => a.id)).toEqual(["media/helper", "space/assistant", "space/ui-fixer"]);
     // The CLIs on the peer go with the snapshot, whatever it offers other spaces.
@@ -305,7 +307,7 @@ describe("hub", () => {
     expect(services.body.peers[0]).toMatchObject({ name: "david", health: "ok", stale: false, apps: 1, agents: 3, widgets: 2, services: 1 });
 
     const p = (await get(hub, "/api/peers")).body.peers[0];
-    expect(p).toMatchObject({ name: "david", url: peerBase, health: "ok", duplicates: ["media-link"] });
+    expect(p).toMatchObject({ name: "david", id: "peer-space-id", url: peerBase, health: "ok", duplicates: ["media-link"] });
     expect(typeof p.asOf).toBe("string");
 
     // Served as a peer itself, the hub hands out only what lives on it: david's entries stay out.
