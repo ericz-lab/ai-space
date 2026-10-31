@@ -14,6 +14,7 @@
 // Files are named like the pack on the server: D/app/<id>.svg|png|webp and D/agent/<id>.svg|png|webp,
 // with the tile id's "/" written as "~" (notes, david~media, notes~librarian, space~assistant, space~settings).
 // The space: SPACE_API_URL, else SPACE_HOST/SPACE_PORT from the environment or <SPACE_HOME>/.env, else 127.0.0.1:8700.
+// The token: SPACE_API_TOKEN, else <SPACE_HOME>/run/operator-token (kept there under SPACE_AUTH=builtin, docs/auth.md).
 
 import { mkdir, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -31,9 +32,10 @@ const BUILTINS: { id: string; title: string; description: string }[] = [
 
 // ------------------------------------------------------------------ the space
 
+const HOME = process.env.SPACE_HOME?.replace(/^~(?=$|\/)/, homedir()) || join(homedir(), ".ai-space");
+
 async function envFile(): Promise<Record<string, string>> {
-  const home = process.env.SPACE_HOME?.replace(/^~(?=$|\/)/, homedir()) || join(homedir(), ".ai-space");
-  const text = await Bun.file(join(home, ".env")).text().catch(() => "");
+  const text = await Bun.file(join(HOME, ".env")).text().catch(() => "");
   const out: Record<string, string> = {};
   for (const line of text.split("\n")) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
@@ -44,7 +46,8 @@ async function envFile(): Promise<Record<string, string>> {
 
 const env = { ...(await envFile()), ...process.env } as Record<string, string | undefined>;
 const BASE = (env.SPACE_API_URL || `http://${env.SPACE_HOST && env.SPACE_HOST !== "0.0.0.0" ? env.SPACE_HOST : "127.0.0.1"}:${env.SPACE_PORT || 8700}`).replace(/\/+$/, "");
-const AUTH: Record<string, string> = env.SPACE_API_TOKEN ? { authorization: `Bearer ${env.SPACE_API_TOKEN}` } : {};
+const TOKEN = env.SPACE_API_TOKEN || (await Bun.file(join(HOME, "run", "operator-token")).text().catch(() => "")).trim();
+const AUTH: Record<string, string> = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {};
 
 async function api<T>(method: string, path: string, body?: BodyInit, type?: string): Promise<T> {
   const r = await fetch(BASE + path, { method, headers: { ...AUTH, ...(type ? { "content-type": type } : {}) }, body });
