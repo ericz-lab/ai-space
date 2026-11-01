@@ -108,6 +108,8 @@ export class Store {
     this.eventRetentionMs = Math.max(60_000, opts.eventRetentionMs ?? DEFAULT_EVENT_RETENTION_MS);
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
+    // Several stores share space.db: wait for another connection's write instead of failing at once.
+    this.db.exec("PRAGMA busy_timeout = 5000");
     this.db.exec("PRAGMA foreign_keys = ON");
     this.db.exec(SCHEMA);
     this.migrate();

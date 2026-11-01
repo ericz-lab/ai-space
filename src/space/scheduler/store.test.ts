@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Store } from "./store.ts";
 import type { Task } from "./types.ts";
 
@@ -110,5 +113,23 @@ describe("Store", () => {
     for (let i = 0; i < 1100; i++) s.addEvent({ app: "feed", name: "x" }, 62_000);
     expect(s.listEvents({ limit: 5000 })).toHaveLength(1000);
     s.close();
+  });
+  test("a write waits for another connection's lock instead of failing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "store-busy-"));
+    const path = join(dir, "space.db");
+    const s = new Store(path);
+    s.saveTask(sampleTask());
+    // Another process holds the write lock for a moment, as a second store or a backup does.
+    const holder = Bun.spawn(["bun", "-e", `const { Database } = require("bun:sqlite"); const db = new Database(${JSON.stringify(path)}); db.exec("BEGIN IMMEDIATE"); console.log("locked"); await Bun.sleep(300); db.exec("COMMIT");`], { stdout: "pipe" });
+    const reader = holder.stdout.getReader();
+    await reader.read();
+    try {
+      expect(() => s.saveState("t1", { consecutiveErrors: 0, lastStatus: "ok" }, 2)).not.toThrow();
+      expect(s.getTask("t1")?.state.lastStatus).toBe("ok");
+    } finally {
+      await holder.exited;
+      s.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

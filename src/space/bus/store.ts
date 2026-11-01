@@ -119,6 +119,8 @@ export class BusStore {
   constructor(path: string) {
     this.db = new Database(path, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
+    // Several stores share space.db: wait for another connection's write instead of failing at once.
+    this.db.exec("PRAGMA busy_timeout = 5000");
     this.db.exec(SCHEMA);
     for (const { table, column, ddl } of ADDED_COLUMNS) {
       const cols = this.db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all();
