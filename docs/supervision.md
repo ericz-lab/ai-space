@@ -53,7 +53,7 @@ Wants=network-online.target
 WorkingDirectory=<app dir>
 EnvironmentFile=<workspace>/run/env/<app>.env
 ExecStart=/bin/sh -c "<service.command>"
-Restart=on-failure
+Restart=always
 RestartSec=5
 KillMode=control-group
 TimeoutStopSec=30
@@ -71,6 +71,11 @@ WantedBy=default.target
   `KillMode=control-group` sends SIGTERM to every process of the unit at once; `KillMode=mixed`
   would signal only the shell and SIGKILL the app (seen on Seoul, 2026-09-28). `TimeoutStopSec=30`
   leaves the 10 seconds the app contract promises plus room before systemd kills what is left.
+- `Restart=always`, not `on-failure`: an app answers SIGTERM by exiting cleanly, so under
+  `on-failure` a signal that did not come from systemd left it stopped. On 2026-11-02 a
+  `pkill -f "bun src/index.ts"` meant for one debug server stopped every app of a space this
+  way. `systemctl stop` (what `space app stop` runs) still stops a unit for good, because systemd
+  never restarts a unit it was asked to stop.
 
 ### The environment file
 
@@ -215,7 +220,7 @@ reconcile table, conflicts, hand-over, uninstall), with these words swapped:
 | `~/.config/systemd/user/space-<app>.service` | `~/Library/LaunchAgents/space.<app>.plist`, label `space.<app>`, domain `gui/<uid>` |
 | the marker on the first line | the marker comment on the second line, after the XML declaration |
 | `EnvironmentFile=` with `KEY="value"` | a shell file, `export KEY='value'`, sourced by the wrapper below |
-| `Restart=on-failure`, `RestartSec=5` | `KeepAlive` `{SuccessfulExit: false}`, `ThrottleInterval` 5 |
+| `Restart=always`, `RestartSec=5` | `KeepAlive` `{SuccessfulExit: false}`, `ThrottleInterval` 5 (still restarts only after an error exit) |
 | `WantedBy=default.target` + lingering | `RunAtLoad`: loaded at every login of the user |
 | `KillMode=control-group` | the wrapper passes SIGTERM to the job's process group |
 | `TimeoutStopSec=30` | `ExitTimeOut` 30 |

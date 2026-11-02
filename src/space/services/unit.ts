@@ -31,6 +31,9 @@ export type UnitInput = {
  * contract promises (app-spec.md: exit within 10 seconds), and
  * `TimeoutStopSec=30` leaves room to spare before systemd kills what is left.
  * `KillMode=mixed` would signal only the shell and SIGKILL the app.
+ * `Restart=always` also brings back an app that exited cleanly on a stray
+ * SIGTERM (a broad `pkill` takes every `bun src/index.ts` with it);
+ * `systemctl stop` still stops it for good.
  */
 export function renderUnit(u: UnitInput): string {
   return [
@@ -45,7 +48,7 @@ export function renderUnit(u: UnitInput): string {
     `WorkingDirectory=${specifiers(u.dir)}`,
     `EnvironmentFile=${specifiers(u.envFile)}`,
     `ExecStart=/bin/sh -c ${execArg(u.command)}`,
-    "Restart=on-failure",
+    "Restart=always",
     "RestartSec=5",
     "KillMode=control-group",
     "TimeoutStopSec=30",

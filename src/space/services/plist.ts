@@ -38,7 +38,7 @@ export type PlistInput = {
 /**
  * The LaunchAgent. `RunAtLoad` starts it at login (and when it is loaded),
  * `KeepAlive.SuccessfulExit=false` restarts it when it exits with an error
- * (`Restart=on-failure`), `ThrottleInterval` spaces the restarts, and
+ * (systemd's `Restart=on-failure`; the systemd unit uses `always`), `ThrottleInterval` spaces the restarts, and
  * `ExitTimeOut` leaves the app the 10 seconds of the contract with room to
  * spare before launchd kills it. The credentials stay in the environment
  * file (mode 0600), not in the plist, which other users may read.
