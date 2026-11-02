@@ -320,7 +320,7 @@ export class Supervisor {
     const probe = this.opts.probe;
     for (;;) {
       const state = await this.opts.manager.show(unit, scope).catch(() => undefined);
-      // A crashing command never reaches "failed" under Restart=on-failure: it loops through auto-restart.
+      // A crashing command never reaches "failed" under Restart=always: it loops through auto-restart.
       if (state && (state.activeState === "failed" || state.subState === "auto-restart" || state.restarts > 0)) return `${unit} ${state.activeState === "failed" ? "failed to start" : "keeps exiting"}; see ${this.opts.manager.logHint(unit, scope)}`;
       if (probe && health && m.service) {
         if ((await probe(m.service.port, health).catch(() => "down")) === "ok") return "ok";
