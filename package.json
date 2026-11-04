@@ -47,6 +47,7 @@
     "desktop:share:build": "desktop/macos/scripts/build-share.sh",
     "desktop:xcode": "desktop/macos/scripts/fetch-deps.sh && xcodegen generate --spec desktop/macos/project.yml",
     "ios:build": "mobile/ios/scripts/build.sh",
+    "ios:device": "mobile/ios/scripts/device.sh",
     "ios:test": "mobile/ios/scripts/test.sh",
     "ios:xcode": "mobile/ios/scripts/swiftterm.sh && xcodegen generate --spec mobile/ios/project.yml",
     "android:build": "cd mobile/android && ./gradlew :app:assembleDebug",

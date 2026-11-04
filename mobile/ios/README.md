@@ -90,6 +90,34 @@ xcrun simctl launch booted dev.ai-space.ios
 
 The Simulator build and launch were checked with Xcode 27 and the iOS 27 runtime. On a Mac whose default developer directory is the Command Line Tools, prefix Xcode commands with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. A Space on the same Mac is reachable from the Simulator at `http://127.0.0.1:8700`.
 
+### On an iPhone
+
+```bash
+bun run ios:device   # build, renew the development profile, install over the copy on the phone, launch
+```
+
+`scripts/device.sh` builds the Debug configuration for the first paired iPhone (`AISPACE_DEVICE=<udid>` picks another) with automatic signing for the first team signed in to Xcode (`AISPACE_TEAM` overrides it; the project leaves `DEVELOPMENT_TEAM` empty), lets `xcodebuild` create or renew the profiles (`-allowProvisioningUpdates`), and installs with `devicectl` over the app already there. The bundle id and team stay the same, so the app keeps its saved Spaces, sign-ins and screens; deleting the app first is never needed.
+
+A free (Personal Team) profile lasts 7 days, after which iOS refuses to open the app. Xcode keeps using its cached profile until it has expired, so the script removes the app's and the Share Extension's cached profiles when less than two days are left, and the build fetches new ones. Run daily, it keeps the app working without a reinstall by hand. A LaunchAgent does that (`AISPACE_NO_LAUNCH=1` installs without opening the app):
+
+```xml
+<!-- ~/Library/LaunchAgents/dev.ai-space.ios-resign.plist; load with
+     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.ai-space.ios-resign.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>dev.ai-space.ios-resign</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/bash</string><string>/path/to/ai-space/mobile/ios/scripts/device.sh</string></array>
+  <key>EnvironmentVariables</key><dict><key>AISPACE_NO_LAUNCH</key><string>1</string></dict>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StandardOutPath</key><string>/tmp/ai-space-ios-resign.log</string>
+  <key>StandardErrorPath</key><string>/tmp/ai-space-ios-resign.log</string>
+</dict></plist>
+```
+
+The phone has to be reachable when it runs: by cable, or over Wi-Fi once Xcode's Devices window has "Connect via network" on. A Mac asleep at that time runs it on waking. When a profile has already expired, iOS may withdraw its trust of the developer; trust it again in Settings > General > VPN & Device Management. A paid Apple Developer Program team signs for a year instead of 7 days.
+
+Checked on 2026-11-03 with Xcode 27 on an iPhone 15 Pro: a Personal Team profile that had expired was renewed from the command line, the app was installed over the old copy, and the LaunchAgent ran the script with exit code 0.
+
 A debug build reads launch switches from its environment, so screens can be reached and captured without touching the device (`SIMCTL_CHILD_AISPACE_TAB=panel xcrun simctl launch …`, or `open --env` for the Catalyst build). `AISpace/DebugLaunch.swift` lists them: connect to a Space, pick a tab, set the search text, open one of the Space's pages or a section of Settings, send a chat message or open an earlier chat, open an `aispace://` link, write a PNG of the window and quit. None of it exists in a release build.
 
 ## Authentication
