@@ -26,6 +26,7 @@ type Tile = { kind: Kind; id: string; file: string; title: string; description?:
 const TYPES: Record<string, string> = { svg: "image/svg+xml", png: "image/png", webp: "image/webp" };
 const BUILTINS: { id: string; title: string; description: string }[] = [
   { id: "space/inbox", title: "Inbox · 收件箱", description: "The panel's inbox: every app's notifications as threads." },
+  { id: "space/shortcuts", title: "Shortcuts · 快捷方式", description: "The panel's shortcuts: quick actions, conversions and calculations from the command box." },
   { id: "space/terminal", title: "Terminal · 终端", description: "A shell on the machine, in the browser." },
   { id: "space/settings", title: "Settings · 设置", description: "The panel's settings: appearance, services, backups, peers." },
 ];
