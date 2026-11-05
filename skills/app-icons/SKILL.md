@@ -18,7 +18,7 @@ Everything goes through `scripts/icons.ts` in this skill's directory (run it wit
 
 1. **Get the style.** Take it from the operator's words. If they gave none, or only a vague one ("nicer", "more modern"), ask one question with two or three concrete directions to pick from (for example: flat plate + line glyph; glossy glass; monochrome outline; duotone), and ask whether the colours should stay calm or be vivid. Do not choose for them, and do not reuse a style from an earlier pack unless they say so. Also ask for a pack name if they care; default to a short slug of the style (`glass`, `mono-line`).
 
-2. **List the tiles.** `bun scripts/icons.ts tiles --dir <work>` writes `<work>/tiles.json`: every app tile (local and peers', in panel order), the three built-in tiles (`space/inbox`, `space/terminal`, `space/settings`), and every agent, with titles, descriptions and the owning app. `<work>` is a scratch directory of your session. `bun scripts/icons.ts current --dir <work>` downloads the present icons into `<work>/current/` when you want to see them (an emoji icon has no file).
+2. **List the tiles.** `bun scripts/icons.ts tiles --dir <work>` writes `<work>/tiles.json`: every app tile (local and peers', in panel order), the four built-in tiles (`space/inbox`, `space/shortcuts`, `space/terminal`, `space/settings`), and every agent, with titles, descriptions and the owning app. `<work>` is a scratch directory of your session. `bun scripts/icons.ts current --dir <work>` downloads the present icons into `<work>/current/` when you want to see them (an emoji icon has no file).
 
 3. **Write the style sheet** to `<work>/style.md` before drawing anything, in a dozen lines: canvas and plate (shape, fill, effects), the palette with named colours, how colours are assigned, glyph rules (stroke width, caps, fill vs line, the live area, how many detail levels), and how agents differ from apps. Every icon follows this sheet; when the operator changes the style, change the sheet first.
 
@@ -41,7 +41,7 @@ To change one or a few icons in an existing pack: `export` it, redraw those file
 - **Legible at 22px.** An app icon also appears as the 26px corner of its agents' tiles. Check the preview's 22px row: a glyph that turns to mush there has too many details.
 - **Colour has a job.** Neighbouring tiles should not look alike; spread hues across the grid, and keep a single hue from dominating unless the style is monochrome. White glyphs need enough contrast on light plates.
 - **Agents.** The main icon shows the agent's *role* (planner, archivist, analyst, transcriber), never a copy of its app's icon; the panel adds the app's icon in the corner by itself, so do not draw a corner badge into the avatar. Make agents recognisable as a family (for example the app's hue, darkened), as the style sheet says.
-- **The space agent and the built-in tiles** are tiles too: `agent/space~assistant` (the workspace assistant, "Base"), `app/space` (its corner, optional), `app/space~inbox`, `app/space~terminal`, `app/space~settings`.
+- **The space agent and the built-in tiles** are tiles too: `agent/space~assistant` (the workspace assistant, "Base"), `app/space` (its corner, optional), `app/space~inbox`, `app/space~shortcuts`, `app/space~terminal`, `app/space~settings`.
 - **Files.** SVG preferred (PNG or WebP accepted, at most 512 KB each). Self-contained: no external references, no scripts, no `<foreignObject>`; gradient and filter ids may repeat across files (each file is its own image).
 
 ## Answering
