@@ -109,7 +109,7 @@ A `backup` task is registered for every app when its manifest syncs, and for `sp
 backup:                       # optional; every key optional
   schedule: "0 3 * * *"       # cron; default: SPACE_BACKUP_SCHEDULE with a per-app minute
   timezone: UTC
-  keep: { daily: 7, weekly: 4, monthly: 6 }
+  keep: { daily: 3, weekly: 2, monthly: 2 }
   include: [databases, files] # add "blobs" for a filesystem blob store
   exclude: ["cache/", "*.tmp"] # gitignore-style, relative to the data dir
 # backup: false               # opt out; nothing of this app is copied
@@ -123,7 +123,7 @@ Retention is counted, not dated, so a machine that was off for a week does not t
 - the first snapshot of each of the newest `weekly` ISO weeks,
 - the first snapshot of each of the newest `monthly` months,
 
-and deletes the rest, archive and sidecar together. One snapshot can satisfy more than one slot. A snapshot that failed verification never fills a slot and is dropped, unless it is the only one left.
+and deletes the rest, archive and sidecar together. One snapshot can satisfy more than one slot, so the default keeps at most 7 snapshots per app. Every snapshot is a full copy, so an app with a large data directory (pictures, a big database) costs its size times that count in the bucket; such an app should set a smaller `keep` (for example `{ daily: 2, weekly: 1, monthly: 1 }`). A snapshot that failed verification never fills a slot and is dropped, unless it is the only one left.
 
 The task is a `command` target, so the scheduler's timeout (`SPACE_BACKUP_TIMEOUT_MIN`, default 30), backoff and concurrency limit apply. A backup that overruns is killed; the next run removes what it left in staging. `SPACE_NOTIFY_TASKS` alerts after three failures in a row, as for every task.
 

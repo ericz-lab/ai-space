@@ -20,8 +20,8 @@ describe("parseBackupSpec", () => {
   });
 
   test("a mapping adjusts schedule, retention, sources and excludes", () => {
-    const s = parseBackupSpec({ schedule: "30 4 * * *", timezone: "Asia/Seoul", keep: { daily: 3 }, include: ["databases", "blobs"], exclude: ["cache/", "*.tmp"] });
-    expect(s).toEqual({ enabled: true, schedule: "30 4 * * *", timezone: "Asia/Seoul", keep: { daily: 3, weekly: 4, monthly: 6 }, include: ["databases", "blobs"], exclude: ["cache/", "*.tmp"] });
+    const s = parseBackupSpec({ schedule: "30 4 * * *", timezone: "Asia/Seoul", keep: { daily: 1 }, include: ["databases", "blobs"], exclude: ["cache/", "*.tmp"] });
+    expect(s).toEqual({ enabled: true, schedule: "30 4 * * *", timezone: "Asia/Seoul", keep: { daily: 1, weekly: 2, monthly: 2 }, include: ["databases", "blobs"], exclude: ["cache/", "*.tmp"] });
   });
 
   test("rejects what it does not understand", () => {
