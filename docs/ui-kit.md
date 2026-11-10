@@ -6,16 +6,28 @@ The designs it was drawn from are in Design Studio (designs 79 to 84: the compon
 
 ## Loading it
 
-A page links two stylesheets before its own:
+The page has three sources of style, and cascade layers put them in order whatever order the files arrive in: the app's own copy of the kit, the space's current version, the app's own rules.
 
-```html
-<link rel="stylesheet" href="./kit.css">
-<script>(function(){var l=document.createElement("link");l.rel="stylesheet";l.href="/_space/ui.css";var k=document.querySelector('link[href$="kit.css"]');k.parentNode.insertBefore(l,k.nextSibling)})()</script>
-<link rel="stylesheet" href="./styles.css">
+`web/styles.css` (the one stylesheet the page links):
+
+```css
+@import "./kit.css" layer(kit);
+@layer app {
+  /* this app's rules, written with the kit's tokens */
+}
 ```
 
-- `./kit.css` is the app's own copy of `src/web/ui-kit/kit.css` (`curl -s http://127.0.0.1:8700/_space/ui.css > web/kit.css`). It paints first, and it is all the page has when it is reached on its own port or on an older ai-space, where `/_space/ui.css` is a 404.
-- `/_space/ui.css` is the space's current version, added at runtime because a bundler that builds the page (Bun's HTML import) would try to resolve the path at build time. The router sends every app hostname's `/_space/*` to ai-space and the package gateway answers the same path, so the link is same-origin for both kinds of app. It lands after the copy and before `styles.css`, so the space's version wins over the copy and the app's own rules win over both.
+In `<head>`, in the inline script that applies the theme before first paint:
+
+```js
+var s = document.createElement("style");
+s.textContent = '@layer kit, space, app; @import url("/_space/ui.css") layer(space);';
+document.head.appendChild(s);
+```
+
+- `web/kit.css` is the app's copy of `src/web/ui-kit/kit.css` (`curl -s http://127.0.0.1:8700/_space/ui.css > web/kit.css`). It is all the page has when it is reached on its own port or on an older ai-space, where `/_space/ui.css` is a 404.
+- `/_space/ui.css` is the space's version. The router sends every app hostname's `/_space/*` to ai-space and the package gateway answers the same path, so it is same-origin for both kinds of app. In the layer `space` it wins over the copy; the app's rules in `app` win over both.
+- The inline `<style>` must come before the page's stylesheet in the document, because the first `@layer` statement fixes the order. A bundler that builds the page (Bun's HTML import) moves and merges the linked stylesheets to the end of `<head>`, which is why the page cannot place a second `<link>` between two of them, and why the space's URL is added by script: the bundler would try to resolve it at build time.
 - The response carries an `ETag` and `cache-control: no-cache`: a page revalidates on every load and gets a 304 until the space is upgraded.
 
 The page still applies its theme before first paint and offers the language and theme controls ([app-spec.md](app-spec.md#app-pages)).
