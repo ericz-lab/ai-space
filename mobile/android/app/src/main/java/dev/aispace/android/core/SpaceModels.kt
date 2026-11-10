@@ -33,6 +33,23 @@ object I18nReader {
 }
 
 /**
+ * The placeholders a manifest `url` may carry for the client that opens it (docs/app-spec.md#app-pages):
+ * `{lang}`, and `{accent}`, the accent of the theme on show as `<light>.<dark>`, six hex digits each
+ * (docs/ui-kit.md#accent). The percent-encoded forms are the same placeholders after URL normalisation.
+ */
+object PagePlaceholders {
+    /** The `{accent}` value of this phone's theme; the theme sets it. Empty until then, which a page ignores. */
+    @Volatile
+    var accent: String = ""
+
+    /** `<light>.<dark>` from two 0xRRGGBB colours. */
+    fun accent(light: Long, dark: Long): String = "%06x.%06x".format(light and 0xFFFFFFL, dark and 0xFFFFFFL)
+
+    fun fill(url: String, lang: String, accent: String = this.accent): String =
+        url.replace("{lang}", lang).replace("%7Blang%7D", lang).replace("{accent}", accent).replace("%7Baccent%7D", accent)
+}
+
+/**
  * The reader's language. iOS reads the first preferred language; here it is the default locale's
  * language, settable so the app (or a test) can choose. In practice `en` or `zh`.
  */
@@ -116,10 +133,10 @@ data class AppInfo(
 ) {
     fun displayTitle(lang: String = Lang.current): String = Lang.pick(title, i18n, Lang.title, lang)
 
-    /** The app's page with `{lang}` filled in, resolved against the Space when it is a path. */
-    fun pageURL(space: URI, lang: String = Lang.current): URI? {
+    /** The app's page with `{lang}` and `{accent}` filled in, resolved against the Space when it is a path. */
+    fun pageURL(space: URI, lang: String = Lang.current, accent: String = PagePlaceholders.accent): URI? {
         if (url.isNullOrEmpty()) return null
-        return Urls.resolve(space, url.replace("{lang}", lang))
+        return Urls.resolve(space, PagePlaceholders.fill(url, lang, accent))
     }
 
     companion object : JsonReader<AppInfo> {

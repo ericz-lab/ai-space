@@ -10,6 +10,7 @@ import {
   PRESETS,
   backdropOf,
   STORAGE_KEY,
+  accentParam,
   bootRecord,
   contrastOn,
   defaultPreferences,
@@ -23,6 +24,7 @@ import {
   savePreferences,
   toCssVars,
   validatePreferences,
+  withAccent,
   withAlpha,
 } from "./theme.ts";
 
@@ -163,6 +165,25 @@ describe("resolution", () => {
 
   test("glow off sets the glow opacity to zero", () => {
     expect(toCssVars(resolveTokens({ ...defaultPreferences(), presetId: "simple" }, "light"))["--glow-opacity"]).toBe("0");
+  });
+});
+
+describe("accent for app pages", () => {
+  const RE = /^[0-9a-f]{6}\.[0-9a-f]{6}$/;
+  test("is the resolved light and dark accent of the chosen preset, six hex digits each", () => {
+    expect(accentParam(defaultPreferences())).toBe("8b5cf6.8b5cf6");
+    expect(accentParam({ ...defaultPreferences(), presetId: "simple" })).toBe("2563eb.3b82f6");
+    for (const p of PRESETS) expect(accentParam({ ...defaultPreferences(), presetId: p.id })).toMatch(RE);
+  });
+  test("follows a per-scheme override, drops alpha, and ignores the mode", () => {
+    const prefs = { ...defaultPreferences("dark"), presetId: "simple", overrides: { light: { accent: "#ABC" }, dark: { accent: "rgba(16, 32, 48, 0.5)" } } };
+    expect(accentParam(prefs)).toBe("aabbcc.102030");
+    expect(accentParam({ ...prefs, mode: "light" })).toBe("aabbcc.102030");
+  });
+  test("fills the placeholder and its percent-encoded form, and leaves other urls alone", () => {
+    expect(withAccent("https://a.example.com/?lang=zh&accent={accent}", "2563eb.3b82f6")).toBe("https://a.example.com/?lang=zh&accent=2563eb.3b82f6");
+    expect(withAccent("https://a.example.com/?accent=%7Baccent%7D", "8b5cf6.8b5cf6")).toBe("https://a.example.com/?accent=8b5cf6.8b5cf6");
+    expect(withAccent("https://a.example.com/?lang=zh", "8b5cf6.8b5cf6")).toBe("https://a.example.com/?lang=zh");
   });
 });
 

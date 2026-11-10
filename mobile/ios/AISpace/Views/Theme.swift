@@ -61,7 +61,10 @@ struct ThemePreset: Identifiable, Equatable {
 /// reads as the same product. `current` is this phone's choice (AppModel keeps it); the views
 /// are rebuilt when it changes.
 enum Theme {
-    static var current = ThemePreset.aurora
+    static var current = ThemePreset.aurora {
+        // App pages opened from here take this theme's accent through `{accent}` (docs/ui-kit.md#accent).
+        didSet { PagePlaceholders.accent = PagePlaceholders.accent(light: current.light.accent, dark: current.dark.accent) }
+    }
 
     static var accent: Color { Color(light: current.light.accent, dark: current.dark.accent) }
     static let link = Color(hex: 0x6366F1)

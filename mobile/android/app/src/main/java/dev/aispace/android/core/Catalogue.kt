@@ -182,7 +182,7 @@ data class CatalogueEntry(
     /** An emoji, an http(s) URL, or a path on the Space. */
     val icon: String? = null,
     val peer: String? = null,
-    /** The page to open: the app's `url` or the widget's `link`, `{lang}` not yet filled in. */
+    /** The page to open: the app's `url` or the widget's `link`, `{lang}` and `{accent}` not yet filled in. */
     val link: String? = null,
     val reach: Reach,
 ) {
@@ -194,10 +194,10 @@ data class CatalogueEntry(
     fun displayDetail(lang: String = Lang.current): String? =
         Lang.pick(detail ?: "", i18n, Lang.description, lang).ifEmpty { null }
 
-    /** The page with `{lang}` filled in, resolved against the Space when it is a path; http(s) only. */
-    fun pageURL(space: URI, lang: String = Lang.current): URI? {
+    /** The page with `{lang}` and `{accent}` filled in, resolved against the Space when it is a path; http(s) only. */
+    fun pageURL(space: URI, lang: String = Lang.current, accent: String = PagePlaceholders.accent): URI? {
         if (link.isNullOrEmpty()) return null
-        val url = Urls.resolve(space, link.replace("{lang}", lang)) ?: return null
+        val url = Urls.resolve(space, PagePlaceholders.fill(link, lang, accent)) ?: return null
         val scheme = Urls.scheme(url)
         return if (scheme == "http" || scheme == "https") url else null
     }

@@ -28,6 +28,25 @@ enum Lang {
     }
 }
 
+/// The placeholders a manifest `url` may carry for the client that opens it (docs/app-spec.md#app-pages):
+/// `{lang}`, and `{accent}`, the accent of the theme on show as `<light>.<dark>`, six hex digits each
+/// (docs/ui-kit.md#accent). The percent-encoded forms are the same placeholders after URL normalisation.
+enum PagePlaceholders {
+    /// The `{accent}` value of this client's theme; the views' `Theme.current` keeps it. Empty until a
+    /// theme is set, which a page reads as no accent and ignores.
+    static var accent = ""
+
+    /// `<light>.<dark>` from two 0xRRGGBB colours.
+    static func accent(light: UInt32, dark: UInt32) -> String {
+        String(format: "%06x.%06x", light & 0xFFFFFF, dark & 0xFFFFFF)
+    }
+
+    static func fill(_ url: String, lang: String, accent: String = PagePlaceholders.accent) -> String {
+        url.replacingOccurrences(of: "{lang}", with: lang).replacingOccurrences(of: "%7Blang%7D", with: lang)
+            .replacingOccurrences(of: "{accent}", with: accent).replacingOccurrences(of: "%7Baccent%7D", with: accent)
+    }
+}
+
 struct AgentInfo: Decodable, Identifiable, Hashable {
     var id: String
     var peer: String?
@@ -65,10 +84,10 @@ struct AppInfo: Decodable, Identifiable, Hashable {
 
     var displayTitle: String { Lang.pick(title, i18n, \.title) }
 
-    /// The app's page with `{lang}` filled in, resolved against the Space when it is a path.
-    func pageURL(space: URL, lang: String = Lang.current) -> URL? {
+    /// The app's page with `{lang}` and `{accent}` filled in, resolved against the Space when it is a path.
+    func pageURL(space: URL, lang: String = Lang.current, accent: String = PagePlaceholders.accent) -> URL? {
         guard let url, !url.isEmpty else { return nil }
-        let filled = url.replacingOccurrences(of: "{lang}", with: lang)
+        let filled = PagePlaceholders.fill(url, lang: lang, accent: accent)
         return URL(string: filled, relativeTo: space)?.absoluteURL
     }
 }

@@ -28,7 +28,7 @@ import SettingsStatus from "./SettingsStatus.tsx";
 import { SECTION_LABEL, type SettingsSection, SettingsNav, saveSection, savedSection } from "./SettingsNav.tsx";
 import Packages from "./Packages.tsx";
 import FeedbackSettings from "./FeedbackSettings.tsx";
-import { backdropOf, useAppearance } from "./theme.ts";
+import { backdropOf, useAccentParam, useAppearance, withAccent } from "./theme.ts";
 import ThemeSettings from "./ThemeSettings.tsx";
 import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 
@@ -100,6 +100,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const [listed, setListed] = useState(false);
   // Embedded widgets get the resolved scheme only, never the panel's colors (theme.ts).
   const { scheme } = useAppearance();
+  // App pages get the accent of this browser's theme through `{accent}` (docs/ui-kit.md#accent).
+  const accent = useAccentParam();
   const [editing, setEditing] = useState(false);
   // The screen an app added from a link is pinned to; `null` when added from the library.
   const [adding, setAdding] = useState<{ pinTo: string | null } | null>(null);
@@ -601,7 +603,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         }
       : undefined;
 
-  const entries = useMemo(() => libraryEntries({ apps, agents: shownAgents, widgets: prefs.noWidget ? [] : widgets, builtins }, lang, t), [apps, shownAgents, widgets, builtins, prefs.noWidget, lang, t]);
+  const entries = useMemo(() => libraryEntries({ apps, agents: shownAgents, widgets: prefs.noWidget ? [] : widgets, builtins }, lang, t, accent), [apps, shownAgents, widgets, builtins, prefs.noWidget, lang, t, accent]);
 
   /** Opens an agent's chat or one of the panel's own windows, from the library. */
   const openEntry = (key: string) => {
@@ -717,7 +719,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       icon={p.icon}
       fallback="📦"
       name={localized(lang, p).title}
-      href={p.url ? withLang(p.url, lang) : undefined}
+      href={p.url ? withAccent(withLang(p.url, lang), accent) : undefined}
       onUse={p.url ? () => recordOpen("app", p.id, "panel") : undefined}
       editing={editing}
       onRemove={onRemove}

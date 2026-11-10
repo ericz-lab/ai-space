@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_APPS, applyEnvOverrides, cloneDefaultApps, describeInstalls, installDefaultApps, parseDefaultApps, urlOverrideKey } from "./defaults.ts";
+import { DEFAULT_APPS, applyEnvOverrides, cloneDefaultApps, describeInstalls, installDefaultApps, parseDefaultApps, urlOverrideKey, withManifestQuery } from "./defaults.ts";
 import { loadManifest } from "./scheduler/manifest.ts";
 import { workspacePaths } from "./workspace.ts";
 
@@ -84,6 +84,23 @@ describe("applyEnvOverrides", () => {
     expect(() => applyEnvOverrides(m, { SPACE_APP_URL_AI_USAGE: "usage.example.com" })).toThrow(/http/);
   });
 
+  test("an override without a query keeps the manifest url's query and its placeholders", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "space-app-"));
+    await writeFile(join(dir, "space.yaml"), "name: ai-usage\nurl: http://127.0.0.1:8880/?lang={lang}&accent={accent}\n");
+    const m = await loadManifest(dir);
+    const over = (url: string) => applyEnvOverrides(m, { SPACE_APP_URL_AI_USAGE: url }).url;
+    expect(over("https://usage.example.com")).toBe("https://usage.example.com/?lang={lang}&accent={accent}");
+    expect(over("https://usage.example.com/")).toBe("https://usage.example.com/?lang={lang}&accent={accent}");
+    expect(over("https://usage.example.com/board#top")).toBe("https://usage.example.com/board?lang={lang}&accent={accent}#top");
+    // An override with a query of its own, even an empty one, is used as written.
+    expect(over("https://usage.example.com/?lang=zh")).toBe("https://usage.example.com/?lang=zh");
+    expect(over("https://usage.example.com/?")).toBe("https://usage.example.com/?");
+    // A manifest url without a query leaves the override alone.
+    expect(withManifestQuery("https://usage.example.com", "http://127.0.0.1:8880/")).toBe("https://usage.example.com");
+    expect(withManifestQuery("https://usage.example.com", undefined)).toBe("https://usage.example.com");
+    expect(withManifestQuery("https://usage.example.com", "http://127.0.0.1:8880/?#x")).toBe("https://usage.example.com");
+  });
+
   test("a path url resolves under the space's domain, or to the service's loopback address without one", async () => {
     const dir = await mkdtemp(join(tmpdir(), "space-app-"));
     await writeFile(join(dir, "space.yaml"), "name: notes\nurl: /docs?lang={lang}\nservice: { command: bun run, port: 8710 }\n");
@@ -91,7 +108,7 @@ describe("applyEnvOverrides", () => {
     expect(m.url).toBe("/docs?lang={lang}");
     expect(applyEnvOverrides(m, {}, { domain: "example.com" }).url).toBe("https://notes.example.com/docs?lang={lang}");
     expect(applyEnvOverrides(m, {}).url).toBe("http://127.0.0.1:8710/docs?lang={lang}");
-    expect(applyEnvOverrides(m, { SPACE_APP_URL_NOTES: "https://n.example.org/" }, { domain: "example.com" }).url).toBe("https://n.example.org/");
+    expect(applyEnvOverrides(m, { SPACE_APP_URL_NOTES: "https://n.example.org/" }, { domain: "example.com" }).url).toBe("https://n.example.org/?lang={lang}");
     await writeFile(join(dir, "space.yaml"), "name: notes\nurl: /\n");
     const bare = await loadManifest(dir);
     expect(() => applyEnvOverrides(bare, {}, { domain: "example.com" })).toThrow(/needs a service with a port/);

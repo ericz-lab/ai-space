@@ -70,7 +70,10 @@ struct ThemePreset: Identifiable, Equatable {
 /// The tokens of the theme on show, by the panel's names (src/web/styles.css). `current` is this
 /// Mac's choice (Preferences keeps it); the views are made again when it changes.
 enum Theme {
-    static var current = ThemePreset.aurora
+    static var current = ThemePreset.aurora {
+        // App pages opened from here take this theme's accent through `{accent}` (docs/ui-kit.md#accent).
+        didSet { PagePlaceholders.accent = PagePlaceholders.accent(light: current.light.accent, dark: current.dark.accent) }
+    }
 
     static var accent: Color { Color(light: current.light.accent, dark: current.dark.accent) }
     static let success = Color(hex: 0x34C759)

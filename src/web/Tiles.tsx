@@ -1,6 +1,7 @@
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { isImgIcon, relTime, type WidgetInfo } from "./api.ts";
 import { type Key, localized, useLang, withLang } from "./i18n.ts";
+import { useAccentParam, withAccent } from "./theme.ts";
 import { Blocks, isOutdated } from "./WidgetBlocks.tsx";
 
 // The panel's building blocks: app and agent tiles with their hover pop-over, and widget cards.
@@ -154,9 +155,10 @@ export function Widget({
   extra?: ReactNode;
 }) {
   const { lang, t } = useLang();
+  const accent = useAccentParam();
   const title = localized(lang, w).title;
   const embed = `${w.peer ? `/api/peers/${encodeURIComponent(w.peer)}` : "/api"}/widgets/${encodeURIComponent(w.app)}/${encodeURIComponent(w.name)}/embed?theme=${theme}&lang=${lang}`;
-  const link = w.link ? withLang(w.link, lang) : "";
+  const link = w.link ? withAccent(withLang(w.link, lang), accent) : "";
   const tall = w.size.endsWith("x2");
   const hasBlocks = w.ok && !!w.blocks?.length;
   const asOf = w.ok ? w.asOf : undefined;

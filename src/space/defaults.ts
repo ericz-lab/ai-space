@@ -20,7 +20,9 @@ import type { Workspace } from "./workspace.ts";
  *
  * `SPACE_APP_URL_<NAME>` (the app name uppercased, `-` and `.` as `_`)
  * replaces the `url` of that app's manifest, so an app checked out from a
- * public repository can point its tile at this machine's hostname.
+ * public repository can point its tile at this machine's hostname. An
+ * override without a query of its own keeps the manifest url's query, so its
+ * placeholders (`?lang={lang}&accent={accent}`) survive a bare hostname.
  */
 
 export type DefaultApp = { name: string; repo: string };
@@ -134,7 +136,7 @@ export function applyEnvOverrides(manifest: Manifest, env: Record<string, string
   const url = env[urlOverrideKey(manifest.app)]?.trim();
   if (url) {
     if (!/^https?:\/\//.test(url)) throw new Error(`${urlOverrideKey(manifest.app)} must start with http:// or https://`);
-    return { ...manifest, url };
+    return { ...manifest, url: withManifestQuery(url, manifest.url) };
   }
   if (manifest.url?.startsWith("/")) {
     const port = manifest.service?.port;
@@ -143,6 +145,21 @@ export function applyEnvOverrides(manifest: Manifest, env: Record<string, string
     return { ...manifest, url: base + manifest.url };
   }
   return manifest;
+}
+
+/**
+ * The override with the manifest url's query string carried over when the override has none of its
+ * own (`https://usage.example.com` + `/?lang={lang}` -> `https://usage.example.com/?lang={lang}`). An
+ * override with a query, even an empty `?`, is used as written; a fragment stays at the end.
+ */
+export function withManifestQuery(override: string, manifestUrl: string | undefined): string {
+  const query = manifestUrl ? /\?[^#]*/.exec(manifestUrl)?.[0] : undefined;
+  if (!query || query === "?" || override.includes("?")) return override;
+  const hash = override.indexOf("#");
+  let base = hash < 0 ? override : override.slice(0, hash);
+  const fragment = hash < 0 ? "" : override.slice(hash);
+  if (/^https?:\/\/[^/]+$/.test(base)) base += "/";
+  return base + query + fragment;
 }
 
 async function runCommand(cmd: string[], cwd: string, env: Record<string, string> = {}): Promise<{ code: number; output: string }> {

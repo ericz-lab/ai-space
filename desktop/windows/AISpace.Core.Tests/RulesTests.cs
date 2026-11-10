@@ -239,6 +239,7 @@ public class DesktopRulesTests
         Assert.Null(AppRoutes.AppFor(new Uri("https://space.example.com/settings"), apps, Space));
         Assert.Null(AppRoutes.AppFor(new Uri("https://github.com/x"), apps, Space));
         Assert.Equal("https://todo.example.com/?lang=zh", apps[0].PageUrl(Space, "zh")?.AbsoluteUri);
+        Assert.Equal("https://todo.example.com/?lang=zh&accent=", (apps[0] with { Url = "https://todo.example.com/?lang={lang}&accent={accent}" }).PageUrl(Space, "zh")?.AbsoluteUri);
         Assert.Null(apps[2].PageUrl(Space));
     }
 
