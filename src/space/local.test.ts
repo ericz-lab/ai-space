@@ -13,6 +13,11 @@ import { Database } from "bun:sqlite";
 
 const REPO = resolve(import.meta.dir, "..", "..");
 const roots: string[] = [];
+// The services these tests start get a home of their own: with the developer's HOME a service under
+// SPACE_SUPERVISOR=space sweeps ~/Library/LaunchAgents (or the systemd user directory) and removes the
+// units of the machine's real space, whose apps its temporary workspace does not have.
+const SERVICE_HOME = await mkdtemp(join(tmpdir(), "space-local-home-"));
+roots.push(SERVICE_HOME);
 const procs = new Set<ReturnType<typeof Bun.spawn>>();
 
 afterEach(async () => {
@@ -84,7 +89,7 @@ function fakeLaunchd(log: string[]) {
         const envBlock = /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(plist)![1]!;
         const env: Record<string, string> = {};
         for (const m of envBlock.matchAll(/<key>(.*?)<\/key><string>(.*?)<\/string>/g)) env[m[1]!] = m[2]!;
-        proc = Bun.spawn(args, { env: { ...env, HOME: process.env.HOME! }, stdout: "ignore", stderr: "ignore" });
+        proc = Bun.spawn(args, { env: { ...env, HOME: SERVICE_HOME }, stdout: "ignore", stderr: "ignore" });
         procs.add(proc);
         return ok();
       }
@@ -141,7 +146,7 @@ function fakeSystemd(log: string[], unitDir: string) {
         const line = (key: string) => new RegExp(`^${key}=(.*)$`, "m").exec(text)?.[1] ?? "";
         const env: Record<string, string> = {};
         for (const w of systemdWords(line("Environment"))) env[w.slice(0, w.indexOf("="))] = w.slice(w.indexOf("=") + 1);
-        proc = Bun.spawn(systemdWords(line("ExecStart")), { cwd: line("WorkingDirectory"), env: { ...env, HOME: process.env.HOME! }, stdout: "ignore", stderr: "ignore" });
+        proc = Bun.spawn(systemdWords(line("ExecStart")), { cwd: line("WorkingDirectory"), env: { ...env, HOME: SERVICE_HOME }, stdout: "ignore", stderr: "ignore" });
         procs.add(proc);
         return ok();
       }
@@ -361,7 +366,7 @@ describe("space local", () => {
     expect((await layout({})).status).toBe(401);
 
     // A second service on the same workspace refuses to start.
-    const second = Bun.spawn([process.execPath, join(REPO, "src", "index.ts"), "start"], { env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME!, SPACE_HOME: workspace, SPACE_PORT: String(port + 1) }, stdout: "ignore", stderr: "pipe" });
+    const second = Bun.spawn([process.execPath, join(REPO, "src", "index.ts"), "start"], { env: { PATH: "/usr/bin:/bin", HOME: SERVICE_HOME, SPACE_HOME: workspace, SPACE_PORT: String(port + 1) }, stdout: "ignore", stderr: "pipe" });
     expect(await second.exited).toBe(1);
     expect(await new Response(second.stderr).text()).toContain("another ai-space service already runs");
 
@@ -475,7 +480,7 @@ describe("space local", () => {
     await expect(localInstall(deps(v1))).rejects.toMatchObject({ code: "foreign" });
 
     // Someone else's service running on it: even --migrate waits for it to stop.
-    const theirs = Bun.spawn([process.execPath, join(REPO, "src", "index.ts"), "start"], { env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME!, SPACE_HOME: workspace, SPACE_PORT: String(port), SPACE_DEFAULT_APPS: "none" }, stdout: "ignore", stderr: "ignore" });
+    const theirs = Bun.spawn([process.execPath, join(REPO, "src", "index.ts"), "start"], { env: { PATH: "/usr/bin:/bin", HOME: SERVICE_HOME, SPACE_HOME: workspace, SPACE_PORT: String(port), SPACE_DEFAULT_APPS: "none" }, stdout: "ignore", stderr: "ignore" });
     procs.add(theirs);
     for (let i = 0; i < 100 && !(await localStatus(deps(v1))).running; i++) await Bun.sleep(100);
     const running = await localStatus(deps(v1));
