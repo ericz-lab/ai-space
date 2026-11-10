@@ -1,11 +1,16 @@
 import Gdk from "gi://Gdk?version=4.0";
 import Gtk from "gi://Gtk?version=4.0";
+import { ICON_RADIUS_MAX } from "../core/catalogue.ts";
+
+/** An icon's corner follows its size and GTK's CSS has no relative radius: one class per pixel (core/catalogue.ts iconShape). */
+const ICON_SHAPES = Array.from({ length: ICON_RADIUS_MAX }, (_, i) => `.icon-r${i + 1} { border-radius: ${i + 1}px; }`).join("\n");
 
 /** The few styles libadwaita does not already give: tiles, chat bubbles, tool rows and cards. Colours are Adwaita's named ones, so light and dark follow the desktop. */
 const CSS = `
 .tile { padding: 10px 4px 8px; border-radius: 16px; min-width: 96px; }
 .tile-title { font-size: 0.92em; }
-.tile-icon { border-radius: 14px; }
+${ICON_SHAPES}
+.icon-round { border-radius: 99px; }
 .tile-emoji { margin: 0; }
 .reach-dot { min-width: 8px; min-height: 8px; border-radius: 99px; }
 .reach-down { background: @error_color; }
