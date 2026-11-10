@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" font-family="Inter, -apple-system, 'PingFang SC', system-ui, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif">
   <title>ai-space Space preset: light and dark sketch</title>
   <desc>Proposed Space preset (docs/design-guidelines.md). Each half shows the field with the orbital arc, three launcher tiles (one focused), a widget card with a hero value and a stale time, and a reading panel with a primary and a secondary button.</desc>
   <defs>
