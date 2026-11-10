@@ -153,7 +153,7 @@ One token, `radius`, with two derived steps (implemented):
 
 ## 7. Typography and language
 
-**Implemented:** `500 16px/1.5 Inter, -apple-system, "PingFang SC", system-ui, sans-serif`; monospace `ui-monospace, "SF Mono", Menlo, monospace` for code, terminal output, and identifiers.
+**Implemented:** `500 16px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", system-ui, sans-serif` (the system font of the device; no font file is shipped or named); monospace `ui-monospace, "SF Mono", Menlo, monospace` for code, terminal output, and identifiers.
 
 Buttons, inputs, selects and text areas inherit the page font (the browser default would be Arial). `ui-policy.json` at the repository root states these fonts and the sizes in the table below for lintapple; glyph icons (edge arrows, attach, send, mic) and switches are exempt from its size rule.
 
