@@ -39,11 +39,16 @@ public sealed record AppInfo(string Id, string Name, string Title, string? Peer,
 {
     public string DisplayTitle(string? lang = null) => Lang.Pick(Title, I18n, true, lang);
 
-    /// <summary>The app's page with <c>{lang}</c> filled in, resolved against the Space when it is a path.</summary>
+    /// <summary>
+    /// The app's page with <c>{lang}</c> filled in, resolved against the Space when it is a path. <c>{accent}</c>
+    /// (docs/ui-kit.md#accent) is filled with nothing: this client follows the system's theme, not one of the
+    /// panel's, so the page keeps the accent it saved or the kit's default.
+    /// </summary>
     public Uri? PageUrl(Uri space, string? lang = null)
     {
         if (string.IsNullOrEmpty(Url)) return null;
-        var filled = Url.Replace("{lang}", lang ?? Lang.Current, StringComparison.Ordinal);
+        var filled = Url.Replace("{lang}", lang ?? Lang.Current, StringComparison.Ordinal)
+            .Replace("{accent}", "", StringComparison.Ordinal).Replace("%7Baccent%7D", "", StringComparison.Ordinal);
         return Uri.TryCreate(space, filled, out var u) && ConnectionRules.IsWeb(u) ? u : null;
     }
 

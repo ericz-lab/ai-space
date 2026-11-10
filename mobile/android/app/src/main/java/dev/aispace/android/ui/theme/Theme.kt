@@ -7,11 +7,13 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.aispace.android.core.PagePlaceholders
 
 /**
  * One of the panel's themes (PRESETS in src/web/theme.ts) as the phone draws it: the ground, the text,
@@ -165,6 +167,8 @@ fun isDark(appearance: Appearance): Boolean = when (appearance) {
 fun AISpaceTheme(preset: ThemePreset, appearance: Appearance, content: @Composable () -> Unit) {
     val dark = isDark(appearance)
     val tokens = ThemeTokens(preset, dark)
+    // App pages opened from here take this theme's accent through `{accent}` (docs/ui-kit.md#accent).
+    SideEffect { PagePlaceholders.accent = PagePlaceholders.accent(preset.light.accent, preset.dark.accent) }
     val scheme = if (dark) {
         darkColorScheme(
             primary = tokens.accent, background = tokens.ground, surface = tokens.solid,

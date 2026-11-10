@@ -174,6 +174,8 @@ class DesktopRulesTests {
         assertNull(AppRoutes.app(URI("https://space.example.com/settings"), apps, space))
         assertNull(AppRoutes.app(URI("https://github.com/x"), apps, space))
         assertEquals("https://todo.example.com/?lang=zh", apps[0].pageURL(space, lang = "zh")?.toString())
+        assertEquals("2563eb.3b82f6", PagePlaceholders.accent(0x2563EB, 0x3B82F6))
+        assertEquals("/x?lang=en&accent=8b5cf6.8b5cf6", PagePlaceholders.fill("/x?lang={lang}&accent=%7Baccent%7D", "en", "8b5cf6.8b5cf6"))
     }
 
     @Test fun deepLinksNeverSend() {

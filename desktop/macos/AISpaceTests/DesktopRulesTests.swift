@@ -43,6 +43,15 @@ struct DesktopRulesTests {
         #expect(apps[0].pageURL(space: space, lang: "zh")?.absoluteString == "https://todo.example.com/?lang=zh")
     }
 
+    @Test func pagesTakeTheThemeAccent() {
+        let themed = app("todo", "https://todo.example.com/?lang={lang}&accent={accent}")
+        #expect(PagePlaceholders.accent(light: 0x2563EB, dark: 0x3B82F6) == "2563eb.3b82f6")
+        #expect(themed.pageURL(space: space, lang: "zh", accent: "2563eb.3b82f6")?.absoluteString == "https://todo.example.com/?lang=zh&accent=2563eb.3b82f6")
+        // No theme yet: an empty value, which the page ignores, and never a literal brace in the URL.
+        #expect(themed.pageURL(space: space, lang: "en", accent: "")?.absoluteString == "https://todo.example.com/?lang=en&accent=")
+        #expect(PagePlaceholders.fill("/x?accent=%7Baccent%7D&lang=%7Blang%7D", lang: "en", accent: "8b5cf6.8b5cf6") == "/x?accent=8b5cf6.8b5cf6&lang=en")
+    }
+
     @Test func deepLinksNeverSend() {
         #expect(DeepLink(URL(string: "aispace://chat?agent=ai-todo/planner&text=hi")!) == .chat(agent: "ai-todo/planner", text: "hi"))
         #expect(DeepLink(URL(string: "aispace://chat")!) == .chat(agent: nil, text: nil))

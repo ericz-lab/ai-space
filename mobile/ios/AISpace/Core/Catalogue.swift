@@ -121,7 +121,7 @@ struct CatalogueEntry: Identifiable, Hashable {
     /// An emoji, an http(s) URL, or a path on the Space.
     var icon: String?
     var peer: String?
-    /// The page to open: the app's `url` or the widget's `link`, `{lang}` not yet filled in.
+    /// The page to open: the app's `url` or the widget's `link`, `{lang}` and `{accent}` not yet filled in.
     var link: String?
     var reach: Reach
 
@@ -135,10 +135,10 @@ struct CatalogueEntry: Identifiable, Hashable {
         return text.isEmpty ? nil : text
     }
 
-    /// The page with `{lang}` filled in, resolved against the Space when it is a path.
-    func pageURL(space: URL, lang: String = Lang.current) -> URL? {
+    /// The page with `{lang}` and `{accent}` filled in, resolved against the Space when it is a path.
+    func pageURL(space: URL, lang: String = Lang.current, accent: String = PagePlaceholders.accent) -> URL? {
         guard let link, !link.isEmpty else { return nil }
-        let filled = link.replacingOccurrences(of: "{lang}", with: lang)
+        let filled = PagePlaceholders.fill(link, lang: lang, accent: accent)
         guard let url = URL(string: filled, relativeTo: space)?.absoluteURL,
               let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https"
         else { return nil }

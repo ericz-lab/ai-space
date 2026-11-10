@@ -446,6 +446,21 @@ export function resolveTokens(prefs: ThemePreferences, scheme: Scheme): Resolved
   return layer(layer({ ...DEFAULT_THEME[scheme] }, preset[scheme]), prefs.overrides[scheme] ?? {});
 }
 
+/**
+ * What an app page receives for the `{accent}` placeholder of its manifest `url` (docs/ui-kit.md#accent):
+ * the resolved accent of the light and of the dark scheme, each as six lowercase hex digits without `#`,
+ * joined by a dot (`8b5cf6.a394ff`). Alpha is dropped; only the accent travels, never the other tokens.
+ */
+export function accentParam(prefs: ThemePreferences): string {
+  const hex = (scheme: Scheme) => toHex(resolveTokens(prefs, scheme).accent).slice(1);
+  return `${hex("light")}.${hex("dark")}`;
+}
+
+/** An app URL with the `{accent}` placeholder filled; `%7Baccent%7D` is the same placeholder after URL normalisation. */
+export function withAccent(url: string, accent: string): string {
+  return url.replaceAll("{accent}", accent).replaceAll("%7Baccent%7D", accent);
+}
+
 /** The custom properties that put resolved tokens on the page. */
 export function toCssVars(t: ResolvedTokens): Record<string, string> {
   const vars: Record<string, string> = {};
@@ -659,3 +674,6 @@ export function onAppearance(fn: (a: Appearance) => void): () => void {
   return () => listeners.delete(l);
 }
 export const currentAppearance = () => snapshot();
+
+/** The `{accent}` value for this browser's saved theme, re-rendering when it changes. */
+export const useAccentParam = (): string => accentParam(useAppearance().saved);

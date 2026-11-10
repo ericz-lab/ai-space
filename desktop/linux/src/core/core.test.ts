@@ -140,6 +140,7 @@ describe("catalogue", () => {
     expect(pageUrl(c.apps[0]!.link, "https://s.example.com/", "en")).toBe("https://s.example.com/apps/todo/");
     expect(pageUrl(c.apps[1]!.link, "https://s.example.com/", "zh")).toBe("https://notes.example.com/zh/");
     expect(pageUrl("javascript:alert(1)", "https://s.example.com/", "en")).toBeUndefined();
+    expect(pageUrl("https://todo.example.com/?lang={lang}&accent={accent}", "https://s.example.com/", "zh")).toBe("https://todo.example.com/?lang=zh&accent=");
     expect(agentBase(c.agentInfo[1]!)).toBe("/api/peers/seoul/agents/todo/helper");
     expect(widgetLines(c.widgets[0]!, "zh")).toEqual(["Open: 1,235", "同步: ok"]);
     expect(widgetLines(c.widgets[1]!, "en")).toEqual(["Buy milk"]);

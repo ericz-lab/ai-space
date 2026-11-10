@@ -65,7 +65,7 @@ export type Entry = {
   peer?: string;
   /** An agent on several machines: every machine's name ("" for this one), the entry standing for them all. */
   machines?: string[];
-  /** The page to open: the app's `url` or the widget's `link`, `{lang}` not filled in yet. */
+  /** The page to open: the app's `url` or the widget's `link`, `{lang}` and `{accent}` not filled in yet. */
   link?: string;
   reach: Reach;
 };
@@ -192,10 +192,14 @@ export function panelScreens(c: Catalogue): Screen[] {
   return c.screens ?? seedScreens(c.apps.map((a) => a.ref), c.agents.map((a) => a.ref), c.widgets.map((w) => w.id));
 }
 
-/** The page of an app or widget with `{lang}` filled in, resolved against the Space; http(s) only. */
+/**
+ * The page of an app or widget with `{lang}` filled in, resolved against the Space; http(s) only.
+ * `{accent}` (docs/ui-kit.md#accent) is filled with nothing: this client follows the desktop's own
+ * theme, not one of the panel's, so the page keeps the accent it saved or the kit's default.
+ */
 export function pageUrl(link: string | undefined, space: string, lang: string): string | undefined {
   if (!link) return undefined;
-  const url = resolveUrl(link.replace(/\{lang\}/g, lang), space);
+  const url = resolveUrl(link.replace(/\{lang\}/g, lang).replace(/\{accent\}|%7Baccent%7D/g, ""), space);
   return url && /^https?:\/\//i.test(url) ? url : undefined;
 }
 

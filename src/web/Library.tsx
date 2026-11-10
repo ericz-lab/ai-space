@@ -3,6 +3,7 @@ import { isImgIcon, recordOpen, type AgentInfo, type AppInfo, type BuiltinIcons,
 import { type Key, type Lang, localized, searchKeyText, searchText, useLang, withLang } from "./i18n.ts";
 import { BUILTINS, type Builtin, WIDGET_SIZES, type EntryKind, type Screen, entryKey, matches, parseKey } from "./screens.ts";
 import { Icon, Tile, Widget } from "./Tiles.tsx";
+import { useAccentParam, withAccent } from "./theme.ts";
 
 // The library: the screen left of home, with every app, agent and widget whether pinned or not.
 // One search over the three kinds and a filter by kind. By default a card opens its entry, like a
@@ -34,11 +35,12 @@ export type Entry = { key: string; kind: EntryKind; widget?: WidgetInfo; icon: s
 const titles = (x: { title: string; i18n?: Record<string, { title?: string } | undefined> }) => [x.title, ...Object.values(x.i18n ?? {}).map((e) => e?.title)].filter((n): n is string => !!n);
 
 /** Every app, built-in tile, agent and widget, in that order: the library's cards and the box's candidates. */
-export function libraryEntries(lists: { apps: AppInfo[]; agents: AgentInfo[]; widgets: WidgetInfo[]; builtins: BuiltinIcons }, lang: Lang, t: (key: Key) => string): Entry[] {
+export function libraryEntries(lists: { apps: AppInfo[]; agents: AgentInfo[]; widgets: WidgetInfo[]; builtins: BuiltinIcons }, lang: Lang, t: (key: Key) => string, accent: string): Entry[] {
+  const open = (url: string) => withAccent(withLang(url, lang), accent);
   const out: Entry[] = [];
   for (const a of lists.apps) {
     const shown = localized(lang, a);
-    out.push({ key: entryKey("app", a.id), kind: "app", icon: a.icon, fallback: "📦", title: shown.title, names: [...titles(a), a.id], text: [searchText(a), a.id].join(" "), kindLabel: t("library.kindApp"), peer: a.peer, href: a.url ? withLang(a.url, lang) : undefined });
+    out.push({ key: entryKey("app", a.id), kind: "app", icon: a.icon, fallback: "📦", title: shown.title, names: [...titles(a), a.id], text: [searchText(a), a.id].join(" "), kindLabel: t("library.kindApp"), peer: a.peer, href: a.url ? open(a.url) : undefined });
   }
   for (const b of BUILTINS) {
     const x = BUILTIN_TEXT[b];
@@ -50,7 +52,7 @@ export function libraryEntries(lists: { apps: AppInfo[]; agents: AgentInfo[]; wi
   }
   for (const w of lists.widgets) {
     const shown = localized(lang, w);
-    out.push({ key: entryKey("widget", w.id), kind: "widget", widget: w, icon: w.icon, fallback: "📦", title: shown.title, names: [...titles(w), w.id], text: [searchText(w), w.id].join(" "), kindLabel: t("library.kindWidget"), peer: w.peer, href: w.link ? withLang(w.link, lang) : undefined, size: w.size });
+    out.push({ key: entryKey("widget", w.id), kind: "widget", widget: w, icon: w.icon, fallback: "📦", title: shown.title, names: [...titles(w), w.id], text: [searchText(w), w.id].join(" "), kindLabel: t("library.kindWidget"), peer: w.peer, href: w.link ? open(w.link) : undefined, size: w.size });
   }
   return out;
 }
@@ -105,6 +107,7 @@ export default function Library({
   details?: (key: string) => ReactNode;
 }) {
   const { lang, t } = useLang();
+  const accent = useAccentParam();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [byUse, setByUse] = useState(() => {
@@ -135,7 +138,7 @@ export default function Library({
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const entries = useMemo(() => libraryEntries({ apps, agents, widgets, builtins }, lang, t), [apps, agents, widgets, builtins, lang, t]);
+  const entries = useMemo(() => libraryEntries({ apps, agents, widgets, builtins }, lang, t, accent), [apps, agents, widgets, builtins, lang, t, accent]);
 
   const kindOf = (e: Entry): Filter => (e.kind === "builtin" ? "app" : e.kind);
   const counts = useMemo(() => {

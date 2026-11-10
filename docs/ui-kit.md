@@ -51,7 +51,7 @@ Type sizes are 12 (captions, counts), 15 (everything read or pressed), 28 (page 
 
 ## Rules
 
-- **The accent is the host's.** It marks the square before a tile title, today in a chart, focus and the selected item (`--accent-wash`). It never fills a button, a switch or a checkbox, and never colours a data series.
+- **The accent is the host's** (see [Accent](#accent)). It marks the square before a tile title, today in a chart, focus and the selected item (`--accent-wash`). It never fills a button, a switch or a checkbox, and never colours a data series.
 - **One ink button per screen at most** (`.sp-btn-ink`), for the screen's main action. The rest are `.sp-btn`.
 - **State colours come with a word.** Green, amber and red appear only in a badge, a dot beside a label, a banner or a meter. Running is ink (`.run`), not amber; amber is a warning.
 - **A count appears once.** If the navigation shows it, the heading does not repeat it.
@@ -76,6 +76,31 @@ All start with `sp-`.
 
 Drawers are classes on `body`: `sp-open-nav` (left column below 960 px), `sp-open-aside` (right column below 1200 px, a bottom sheet below 760 px), `sp-sheet-open` (the scrim). The page toggles them; the kit has no script.
 
-## Not yet
+## Accent
 
-The accent follows the space's theme only by its default: the panel keeps its appearance in the browser, where an app's origin cannot read it. Serving the operator's accent with `/_space/ui.css` needs the appearance stored by the space.
+The accent is the only token the host sets. The panel keeps its appearance per browser, where an app's origin cannot read it, so the accent travels the way the language does: in the URL the panel opens.
+
+- The manifest's `url` carries an `{accent}` placeholder next to `{lang}`: `url: /?lang={lang}&accent={accent}`. Whoever opens the app fills it with the resolved accent of that browser's panel theme, for the light and for the dark scheme, as `<light>.<dark>`, each six hex digits without `#`: `?accent=8b5cf6.a394ff` ([app-spec.md](app-spec.md#app-pages), [i18n.md](i18n.md#apps)).
+- The page's inline `<head>` script reads it before first paint. It accepts only a value matching `^[0-9a-f]{6}\.[0-9a-f]{6}$` (any case), saves it in `localStorage` under `space.accent`, and otherwise falls back to the saved value; an unfilled placeholder, an empty value or anything else is ignored. With a value, it adds an **unlayered** `<style>` that sets `--accent`, which wins over every layer (`kit`, `space`, `app`). `--accent-wash` and `--focus` are made from `--accent` and follow it.
+- Only the accent follows the panel. The neutral palette, the radii and the page's light or dark mode stay the kit's and the page's own.
+- A page that is already open keeps its accent until it is opened from the panel again. A page opened some other way (a bookmark, its own hostname) shows the accent it saved last, or the kit's default `#8b5cf6` if it never received one.
+
+In the same inline script, after the theme is applied:
+
+```js
+// The panel's accent (docs/ui-kit.md#accent): ?accent=<light>.<dark>, kept for the next visit.
+var re = /^[0-9a-f]{6}\.[0-9a-f]{6}$/i, a = q.get("accent");
+if (a && re.test(a)) { try { localStorage.setItem("space.accent", a); } catch (e) {} }
+else a = get("space.accent");
+if (a && re.test(a)) {
+  var c = a.split("."), st = document.createElement("style");
+  st.textContent = ":root{--accent:#" + c[0] + "}" +
+    '@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--accent:#' + c[1] + "}}" +
+    ':root[data-theme="dark"]{--accent:#' + c[1] + "}";
+  document.head.appendChild(st);
+}
+```
+
+`q` is the page's `URLSearchParams` and `get` reads `localStorage` inside a `try`, as in the head script of [app-spec.md](app-spec.md#app-pages). The key `space.accent` is the same in every app: each app has its own origin, so it is one value per app and browser.
+
+The native clients fill `{accent}` from their own theme where they draw one of the panel's presets (the Mac, iPhone and Android clients: the preset's light and dark accent, without the browser's per-scheme overrides); the Linux and Windows clients follow the desktop's theme and fill it with nothing, which the page ignores.

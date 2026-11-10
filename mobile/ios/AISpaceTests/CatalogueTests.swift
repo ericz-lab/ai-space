@@ -158,6 +158,7 @@ struct CatalogueTests {
     @Test func resolvesPagesAgainstTheSpace() {
         let c = Fixture.catalogue
         #expect(c.app(named: "todo")?.pageURL(space: space, lang: "zh")?.absoluteString == "https://todo.example.com/?lang=zh")
+        #expect(c.app(named: "todo")?.pageURL(space: space, lang: "zh", accent: "2563eb.3b82f6")?.absoluteString == "https://todo.example.com/?lang=zh")
         let path = CatalogueEntry(kind: .app, ref: "wiki", title: "Wiki", link: "/wiki/", reach: .link)
         #expect(path.pageURL(space: space)?.absoluteString == "https://space.example.com/wiki/")
         let script = CatalogueEntry(kind: .app, ref: "x", title: "X", link: "javascript:alert(1)", reach: .link)
