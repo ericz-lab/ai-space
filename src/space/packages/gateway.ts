@@ -29,6 +29,8 @@ export class PackageGateway {
   usageBeat?: (app: string, tab: unknown) => void;
   /** Answers a local app's `/_space/feedback*` (docs/feedback.md) as the router does for source apps; unset, they are 404. */
   feedback?: (app: string, req: Request) => Response | Promise<Response>;
+  /** Answers `/_space/ui.css`, the built-in apps' stylesheet (docs/ui-kit.md): static, so a remote app gets this Space's too; unset, it is 404. */
+  uiKit?: (req: Request) => Response | Promise<Response>;
   constructor(readonly runtime: PackageRuntime, readonly links: PackageLinks, readonly spaceId: string) {}
 
   start(port: number, publicBase?: string): number {
@@ -140,6 +142,7 @@ export class PackageGateway {
     const site = req.headers.get("sec-fetch-site");
     if (origin && origin !== entry.origin || !origin && site && site !== "same-origin" && site !== "none" && req.headers.get("sec-fetch-mode") !== "navigate") return new Response("Cross-origin application request refused", { status: 403 });
     if (!origin && !["GET", "HEAD"].includes(req.method) && site !== "same-origin") return new Response("Application write requires same origin", { status: 403 });
+    if (url.pathname === "/_space/ui.css") return this.uiKit ? this.uiKit(req) : new Response("Not found", { status: 404 });
     const usage = this.usageResponse(req, entry, url.pathname);
     if (usage) return usage;
     if (url.pathname === "/_space/feedback.js" || url.pathname === "/_space/feedback" || url.pathname.startsWith("/_space/feedback/")) {

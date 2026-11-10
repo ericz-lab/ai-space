@@ -627,6 +627,8 @@ The `<head>` part, before any stylesheet that paints (the rest, the dictionary a
 </script>
 ```
 
+The built-in apps share one stylesheet, served at `/_space/ui.css`; a page that wants the same look links it as [ui-kit.md](ui-kit.md) describes.
+
 Before shipping a page, look at it at 1440 px and 375 px wide, in both languages and both themes: nothing frames the app, every string switches, and the theme button cycles and survives a reload.
 
 ## Full example

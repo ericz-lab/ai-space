@@ -38,6 +38,7 @@ import { withUserToolDirs } from "./space/host-tools.ts";
 import { readOwnership } from "./space/local.ts";
 import { createPackageRoutes } from "./space/packages/api.ts";
 import { createStudioRoutes } from "./space/studio.ts";
+import { createUiKitRoutes, loadUiKit, uiKitResponse } from "./space/ui-kit.ts";
 import { createActivityRoutes } from "./space/activity.ts";
 import { PackageStore } from "./space/packages/store.ts";
 import { PackageInstaller } from "./space/packages/install.ts";
@@ -506,6 +507,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   });
   feedback.resume();
   const feedbackScript = buildFeedbackScript({ dev: process.env.SPACE_DEV === "1" });
+  const uiKit = loadUiKit({ dev: process.env.SPACE_DEV === "1" });
+  packageGateway.uiKit = (req) => uiKitResponse(req, uiKit);
   const feedbackLists = {
     service: feedback,
     apps: () =>
@@ -612,6 +615,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", terminalRoutes],
       ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, id: packageStore.spaceId, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), feedback: createFeedbackPeerServeRoutes(feedbackLists), inventory: () => peerRow(runtimeHealth, runtimes), ledger: createPeerUsageRoutes({ service: model, name: config.name, skipApps: () => packageStore.list().filter((o) => o.state === "installed").map((o) => o.app) }), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
       ["public", createWebRoutes()],
+      ["public", createUiKitRoutes(uiKit)],
       ["owner", createAuthRoutes({ mode: config.auth, auth })],
     ],
     {
@@ -621,6 +625,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       "/api/chat/widget.js": "public",
       "/api/chat/widget.css": "public",
       "/_space/usage.js": "public",
+      // The built-in apps' stylesheet (docs/ui-kit.md): static, the same for every app.
+      "/_space/ui.css": "public",
       // Heartbeats arrive through the router from app pages, which hold no panel session; they only count time in use.
       "/_space/usage/beat": "public",
       // The feedback button on app pages (docs/feedback.md): the router names the app, the page holds no session;
