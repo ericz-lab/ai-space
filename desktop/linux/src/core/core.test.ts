@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { ConnectionUrlError, escapeSegment, isLoopback, normalizeConnectionUrl, origin, queryParams, resolveUrl, sameOrigin } from "./url.ts";
 import { ConnectionList, decodeConnections, encodeConnections, localToClaim } from "./connections.ts";
-import { agentBase, allEntries, decodeCatalogue, NotASpaceError, opensFirst, pageUrl, panelScreens, pickText, search, widgetLines } from "./catalogue.ts";
+import { agentBase, allEntries, decodeCatalogue, ICON_RADIUS_MAX, iconShape, NotASpaceError, opensFirst, pageUrl, panelScreens, pickText, search, widgetLines } from "./catalogue.ts";
 import { checkResponse, classifyIdentity, classifyLayout, SpaceError } from "./check.ts";
 import { LineSplitter, SSEParser } from "./sse.ts";
 import { appForUrl, decodeInbox, InboxSeen, parseDeepLink, visibleTabs } from "./desktop.ts";
@@ -123,6 +123,14 @@ describe("catalogue", () => {
     expect(panelScreens(c)[0]!.items).toEqual(["app:todo", "agent:space/assistant"]);
     expect(panelScreens({ ...c, screens: undefined })[0]!.items[0]).toBe("app:todo");
     expect(() => decodeCatalogue({ ...CATALOGUE, apps: { nope: 1 } })).toThrow(NotASpaceError);
+  });
+
+  test("an icon is cut as the Mac cuts it: a corner of 0.26 of its side, a circle for an agent", () => {
+    expect([22, 28, 56, 72].map((size) => iconShape(size))).toEqual(["icon-r6", "icon-r7", "icon-r15", "icon-r19"]);
+    expect(iconShape(56, true)).toBe("icon-round");
+    // No size leaves the classes the stylesheet writes.
+    expect(iconShape(1)).toBe("icon-r1");
+    expect(iconShape(512)).toBe(`icon-r${ICON_RADIUS_MAX}`);
   });
 
   test("search finds every language and ranks names first; Return opens a typed name", () => {

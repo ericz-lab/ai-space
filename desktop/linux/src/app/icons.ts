@@ -1,6 +1,7 @@
 import Gdk from "gi://Gdk?version=4.0";
 import GdkPixbuf from "gi://GdkPixbuf";
 import Gtk from "gi://Gtk?version=4.0";
+import { iconShape } from "../core/catalogue.ts";
 import { resolveUrl, sameOrigin } from "../core/url.ts";
 import { type GBytes, type SpaceClient, plainRequest } from "./http.ts";
 import { APP_ROOT, path } from "./env.ts";
@@ -75,9 +76,9 @@ export function appTexture(name: string): any | undefined {
 
 /** An icon as a widget of `size` pixels: an emoji label, the image once it has loaded, or the fallback glyph. */
 /** `exact`: the picture takes exactly `size`, not its own larger size (a small avatar beside a name). */
-export function iconWidget(icon: string | undefined, size: number, client: SpaceClient | undefined, fallback = "application-x-executable-symbolic", exact = false): any {
+/** `round`: an agent's avatar, cut to a circle; an app's icon is cut to a rounded square. */
+export function iconWidget(icon: string | undefined, size: number, client: SpaceClient | undefined, fallback = "application-x-executable-symbolic", exact = false, round = false): any {
   const box = new Gtk.Box({ width_request: size, height_request: size, halign: Gtk.Align.CENTER, valign: Gtk.Align.CENTER });
-  box.add_css_class("tile-icon");
   const glyph = () => {
     const img = new Gtk.Image({ icon_name: fallback, pixel_size: Math.round(size * 0.6), hexpand: true, vexpand: true });
     img.add_css_class("dim-label");
@@ -100,6 +101,10 @@ export function iconWidget(icon: string | undefined, size: number, client: Space
         ? new Gtk.Image({ paintable: texture, pixel_size: size })
         : new Gtk.Picture({ paintable: texture, content_fit: Gtk.ContentFit.CONTAIN, can_shrink: true, width_request: size, height_request: size });
       pic.add_css_class("tile-image");
+      // A picture that fills its square brings no corners of its own: its shape cuts them. On the
+      // picture, not the box, which a roomy parent makes wider than what is drawn.
+      pic.add_css_class(iconShape(size, round));
+      pic.set_overflow(Gtk.Overflow.HIDDEN);
       box.remove(shown);
       shown = pic;
       box.append(pic);

@@ -133,7 +133,7 @@ export class ChatPage {
         const row = new Gtk.ListBoxRow() as any;
         row.agentId = a.id;
         const box = new Gtk.Box({ spacing: 10, margin_top: 4, margin_bottom: 4 });
-        box.append(iconWidget(a.avatar, 26, this.space?.client, "avatar-default-symbolic"));
+        box.append(iconWidget(a.avatar, 26, this.space?.client, "avatar-default-symbolic", false, true));
         const text = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, valign: Gtk.Align.CENTER });
         const title = new Gtk.Label({ label: pickText(a.title, a.i18n, "title", lang), xalign: 0, ellipsize: Pango.EllipsizeMode.END });
         text.append(title);

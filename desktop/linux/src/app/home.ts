@@ -502,7 +502,7 @@ export class HomePage {
     const where = e.machines ? tw("agents.onMachines", { machines: e.machines.map((m) => m || tw("agents.thisMachine")).join(lang === "zh" ? "、" : ", ") }) : e.peer ? `@${e.peer}` : "";
     const tooltip = screen ? undefined : [title, detail, where].filter(Boolean).join("\n");
     const dot = e.reach === "down" || e.reach === "paused" || e.reach === "peer-offline" ? e.reach : undefined;
-    const button = this.tileButton(iconWidget(e.icon, 56, space.client, e.kind === "agent" ? "avatar-default-symbolic" : "application-x-executable-symbolic"), title, tooltip, dot);
+    const button = this.tileButton(iconWidget(e.icon, 56, space.client, e.kind === "agent" ? "avatar-default-symbolic" : "application-x-executable-symbolic", false, e.kind === "agent"), title, tooltip, dot);
     button.connect("clicked", () => this.actions.open(space, e));
     this.onRightClick(button, (anchor, x, y) => this.entryMenu(anchor, space, e, screen, { x, y }));
     return button;
@@ -689,7 +689,7 @@ export class HomePage {
           const e = byKey.get(key);
           const b = BUILTINS.find((x) => `builtin:${x.name}` === key);
           const row = new Adw.ActionRow({ title: e ? pickText(e.title, e.i18n, "title", lang) : (b?.label() ?? key), subtitle: e?.peer ?? "", use_markup: false });
-          row.add_prefix(e ? iconWidget(e.icon, 28, space.client, e.kind === "agent" ? "avatar-default-symbolic" : "application-x-executable-symbolic") : new Gtk.Image({ icon_name: b?.icon ?? "view-grid-symbolic", pixel_size: 22 }));
+          row.add_prefix(e ? iconWidget(e.icon, 28, space.client, e.kind === "agent" ? "avatar-default-symbolic" : "application-x-executable-symbolic", false, e.kind === "agent") : new Gtk.Image({ icon_name: b?.icon ?? "view-grid-symbolic", pixel_size: 22 }));
           const button = (icon: string, tip: string, sensitive: boolean, run: () => void) => {
             const btn = new Gtk.Button({ icon_name: icon, tooltip_text: tip, valign: Gtk.Align.CENTER, sensitive, css_classes: ["flat"] });
             btn.connect("clicked", run);

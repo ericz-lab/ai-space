@@ -72,6 +72,14 @@ export type Entry = {
 
 export const entryKey = (e: Pick<Entry, "kind" | "ref">) => `${e.kind}:${e.ref}`;
 
+/** The widest corner the stylesheet has a class for (`.icon-r1` … `.icon-r<max>`, app/style.ts). */
+export const ICON_RADIUS_MAX = 32;
+
+/** The style class of the shape an icon's picture is cut to, as the Mac's EntryIcon: a circle for an agent, a rounded square with a corner of 0.26 of its side for the rest. */
+export function iconShape(size: number, round = false): string {
+  return round ? "icon-round" : `icon-r${Math.min(ICON_RADIUS_MAX, Math.max(1, Math.round(size * 0.26)))}`;
+}
+
 export type Catalogue = {
   apps: Entry[];
   agents: Entry[];

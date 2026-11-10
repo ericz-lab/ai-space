@@ -290,7 +290,7 @@ export class ChatView {
     this.emptyBody.set_text(agent ? pickText(agent.description ?? "", agent.i18n, "description", lang) : t("noAgents"));
     const old = this.emptyAvatar.get_first_child();
     if (old) this.emptyAvatar.remove(old);
-    if (agent) this.emptyAvatar.append(iconWidget(agent.avatar, 72, space?.client, "avatar-default-symbolic"));
+    if (agent) this.emptyAvatar.append(iconWidget(agent.avatar, 72, space?.client, "avatar-default-symbolic", false, true));
     this.renderMachines();
     this.render();
   }
