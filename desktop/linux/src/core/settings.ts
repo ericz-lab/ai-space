@@ -173,6 +173,7 @@ export type FeedbackView = {
   /** Each peer's apps, which follow these settings (the hub sends them on). */
   peers: { name: string; ok: boolean; error: string; synced: boolean; apps: { app: string; title: string; zh?: string; enabled: boolean }[] }[];
   machines: Choice[];
+  /** The models of the machine the engineer runs on (`machineModels`), or this one's from an older core. */
   models: ModelOption[];
   later: number;
   shortcut: string;
@@ -188,13 +189,15 @@ export function decodeFeedback(raw: unknown): FeedbackView {
   const apps = field(s, "apps");
   const mode = field(s, "mode");
   const effort = field(s, "effort");
+  const machine = String(field(s, "machine") ?? "");
+  const byMachine = field(raw, "machineModels");
   return {
     settings: {
       enabled: field(s, "enabled") === true,
       appsDefault: field(s, "appsDefault") !== false,
       apps: typeof apps === "object" && apps !== null ? Object.fromEntries(Object.entries(apps).filter(([, v]) => v === "on" || v === "off")) : {},
       mode: mode === "later" ? "later" : "auto",
-      machine: String(field(s, "machine") ?? ""),
+      machine,
       model: String(field(s, "model") ?? ""),
       effort: FEEDBACK_EFFORTS.includes(effort as "high") ? (effort as FeedbackView["settings"]["effort"]) : "xhigh",
       errors: field(s, "errors") !== false,
@@ -204,7 +207,8 @@ export function decodeFeedback(raw: unknown): FeedbackView {
       .filter((p) => typeof p.name === "string")
       .map((p) => ({ name: String(p.name), ok: p.ok === true, error: typeof p.error === "string" ? p.error : "", synced: p.synced === true, apps: feedbackApps(p) })),
     machines: listOf<Choice>(raw, "machines").map((m) => ({ value: String(m.value ?? ""), label: String(m.label ?? "") })),
-    models: listOf<ModelOption>(raw, "models").filter((o) => typeof o.value === "string"),
+    // The machine the engineer runs on decides what it can run on: a hub's own runtimes are not a peer's.
+    models: listOf<ModelOption>(typeof byMachine === "object" && byMachine !== null ? { models: field(byMachine, machine) } : raw, "models").filter((o) => typeof o.value === "string"),
     later: Number(field(field(raw, "counts"), "later") ?? 0) || 0,
     shortcut: String(field(raw, "shortcut") ?? "Alt+Shift+F"),
   };

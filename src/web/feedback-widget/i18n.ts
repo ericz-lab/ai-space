@@ -12,6 +12,12 @@ const en = {
   mode: "What happens next",
   machine: "Fix on",
   thisMachine: "{name} (this one)",
+  model: "Model",
+  defaultModel: "Default model",
+  "tier.basic": "Basic",
+  "tier.junior": "Junior",
+  "tier.intermediate": "Intermediate",
+  "tier.advanced": "Advanced",
   send: "Send",
   sending: "Sending…",
   close: "Close",
@@ -65,6 +71,12 @@ const zh: Record<Key, string> = {
   mode: "之后怎么处理",
   machine: "在哪台机器修",
   thisMachine: "{name}（本机）",
+  model: "用哪个模型",
+  defaultModel: "默认模型",
+  "tier.basic": "基础",
+  "tier.junior": "初级",
+  "tier.intermediate": "中级",
+  "tier.advanced": "高级",
   send: "发送",
   sending: "发送中…",
   close: "关闭",
@@ -107,9 +119,9 @@ const dict: Record<Lang, Record<Key, string>> = { en, zh };
 
 export function tr(lang: Lang, key: Key, vars: Record<string, string | number> = {}): string {
   // A page can hold this script while the space has moved on: a word the space sends that this
-  // copy does not know (a new status) shows as itself instead of breaking the card.
+  // copy does not know (a new status, a new model tier) shows as itself instead of breaking the card.
   const words = dict[lang] as Record<string, string | undefined>;
-  const text = words[key] ?? (dict.en as Record<string, string | undefined>)[key] ?? String(key).replace(/^status\./, "");
+  const text = words[key] ?? (dict.en as Record<string, string | undefined>)[key] ?? String(key).replace(/^(status|tier)\./, "");
   return text.replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? ""));
 }
 

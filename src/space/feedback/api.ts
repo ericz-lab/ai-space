@@ -9,9 +9,9 @@ import { LIMITS } from "./types.ts";
  *
  *   GET  /_space/feedback.js                 the button's script (public)
  *   GET  /_space/feedback/config             { enabled, ... } for the app the router names (public)
- *   POST /_space/feedback                    { text, mode?, context, images? } → { id, status, todoId, todoUrl } (public, same origin)
+ *   POST /_space/feedback                    { text, mode?, machine?, model?, context, images? } → { id, status, todoId, todoUrl } (public, same origin)
  *   GET  /_space/feedback/recent             the app's last five, without context (public)
- *   GET  /api/panel/feedback/settings        settings, apps, machines, models, and each peer's apps (owner)
+ *   GET  /api/panel/feedback/settings        settings, apps, machines, models (by machine too), and each peer's apps (owner)
  *   PUT  /api/panel/feedback/settings        a settings patch, sent on to the peers (owner)
  *   GET  /api/panel/feedback                 recent feedback of every app, the peers' too (owner)
  *   POST /api/panel/feedback/fix             { peer?, app? | ids? } start waiting feedback now (owner)
@@ -172,6 +172,8 @@ function localSettingsView(opts: Omit<FeedbackApiOptions, "peers" | "script">) {
     apps: opts.apps().map((a) => ({ ...a, enabled: service.enabledFor(a.app) })),
     machines: opts.machines(),
     models: opts.models(),
+    // What the engineer can run on at each machine: "Fix on" decides which list the model menu shows.
+    machineModels: service.modelChoices(),
     counts: service.counts(),
     shortcut: "Alt+Shift+F",
   };

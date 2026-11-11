@@ -3,7 +3,7 @@ import { parseContext, parseImages, redact } from "./context.ts";
 import { type FixResult, type FixTarget, fixMessage, parseResult, todoPlan, todoTitle } from "./prompt.ts";
 import { FeedbackStore, recentView } from "./store.ts";
 import type { TodoSink } from "./todo.ts";
-import { type FeedbackRow, type FeedbackSettings, LIMITS, type RecentView, STATUSES, type Status, TODO_SYNCED } from "./types.ts";
+import { type FeedbackRow, type FeedbackSettings, LIMITS, MODEL_PATTERN, type ModelChoice, type RecentView, STATUSES, type Status, TODO_SYNCED } from "./types.ts";
 
 /**
  * Feedback from app pages to a fix (docs/feedback.md): a submission becomes a row and an ai-todo
@@ -40,6 +40,11 @@ export type FeedbackServiceOptions = {
   fixer: FixerPort;
   /** The peers the engineer may run on. */
   machines: () => string[];
+  /**
+   * The models the engineer can run on at a machine ("" here, else a peer): that machine's own chat
+   * runtimes, not this one's. Undefined when it is not known (a peer that has not said).
+   */
+  models?: (machine: string) => ModelChoice[] | undefined;
   /** Takes a fix pushed from another machine (src/space/feedback/deploy.ts). */
   deploy?: (app: string) => Promise<{ ok: boolean; log: string }>;
   log?: (line: string) => void;
@@ -48,7 +53,9 @@ export type FeedbackServiceOptions = {
 
 type Lang = "en" | "zh";
 const WORDS = {
-  started: { en: "Handed to the Fix Engineer (run {run}, {where}).", zh: "已交给修复工程师（run {run}，{where}）。" },
+  started: { en: "Handed to the Fix Engineer (run {run}, {where}, {model}).", zh: "已交给修复工程师（run {run}，{where}，{model}）。" },
+  model: { en: "model {model}", zh: "模型 {model}" },
+  defaultModel: { en: "the machine's default model", zh: "机器的默认模型" },
   here: { en: "on this machine", zh: "在本机" },
   on: { en: "on {machine}", zh: "在 {machine}" },
   fixed: { en: "Fix Engineer: fixed, waiting for your review.", zh: "修复工程师：已修好，等你验收。" },
@@ -118,6 +125,7 @@ export class FeedbackService {
     const on = Boolean(info) && this.enabledFor(app, s);
     if (!on) return { ok: true, enabled: false };
     const client = clientOf(ua);
+    const models = this.modelChoices();
     return {
       ok: true,
       enabled: true,
@@ -126,9 +134,24 @@ export class FeedbackService {
       app: { name: app, title: info!.title, zh: info!.zhTitle ?? info!.title },
       // Where the fix may run, when there is a choice: this machine first, then its peers.
       ...(this.opts.machines().length ? { machine: this.machineFor(s.machine), machines: [{ value: "", label: this.opts.name }, ...this.opts.machines().map((m) => ({ value: m, label: m }))] } : {}),
+      // The models it may run on, by machine: Settings' model, and what each machine offers.
+      ...(Object.keys(models).length ? { model: s.model, models } : {}),
       client: { kind: client.kind, en: clientLabel(client, "en"), zh: clientLabel(client, "zh") },
       shortcut: "Alt+Shift+F",
     };
+  }
+
+  /**
+   * The models the engineer can run on, by machine ("" this one, then each peer that said): the
+   * machine it runs on decides, so a hub whose own runtimes differ from a peer's offers the peer's.
+   */
+  modelChoices(): Record<string, ModelChoice[]> {
+    const out: Record<string, ModelChoice[]> = {};
+    for (const m of ["", ...this.opts.machines()]) {
+      const list = this.opts.models?.(m);
+      if (list) out[m] = list;
+    }
+    return out;
   }
 
   recent(app: string): RecentView[] {
@@ -188,7 +211,7 @@ export class FeedbackService {
         // Submitted again meanwhile, or another sync got there first: leave that one.
         if (this.store.get(r.id)?.todoId !== null) continue;
         const row = this.store.patch(r.id, { status: "later", note: null, todoId, todoPeer: sink.peer, todoUrl: sink.url(todoId) })!;
-        const fixer = runOn ? `Fix Engineer: space/ui-fixer on ${runOn}.` : "Fix Engineer: space/ui-fixer.";
+        const fixer = this.fixerLine(row);
         await sink.plan(todoId, todoPlan(row, titleFor(info, row), { images: 0, fixer })).catch((e) => this.log(`#${row.id}: plan: ${(e as Error).message}`));
         this.log(`#${r.id}: task made on a later try (${sink.peer || "here"} #${todoId})`);
       } catch (e) {
@@ -235,6 +258,14 @@ export class FeedbackService {
       if (typeof b.machine !== "string" || (b.machine && !this.opts.machines().includes(b.machine))) throw new FeedbackError(400, "machine must be this space or one of its peers");
       fixMachine = b.machine;
     }
+    // And the model: one that machine offers, or "" for its default; left out, Settings decide.
+    let fixModel: string | null = null;
+    if (b.model !== undefined && b.model !== null) {
+      if (typeof b.model !== "string" || (b.model && !MODEL_PATTERN.test(b.model))) throw new FeedbackError(400, "model must be empty (the machine's default) or runtime/model");
+      const offered = b.model ? this.opts.models?.(fixMachine ?? s.machine) : undefined;
+      if (offered && !offered.some((o) => o.value === b.model)) throw new FeedbackError(400, `model ${b.model} is not offered on ${(fixMachine ?? s.machine) || this.opts.name}`);
+      fixModel = b.model;
+    }
     let images;
     try {
       images = parseImages(b.images);
@@ -247,7 +278,7 @@ export class FeedbackService {
     if (repeated) return { id: repeated.id, status: repeated.status, todoId: repeated.todoId, todoUrl: repeated.todoUrl, repeated: true };
     if (this.store.countSince(app, this.now() - 3600_000) >= LIMITS.perHour) throw new FeedbackError(429, `at most ${LIMITS.perHour} pieces of feedback per app in an hour`);
 
-    let row = this.store.add({ app, text, context, client: clientOf(ua), status: mode === "later" ? "later" : "queued", fixMachine });
+    let row = this.store.add({ app, text, context, client: clientOf(ua), status: mode === "later" ? "later" : "queued", fixMachine, fixModel });
     // The task goes where the engineer will work, so the task and its fix are on one machine's list;
     // a machine without ai-todo leaves it to this space's own, then to any peer's.
     const runOn = fixMachine ?? s.machine;
@@ -265,7 +296,7 @@ export class FeedbackService {
       row = this.store.patch(row.id, { status: "recorded", note: `${TODO_FAILED}${(e as Error).message}`.slice(0, 500) })!;
       return { id: row.id, status: row.status, todoId: null, todoUrl: null };
     }
-    const fixer = runOn ? `Fix Engineer: space/ui-fixer on ${runOn}.` : "Fix Engineer: space/ui-fixer.";
+    const fixer = this.fixerLine(row, s);
     await sink.plan(row.todoId!, todoPlan(row, titleFor(info, row), { images: images.length, fixer })).catch((e) => this.log(`#${row.id}: plan: ${(e as Error).message}`));
     if (images.length) await sink.record(row.todoId!, say(langOf(row), "screenshot"), images).catch((e) => this.log(`#${row.id}: picture: ${(e as Error).message}`));
     if (row.status === "queued") this.schedule(app);
@@ -321,6 +352,24 @@ export class FeedbackService {
     return r.fixMachine ?? s.machine;
   }
 
+  /**
+   * A row's model on its machine: the person's choice, else Settings'. One that machine does not
+   * offer (Settings name a runtime the hub has and the peer has not) gives way to the machine's
+   * default ("") rather than a run that cannot start.
+   */
+  private modelOf(r: FeedbackRow, s = this.settings()): string {
+    const wanted = r.fixModel ?? s.model;
+    const offered = wanted ? this.opts.models?.(this.machineOf(r, s)) : undefined;
+    return offered && !offered.some((o) => o.value === wanted) ? "" : wanted;
+  }
+
+  /** The task's line about who fixes it: the engineer, where, on which model. */
+  private fixerLine(r: FeedbackRow, s = this.settings()): string {
+    const machine = this.machineOf(r, s);
+    const model = this.modelOf(r, s);
+    return `Fix Engineer: space/ui-fixer${machine ? ` on ${machine}` : ""}${model ? ` (${model})` : ""}.`;
+  }
+
   /** The default the button shows: Settings' machine while it is still a peer, else this one. */
   private machineFor(m: string): string {
     return m && this.opts.machines().includes(m) ? m : "";
@@ -328,7 +377,7 @@ export class FeedbackService {
 
   /**
    * Start the app's queued feedback unless a fix of the app is running; that one starts the next.
-   * One run goes to one machine: the oldest row's; rows meant for another machine wait for the next.
+   * One run goes to one machine on one model: the oldest row's; rows meant for another wait for the next.
    */
   private schedule(app: string): void {
     if (this.active.has(app)) return;
@@ -336,8 +385,9 @@ export class FeedbackService {
     const queued = this.store.list({ app, status: ["queued"], limit: 100 }).reverse();
     if (!queued.length) return;
     const machine = this.machineOf(queued[0]!, s);
-    const rows = queued.filter((r) => this.machineOf(r, s) === machine).slice(0, 20);
-    const done = this.dispatch(app, rows, machine)
+    const model = this.modelOf(queued[0]!, s);
+    const rows = queued.filter((r) => this.machineOf(r, s) === machine && this.modelOf(r, s) === model).slice(0, 20);
+    const done = this.dispatch(app, rows, machine, model)
       .catch((e) => this.log(`${app}: ${(e as Error).message}`))
       .finally(() => this.afterRun(app));
     this.active.set(app, done);
@@ -355,7 +405,7 @@ export class FeedbackService {
     return s?.peer === r.todoPeer ? s : undefined;
   }
 
-  private async dispatch(app: string, rows: FeedbackRow[], machine: string): Promise<void> {
+  private async dispatch(app: string, rows: FeedbackRow[], machine: string, model: string): Promise<void> {
     const s = this.settings();
     const info = this.opts.app(app);
     const lang = langOf(rows[0]!);
@@ -378,7 +428,7 @@ export class FeedbackService {
     const target: FixTarget = { app, appTitle: info.title, appMachine: this.opts.name, sameMachine: !machine, ...(info.repo ? { repo: info.repo } : {}), hasDeployCheck: info.hasDeployCheck };
     let runId: string;
     try {
-      runId = await this.opts.fixer.start(machine, { message: fixMessage(target, rows, history), ...(s.model ? { model: s.model } : {}), effort: s.effort, permissionMode: "bypassPermissions" });
+      runId = await this.opts.fixer.start(machine, { message: fixMessage(target, rows, history), ...(model ? { model } : {}), effort: s.effort, permissionMode: "bypassPermissions" });
     } catch (e) {
       return fail(say(lang, "notStarted", { error: (e as Error).message.slice(0, 500) }));
     }
@@ -387,7 +437,7 @@ export class FeedbackService {
       const sink = r.todoId !== null ? this.sinkOf(r) : undefined;
       if (r.todoId !== null && sink) {
         await sink.status(r.todoId, "doing").catch(() => false);
-        await sink.record(r.todoId, say(lang, "started", { run: runId, where: machine ? say(lang, "on", { machine }) : say(lang, "here") })).catch(() => {});
+        await sink.record(r.todoId, say(lang, "started", { run: runId, where: machine ? say(lang, "on", { machine }) : say(lang, "here"), model: model ? say(lang, "model", { model }) : say(lang, "defaultModel") })).catch(() => {});
       }
     }
     await this.watch(app, rows.map((r) => this.store.get(r.id)!), machine, runId);

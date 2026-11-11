@@ -12,7 +12,7 @@ One script, `GET /_space/feedback.js` (`src/web/feedback-widget/`, bundled at bo
 - **Theme and language follow the page:** `data-theme` / `data-color-scheme` / `data-mode` or a `dark`/`light` class on `<html>` or `<body>`, else the system; Chinese when `<html lang>` starts with `zh`, else English. It watches those attributes and redraws when they change.
 - **Drag** the button anywhere; the spot is kept per app in `localStorage` (`space-feedback.pos.<app>`). Double-click puts it back in the corner. A press that moves less than 4 px is a click.
 - **Alt+Shift+F** opens and closes it from anywhere on the page. The key is matched by its physical position (`KeyboardEvent.code === "KeyF"`), so a Mac's Option layer (Option+Shift+F types "Ï") does not get in the way. **Esc** closes it or cancels picking. **Ctrl+Enter** (⌘ Enter on a Mac) sends.
-- **The card** (320 px; a bottom sheet under 520 px): the text, **Pick element** (hover outlines an element with its selector; a click picks it; up to five), **Screenshot** (the browser's own screen-capture prompt with the current tab preferred; desktop browsers only), **Attach** (a PNG, JPEG or WebP up to 3 MB; pasting an image into the text works too; two at most), **Fix now | Fix later** (preset from Settings), **Fix on** (only when the space has peers: this machine or one of its peers, preset from Settings; the last one picked is kept per app in `localStorage`, `space-feedback.machine.<app>`), **Send**. A grey footer shows what goes with it: app, theme, page, client. **Hide on this page** hides the button until the tab is closed. The last three pieces of feedback of this app show with their state and a link to their task.
+- **The card** (320 px; a bottom sheet under 520 px): the text, **Pick element** (hover outlines an element with its selector; a click picks it; up to five), **Screenshot** (the browser's own screen-capture prompt with the current tab preferred; desktop browsers only), **Attach** (a PNG, JPEG or WebP up to 3 MB; pasting an image into the text works too; two at most), **Fix now | Fix later** (preset from Settings), **Fix on** (only when the space has peers: this machine or one of its peers, preset from Settings; the last one picked is kept per app in `localStorage`, `space-feedback.machine.<app>`), **Model** (the models the engineer can run on at that machine, as [The Fix Engineer](#the-fix-engineer) says, plus **Default model**, that machine's own default; it changes with **Fix on**; preset to the last one picked for this app while that machine offers it (`space-feedback.model.<app>`), else Settings' model while it does, else the default), **Send**. A grey footer shows what goes with it: app, theme, page, client. **Hide on this page** hides the button until the tab is closed. The last three pieces of feedback of this app show with their state and a link to their task.
 - It never runs inside a frame, never twice on one page, and never reads input values, cookies or storage.
 
 ### Adding it to an app
@@ -70,7 +70,9 @@ States: `later` (waiting), `queued`, `fixing`, `review` (fixed, to accept), `fai
 - Commit `fix(<area>): ...` with `From app feedback #<id> (ai-todo #<n>).`, deploy through the app's channel (normally `git push deploy main`, which runs `space app deploy` with the manifest's checks), push `origin`.
 - Not an app fix (a product decision, data, money, credentials): change nothing and answer `needs-person`.
 
-Settings choose its model (default `claude/intermediate`) and effort (`high`, `xhigh` (default) or `max`; Claude Code's `--effort`), and it runs with full permission (`bypassPermissions`) because it has to build, test and deploy.
+Settings choose its model (default `claude/intermediate`) and effort (`high`, `xhigh` (default) or `max`; Claude Code's `--effort`), and it runs with full permission (`bypassPermissions`) because it has to build, test and deploy. The button's **Model** can pick another one for a single piece of feedback: the row keeps it (`fix_model`; `""` is the machine's default, `NULL` follows Settings), **Fix again** uses it too, and one run takes only rows bound for the same machine and model.
+
+The models on offer are those of the machine the engineer runs on, not this space's: this machine's chat runtimes that are installed and signed in, and for a peer what its own `space/ui-fixer` lists in the peer's snapshot (`modelOptions`, the same choices its chat offers; a peer on an older ai-space lists none, and the button shows no model menu for it). A hub that has only DeepSeek and Codex can so send a fix to a peer's Claude Code. The button refuses a model its machine does not offer. When Settings' model is one the machine does not offer (Settings say `claude/intermediate`, the fix goes to a machine without Claude Code), the run uses that machine's default model rather than failing to start; the task's "Handed to the Fix Engineer" record names the model the run used.
 
 ### On another machine
 
@@ -103,16 +105,17 @@ Anyone who can open an app's page can send feedback that an engineer with full p
 
 ## Settings
 
-Settings → Feedback (web panel and the Linux client): the switch, **What happens to feedback** (fix right away / record and fix later), **Fix on** (this machine or a peer), the engineer's model and effort, **Attach recent script errors**, the shortcut, then the apps with their switches, then the recent feedback with its state, task link and **Fix now** / **Fix again**.
+Settings → Feedback (web panel and the Linux client): the switch, **What happens to feedback** (fix right away / record and fix later), **Fix on** (this machine or a peer), the engineer's model (from the models of the machine **Fix on** names; a saved one that machine does not offer is shown as not available) and effort, **Attach recent script errors**, the shortcut, then the apps with their switches, then the recent feedback with its state, task link and **Fix now** / **Fix again**.
 
 ## Routes
 
 ```
 GET  /_space/feedback.js                 the button's script (public)
-GET  /_space/feedback/config             { enabled, mode, errors, app, client, shortcut, machine?, machines? } for X-Space-App (public)
+GET  /_space/feedback/config             { enabled, mode, errors, app, client, shortcut, machine?, machines?, model?, models? } for X-Space-App (public;
+                                         models maps each machine, "" this one, to [{value, runtime, tier, model}])
 GET  /_space/feedback/recent             the app's last five (public; empty while off)
-POST /_space/feedback                    { text, mode?: now|later, machine?, context, images?: [{name, data}] } → 201 { id, status, todoId, todoUrl } (public, same origin)
-GET  /api/panel/feedback/settings        settings, apps with their state, machines, models, counts, peers (owner)
+POST /_space/feedback                    { text, mode?: now|later, machine?, model?, context, images?: [{name, data}] } → 201 { id, status, todoId, todoUrl } (public, same origin)
+GET  /api/panel/feedback/settings        settings, apps with their state, machines, models (this machine's), machineModels (by machine), counts, peers (owner)
 PUT  /api/panel/feedback/settings        a settings patch, sent on to the peers (owner)
 GET  /api/panel/feedback?limit=          recent feedback of every app, the peers' with `peer` (owner)
 POST /api/panel/feedback/fix             { peer?, app? } the waiting ones, or { peer?, ids } again (owner)
@@ -126,7 +129,7 @@ POST /api/peer/feedback/fix              ┘
 
 ```sql
 feedback_settings(key, value)          -- one JSON value: enabled, appsDefault, apps, mode, machine, model, effort, errors
-feedback(id, app, text, context, client, status, todo_id, todo_peer, todo_url, run_id, run_machine, fix_machine, note, created_at, updated_at)
+feedback(id, app, text, context, client, status, todo_id, todo_peer, todo_url, run_id, run_machine, fix_machine, fix_model, note, created_at, updated_at)
 ```
 
 At boot a fix that was running on this machine is marked failed (its process is gone); one running on a peer is watched again.

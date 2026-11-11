@@ -8,11 +8,12 @@ import css from "./widget.css";
  * On, it draws one small button in its own closed shadow root, bottom right, which the person can
  * drag (the spot is kept per app); a click or Alt+Shift+F opens a card: a sentence, picked
  * elements, a screenshot or a picture, "fix now" or "fix later", the machine the fix runs on (when
- * the space has peers), and the page's context shown in
- * one grey line. Everything is sent to `/_space/feedback` on the page's own origin; the router
- * names the app. Colours and language follow the page.
+ * the space has peers), the model it runs on (what that machine offers), and the page's context
+ * shown in one grey line. Everything is sent to `/_space/feedback` on the page's own origin; the
+ * router names the app. Colours and language follow the page.
  */
 
+type ModelOption = { value: string; runtime: string; tier: string; model: string };
 type Config = {
   ok: boolean;
   enabled: boolean;
@@ -24,6 +25,9 @@ type Config = {
   /** Where the fix may run, sent only when the space has peers: "" is the space itself. */
   machine?: string;
   machines?: { value: string; label: string }[];
+  /** Settings' model, and the models each machine offers ("" is the space itself); absent from an older space. */
+  model?: string;
+  models?: Record<string, ModelOption[]>;
 };
 type Recent = { id: number; text: string; status: string; todoId: number | null; todoUrl: string | null };
 type Image = { name: string; type: string; data: string; bytes: number };
@@ -89,6 +93,7 @@ function mount(cfg: Config, errors: string[]): void {
   const POS_KEY = `space-feedback.pos.${app.name}`;
   const HIDE_KEY = `space-feedback.hidden.${app.name}`;
   const MACHINE_KEY = `space-feedback.machine.${app.name}`;
+  const MODEL_KEY = `space-feedback.model.${app.name}`;
   const store = {
     get: (s: Storage | undefined, k: string) => {
       try { return s?.getItem(k) ?? null; } catch { return null; }
@@ -132,6 +137,17 @@ function mount(cfg: Config, errors: string[]): void {
         return kept !== null && machines.some((m) => m.value === kept) ? kept : cfg.machine ?? "";
       })()
     : null;
+  // The model, among what that machine offers: the last one picked for this app while that machine
+  // has it, else Settings' model while it has that, else its default (""); null when nothing is known.
+  const modelsOn = () => cfg.models?.[machine ?? ""] ?? [];
+  const pickModel = (): string | null => {
+    const list = modelsOn();
+    if (!list.length) return null;
+    const offered = (v: string | null | undefined): v is string => typeof v === "string" && (v === "" || list.some((o) => o.value === v));
+    const kept = store.get(local, MODEL_KEY);
+    return offered(kept) ? kept : cfg.model && offered(cfg.model) ? cfg.model : "";
+  };
+  let model = pickModel();
 
   // ---- the button
   const fab = el("button", { class: "fab", type: "button", html: ICONS.fab });
@@ -288,13 +304,25 @@ function mount(cfg: Config, errors: string[]): void {
     const where = machine === null
       ? null
       : (() => {
-          const select = el("select", { "aria-label": t("machine"), onchange: (e: Event) => { machine = (e.target as HTMLSelectElement).value; store.set(local, MACHINE_KEY, machine); } });
+          // Another machine offers other models: the model menu follows.
+          const select = el("select", { "aria-label": t("machine"), onchange: (e: Event) => { machine = (e.target as HTMLSelectElement).value; store.set(local, MACHINE_KEY, machine); model = pickModel(); render(); } });
           for (const m of machines) {
             const o = el("option", { value: m.value }, m.value ? m.label : t("thisMachine", { name: m.label }));
             o.selected = m.value === machine;
             select.append(o);
           }
           return el("label", { class: "machine" }, el("span", {}, t("machine")), select);
+        })();
+    const which = model === null
+      ? null
+      : (() => {
+          const select = el("select", { "aria-label": t("model"), onchange: (e: Event) => { model = (e.target as HTMLSelectElement).value; store.set(local, MODEL_KEY, model); } });
+          for (const m of [{ value: "", label: t("defaultModel") }, ...modelsOn().map((o) => ({ value: o.value, label: `${o.runtime} · ${t(`tier.${o.tier}` as Key)} · ${o.model}` }))]) {
+            const o = el("option", { value: m.value }, m.label);
+            o.selected = m.value === model;
+            select.append(o);
+          }
+          return el("label", { class: "machine" }, el("span", {}, t("model")), select);
         })();
     const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
     const send = el("button", { class: "primary", type: "button", disabled: sending, onclick: () => void submit() }, sending ? t("sending") : t("send"));
@@ -304,7 +332,7 @@ function mount(cfg: Config, errors: string[]): void {
       file,
       picked.length || images.length ? chips : null,
       seg,
-      where,
+      where || which ? el("div", { class: "pickers" }, where, which) : null,
       el("div", { class: "send-row" }, coarse() ? null : el("kbd", {}, isMac ? "⌘ Enter" : "Ctrl+Enter"), send),
       message ? el("p", { class: `note${message.ok ? "" : " err"}`, role: message.ok ? "status" : "alert" }, message.text) : null,
     ];
@@ -481,6 +509,7 @@ function mount(cfg: Config, errors: string[]): void {
       text,
       mode,
       ...(machine !== null ? { machine } : {}),
+      ...(model !== null ? { model } : {}),
       context: {
         url: location.href,
         title: document.title,

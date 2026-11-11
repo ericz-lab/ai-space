@@ -43,7 +43,15 @@ function fakeFixer() {
   return { port, starts, end, failWith: (m: string | null) => (fail = m) };
 }
 
-function setup(o: { todo?: ReturnType<typeof fakeTodo>; machines?: string[]; deploy?: (app: string) => Promise<{ ok: boolean; log: string }> } = {}) {
+/** A model choice as a machine offers it. */
+const choice = (value: string, model: string) => ({ value, runtime: value.split("/")[0]!, tier: value.split("/")[1]!, model });
+/** Like a hub whose own runtimes are not its peer's: Claude Code here, only Codex on "hub". */
+const MODELS: Record<string, ReturnType<typeof choice>[]> = {
+  "": [choice("claude/intermediate", "opus"), choice("claude/advanced", "fable")],
+  hub: [choice("codex/intermediate", "gpt-6.1-sol")],
+};
+
+function setup(o: { todo?: ReturnType<typeof fakeTodo>; machines?: string[]; deploy?: (app: string) => Promise<{ ok: boolean; log: string }>; models?: Record<string, ReturnType<typeof choice>[]> } = {}) {
   const store = new FeedbackStore(new Database(":memory:"));
   const todo = o.todo ?? fakeTodo();
   const fixer = fakeFixer();
@@ -56,6 +64,7 @@ function setup(o: { todo?: ReturnType<typeof fakeTodo>; machines?: string[]; dep
     todo: () => todo.sink,
     fixer: fixer.port,
     machines: () => o.machines ?? ["hub"],
+    ...(o.models ? { models: (m: string) => o.models![m] } : {}),
     deploy: async (app) => {
       deploys.push(app);
       return o.deploy ? o.deploy(app) : { ok: true, log: "deployed" };
@@ -256,6 +265,71 @@ describe("fixing", () => {
     await until(() => fixer.starts.length === 3);
     expect(fixer.starts[2]!.machine).toBe("hub");
     await fixer.end("run-3", { text: RESULT("not-fixed") });
+    await service.idle();
+  });
+
+  test("the button offers each machine's own models, and Settings' model", () => {
+    const { service } = setup({ models: MODELS, machines: ["hub", "old"] });
+    // "old" runs an ai-space that does not list its engineer's models: not known, so not offered.
+    expect(service.config("ai-todo", UA)).toMatchObject({ model: "claude/intermediate", models: MODELS });
+    expect(Object.keys(service.modelChoices())).toEqual(["", "hub"]);
+    // Without a word on the models, the button stays as it was.
+    expect(setup().service.config("ai-todo", UA)).not.toHaveProperty("models");
+  });
+
+  test("the page picks the model: that row runs on it, there", async () => {
+    const { service, fixer, store, todo } = setup({ models: MODELS });
+    store.saveSettings({ mode: "later" });
+    await service.submit("ai-todo", body("opus is not enough", { machine: "", model: "claude/advanced" }), UA);
+    expect(store.get(1)).toMatchObject({ fixMachine: "", fixModel: "claude/advanced" });
+    expect(String((todo.calls[1]!.body as { plan?: string }).plan ?? JSON.stringify(todo.calls[1]!.body))).toContain("space/ui-fixer (claude/advanced)");
+    await service.submit("ai-todo", body("its default", { machine: "hub", model: "" }), UA);
+    expect(store.get(2)).toMatchObject({ fixMachine: "hub", fixModel: "" });
+    // A model the machine does not offer, or not a model at all, is refused before anything is kept.
+    await expect(service.submit("ai-todo", body("x", { machine: "hub", model: "claude/advanced" }), UA)).rejects.toThrow("not offered on hub");
+    await expect(service.submit("ai-todo", body("y", { model: "rm -rf" }), UA)).rejects.toMatchObject({ status: 400 });
+    expect(store.list()).toHaveLength(2);
+    service.fix({ ids: [1] });
+    await until(() => fixer.starts.length === 1);
+    expect(fixer.starts[0]).toMatchObject({ machine: "", body: { model: "claude/advanced" } });
+    await fixer.end("run-1", { text: RESULT("not-fixed") });
+    await service.idle();
+    service.fix({ ids: [2] });
+    await until(() => fixer.starts.length === 2);
+    expect(fixer.starts[1]!.machine).toBe("hub");
+    expect(fixer.starts[1]!.body).not.toHaveProperty("model");
+    await fixer.end("run-2", { text: RESULT("not-fixed") });
+    await service.idle();
+  });
+
+  test("Settings' model where that machine has no such runtime: its default, not a run that cannot start", async () => {
+    const { service, fixer, store, todo } = setup({ models: MODELS });
+    store.saveSettings({ machine: "hub" });
+    await service.submit("ai-todo", body("a"), UA);
+    await until(() => fixer.starts.length === 1);
+    expect(fixer.starts[0]!.machine).toBe("hub");
+    expect(fixer.starts[0]!.body).not.toHaveProperty("model");
+    // The task says which model the run went to.
+    await until(() => todo.calls.some((c) => String((c.body as { content?: string }).content ?? "").includes("机器的默认模型")));
+    await fixer.end("run-1", { text: RESULT("not-fixed") });
+    await service.idle();
+  });
+
+  test("one run goes to one model: rows meant for another wait for the next run", async () => {
+    const { service, fixer, store } = setup({ models: MODELS });
+    store.saveSettings({ mode: "later" });
+    await service.submit("ai-todo", body("one", { model: "claude/advanced" }), UA);
+    await service.submit("ai-todo", body("two"), UA);
+    await service.submit("ai-todo", body("three", { model: "claude/intermediate" }), UA);
+    service.fix({ app: "ai-todo" });
+    await until(() => fixer.starts.length === 1);
+    expect(fixer.starts[0]!.body.model).toBe("claude/advanced");
+    await fixer.end("run-1", { text: RESULT("not-fixed") });
+    await until(() => fixer.starts.length === 2);
+    // Settings' model and the same one picked on the page are one run.
+    expect(fixer.starts[1]!.body).toMatchObject({ model: "claude/intermediate" });
+    expect(fixer.starts[1]!.body.message).toContain("are 2 pieces");
+    await fixer.end("run-2", { text: RESULT("not-fixed") });
     await service.idle();
   });
 

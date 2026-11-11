@@ -168,6 +168,10 @@ textarea:focus-visible { outline-offset: 0; border-color: var(--accent); }
 .machine span { white-space: nowrap; }
 .machine select { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
 .machine select:focus-visible { outline-offset: 1px; }
+/* Fix on and Model together: one column of labels, one of menus, so the menus line up. */
+.pickers { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px 8px; min-width: 0; }
+.pickers .machine { display: contents; }
+.pickers select { width: 100%; }
 .send-row { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
 .note { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; }
 .note.err { color: var(--danger); background: var(--danger-soft); border: 1px solid var(--danger-rule); border-radius: 8px; padding: 6px 10px; }

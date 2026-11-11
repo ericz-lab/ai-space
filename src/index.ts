@@ -27,7 +27,7 @@ import { TerminalService, TerminalStore, createTerminalRoutes, terminalWebSocket
 import { Router, createRouterRoutes } from "./space/router/index.ts";
 import { createLogsRoutes } from "./space/logs/index.ts";
 import { UsageService, UsageStore, createUsageRoutes } from "./space/usage/index.ts";
-import { FeedbackService, FeedbackStore, PeerFeedbackSync, createFeedbackPeerServeRoutes, createFeedbackRoutes, deployFromOrigin, fixerPort, localFixer, peerFixer, todoSinkFor } from "./space/feedback/index.ts";
+import { FeedbackService, FeedbackStore, PeerFeedbackSync, createFeedbackPeerServeRoutes, createFeedbackRoutes, deployFromOrigin, fixerModels, fixerPort, localFixer, peerFixer, todoSinkFor } from "./space/feedback/index.ts";
 import { TODO_APP } from "./space/feedback/todo.ts";
 import { buildFeedbackScript } from "./web/feedback-widget/build.ts";
 import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/services/index.ts";
@@ -486,6 +486,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
     peers: () => peers.names().flatMap((name) => (peers.get(name) ? [{ name, client: peers.get(name)! }] : [])),
   };
+  // The models the Fix Engineer can run on: this machine's chat runtimes, and a peer's as its snapshot lists them.
+  const localFixerModels = () => runtimes.tierOptions().filter((o) => o.capabilities.chat && !o.unavailable).map(({ value, runtime, tier, model }) => ({ value, runtime, tier, model }));
   const feedback = new FeedbackService({
     store: new FeedbackStore(store.db),
     name: config.name,
@@ -500,6 +502,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       return c ? (path, init) => c.request(path, init) : undefined;
     })),
     machines: () => peers.names(),
+    models: (machine) => (machine ? fixerModels(peers.get(machine)?.snapshot?.agents) : localFixerModels()),
     deploy: (app) => {
       const repo = registry.get(app)?.manifest.repo;
       return deployFromOrigin(ws.home, app, repo ? { repo } : {});
@@ -519,7 +522,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         .map((m) => ({ app: m.app, title: m.title ?? m.app, ...(m.i18n?.zh?.title ? { zh: m.i18n.zh.title } : {}), status: m.status }))
         .sort((a, b) => a.title.localeCompare(b.title)),
     machines: () => [{ value: "", label: config.name }, ...peers.names().map((n) => ({ value: n, label: n }))],
-    models: () => runtimes.tierOptions().filter((o) => o.capabilities.chat && !o.unavailable).map(({ value, runtime, tier, model }) => ({ value, runtime, tier, model })),
+    models: localFixerModels,
   };
   // Apps on a peer ask that peer whether to show the button: the switches set here are sent there.
   const feedbackPeers = new PeerFeedbackSync({
