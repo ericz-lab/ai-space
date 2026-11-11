@@ -74,7 +74,7 @@ Not covered: the answer is not resumed inside the runtime after a restart (its p
 
 ### Model choice
 
-The widget has a model chip under the box (`⚙ claude/opus`, the model in use). It opens a picker: "Default (follow the app / space)" and every runtime/tier pair of a runtime that answers requests (`claude/basic` … `codex/advanced`, the list `GET /api/tasks/models` shows), each with the concrete model it maps to. The pick is stored in ai-space per app (`chat_model_choices` in `space.db`, keyed by the app the token maps to), so it holds across reloads and devices, and every scope and thread of that app uses it.
+The widget has a model chip under the box (`⚙ claude/opus`, the model in use). It opens a picker: "Default (follow the app / space)" and every runtime/tier pair of a runtime that answers requests (`claude/basic` … `codex/advanced`, the list `GET /api/tasks/models` shows), each with the concrete model it maps to. When other machines answer for this space (a peer's offered runtimes, a `machines:` login; [model-machines.md](model-machines.md)), their pairs follow under a heading per machine, this machine's first; such an option's value is `machine:runtime/tier` and it carries `machine`, as does `effective` when the turn runs elsewhere. A chat turn is a plain answer, so it may run on any of them; a turn that asks for `Read` needs this machine and fails on another with the reason. The pick is stored in ai-space per app (`chat_model_choices` in `space.db`, keyed by the app the token maps to), so it holds across reloads and devices, and every scope and thread of that app uses it.
 
 A turn runs on the first of:
 

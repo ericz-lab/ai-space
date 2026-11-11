@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelService } from "../model/service.ts";
 import { ModelStore } from "../model/store.ts";
-import { claudeOnly } from "../runtimes/registry.ts";
+import { parseRuntimesYaml } from "../runtimes/config.ts";
+import { claudeOnly, RuntimeRegistry } from "../runtimes/registry.ts";
 import { fakeModelBin } from "../runtimes/testing.ts";
 import { createChatRoutes } from "./api.ts";
 import { ChatService } from "./service.ts";
@@ -373,6 +375,23 @@ test("chat inherits a changed workspace default and preserves explicit request m
 });
 
 describe("model choice", () => {
+  test("models on other machines follow this machine's, each naming its machine, and can be chosen", () => {
+    const { config } = parseRuntimesYaml("default: codex\nruntimes:\n  codex: { kind: codex-cli }\nmachines:\n  bare: { ssh: bare-alias }\n", {});
+    const d = mkdtempSync(join(tmpdir(), "chat-machines-"));
+    const chat = new ChatService({ store: new ChatStore(join(d, "space.db")), model: new ModelService({ store: new ModelStore(join(d, "space.db")), runtimes: new RuntimeRegistry(config), maxConcurrency: 1, log: () => {} }), defaultModel: () => "codex/basic", fileDir: () => d, log: () => {} });
+    const options = chat.modelOptions();
+    const machines = options.map((o) => o.machine ?? "");
+    expect(machines).toContain("bare");
+    // This machine's block first, then the other machine's.
+    expect(machines.lastIndexOf("")).toBeLessThan(machines.indexOf("bare"));
+    const there = options.find((o) => o.machine === "bare" && o.tier === "basic")!;
+    expect(there).toMatchObject({ value: "bare:codex/basic", runtime: "codex" });
+    expect(options.find((o) => o.value === "codex/basic")).not.toHaveProperty("machine");
+    chat.setModelChoice("notes", there.value);
+    expect(chat.effectiveModel("notes")).toMatchObject({ value: "bare:codex/basic", source: "choice", runtime: "codex", machine: "bare", model: there.model });
+    expect(chat.effectiveModel("cal")).not.toHaveProperty("machine");
+    rmSync(d, { recursive: true, force: true });
+  });
   test("the picker lists runtime/tier options with concrete models; the choice is stored per app and validated", async () => {
     const view = (await (await call("GET", "/api/chat/models")).json()) as any;
     expect(view.options).toContainEqual({ value: "claude/basic", runtime: "claude", tier: "basic", model: "haiku" });

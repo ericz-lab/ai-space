@@ -22,7 +22,8 @@ import { followTurn, newRequestId, turnBody, type Attachment, type Context, type
 
 export type { Attachment, Context, Message, Thread };
 
-export type ModelOption = { value: string; runtime: string; tier: string; model: string };
+/** `machine`: the machine whose runtime answers; absent = the one serving the page. */
+export type ModelOption = { value: string; runtime: string; tier: string; model: string; machine?: string };
 export type ModelsView = {
   options: ModelOption[];
   /** The person's pick for this app's chat, stored in ai-space; null = follow the app and the space. */
@@ -34,7 +35,7 @@ export type ModelsView = {
   /** What "default" resolves to: the app's model, else the space's. */
   fallback: Effective;
 };
-type Effective = { value: string; source: "choice" | "app" | "default"; runtime?: string; model?: string };
+type Effective = { value: string; source: "choice" | "app" | "default"; runtime?: string; model?: string; machine?: string };
 
 /** What `context()` is called with: the turn it is for, which stays the same however the page moves on while it runs. */
 export type TurnInfo = { scope: string; thread: Thread; signal: AbortSignal };
@@ -796,7 +797,7 @@ function mount(host: HTMLElement, opts: Options): Widget {
   };
 
   // ---------------------------------------------------------------- model picker
-  const concrete = (e: ModelsView["effective"]) => (e.runtime && e.model ? `${e.runtime}/${e.model}` : e.value);
+  const concrete = (e: ModelsView["effective"]) => (e.runtime && e.model ? `${e.machine ? `${e.machine}:` : ""}${e.runtime}/${e.model}` : e.value);
   const renderModels = () => {
     if (!models) return;
     const e = models.effective;
@@ -826,7 +827,20 @@ function mount(host: HTMLElement, opts: Options): Widget {
       menu.appendChild(b);
     };
     item(null, t.modelDefault, concrete(models.fallback));
-    for (const o of models.options) item(o.value, `${o.runtime} · ${t.tiers[o.tier] ?? o.tier}`, o.model);
+    // With models on other machines, each machine gets a heading: this one first, then the others as listed.
+    const grouped = models.options.some((o) => o.machine);
+    let group: string | undefined;
+    for (const o of models.options) {
+      const machine = o.machine ?? "";
+      if (grouped && machine !== group) {
+        const h = document.createElement("div");
+        h.className = "sc-model-group";
+        h.textContent = machine || t.modelHere;
+        menu.appendChild(h);
+        group = machine;
+      }
+      item(o.value, `${o.runtime} · ${t.tiers[o.tier] ?? o.tier}`, o.model);
+    }
   };
   const modelQuery = () => (appModel ? `?model=${encodeURIComponent(appModel)}` : "");
   const loadModels = async () => {
