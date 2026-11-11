@@ -68,6 +68,10 @@ function say(lang: Lang, key: keyof typeof WORDS, vars: Record<string, string> =
 
 /** How often the rows waiting on a person look at their tasks, and how long a read waits for that. */
 export const TODO_SYNC = { everyMs: 60_000, waitMs: 2_500, batch: 200, parallel: 6 } as const;
+/** A row whose task could not be made (ai-todo did not answer) is tried again with the sync: this many at a time, for this long. */
+export const TODO_RETRY = { batch: 5, forMs: 7 * 86400_000 } as const;
+/** How such a row's note starts (`submit` writes it); a space with no ai-todo at all is not tried again. */
+const TODO_FAILED = "ai-todo: ";
 
 const langOf = (r: FeedbackRow): Lang => (/^zh/i.test(r.context.lang) || /[一-鿿]/.test(r.text) ? "zh" : "en");
 /** The app's name in the language the feedback was written in. */
@@ -165,7 +169,36 @@ export class FeedbackService {
     clearTimeout(timer);
   }
 
+  /**
+   * The tasks that could not be made when the feedback came in (ai-todo was restarting or unreachable):
+   * made now, where the fix would run. The row then waits (`later`) instead of starting a fix long after
+   * the person asked, and its pictures are gone with the request that carried them.
+   */
+  private async retryTodos(): Promise<void> {
+    const since = this.now() - TODO_RETRY.forMs;
+    const rows = this.store.list({ status: ["recorded"], limit: 500 }).filter((r) => r.todoId === null && r.createdAt >= since && (r.note ?? "").startsWith(TODO_FAILED)).slice(0, TODO_RETRY.batch);
+    for (const r of rows) {
+      const info = this.opts.app(r.app);
+      if (!info) continue;
+      const runOn = r.fixMachine ?? this.settings().machine;
+      const sink = (runOn ? this.opts.todoAt?.(runOn) : undefined) ?? this.opts.todo();
+      if (!sink) continue;
+      try {
+        const todoId = await sink.add({ title: todoTitle(r, titleFor(info, r)), notes: this.notes(r, info), tags: ["feedback", r.app] });
+        // Submitted again meanwhile, or another sync got there first: leave that one.
+        if (this.store.get(r.id)?.todoId !== null) continue;
+        const row = this.store.patch(r.id, { status: "later", note: null, todoId, todoPeer: sink.peer, todoUrl: sink.url(todoId) })!;
+        const fixer = runOn ? `Fix Engineer: space/ui-fixer on ${runOn}.` : "Fix Engineer: space/ui-fixer.";
+        await sink.plan(todoId, todoPlan(row, titleFor(info, row), { images: 0, fixer })).catch((e) => this.log(`#${row.id}: plan: ${(e as Error).message}`));
+        this.log(`#${r.id}: task made on a later try (${sink.peer || "here"} #${todoId})`);
+      } catch (e) {
+        this.store.patch(r.id, { note: `${TODO_FAILED}${(e as Error).message}`.slice(0, 500) });
+      }
+    }
+  }
+
   private async followTodos(): Promise<void> {
+    await this.retryTodos();
     const rows = this.store.list({ status: [...TODO_SYNCED], limit: TODO_SYNC.batch }).filter((r) => r.todoId !== null);
     const sinks = new Map<string, TodoSink | undefined>();
     const sinkAt = (r: FeedbackRow) => {
@@ -229,7 +262,7 @@ export class FeedbackService {
     } catch (e) {
       // The feedback is kept; without a task the engineer has nothing to report to.
       this.log(`#${row.id}: no todo: ${(e as Error).message}`);
-      row = this.store.patch(row.id, { status: "recorded", note: `ai-todo: ${(e as Error).message}`.slice(0, 500) })!;
+      row = this.store.patch(row.id, { status: "recorded", note: `${TODO_FAILED}${(e as Error).message}`.slice(0, 500) })!;
       return { id: row.id, status: row.status, todoId: null, todoUrl: null };
     }
     const fixer = runOn ? `Fix Engineer: space/ui-fixer on ${runOn}.` : "Fix Engineer: space/ui-fixer.";
