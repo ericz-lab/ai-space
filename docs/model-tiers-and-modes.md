@@ -183,9 +183,16 @@ used for authorization and accounting; it does not select a different project
 directory. Context available on the execution host can therefore differ from
 context available on the machine making the HTTP request.
 
-For Codex, full mode keeps the read-only sandbox and the never-approve policy. It
-does not grant unrestricted write access. Claude Code retains its native permission
-behavior; ai-space does not add a permission-bypass flag for full completions.
+By default, Codex full mode keeps the read-only sandbox and the never-approve policy,
+and Claude Code retains its native headless permission behavior: full context alone
+does not grant write access. A full-mode request may name a write tier with
+`permissionMode` (`acceptEdits`, `bypassPermissions` or `plan`, the same values as a
+chat turn or an agent task). Claude Code receives it as `--permission-mode`; Codex
+maps `acceptEdits` to the `workspace-write` sandbox and `bypassPermissions` to
+`danger-full-access`, with the never-approve policy unchanged. `bypassPermissions`
+lets the call run any command as the service's user, so a caller sends it only for
+work the operator handed over. Slim requests and requests without a mode reject the
+field.
 
 ### Defaults and compatibility
 

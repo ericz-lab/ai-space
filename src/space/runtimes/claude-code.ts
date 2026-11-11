@@ -121,13 +121,18 @@ export function filesNote(files: CompleteFile[], pathOf: (f: CompleteFile) => st
   return `\n\nAttached files (open them with the Read tool; refer to them by these names):\n${files.map((f) => `- ${f.name}: ${pathOf(f)}`).join("\n")}\n`;
 }
 
+/** The write tier a full-mode call asked for; without one the headless CLI refuses tools that need approval. */
+function permissionArgs(input: CompleteInput): string[] {
+  return input.permissionMode ? ["--permission-mode", input.permissionMode] : [];
+}
+
 /** Command line for the CLI on this machine; exported for tests. */
 export function cliArgs(bin: string[], input: CompleteInput, stream = false): string[] {
   assertCompletionMode(input);
   const tools = toolList(input);
   const context = input.mode === "full" ? [] : ["--safe-mode", "--strict-mcp-config"];
   const toolArgs = input.mode === "full" && !tools ? [] : ["--tools", tools, ...(tools ? ["--allowedTools", tools] : [])];
-  return [...bin, "-p", ...formatArgs(stream), "--model", input.model, ...context, ...toolArgs,
+  return [...bin, "-p", ...formatArgs(stream), "--model", input.model, ...context, ...permissionArgs(input), ...toolArgs,
     ...(input.system ? ["--system-prompt", input.system] : [])];
 }
 
@@ -149,7 +154,7 @@ const SAFE_ARG = /^[A-Za-z0-9._:/@,()*-]+$/;
 export function remoteCommand(bin: string[], input: CompleteInput, stream = false, blobs: FileBlob[] = []): { command: string; spool?: { dir: string; archive: Uint8Array } } | { bad: string } {
   const tools = toolList(input);
   assertCompletionMode(input);
-  const words = [...bin, "-p", ...formatArgs(stream), "--model", input.model, ...(input.mode === "full" ? [] : ["--safe-mode", "--strict-mcp-config"])];
+  const words = [...bin, "-p", ...formatArgs(stream), "--model", input.model, ...(input.mode === "full" ? [] : ["--safe-mode", "--strict-mcp-config"]), ...permissionArgs(input)];
   const bad = [...words, ...(tools ? [tools] : []), ...blobs.map((b) => b.name)].find((w) => !SAFE_ARG.test(w) || (blobs.some((b) => b.name === w) && !FILE_NAME_PATTERN.test(w)));
   if (bad) return { bad };
   const system = Buffer.from(input.system, "utf8").toString("base64");

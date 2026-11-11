@@ -136,10 +136,11 @@ function transientCompletionError(error: string): boolean {
 export function codexArgs(bin: string[], input: CompleteInput, dir: string, fullCwd = process.cwd()): string[] {
   assertCompletionMode(input);
   const images = completionFiles(input).flatMap((file) => ["--image", join(dir, file.name)]);
-  const common = ["--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", "read-only", "--model", input.model];
   // Explicit web-only lists must not inherit native shell, plugins or MCP tools.
   if (input.mode === "full" && !input.tools.length) {
-    return [...bin, "exec", ...common, "--cd", fullCwd, "-c", 'approval_policy="never"', "-c", 'web_search="live"',
+    // Only the native tool set acts on the machine, so only here does the request's write tier widen the sandbox.
+    const sandbox = input.permissionMode === "bypassPermissions" ? "danger-full-access" : input.permissionMode === "acceptEdits" ? "workspace-write" : "read-only";
+    return [...bin, "exec", "--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", sandbox, "--model", input.model, "--cd", fullCwd, "-c", 'approval_policy="never"', "-c", 'web_search="live"',
       ...(input.system ? ["-c", `model_instructions_file=${JSON.stringify(join(dir, "system.txt"))}`] : []), ...images, "-"];
   }
   const config: Record<string, string | number | boolean> = {
