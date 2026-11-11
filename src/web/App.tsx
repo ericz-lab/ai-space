@@ -170,8 +170,11 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // The app whose model page Settings shows: the Models section lists the apps itself, and a click
   // opens that app's page as the section's sub-page, so back returns to the list.
   const [appModelsApp, setAppModelsApp] = useState<string | null>(null);
+  // The app whose tasks Settings shows, one level under the tasks page: back returns to the list of apps.
+  const [tasksApp, setTasksApp] = useState<string | null>(null);
   const setSettingsPage = (p: typeof settingsPage) => {
     setAppModelsApp(null);
+    setTasksApp(null);
     setSettingsPageRaw(p);
   };
   const openAppModel = (app: string | null) => {
@@ -942,13 +945,13 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               <SettingsNav sections={setSections} current={setSection} onPick={pickSection} t={t} />
               <div className="setbody" key={settingsPage ?? setSection}>
                 {settingsPage ? <>
-                  <button className="setpage-back" onClick={() => setSettingsPage(null)}>
-                    <span aria-hidden="true">‹</span> {t(SECTION_LABEL[setSection])}
+                  <button className="setpage-back" onClick={() => (settingsPage === "tasks" && tasksApp ? setTasksApp(null) : setSettingsPage(null))}>
+                    <span aria-hidden="true">‹</span> {settingsPage === "tasks" && tasksApp ? t("tasks.title") : t(SECTION_LABEL[setSection])}
                   </button>
                   {settingsPage === "usage" && <Usage open embedded onClose={close} />}
                   {settingsPage === "activity" && <Activity open embedded onClose={close} nameOf={nameOf} />}
                   {settingsPage === "appModels" && <AppModels open embedded onClose={close} selected={appModelsApp} onSelect={openAppModel} />}
-                  {settingsPage === "tasks" && <Tasks open embedded onClose={close} />}
+                  {settingsPage === "tasks" && <Tasks open embedded onClose={close} selected={tasksApp} onSelect={setTasksApp} />}
                   {settingsPage === "events" && <Events open embedded onClose={close} />}
                 </> : <>
                 <h3 className="setpage-title">{t(SECTION_LABEL[setSection])}</h3>

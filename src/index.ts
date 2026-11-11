@@ -16,7 +16,7 @@ import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
 import { refreshCodexTiers } from "./space/runtimes/codex-upgrade.ts";
 import { Bus, BusStore, Consumers, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
-import { type Manifest, Scheduler, Store, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
+import { type Manifest, Scheduler, Store, createPeerTaskRoutes, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts";
 import { BACKUP_TASK, SPACE_APP, backupTask, createBackupRoutes, parseBackupSpec, spaceManifest } from "./space/storage/backup/index.ts";
 import { type Workspace, discoverApps } from "./space/workspace.ts";
@@ -616,7 +616,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       // A rename moves what this hub keeps under the peer's name and tells the apps (docs/peers.md#renaming-a-peer).
       ["owner", createPeerRoutes({ hub: peers, layout, registry, rename: (from, to) => renamePeer({ hub: peers, db: store.db, envFile: ws.envFile, env, taken: (name) => Boolean(registry.get(name)), publish: (data) => scheduler.publish({ app: SPACE_APP, name: "peer.renamed", data }) }, from, to) })],
       ["owner", terminalRoutes],
-      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, id: packageStore.spaceId, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), feedback: createFeedbackPeerServeRoutes(feedbackLists), inventory: () => peerRow(runtimeHealth, runtimes), ledger: createPeerUsageRoutes({ service: model, name: config.name, skipApps: () => packageStore.list().filter((o) => o.state === "installed").map((o) => o.app) }), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
+      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, id: packageStore.spaceId, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), tasks: createPeerTaskRoutes({ scheduler, store, runtimes }), feedback: createFeedbackPeerServeRoutes(feedbackLists), inventory: () => peerRow(runtimeHealth, runtimes), ledger: createPeerUsageRoutes({ service: model, name: config.name, skipApps: () => packageStore.list().filter((o) => o.state === "installed").map((o) => o.app) }), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
       ["public", createWebRoutes()],
       ["public", createUiKitRoutes(uiKit)],
       ["owner", createAuthRoutes({ mode: config.auth, auth })],

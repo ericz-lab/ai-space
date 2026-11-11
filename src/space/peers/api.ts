@@ -17,6 +17,11 @@ import { bridge, wantsWebSocket } from "../terminal/api.ts";
  *   GET   /api/peers/:peer/model/apps                   the peer's app-model rows and its own choices (forwarded)
  *   PATCH /api/peers/:peer/apps/:app/model              {tag?, model}: set or clear an app's override on the peer
  *                                                       (forwarded; same-origin browser requests only, like the local route)
+ *   GET   /api/peers/:peer/tasks                        the peer's scheduled tasks (forwarded)
+ *   GET   /api/peers/:peer/tasks/models                 the models a task can run on there (forwarded)
+ *   GET   /api/peers/:peer/tasks/:id/runs               one task's runs (forwarded)
+ *   PATCH /api/peers/:peer/tasks/:id/model              {model}: set or clear a task's model on the peer
+ *                                                       (forwarded; same-origin browser requests only, like the local route)
  *   GET   /api/peers/:peer/apps/:app/icon               ┐
  *   GET   /api/peers/:peer/apps/:app/appcolor           │
  *   GET   /api/peers/:peer/agents/:app/:agent/avatar    │ forwarded to the peer's /api/peer/... with
@@ -146,6 +151,15 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
 
     "/api/peers/:peer/model/apps": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/apps/:app/model": {
+      PATCH: (req, server) => {
+        if (!req.headers.get("origin") || !sameOrigin(req)) return error(403, "same-origin browser request required");
+        return proxy(FORWARD_TIMEOUT_MS)(req, server);
+      },
+    },
+    "/api/peers/:peer/tasks": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/tasks/models": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/tasks/:id/runs": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/tasks/:id/model": {
       PATCH: (req, server) => {
         if (!req.headers.get("origin") || !sameOrigin(req)) return error(403, "same-origin browser request required");
         return proxy(FORWARD_TIMEOUT_MS)(req, server);

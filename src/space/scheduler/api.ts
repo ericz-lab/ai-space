@@ -77,21 +77,8 @@ export function createRoutes(opts: ApiOptions): Routes {
     return caller === OPERATOR ? fromBody() : caller.app;
   };
 
-  const withTask = (req: { params: Record<string, string> }): Task => {
-    const task = store.getTask(req.params.id ?? "");
-    if (!task) throw new NotFound(`unknown task: ${req.params.id}`);
-    return task;
-  };
-
-  const validateModel = (task: Task, model: unknown) => {
-    if (model === undefined || model === null) return;
-    assertTaskModel(model);
-    if (!taskSupportsModel(task)) throw new Error("this task has not opted in to model selection");
-    if (!opts.runtimes) throw new Error("model runtimes are unavailable");
-    const { runtime } = opts.runtimes.resolve(model);
-    const operation = task.target.kind === "agent" ? "agent" : "complete";
-    if (!runtime.capabilities[operation]) throw new Error(`runtime ${runtime.name} does not support ${operation}`);
-  };
+  const withTask = (req: { params: Record<string, string> }): Task => taskOf(store, req);
+  const validateModel = (task: Task, model: unknown) => checkTaskModel(opts, task, model);
 
   // Load, provision and register one app directory. Shared by both sync routes.
   const syncDir = async (dir: string): Promise<SyncSummary> => {
@@ -111,16 +98,7 @@ export function createRoutes(opts: ApiOptions): Routes {
     "/api/panel/tasks/:id/model": {
       PATCH: async (req) => {
         if (!req.headers.get("origin") || !sameOrigin(req)) return error(403, "same-origin browser request required");
-        if (req.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return error(415, "application/json required");
-        try {
-          const task = withTask(req);
-          const body = await req.json();
-          if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || !("model" in body)) throw new Error("only model may be changed here");
-          validateModel(task, body.model);
-          return json({ ok: true, task: view(scheduler.patchTask(task.id, parsePatch(body))) });
-        } catch (e) {
-          return error(e instanceof NotFound ? 404 : 400, (e as Error).message);
-        }
+        return patchTaskModel(opts, req);
       },
     },
 
@@ -236,9 +214,55 @@ export function createRoutes(opts: ApiOptions): Routes {
   };
 }
 
+/**
+ * The task routes a hub reads for its Tasks page (peers/serve.ts puts the hub token in front):
+ * this space's tasks, a task's runs, the models a task can run on here, and one task's model
+ * override. Nothing else of a task changes from afar.
+ */
+export function createPeerTaskRoutes(opts: ApiOptions): Routes {
+  const local = createRoutes(opts) as Record<string, Partial<Record<"GET" | "PATCH", Handler>>>;
+  return {
+    "/api/peer/tasks": { GET: local["/api/tasks"]!.GET! },
+    "/api/peer/tasks/models": { GET: local["/api/tasks/models"]!.GET! },
+    "/api/peer/tasks/:id": { GET: local["/api/tasks/:id"]!.GET! },
+    "/api/peer/tasks/:id/runs": { GET: local["/api/tasks/:id/runs"]!.GET! },
+    "/api/peer/tasks/:id/model": { PATCH: (req) => patchTaskModel(opts, req) },
+  };
+}
+
 // ---------------------------------------------------------------- helpers
 
 class NotFound extends Error {}
+
+function taskOf(store: Store, req: { params: Record<string, string> }): Task {
+  const task = store.getTask(req.params.id ?? "");
+  if (!task) throw new NotFound(`unknown task: ${req.params.id}`);
+  return task;
+}
+
+function checkTaskModel(opts: ApiOptions, task: Task, model: unknown): void {
+  if (model === undefined || model === null) return;
+  assertTaskModel(model);
+  if (!taskSupportsModel(task)) throw new Error("this task has not opted in to model selection");
+  if (!opts.runtimes) throw new Error("model runtimes are unavailable");
+  const { runtime } = opts.runtimes.resolve(model);
+  const operation = task.target.kind === "agent" ? "agent" : "complete";
+  if (!runtime.capabilities[operation]) throw new Error(`runtime ${runtime.name} does not support ${operation}`);
+}
+
+/** Sets or clears one task's model override from a `{ model }` body; the caller has checked who asks. */
+async function patchTaskModel(opts: ApiOptions, req: Request & { params: Record<string, string> }): Promise<Response> {
+  if (req.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return error(415, "application/json required");
+  try {
+    const task = taskOf(opts.store, req);
+    const body = await req.json();
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || !("model" in body)) throw new Error("only model may be changed here");
+    checkTaskModel(opts, task, body.model);
+    return json({ ok: true, task: view(opts.scheduler.patchTask(task.id, parsePatch(body))) });
+  } catch (e) {
+    return error(e instanceof NotFound ? 404 : 400, (e as Error).message);
+  }
+}
 
 const APP_RE = /^[a-z0-9][a-z0-9._-]*$/i;
 

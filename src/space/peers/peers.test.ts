@@ -95,6 +95,26 @@ const peerAppModels = {
     },
   },
 };
+// The peer's task routes, stubbed the same way.
+const peerTaskModels: { id: string; body: unknown }[] = [];
+const peerTaskList = [{ id: "media.sync", app: "media", name: "sync" }, { id: "secret.sweep", app: "secret", name: "sweep" }];
+const peerTasks = {
+  "/api/peer/tasks": { GET: () => Response.json({ ok: true, tasks: peerTaskList }) },
+  "/api/peer/tasks/models": { GET: () => Response.json({ ok: true, models: [{ value: "codex/basic" }] }) },
+  "/api/peer/tasks/:id": {
+    GET: (req: Request & { params: Record<string, string> }) => {
+      const task = peerTaskList.find((t) => t.id === req.params.id);
+      return task ? Response.json({ ok: true, task }) : Response.json({ ok: false, error: "unknown task" }, { status: 404 });
+    },
+  },
+  "/api/peer/tasks/:id/runs": { GET: (req: Request & { params: Record<string, string> }) => Response.json({ ok: true, runs: [{ id: 1, taskId: req.params.id, limit: new URL(req.url).searchParams.get("limit") }] }) },
+  "/api/peer/tasks/:id/model": {
+    PATCH: async (req: Request & { params: Record<string, string> }) => {
+      peerTaskModels.push({ id: req.params.id!, body: await req.json() });
+      return Response.json({ ok: true, task: peerTaskList.find((t) => t.id === req.params.id) });
+    },
+  },
+};
 const mirrored: { peer: string; app: string; name: string }[] = [];
 
 // The hub's fetch: the real one towards the peer, with a switch that simulates the peer being unreachable.
@@ -160,7 +180,7 @@ widgets:
   });
   peerBus.syncApp("media", { events: { publishes: [{ name: "clip.added" }], consumes: [] }, provides: [{ name: "clip", method: "POST", path: "/api/clip", timeoutMs: 5000 }] });
   // The peer routes may upgrade a socket (the terminal's), so the server declares a websocket handler.
-  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", id: "peer-space-id", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents, appModels: peerAppModels, ledger: { "/api/peer/model/usage": { GET: () => Response.json({ ok: true, name: "peer-box" }) }, "/api/peer/model/calls": { GET: () => Response.json({ ok: true, name: "peer-box", calls: [] }) } }, allowApp: (app) => app !== "secret", inventory: () => ({ machine: "", via: "local", clis: [{ cli: "claude", kind: "claude-code", installed: true, signedIn: true, version: "2.1.3", configured: true, runtimes: ["claude"] }, { cli: "codex", kind: "codex-cli", installed: true, signedIn: false, configured: false, runtimes: [] }, { cli: "dsh", kind: "deepseek-harness", installed: false, configured: false, runtimes: [] }] }) }) }, websocket: terminalWebSocket });
+  peerServer = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { ...peerPanel, ...peerAgents, ...createPeerServeRoutes({ token: "s3cret", name: "peer-box", id: "peer-space-id", panel: peerPanel, agents: peerAgents, servicePort: (app) => peerRegistry.get(app)?.manifest.service?.port && appSocket.port, fetch: fakeLoopback, bus: peerBus, events: peerEvents, appModels: peerAppModels, tasks: peerTasks, ledger: { "/api/peer/model/usage": { GET: () => Response.json({ ok: true, name: "peer-box" }) }, "/api/peer/model/calls": { GET: () => Response.json({ ok: true, name: "peer-box", calls: [] }) } }, allowApp: (app) => app !== "secret", inventory: () => ({ machine: "", via: "local", clis: [{ cli: "claude", kind: "claude-code", installed: true, signedIn: true, version: "2.1.3", configured: true, runtimes: ["claude"] }, { cli: "codex", kind: "codex-cli", installed: true, signedIn: false, configured: false, runtimes: [] }, { cli: "dsh", kind: "deepseek-harness", installed: false, configured: false, runtimes: [] }] }) }) }, websocket: terminalWebSocket });
   peerBase = `http://127.0.0.1:${peerServer.port}`;
 
   // ---- the hub: a local app, a link app that duplicates the peer's app, and the peer
@@ -564,6 +584,36 @@ describe("one tile per url", () => {
   test("widget cards follow the same rule by link", () => {
     const w = (id: string, link: string) => ({ id, app: id.split("/").at(-1)!, name: "n", title: "t", kind: "items", size: "1x1", link, icon: "x", items: [] }) as unknown as WidgetView;
     expect(dropSameLink([w("usage/usage", "https://usage.example.com/")], [w("a/usage/usage", "https://usage.example.com/"), w("a/media/latest", "https://media.example.com/#latest"), w("b/media/latest", "https://media.example.com/#latest")]).map((x) => x.id)).toEqual(["a/media/latest"]);
+  });
+});
+
+describe("tasks over peers", () => {
+  const auth = { authorization: "Bearer s3cret" };
+
+  test("the peer lists its tasks, runs and task models only with the token, minus apps it does not share", async () => {
+    expect((await get(peerBase, "/api/peer/tasks")).status).toBe(401);
+    expect((await get(peerBase, "/api/peer/tasks", { headers: auth })).body.tasks.map((t: Body) => t.id)).toEqual(["media.sync"]);
+    expect((await get(peerBase, "/api/peer/tasks/models", { headers: auth })).body.models[0].value).toBe("codex/basic");
+    expect((await get(peerBase, "/api/peer/tasks/media.sync/runs")).status).toBe(401);
+    expect((await get(peerBase, "/api/peer/tasks/media.sync/runs?limit=5", { headers: auth })).body.runs).toEqual([{ id: 1, taskId: "media.sync", limit: "5" }]);
+    expect((await get(peerBase, "/api/peer/tasks/secret.sweep/runs", { headers: auth })).status).toBe(403);
+    expect((await get(peerBase, "/api/peer/tasks/ghost/runs", { headers: auth })).status).toBe(404);
+    expect((await fetch(`${peerBase}/api/peer/tasks/secret.sweep/model`, { ...jsonInit("PATCH", { model: null }), headers: { "content-type": "application/json", ...auth } })).status).toBe(403);
+    // The list is the only way to read a task: the route by id stays inside the peer.
+    expect((await get(peerBase, "/api/peer/tasks/media.sync", { headers: auth })).status).toBe(404);
+  });
+
+  test("the hub forwards the list and the runs, and a same-origin model change", async () => {
+    peerTaskModels.length = 0;
+    expect((await get(hub, "/api/peers/david/tasks")).body.tasks.map((t: Body) => t.id)).toEqual(["media.sync"]);
+    expect((await get(hub, "/api/peers/david/tasks/models")).body.models.length).toBe(1);
+    expect((await get(hub, "/api/peers/david/tasks/media.sync/runs?limit=20")).body.runs[0].limit).toBe("20");
+    expect((await get(hub, "/api/peers/ghost/tasks")).status).toBe(404);
+    const body = { model: "codex/basic" };
+    expect((await fetch(`${hub}/api/peers/david/tasks/media.sync/model`, jsonInit("PATCH", body))).status).toBe(403);
+    const ok = await fetch(`${hub}/api/peers/david/tasks/media.sync/model`, { ...jsonInit("PATCH", body), headers: { "content-type": "application/json", origin: hub } });
+    expect(ok.status).toBe(200);
+    expect(peerTaskModels).toEqual([{ id: "media.sync", body }]);
   });
 });
 

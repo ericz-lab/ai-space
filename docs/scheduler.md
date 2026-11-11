@@ -306,6 +306,7 @@ API:
 
 - `GET /api/tasks/models` lists runtime/tier options and their concrete model IDs and capabilities.
 - `PATCH /api/tasks/:id` accepts `{ "model": "codex/intermediate" }` or `{ "model": null }` alongside existing fields, with the operator bearer token.
+- On a hub the Tasks page also lists each peer's tasks under the peer's name; the list, the runs, the options and this change are forwarded to the peer (`/api/peers/:peer/tasks…`, [peers.md](peers.md)), so the options are the peer's own.
 - `PATCH /api/panel/tasks/:id/model` accepts only that model field, requires a matching Origin and JSON content type, and uses the panel's access perimeter like terminal/chat. It cannot edit schedules, commands or enabled state and never exposes the operator token to the browser.
 - Task views include the effective `model`, `modelSelectable`, and `base.model`. Unknown runtimes and incompatible capabilities are rejected on save. A concrete model may still be unavailable to an account; execution then fails explicitly, without a fallback to another tier.
 

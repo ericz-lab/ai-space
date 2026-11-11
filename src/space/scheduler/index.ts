@@ -1,4 +1,4 @@
-export { createRoutes, view } from "./api.ts";
+export { createPeerTaskRoutes, createRoutes, view } from "./api.ts";
 export { loadManifest, parseManifest, MANIFEST_FILE, type Manifest, type ManifestTask } from "./manifest.ts";
 export { assertSchedule, nextRunAt, parseDuration } from "./schedule.ts";
 export { Scheduler, MAX_EVENT_REDELIVERIES, type Runner, type SchedulerOptions, type SyncSummary } from "./scheduler.ts";
