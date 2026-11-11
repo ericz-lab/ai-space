@@ -392,6 +392,41 @@ describe("following the task", () => {
     expect(calls).toContain("mac:status");
   });
 
+  test("a task that could not be made is made on a later sync, and the row waits", async () => {
+    let down = true;
+    const made: string[] = [];
+    const sink = new TodoSink(async (capability) => {
+      if (down) throw new Error("ai-todo/add: unreachable");
+      made.push(capability);
+      return { status: 201, text: '{"ok":true,"todos":[{"id":9}]}' };
+    }, "");
+    const store = new FeedbackStore(new Database(":memory:"));
+    const fixer = fakeFixer();
+    let clock = Date.now();
+    const service = new FeedbackService({ store, name: "home", app: () => ({ title: "Notes", hasDeployCheck: false }), todo: () => sink, fixer: fixer.port, machines: () => [], log: () => {}, now: () => clock });
+    service.saveSettings({ enabled: true, appsDefault: true, mode: "auto" });
+    const { id } = await service.submit("notes", { text: "sent while ai-todo restarts" }, "");
+    expect(store.get(id)).toMatchObject({ status: "recorded", todoId: null });
+    // Still down: nothing changes. Up again: the task is made, the row waits, no fix starts by itself.
+    await service.syncTodos(true);
+    expect(store.get(id)!.status).toBe("recorded");
+    down = false;
+    await service.syncTodos(true);
+    expect(store.get(id)).toMatchObject({ status: "later", todoId: 9, note: null });
+    expect(made.slice(0, 2)).toEqual(["add", "plan"]);
+    expect(fixer.starts).toEqual([]);
+    await service.syncTodos(true);
+    expect(made.filter((c) => c === "add")).toHaveLength(1);
+    // A space without ai-todo, and feedback older than a week, are left as they are.
+    const none = store.add({ app: "notes", text: "no ai-todo", context: store.get(id)!.context, client: store.get(id)!.client, status: "recorded", fixMachine: null });
+    store.patch(none.id, { note: "no ai-todo on this space or its peers" });
+    const old = store.add({ app: "notes", text: "old", context: store.get(id)!.context, client: store.get(id)!.client, status: "recorded", fixMachine: null });
+    store.patch(old.id, { note: "ai-todo: unreachable" });
+    clock += 8 * 86400_000;
+    await service.syncTodos(true);
+    expect([store.get(none.id)!.todoId, store.get(old.id)!.todoId]).toEqual([null, null]);
+  });
+
   test("a task done in ai-todo is accepted; dropped or deleted is dropped; open ones stay", async () => {
     const { store, service } = make({ 1: "done", 2: "dropped", 4: "review", 5: "doing", 6: "done", 7: "done" });
     const ids = rows(store, [
