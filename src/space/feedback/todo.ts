@@ -21,6 +21,8 @@ export class TodoSink {
     readonly peer: string,
     /** ai-todo's page, for links to a task; undefined when unknown. */
     private readonly pageUrl?: string,
+    /** The machine to name in the link (`?m=`): the page is this space's ai-todo showing a peer's list. */
+    private readonly pageMachine?: string,
   ) {}
 
   url(id: number): string | null {
@@ -28,6 +30,7 @@ export class TodoSink {
     try {
       const u = new URL(this.pageUrl.replace("{lang}", ""));
       u.search = "";
+      if (this.pageMachine) u.searchParams.set("m", this.pageMachine);
       u.searchParams.set("todo", String(id));
       return u.toString();
     } catch {
@@ -136,12 +139,15 @@ export function todoSinkFor(opts: {
   for (const p of opts.peers()) {
     if (at !== undefined && p.name !== at) continue;
     if (!p.client.provides(TODO_APP, "add")) continue;
-    const url = p.client.snapshot?.apps.find((a) => a.name === TODO_APP)?.url;
+    // The link opens this space's own ai-todo on the peer's list when there is one: the peer's own page is
+    // often an address only that machine can open (loopback on a laptop).
+    const mine = opts.local()?.url;
+    const url = mine ?? p.client.snapshot?.apps.find((a) => a.name === TODO_APP)?.url;
     return new TodoSink(async (capability, body) => {
       const { contentType, bytes } = await encode(body);
       const r = await p.client.request(`/api/peer/call/${TODO_APP}/${encodeURIComponent(capability)}`, { method: "POST", headers: { "content-type": contentType, accept: "application/json", "x-space-caller": `${opts.name}/space` }, body: bytes });
       return { status: r.status, text: await r.text() };
-    }, p.name, url);
+    }, p.name, url, mine ? p.name : undefined);
   }
   return undefined;
 }
