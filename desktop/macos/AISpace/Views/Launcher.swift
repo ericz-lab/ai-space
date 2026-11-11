@@ -99,7 +99,9 @@ struct LauncherPage: View {
     private var screens: [PanelScreen] { store.screens(connection.id) }
 
     private let columns = [GridItem(.adaptive(minimum: 96, maximum: 124), spacing: 18, alignment: .top)]
-    private let cards = [GridItem(.adaptive(minimum: 300, maximum: 520), spacing: 16, alignment: .top)]
+    /// Arranging the screen: pressing and holding a tile or a card starts it; each one then has a
+    /// remove badge, each card its size, and Done, Esc or a click on the empty screen ends it.
+    @State private var arranging = false
 
     var body: some View {
         if let screenID, screenID == Screens.home {
@@ -145,11 +147,32 @@ struct LauncherPage: View {
                 .background {
                     // The empty part of a screen takes the right click; a tile or a card keeps its own.
                     if menu {
-                        Color.clear.contentShape(Rectangle()).contextMenu { ScreenActions(model: model, connection: connection, loader: loader, store: store) }
+                        Color.clear.contentShape(Rectangle())
+                            .onTapGesture { if arranging { withAnimation(.snappy) { arranging = false } } }
+                            .contextMenu { ScreenActions(model: model, connection: connection, loader: loader, store: store) }
                     }
                 }
             }
             .scrollIndicators(.automatic)
+        }
+        .overlay(alignment: .topTrailing) {
+            if arranging {
+                Button("Done") { withAnimation(.snappy) { arranging = false } }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .padding(.top, 12).padding(.trailing, 20)
+                    .transition(.opacity)
+            }
+        }
+        .onExitCommand { if arranging { withAnimation(.snappy) { arranging = false } } }
+        .onChange(of: model.pagerID) { arranging = false }
+    }
+
+    /// Starts arranging on a screen; the library has nothing to arrange.
+    private func hold(on screen: String?) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+            guard screen != nil, !arranging else { return }
+            withAnimation(.snappy) { arranging = true }
         }
     }
 
@@ -229,24 +252,73 @@ struct LauncherPage: View {
             ForEach(tiles) { tile in
                 switch tile {
                 case .entry(let entry):
-                    EntryTile(entry: current(entry), icons: icons, details: screen == nil) { model.open(entry) }
+                    EntryTile(entry: current(entry), icons: icons, details: screen == nil) { if !arranging { model.open(entry) } }
                         .contextMenu { EntryMenu(model: model, connection: connection, store: store, entry: entry, screen: screen) }
+                        .modifier(Arrangeable(active: arranging && screen != nil, remove: { unpin(entry.key, from: screen) }))
+                        .simultaneousGesture(hold(on: screen))
                 case .builtin(let builtin):
-                    BuiltinTile(builtin: builtin, icons: icons) { model.openBuiltin(builtin) }
+                    BuiltinTile(builtin: builtin, icons: icons) { if !arranging { model.openBuiltin(builtin) } }
                         .contextMenu { PinMenu(model: model, connection: connection, store: store, key: builtin.key, screen: screen) { model.openBuiltin(builtin) } }
+                        .modifier(Arrangeable(active: arranging && screen != nil, remove: { unpin(builtin.key, from: screen) }))
+                        .simultaneousGesture(hold(on: screen))
                 }
             }
         }
     }
 
+    /// The cards on the panel's grid: a widget's size spans columns and rows, and the cards of a row are as tall as the row.
     private func widgetGrid(_ widgets: [CatalogWidget], on screen: String?) -> some View {
-        LazyVGrid(columns: cards, alignment: .leading, spacing: 16) {
+        CardGrid {
             ForEach(widgets) { widget in
                 let entry = Catalogue.entry(widget)
-                WidgetCard(widget: widget, icons: icons, open: { url in open(url, widget: entry) })
-                    .contextMenu { EntryMenu(model: model, connection: connection, store: store, entry: entry, screen: screen) }
+                WidgetCard(widget: widget, icons: icons, open: { url in if !arranging { open(url, widget: entry) } })
+                    .contextMenu {
+                        EntryMenu(model: model, connection: connection, store: store, entry: entry, screen: screen)
+                        Divider()
+                        sizeMenu(widget)
+                    }
+                    .modifier(Arrangeable(active: arranging && screen != nil, remove: { unpin(entry.key, from: screen) }, corner: 18))
+                    .overlay(alignment: .topTrailing) {
+                        if arranging && screen != nil {
+                            Menu { sizeMenu(widget) } label: {
+                                Text(verbatim: widget.size ?? "1x1").font(.caption.weight(.semibold)).monospacedDigit()
+                            }
+                            .menuStyle(.button).buttonStyle(.bordered).controlSize(.small).fixedSize()
+                            .padding(.top, 10).padding(.trailing, 12)
+                            .help(Text("Size"))
+                        }
+                    }
+                    .simultaneousGesture(hold(on: screen))
+                    .layoutValue(key: CardSpanKey.self, value: CardSpan.of(widget.size))
             }
         }
+    }
+
+    /// The four sizes of the panel's grid; the Space keeps the choice for every panel and client.
+    @ViewBuilder private func sizeMenu(_ widget: CatalogWidget) -> some View {
+        Menu("Size") {
+            ForEach(["1x1", "2x1", "1x2", "2x2"], id: \.self) { size in
+                Toggle(isOn: Binding(get: { (widget.size ?? "1x1") == size }, set: { on in if on { resize(widget, to: size) } })) {
+                    Text(verbatim: size)
+                }
+            }
+        }
+    }
+
+    private func resize(_ widget: CatalogWidget, to size: String) {
+        Task {
+            do {
+                try await loader.api.send("PUT", "/api/panel/layout", json: ["sizes": [widget.id: size]])
+                await loader.refresh(afterCurrent: true)
+            } catch {
+                NSSound.beep()
+            }
+        }
+    }
+
+    private func unpin(_ key: String, from screen: String?) {
+        guard let screen else { return }
+        withAnimation(.snappy) { model.togglePin(key, screen: screen, in: connection) }
     }
 
     /// A health dot is a claim about now: while the catalogue on show is not this moment's
@@ -588,5 +660,100 @@ struct PageIndicator: View {
         .help(label)
         .accessibilityLabel(label)
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// A tile or a card while its screen is arranged: a remove badge at its top-left corner and a
+/// quiet outline, so the screen reads as being changed.
+private struct Arrangeable: ViewModifier {
+    let active: Bool
+    let remove: () -> Void
+    var corner: CGFloat = 14
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if active {
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                        .strokeBorder(Theme.accent.opacity(0.55), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                        .allowsHitTesting(false)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if active {
+                    Button(action: remove) {
+                        Image(systemName: "minus.circle.fill")
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, Color.gray)
+                            .font(.system(size: 20))
+                            .background(Circle().fill(Theme.solid).padding(2))
+                    }
+                    .buttonStyle(.plain)
+                    .help(Text("Remove from This Screen"))
+                    .accessibilityLabel(Text("Remove from This Screen"))
+                    .offset(x: -8, y: -8)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+    }
+}
+
+/// The card grid's layout value: the columns and rows a card spans.
+struct CardSpanKey: LayoutValueKey {
+    static let defaultValue = CardSpan(columns: 1, rows: 1)
+}
+
+/// The widget cards as the panel lays them out (src/web/styles.css `.widgets`): as many columns of
+/// at least 320 pt as fit, cards placed in order where their span first fits, every row as tall as
+/// its tallest card and every card stretched to the rows it spans, so a row reads as one line.
+struct CardGrid: Layout {
+    var minColumn: CGFloat = 320
+    var spacing: CGFloat = 16
+
+    struct Arrangement {
+        var frames: [CGRect] = []
+        var height: CGFloat = 0
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? minColumn * 2 + spacing
+        return CGSize(width: width, height: arrange(width, subviews).height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let a = arrange(bounds.width, subviews)
+        for (view, frame) in zip(subviews, a.frames) {
+            view.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    func arrange(_ width: CGFloat, _ subviews: Subviews) -> Arrangement {
+        let columns = Swift.max(1, Int((width + spacing) / (minColumn + spacing)))
+        let column = (width - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+        let spans = subviews.map { s -> CardSpan in
+            let span = s[CardSpanKey.self]
+            return CardSpan(columns: Swift.min(span.columns, columns), rows: span.rows)
+        }
+        let cells = CardPlacement.place(spans, columns: columns)
+        var heights: [CGFloat] = Array(repeating: 0, count: (cells.map { $0.row + $0.span.rows }.max() ?? 0))
+        let natural = zip(subviews, spans).map { view, span in
+            view.sizeThatFits(ProposedViewSize(width: column * CGFloat(span.columns) + spacing * CGFloat(span.columns - 1), height: nil)).height
+        }
+        // One-row cards set their row's height first; a taller two-row card then grows its second row.
+        for (cell, h) in zip(cells, natural) where cell.span.rows == 1 { heights[cell.row] = Swift.max(heights[cell.row], h) }
+        for (cell, h) in zip(cells, natural) where cell.span.rows > 1 {
+            let rows = cell.row..<(cell.row + cell.span.rows)
+            let have = rows.reduce(0) { $0 + heights[$1] } + spacing * CGFloat(cell.span.rows - 1)
+            if h > have { heights[rows.upperBound - 1] += h - have }
+        }
+        var tops: [CGFloat] = []
+        var y: CGFloat = 0
+        for h in heights { tops.append(y); y += h + spacing }
+        let frames = cells.map { cell in
+            CGRect(x: CGFloat(cell.column) * (column + spacing), y: tops[cell.row],
+                   width: column * CGFloat(cell.span.columns) + spacing * CGFloat(cell.span.columns - 1),
+                   height: (cell.row..<(cell.row + cell.span.rows)).reduce(0) { $0 + heights[$1] } + spacing * CGFloat(cell.span.rows - 1))
+        }
+        return Arrangement(frames: frames, height: heights.isEmpty ? 0 : y - spacing)
     }
 }
