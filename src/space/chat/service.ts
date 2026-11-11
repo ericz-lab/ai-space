@@ -43,7 +43,8 @@ export type ChatServiceOptions = {
 };
 
 /** One entry of the widget's model picker: a runtime's capability tier and the concrete model it maps to. */
-export type ModelOption = { value: string; runtime: string; tier: ModelTier; model: string; unavailable?: "signed-out" | "offline" };
+/** `machine`: the peer or login whose runtime answers (`value` is then `machine:runtime/tier`); absent = this machine. */
+export type ModelOption = { value: string; runtime: string; tier: ModelTier; model: string; machine?: string; unavailable?: "signed-out" | "offline" };
 
 /**
  * The model a turn runs on and why: the person's pick in the widget, the
@@ -51,7 +52,7 @@ export type ModelOption = { value: string; runtime: string; tier: ModelTier; mod
  * space's app default. `runtime`/`model` are the resolved names, absent when
  * the value does not resolve (the turn then fails with the reason).
  */
-export type EffectiveModel = { value: string; source: "choice" | "app" | "default"; runtime?: string; model?: string; /** What the ledger records as `modelSource`. */ ledgerSource: ModelSource };
+export type EffectiveModel = { value: string; source: "choice" | "app" | "default"; runtime?: string; model?: string; /** The machine that answers, when not this one. */ machine?: string; /** What the ledger records as `modelSource`. */ ledgerSource: ModelSource };
 
 export type TurnResult = { ok: boolean; error?: string; user: Message; assistant: Message; thread: Thread; call?: ModelCall };
 
@@ -128,9 +129,15 @@ export class ChatService {
 
   // ---------------------------------------------------------------- model choice
 
-  /** What the picker offers: every runtime/tier pair of a runtime that answers requests. */
+  /**
+   * What the picker offers: every runtime/tier pair of a runtime that answers requests, on this machine
+   * and then on each machine that answers for this space (a peer's offered runtimes, a `machines:` login).
+   * A chat turn is a plain answer, so it may run on any of them (docs/model-machines.md#placement).
+   */
   modelOptions(): ModelOption[] {
-    return this.model.runtimes.tierOptions().filter((o) => o.capabilities.complete).map(({ value, runtime, tier, model, unavailable }) => ({ value, runtime, tier, model, ...(unavailable ? { unavailable } : {}) }));
+    const here = this.model.runtimes.tierOptions().filter((o) => o.capabilities.complete).map(({ value, runtime, tier, model, unavailable }) => ({ value, runtime, tier, model, ...(unavailable ? { unavailable } : {}) }));
+    const elsewhere = this.model.runtimes.machineTierOptions().map(({ value, machine, runtime, tier, model, unavailable }) => ({ value, machine, runtime, tier, model, ...(unavailable ? { unavailable } : {}) }));
+    return [...here, ...elsewhere];
   }
 
   /** The space's model for an app's chat that names none: its panel override, its manifest, then Settings → default model (app-models.ts). */
@@ -173,7 +180,7 @@ export class ChatService {
         : { value: requested!, source: "app", ledgerSource: "request" };
     try {
       const r = this.model.resolve(pick.value);
-      return { ...pick, runtime: r.runtime.name, model: r.model };
+      return { ...pick, runtime: r.runtime.name, model: r.model, ...(r.runtime.machine ? { machine: r.runtime.machine } : {}) };
     } catch {
       return pick;
     }
