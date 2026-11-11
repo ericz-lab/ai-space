@@ -10,6 +10,10 @@ describe("parseRunInput", () => {
     for (const mode of ["lean", "", null, false]) expect(() => parseRunInput({ prompt: "x", mode })).toThrow(/mode/);
     expect(() => parseRunInput({ prompt: "x", mode: "slim", tools: ["Read"] })).toThrow(/slim/);
     expect(parseRunInput({ prompt: "x", mode: "full", tools: ["Read"] }).tools).toEqual(["Read"]);
+    expect(parseRunInput({ prompt: "x", mode: "full" })).not.toHaveProperty("permissionMode");
+    expect(parseRunInput({ prompt: "x", mode: "full", permissionMode: "bypassPermissions" }).permissionMode).toBe("bypassPermissions");
+    expect(() => parseRunInput({ prompt: "x", mode: "full", permissionMode: "root" })).toThrow("permissionMode must be one of");
+    for (const mode of [undefined, "slim"]) expect(() => parseRunInput({ prompt: "x", mode, permissionMode: "bypassPermissions" })).toThrow("permissionMode requires full mode");
   });
   test("fills the defaults and keeps what was given", () => {
     expect(parseRunInput({ prompt: "hi" })).toEqual({ prompt: "hi", system: DEFAULT_SYSTEM, model: "sonnet", tag: "other", tools: [], timeoutMs: 120_000, maxTokens: 4096 });

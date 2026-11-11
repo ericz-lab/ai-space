@@ -242,7 +242,9 @@ Codex slim skips user configuration and rules, disables optional context message
 sets `agents.enabled=false`, and disables execution, code-mode host, integrations
 and discovery features. Full retains native configuration and tools. Both Codex
 modes retain the read-only sandbox and never-approve policy: full context does not
-authorize unrestricted writes. Full uses the CLI's reasoning default; slim uses
+authorize unrestricted writes. Only a full request's own `permissionMode`
+([model.md](model.md#call)) widens it: `--permission-mode` for Claude Code, the
+`workspace-write` or `danger-full-access` sandbox for Codex. Full uses the CLI's reasoning default; slim uses
 low reasoning. Codex accepts WebSearch/WebFetch tool lists; full without an explicit
 list exposes native tools. Image attachments are supported with omitted or full
 mode (explicit slim rejects attachments): images are staged in the request directory

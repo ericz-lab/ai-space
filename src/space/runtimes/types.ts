@@ -59,6 +59,12 @@ export type CompleteInput = {
   /** Explicit per-request speed tier; currently supported by local Codex streaming only. */
   serviceTier?: "priority" | "default";
   /**
+   * Write tier of a full-mode call, as for a chat turn or an agent task; absent keeps the
+   * runtime's headless default (Claude Code refuses tools that need approval, Codex is read-only).
+   * `bypassPermissions` lets the call run any command as the service's user.
+   */
+  permissionMode?: PermissionMode;
+  /**
    * Files the model may open (images the chat service stores). `name` is the
    * caller's short file name, unique inside the call and safe for a shell
    * (`a17.png`); `path` is where the bytes are on the machine ai-space runs
@@ -77,6 +83,10 @@ export type CompletionMode = (typeof COMPLETION_MODES)[number];
 export function assertCompletionMode(input: CompleteInput): void {
   if (input.mode !== undefined && !COMPLETION_MODES.includes(input.mode)) throw new Error("mode must be slim or full");
   if (input.mode === "slim" && (input.tools.length || input.files?.length)) throw new Error("slim mode does not support tools or files; use full mode");
+  if (input.permissionMode !== undefined) {
+    if (!(PERMISSION_MODES as readonly string[]).includes(input.permissionMode)) throw new Error(`permissionMode must be one of ${PERMISSION_MODES.join(", ")}`);
+    if (input.mode !== "full") throw new Error("permissionMode requires full mode");
+  }
 }
 
 export type CompleteFile = { name: string; path: string };

@@ -351,6 +351,11 @@ test("web tool lists enable native web access locally and over SSH without enabl
     expect(output.code).toBe(0);
     expect(JSON.parse(parseCodexOutput(output.stdout).text!).args).toContain('web_search="live"');
   }
+  const sandboxOf = (over: Partial<CompleteInput>) => { const a = codexArgs(["codex"], input({ mode: "full", ...over }), "/tmp/x"); return a[a.indexOf("--sandbox") + 1]; };
+  expect([sandboxOf({}), sandboxOf({ permissionMode: "plan" }), sandboxOf({ permissionMode: "acceptEdits" }), sandboxOf({ permissionMode: "bypassPermissions" })]).toEqual(["read-only", "read-only", "workspace-write", "danger-full-access"]);
+  // A web-only list has no shell to widen.
+  expect(sandboxOf({ permissionMode: "bypassPermissions", tools: ["WebSearch"] })).toBe("read-only");
+  expect(() => codexArgs(["codex"], input({ permissionMode: "bypassPermissions" }), "/tmp/x")).toThrow("permissionMode requires full mode");
   const full = codexArgs(["codex"], input({ mode: "full", tools: ["WebSearch", "WebFetch"] }), "/tmp/web-only");
   expect(full).toContain("--ignore-user-config");
   expect(full).toContain('web_search="live"');

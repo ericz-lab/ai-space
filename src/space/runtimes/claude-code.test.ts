@@ -29,6 +29,13 @@ describe("cliArgs", () => {
     const native = cliArgs(["claude"], input({ mode: "full", system: "" }));
     expect(native).not.toContain("--system-prompt");
     expect(() => cliArgs(["claude"], input({ mode: "slim", tools: ["Read"] }))).toThrow(/slim/);
+    expect(native).not.toContain("--permission-mode");
+    const bypass = input({ mode: "full", system: "", permissionMode: "bypassPermissions" });
+    expect(cliArgs(["claude"], bypass)).toEqual(["claude", "-p", "--output-format", "json", "--model", "haiku", "--permission-mode", "bypassPermissions"]);
+    const remote = remoteCommand(["claude"], bypass);
+    expect("command" in remote && remote.command).toContain("--model haiku --permission-mode bypassPermissions");
+    expect(() => cliArgs(["claude"], input({ permissionMode: "bypassPermissions" }))).toThrow("permissionMode requires full mode");
+    expect(() => cliArgs(["claude"], input({ mode: "full", permissionMode: "root" as never }))).toThrow("permissionMode must be one of");
     expect(() => cliArgs(["claude"], input({ mode: "slim", files: [{ name: "a.png", path: "/missing" }] }))).toThrow(/slim/);
   });
   test("lean by default: own system prompt, no tools, no MCP; the prompt stays off the command line", () => {

@@ -1,4 +1,5 @@
 import { DEFAULT_IMAGE_SYSTEM, DEFAULT_IMAGE_TIMEOUT_MS, type ImageRunInput, MAX_IMAGE_PROMPT_CHARS, DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_SYSTEM, DEFAULT_TIMEOUT_MS, MAX_PROMPT_CHARS, MAX_SYSTEM_CHARS, MAX_THINKING_TOKENS, MAX_TIMEOUT_MS, MODEL_PATTERN, type RunInput, TAG_PATTERN, TOOL_PATTERN, WINDOWS, type Window } from "./types.ts";
+import { PERMISSION_MODES, type PermissionMode } from "../runtimes/types.ts";
 
 /**
  * Validation of what comes over the API. Strict like manifests: an unknown
@@ -52,9 +53,15 @@ export function parseRunInput(body: Record<string, unknown>, defaults: { model?:
     thinking = Math.min(body.thinking, MAX_THINKING_TOKENS);
   }
 
+  const permissionMode = body.permissionMode;
+  if (permissionMode !== undefined) {
+    if (typeof permissionMode !== "string" || !(PERMISSION_MODES as readonly string[]).includes(permissionMode)) throw new Error(`permissionMode must be one of ${PERMISSION_MODES.join(", ")}`);
+    if (mode !== "full") throw new Error("permissionMode requires full mode");
+  }
+
   const serviceTier = body.serviceTier;
   if (serviceTier !== undefined && serviceTier !== "priority" && serviceTier !== "default") throw new Error("serviceTier must be priority or default");
-  return { prompt: body.prompt, system, model, tag, tools, timeoutMs, maxTokens, ...(mode !== undefined ? { mode } : {}), ...(thinking !== undefined ? { thinking } : {}), ...(serviceTier !== undefined ? { serviceTier } : {}) };
+  return { prompt: body.prompt, system, model, tag, tools, timeoutMs, maxTokens, ...(mode !== undefined ? { mode } : {}), ...(thinking !== undefined ? { thinking } : {}), ...(serviceTier !== undefined ? { serviceTier } : {}), ...(permissionMode !== undefined ? { permissionMode: permissionMode as PermissionMode } : {}) };
 }
 
 /** `POST /api/model/image`: a prompt, optional system, model, tag and timeout; the images are parsed apart. */
