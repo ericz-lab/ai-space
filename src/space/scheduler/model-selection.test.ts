@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { RuntimeRegistry } from "../runtimes/registry.ts";
 import { fakeCodexBin } from "../runtimes/testing-codex.ts";
-import { createRoutes } from "./api.ts";
+import { createPeerTaskRoutes, createRoutes } from "./api.ts";
 import { Scheduler } from "./scheduler.ts";
 import { Store } from "./store.ts";
 
@@ -32,6 +32,27 @@ test("panel saves only models, validates capabilities and rejects cross-origin c
     expect((await (await patch({ model: null })).json()).task.model).toBe("codex/junior");
     // Existing general mutation routes still require the operator token.
     expect((await fetch(`${base}/api/tasks/${task.id}`, { method: "PATCH", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ model: "codex/basic" }) })).status).toBe(401);
+    expect(store.getTask(task.id)!.enabled).toBe(true);
+  } finally { server.stop(true); scheduler.stop(); store.close(); }
+});
+
+test("the routes for a hub list tasks and runs and change only a task's model", async () => {
+  const store = new Store(":memory:");
+  const scheduler = new Scheduler({ store, log: () => {} });
+  const task = scheduler.addTask({ app: "news", name: "classify", schedule: { kind: "every", everyMs: 60_000 }, target: { kind: "http", method: "POST", url: "http://localhost:1", model: "codex/junior" } });
+  const routes = createPeerTaskRoutes({ scheduler, store, token: "operator-secret", runtimes: registry() });
+  expect(Object.keys(routes).sort()).toEqual(["/api/peer/tasks", "/api/peer/tasks/:id", "/api/peer/tasks/:id/model", "/api/peer/tasks/:id/runs", "/api/peer/tasks/models"]);
+  // Served bare here; peers/serve.ts puts the hub token in front and has no Origin to check.
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes });
+  const base = `http://127.0.0.1:${server.port}`;
+  const patch = (body: unknown, id = task.id) => fetch(`${base}/api/peer/tasks/${id}/model`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  try {
+    expect((await (await fetch(`${base}/api/peer/tasks`)).json()).tasks.map((t: { id: string }) => t.id)).toEqual([task.id]);
+    expect((await (await fetch(`${base}/api/peer/tasks/models`)).json()).models).toHaveLength(8);
+    expect((await (await fetch(`${base}/api/peer/tasks/${task.id}/runs`)).json()).runs).toEqual([]);
+    expect((await (await patch({ model: "codex/intermediate" })).json()).task.overrides).toEqual({ model: "codex/intermediate" });
+    expect((await patch({ model: "codex/basic", enabled: false })).status).toBe(400);
+    expect((await patch({ model: "codex/basic" }, "ghost")).status).toBe(404);
     expect(store.getTask(task.id)!.enabled).toBe(true);
   } finally { server.stop(true); scheduler.stop(); store.close(); }
 });

@@ -1,16 +1,55 @@
 import type { ModelChoice } from "./api.ts";
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { type AppInfo, type RunInfo, type TaskInfo, dateTime, fmtDuration, getJson, isImgIcon, relTime, scheduleText, sendJson, untilTime } from "./api.ts";
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
 
-// Tasks window: scheduler state and per-task model selection, grouped by app.
+// Tasks window: scheduler state and per-task model selection, by machine and app.
 // - Reads `GET /api/tasks` when opened and every 30 s while open; the list is small (tens of tasks).
-// - A row shows the effective schedule and event triggers, the next run, the last outcome; clicking it loads run history.
+// - The list shows one line per app that has tasks: how many are active and how many fail. A click
+//   opens the app's page with its tasks.
+// - A task row shows the effective schedule and event triggers, the next run, the last outcome; clicking it loads run history.
 // - App titles and icons come from `GET /api/apps?all=1` so headless and hidden apps still get a name.
+// - On a hub, each peer's apps follow under that machine's name (docs/peers.md), as on the app
+//   models page: read through `GET /api/peers/:peer/tasks`, with the runs, the model choices and
+//   the model change forwarded the same way, since the task runs there. Such an app is keyed `<peer>/<app>`.
+// - Which app is open is held by the caller when it passes `selected`/`onSelect` (Settings, whose
+//   own back button returns to the list); the standalone window holds it here.
 // Model changes use a narrow same-origin panel route; the browser never holds the operator token.
 
 type AppLabel = { title: string; i18n?: AppInfo["i18n"]; icon: string };
+type T = (key: Key, vars?: Record<string, string | number>) => string;
+/** One app's tasks on one machine. */
+export type TaskGroup = { key: string; app: string; peer?: string; title: string; icon: string; list: TaskInfo[] };
+/** One peer's part of the page: its tasks, or why there are none. */
+export type PeerTasks = { peer: string; tasks?: TaskInfo[]; error?: string; old?: boolean };
+
+/** The task routes of this machine, or of a peer through the hub. */
+const tasksBase = (peer?: string) => (peer ? `/api/peers/${encodeURIComponent(peer)}/tasks` : "/api/tasks");
+export const runsPath = (id: string, peer?: string) => `${tasksBase(peer)}/${encodeURIComponent(id)}/runs?limit=20`;
+export const modelsPath = (peer?: string) => `${tasksBase(peer)}/models`;
+export const modelPath = (id: string, peer?: string) => (peer ? `${tasksBase(peer)}/${encodeURIComponent(id)}/model` : `/api/panel/tasks/${encodeURIComponent(id)}/model`);
+
+/** How many tasks there are, how many are on, and how many of those failed their last run. */
+export function counts(list: TaskInfo[]): { total: number; active: number; failing: number } {
+  const on = list.filter((t) => t.enabled && !t.orphaned);
+  return { total: list.length, active: on.length, failing: on.filter((t) => t.state.lastStatus === "error").length };
+}
+
+/** A peer's tasks; a peer whose core has no such route (404) is marked old rather than failed. */
+export async function loadPeerTasks(peer: string): Promise<PeerTasks> {
+  try {
+    const r = await fetch(tasksBase(peer));
+    if (r.status === 404 && !/^unknown peer/.test(((await r.clone().json().catch(() => ({}))) as { error?: string }).error ?? "")) return { peer, old: true };
+    // An older core answers a path it does not know with its page, not JSON.
+    if (r.ok && !r.headers.get("content-type")?.includes("json")) return { peer, old: true };
+    const d = (await r.json()) as { ok: boolean; error?: string; tasks?: TaskInfo[] };
+    if (!d.ok) return { peer, error: d.error || `HTTP ${r.status}` };
+    return { peer, tasks: d.tasks ?? [] };
+  } catch (e) {
+    return { peer, error: String((e as Error).message || e) };
+  }
+}
 
 function Ico({ icon }: { icon: string }) {
   const [broken, setBroken] = useState(false);
@@ -37,16 +76,16 @@ function rowStatus(t: TaskInfo): { cls: string; key: Key; n?: number } {
 
 const RUN_STATUS: Record<RunInfo["status"], Key> = { ok: "status.ok", error: "tasks.error", skipped: "tasks.skipped" };
 
-function Runs({ taskId }: { taskId: string }) {
+function Runs({ taskId, peer }: { taskId: string; peer?: string }) {
   const { lang, t } = useLang();
   const [runs, setRuns] = useState<RunInfo[] | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => {
     setRuns(null);
-    getJson<{ runs: RunInfo[] }>(`/api/tasks/${encodeURIComponent(taskId)}/runs?limit=20`)
+    getJson<{ runs: RunInfo[] }>(runsPath(taskId, peer))
       .then((d) => setRuns(d.runs || []))
       .catch((e) => setErr(String((e as Error).message || e)));
-  }, [taskId]);
+  }, [taskId, peer]);
   if (err) return <p className="task-note">{t("common.unavailable", { error: err })}</p>;
   if (runs === null) return <p className="task-note">{t("common.loading")}</p>;
   if (!runs.length) return <p className="task-note">{t("tasks.noRuns")}</p>;
@@ -76,7 +115,7 @@ function Runs({ taskId }: { taskId: string }) {
 
 type ModelOption = ModelChoice & { capabilities: { agent: boolean; complete: boolean } };
 
-function ModelPicker({ task, onSaved }: { task: TaskInfo; onSaved: (task: TaskInfo) => void }) {
+function ModelPicker({ task, peer, onSaved }: { task: TaskInfo; peer?: string; onSaved: (task: TaskInfo) => void }) {
   const { t } = useLang();
   const [options, setOptions] = useState<ModelOption[]>([]);
   const [value, setValue] = useState(task.overrides.model ?? "");
@@ -87,25 +126,27 @@ function ModelPicker({ task, onSaved }: { task: TaskInfo; onSaved: (task: TaskIn
   useEffect(() => { setValue(task.overrides.model ?? ""); }, [task.id, task.overrides.model]);
   useEffect(() => {
     let live = true;
-    getJson<{ models: ModelOption[] }>("/api/tasks/models")
+    // A peer's task runs there, so the choices are the peer's own.
+    getJson<{ models: ModelOption[] }>(modelsPath(peer))
       .then((data) => { if (live) { setOptions(data.models); setLoaded(true); } })
       .catch((e) => { if (live) setError((e as Error).message); });
     return () => { live = false; };
-  }, []);
+  }, [peer]);
   const eligible = options.filter((o) => task.target.kind === "agent" ? o.capabilities.agent : o.capabilities.complete);
   const save = async () => {
     setBusy(true); setError(""); setSaved(false);
     try {
-      const result = await sendJson<{ task: TaskInfo }>("PATCH", `/api/panel/tasks/${encodeURIComponent(task.id)}/model`, { model: value || null });
+      const result = await sendJson<{ task: TaskInfo }>("PATCH", modelPath(task.id, peer), { model: value || null });
       onSaved(result.task); setSaved(true);
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
   if (!task.modelSelectable) return <p className="task-note">{t("tasks.modelUnsupported")}</p>;
+  const selectId = `task-model-${peer ? `${peer}-` : ""}${task.id}`;
   return <div className="task-model">
-    <label htmlFor={`task-model-${task.id}`}>{t("tasks.model")}</label>
+    <label htmlFor={selectId}>{t("tasks.model")}</label>
     <div className="task-model-controls">
-      <select id={`task-model-${task.id}`} value={value} disabled={busy || !loaded || task.orphaned} onChange={(e) => { setValue(e.target.value); setSaved(false); }}>
+      <select id={selectId} value={value} disabled={busy || !loaded || task.orphaned} onChange={(e) => { setValue(e.target.value); setSaved(false); }}>
         <option value="">{t("tasks.modelDefault", { model: task.base?.model ?? t("chat.modelDefault") })}</option>
         {value && !eligible.some((o) => o.value === value) && <SavedChoice value={value} t={t} />}
         {[...new Set(eligible.map((o) => o.runtime))].map((runtime) => <optgroup key={runtime} label={runtime}>
@@ -120,7 +161,7 @@ function ModelPicker({ task, onSaved }: { task: TaskInfo; onSaved: (task: TaskIn
   </div>;
 }
 
-function TaskRow({ t, open, onToggle, onSaved }: { t: TaskInfo; open: boolean; onToggle: () => void; onSaved: (task: TaskInfo) => void }) {
+function TaskRow({ t, peer, open, onToggle, onSaved }: { t: TaskInfo; peer?: string; open: boolean; onToggle: () => void; onSaved: (task: TaskInfo) => void }) {
   const { lang, t: tr } = useLang();
   const st = rowStatus(t);
   const next = t.enabled && !t.orphaned && t.state.nextRunAt ? untilTime(t.state.nextRunAt, lang) : "";
@@ -163,36 +204,108 @@ function TaskRow({ t, open, onToggle, onSaved }: { t: TaskInfo; open: boolean; o
       {open && (
         <div className="task-detail">
           {t.description && <p className="task-desc">{t.description}</p>}
-          <ModelPicker task={t} onSaved={onSaved} />
-          <Runs taskId={t.id} />
+          <ModelPicker task={t} peer={peer} onSaved={onSaved} />
+          <Runs taskId={t.id} peer={peer} />
         </div>
       )}
     </div>
   );
 }
 
-export default function Tasks({ open, onClose, onBack, embedded = false }: { open: boolean; onClose: () => void; onBack?: () => void; embedded?: boolean }) {
+/** One machine's apps, one line each, for reading; a click opens the app's tasks. */
+export function TaskAppList({ groups, onOpen, t, heading, note }: { groups: TaskGroup[]; onOpen: (key: string) => void; t: T; heading?: string; note?: string }) {
+  if (groups.length === 0 && !note) return null;
+  return (
+    <section className="task-group app-model-list">
+      {heading && (
+        <div className="task-app">
+          <span className="svc-name">{heading}</span>
+        </div>
+      )}
+      {note && <p className="task-note">{note}</p>}
+      {groups.map((g) => {
+        const c = counts(g.list);
+        return (
+          <div key={g.key} className="taskrow">
+            <button className="task-main app-model-row" data-app={g.key} onClick={() => onOpen(g.key)}>
+              <span className="svc-ico">
+                <Ico icon={g.icon} />
+              </span>
+              <span className="task-text">
+                <span className="task-line">
+                  <span className="task-name">{g.title}</span>
+                </span>
+                <span className="task-meta">
+                  <span>{t("tasks.summary", c)}</span>
+                  {c.failing > 0 && <span className="task-badge task-failing">{t("tasks.failingN", { n: c.failing })}</span>}
+                </span>
+              </span>
+              <span className="app-model-chev" aria-hidden="true">›</span>
+            </button>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+export default function Tasks({ open, onClose, onBack, embedded = false, selected: selectedProp, onSelect }: {
+  open: boolean;
+  onClose: () => void;
+  onBack?: () => void;
+  embedded?: boolean;
+  /** The app whose tasks are shown; null = the list. Pass with `onSelect` to hold it outside. */
+  selected?: string | null;
+  onSelect?: (app: string | null) => void;
+}) {
   const { lang, t } = useLang();
   const [tasks, setTasks] = useState<TaskInfo[] | null>(null);
-  const [apps, setApps] = useState<Record<string, AppLabel>>({});
+  const [peers, setPeers] = useState<PeerTasks[]>([]);
+  const [labels, setLabels] = useState<Record<string, AppLabel>>({});
   const [err, setErr] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [selectedHere, setSelectedHere] = useState<string | null>(null);
+  const selected = selectedProp === undefined ? selectedHere : selectedProp;
+  const select = (app: string | null) => (onSelect ? onSelect(app) : setSelectedHere(app));
+  const root = useRef<HTMLDivElement>(null);
+  const lastOpened = useRef<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    const load = () =>
+    let live = true;
+    const load = () => {
       getJson<{ tasks: TaskInfo[] }>("/api/tasks")
         .then((d) => {
+          if (!live) return;
           setTasks(d.tasks || []);
           setErr("");
         })
-        .catch((e) => setErr(String((e as Error).message || e)));
+        .catch((e) => live && setErr(String((e as Error).message || e)));
+      // A space without peers answers with an empty list; each peer is read on its own, so a slow
+      // one holds up only its section, and a refresh keeps what a peer showed until its answer is in.
+      getJson<{ peers: { name: string }[] }>("/api/peers")
+        .then((d) => {
+          if (!live) return;
+          const names = (d.peers ?? []).map((p) => p.name).sort();
+          setPeers((ps) => names.map((peer) => ps.find((p) => p.peer === peer) ?? { peer }));
+          for (const name of names) void loadPeerTasks(name).then((m) => live && setPeers((ps) => ps.map((p) => (p.peer === name ? m : p))));
+        })
+        .catch(() => live && setPeers((ps) => ps));
+    };
     load();
+    // Keyed by the layout id: a peer's app is `<peer>/<app>`.
     getJson<{ apps: AppInfo[] }>("/api/apps?all=1")
-      .then((d) => setApps(Object.fromEntries((d.apps || []).map((a) => [a.name, { title: a.title, ...(a.i18n ? { i18n: a.i18n } : {}), icon: a.icon }]))))
+      .then((d) => live && setLabels(Object.fromEntries((d.apps || []).map((a) => [a.id || a.name, { title: a.title, ...(a.i18n ? { i18n: a.i18n } : {}), icon: a.icon }]))))
       .catch(() => {});
     const timer = setInterval(load, 30_000);
-    return () => clearInterval(timer);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setSelectedHere(null);
   }, [open]);
 
   useEffect(() => {
@@ -202,35 +315,63 @@ export default function Tasks({ open, onClose, onBack, embedded = false }: { ope
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose, embedded]);
 
-  const groups = useMemo(() => {
-    const byApp = new Map<string, TaskInfo[]>();
-    for (const t of tasks || []) byApp.set(t.app, [...(byApp.get(t.app) || []), t]);
-    const label = (app: string) => {
-      const a = apps[app];
-      return a ? localized(lang, a).title : app;
-    };
-    return [...byApp.entries()]
-      .sort(([a], [b]) => label(a).localeCompare(label(b), lang as Lang))
-      .map(([app, list]) => ({ app, title: label(app), icon: apps[app]?.icon || "📦", list: list.sort((a, b) => a.name.localeCompare(b.name)) }));
-  }, [tasks, apps, lang]);
+  // An app's page starts at the top with every task closed; back on the list, the app just left keeps the focus and stays in view.
+  useEffect(() => {
+    setOpenId(null);
+    const el = root.current;
+    if (!el) return;
+    if (selected) {
+      lastOpened.current = selected;
+      el.closest(".setbody")?.scrollTo?.(0, 0);
+      el.querySelector(".task-body")?.scrollTo?.(0, 0);
+    } else if (lastOpened.current) {
+      const row = [...el.querySelectorAll<HTMLButtonElement>(".app-model-row")].find((b) => b.dataset.app === lastOpened.current);
+      row?.focus();
+      lastOpened.current = null;
+    }
+  }, [selected]);
 
-  const total = tasks?.length ?? 0;
-  const active = tasks?.filter((t) => t.enabled && !t.orphaned).length ?? 0;
-  const failing = tasks?.filter((t) => t.enabled && !t.orphaned && t.state.lastStatus === "error").length ?? 0;
+  const toGroups = (list: TaskInfo[], peer?: string): TaskGroup[] => {
+    const keyOf = (app: string) => (peer ? `${peer}/${app}` : app);
+    const byApp = new Map<string, TaskInfo[]>();
+    for (const task of list) byApp.set(task.app, [...(byApp.get(task.app) || []), task]);
+    const title = (app: string) => (labels[keyOf(app)] ? localized(lang, labels[keyOf(app)]!).title : app);
+    // A peer app the hub's list leaves out (one with the same link as a local app) still has its icon on the peer.
+    const iconOf = (app: string) => labels[keyOf(app)]?.icon || (peer ? `/api/peers/${encodeURIComponent(peer)}/apps/${encodeURIComponent(app)}/icon` : "📦");
+    return [...byApp.entries()]
+      .map(([app, of]) => ({ key: keyOf(app), app, ...(peer ? { peer } : {}), title: title(app), icon: iconOf(app), list: of.sort((a, b) => a.name.localeCompare(b.name)) }))
+      .sort((a, b) => a.title.localeCompare(b.title, lang as Lang));
+  };
+  const groups = useMemo(() => toGroups(tasks ?? []), [tasks, labels, lang]);
+  const peerGroups = useMemo(() => peers.map((p) => ({ ...p, groups: toGroups(p.tasks ?? [], p.peer) })), [peers, labels, lang]);
+  const all = [...groups, ...peerGroups.flatMap((p) => p.groups)];
+  const group = selected ? all.find((g) => g.key === selected) : undefined;
+  const loading = (p: PeerTasks) => !p.tasks && !p.error && !p.old;
+
+  const swap = (list: TaskInfo[], next: TaskInfo) => list.map((row) => (row.id === next.id ? next : row));
+  const replace = (peer: string | undefined) => (next: TaskInfo) =>
+    peer ? setPeers((ps) => ps.map((p) => (p.peer === peer && p.tasks ? { ...p, tasks: swap(p.tasks, next) } : p))) : setTasks((current) => (current ? swap(current, next) : current));
+
+  // The heading counts what is on the page: one app's tasks, or every machine's that has answered.
+  const shown = counts(group ? group.list : [...(tasks ?? []), ...peers.flatMap((p) => p.tasks ?? [])]);
+  const summary = tasks === null || (selected && !group) ? "" : `${t("tasks.summary", shown)}${shown.failing ? t("tasks.failing", { n: shown.failing }) : ""}`;
 
   return (
-    <div className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
-      <div className="tasks" role={embedded ? "region" : "dialog"} aria-label={t("tasks.title")}>
+    <div ref={root} className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
+      <div className="tasks" role={embedded ? "region" : "dialog"} aria-label={selected ? (group?.title ?? selected) : t("tasks.title")}>
       <div className="task-head">
-        {!embedded && onBack && (
-          <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
+        {!embedded && (selected || onBack) && (
+          <button className="chat-hbtn back" title={t("common.back")} onClick={() => (selected ? select(null) : onBack?.())}>
             ‹
           </button>
         )}
-        <b>{t("tasks.title")}</b>
-        <span className="chat-sub">
-          {tasks === null ? "" : `${t("tasks.summary", { active, total })}${failing ? t("tasks.failing", { n: failing }) : ""}`}
-        </span>
+        {selected && group && (
+          <span className="svc-ico">
+            <Ico icon={group.icon} />
+          </span>
+        )}
+        <b>{selected ? (group?.title ?? selected) : t("tasks.title")}</b>
+        <span className="chat-sub">{[group?.peer ? t("appModels.onPeer", { peer: group.peer }) : "", summary].filter(Boolean).join(" · ")}</span>
         {!embedded && (<button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
           ✕
         </button>)}
@@ -238,21 +379,29 @@ export default function Tasks({ open, onClose, onBack, embedded = false }: { ope
       <div className="task-body">
         {err && <p className="task-note">{t("common.unavailable", { error: err })}</p>}
         {tasks === null && !err && <p className="task-note">{t("common.loading")}</p>}
-        {tasks !== null && !total && <p className="task-note">{t("tasks.empty")}</p>}
-        {groups.map((g) => (
-          <section key={g.app} className="task-group">
-            <div className="task-app">
-              <span className="svc-ico">
-                <Ico icon={g.icon} />
-              </span>
-              <span className="svc-name">{g.title}</span>
-              <span className="svc-port">{g.list.length}</span>
-            </div>
-            {g.list.map((t) => (
-              <TaskRow key={t.id} t={t} open={openId === t.id} onToggle={() => setOpenId(openId === t.id ? null : t.id)} onSaved={(task) => setTasks((current) => current?.map((row) => row.id === task.id ? task : row) ?? null)} />
+        {tasks !== null && !selected && all.length === 0 && peers.length === 0 && <p className="task-note">{t("tasks.empty")}</p>}
+        {tasks !== null && selected && !group && !peerGroups.some(loading) && <p className="task-note">{t("tasks.appGone")}</p>}
+        {!selected && tasks !== null && (
+          <TaskAppList groups={groups} onOpen={select} t={t} {...(peers.length ? { heading: t("appModels.here"), ...(groups.length === 0 ? { note: t("tasks.noneHere") } : {}) } : {})} />
+        )}
+        {!selected &&
+          peerGroups.map((p) => (
+            <TaskAppList
+              key={p.peer}
+              groups={p.groups}
+              onOpen={select}
+              t={t}
+              heading={t("appModels.onPeer", { peer: p.peer })}
+              {...(loading(p) ? { note: t("common.loading") } : p.old ? { note: t("tasks.peerOld", { peer: p.peer }) } : p.error ? { note: t("appModels.peerDown", { peer: p.peer, error: p.error }) } : p.groups.length === 0 ? { note: t("tasks.noneHere") } : {})}
+            />
+          ))}
+        {group && (
+          <section className="task-group">
+            {group.list.map((task) => (
+              <TaskRow key={task.id} t={task} peer={group.peer} open={openId === task.id} onToggle={() => setOpenId(openId === task.id ? null : task.id)} onSaved={replace(group.peer)} />
             ))}
           </section>
-        ))}
+        )}
       </div>
       </div>
     </div>

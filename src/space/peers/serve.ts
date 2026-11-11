@@ -18,6 +18,10 @@ import type { PeerModelInfo } from "./client.ts";
  *   GET  /api/peer/apps/:app/icon                  = /api/apps/:app/icon
  *   GET  /api/peer/model/apps                      = /api/model/apps: every app's model rows and this space's choices ┐ when the
  *   PATCH /api/peer/apps/:app/model                = /api/panel/apps/:app/model {tag?, model}                         ┘ routes are given
+ *   GET  /api/peer/tasks                           = /api/tasks: this space's scheduled tasks                        ┐ when the
+ *   GET  /api/peer/tasks/models                    = /api/tasks/models: the models a task can run on here            │ routes are
+ *   GET  /api/peer/tasks/:id/runs?limit            = /api/tasks/:id/runs                                             │ given
+ *   PATCH /api/peer/tasks/:id/model                = /api/panel/tasks/:id/model {model}                              ┘
  *   GET  /api/peer/feedback/settings               ┐ this space's feedback settings and rows, without its peers, so a hub
  *   PUT  /api/peer/feedback/settings               │ shows and sets the switches of the apps that run here
  *   GET  /api/peer/feedback?limit                  │ (feedback/api.ts `createFeedbackPeerServeRoutes`, docs/feedback.md)
@@ -91,6 +95,8 @@ export type PeerServeOptions = {
   inventory?: () => MachineInventory;
   /** The app-model routes for a hub's Models page (model/app-models.ts `createPeerAppModelRoutes`). */
   appModels?: Routes;
+  /** The task routes for a hub's Tasks page (scheduler/api.ts `createPeerTaskRoutes`). */
+  tasks?: Routes;
   /** The feedback routes for a hub's Settings → Feedback (feedback/api.ts `createFeedbackPeerServeRoutes`). */
   feedback?: Routes;
 };
@@ -123,6 +129,19 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
     const h = handlerOf(routes, path, method);
     return (req, server) => h(req, server);
   };
+
+  /** A task route by id, refused for a task of an app legacy peers do not share. */
+  const sharedTask =
+    (h: Handler): Handler =>
+    async (req, server) => {
+      if (opts.allowApp) {
+        const one = await mirror(opts.tasks!, "/api/peer/tasks/:id", "GET")(Object.assign(new Request(req.url), { params: req.params }), server);
+        if (!one || !one.ok) return one;
+        const { task } = (await one.json()) as { task: { app: string } };
+        if (!opts.allowApp(task.app)) return json({ ok: false, error: "application is not shared through legacy peers" }, 403);
+      }
+      return h(req, server);
+    };
 
   /**
    * Call a local GET route in-process and return its JSON body. The lists are read with the
@@ -267,6 +286,21 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
             }),
           },
           "/api/peer/apps/:app/model": { PATCH: guard(mirror(opts.appModels, "/api/peer/apps/:app/model", "PATCH")) },
+        }
+      : {}),
+    ...(opts.tasks
+      ? {
+          "/api/peer/tasks": {
+            GET: guard(async (req, server) => {
+              const r = await mirror(opts.tasks!, "/api/peer/tasks", "GET")(req, server);
+              if (!r || !r.ok || !opts.allowApp) return r;
+              const data = (await r.json()) as { tasks: { app: string }[] };
+              return json({ ...data, tasks: data.tasks.filter((t) => opts.allowApp!(t.app)) });
+            }),
+          },
+          "/api/peer/tasks/models": { GET: guard(mirror(opts.tasks, "/api/peer/tasks/models", "GET")) },
+          "/api/peer/tasks/:id/runs": { GET: guard(sharedTask(mirror(opts.tasks, "/api/peer/tasks/:id/runs", "GET"))) },
+          "/api/peer/tasks/:id/model": { PATCH: guard(sharedTask(mirror(opts.tasks, "/api/peer/tasks/:id/model", "PATCH"))) },
         }
       : {}),
     "/api/peer/agents/:app/:agent/chat": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/chat", "POST")) },
