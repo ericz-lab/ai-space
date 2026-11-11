@@ -339,6 +339,59 @@ describe("following the task", () => {
     return { store, service, reads };
   }
 
+  test("the task is made on the machine the fix runs on, else here", async () => {
+    const made: string[] = [];
+    const sinkAt = (peer: string) => new TodoSink(async (capability) => {
+      if (capability === "add") made.push(peer);
+      return { status: 201, text: '{"ok":true,"todos":[{"id":7}]}' };
+    }, peer);
+    const store = new FeedbackStore(new Database(":memory:"));
+    const service = new FeedbackService({
+      store,
+      name: "home",
+      app: () => ({ title: "Notes", hasDeployCheck: false }),
+      todo: () => sinkAt(""),
+      // mac runs ai-todo, bare does not.
+      todoAt: (peer) => (peer === "" || peer === "mac" ? sinkAt(peer) : undefined),
+      fixer: fakeFixer().port,
+      machines: () => ["mac", "bare"],
+      log: () => {},
+    });
+    service.saveSettings({ enabled: true, appsDefault: true, mode: "later" });
+    const at = async (text: string, machine?: string) => store.get((await service.submit("notes", { text, ...(machine === undefined ? {} : { machine }) }, "")).id)!.todoPeer;
+    expect(await at("fix on mac", "mac")).toBe("mac");
+    expect(await at("fix on a machine without ai-todo", "bare")).toBe("");
+    expect(await at("fix here", "")).toBe("");
+    // Left out, Settings decide.
+    expect(await at("as the settings say")).toBe("");
+    service.saveSettings({ machine: "mac" });
+    expect(await at("settings name mac")).toBe("mac");
+    expect(await at("the button wins over settings", "")).toBe("");
+    expect(made).toEqual(["mac", "", "", "", "mac", ""]);
+  });
+
+  test("a fix reports to the list that holds the task, not to this space's own", async () => {
+    const calls: string[] = [];
+    const sinkAt = (peer: string) => new TodoSink(async (capability) => {
+      calls.push(`${peer || "here"}:${capability}`);
+      return { status: 201, text: '{"ok":true,"todos":[{"id":7}],"todo":{"id":7,"status":"doing"},"records":[]}' };
+    }, peer);
+    const store = new FeedbackStore(new Database(":memory:"));
+    const fixer = fakeFixer();
+    const service = new FeedbackService({
+      store, name: "home", app: () => ({ title: "Notes", hasDeployCheck: false }),
+      todo: () => sinkAt(""), todoAt: (peer) => sinkAt(peer), fixer: fixer.port, machines: () => ["mac"], log: () => {},
+    });
+    service.saveSettings({ enabled: true, appsDefault: true, mode: "auto" });
+    const { id } = await service.submit("notes", { text: "fix it on mac", machine: "mac" }, "");
+    await fixer.end("run-1", { text: RESULT("fixed") });
+    for (let i = 0; i < 50 && store.get(id)!.status === "fixing"; i++) await Bun.sleep(1);
+    expect(fixer.starts[0]!.machine).toBe("mac");
+    expect(calls.length).toBeGreaterThan(3);
+    expect(calls.filter((c) => !c.startsWith("mac:"))).toEqual([]);
+    expect(calls).toContain("mac:status");
+  });
+
   test("a task done in ai-todo is accepted; dropped or deleted is dropped; open ones stay", async () => {
     const { store, service } = make({ 1: "done", 2: "dropped", 4: "review", 5: "doing", 6: "done", 7: "done" });
     const ids = rows(store, [

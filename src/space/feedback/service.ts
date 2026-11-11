@@ -168,12 +168,12 @@ export class FeedbackService {
   private async followTodos(): Promise<void> {
     const rows = this.store.list({ status: [...TODO_SYNCED], limit: TODO_SYNC.batch }).filter((r) => r.todoId !== null);
     const sinks = new Map<string, TodoSink | undefined>();
-    const sinkAt = (peer: string) => {
-      if (!sinks.has(peer)) sinks.set(peer, this.opts.todoAt ? this.opts.todoAt(peer) : ((s) => (s?.peer === peer ? s : undefined))(this.opts.todo()));
-      return sinks.get(peer);
+    const sinkAt = (r: FeedbackRow) => {
+      if (!sinks.has(r.todoPeer)) sinks.set(r.todoPeer, this.sinkOf(r));
+      return sinks.get(r.todoPeer);
     };
     const one = async (r: FeedbackRow) => {
-      const sink = sinkAt(r.todoPeer);
+      const sink = sinkAt(r);
       if (!sink) return;
       const status = await sink.taskStatus(r.todoId!);
       const next: Status | null = status === "done" ? "accepted" : status === "dropped" || status === "gone" ? "dropped" : null;
@@ -215,7 +215,10 @@ export class FeedbackService {
     if (this.store.countSince(app, this.now() - 3600_000) >= LIMITS.perHour) throw new FeedbackError(429, `at most ${LIMITS.perHour} pieces of feedback per app in an hour`);
 
     let row = this.store.add({ app, text, context, client: clientOf(ua), status: mode === "later" ? "later" : "queued", fixMachine });
-    const sink = this.opts.todo();
+    // The task goes where the engineer will work, so the task and its fix are on one machine's list;
+    // a machine without ai-todo leaves it to this space's own, then to any peer's.
+    const runOn = fixMachine ?? s.machine;
+    const sink = (runOn ? this.opts.todoAt?.(runOn) : undefined) ?? this.opts.todo();
     if (!sink) {
       row = this.store.patch(row.id, { status: "recorded", note: "no ai-todo on this space or its peers" })!;
       return { id: row.id, status: row.status, todoId: null, todoUrl: null };
@@ -229,7 +232,6 @@ export class FeedbackService {
       row = this.store.patch(row.id, { status: "recorded", note: `ai-todo: ${(e as Error).message}`.slice(0, 500) })!;
       return { id: row.id, status: row.status, todoId: null, todoUrl: null };
     }
-    const runOn = fixMachine ?? s.machine;
     const fixer = runOn ? `Fix Engineer: space/ui-fixer on ${runOn}.` : "Fix Engineer: space/ui-fixer.";
     await sink.plan(row.todoId!, todoPlan(row, titleFor(info, row), { images: images.length, fixer })).catch((e) => this.log(`#${row.id}: plan: ${(e as Error).message}`));
     if (images.length) await sink.record(row.todoId!, say(langOf(row), "screenshot"), images).catch((e) => this.log(`#${row.id}: picture: ${(e as Error).message}`));
@@ -313,15 +315,21 @@ export class FeedbackService {
     this.schedule(app);
   }
 
+  /** ai-todo where a row's task was made (this space or a peer): rows of one run may have theirs in different places. */
+  private sinkOf(r: FeedbackRow): TodoSink | undefined {
+    if (this.opts.todoAt) return this.opts.todoAt(r.todoPeer);
+    const s = this.opts.todo();
+    return s?.peer === r.todoPeer ? s : undefined;
+  }
+
   private async dispatch(app: string, rows: FeedbackRow[], machine: string): Promise<void> {
     const s = this.settings();
     const info = this.opts.app(app);
-    const sink = this.opts.todo();
     const lang = langOf(rows[0]!);
     const fail = async (note: string) => {
       for (const r of rows) {
         this.store.patch(r.id, { status: "failed", note: note.slice(0, 1000) });
-        if (r.todoId !== null) await sink?.record(r.todoId, note).catch(() => {});
+        if (r.todoId !== null) await this.sinkOf(r)?.record(r.todoId, note).catch(() => {});
       }
     };
     if (!info) return fail(`${app} is no longer registered here`);
@@ -329,8 +337,9 @@ export class FeedbackService {
     // A second try carries the task's records: the last attempt's report, the person's reason for rejecting it.
     const history = new Map<number, string[]>();
     for (const r of rows) {
-      if (!r.runId || r.todoId === null || !sink) continue;
-      const task = await sink.task(r.todoId);
+      const sink = r.runId && r.todoId !== null ? this.sinkOf(r) : undefined;
+      if (!sink) continue;
+      const task = await sink.task(r.todoId!);
       if (task) history.set(r.id, task.records.slice(0, 5).map((x) => `${x.createdAt} (${x.source}): ${x.content.slice(0, 800)}`));
     }
     const target: FixTarget = { app, appTitle: info.title, appMachine: this.opts.name, sameMachine: !machine, ...(info.repo ? { repo: info.repo } : {}), hasDeployCheck: info.hasDeployCheck };
@@ -342,6 +351,7 @@ export class FeedbackService {
     }
     for (const r of rows) {
       this.store.patch(r.id, { status: "fixing", runId, runMachine: machine, note: null });
+      const sink = r.todoId !== null ? this.sinkOf(r) : undefined;
       if (r.todoId !== null && sink) {
         await sink.status(r.todoId, "doing").catch(() => false);
         await sink.record(r.todoId, say(lang, "started", { run: runId, where: machine ? say(lang, "on", { machine }) : say(lang, "here") })).catch(() => {});
@@ -352,7 +362,6 @@ export class FeedbackService {
 
   /** Wait for the run, then report it on every row and its task. */
   private async watch(app: string, rows: FeedbackRow[], machine: string, runId: string): Promise<void> {
-    const sink = this.opts.todo();
     const lang = langOf(rows[0]!);
     let end: RunEnd;
     try {
@@ -380,6 +389,7 @@ export class FeedbackService {
       const head = it.status === "fixed" ? say(lang, "fixed") : it.status === "needs-person" ? say(lang, "needsPerson") : say(lang, "notFixed");
       const lines = [head, result.summary, it.note ?? "", ...extra, result.commit ? say(lang, "commit", { commit: result.commit }) : "", `run ${runId}${machine ? ` · ${machine}` : ""}`].filter(Boolean);
       this.store.patch(r.id, { status, note: [it.note, result.summary, ...extra].filter(Boolean).join("\n").slice(0, 2000) || null });
+      const sink = r.todoId !== null ? this.sinkOf(r) : undefined;
       if (r.todoId === null || !sink) continue;
       await sink.record(r.todoId, lines.join("\n\n")).catch((e) => this.log(`#${r.id}: record: ${(e as Error).message}`));
       if (status === "review") await sink.status(r.todoId, "review").catch(() => false);
