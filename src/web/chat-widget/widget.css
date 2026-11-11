@@ -127,7 +127,7 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: no
 .sc-model-btn:hover, .sc-model-btn[aria-expanded="true"] { color: var(--sc-fg); }
 .sc-model-menu { position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 5; width: min(320px, 100%); max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; padding: 4px; border-radius: 12px; background: var(--sc-menu-bg); border: 1px solid var(--sc-border); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14); }
 .sc-model-head { font-size: 0.8em; color: var(--sc-muted); padding: 4px 8px 6px; border-bottom: 1px solid var(--sc-border); margin-bottom: 2px; }
-.sc-model-group { font-size: 0.75em; color: var(--sc-muted); padding: 8px 8px 2px; }
+.sc-model-group { font-size: 0.8em; font-weight: 600; color: var(--sc-fg); padding: 8px 8px 4px; margin-top: 4px; border-top: 1px solid var(--sc-border); }
 .sc-model-warn { font-size: 0.8em; color: var(--sc-danger); padding: 4px 8px; }
 .sc-model-item { display: grid; grid-template-columns: 1.1em 1fr auto; gap: 6px; align-items: baseline; text-align: left; border: 0; background: transparent; padding: 6px 8px; border-radius: 8px; font-size: 0.88em; }
 .sc-model-item:hover, .sc-model-item:focus-visible { background: var(--sc-surface); }

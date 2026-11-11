@@ -839,7 +839,8 @@ function mount(host: HTMLElement, opts: Options): Widget {
         menu.appendChild(h);
         group = machine;
       }
-      item(o.value, `${o.runtime} · ${t.tiers[o.tier] ?? o.tier}`, o.model);
+      // The machine is in the row too: two machines often offer the same runtime and models, and a heading scrolls away.
+      item(o.value, `${o.machine ? `${o.machine} · ` : ""}${o.runtime} · ${t.tiers[o.tier] ?? o.tier}`, o.model);
     }
   };
   const modelQuery = () => (appModel ? `?model=${encodeURIComponent(appModel)}` : "");
