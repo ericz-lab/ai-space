@@ -13,6 +13,9 @@ import { MANIFEST_FILE } from "./scheduler/manifest.ts";
  *   ├── core/    ai-space itself (this repository), when deployed here
  *   ├── apps/    one directory per app; an app with a space.yaml is picked up automatically
  *   ├── app-src/ app source checkouts for development, one per app; ai-space does not scan it (AGENTS.md, App Development Mode)
+ *   ├── repos/   bare repositories that take a `git push` and deploy it, `<name>.git` each with a post-receive hook:
+ *   │            ai-space.git for core/, one per app deployed by push (docs/app-spec.md#deploy); made by hand, absent on a
+ *   │            machine nothing is pushed to
  *   ├── data/    runtime state: space.db, then one directory per app (its databases, blobs/ and space.env)
  *   ├── logs/
  *   ├── icons/   the panel's icon packs, one directory per pack, made on the first upload (src/space/panel/icons.ts)
@@ -151,4 +154,9 @@ async function exists(dir: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The bare repository a push deploys `name` through: `<workspace>/repos/<name>.git` (docs/app-spec.md#deploy). */
+export function deployRepo(home: string, name: string): string {
+  return join(home, "repos", `${name}.git`);
 }

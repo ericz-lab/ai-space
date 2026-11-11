@@ -137,9 +137,9 @@ The workspace is `~/.ai-space` unless `SPACE_HOME` is set for the install: `SPAC
 **Git-push deploys, from the laptop**
 
 ```bash
-ssh <host> "git init --bare ~/ai-space.git"
-scp deploy/post-receive <host>:~/ai-space.git/hooks/post-receive && ssh <host> chmod +x ~/ai-space.git/hooks/post-receive
-git remote add <host> <host>:~/ai-space.git
+ssh <host> "git init --bare ~/.ai-space/repos/ai-space.git"
+scp deploy/post-receive <host>:~/.ai-space/repos/ai-space.git/hooks/post-receive && ssh <host> chmod +x ~/.ai-space/repos/ai-space.git/hooks/post-receive
+git remote add <host> <host>:~/.ai-space/repos/ai-space.git
 git push <host> main      # checks out into the unit's checkout (~/.ai-space/core by default), runs deploy/install.sh, restarts the unit
 ```
 

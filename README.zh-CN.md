@@ -87,9 +87,9 @@ claude   # 然后说："在这台机器上安装 ai-space"
 目标机器上装好 Bun（在 `~/.bun` 下）之后：
 
 ```bash
-ssh <host> "git init --bare ~/ai-space.git"
-scp deploy/post-receive <host>:~/ai-space.git/hooks/post-receive && ssh <host> chmod +x ~/ai-space.git/hooks/post-receive
-git remote add <host> <host>:~/ai-space.git
+ssh <host> "git init --bare ~/.ai-space/repos/ai-space.git"
+scp deploy/post-receive <host>:~/.ai-space/repos/ai-space.git/hooks/post-receive && ssh <host> chmod +x ~/.ai-space/repos/ai-space.git/hooks/post-receive
+git remote add <host> <host>:~/.ai-space/repos/ai-space.git
 git push <host> main      # 检出到 ~/.ai-space/core，运行 deploy/install.sh，重启单元
 ```
 

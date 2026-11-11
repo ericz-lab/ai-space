@@ -157,6 +157,61 @@ describe("deploy from origin", () => {
     expect(ran.some((c) => c.startsWith("remote add"))).toBe(false);
   });
 
+  describe("without a deploy remote, into an app directory that is a clone", () => {
+    const rev = "a".repeat(40);
+    const answers = { "rev-parse --abbrev-ref": { code: 0, out: "main" }, "remote get-url deploy": { code: 2, out: "" }, "rev-parse HEAD": { code: 0, out: rev } };
+    const src = join(home, "app-src", "usage");
+    mkdirSync(src, { recursive: true });
+    mkdirSync(join(home, "apps", "usage", ".git"), { recursive: true });
+    const cli = (code = 0) => {
+      const ran: string[] = [];
+      const space: Runner = async (args, opts) => {
+        ran.push(`(${opts.cwd === home ? "workspace" : opts.cwd}) ${args.join(" ")}`);
+        return { code, out: code ? "usage: deploy stopped at check" : "usage: deployed" };
+      };
+      return { space, ran };
+    };
+
+    test("the clone fetches the commit from app-src and space app deploy runs here", async () => {
+      const { run, ran } = fake(answers, "usage");
+      const { space, ran: spaceRan } = cli();
+      const r = await deployFromOrigin(home, "usage", { run, space });
+      expect(r.ok).toBe(true);
+      expect(ran).toEqual([
+        "rev-parse --show-toplevel", "rev-parse --abbrev-ref HEAD", "status --porcelain", "remote get-url deploy", "pull --ff-only origin main", "rev-parse HEAD",
+        `(apps/usage) fetch ${src} main`,
+        `(apps/usage) merge-base --is-ancestor HEAD ${rev}`,
+      ]);
+      expect(spaceRan).toEqual([`(workspace) app deploy usage --rev ${rev}`]);
+      expect(r.log).toContain(`$ space app deploy usage --rev ${rev}\nusage: deployed`);
+    });
+
+    test("stops before the deploy when the clone cannot take the commit, and reports a failed deploy", async () => {
+      const cases: [Record<string, { code: number; out: string }>, number, string, number][] = [
+        [{ ...answers, "rev-parse HEAD": { code: 128, out: "" } }, 0, "has no commit to deploy", 0],
+        [{ ...answers, fetch: { code: 128, out: "not a git repository" } }, 0, "could not fetch the commit", 0],
+        [{ ...answers, "merge-base": { code: 1, out: "" } }, 0, "origin/main does not contain", 0],
+        [answers, 1, "space app deploy failed", 1],
+      ];
+      for (const [git, code, why, deploys] of cases) {
+        const { space, ran } = cli(code);
+        const r = await deployFromOrigin(home, "usage", { run: fake(git, "usage").run, space });
+        expect(r.ok).toBe(false);
+        expect(r.log.split("\n")[0]).toContain(why);
+        expect(ran.length).toBe(deploys);
+      }
+    });
+
+    test("an app directory that is not a clone still stops at the missing deploy remote, before the pull", async () => {
+      const { run, ran } = fake(answers);
+      const { space, ran: spaceRan } = cli();
+      const r = await deployFromOrigin(home, "ai-todo", { run, space });
+      expect(r.log.split("\n")[0]).toBe("app-src/ai-todo has no deploy remote, and apps/ai-todo is not a git clone to deploy into");
+      expect(ran.at(-1)).toBe("remote get-url deploy");
+      expect(spaceRan).toEqual([]);
+    });
+  });
+
   test("git that cannot start is a failed step, not a throw", async () => {
     const r = await gitRunner(["status"], { cwd: join(home, "missing"), timeoutMs: 5_000 });
     expect(r.code).not.toBe(0);
