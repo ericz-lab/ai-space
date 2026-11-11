@@ -87,9 +87,9 @@ Procedure: [docs/install-by-agent.md](docs/install-by-agent.md). Reference: [doc
 On the target machine, with Bun installed under `~/.bun`:
 
 ```bash
-ssh <host> "git init --bare ~/ai-space.git"
-scp deploy/post-receive <host>:~/ai-space.git/hooks/post-receive && ssh <host> chmod +x ~/ai-space.git/hooks/post-receive
-git remote add <host> <host>:~/ai-space.git
+ssh <host> "git init --bare ~/.ai-space/repos/ai-space.git"
+scp deploy/post-receive <host>:~/.ai-space/repos/ai-space.git/hooks/post-receive && ssh <host> chmod +x ~/.ai-space/repos/ai-space.git/hooks/post-receive
+git remote add <host> <host>:~/.ai-space/repos/ai-space.git
 git push <host> main      # checks out into ~/.ai-space/core, runs deploy/install.sh, restarts the unit
 ```
 

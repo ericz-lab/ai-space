@@ -1,5 +1,5 @@
 #!/bin/bash
-# Bare-repository hook on the host: install as ~/my-app.git/hooks/post-receive (chmod +x).
+# Bare-repository hook on the host: install as <workspace>/repos/my-app.git/hooks/post-receive (chmod +x).
 # `space app deploy` checks main out into the app directory, runs space.yaml's deploy commands
 # (install, type check, tests, build) and restarts the service only when all of them pass; on a
 # failure the previous tree goes back and the running service is left alone.
@@ -8,4 +8,4 @@ set -e; unset GIT_DIR
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 APP=my-app
 mkdir -p "${SPACE_HOME:-$HOME/.ai-space}/apps/$APP"
-exec "$HOME/.local/bin/space" app deploy "$APP" --git-dir "$HOME/$APP.git" --rev main
+exec "$HOME/.local/bin/space" app deploy "$APP" --git-dir "${SPACE_HOME:-$HOME/.ai-space}/repos/$APP.git" --rev main

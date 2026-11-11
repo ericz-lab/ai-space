@@ -30,7 +30,7 @@ An app is read and changed in its source checkout, never in a deployed copy. Thi
 - Use the app source directory specified by the user when one is provided.
 - Otherwise, default to `<workspace>/app-src/<app-name>/`, where the workspace is `$SPACE_HOME` or `~/.ai-space`. State the resolved path and proceed with this default without requiring confirmation.
 - When the app is not there yet, clone its repository (the manifest's `repo:`) into that directory. Other checkouts of the app elsewhere on the machine are not the source of truth and may lag behind; use one only when the user points to it.
-- `<workspace>/apps/<app>/` on a server is what runs there, put in place by the app's deployment channel (a bare repository with a hook, `deploy.sh`, or an exported tree without `.git`). Read it to diagnose, change the source checkout, and deploy through the channel the app's `AGENTS.md` names; an edit in the deployed copy is lost on the next deploy.
+- `<workspace>/apps/<app>/` on a server is what runs there, put in place by the app's deployment channel (a bare repository with a hook, kept in `<workspace>/repos/<app>.git`; `deploy.sh`; or an exported tree without `.git`). Read it to diagnose, change the source checkout, and deploy through the channel the app's `AGENTS.md` names; an edit in the deployed copy is lost on the next deploy.
 - Keep app source changes in that directory and follow its own `AGENTS.md` instructions. Run the app's commands and Git operations from its source directory; keep ai-space platform changes in the ai-space checkout.
 
 ## Stack And Conventions
