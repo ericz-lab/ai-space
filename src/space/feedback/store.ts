@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { APP_SWITCHES, type ClientInfo, DEFAULT_SETTINGS, EFFORTS, type FeedbackRow, type FeedbackSettings, MODES, type PageContext, type RecentView, type Status, STATUSES } from "./types.ts";
+import { APP_SWITCHES, type ClientInfo, DEFAULT_SETTINGS, EFFORTS, type FeedbackRow, type FeedbackSettings, MODEL_PATTERN, MODES, type PageContext, type RecentView, type Status, STATUSES } from "./types.ts";
 
 /**
  * Feedback in space.db (docs/feedback.md): the settings as one JSON value, and one row per piece of
@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS feedback (
   run_id      TEXT,
   run_machine TEXT NOT NULL DEFAULT '',
   fix_machine TEXT,
+  fix_model   TEXT,
   note        TEXT,
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
@@ -43,6 +44,7 @@ type Row = {
   run_id: string | null;
   run_machine: string;
   fix_machine: string | null;
+  fix_model: string | null;
   note: string | null;
   created_at: number;
   updated_at: number;
@@ -60,6 +62,7 @@ const fromRow = (r: Row): FeedbackRow => ({
   todoUrl: r.todo_url,
   runId: r.run_id,
   fixMachine: r.fix_machine,
+  fixModel: r.fix_model,
   runMachine: r.run_machine,
   note: r.note,
   createdAt: r.created_at,
@@ -89,7 +92,7 @@ export function mergeSettings(cur: FeedbackSettings, patch: unknown): FeedbackSe
     next.machine = p.machine;
   }
   if (p.model !== undefined) {
-    if (typeof p.model !== "string" || (p.model !== "" && !/^[a-z0-9][a-z0-9._-]*\/[a-z0-9._-]{1,64}$/i.test(p.model))) throw new Error("model must be empty or runtime/model");
+    if (typeof p.model !== "string" || (p.model !== "" && !MODEL_PATTERN.test(p.model))) throw new Error("model must be empty or runtime/model");
     next.model = p.model;
   }
   if (p.apps !== undefined) {
@@ -107,8 +110,10 @@ export function mergeSettings(cur: FeedbackSettings, patch: unknown): FeedbackSe
 export class FeedbackStore {
   constructor(private readonly db: Database, private readonly now: () => number = Date.now) {
     db.exec(SCHEMA);
-    // Added after the first release: a space.db from then has no column for the person's machine.
-    if (!db.query<{ name: string }, []>("PRAGMA table_info(feedback)").all().some((c) => c.name === "fix_machine")) db.exec("ALTER TABLE feedback ADD COLUMN fix_machine TEXT");
+    // Added after the first release: a space.db from then has no column for the person's machine or model.
+    const cols = new Set(db.query<{ name: string }, []>("PRAGMA table_info(feedback)").all().map((c) => c.name));
+    if (!cols.has("fix_machine")) db.exec("ALTER TABLE feedback ADD COLUMN fix_machine TEXT");
+    if (!cols.has("fix_model")) db.exec("ALTER TABLE feedback ADD COLUMN fix_model TEXT");
   }
 
   settings(): FeedbackSettings {
@@ -135,12 +140,12 @@ export class FeedbackStore {
     return next;
   }
 
-  add(r: { app: string; text: string; context: PageContext; client: ClientInfo; status: Status; fixMachine?: string | null }): FeedbackRow {
+  add(r: { app: string; text: string; context: PageContext; client: ClientInfo; status: Status; fixMachine?: string | null; fixModel?: string | null }): FeedbackRow {
     const at = this.now();
     const id = Number(
       this.db
-        .query("INSERT INTO feedback (app, text, context, client, status, fix_machine, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(r.app, r.text, JSON.stringify(r.context), JSON.stringify(r.client), r.status, r.fixMachine ?? null, at, at).lastInsertRowid,
+        .query("INSERT INTO feedback (app, text, context, client, status, fix_machine, fix_model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(r.app, r.text, JSON.stringify(r.context), JSON.stringify(r.client), r.status, r.fixMachine ?? null, r.fixModel ?? null, at, at).lastInsertRowid,
     );
     return this.get(id)!;
   }

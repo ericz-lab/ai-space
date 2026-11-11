@@ -23,6 +23,7 @@ function setup(o: { taskStatus?: string } = {}) {
       }, ""),
     fixer: { start: async () => "run-1", wait: () => new Promise(() => {}) },
     machines: () => ["hub"],
+    models: (m) => (m === "" ? [{ value: "claude/intermediate", runtime: "claude", tier: "intermediate", model: "opus" }] : m === "hub" ? [{ value: "codex/intermediate", runtime: "codex", tier: "intermediate", model: "gpt-6.1-sol" }] : undefined),
     log: () => {},
   });
   // As the entry point serves them: every write behind the same-origin guard.
@@ -95,6 +96,8 @@ describe("feedback routes", () => {
     const { call } = setup();
     const view = (await call("GET", "/api/panel/feedback/settings")).json;
     expect(view).toMatchObject({ ok: true, settings: { enabled: false, mode: "auto" }, apps: [{ app: "ai-todo", enabled: false }], machines: [{ value: "" }, { value: "hub" }], shortcut: "Alt+Shift+F", counts: { later: 0 } });
+    // The model menu offers what the machine the engineer runs on has, not only this one's.
+    expect(view.machineModels).toEqual({ "": [{ value: "claude/intermediate", runtime: "claude", tier: "intermediate", model: "opus" }], hub: [{ value: "codex/intermediate", runtime: "codex", tier: "intermediate", model: "gpt-6.1-sol" }] });
     const put = await call("PUT", "/api/panel/feedback/settings", { body: JSON.stringify({ enabled: true, apps: { "ai-todo": "on" }, mode: "later" }), headers: same });
     expect(put.json).toMatchObject({ settings: { enabled: true, mode: "later", apps: { "ai-todo": "on" } }, apps: [{ app: "ai-todo", enabled: true }] });
     expect((await call("PUT", "/api/panel/feedback/settings", { body: JSON.stringify({ machine: "nowhere" }), headers: same })).status).toBe(400);

@@ -32,6 +32,12 @@ export type FeedbackSettings = {
   errors: boolean;
 };
 
+/** A model the Fix Engineer can run on, on one machine: what the button and Settings offer. */
+export type ModelChoice = { value: string; runtime: string; tier: string; model: string };
+
+/** How a model is named in Settings and from the button: `runtime/model` (a tier or the runtime's own name). */
+export const MODEL_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9._-]{1,64}$/i;
+
 export const DEFAULT_SETTINGS: FeedbackSettings = {
   enabled: false,
   appsDefault: true,
@@ -97,6 +103,8 @@ export type FeedbackRow = {
   todoUrl: string | null;
   /** Where the person asked the fix to run ("" here, else a peer); null follows Settings. */
   fixMachine: string | null;
+  /** The model the person picked for the fix (`runtime/tier`, "" for that machine's default); null follows Settings. */
+  fixModel: string | null;
   /** The engineer's run, and the machine it ran on ("" here). */
   runId: string | null;
   runMachine: string;

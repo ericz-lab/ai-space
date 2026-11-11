@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getJson, relTime, sendJson } from "./api.ts";
 import { useLang } from "./i18n.ts";
 import type { Key } from "./i18n.ts";
+import { SavedChoice } from "./model-choices.tsx";
 
 /**
  * Settings → Feedback (docs/feedback.md): the button app pages show, what happens to what is sent
@@ -13,6 +14,7 @@ import type { Key } from "./i18n.ts";
 type Status = "later" | "queued" | "fixing" | "review" | "failed" | "skipped" | "recorded" | "accepted" | "dropped";
 type AppRow = { app: string; title: string; zh?: string; status: string; enabled: boolean };
 export type PeerView = { name: string; ok: boolean; error?: string; synced: boolean; apps: AppRow[]; counts: Partial<Record<Status, number>> };
+type Model = { value: string; runtime: string; tier: string; model: string };
 export type Settings = { enabled: boolean; appsDefault: boolean; apps: Record<string, "on" | "off">; mode: "auto" | "later"; machine: string; model: string; effort: "high" | "xhigh" | "max"; errors: boolean };
 export type View = {
   settings: Settings;
@@ -20,7 +22,10 @@ export type View = {
   /** Each peer's apps, which follow these settings; absent from an older space. */
   peers?: PeerView[];
   machines: { value: string; label: string }[];
-  models: { value: string; runtime: string; tier: string; model: string }[];
+  /** This machine's models. */
+  models: Model[];
+  /** The models each machine offers ("" this one), for the machine the engineer runs on; absent from an older space. */
+  machineModels?: Record<string, Model[]>;
   counts: Record<Status, number>;
   shortcut: string;
 };
@@ -41,6 +46,14 @@ export function withPatch(view: View, patch: Partial<Settings>): View {
   const shown = (app: string) => settings.enabled && (apps[app] ? apps[app] === "on" : settings.appsDefault);
   const follow = (rows: AppRow[]) => rows.map((a) => ({ ...a, enabled: shown(a.app) }));
   return { ...view, settings, apps: follow(view.apps), ...(view.peers ? { peers: view.peers.map((p) => (p.ok ? { ...p, apps: follow(p.apps) } : p)) } : {}) };
+}
+
+/**
+ * The models the model menu offers: those of the machine the engineer runs on, not this one's (a
+ * peer that has not said offers none here); an older space sends only its own.
+ */
+export function modelsFor(view: View): Model[] {
+  return view.machineModels ? view.machineModels[view.settings.machine] ?? [] : view.models;
 }
 
 export default function FeedbackSettings() {
@@ -93,7 +106,8 @@ export default function FeedbackSettings() {
 
   if (!view) return <div className="setcard"><p className="setnote">{error || t("common.loading")}</p></div>;
   const s = view.settings;
-  const appName = (a: { title: string; zh?: string }) => (lang === "zh" && a.zh ? a.zh : a.title);
+  const models = modelsFor(view);
+  const appName =(a: { title: string; zh?: string }) => (lang === "zh" && a.zh ? a.zh : a.title);
   const appTitle = (app: string, peer = "") => {
     const rows = peer ? (view.peers ?? []).find((p) => p.name === peer)?.apps ?? [] : view.apps;
     const a = rows.find((x) => x.app === app);
@@ -139,8 +153,8 @@ export default function FeedbackSettings() {
         {t("feedback.model")}
         <select className="setselect" value={s.model} onChange={(e) => void save({ model: e.target.value })}>
           <option value="">{t("feedback.modelDefault")}</option>
-          {s.model && !view.models.some((o) => o.value === s.model) && <option value={s.model}>{s.model}</option>}
-          {view.models.map((o) => <option key={o.value} value={o.value}>{`${o.runtime} · ${t(`modelTier.${o.tier}` as Key)} · ${o.model}`}</option>)}
+          {s.model && !models.some((o) => o.value === s.model) && <SavedChoice value={s.model} t={t} />}
+          {models.map((o) => <option key={o.value} value={o.value}>{`${o.runtime} · ${t(`modelTier.${o.tier}` as Key)} · ${o.model}`}</option>)}
         </select>
       </label>
       <label className="setrow">

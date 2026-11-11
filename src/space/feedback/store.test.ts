@@ -19,6 +19,7 @@ function row(over: Partial<FeedbackRow> = {}): FeedbackRow {
     todoPeer: "",
     todoUrl: "https://todo.example.com/?todo=312",
     fixMachine: null,
+    fixModel: null,
     runId: null,
     runMachine: "",
     note: null,
@@ -139,7 +140,16 @@ describe("store upgrade", () => {
     db.exec(`CREATE TABLE feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, app TEXT NOT NULL, text TEXT NOT NULL, context TEXT NOT NULL, client TEXT NOT NULL, status TEXT NOT NULL, todo_id INTEGER, todo_peer TEXT NOT NULL DEFAULT '', todo_url TEXT, run_id TEXT, run_machine TEXT NOT NULL DEFAULT '', note TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
     db.query("INSERT INTO feedback (app, text, context, client, status, created_at, updated_at) VALUES ('a', 't', ?, ?, 'later', 1, 1)").run(JSON.stringify(parseContext({})), JSON.stringify(client));
     const store = new FeedbackStore(db);
-    expect(store.get(1)!.fixMachine).toBeNull();
+    expect(store.get(1)).toMatchObject({ fixMachine: null, fixModel: null });
     expect(store.add({ app: "a", text: "u", context: parseContext({}), client, status: "later", fixMachine: "hub" }).fixMachine).toBe("hub");
+  });
+
+  test("a space.db from before the model choice gets its column too", () => {
+    const db = new Database(":memory:");
+    db.exec(`CREATE TABLE feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, app TEXT NOT NULL, text TEXT NOT NULL, context TEXT NOT NULL, client TEXT NOT NULL, status TEXT NOT NULL, todo_id INTEGER, todo_peer TEXT NOT NULL DEFAULT '', todo_url TEXT, run_id TEXT, run_machine TEXT NOT NULL DEFAULT '', fix_machine TEXT, note TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
+    db.query("INSERT INTO feedback (app, text, context, client, status, fix_machine, created_at, updated_at) VALUES ('a', 't', ?, ?, 'later', 'hub', 1, 1)").run(JSON.stringify(parseContext({})), JSON.stringify(client));
+    const store = new FeedbackStore(db);
+    expect(store.get(1)).toMatchObject({ fixMachine: "hub", fixModel: null });
+    expect(store.add({ app: "a", text: "u", context: parseContext({}), client, status: "later", fixModel: "claude/advanced" }).fixModel).toBe("claude/advanced");
   });
 });

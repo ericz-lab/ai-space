@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deployFromOrigin, gitRunner, type Runner } from "./deploy.ts";
 import type { RunRegistry } from "../agents/runs.ts";
-import { FIXER_ID, fixerPort, localFixer, peerFixer, sseData } from "./fixer.ts";
+import { FIXER_ID, fixerModels, fixerPort, localFixer, peerFixer, sseData } from "./fixer.ts";
 
 describe("local fixer", () => {
   test("starts through the agents' chat route and reads the run's end", async () => {
@@ -80,6 +80,19 @@ describe("peer fixer", () => {
     expect(await port.start("", { message: "", permissionMode: "" })).toBe("local");
     expect(await port.start("hub", { message: "", permissionMode: "" })).toBe("remote");
     expect((await port.wait("hub", "x")).text).toBe("remote");
+  });
+
+  test("a peer's models: its own engineer's chat choices that can run now, else unknown", () => {
+    const opus = { value: "claude/intermediate", runtime: "claude", tier: "intermediate" as const, model: "opus" };
+    const agents = [
+      { id: "notes/helper", modelOptions: [{ value: "dsh/basic", runtime: "dsh", tier: "basic" as const, model: "flash" }] },
+      { id: `${FIXER_ID.app}/${FIXER_ID.agent}`, modelOptions: [opus, { value: "codex/basic", runtime: "codex", tier: "basic" as const, model: "luna", unavailable: "signed-out" as const }] },
+    ];
+    expect(fixerModels(agents)).toEqual([opus]);
+    // An older peer lists no engineer, or one without choices: not known, which is not "none".
+    expect(fixerModels([agents[0]!])).toBeUndefined();
+    expect(fixerModels([{ id: "space/ui-fixer" }])).toBeUndefined();
+    expect(fixerModels(undefined)).toBeUndefined();
   });
 });
 

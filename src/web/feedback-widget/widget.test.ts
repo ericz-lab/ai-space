@@ -40,6 +40,9 @@ describe("capture", () => {
     expect(tr("en", "button")).toBe("Feedback (Alt+Shift+F)");
     // A status from a newer space shows as itself, not a crash.
     expect(tr("zh", "status.archived" as Parameters<typeof tr>[1])).toBe("archived");
+    // The model menu names the tier in the page's language; a tier it does not know shows as itself.
+    expect([tr("zh", "model"), tr("zh", "tier.advanced"), tr("en", "defaultModel")]).toEqual(["用哪个模型", "高级", "Default model"]);
+    expect(tr("zh", "tier.expert" as Parameters<typeof tr>[1])).toBe("expert");
   });
 });
 

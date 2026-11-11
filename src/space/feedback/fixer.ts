@@ -1,6 +1,7 @@
 import type { RunRegistry } from "../agents/runs.ts";
 import { finalText } from "./prompt.ts";
 import type { FixerPort, RunEnd } from "./service.ts";
+import type { ModelChoice } from "./types.ts";
 
 /**
  * How the feedback service reaches the Fix Engineer (`space/ui-fixer`): on this machine through the
@@ -9,6 +10,18 @@ import type { FixerPort, RunEnd } from "./service.ts";
  */
 
 export const FIXER_ID = { app: "space", agent: "ui-fixer" } as const;
+
+type OfferedModel = ModelChoice & { unavailable?: string };
+
+/**
+ * The models a machine's Fix Engineer can run on now, from the agents that machine lists (a peer's
+ * snapshot: its own `space/ui-fixer` with its chat choices). Undefined when it lists no engineer or
+ * no choices (an older ai-space), so the caller does not mistake "unknown" for "none".
+ */
+export function fixerModels(agents: readonly { id: string; modelOptions?: readonly OfferedModel[] }[] | undefined): ModelChoice[] | undefined {
+  const fixer = agents?.find((a) => a.id === `${FIXER_ID.app}/${FIXER_ID.agent}`);
+  return fixer?.modelOptions?.filter((o) => !o.unavailable).map(({ value, runtime, tier, model }) => ({ value, runtime, tier, model }));
+}
 
 type ChatHandler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
 type PeerRequest = (path: string, init?: RequestInit & { headers?: Record<string, string> }) => Promise<Response>;

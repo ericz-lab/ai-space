@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { withPatch, type View } from "./FeedbackSettings.tsx";
+import { modelsFor, withPatch, type View } from "./FeedbackSettings.tsx";
 
 const view = (): View => ({
   settings: { enabled: true, appsDefault: true, apps: { notes: "off" }, mode: "auto", machine: "", model: "", effort: "high", errors: true },
@@ -31,4 +31,17 @@ test("an app's own value wins over the default", () => {
   const next = withPatch(view(), { appsDefault: false, apps: { todo: "on" } });
   expect(next.settings.apps).toEqual({ notes: "off", todo: "on" });
   expect(shown(next)).toEqual({ notes: false, todo: true });
+});
+
+test("the model menu offers the models of the machine the engineer runs on", () => {
+  const opus = { value: "claude/intermediate", runtime: "claude", tier: "intermediate", model: "opus" };
+  const sol = { value: "codex/intermediate", runtime: "codex", tier: "intermediate", model: "gpt-6.1-sol" };
+  const v = { ...view(), machines: [{ value: "", label: "home" }, { value: "box", label: "box" }, { value: "old", label: "old" }], models: [sol], machineModels: { "": [sol], box: [opus] } };
+  expect(modelsFor(v)).toEqual([sol]);
+  // Picking another machine changes the list at once, before the save answers.
+  expect(modelsFor(withPatch(v, { machine: "box" }))).toEqual([opus]);
+  // A peer that has not said what it runs offers nothing, rather than this machine's list.
+  expect(modelsFor(withPatch(v, { machine: "old" }))).toEqual([]);
+  // An older space sends only its own.
+  expect(modelsFor({ ...view(), models: [sol] })).toEqual([sol]);
 });

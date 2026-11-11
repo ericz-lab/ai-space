@@ -186,6 +186,12 @@ test("feedback settings read as the panel writes them, with safe defaults", () =
   const empty = decodeFeedback(null);
   expect(empty.settings).toEqual({ enabled: false, appsDefault: true, apps: {}, mode: "auto", machine: "", model: "", effort: "xhigh", errors: true });
   expect(empty.shortcut).toBe("Alt+Shift+F");
+  // An older core sent only its own models; a newer one sends each machine's, and the engineer's machine decides.
+  expect(v.models.map((o) => o.value)).toEqual(["claude/intermediate"]);
+  const sol = { value: "codex/intermediate", runtime: "codex", tier: "intermediate", model: "gpt-6.1-sol" };
+  const byMachine = decodeFeedback({ settings: { machine: "hub" }, models: [sol], machineModels: { "": [sol], hub: [{ value: "claude/advanced", runtime: "claude", tier: "advanced", model: "fable" }] } });
+  expect(byMachine.models.map((o) => o.value)).toEqual(["claude/advanced"]);
+  expect(decodeFeedback({ settings: { machine: "old" }, models: [sol], machineModels: { "": [sol] } }).models).toEqual([]);
 });
 
 test("model usage names the Space and the peers whose rows are missing or old", () => {
