@@ -13,6 +13,9 @@ import WebKit
 ///                      logging the frames the main thread dropped (see ScrollBench)
 ///                      and the times the page moved by itself under it
 ///   AISPACE_SCROLL_SPEED points per second of the bench's vertical sweep (default 2400)
+///   AISPACE_SCROLL_RANGE "top,bottom": the offsets the bench's vertical sweep turns at (default the whole page)
+///   AISPACE_SCROLL_WATCH 1 logs each frame the visible page moves further than a finger
+///                      dragging it would (see ScrollWatch), for scrolling by hand
 ///   AISPACE_LAYERS     1 logs, five seconds after launch, the layers on show that the render
 ///                      server draws off screen first (see LayerAudit)
 ///   AISPACE_SEARCH     the search text on Home
@@ -131,6 +134,9 @@ enum DebugLaunch {
         }
         if let seconds = env["AISPACE_SCROLL_BENCH"].flatMap(Double.init) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { ScrollBench.run(seconds: seconds) }
+        }
+        if env["AISPACE_SCROLL_WATCH"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { ScrollWatch.start() }
         }
         if env["AISPACE_LAYERS"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { LayerAudit.log() }
@@ -254,6 +260,42 @@ enum LayerAudit {
     }
 }
 
+/// Watches the page on show while a finger scrolls it: a frame where the content moved more than
+/// 40 pt, or its height changed, is logged with the offset, the height and whether a finger was on it.
+@MainActor
+final class ScrollWatch: NSObject {
+    private static var running: ScrollWatch?
+    private var link: CADisplayLink?
+    private var lastY: CGFloat?
+    private var lastHeight: CGFloat?
+
+    static func start() {
+        guard running == nil else { return }
+        let watch = ScrollWatch()
+        running = watch
+        let link = CADisplayLink(target: watch, selector: #selector(tick))
+        link.add(to: .main, forMode: .common)
+        watch.link = link
+    }
+
+    private func pages(in view: UIView) -> [UIScrollView] {
+        ((view as? UIScrollView).map { [$0] } ?? []) + view.subviews.flatMap(pages)
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+        guard let window = windows.first(where: \.isKeyWindow),
+              let page = pages(in: window).first(where: { $0.contentSize.height > $0.bounds.height + 100 && $0.bounds.height > 200
+                  && window.bounds.contains($0.convert(CGPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: window)) })
+        else { lastY = nil; return }
+        let y = page.contentOffset.y, height = page.contentSize.height
+        if let lastY, let lastHeight, abs(y - lastY) > 40 || abs(height - lastHeight) > 0.5 {
+            NSLog("ai-space: scroll watch y=%.0f -> %.0f height %.0f -> %.0f tracking=%d", lastY, y, lastHeight, height, page.isTracking ? 1 : 0)
+        }
+        lastY = y; lastHeight = height
+    }
+}
+
 /// Scrolls the launcher by itself, as a finger would move it, so a profiler can be pointed at
 /// the device without anyone touching it: the visible page up and down for the first half of
 /// the time, then the pager from page to page. What it logs is the main thread's part only
@@ -262,6 +304,10 @@ enum LayerAudit {
 final class ScrollBench: NSObject {
     private static var running: ScrollBench?
     /// Points per second of the vertical sweep, about a brisk flick; AISPACE_SCROLL_SPEED sets another.
+    private static let range: (CGFloat, CGFloat)? = ProcessInfo.processInfo.environment["AISPACE_SCROLL_RANGE"].flatMap { text in
+        let parts = text.split(separator: ",").compactMap { Double($0) }
+        return parts.count == 2 ? (CGFloat(parts[0]), CGFloat(parts[1])) : nil
+    }
     private static let speed = ProcessInfo.processInfo.environment["AISPACE_SCROLL_SPEED"].flatMap(Double.init).map { CGFloat($0) } ?? 2400
 
     private let seconds: Double
@@ -338,8 +384,9 @@ final class ScrollBench: NSObject {
                 worstJump = max(worstJump, abs(page.contentOffset.y - placed))
                 NSLog("ai-space: scroll bench jump at y=%.0f by %.1f h=%.0f top=%.0f", placed, page.contentOffset.y - placed, page.contentSize.height, page.adjustedContentInset.top)
             }
-            let top = -page.adjustedContentInset.top
-            let bottom = page.contentSize.height - page.bounds.height + page.adjustedContentInset.bottom
+            var top = -page.adjustedContentInset.top
+            var bottom = page.contentSize.height - page.bounds.height + page.adjustedContentInset.bottom
+            if let range = Self.range { top = max(top, range.0); bottom = min(bottom, range.1) }
             var y = page.contentOffset.y + direction * Self.speed * CGFloat(gap)
             if y >= bottom { y = bottom; direction = -1 }
             if y <= top { y = top; direction = 1 }
