@@ -30,8 +30,6 @@ export const LIVE_STOP_GRACE_MS = 4_000;
  * last turn (SPACE_CHAT_BACKGROUND_MINUTES; default 2 hours, Claude Code's own cap on a background
  * command in a non-interactive run). Closing the process stops its jobs.
  */
-export const LIVE_BACKGROUND_MS = backgroundMs(process.env.SPACE_CHAT_BACKGROUND_MINUTES);
-
 export function backgroundMs(minutes: string | undefined): number {
   const n = Number(minutes);
   return minutes !== undefined && minutes.trim() !== "" && Number.isFinite(n) && n >= 0 ? n * 60_000 : 120 * 60_000;
@@ -122,7 +120,7 @@ export class LivePool {
       if (!p.alive) return this.drop(p, false);
       const idleMs = this.opts.idleMs ?? LIVE_IDLE_MS;
       const now = Date.now();
-      const held = (p.busy || p.background) && now - entry.idleSince < (this.opts.backgroundMs ?? LIVE_BACKGROUND_MS);
+      const held = (p.busy || p.background) && now - entry.idleSince < (this.opts.backgroundMs ?? backgroundMs(process.env.SPACE_CHAT_BACKGROUND_MINUTES));
       const quiet = now - Math.max(entry.idleSince, p.lastActive ?? 0);
       if (held) this.arm(p, idleMs);
       else if (quiet < idleMs && !p.busy && !p.background) this.arm(p, idleMs - quiet);

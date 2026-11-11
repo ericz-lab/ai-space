@@ -782,7 +782,7 @@ data class CapabilityApp(
     }
 }
 
-// Packages and connections (docs/packages.md)
+// Packages and connections (docs/app-packages.md)
 
 data class PackageApp(
     val app: String,

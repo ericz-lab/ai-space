@@ -9,7 +9,6 @@ export type Mode = (typeof MODES)[number];
 
 /** An app's own switch: follow the default, or on / off for this app only. */
 export const APP_SWITCHES = ["default", "on", "off"] as const;
-export type AppSwitch = (typeof APP_SWITCHES)[number];
 
 /** Claude Code's effort levels the fix engineer may run at (`--effort`). */
 export const EFFORTS = ["high", "xhigh", "max"] as const;

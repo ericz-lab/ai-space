@@ -22,6 +22,10 @@ SPACE_HOME="${SPACE_HOME/#\~/$HOME}"
 mkdir -p "$SPACE_HOME"
 SPACE_HOME="$(cd "$SPACE_HOME" && pwd)"
 export SPACE_HOME
+# The health check below asks the port the service listens on, which `setup` keeps in the workspace's .env.
+if [ -z "${SPACE_PORT:-}" ] && [ -f "$SPACE_HOME/.env" ]; then
+  SPACE_PORT="$(sed -n 's/^SPACE_PORT=//p' "$SPACE_HOME/.env" | head -n 1 | tr -d "\"' \r")"
+fi
 
 cd "$HERE"
 # A release (RELEASE.json) ships its dependencies; a checkout installs them from the lockfile.

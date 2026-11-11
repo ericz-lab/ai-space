@@ -46,6 +46,8 @@ for p in "$profiles"/*.mobileprovision; do
   (( $(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$exp" +%s) < soon )) && rm -f "$p" && echo "renewing $appid (expires $exp)"
 done
 
+"$here/scripts/swiftterm.sh"
+
 derived="$here/build/device"
 xcodebuild -project "$here/AISpace.xcodeproj" -scheme AISpace -configuration Debug \
   -destination "id=$device" -derivedDataPath "$derived" \

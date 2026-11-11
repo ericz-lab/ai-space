@@ -68,7 +68,7 @@ or post the identity fields directly (`name`, `title`, `description`, `icon` as 
 
 An app that runs on another machine with its own ai-space does not need a link app: register that machine as a peer of this one (`SPACE_PEER_<NAME>` in the workspace `.env`, [docs/peers.md](../../docs/peers.md)) and its apps, agents, widgets and services appear here as `<peer>/<app>`, with chat forwarded. `GET /api/peers` lists link apps a peer makes redundant under `duplicates`; delete those.
 
-To remove one: `curl -sS -X DELETE "$API/api/apps/<name>"`. This is the only kind of app the API deletes.
+To remove one: `curl -sS -X DELETE "$API/api/apps/<name>"`. For an app with code the same call uninstalls it: service stopped, directory moved to `<workspace>/trash/`, data kept.
 
 ## 3. Create a code app
 
@@ -103,7 +103,7 @@ Validate as in step 3.6.
 
 1. **Directory.** `<workspace>/apps/<name>` on the host is a clone or a checkout of the repository, never a copy without `.git`. Deployment channels, pick one and write it into the app's `AGENTS.md`: a bare repository at `<workspace>/repos/<name>.git` whose `post-receive` hook is the template `deploy/post-receive` (`space app deploy`: checkout, the manifest's `deploy` install, check and build, restart only when they pass; preferred), `git pull` on the host, or the template `deploy.sh` (rsync, install the unit, restart, health check; no sudo). Put the type check into `deploy.check` so a broken push never restarts the service.
 2. **Secrets.** Real values go to `<workspace>/apps/<name>/.env` with `scp`; the workspace `.env` holds anything the manifest references as `${VAR}`.
-3. **Service.** Until ai-space supervises services, a user-level systemd unit runs it: install `deploy/app.service` as `~/.config/systemd/user/<name>.service`, `loginctl enable-linger`, `systemctl --user enable --now <name>`. The unit loads the app `.env` and `<workspace>/data/<name>/space.env`, so provisioned storage reaches the process without code. Unit changes are not deployed by a git hook; reinstall the file and `daemon-reload` by hand (`deploy.sh` does).
+3. **Service.** Under `SPACE_SUPERVISOR=space` skip this step: the sync writes and starts `space-<name>.service`, and a hand-installed `<name>.service` is a conflict. Under `operator`, a user-level systemd unit runs it: install `deploy/app.service` as `~/.config/systemd/user/<name>.service`, `loginctl enable-linger`, `systemctl --user enable --now <name>`. The unit loads the app `.env` and `<workspace>/data/<name>/space.env`, so provisioned storage reaches the process without code. Unit changes are not deployed by a git hook; reinstall the file and `daemon-reload` by hand (`deploy.sh` does).
 4. **Register.** No restart is needed in either case.
    - A **new directory** is registered by the workspace-wide sync, which re-reads every `apps/*/space.yaml` the way boot does:
 
@@ -136,7 +136,7 @@ The manifest lives in the repository. Change it there, commit, deploy, sync; nev
 | notify | `channels`, `default`, `title`, `window` | every channel must exist as `SPACE_NOTIFY_<NAME>` in the workspace `.env`; sync |
 | pause / archive | `status: paused` (listed, tasks and service stop) or `archived` (hidden, everything stops) | sync; storage stays |
 | hide from the panel | `PATCH /api/apps/<name>` with `{ "hidden": true }`; the app stays registered and scheduled | not a manifest field; the layout keeps it |
-| remove | delete `<workspace>/apps/<name>` and restart ai-space (the sync routes only add and update); tasks become orphaned, agents and widgets disappear | `<workspace>/data/<name>/` stays until the operator removes it by hand; confirm before deleting anything |
+| remove | `space app uninstall <name>` (or `DELETE /api/apps/<name>`): stops the service and moves the checkout to `<workspace>/trash/`; tasks, agents and widgets disappear | `<workspace>/data/<name>/` stays until the operator removes it by hand; confirm before deleting anything |
 
 Parsing is strict: an unknown key, a wrong type or an unresolvable `${VAR}` rejects the whole app. Validate locally (step 3.6) before every deploy.
 

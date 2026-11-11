@@ -120,7 +120,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   const runIntent = (intent: Intent) => {
     if (intent.kind === "calc") {
       try {
-        void navigator.clipboard?.writeText(format(evaluate(intent.expression)));
+        void navigator.clipboard?.writeText(format(evaluate(intent.expression))).catch(() => {});
       } catch {
         // an expression that does not evaluate has nothing to copy
       }
@@ -311,16 +311,21 @@ function IntentRow({ intent, on, onHover, onPick }: { intent: Intent; on: boolea
       return;
     }
     setPreview(null);
+    // The row outlives its arguments, so an answer for the previous ones must not be shown under the new ones.
+    let live = true;
     const timer = setTimeout(() => {
       sendJson<{ result: RunResult }>("POST", "/api/shortcuts/preview", { action: intent.action.id, args: intent.args, timezone: browserZone() })
         .then((d) => d.result)
         .catch((e): { error: string } => ({ error: String((e as Error).message || e) }))
         .then((r) => {
           previews.set(convertKey, { at: Date.now(), result: r });
-          setPreview(r);
+          if (live) setPreview(r);
         });
     }, 300);
-    return () => clearTimeout(timer);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
   }, [convertKey]);
 
   let title: React.ReactNode;

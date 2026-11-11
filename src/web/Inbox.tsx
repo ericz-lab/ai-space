@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { type InboxItem, type InboxSummary, dateTime, getJson, relTime, sendJson } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
 
@@ -33,16 +33,21 @@ export default function Inbox({ open, onClose, onSummary }: { open: boolean; onC
     setSummary(s);
     onSummary(s);
   };
-  const load = () =>
-    getJson<{ items: InboxItem[]; summary: InboxSummary }>(`/api/inbox?${QUERY[filter]}&limit=200${app ? `&app=${encodeURIComponent(app)}` : ""}`)
+  // Only the newest request is shown: an answer for the previous filter or app must not land under the new one.
+  const request = useRef(0);
+  const load = () => {
+    const mine = ++request.current;
+    return getJson<{ items: InboxItem[]; summary: InboxSummary }>(`/api/inbox?${QUERY[filter]}&limit=200${app ? `&app=${encodeURIComponent(app)}` : ""}`)
       .then((d) => {
+        if (mine !== request.current) return;
         setItems(d.items || []);
         report(d.summary);
         // The app menu remembers every app seen, so narrowing the list does not empty it.
         setApps((prev) => [...new Set([...prev, ...(d.items || []).map((i) => i.app)])].sort());
         setErr("");
       })
-      .catch((e) => setErr(String((e as Error).message || e)));
+      .catch((e) => mine === request.current && setErr(String((e as Error).message || e)));
+  };
 
   useEffect(() => {
     if (!open) return;

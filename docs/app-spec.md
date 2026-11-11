@@ -565,7 +565,7 @@ API, for apps and their agents:
 | Route | Purpose |
 | --- | --- |
 | `GET /api/apps` | Every app with its status, agents and widgets. |
-| `POST /api/apps`, `PATCH`/`DELETE /api/apps/:app` | Create a manifest-only app, hide an app, delete a manifest-only app. |
+| `POST /api/apps`, `PATCH`/`DELETE /api/apps/:app` | Create a manifest-only app, hide an app, uninstall an app (service stopped, directory out of the workspace, data kept). |
 | `GET /api/tasks`, `POST /api/tasks/:id/run` | Inspect and trigger the app's own tasks. |
 | `POST /api/events`, `GET /api/events` | Publish an event for other apps (`{ name, data }`, stored as `<app>/<name>`); read recent events. |
 | `GET /api/events/stream`, `POST /api/events/ack`, `GET /api/events/:id`, `GET /api/deliveries` | Stream deliveries to the app, ack them, read an event with its deliveries ([events.md](events.md)). The stream and ack also serve external consumers, programs outside the space with their own operator-made credential ([events.md](events.md#external-consumers)). |
@@ -575,7 +575,7 @@ API, for apps and their agents:
 | `POST /api/notify`, `GET /api/notifications?app` | Send a notification; read the app's own delivery history. |
 | `POST /api/model/run` | One model call for the app, counted in the ledger ([model.md](model.md)). |
 | `/api/chat/threads…`, `/api/chat/widget.js` | Conversations with history and images, kept by the space per app, and the widget an app's page embeds to show them ([chat.md](chat.md)). |
-| `GET /api/spec` | The spec version and JSON Schema this ai-space enforces. |
+| `GET /api/spec` (planned) | The spec version and JSON Schema this ai-space enforces. |
 
 Mutating routes require the bearer token from `SPACE_API_TOKEN`, or the app's own `SPACE_APP_TOKEN` where the route acts on behalf of one app.
 
@@ -704,7 +704,7 @@ notify:
 | Panel (web UI, layout, manifest-only apps) | Implemented ([panel.md](panel.md)) |
 | `skills`, shared skills under `skills/` | Linked into `<workspace>/.claude/skills/` for sessions started by hand (`src/space/skills.ts`); an agent's own, shared and other apps' skills indexed in its chat prompt; scheduled agent tasks not yet |
 | JSON Schema (`schema/space.schema.json`), `validate`, `/api/spec` | Planned |
-| `templates/app/`, `new-app`, GitHub repository creation | Planned; the shared skill `skills/space-app/` and its templates cover creation, adoption and edits by hand today |
+| `space app new`, its templates, GitHub repository creation | Implemented (`src/cli/newapp.ts`, `skills/space-app/templates/`) |
 
 ### Per-task model choice
 

@@ -315,7 +315,7 @@ export function ValueCard({ result, when }: { result: Extract<RunResult, { kind:
     void navigator.clipboard?.writeText(typeof result.value === "number" ? formatNumber(result.value) : String(result.value)).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
-    });
+    }, () => {});
   };
   return (
     <div className="sc-value">

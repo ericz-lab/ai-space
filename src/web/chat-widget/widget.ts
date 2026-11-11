@@ -319,7 +319,7 @@ function mount(host: HTMLElement, opts: Options): Widget {
       const copy = document.createElement("button");
       copy.type = "button";
       copy.textContent = t.copy;
-      copy.onclick = () => void navigator.clipboard.writeText(m.content).then(() => toast(t.copied));
+      copy.onclick = () => void navigator.clipboard?.writeText(m.content).then(() => toast(t.copied), () => {});
       acts.appendChild(copy);
       // The thread the answer is rendered in: a click can only come from this rendering, so it is the answer's own.
       const own = thread;

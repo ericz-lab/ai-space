@@ -158,3 +158,11 @@ describe("webhook family", () => {
     expect(f.calls).toHaveLength(0);
   });
 });
+
+test("a Telegram caption is escaped for HTML and still fits the limit", async () => {
+  const { htmlCaption } = await import("./transports.ts");
+  expect(htmlCaption("[App] a < b & c", 1024)).toBe("[App] a &lt; b &amp; c");
+  const long = htmlCaption("<".repeat(2000), 1024);
+  expect(long.length).toBeLessThanOrEqual(1024);
+  expect(long).not.toContain("<");
+});

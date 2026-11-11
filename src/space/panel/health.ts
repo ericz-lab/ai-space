@@ -1,7 +1,7 @@
 /**
  * Service health probe with a short cache, so listing apps costs at most one
- * loopback request per service every `ttlMs`. Service supervision is not
- * implemented yet; the probe is what tells the panel "up" from "down".
+ * loopback request per service every `ttlMs`. The probe is what tells the
+ * panel "up" from "down", whoever runs the service.
  *
  * `check` waits for the probe; `peek` answers from the cache at once (the
  * last result, or "unknown" before the first) and refreshes it in the

@@ -474,6 +474,7 @@ final class AppModel: ObservableObject {
         chats = chats.filter { $0.key.connection != id }
         lives[id]?.stop()
         lives[id] = nil
+        settingsLoaders[id] = nil
         if quickChatAgentRef?.connection == id { quickChatAgentRef = nil }
     }
 

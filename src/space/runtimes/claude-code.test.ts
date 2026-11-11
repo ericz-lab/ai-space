@@ -70,7 +70,7 @@ describe("files", () => {
     expect(r.spool?.dir).toMatch(/^\/tmp\/sc-[0-9a-f]{16}$/);
     const dir = r.spool!.dir;
     expect(r.command).toBe(
-      `dir=${dir}; mkdir "$dir" && tar -xf - -C "$dir" && claude -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools Read --allowedTools Read --system-prompt "$(printf %s ${Buffer.from("Be brief.").toString("base64")} | base64 -d)" < "$dir/prompt"; rc=$?; rm -rf "$dir"; exit $rc`,
+      `dir=${dir}; mkdir "$dir" && tar -xf - -C "$dir" && claude -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools "Read" --allowedTools "Read" --system-prompt "$(printf %s ${Buffer.from("Be brief.").toString("base64")} | base64 -d)" < "$dir/prompt"; rc=$?; rm -rf "$dir"; exit $rc`,
     );
     const note = `hello\n\nAttached files (open them with the Read tool; refer to them by these names):\n- a1.png: ${dir}/a1.png\n- a2.jpg: ${dir}/a2.jpg\n`;
     expect(new TextDecoder().decode(r.spool!.archive.slice(512, 512 + new TextEncoder().encode(note).byteLength))).toBe(note);
@@ -122,7 +122,7 @@ describe("remoteCommand", () => {
     const b64 = Buffer.from("Be brief.").toString("base64");
     expect(remoteCommand(["claude"], input())).toEqual({ command: `f=$(mktemp) && cat > "$f" && claude -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc` });
     expect(remoteCommand(["claude"], input({ tools: ["WebSearch"] }))).toEqual({
-      command: `f=$(mktemp) && cat > "$f" && claude -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools WebSearch --allowedTools WebSearch --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc`,
+      command: `f=$(mktemp) && cat > "$f" && claude -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools "WebSearch" --allowedTools "WebSearch" --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc`,
     });
     expect(remoteCommand(["claude"], input({ thinking: 0 }))).toEqual({ command: `f=$(mktemp) && cat > "$f" && MAX_THINKING_TOKENS=0 claude -p --output-format json --model haiku --safe-mode --strict-mcp-config --tools "" --system-prompt "$(printf %s ${b64} | base64 -d)" < "$f"; rc=$?; rm -f "$f"; exit $rc` });
     expect(cliEnv(input(), { A: "1" })).toEqual({ A: "1" });

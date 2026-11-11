@@ -67,8 +67,8 @@ export class WebTabs {
     this.view.connect("notify::selected-page", () => this.sync());
     this.view.connect("close-page", (_v: unknown, page: any) => {
       this.tabs.delete(page);
+      // `page-detached` follows and reports the empty view, once.
       this.view.close_page_finish(page, true);
-      if (!this.view.get_n_pages()) this.onEmpty?.();
       return true;
     });
     // A tab moved in from another window brings its web view along.

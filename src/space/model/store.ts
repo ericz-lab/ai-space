@@ -244,7 +244,7 @@ export class ModelStore {
   }
 
   list(opts: LedgerScope & { tag?: string; since?: number; limit?: number } = {}): ModelCall[] {
-    const limit = Math.max(1, Math.min(opts.limit ?? 50, 500));
+    const limit = Math.max(1, Math.min(Math.floor(opts.limit ?? 50), 500));
     const { sql: where, args } = scopeWhere(opts.since, opts);
     const clauses = where ? [where] : [];
     if (opts.tag) {
@@ -295,11 +295,6 @@ export class ModelStore {
   lastOk(): Map<string, number> {
     const rows = this.db.query<{ machine: string | null; runtime: string | null; t: number }, []>("SELECT machine, runtime, MAX(started_at) AS t FROM model_calls WHERE status = 'ok' AND runtime IS NOT NULL AND origin != 'import' GROUP BY machine, runtime").all();
     return new Map(rows.map((r) => [`${r.machine ?? ""}|${r.runtime}`, r.t]));
-  }
-
-  /** How many calls of an app are in flight or done since a point in time; for the API's concurrency view. */
-  count(since: number): number {
-    return this.db.query<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM model_calls WHERE started_at >= ?").get(since)?.n ?? 0;
   }
 }
 

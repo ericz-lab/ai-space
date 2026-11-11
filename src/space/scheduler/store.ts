@@ -90,7 +90,7 @@ type RunRow = {
 type EventRow = { id: number; name: string; app: string; data: string; at: number; peer: string | null };
 
 const MAX_RUNS_PER_TASK = 500;
-/** Events older than this are dropped on insert (`SPACE_EVENTS_RETENTION`, days). */
+/** Events older than this are dropped on insert (`SPACE_EVENTS_RETENTION_DAYS`, days). */
 export const DEFAULT_EVENT_RETENTION_MS = 30 * 24 * 3_600_000;
 /** Hard cap on the events table whatever the retention, so a runaway publisher cannot fill the disk. */
 export const MAX_EVENTS = 50_000;

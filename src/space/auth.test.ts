@@ -68,3 +68,11 @@ describe("the owner's session", () => {
     expect(await identify(req(), { token: "op" })).toBeUndefined();
   });
 });
+
+test("a request the gate marked as the owner's is the operator even with its own bearer (a device credential)", async () => {
+  const { identify, markOwner, OPERATOR } = await import("./auth.ts");
+  const req = new Request("http://127.0.0.1/api/tasks", { headers: { authorization: "Bearer spd_device" } });
+  expect(await identify(req, { token: "op" })).toBeUndefined();
+  markOwner(req);
+  expect((await identify(req, { token: "op" })) === OPERATOR).toBe(true);
+});

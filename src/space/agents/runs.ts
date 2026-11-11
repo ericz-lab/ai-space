@@ -105,6 +105,8 @@ CREATE INDEX IF NOT EXISTS agent_runs_started ON agent_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS agent_runs_agent ON agent_runs(agent, started_at DESC);
 `;
 
+type InfoRow = Omit<Row, "events">;
+
 type Row = {
   id: string;
   agent: string;
@@ -218,7 +220,7 @@ export class RunRegistry {
   get(id: string): RunInfo | null {
     const r = this.live.get(id);
     if (r) return { ...r.info };
-    const row = this.db.query<Row, [string]>("SELECT * FROM agent_runs WHERE id = ?").get(id);
+    const row = this.db.query<InfoRow, [string]>(`SELECT ${INFO_COLUMNS} FROM agent_runs WHERE id = ?`).get(id);
     return row ? fromRow(row) : null;
   }
 
@@ -230,8 +232,8 @@ export class RunRegistry {
     const since = filter.recentMs === undefined ? 0 : this.now() - filter.recentMs;
     const limit = Math.min(200, Math.max(1, filter.limit ?? 50));
     const rows = filter.agent
-      ? this.db.query<Row, [string, number, number]>("SELECT * FROM agent_runs WHERE agent = ? AND (status = 'running' OR finished_at >= ?) ORDER BY started_at DESC LIMIT ?").all(filter.agent, since, limit)
-      : this.db.query<Row, [number, number]>("SELECT * FROM agent_runs WHERE status = 'running' OR finished_at >= ? ORDER BY started_at DESC LIMIT ?").all(since, limit);
+      ? this.db.query<InfoRow, [string, number, number]>(`SELECT ${INFO_COLUMNS} FROM agent_runs WHERE agent = ? AND (status = 'running' OR finished_at >= ?) ORDER BY started_at DESC LIMIT ?`).all(filter.agent, since, limit)
+      : this.db.query<InfoRow, [number, number]>(`SELECT ${INFO_COLUMNS} FROM agent_runs WHERE status = 'running' OR finished_at >= ? ORDER BY started_at DESC LIMIT ?`).all(since, limit);
     return rows.map((row) => {
       const r = this.live.get(row.id);
       return r ? { ...r.info } : fromRow(row);
@@ -290,13 +292,6 @@ export class RunRegistry {
     const r = this.live.get(id);
     if (!r || r.info.status !== "running" || r.ending || !r.handle.respond) return false;
     return r.handle.respond(requestId, decision, answers);
-  }
-
-  /** Number of runs still going. */
-  get active(): number {
-    let n = 0;
-    for (const r of this.live.values()) if (r.info.status === "running") n++;
-    return n;
   }
 
   /**
@@ -479,7 +474,10 @@ function parseEvents(text: string | null): RunEvent[] {
   }
 }
 
-function fromRow(row: Row): RunInfo {
+/** A run's row without `events`, which can be megabytes and only a replay reads. */
+const INFO_COLUMNS = "id, agent, session_id, sid, message, runtime, model, status, error, started_at, finished_at, last_seq, trigger";
+
+function fromRow(row: InfoRow): RunInfo {
   return {
     id: row.id,
     agent: row.agent,

@@ -201,21 +201,26 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
 
   useEffect(() => {
     if (!open) return;
+    let live = true;
     const load = () =>
       Promise.all([getJson<UsageInfo>(`/api/model/usage?window=${window}`), getJson<{ calls: CallInfo[] }>("/api/model/calls?limit=30")])
         .then(([u, c]) => {
+          if (!live) return;
           setUsage(u);
           setCalls(c.calls || []);
           setErr("");
         })
-        .catch((e) => setErr(String((e as Error).message || e)));
+        .catch((e) => live && setErr(String((e as Error).message || e)));
     load();
     getJson<{ apps: AppInfo[] }>("/api/apps?all=1")
       // Keyed by id: a peer's app is `<peer>/<app>`, as its calls are.
       .then((d) => setApps(Object.fromEntries((d.apps || []).map((a) => [a.id || a.name, { title: a.title, ...(a.i18n ? { i18n: a.i18n } : {}) }]))))
       .catch(() => {});
     const timer = setInterval(load, 30_000);
-    return () => clearInterval(timer);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
   }, [open, window]);
 
   useEffect(() => {

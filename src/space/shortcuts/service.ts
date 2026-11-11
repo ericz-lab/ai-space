@@ -106,11 +106,16 @@ export class Shortcuts {
       }
     };
     for (const a of this.opts.bus.capabilities()) add(a);
-    for (const a of this.opts.peers?.capabilities() ?? []) add(a, a.peer);
+    for (const a of this.peerCapabilities()) add(a, a.peer);
     // The slots nobody fills yet: shown so the operator sees what is missing.
     for (const t of TEMPLATES) if (!filled.has(t)) out.push(missingTemplate(t));
     const saved = this.store.patterns();
     return out.map((a) => ({ ...a, customPatterns: saved.find((p) => p.action === a.id && p.peer === (a.peer ?? ""))?.patterns ?? [] }));
+  }
+
+  /** The peers' catalogues with each app under its own name: the hub lists it as `<peer>/<app>`, and an action names its peer apart. */
+  private peerCapabilities(): (AppCapabilities & { peer: string })[] {
+    return (this.opts.peers?.capabilities() ?? []).map((a) => (a.app.startsWith(`${a.peer}/`) ? { ...a, app: a.app.slice(a.peer.length + 1) } : a));
   }
 
   setPatterns(id: string, peer: string | undefined, raw: unknown): void {
@@ -128,7 +133,7 @@ export class Shortcuts {
     const all = this.opts.scheduler?.listTasks() ?? [];
     const tasks = [...all.filter((t) => !backup(t)), ...all.filter(backup)];
     const ratesHere = !!this.opts.bus.capability(this.rates.app, this.rates.capability);
-    const ratesPeer = (this.opts.peers?.capabilities() ?? []).some((a) => a.app === this.rates.app && a.provides.some((c) => c.name === this.rates.capability));
+    const ratesPeer = this.peerCapabilities().some((a) => a.app === this.rates.app && a.provides.some((c) => c.name === this.rates.capability));
     return [
       {
         ...CALC,
@@ -421,7 +426,7 @@ export class Shortcuts {
       status = r.status;
       text = new TextDecoder().decode(r.body);
     } else {
-      const peer = (this.opts.peers?.capabilities() ?? []).find((a) => a.app === app && a.provides.some((c) => c.name === capability));
+      const peer = this.peerCapabilities().find((a) => a.app === app && a.provides.some((c) => c.name === capability));
       if (!peer || !this.opts.peers) throw new Error(`no ${app}/${capability} capability on this space or its peers`);
       ({ status, body: text } = await this.opts.peers.call(peer.peer, app, capability, "{}"));
     }

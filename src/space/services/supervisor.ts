@@ -176,11 +176,6 @@ export class Supervisor {
     return { app, supervisor: this.opts.mode, unit, scope, managed, ...(state ? { state } : {}), ...(last ? { last } : {}) };
   }
 
-  /** The last apply of every app. */
-  results(): ApplyResult[] {
-    return [...this.last.values()];
-  }
-
   lastOf(app: string): ApplyResult | undefined {
     return this.last.get(app);
   }

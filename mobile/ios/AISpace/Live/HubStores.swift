@@ -752,7 +752,15 @@ final class ChatStore: ObservableObject {
                 reply.activity = .reconnecting
                 show()
                 try await Task.sleep(nanoseconds: 1_000_000_000)
-                (_, stream) = try await api.events("GET", "\(base)/runs/\(SpacePath.escape(run))/events?after=\(lastSeq)")
+                do {
+                    (_, stream) = try await api.events("GET", "\(base)/runs/\(SpacePath.escape(run))/events?after=\(lastSeq)")
+                } catch SpaceAPIError.authenticationRequired {
+                    throw SpaceAPIError.authenticationRequired
+                } catch {
+                    // A reopen that fails is one of the tries, not the end of the turn: the run goes on on the Space.
+                    if Task.isCancelled { break }
+                    stream = AsyncThrowingStream { $0.finish() }
+                }
             }
         } catch {
             if !Task.isCancelled { reply.note = "⚠️ " + HubStore.message(error) }

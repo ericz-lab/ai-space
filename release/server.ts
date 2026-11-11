@@ -22,7 +22,7 @@ export const INCLUDE = ["src/", "skills/", "bin/", "deploy/", "docs/", "package.
 
 /** Whether a committed path goes into the archive. */
 export function included(path: string): boolean {
-  if (/\.test\.ts$/.test(path)) return false;
+  if (/\.test\.tsx?$/.test(path)) return false;
   return INCLUDE.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p));
 }
 

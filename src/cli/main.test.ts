@@ -181,6 +181,11 @@ describe("other nouns", () => {
     expect(r.err[0]).toBe("notify: n1 default=queued");
     const alias = await runCli(["notify", "--app", "demo", "hi"], (t) => t.scripted.reply({ status: 202, body: { ok: true, notification: { id: "n2", deliveries: [] } } }));
     expect(alias.calls[0]).toMatchObject({ body: { app: "demo", text: "hi" } });
+    // --url after `notify send` is the notification's link, never the address the token is sent to.
+    const link = await runCli(["notify", "send", "--app", "demo", "--url", "https://example.test/r/1", "hi"], (t) => t.scripted.reply({ status: 202, body: { ok: true, notification: { id: "n3", deliveries: [] } } }));
+    expect(link.calls[0]).toMatchObject({ url: "http://127.0.0.1:8700/api/notify", body: { app: "demo", text: "hi", url: "https://example.test/r/1" } });
+    const both = await runCli(["--url", "http://127.0.0.1:8701", "notify", "--app", "demo", "--url=https://example.test/r/2", "hi"], (t) => t.scripted.reply({ status: 202, body: { ok: true, notification: { id: "n4", deliveries: [] } } }));
+    expect(both.calls[0]).toMatchObject({ url: "http://127.0.0.1:8701/api/notify", body: { url: "https://example.test/r/2" } });
     const noApp = await runCli(["notify", "send", "hi"]);
     expect(noApp.code).toBe(EXIT.usage);
     expect(noApp.err[0]).toContain("--app is required");
