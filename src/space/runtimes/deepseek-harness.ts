@@ -350,7 +350,10 @@ function chatStream(bin: string[], profile: string, patch: string, t: ChatTurn, 
       dir = await mkdtemp(join(tmpdir(), "space-dsh-"));
       const file = join(dir, "patch.yml");
       await writeFile(file, patch, { mode: 0o600 });
-      if (killed) return cb.onFinish("aborted");
+      if (killed) {
+        await cleanup();
+        return cb.onFinish("aborted");
+      }
       const args = [...bin, "--profile", profile, "--patch", file, "--json", ...(t.sessionId ? ["--session-id", t.sessionId] : []), t.message];
       proc = Bun.spawn(args, { cwd: t.cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     } catch (e) {

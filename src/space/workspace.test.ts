@@ -51,3 +51,14 @@ describe("workspace", () => {
     expect(await loadWorkspaceEnv(workspacePaths("/nope"), env)).toBe(0);
   });
 });
+
+test("a value setup quoted reads back as it was written", async () => {
+  const { quoteEnvValue } = await import("./setup.ts");
+  const home = await mkdtemp(join(tmpdir(), "space-env-"));
+  const ws = workspacePaths(home);
+  const values = { A: 'pa"ss word', B: "back\\slash here", C: "plain", D: "it's" };
+  await writeFile(ws.envFile, Object.entries(values).map(([k, v]) => `${k}=${quoteEnvValue(v)}`).join("\n"));
+  const env: Record<string, string | undefined> = {};
+  await loadWorkspaceEnv(ws, env);
+  expect(env).toEqual(values);
+});

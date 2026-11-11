@@ -67,7 +67,7 @@ A database is identified by a URL. The scheme selects the backend:
 | `sqlite:///abs/path/app.db` | SQLite through Bun's built-in client (`bun:sqlite` underneath). Default. |
 | `postgres://user:pass@host:5432/db` | PostgreSQL through Bun's built-in client. No driver dependency. |
 
-`SPACE_DB_URL` sets ai-space's own database (default `sqlite:///<workspace>/data/space.db`). Per-app databases follow the app's `space.yaml` declaration (see [Registering](#registering-storage-in-spaceyaml)): `sqlite` yields `<workspace>/data/<app>/app.db`; `postgres` creates a database named after the app on the server given by `SPACE_PG_ADMIN_URL`, with its own role and password, and writes the resulting URL into `space.env`.
+`SPACE_DB` sets the path of ai-space's own SQLite file (default `<workspace>/data/space.db`). Per-app databases follow the app's `space.yaml` declaration (see [Registering](#registering-storage-in-spaceyaml)): `sqlite` yields `<workspace>/data/<app>/main.db`; `postgres` creates a database named after the app on the server given by `SPACE_PG_ADMIN_URL`, with its own role and password, and writes the resulting URL into `space.env`.
 
 ### Client
 
@@ -251,7 +251,7 @@ The implementation plan lives in [backup.md](backup.md); it supersedes this sect
 | `space.yaml`, `space.env` | Included | Small, and needed to restore an app in one step. |
 | Workspace `.env` | Never | Secrets stay out of backups. Recreate from the password manager. |
 
-Snapshots are compressed with zstd, named `backups/<app>/<yyyy>/<yyyy-mm-ddThh-mm>Z.tar.zst`, uploaded to `SPACE_BACKUP_URL` (falls back to `SPACE_BLOB_URL`), and recorded in a `backups` table with size, sha256, duration and which sources were included. The staging directory is emptied afterwards, so peak disk use is one uncompressed snapshot.
+Snapshots are compressed with zstd, named `backups/<app>/<yyyy>/<yyyy-mm-ddThh-mm>Z.tar.zst`, uploaded to `SPACE_BACKUP_URL` (default `s3://<SPACE_S3_BUCKET>/backups/<SPACE_NAME>/` when S3 is configured; backups are off otherwise), and recorded in a `backups` table with size, sha256, duration and which sources were included. The staging directory is emptied afterwards, so peak disk use is one uncompressed snapshot.
 
 ### Schedule and retention
 
@@ -305,9 +305,9 @@ Sync is idempotent. Changing `database` from `sqlite` to `postgres` provisions t
 ## Configuration
 
 ```
-SPACE_DB_URL              ai-space's database        default sqlite:///<workspace>/data/space.db
+SPACE_DB                  ai-space's database file   default <workspace>/data/space.db
 SPACE_BLOB_URL            ai-space's blob store       default file:///<workspace>/data/blobs
-SPACE_BACKUP_URL          where snapshots go           default SPACE_BLOB_URL
+SPACE_BACKUP_URL          where snapshots go           default s3://<SPACE_S3_BUCKET>/backups/<SPACE_NAME>/ with S3, else off
 SPACE_BACKUP_SCHEDULE     ai-space's own backup        default "0 3 * * *"
 SPACE_PG_ADMIN_URL        superuser URL used only to create per-app databases and roles
 SPACE_S3_ENDPOINT         e.g. https://<account>.r2.cloudflarestorage.com, http://127.0.0.1:9000
@@ -352,7 +352,7 @@ The scheduler's `store.ts` moves onto `openDatabase` in the same change that int
 ## Migrating an app
 
 1. Declare `storage` in the app's `space.yaml` and re-sync. Read `DATABASE_URL` and `BLOB_URL` from `space.env` instead of hard-coded paths.
-2. For an app that already has a SQLite file: move it to `<workspace>/data/<app>/app.db` (or set `database: sqlite` and copy the file in before the first start). Nothing else changes; the app keeps its own schema and driver.
+2. For an app that already has a SQLite file: move it to `<workspace>/data/<app>/main.db` (or set `database: sqlite` and copy the file in before the first start). Nothing else changes; the app keeps its own schema and driver.
 3. For an app that already keeps objects in a bucket: declare `blobs: { backend: s3, bucket: <its bucket>, prefix: "" }` (or the prefix it already uses), point the app's S3 client at `BLOB_URL` and the `S3_*` variables instead of its own credential names, and keep the old names as a fallback for one release. Files that live in the app directory today (uploads, generated images, exports) move into the store with a one-off copy; the app records the new key where it used to store a path.
 4. Turn on `backup` and check the first snapshot in `/api/tasks` and the `backups` table. Run a `restore --to` into a temporary directory once to confirm the round trip.
 5. Consider `database: postgres` only when the app needs several writers or lives on more than one machine. The rules in [Portable SQL](#portable-sql) make the switch a configuration change for TypeScript apps that used the client from the start.

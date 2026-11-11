@@ -52,8 +52,8 @@ import java.text.Collator
 
 /**
  * The texts the stores write themselves (an error's words, a note in a chat reply, a line in a
- * terminal), from the app's resources. Bound by the Space's pages before any store speaks
- * (`HubCover`); the application's resources, so no activity is held.
+ * terminal), from the app's resources. Bound by the application at start, before any store
+ * speaks; the application's resources, so no activity is held.
  */
 object HubText {
     @Volatile

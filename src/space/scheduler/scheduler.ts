@@ -296,11 +296,14 @@ export class Scheduler {
     this.timer = null;
     if (!this.started) return;
     const now = this.now();
+    // With every slot taken a task already due cannot start, and a tick for it would re-arm at once and spin;
+    // the run that frees a slot ticks again.
+    const full = this.inflight.size >= this.maxConcurrency;
     let nextAt: number | undefined;
     for (const t of this.store.listTasks()) {
       if (!effectiveEnabled(t) || t.state.runningAt !== undefined) continue;
       const at = dueAt(t);
-      if (at === Number.POSITIVE_INFINITY) continue;
+      if (at === Number.POSITIVE_INFINITY || (full && at <= now)) continue;
       if (nextAt === undefined || at < nextAt) nextAt = at;
     }
     if (nextAt === undefined) return;

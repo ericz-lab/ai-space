@@ -76,7 +76,6 @@ export type DeliveryKind = "http" | "stream";
  * ok: answered 2xx / acked; dead: given up; skipped: the app or its service was gone when it was due.
  */
 export type DeliveryStatus = "pending" | "sent" | "ok" | "dead" | "skipped";
-export const FINAL_DELIVERY_STATUSES: readonly DeliveryStatus[] = ["ok", "dead", "skipped"];
 
 export type Delivery = {
   id: number;

@@ -338,3 +338,35 @@ test("manifest patterns validate slots and preserve backwards compatibility", ()
   expect(parseProvidesSpec({ news: { http: { path: "/news" }, action } })[0]!.action?.patterns).toBeUndefined();
   expect(() => parseProvidesSpec({ news: { http: { path: "/news" }, action: { ...action, patterns: ["news{other}"] } } })).toThrow(/Unknown input/);
 });
+
+test("an action on a peer is listed under the app's own name and called on that peer", async () => {
+  const events = new Store(":memory:");
+  const busStore = new BusStore(":memory:");
+  const store = new ShortcutStore(":memory:");
+  const bus = new Bus({ store: busStore, events, servicePort: () => undefined, fetch: async () => new Response("{}"), log: () => {}, now: () => NOW });
+  const calls: string[] = [];
+  const shortcuts = new Shortcuts({
+    store,
+    bus,
+    now: () => NOW,
+    waitMs: 2_000,
+    peers: {
+      // As the hub lists a peer's catalogue: the app under `<peer>/<app>`.
+      capabilities: () => [{ app: "other/feed", peer: "other", provides: NEWS, publishes: [], consumes: [] }],
+      call: async (peer, app, capability) => {
+        calls.push(`${peer}:${app}/${capability}`);
+        return { status: 200, body: JSON.stringify({ ok: true, items: [] }) };
+      },
+    },
+  });
+  try {
+    expect(shortcuts.catalogue().find((a) => a.peer === "other")).toMatchObject({ id: "feed/news", app: "feed" });
+    await shortcuts.start({ action: "feed/news", peer: "other", args: { period: "today" }, timezone: TZ });
+    await shortcuts.idle();
+    expect(calls).toEqual(["other:feed/news"]);
+  } finally {
+    store.close();
+    busStore.close();
+    events.close();
+  }
+});

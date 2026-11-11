@@ -35,10 +35,6 @@ export function parseEventInput(app: string, raw: Record<string, unknown>): Even
   return { app, name, data: data as Record<string, unknown> };
 }
 
-export function qualifiedName(input: { app: string; name: string }): string {
-  return `${input.app}/${input.name}`;
-}
-
 /** Does one trigger accept the event? Name first, then every filter field. */
 export function matches(trigger: EventTrigger, event: SpaceEvent): boolean {
   const slash = trigger.event.indexOf("/");

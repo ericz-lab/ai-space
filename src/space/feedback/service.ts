@@ -164,7 +164,7 @@ export class FeedbackService {
 
   counts(): Record<Status, number> {
     const out = Object.fromEntries(STATUSES.map((s) => [s, 0])) as Record<Status, number>;
-    for (const r of this.store.list({ limit: 500 })) out[r.status]++;
+    for (const [status, n] of this.store.counts()) if (status in out) out[status] = n;
     return out;
   }
 

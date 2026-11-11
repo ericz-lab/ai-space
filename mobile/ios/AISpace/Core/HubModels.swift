@@ -847,7 +847,7 @@ struct CapabilityApp: Decodable, Hashable, Identifiable {
     var isEmpty: Bool { (provides ?? []).isEmpty && (publishes ?? []).isEmpty && (consumes ?? []).isEmpty }
 }
 
-// MARK: Packages and connections (docs/packages.md)
+// MARK: Packages and connections (docs/app-packages.md)
 
 struct PackageApp: Decodable, Hashable, Identifiable {
     var app: String

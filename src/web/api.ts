@@ -128,8 +128,6 @@ export type PeerInfo = {
   services: number;
 };
 
-export type Layout = { order: { apps: string[]; agents: string[]; widgets: string[] }; hidden: string[]; sizes: Record<string, string> };
-
 export type ChatSession = { sid: string; title: string; ts: number; runtime?: string | null; model?: string | null };
 /** A chat turn running, or run, in the background on the server (src/space/agents/runs.ts). */
 export type ChatRun = {

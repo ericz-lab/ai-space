@@ -1,6 +1,6 @@
 # Native macOS desktop proposal
 
-Status: in progress in `desktop/macos/` (see [Native-first client](#native-first-client) and [Build and run](#build-and-run)). Hub and Peer configuration and the managed local installation remain proposals; none of their APIs exist yet.
+Status: in progress in `desktop/macos/` (see [Native-first client](#native-first-client) and [Build and run](#build-and-run)). Hub and Peer configuration remains a proposal; the managed local installation is implemented ([local.md](local.md)).
 
 Build a Mac application with SwiftUI and AppKit for the desktop interface, WKWebView for the existing React panel, and the existing Bun service for all Space operations. Ship a client for an already running Space first. Add a managed local installation only after the client works reliably.
 

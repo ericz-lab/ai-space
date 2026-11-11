@@ -35,7 +35,7 @@ Advanced. Use the lowercase aliases in configuration and API requests.
 | --- | --- | --- | --- |
 | Basic | `basic` | Haiku: `haiku` | Luna: `gpt-6-luna` |
 | Junior | `junior` | Sonnet: `sonnet` | Terra: `gpt-5.6-terra` |
-| Intermediate | `intermediate` | Opus: `opus` | Sol: `gpt-6-sol` |
+| Intermediate | `intermediate` | Opus: `opus` | Sol: `gpt-6.1-sol` |
 | Advanced | `advanced` | Fable: `fable` | Astra: `gpt-6-astra` |
 
 These are ai-space routing conventions. They are not provider-defined equivalence
@@ -74,7 +74,7 @@ codex/advanced
 The prefix is a configured runtime name, not necessarily a provider name. A runtime
 named `remote-codex` would be selected with `remote-codex/intermediate`.
 
-Concrete model identifiers also work, for example `codex/gpt-6-sol`. Such requests
+Concrete model identifiers also work, for example `codex/gpt-6.1-sol`. Such requests
 bypass the tier mapping. A bare name, such as `intermediate` or `sonnet`, uses the
 runtime named by `default` in `runtimes.yaml`. Explicit prefixes make application
 behavior easier to preserve when the workspace default changes.
@@ -104,7 +104,7 @@ runtimes:
     models:
       basic: gpt-6-luna
       junior: gpt-5.6-terra
-      intermediate: gpt-6-sol
+      intermediate: gpt-6.1-sol
       advanced: gpt-6-astra
 ```
 
@@ -391,7 +391,7 @@ imported, agent/chat, or legacy selective-tool records may have no mode value.
 Absence of a mode on an old record does not mean the call ran in full mode.
 
 The ledger also records the runtime name and resolved model identifier separately.
-For example, `codex/intermediate` resolves to runtime `codex` and model `gpt-6-sol`.
+For example, `codex/intermediate` resolves to runtime `codex` and model `gpt-6.1-sol`.
 A Claude tier can resolve to a CLI alias such as `opus`; that is the identifier sent
 to the CLI, not necessarily a provider version independently discovered by ai-space.
 

@@ -10,7 +10,6 @@
     <string name="omnibox_ask_assistant">询问空间助手</string>
     <string name="omnibox_agent_busy">此智能体仍在回复，请打开它的对话继续。</string>
     <string name="omnibox_result">结果</string>
-    <string name="omnibox_copied">已复制</string>
     <string name="omnibox_retry">重试</string>
     <string name="omnibox_create">创建</string>
     <string name="omnibox_run">运行</string>

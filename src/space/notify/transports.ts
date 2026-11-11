@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { DINGTALK_MARKDOWN, DISCORD_MARKDOWN, HTML, PLAIN, SLACK_MRKDWN, renderFields, renderText, splitParts, splitText, truncate } from "./render.ts";
+import { DINGTALK_MARKDOWN, DISCORD_MARKDOWN, HTML, PLAIN, SLACK_MRKDWN, escapeHtml, renderFields, renderText, splitParts, splitText, truncate } from "./render.ts";
 import type { Channel, Level, Notification } from "./types.ts";
 
 /**
@@ -57,6 +57,13 @@ export const TRANSPORTS: Record<Channel["kind"], Transport> = {
 
 // ---------------------------------------------------------------- telegram
 
+/** Plain text as an HTML caption of at most `max` characters once escaped: the headline is sent with `parse_mode: HTML`. */
+export function htmlCaption(plain: string, max: number): string {
+  let cut = truncate(plain, max);
+  while (escapeHtml(cut).length > max) cut = truncate(cut, cut.length - (escapeHtml(cut).length - max));
+  return escapeHtml(cut);
+}
+
 async function sendTelegram(out: Outgoing, fetch: Fetch): Promise<SendResult> {
   const t = out.channel.telegram!;
   const text = renderText(out.notification, out.appTitle, HTML);
@@ -70,7 +77,7 @@ async function sendTelegram(out: Outgoing, fetch: Fetch): Promise<SendResult> {
     let textParts = parts;
     const image = out.image ?? (out.notification.imageUrl ? { url: out.notification.imageUrl } : undefined);
     if (image) {
-      const caption = parts.length === 1 && text.length <= TELEGRAM_CAPTION_MAX ? text : truncate(splitParts(out.notification, out.appTitle).headline, TELEGRAM_CAPTION_MAX);
+      const caption = parts.length === 1 && text.length <= TELEGRAM_CAPTION_MAX ? text : htmlCaption(splitParts(out.notification, out.appTitle).headline, TELEGRAM_CAPTION_MAX);
       const form = new FormData();
       for (const [k, v] of Object.entries(common)) form.set(k, String(v));
       form.set("caption", caption);

@@ -159,7 +159,7 @@ export function remoteCommand(bin: string[], input: CompleteInput, stream = fals
   if (bad) return { bad };
   const system = Buffer.from(input.system, "utf8").toString("base64");
   const env = input.thinking === undefined ? [] : [`MAX_THINKING_TOKENS=${Math.trunc(input.thinking)}`];
-  const parts = [...env, ...words, ...(input.mode === "full" && !tools ? [] : ["--tools", tools ? tools : '""', ...(tools ? ["--allowedTools", tools] : [])]), ...(input.system ? ["--system-prompt", `"$(printf %s ${system} | base64 -d)"`] : [])];
+  const parts = [...env, ...words, ...(input.mode === "full" && !tools ? [] : ["--tools", `"${tools ?? ""}"`, ...(tools ? ["--allowedTools", `"${tools}"`] : [])]), ...(input.system ? ["--system-prompt", `"$(printf %s ${system} | base64 -d)"`] : [])];
   // The prompt is spooled to a file before the CLI starts: the CLI gives up on stdin after 3 s,
   // and a prompt of a few hundred KB can take longer than that to cross a slow ssh link.
   if (!blobs.length) return { command: `f=$(mktemp) && cat > "$f" && ${parts.join(" ")} < "$f"; rc=$?; rm -f "$f"; exit $rc` };

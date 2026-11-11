@@ -28,7 +28,9 @@ final class VoiceInput: NSObject, ObservableObject, AVAudioRecorderDelegate {
         self.api = api
         if let known = Self.known[api.base] { state = known ? (state == .unavailable ? .idle : state) : .unavailable; return }
         struct Answer: Decodable { var transcribe: Bool? }
-        let can = (try? await api.get("/api/voice", as: Answer.self))?.transcribe ?? false
+        // Only an answer is remembered: a request that failed (signed out, offline) is asked again next time.
+        guard let answer = try? await api.get("/api/voice", as: Answer.self) else { return }
+        let can = answer.transcribe ?? false
         Self.known[api.base] = can
         if state == .unavailable, can { state = .idle }
     }

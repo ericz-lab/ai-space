@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { MANIFEST_FILE } from "../scheduler/manifest.ts";
 import type { Workspace } from "../workspace.ts";
@@ -66,12 +66,6 @@ export async function createLinkApp(ws: Workspace, app: LinkApp): Promise<string
   await mkdir(dir, { recursive: true });
   await Bun.write(join(dir, MANIFEST_FILE), linkManifest(app));
   return dir;
-}
-
-/** Remove a manifest-only app directory. The caller has checked it is one. */
-export async function removeLinkApp(ws: Workspace, name: string): Promise<void> {
-  if (!NAME_RE.test(name)) throw new Error("invalid app name");
-  await rm(join(ws.apps, name), { recursive: true, force: true });
 }
 
 /**

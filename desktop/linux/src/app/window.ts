@@ -8,6 +8,7 @@ import { type Agent, type Entry, pageUrl, pickText } from "../core/catalogue.ts"
 import type { DeepLink, InboxItem } from "../core/desktop.ts";
 import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
+import { sameOrigin } from "../core/url.ts";
 import { ChatPage } from "./chat-page.ts";
 import { lang, openExternally, prefs, savePrefs, t } from "./env.ts";
 import { type Builtin, HomePage } from "./home.ts";
@@ -373,7 +374,8 @@ export class MainWindow {
   /** A link: another app's tab, a page of the Space, or the browser. */
   openUrl(space: Space, url: string): void {
     const absolute = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `${space.client.base}${url.startsWith("/") ? "" : "/"}${url}`;
-    if (absolute.startsWith(space.client.base)) {
+    // By origin, not by prefix: `https://space.example.com.evil.net` starts with the Space's address too.
+    if (sameOrigin(absolute, space.client.base)) {
       const before = this.tabs.count;
       this.tabs.route(space, absolute);
       if (this.tabs.count === before) this.tabs.open({ space, url: absolute, title: t("panel"), key: `url:${absolute}` });

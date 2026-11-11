@@ -195,7 +195,7 @@ space backup ls                       # 每个 app 数据的快照
 
 后续工作，大致按顺序：
 
-- [ ] **托管交接**：`space app supervise <app>`，带健康检查和失败回滚；unit 里的资源上限。
+- [ ] **资源上限**：受托管应用的 unit 里的资源上限。
 - [ ] **Skills 挂载**：把 manifest 里的 `skills:` 和 `memory:` 提供给 agent 会话。共享 skill 和各 app 的 skill 已经链接到 `<workspace>/.claude/skills/`。
 - [ ] **托管 blob API**：在已经开通的对象存储之上加索引表、流式路由和预签名。
 - [ ] **App 工具链**：`schema/space.schema.json`、`validate` 和 `/api/spec`。

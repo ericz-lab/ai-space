@@ -58,11 +58,13 @@ async function exists(path: string): Promise<boolean> {
   );
 }
 
-async function files(dir: string, rel = ""): Promise<string[]> {
+/** Every file under `dir`, never descending into a name in `skip` (dependencies and Git history are large). */
+async function files(dir: string, skip: Set<string> = new Set(), rel = ""): Promise<string[]> {
   const out: string[] = [];
   for (const e of await readdir(join(dir, rel), { withFileTypes: true })) {
+    if (skip.has(e.name)) continue;
     const p = rel ? `${rel}/${e.name}` : e.name;
-    if (e.isDirectory()) out.push(...(await files(dir, p)));
+    if (e.isDirectory()) out.push(...(await files(dir, skip, p)));
     else if (e.isFile()) out.push(p);
   }
   return out;
@@ -180,8 +182,7 @@ export async function listSources(d: StudioDeps): Promise<StudioApp[]> {
     const built = installed ? await stat(join(d.ws.run, "studio", `${app}-${installed.version}.spaceapp`)).then((s) => s.mtimeMs, () => 0) : 0;
     let changed = !installed;
     if (installed) {
-      for (const f of await files(dir)) {
-        if (f.split("/").some((p) => EXCLUDE.has(p))) continue;
+      for (const f of await files(dir, EXCLUDE)) {
         if ((await stat(join(dir, f))).mtimeMs > built) {
           changed = true;
           break;

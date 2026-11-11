@@ -182,6 +182,11 @@ export class FeedbackStore {
       .map(fromRow);
   }
 
+  /** How many rows are in each state. */
+  counts(): [Status, number][] {
+    return this.db.query<{ status: Status; n: number }, []>("SELECT status, COUNT(*) AS n FROM feedback GROUP BY status").all().map((r) => [r.status, r.n]);
+  }
+
   /** How many came from one app since `since`: the hourly cap. */
   countSince(app: string, since: number): number {
     return this.db.query<{ n: number }, [string, number]>("SELECT COUNT(*) AS n FROM feedback WHERE app = ? AND created_at >= ?").get(app, since)?.n ?? 0;

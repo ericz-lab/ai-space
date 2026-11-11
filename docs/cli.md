@@ -88,7 +88,7 @@ Rules:
 | `space model run [--app] [--model] [--tag] [--system] PROMPT\|-` | one call, the answer streamed to stdout (`stream: true`); `--json` for the whole answer with the ledger row | `POST /api/model/run` |
 | `space model import APP FILE` | today's `model-import` | disk |
 | `space usage [--window 30d] [--kind app\|agent\|builtin]` | opens and time in use per app, agent and built-in, by time and then opens; the panel's App usage ([usage.md](usage.md)) | `GET /api/usage` |
-| `space notify send [--level] [--title] [--wait] TEXT` | today's `notify`, same flags | `POST /api/notify` |
+| `space notify send [--level] [--title] [--url LINK] [--wait] TEXT` | today's `notify`, same flags | `POST /api/notify` |
 | `space notify ls [--app] [-n]` | history with deliveries | `GET /api/notifications` |
 | `space notify channels` / `test NAME` | channels and their state; a test message | `GET /api/notify/channels`, `POST .../test` |
 | `space backup run APP` | snapshot now, synchronously: the same code the daily task spawns | disk (`backup/cli.ts`) |
@@ -107,13 +107,13 @@ Rules:
 | `space codex-upgrade run [--dry-run] [--no-update] [--no-restart]` | update the Codex CLI, check each codex tier's model, restart so the catalogue gives the tiers ([runtimes.md](runtimes.md#keeping-codex-tiers-current)) | disk, ssh |
 | `space completion zsh\|bash` | a completion script from the same command table the help prints | |
 
-Global flags, before or after the noun: `--json`, `--url <api url>`, `--token <token>`, `-q` (no table header), `--help` at every level. `space` alone and `space <noun>` alone print the help of that level; a noun whose only verb takes no argument (`status`, `init`, `setup`, `start`) runs it.
+Global flags, before or after the noun: `--json`, `--url <api url>`, `--token <token>`, `-q` (no table header), `--help` at every level. One exception: after `notify send`, `--url` is the notification's link, so the API's address goes before `notify` there. `space` alone and `space <noun>` alone print the help of that level; a noun whose only verb takes no argument (`status`, `init`, `setup`, `start`) runs it.
 
 Two aggregate views deserve one line each. `space status` is composed in the CLI from six existing routes rather than from a new `/api/status`, because it is the only reader and the routes already answer in milliseconds from the health cache. `space model usage` prints the same table the panel does; the CLI is the place to check a bill from a task or a cron mail without opening a browser.
 
 ## The one new route: logs
 
-`space logs` was the one verb the API could not answer: service supervision (start, restart, log collection under `<workspace>/logs/<app>/`) is planned in [app-spec.md](app-spec.md#implementation-status) but not built, and apps run as user units today.
+`space logs` was the one verb the API could not answer: where an app's log lives depends on who runs it: the operator's command under `SPACE_SUPERVISOR=operator`, the unit's journal or log file under `space` ([supervision.md](supervision.md)).
 
 Rather than have the CLI shell out to `journalctl` itself (which would tie it to systemd and to the machine it runs on), the route went in first and hides where the log lives (`src/space/logs/`):
 

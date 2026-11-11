@@ -46,13 +46,12 @@ public partial class App
         _instance = new SingleInstance();
         if (!_instance.IsFirst)
         {
-            if (!OfferUpdate())
-            {
-                // Started again (Start menu, a link, the jump list): the running copy takes it from here.
-                SingleInstance.Send(e.Args.Length == 0 ? ["--show"] : e.Args);
-                Shutdown();
-                return;
-            }
+            // An accepted update has replaced or restarted the installed copy and shut this one down.
+            if (OfferUpdate()) return;
+            // Started again (Start menu, a link, the jump list): the running copy takes it from here.
+            SingleInstance.Send(e.Args.Length == 0 ? ["--show"] : e.Args);
+            Shutdown();
+            return;
         }
 
         ThemeMode = ThemeMode.System;

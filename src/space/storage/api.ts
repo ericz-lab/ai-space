@@ -1,5 +1,6 @@
 import { parseBackend, parseName } from "./spec.ts";
 import type { StorageService } from "./storage.ts";
+import { databaseEnvName } from "./types.ts";
 import { isOperator } from "../auth.ts";
 
 /**
@@ -51,14 +52,10 @@ export function createStorageRoutes(opts: StorageApiOptions): Routes {
         const name = parseName(body.name, "name");
         const backend = body.backend === undefined ? "sqlite" : parseBackend(body.backend, "backend");
         const d = await storage.addDatabase(parseName(req.params.app, "app"), name, backend);
-        return json({ ok: true, database: { name: d.name, backend: d.backend, source: d.source, env: envOf(d.name) } }, 201);
+        return json({ ok: true, database: { name: d.name, backend: d.backend, source: d.source, env: databaseEnvName(d.name) } }, 201);
       }),
     },
   };
-}
-
-function envOf(name: string): string {
-  return name === "main" ? "DATABASE_URL" : `DATABASE_URL_${name.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`;
 }
 
 function json(body: unknown, status = 200): Response {

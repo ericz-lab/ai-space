@@ -6,7 +6,7 @@ import system from "system";
 import { Application } from "./app/application.ts";
 
 /**
- * The Linux client: GJS runs this bundle (`gjs -m main.js`), built by desktop/linux/scripts/build.sh.
+ * The Linux client: GJS runs this bundle (`gjs -m main.js`), built by desktop/linux/build.ts.
  * The library versions are pinned above, before any module imports them unversioned.
  */
 const app = new Application();

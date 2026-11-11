@@ -195,7 +195,7 @@ In place: the scheduler (schedules and event triggers), the bus, storage (databa
 
 Next, roughly in order:
 
-- [ ] **Supervision hand-over**: `space app supervise <app>` with a health check and a rollback; resource limits in the unit.
+- [ ] **Resource limits** in the unit of a supervised app.
 - [ ] **Skills mounting**: make `skills:` and `memory:` from the manifest available to agent sessions. Shared and app skills are already linked into `<workspace>/.claude/skills/`.
 - [ ] **Managed blob API**: index table, streaming routes and presigning on top of the blob stores that are already provisioned.
 - [ ] **App tooling**: `schema/space.schema.json`, `validate` and `/api/spec`.

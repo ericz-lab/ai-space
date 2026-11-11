@@ -61,7 +61,7 @@ export function createRoutes(opts: ApiOptions): Routes {
       try {
         return await h(req);
       } catch (e) {
-        return error(400, (e as Error).message ?? String(e));
+        return error(e instanceof NotFound ? 404 : 400, (e as Error).message ?? String(e));
       }
     };
 

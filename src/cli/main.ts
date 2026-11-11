@@ -166,6 +166,8 @@ export function expandAlias(words: string[]): string[] {
 
 const GLOBAL_WORDS = new Set(["--json", "--quiet", "-q", "--help", "-h"]);
 const GLOBAL_VALUES = new Set(["--url", "--token"]);
+/** The verbs of `notify` that are not `send`, its default: only `send` has a `--url` of its own. */
+const NOTIFY_OTHER_VERBS = new Set(Object.keys(notifyNoun.verbs).filter((v) => v !== "send"));
 
 function splitGlobal(argv: string[]): { global: string[]; rest: string[] } {
   const global: string[] = [];
@@ -176,7 +178,10 @@ function splitGlobal(argv: string[]): { global: string[]; rest: string[] } {
       rest.push(...argv.slice(i));
       break;
     }
+    // `notify send --url <link>` is the notification's link; the API's address goes before `notify` there.
+    const own = (a === "--url" || a.startsWith("--url=")) && rest[0] === "notify" && !NOTIFY_OTHER_VERBS.has(rest[1] ?? "");
     if (GLOBAL_WORDS.has(a)) global.push(a);
+    else if (own) rest.push(a);
     else if (GLOBAL_VALUES.has(a)) global.push(a, argv[++i] ?? "");
     else if ([...GLOBAL_VALUES].some((g) => a.startsWith(`${g}=`))) global.push(a);
     else rest.push(a);
@@ -198,8 +203,8 @@ export function help(): string[] {
 export function nounHelp(noun: Noun): string[] {
   const entries = Object.entries(noun.verbs);
   if (entries.length === 1 && noun.defaultVerb) {
-    const [name, v] = entries[0]!;
-    return [`usage: space ${noun.name} ${v.usage}`.trim(), "", `  ${v.summary}`].concat(name === noun.defaultVerb ? [] : []);
+    const [, v] = entries[0]!;
+    return [`usage: space ${noun.name} ${v.usage}`.trim(), "", `  ${v.summary}`];
   }
   // Long usages get their summary on the next line so the table stays readable.
   const MAX = 56;

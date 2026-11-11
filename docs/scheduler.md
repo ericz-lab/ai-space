@@ -143,7 +143,6 @@ Pending events live in the task state in `space.db`, so a restart delivers them.
 
 - Events ai-space itself publishes (`space/task.finished`, `space/service.down`), with a loop guard.
 - External webhooks (`POST /api/hooks/:app/:hook` with a per-hook secret) turned into events.
-- Forwarding between peers (planned on the bus, see events.md).
 
 ## Registering tasks
 

@@ -126,7 +126,9 @@ export async function readWorkspaceEnv(ws: Workspace): Promise<Record<string, st
     if (eq <= 0) continue;
     const key = line.slice(0, eq).trim().replace(/^export\s+/, "");
     let value = line.slice(eq + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    // `setup` escapes `"` and `\` inside double quotes (quoteEnvValue); single quotes are literal.
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1).replace(/\\(["\\])/g, "$1");
+    else if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
     out[key] = value;
   }
   return out;

@@ -1082,7 +1082,6 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
 .modal h3 { font-size: 18px; font-weight: 700; display: flex; align-items: baseline; gap: 10px; }
 .modal-sub { font-size: 12px; font-weight: 400; color: var(--muted); }
 .field { margin-top: 12px; flex: 1; }
-.field-row { display: flex; gap: 12px; }
 .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 5px; }
 .field input, .field select, .field textarea {
   width: 100%; border: 1px solid var(--glass-border); background: var(--glass);

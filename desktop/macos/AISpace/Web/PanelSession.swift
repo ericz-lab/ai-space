@@ -209,6 +209,8 @@ extension PanelSession: WKDownloadDelegate {
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        isLoading = false
+        hasContent = true
         downloads.removeValue(forKey: ObjectIdentifier(download))
         NSLog("ai-space: download failed: \(error.localizedDescription)")
     }

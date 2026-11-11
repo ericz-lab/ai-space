@@ -144,10 +144,15 @@ export class Inbox {
 
   /** Mark every thread read, optionally of one app. Returns how many changed. */
   readAll(now: number, app?: string): number {
-    const threads = this.list({ app, filter: "unread", limit: 500 }).map((i) => i.thread);
     let total = 0;
-    for (let i = 0; i < threads.length; i += 100) total += this.mark(threads.slice(i, i + 100), { read: true }, now);
-    return total;
+    // A page at a time until none is left unread; a page that changes nothing ends it.
+    for (;;) {
+      const threads = this.list({ app, filter: "unread", limit: 500 }).map((i) => i.thread);
+      let changed = 0;
+      for (let i = 0; i < threads.length; i += 100) changed += this.mark(threads.slice(i, i + 100), { read: true }, now);
+      total += changed;
+      if (threads.length < 500 || !changed) return total;
+    }
   }
 
   /** Drop state rows whose thread has no notification left (pruned by the per-app cap). */

@@ -271,7 +271,9 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
         if (!d) return error(404, `unknown delivery: ${req.params.id}`);
         if (d.status !== "dead" && d.status !== "skipped") return json({ ok: true, delivery: deliveryView(d), retried: false }, 409);
         const fresh = bus.retry(id);
-        return json({ ok: true, delivery: deliveryView(fresh ?? d), retried: true }, 202);
+        // Nothing was queued again when its consumer is gone.
+        if (!fresh || fresh.status === d.status) return json({ ok: true, delivery: deliveryView(fresh ?? d), retried: false }, 409);
+        return json({ ok: true, delivery: deliveryView(fresh), retried: true }, 202);
       }),
     },
 

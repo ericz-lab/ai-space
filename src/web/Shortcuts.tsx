@@ -9,7 +9,7 @@ import { type Action, type RunView, actionKey, actionText } from "./shortcuts.ts
 // going when the window closes; it is listed here with its status and result when it reopens.
 // An action that cannot run says what it is missing instead of disappearing.
 
-export default function Shortcuts({ open, onClose, onOpenTasks, focus }: { open: boolean; onClose: () => void; onOpenTasks: () => void; focus?: { action?: string; run?: number } }) {
+export default function Shortcuts({ open, onClose, onOpenTasks }: { open: boolean; onClose: () => void; onOpenTasks: () => void }) {
   const { lang, t } = useLang();
   const [actions, setActions] = useState<Action[] | null>(null);
   const [runs, setRuns] = useState<RunView[]>([]);
@@ -31,9 +31,7 @@ export default function Shortcuts({ open, onClose, onOpenTasks, focus }: { open:
       })
       .catch((e) => setErr(String((e as Error).message || e)));
     void loadRuns();
-    if (focus?.action) setSelected(focus.action);
-    if (focus?.run) setOpenRun(focus.run);
-  }, [open, focus]);
+  }, [open]);
   // Running runs are followed while the window is open.
   const running = runs.some((r) => r.status === "running");
   useEffect(() => {

@@ -47,7 +47,8 @@ export type Caller = typeof OPERATOR | { app: string };
  */
 export async function identify(req: Request, opts: { token: string; appForToken?: (token: string) => Promise<string | undefined> }): Promise<Caller | undefined> {
   const presented = bearer(req);
-  if (!presented && owners.has(req)) return OPERATOR;
+  // The gate marks the owner's session and a device credential, which is itself a bearer.
+  if (owners.has(req)) return OPERATOR;
   if (opts.token && tokenEquals(presented, opts.token)) return OPERATOR;
   if (presented && opts.appForToken) {
     const app = await opts.appForToken(presented);
