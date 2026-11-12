@@ -587,6 +587,28 @@ describe("shutdown", () => {
     // The run failed, but the task did not: no backoff on top of the next schedule.
     expect(after.state.consecutiveErrors).toBe(0);
   });
+
+  test("events a killed run carried are delivered again by the next process, ahead of newer ones", async () => {
+    // The first process starts the run and dies without finishing it.
+    const h = harness({ runner: () => new Promise(() => {}) });
+    h.s.syncManifest(h.manifest([mt("consume", { schedule: { kind: "manual" }, triggers: [{ event: "feed/x" }] })]));
+    const a = h.s.publish({ app: "feed", name: "x" }).event;
+    await h.s.tick();
+    expect(h.s.running()).toHaveLength(1);
+    const b = h.s.publish({ app: "feed", name: "x" }).event; // queued behind the run in flight
+    h.s.stop();
+
+    const seen: number[][] = [];
+    const next = new Scheduler({ store: h.store, now: h.at, log: () => {}, runner: async (_t, ctx) => (seen.push((ctx.events ?? []).map((e) => e.id)), { status: "ok" }) });
+    next.syncManifest(h.manifest([mt("consume", { schedule: { kind: "manual" }, triggers: [{ event: "feed/x" }] })]));
+    await next.start();
+    await next.idle();
+    expect(seen).toEqual([[a.id, b.id]]);
+    const runs = h.store.listRuns(h.store.findTask("demo", "consume")!.id);
+    expect(runs.map((r) => [r.error ?? "ok", r.eventIds])).toEqual([["ok", [a.id, b.id]], [INTERRUPTED, [a.id]]]);
+    expect(h.store.findTask("demo", "consume")!.state.runningEvents).toBeUndefined();
+    next.stop();
+  });
 });
 
 describe("task model overrides", () => {
