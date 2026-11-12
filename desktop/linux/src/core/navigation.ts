@@ -52,3 +52,16 @@ export function grantsMicrophone(kind: "microphone" | "camera" | "both", frame: 
   if (!u || (u.scheme !== "http" && u.scheme !== "https")) return false;
   return sameOrigin(frame, home) || sameOrigin(frame, connection);
 }
+
+/**
+ * A page whose web process ended is loaded again, after a wait that doubles with each crash in the
+ * last minute (1 s, 2 s, 4 s); a fourth crash within that minute gives up, so a page that crashes as
+ * it loads is not reloaded forever. `recent` is when the earlier crashes were; `null` means give up.
+ */
+export const CRASH_RELOAD = { limit: 3, windowMs: 60_000, firstDelayMs: 1_000 };
+
+export function crashReload(recent: readonly number[], now: number): { delayMs: number; recent: number[] } | null {
+  const kept = [...recent.filter((at) => now - at < CRASH_RELOAD.windowMs), now];
+  if (kept.length > CRASH_RELOAD.limit) return null;
+  return { delayMs: CRASH_RELOAD.firstDelayMs * 2 ** (kept.length - 1), recent: kept };
+}
