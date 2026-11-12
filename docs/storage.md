@@ -44,8 +44,7 @@ The API surface for apps is deliberately thin: two environment variables and a h
 ```
 ~/.ai-space/
 ├── data/
-│   ├── space.db                 ai-space's own database (scheduler, blob index, backup log)
-│   ├── blobs/                   filesystem blob backend for ai-space itself
+│   ├── space.db                 ai-space's own database (scheduler, storage inventory, backup log)
 │   └── <app>/
 │       ├── main.db              provisioned SQLite database (one file per declared name)
 │       ├── blobs/               provisioned filesystem blob store
@@ -169,7 +168,7 @@ Alternatives considered and rejected:
 | `file:///abs/dir` | Filesystem. Default. Keys map to paths under the directory. |
 | `s3://bucket/prefix` | Any S3-compatible service through Bun's built-in `S3Client`. Endpoint, region and credentials come from `SPACE_S3_ENDPOINT`, `SPACE_S3_REGION`, `SPACE_S3_ACCESS_KEY_ID`, `SPACE_S3_SECRET_ACCESS_KEY`. |
 
-`SPACE_BLOB_URL` sets ai-space's own store (default `file:///<workspace>/data/blobs`). A per-app store is either `<workspace>/data/<app>/blobs` or `s3://<bucket>/<prefix>`, chosen per app in `space.yaml`. A separate `SPACE_BACKUP_URL` may point backups at a different bucket or account so that a compromised app credential cannot reach the backups.
+ai-space has no blob store of its own: every store belongs to one app, provisioned on sync by `src/space/storage/storage.ts` and recorded in `space.db` (`storage_blob_stores`). A per-app store is either `<workspace>/data/<app>/blobs` or `s3://<bucket>/<prefix>`, chosen per app in `space.yaml`. A separate `SPACE_BACKUP_URL` may point backups at a different bucket or account so that a compromised app credential cannot reach the backups.
 
 ### How an app gets a blob store
 
@@ -306,7 +305,6 @@ Sync is idempotent. Changing `database` from `sqlite` to `postgres` provisions t
 
 ```
 SPACE_DB                  ai-space's database file   default <workspace>/data/space.db
-SPACE_BLOB_URL            ai-space's blob store       default file:///<workspace>/data/blobs
 SPACE_BACKUP_URL          where snapshots go           default s3://<SPACE_S3_BUCKET>/backups/<SPACE_NAME>/ with S3, else off
 SPACE_BACKUP_SCHEDULE     ai-space's own backup        default "0 3 * * *"
 SPACE_PG_ADMIN_URL        superuser URL used only to create per-app databases and roles

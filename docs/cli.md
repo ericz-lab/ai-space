@@ -18,19 +18,25 @@ One executable, `space`, on `PATH` on every machine that runs ai-space, and on t
 
 ```
 space status                          the machine at a glance
-space app     ls | show | sync | deploy | service | start | stop | restart | hide | unhide | uninstall | env | new
+space auth    status | init | reset-password | revoke-sessions | device-add | devices | device-revoke
+space app     ls | show | sync | deploy | service | start | stop | restart | supervise | hide | unhide | uninstall | env | new
+              create | build | pack | inspect-package | install | upgrade | packages | open | rollback | remove-package
 space task    ls | show | run | runs | enable | disable | create | rm
 space logs    <app> [-n 100] [-f]     an app's log, or `space logs space` for ai-space itself
 space model   usage | calls | status | run | import
+space usage   [--window 30d] [--kind app|agent|builtin]
 space notify  send | ls | channels | test
 space backup  run | ls | verify | restore
 space chat    ls | import
 space event   ls | emit
 space consumer ls | show | add | rotate | rm
 space peer    ls | rename
+space connection ls | create | grant | enable | disable | rm
 space router  show | sync
 space api     <METHOD> <path> [body]  the escape hatch: one raw call with the token added
-space init | setup | start | install-defaults
+space local   status | install | start | stop | restart | remove-service
+space init | setup | start | install-defaults | codex-upgrade
+space completion zsh | bash
 ```
 
 The CLI is a client of the running ai-space, not a second implementation of it:
@@ -49,7 +55,7 @@ Rules:
 - **stdin only when asked.** A body or a prompt comes from the argument, from `--json-file`, or from stdin when the argument is `-`. The CLI never reads stdin on its own: inside a task or a hook, stdin may be a pipe nobody closes, and a command that waits on it hangs the run.
 - **Questions only on a terminal.** `app uninstall` and `task rm` ask before acting; `--yes` skips the question, and without a terminal the question is a usage error rather than a silent default.
 - **Honest exit codes.** `0` done; `1` the operation failed (the server said no, a run failed, a delivery errored under `--wait`); `2` usage; `3` ai-space not reachable. The older `notify` returned `1` for both failure and unreachable; the scheduler's hooks only test for non-zero, so the split is safe.
-- **No new dependency.** Argument parsing is by hand, as `parseNotifyArgs` does today; there are twelve nouns, not a hundred flags.
+- **No new dependency.** Argument parsing is by hand, as `parseNotifyArgs` does today; there are two dozen nouns, not a hundred flags.
 - **The old spellings keep working.** `bun src/index.ts backup <app>` is what the backup task spawns and what the older docs say. `main.ts` keeps them as aliases (`env` → `app env`, `backup` → `backup run`, `backup-verify` → `backup verify`, `backups` → `backup ls`, `restore` → `backup restore`, `model-import` → `model import`, `chat-import` → `chat import`; `notify …` is `notify send …` because `send` is that noun's default verb). Nothing outside the checkout changed on the day the CLI landed.
 
 ## Commands
@@ -60,10 +66,10 @@ Rules:
 | --- | --- | --- |
 | `space auth status` / `init [--password-stdin]` / `reset-password [--password-stdin]` / `revoke-sessions` / `device-add <name>` / `devices` / `device-revoke <id>` | the owner's password, sessions and device credentials of the built-in sign-in ([auth.md](auth.md)); the password is asked without echo or read from stdin, never an argument | disk (`space.db`), works without ai-space |
 | `space app create NAME [--title T] [--description D]` / `space app build NAME` | apps made inside the Space: the source in `app-src/NAME` from the template, packed and installed or upgraded ([app-studio.md](app-studio.md)) | `/api/studio/*` |
-| `space local status` / `install [--migrate] [--device <name>]` / `start` / `stop` / `restart` / `remove-service` | the Local edition's installation on this Mac, what its app runs ([local.md](local.md)) | disk and launchd, works without ai-space |
+| `space local status [--claude P] [--codex P] [--dsh P]` / `install [--migrate] [--device <name>] [--default-model <runtime/tier>] [--wait\|--now] [--claude P] [--codex P] [--dsh P]` / `start` / `stop` / `restart` / `remove-service` | the Local edition's installation on this Mac, what its app runs; `--claude`/`--codex`/`--dsh` name agent CLIs over the search, a first install needs `--default-model`, and an upgrade while the Space is busy is refused unless `--wait` (until idle) or `--now` (drain it) ([local.md](local.md)) | disk and launchd, works without ai-space |
 | `space status` | health, app services with their health, tasks failing or overdue, last backup per app, model calls in flight, peers up or down; one screen | `/healthz`, `/api/services`, `/api/tasks`, `/api/backups`, `/api/model/status`, `/api/peers` |
 | `space app ls [--panel]` | every app: title, status, service health, url, hidden (`--panel`: only what the panel shows) | `GET /api/apps?all=1` |
-| `space app pack DIR --output FILE [--include PATH,...] [--target OS/ARCH] [--source-included] [--sign-key FILE]` | build a package from explicitly selected prepared files, without network or build hooks ([app-packages.md](app-packages.md)) | disk, works without ai-space |
+| `space app pack DIR --output FILE [--include PATH,...] [--manifest FILE] [--target OS/ARCH] [--source-included] [--sign-key FILE]` | build a package from explicitly selected prepared files, without network or build hooks ([app-packages.md](app-packages.md)) | disk, works without ai-space |
 | `space app inspect-package FILE [--trusted-key FILE] [--check-host]` | verify every file and inspect signature/compatibility without executing code | disk, works without ai-space |
 | `space app show APP` | the manifest as synced, storage, tasks, agents, widgets, last backup | `GET /api/apps/:app`, `.../storage`, `.../backups` |
 | `space app sync [APP]` | re-read one `space.yaml` or every app directory | `POST /api/apps/sync`, `POST /api/apps/:app/sync` |
@@ -75,27 +81,27 @@ Rules:
 | `space app uninstall APP [--yes] [--force]` | stop, remove, forget; asks unless `--yes`; refuses while a task of the app runs unless `--force` | `DELETE /api/apps/:app` |
 | `space app env APP` | `export` lines of the provisioned variables | disk (`storage.envFor`) |
 | `space app new NAME [--dir D] [--title T] [--port N] [--no-github]` | the `new-app` command of [app-spec.md](app-spec.md): the `space-app` template filled in, `git init`, first commit, a private repository under `SPACE_GITHUB_OWNER` when set and `gh` is on PATH (otherwise a warning, and the app stays local) | disk (`newapp.ts`) |
-| `space task ls [--app APP] [--failing]` | task, schedule, enabled, last run, next run | `GET /api/tasks` |
+| `space task ls [--app APP] [--failing] [--all]` | task, schedule, enabled, last run, next run (`--all`: orphaned tasks too) | `GET /api/tasks` |
 | `space task show TASK` | effective view, state, last runs | `GET /api/tasks/:id`, `/runs?limit=5` |
 | `space task run TASK [--wait] [--timeout D]` | force a run; `--wait` polls the run history to its end, prints the output and exits with its status | `POST /api/tasks/:id/run`, then `GET .../runs` |
 | `space task runs TASK [-n 20] [--output]` | history, newest first (`--output`: each run's captured output) | `GET /api/tasks/:id/runs` |
-| `space task enable` / `disable TASK` | `{ enabled }` override; `--reset` clears it | `PATCH /api/tasks/:id` |
-| `space task create` / `rm TASK [--yes]` | an API task from flags (`--app --name --cron\|--every\|--at --http\|--command`), a JSON argument, `-` or `--json-file`; delete an API task or an orphaned manifest task with its history (a live manifest task is removed in `space.yaml`) | `POST`, `DELETE /api/tasks` |
+| `space task enable` / `disable TASK [--reset]` | `{ enabled }` override; `--reset` clears it | `PATCH /api/tasks/:id` |
+| `space task create` / `rm TASK [--yes]` | an API task from flags (`--app --name --cron [--tz]\|--every\|--at --http [--method]\|--command [--cwd]`, optional `--timeout --description`), a JSON argument, `-` or `--json-file`; delete an API task or an orphaned manifest task with its history (a live manifest task is removed in `space.yaml`) | `POST`, `DELETE /api/tasks` |
 | `space logs APP [-n N] [-f]` | the app's log, tail or follow; `space logs space` for ai-space | `GET /api/apps/:app/logs` (new, below) |
-| `space model usage [--window 24h] [--app APP]` | sums by app, tag, model, runtime; the same numbers as the panel's Model usage | `GET /api/model/usage` |
+| `space model usage [--window 5h\|24h\|7d\|30d] [--app APP] [--by app\|tag\|model\|runtime]` | sums by app, tag, model, runtime; the same numbers as the panel's Model usage | `GET /api/model/usage` |
 | `space model calls [--app] [--tag] [-n]` | recent calls | `GET /api/model/calls` |
 | `space model status` | runtimes, concurrency, in flight | `GET /api/model/status` |
-| `space model run [--app] [--model] [--tag] [--system] PROMPT\|-` | one call, the answer streamed to stdout (`stream: true`); `--json` for the whole answer with the ledger row | `POST /api/model/run` |
+| `space model run [--app] [--model\|-m] [--tag] [--mode slim\|full] [--system] [--timeout MS] PROMPT\|-` | one call, the answer streamed to stdout (`stream: true`); `--json` for the whole answer with the ledger row | `POST /api/model/run` |
 | `space model import APP FILE` | today's `model-import` | disk |
-| `space usage [--window 30d] [--kind app\|agent\|builtin]` | opens and time in use per app, agent and built-in, by time and then opens; the panel's App usage ([usage.md](usage.md)) | `GET /api/usage` |
-| `space notify send [--level] [--title] [--url LINK] [--wait] TEXT` | today's `notify`, same flags | `POST /api/notify` |
+| `space usage [--window 7d\|30d\|90d\|all] [--kind app\|agent\|builtin]` | opens and time in use per app, agent and built-in, by time and then opens; the panel's App usage ([usage.md](usage.md)) | `GET /api/usage` |
+| `space notify send [--app] [--level] [--title] [--url LINK] [--channel C] [--key K [--window D]] [--wait] TEXT` | today's `notify`, same flags; `--channel` sends to one channel only, `--key` dedups within `--window` (default from the manifest's `notify.window`) | `POST /api/notify` |
 | `space notify ls [--app] [-n]` | history with deliveries | `GET /api/notifications` |
 | `space notify channels` / `test NAME` | channels and their state; a test message | `GET /api/notify/channels`, `POST .../test` |
 | `space backup run APP` | snapshot now, synchronously: the same code the daily task spawns | disk (`backup/cli.ts`) |
 | `space backup ls [APP] [--target]` | every app's last snapshot, or one app's list; `--target` lists the bucket itself, no ai-space needed | `GET /api/backups`, `GET /api/apps/:app/backups` |
-| `space backup verify` / `restore APP ...` | today's `backup-verify` and `restore`, unchanged | disk |
-| `space chat ls --app APP --scope S` / `import` | threads of one scope; the older `chat-import` | `GET /api/chat/threads`, disk |
-| `space event ls [--name] [--app]` / `emit NAME [--data JSON]` | recent events; publish one | `GET`, `POST /api/events` |
+| `space backup verify [APP…]` / `restore APP [--at TIME] (--to DIR \| --in-place [--stopped])` | today's `backup-verify` and `restore`, unchanged | disk |
+| `space chat ls --app APP --scope S [-n 30]` / `import APP FILE` | threads of one scope; the older `chat-import` | `GET /api/chat/threads`, disk |
+| `space event ls [--name] [--app] [-n 30]` / `emit NAME [--data JSON] [--app APP]` | recent events; publish one | `GET`, `POST /api/events` |
 | `space consumer ls` / `show NAME` | external consumers of the bus: events, calls, token hint, last contact; one with its delivery counts ([events.md](events.md#external-consumers)) | `GET /api/consumers`, `GET /api/consumers/:name` |
 | `space consumer add NAME --event E [--filter k=v1,v2] [--call APP/CAP] [--description D]` | create one; `--filter` applies to every event and call; or a JSON body, `-`, `--json-file`; prints the token once | `POST /api/consumers` |
 | `space consumer rotate NAME [--yes]` / `rm NAME [--yes]` | a new token, or revoke; both end the old token and its open streams at once | `POST /api/consumers/:name/rotate`, `DELETE /api/consumers/:name` |
@@ -181,6 +187,7 @@ space connection create outgoing HUB_UUID --endpoint https://hub.example.com --t
 space connection grant CONNECTION_UUID --apps notes
 space connection grant CONNECTION_UUID --apps ''
 space connection disable CONNECTION_UUID
+space connection enable CONNECTION_UUID
 space connection rm CONNECTION_UUID
 ```
 
