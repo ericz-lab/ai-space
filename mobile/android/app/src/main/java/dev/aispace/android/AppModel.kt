@@ -101,6 +101,8 @@ class OpenPage(
     val title: String,
     val connection: UUID,
     val session: WebSession,
+    /** The launcher page the tab was opened from: Home, a screen or Settings. */
+    val originPage: String,
 ) {
     val id: UUID = UUID.randomUUID()
 }
@@ -646,18 +648,26 @@ class AppModel(private val context: Context) {
                 scope.launch { loader.refresh() }
             }
         }
-        val opened = OpenPage(key, title, connection.id, session)
-        appTabs.add(opened)
+        val opened = OpenPage(key, title, connection.id, session, originPage = pagerID)
+        // Most recently opened or shown first, as the iPhone lists them.
+        appTabs.add(0, opened)
         page = opened
     }
 
+    /** Back to the launcher page the tab on show was opened from (iOS AppModel.returnToSpace). */
     fun returnToSpace() {
+        page?.let { p -> pagerID = Screens.returnPage(p.originPage, screens.screens(p.connection), setOf(Pager.HOME, Pager.SETTINGS)) }
         page = null
-        tab = MainTab.Home
     }
 
     fun showTab(id: UUID) {
-        val next = appTabs.firstOrNull { it.id == id && it.connection == selected?.id } ?: return
+        val index = appTabs.indexOfFirst { it.id == id && it.connection == selected?.id }
+        if (index < 0) return
+        val next = appTabs[index]
+        if (index != 0) {
+            appTabs.removeAt(index)
+            appTabs.add(0, next)
+        }
         next.session.showControls()
         next.session.recoverIfFailed()
         page = next
@@ -669,7 +679,7 @@ class AppModel(private val context: Context) {
         val closed = appTabs.removeAt(index)
         closed.session.stop()
         if (page?.id == id) {
-            page = appTabs.lastOrNull { it.connection == closed.connection }
+            page = appTabs.firstOrNull { it.connection == closed.connection }
             page?.session?.showControls()
         }
     }

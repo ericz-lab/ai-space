@@ -81,6 +81,14 @@ object Screens {
     }
 
     /** The home screen cannot be deleted; deleting a screen leaves its entries in the library. */
+    /**
+     * The launcher page an app tab returns to (iOS AppModel.returnToSpace): the one it was opened
+     * from, which is one of [pages] (Home, Settings) or a screen, or the first screen when that
+     * screen has been deleted since.
+     */
+    fun returnPage(origin: String, screens: List<PanelScreen>, pages: Set<String>): String =
+        if (origin in pages || screens.any { it.id == origin }) origin else home
+
     fun remove(screens: List<PanelScreen>, id: String): List<PanelScreen> =
         if (id == home) screens else screens.filter { it.id != id }
 

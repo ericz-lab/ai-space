@@ -151,7 +151,7 @@ fun AppPageView(model: AppModel, page: OpenPage) {
         when {
             menuOpen -> menuOpen = false
             canGoBack -> session.goBack()
-            else -> model.page = null
+            else -> model.returnToSpace()
         }
     }
 
