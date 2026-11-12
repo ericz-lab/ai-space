@@ -5,7 +5,7 @@ import { DshLive } from "./deepseek-live.ts";
 import { LivePool } from "./live.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { readDshTranscript } from "./transcripts.ts";
-import type { AgentOutcome, Backend, ChatCallbacks, ChatTurn, CompleteInput, CompleteOutcome, DeepseekHarnessSpec, RuntimeAdapter, Usage } from "./types.ts";
+import { SSH_HOST_PATTERN, type AgentOutcome, type Backend, type ChatCallbacks, type ChatTurn, type CompleteInput, type CompleteOutcome, type DeepseekHarnessSpec, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /**
  * DeepSeek Harness (`dsh`) as a runtime. Answers and agent tasks run
@@ -201,7 +201,7 @@ const SAFE_ARG = /^[A-Za-z0-9._:/@,()*-]+$/;
 
 export function createDeepseekHarness(spec: DeepseekHarnessSpec): RuntimeAdapter {
   const sshHost = spec.sshHost?.trim() ?? "";
-  if (sshHost && !/^[A-Za-z0-9._@-]+$/.test(sshHost)) throw new Error(`runtime ${spec.name}: ssh host is not a host name: ${sshHost}`);
+  if (sshHost && !SSH_HOST_PATTERN.test(sshHost)) throw new Error(`runtime ${spec.name}: ssh host is not a host name: ${sshHost}`);
   const bin = spec.bin.length ? spec.bin : ["dsh"];
   const profile = spec.profile || DEFAULT_PROFILE;
   const liveProfile = spec.liveProfile || "acp";

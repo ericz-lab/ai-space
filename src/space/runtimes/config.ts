@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { FALLBACK_MODEL_PATTERN, MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, type MachineSpec, type ModelTier, type RuntimeKind, type RuntimeSpec, type RuntimesConfig, type TierModels } from "./types.ts";
+import { FALLBACK_MODEL_PATTERN, MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, SSH_HOST_PATTERN, type MachineSpec, type ModelTier, type RuntimeKind, type RuntimeSpec, type RuntimesConfig, type TierModels } from "./types.ts";
 
 /**
  * Which runtimes a space has: `<workspace>/runtimes.yaml`, or, when the file
@@ -163,7 +163,7 @@ function parseMachines(raw: unknown): MachineSpec[] {
     if (!isRecord(m)) throw new Error(`${ctx} must be a mapping`);
     for (const key of Object.keys(m)) if (key !== "ssh") throw new Error(`${ctx} has unknown key "${key}"`);
     const ssh = optionalString(m.ssh, `${ctx}: ssh`);
-    if (!ssh || !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(ssh)) throw new Error(`${ctx}: ssh must be a host name or alias`);
+    if (!ssh || !SSH_HOST_PATTERN.test(ssh)) throw new Error(`${ctx}: ssh must be a host name or alias`);
     return { name, ssh };
   });
 }
@@ -181,13 +181,13 @@ function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>
     case "codex-cli": {
       if (raw.streamCompletions !== undefined && typeof raw.streamCompletions !== "boolean") throw new Error(`${ctx}: streamCompletions must be boolean`);
       const sshHost = optionalString(raw.ssh, `${ctx}: ssh`);
-      if (sshHost && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);
+      if (sshHost && !SSH_HOST_PATTERN.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);
       if (sshHost && raw.streamCompletions) throw new Error(`${ctx}: streamCompletions requires a local runtime`);
       return { name, kind, bin: command(raw.bin, `${ctx}: bin`), ...(sshHost ? { sshHost } : {}), ...(raw.streamCompletions !== undefined ? { streamCompletions: raw.streamCompletions as boolean } : {}) };
     }
     case "claude-code": {
       const sshHost = optionalString(raw.ssh, `${ctx}: ssh`);
-      if (sshHost && !/^[A-Za-z0-9._@-]+$/.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);
+      if (sshHost && !SSH_HOST_PATTERN.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);
       return { name, kind, bin: command(raw.bin, `${ctx}: bin`), ...(sshHost ? { sshHost } : {}), chatArgs: command(raw.chatArgs, `${ctx}: chatArgs`) };
     }
     case "anthropic-api": {
@@ -198,7 +198,7 @@ function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>
     }
     case "deepseek-harness": {
       const sshHost = optionalString(raw.ssh, `${ctx}: ssh`);
-      if (sshHost && !/^[A-Za-z0-9._@-]+$/.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);
+      if (sshHost && !SSH_HOST_PATTERN.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);
       const home = optionalString(raw.home, `${ctx}: home`);
       const profile = optionalString(raw.profile, `${ctx}: profile`) ?? "headless";
       if (!/^[a-z][a-z0-9-]*$/.test(profile)) throw new Error(`${ctx}: profile must be a profile name`);

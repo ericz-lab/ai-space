@@ -9,7 +9,7 @@ import { CodexLive } from "./codex-live.ts";
 import { LivePool } from "./live.ts";
 import { readCodexTranscript, SESSION_ID_RE } from "./transcripts.ts";
 import { ustar } from "./tar.ts";
-import { assertCompletionMode, type AgentRun, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type GeneratedImage, type ImageInput, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, SSH_HOST_PATTERN, type AgentRun, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type GeneratedImage, type ImageInput, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /** Codex completions, agent runs and persistent local chat. Authentication stays in the CLI home. */
 export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
@@ -21,7 +21,7 @@ export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
   const now = deps.now ?? (() => performance.now());
   const sleep = deps.sleep ?? ((ms, signal) => delay(ms, undefined, { signal }));
   const host = spec.sshHost?.trim();
-  if (host && !/^[A-Za-z0-9][A-Za-z0-9._@-]*$/.test(host)) throw new Error(`runtime ${spec.name}: ssh is not a host name`);
+  if (host && !SSH_HOST_PATTERN.test(host)) throw new Error(`runtime ${spec.name}: ssh is not a host name`);
   const bin = spec.bin.length ? spec.bin : ["codex"];
   const backend: Backend = host ? `ssh:${host}` : "local";
   const live = new LivePool();

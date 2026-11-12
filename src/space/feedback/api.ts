@@ -1,4 +1,4 @@
-import { APP_HEADER } from "../usage/api.ts";
+import { routerApp } from "../usage/api.ts";
 import { APP_PATTERN } from "../usage/types.ts";
 import { PeerError, type PeerFeedbackSync } from "./peers.ts";
 import { FeedbackError, type FeedbackService } from "./service.ts";
@@ -16,8 +16,9 @@ import { LIMITS } from "./types.ts";
  *   GET  /api/panel/feedback                 recent feedback of every app, the peers' too (owner)
  *   POST /api/panel/feedback/fix             { peer?, app? | ids? } start waiting feedback now (owner)
  *
- * `/_space/*` arrives through the router, which names the app in `X-Space-App`; a page cannot pick
- * another app. The writes are same-origin only (guardBrowserWrites in the entry point).
+ * `/_space/*` arrives through the router, which names the app in `X-Space-App` and proves it is the
+ * router with this boot's key (`routerApp`); a page cannot pick another app, nor a client that
+ * reaches the panel's port directly. The writes are same-origin only (guardBrowserWrites in the entry point).
  *
  * A space with peers keeps their switches in line with its own (peers.ts): reading or saving the
  * settings sends each peer this space's choices for the apps it runs. What a peer serves for that is
@@ -33,6 +34,8 @@ export type FeedbackApiOptions = {
   models: () => { value: string; runtime: string; tier: string; model: string }[];
   /** On a space with peers: their apps' switches follow this space's settings. */
   peers?: PeerFeedbackSync;
+  /** The key the router sends with `X-Space-App` (`routerApp`). */
+  routerKey: string;
 };
 
 type Handler = (req: Request) => Response | Promise<Response>;
@@ -42,8 +45,8 @@ export function createFeedbackRoutes(opts: FeedbackApiOptions): Routes {
   const { service } = opts;
   /** The router's word for the app, or a response that refuses the request. */
   const appOf = (req: Request): string | Response => {
-    const app = req.headers.get(APP_HEADER)?.trim() ?? "";
-    if (!app) return error(400, "no X-Space-App header: feedback arrives through the router");
+    const app = routerApp(req, opts.routerKey);
+    if (!app) return error(400, "no X-Space-App from the router: feedback arrives through the router");
     if (!APP_PATTERN.test(app)) return error(404, "unknown app");
     return app;
   };
@@ -139,7 +142,7 @@ export function createFeedbackRoutes(opts: FeedbackApiOptions): Routes {
  * peers/serve.ts): this space's own settings view and rows, without its peers, so two spaces that
  * are peers of each other never ask each other in a circle.
  */
-export function createFeedbackPeerServeRoutes(opts: Omit<FeedbackApiOptions, "peers" | "script">): Routes {
+export function createFeedbackPeerServeRoutes(opts: Omit<FeedbackApiOptions, "peers" | "script" | "routerKey">): Routes {
   const { service } = opts;
   return {
     "/api/peer/feedback/settings": {
@@ -164,7 +167,7 @@ export function createFeedbackPeerServeRoutes(opts: Omit<FeedbackApiOptions, "pe
   };
 }
 
-function localSettingsView(opts: Omit<FeedbackApiOptions, "peers" | "script">) {
+function localSettingsView(opts: Omit<FeedbackApiOptions, "peers" | "script" | "routerKey">) {
   const { service } = opts;
   return {
     ok: true,

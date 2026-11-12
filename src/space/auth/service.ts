@@ -117,11 +117,13 @@ export class AuthService {
     if (!owner) return { ok: false, reason: "uninitialized" };
     const retryAfterMs = this.wait(meta.client, now);
     if (retryAfterMs > 0) return { ok: false, reason: "limited", retryAfterMs };
-    if (typeof password !== "string" || !password || !(await Bun.password.verify(password, owner.passwordHash))) {
-      this.fail(meta.client, now);
-      return { ok: false, reason: "invalid" };
-    }
+    // The attempt counts as a failure before the hash is checked, so concurrent attempts cannot all
+    // pass the limit while the first verifications are still running; a correct password takes it back.
+    this.fail(meta.client, now);
+    if (typeof password !== "string" || !password || !(await Bun.password.verify(password, owner.passwordHash))) return { ok: false, reason: "invalid" };
     this.failures.delete(meta.client);
+    const mine = this.spaceFailures.lastIndexOf(now);
+    if (mine >= 0) this.spaceFailures.splice(mine, 1);
     const token = randomBytes(32).toString("base64url");
     const session = this.store.addSession(hashToken(token), now, now + this.ttl, meta.userAgent ?? "");
     if (Math.random() < 0.05) this.store.prune(now);

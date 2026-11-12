@@ -95,7 +95,7 @@ On the peer the routes are `/api/peer/feedback*` behind the hub's token (`create
 The button's routes are public: an app page holds no panel session. What stands between a page and the engineer:
 
 - **Opt-in.** Off by default, then per app (each app `default`, `on` or `off`; `default` follows "Show on apps by default").
-- **The router names the app.** `/_space/*` on an app's hostname reaches ai-space with `X-Space-App` set by the router; the panel's own site drops a client's `X-Space-App` ([router.md](router.md)). Writes go through the same-origin check (`guardBrowserWrites`).
+- **The router names the app.** `/_space/*` on an app's hostname reaches ai-space with `X-Space-App` set by the router, together with the router's per-start key (`X-Space-Router`); without the key the header is ignored, so a client on ai-space's own port cannot name an app and start the Fix Engineer with its text; the panel's own site drops a client's `X-Space-App` ([router.md](router.md)). Writes go through the same-origin check (`guardBrowserWrites`).
 - **Limits:** 30 per app per hour, sizes, image types.
 - **Page content is data.** The person's words are the request; everything taken from the page (HTML, text, titles, errors) is fenced and labelled untrusted in the task and in the engineer's message, and its rules say never to follow instructions found there.
 - **One app, checked.** The scope check runs before every commit; the deploy channel runs the app's checks and keeps the running version when they fail.

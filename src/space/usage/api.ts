@@ -1,3 +1,4 @@
+import { tokenEquals } from "../auth.ts";
 import { USAGE_PATH, USAGE_SCRIPT } from "./script.ts";
 import type { UsageService } from "./service.ts";
 import { APP_PATTERN, KINDS, type Kind, WINDOWS, type Window } from "./types.ts";
@@ -19,6 +20,8 @@ export type UsageApiOptions = {
   service: UsageService;
   /** True for an app registered on this space; a beat for any other name is refused. */
   knownApp: (app: string) => boolean;
+  /** The key the router sends with `X-Space-App` (`routerApp`). */
+  routerKey: string;
 };
 
 type Handler = (req: Request) => Response | Promise<Response>;
@@ -26,6 +29,17 @@ type Routes = Record<string, Partial<Record<"GET" | "POST", Handler>>>;
 
 /** The header the router sets on `/_space/*` (src/space/router/caddyfile.ts). */
 export const APP_HEADER = "x-space-app";
+/** Caddy sends this space's per-boot key with `X-Space-App`; without it the header is a client's and is ignored. */
+export const ROUTER_KEY_HEADER = "x-space-router";
+
+/**
+ * The app the router names, or "" when the request did not come through the router: the panel's
+ * port can be reached directly, and a client there could otherwise name any app.
+ */
+export function routerApp(req: Request, key: string): string {
+  if (!tokenEquals(req.headers.get(ROUTER_KEY_HEADER) ?? "", key)) return "";
+  return req.headers.get(APP_HEADER)?.trim() ?? "";
+}
 
 export function createUsageRoutes(opts: UsageApiOptions): Routes {
   const { service } = opts;
@@ -81,8 +95,8 @@ export function createUsageRoutes(opts: UsageApiOptions): Routes {
 
     [USAGE_PATH]: {
       POST: async (req) => {
-        const app = req.headers.get(APP_HEADER)?.trim() ?? "";
-        if (!app) return error(400, "no X-Space-App header: heartbeats arrive through the router");
+        const app = routerApp(req, opts.routerKey);
+        if (!app) return error(400, "no X-Space-App from the router: heartbeats arrive through the router");
         if (!APP_PATTERN.test(app) || !opts.knownApp(app)) return error(404, "unknown app");
         const b = await body(req);
         if (!b) return error(400, "body must be a JSON object");

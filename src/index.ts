@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { createVoiceRoutes, voiceTarget } from "./space/bus/voice.ts";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -26,7 +27,7 @@ import { localMachine, syncGuide } from "./space/guide.ts";
 import { TerminalService, TerminalStore, createTerminalRoutes, terminalWebSocket } from "./space/terminal/index.ts";
 import { Router, createRouterRoutes } from "./space/router/index.ts";
 import { createLogsRoutes } from "./space/logs/index.ts";
-import { UsageService, UsageStore, createUsageRoutes } from "./space/usage/index.ts";
+import { APP_HEADER, ROUTER_KEY_HEADER, UsageService, UsageStore, createUsageRoutes } from "./space/usage/index.ts";
 import { FeedbackService, FeedbackStore, PeerFeedbackSync, createFeedbackPeerServeRoutes, createFeedbackRoutes, deployFromOrigin, fixerModels, fixerPort, localFixer, peerFixer, todoSinkFor } from "./space/feedback/index.ts";
 import { TODO_APP } from "./space/feedback/todo.ts";
 import { buildFeedbackScript } from "./web/feedback-widget/build.ts";
@@ -312,8 +313,11 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     log: (m) => console.log(`[shortcuts] ${m}`),
   });
   // The proxy's configuration follows the registry (docs/router.md); a failed write never stops a sync.
+  // Caddy sends this with every app's `/_space/*`; ai-space trusts `X-Space-App` only with it (usage/api.ts routerApp).
+  const routerKey = randomBytes(24).toString("hex");
   const router = new Router({
     config: config.router,
+    routerKey,
     apps: () => registry.list().map((e) => e.manifest),
     panelPort: config.port,
     file: join(ws.run, "Caddyfile"),
@@ -533,13 +537,14 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     }),
     log: (line) => console.error(line),
   });
-  const feedbackRoutes = createFeedbackRoutes({ ...feedbackLists, script: feedbackScript, peers: feedbackPeers });
+  const feedbackRoutes = createFeedbackRoutes({ ...feedbackLists, script: feedbackScript, peers: feedbackPeers, routerKey });
   packageGateway.feedback = (app, req) => {
     const path = new URL(req.url).pathname;
     const route = feedbackRoutes[path]?.[req.method as "GET" | "POST"];
     if (!route) return new Response("Not found", { status: 404 });
     const headers = new Headers(req.headers);
-    headers.set("x-space-app", app);
+    headers.set(APP_HEADER, app);
+    headers.set(ROUTER_KEY_HEADER, routerKey);
     return route(new Request(req, { headers }));
   };
   // A shell in the workspace root, opt-in; on a peer it is offered to the hub only while enabled here.
@@ -608,7 +613,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createConnectionRoutes({ links: packageLinks, token: config.apiToken })],
       ["owner", createPackageOpenRoutes(packageGateway, config.apiToken)],
       ["owner", createRouterRoutes({ router })],
-      ["owner", createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)) })],
+      ["owner", createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)), routerKey })],
       ["owner", feedbackRoutes],
       ["owner", createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) })],
       ["owner", createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest })],

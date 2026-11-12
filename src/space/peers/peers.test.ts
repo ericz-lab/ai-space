@@ -365,7 +365,9 @@ describe("hub", () => {
     expect(icon.status).toBe(200);
     expect(icon.headers.get("content-type")).toContain("svg");
     expect((await fetch(`${hub}/api/peers/david/agents/media/helper/avatar`)).status).toBe(200);
-    expect(await (await fetch(`${hub}/api/peers/david/widgets/media/board/embed?theme=dark`)).text()).toBe("<html>board dark</html>");
+    const embed = await fetch(`${hub}/api/peers/david/widgets/media/board/embed?theme=dark`);
+    expect(await embed.text()).toBe("<html>board dark</html>");
+    expect(embed.headers.get("content-security-policy")).toBe("sandbox allow-scripts");
     expect((await get(hub, "/api/peers/david/apps/media/appcolor")).body).toEqual({ ok: true, color: "#abcdef" });
 
     const chat = await fetch(`${hub}/api/peers/david/agents/media/helper/chat`, jsonInit("POST", { message: "hello" }));

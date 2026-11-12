@@ -70,7 +70,7 @@ function space(name: string, apps: string[], opts: { peers?: PeerLink[]; machine
     models: () => [{ value: "claude/intermediate", runtime: "claude", tier: "intermediate", model: "opus" }],
   };
   const sync = opts.peers ? new PeerFeedbackSync({ hubName: name, peers: () => opts.peers! }) : undefined;
-  const routes = createFeedbackRoutes({ ...lists, script: async () => ({ js: "", etag: '"x"' }), ...(sync ? { peers: sync } : {}) }) as Record<string, Record<string, (r: Request) => Promise<Response>>>;
+  const routes = createFeedbackRoutes({ ...lists, script: async () => ({ js: "", etag: '"x"' }), routerKey: "rk", ...(sync ? { peers: sync } : {}) }) as Record<string, Record<string, (r: Request) => Promise<Response>>>;
   const serve = createFeedbackPeerServeRoutes(lists) as Record<string, Record<string, (r: Request) => Promise<Response>>>;
   const call = async (method: string, path: string, body?: unknown) => {
     const url = new URL(path, "http://space.test");

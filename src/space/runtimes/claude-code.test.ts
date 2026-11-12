@@ -246,6 +246,7 @@ describe("complete, over ssh", () => {
     const r = await runtime.complete(input({ model: "x y" }));
     expect(r).toMatchObject({ ok: false, error: "argument not allowed over ssh: x y", backend: "ssh:box" });
     expect(() => createClaudeCode(spec({ sshHost: "box; rm" }))).toThrow(/not a host name/);
+    expect(() => createClaudeCode(spec({ sshHost: "-oProxyCommand=x" }))).toThrow(/not a host name/);
   });
 });
 

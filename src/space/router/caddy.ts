@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 /**
@@ -38,6 +38,7 @@ export class CaddyBackend {
     if ((await f.exists()) && (await f.text()) === text) return false;
     await mkdir(dirname(this.opts.file), { recursive: true });
     await Bun.write(this.opts.file, text);
+    await chmod(this.opts.file, 0o600); // it holds the router key
     return true;
   }
 

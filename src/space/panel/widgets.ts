@@ -4,6 +4,13 @@ import type { AppRegistry } from "./registry.ts";
 import { sanitizeBlocks, type WidgetBlock } from "./blocks.ts";
 
 /**
+ * An embed widget's page is the app's HTML served from the panel's origin. The panel frames it with
+ * `sandbox="allow-scripts"`; the same sandbox as a header keeps its scripts off the panel's origin when
+ * the address is opened directly, or framed without the attribute.
+ */
+export const EMBED_HEADERS = { "content-security-policy": "sandbox allow-scripts", "x-content-type-options": "nosniff" } as const;
+
+/**
  * Widget feed: fetches every declared `kind: items` widget (its list and, when sent, its blocks) through ai-space,
  * caches each for its `refresh`, and only ever calls URLs a manifest declares.
  * Sources may be loopback addresses; they never reach the browser. A failing

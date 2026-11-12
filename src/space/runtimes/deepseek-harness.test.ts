@@ -128,6 +128,7 @@ describe("complete", () => {
     expect(r.backend).toBe("ssh:box");
     expect(await createDeepseekHarness(spec({ sshHost: "box", bin: ["d sh"] })).complete(input())).toMatchObject({ ok: false, error: "argument not allowed over ssh: d sh" });
     expect(() => createDeepseekHarness(spec({ sshHost: "box; rm" }))).toThrow(/not a host name/);
+    expect(() => createDeepseekHarness(spec({ sshHost: "-oProxyCommand=x" }))).toThrow(/not a host name/);
   });
 });
 
