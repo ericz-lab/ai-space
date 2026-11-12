@@ -18,6 +18,7 @@ const PUBLIC: Record<string, string> = {
   "/apple-touch-icon.png": "apple-touch-icon.png",
   "/icon-512.png": "icon-512.png",
   "/pet.webp": "pet.webp",
+  "/pet-claude.webp": "pet-claude.webp",
   // The presets' backdrops (theme.ts `backdrop`), framed behind the page.
   "/backdrops/orbit.html": "backdrops/orbit.html",
   "/backdrops/northern.html": "backdrops/northern.html",

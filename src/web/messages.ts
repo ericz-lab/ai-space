@@ -477,6 +477,7 @@ const en = {
   "pet.kind": "Which pet",
   "pet.petdex": "Capybara or a petdex.dev pet",
   "pet.fromApp": "From an app: it shows what the app reports",
+  "pet.builtin.claude": "Claude (built in)",
 
   "term.title": "Terminal",
   "term.blurb": "A shell on this machine and on the peers that offer one.",
@@ -1252,6 +1253,7 @@ const zh: Record<Key, string> = {
   "pet.kind": "选择宠物",
   "pet.petdex": "水豚或 petdex.dev 上的宠物",
   "pet.fromApp": "来自 app：它的样子反映 app 报告的状态",
+  "pet.builtin.claude": "Claude（内置）",
 
   "term.title": "终端",
   "term.blurb": "本机以及开放了终端的 peer 机器上的 shell。",

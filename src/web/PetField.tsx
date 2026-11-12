@@ -1,23 +1,29 @@
 import { useEffect, useState } from "react";
 import { localized, useLang } from "./i18n.ts";
-import type { AppPetInfo } from "./Pet.tsx";
+import { type AppPetInfo, BUILTIN } from "./Pet.tsx";
 import { type PetChoice, type PetdexPet, loadPetdex, resolvePet, suggestPets } from "./petdex.ts";
 
 /**
- * The pet picker in the settings pop-over. When apps offer pets (docs/app-spec.md#pets) a menu chooses
- * between them and the petdex pet. For the latter: type a name from petdex.dev, the sheet URL is looked
- * up in the public manifest and kept in the preferences. Empty means the bundled default.
+ * The pet picker in the settings pop-over. A menu chooses between the petdex pet, the pets bundled with
+ * the panel (`builtin:<name>`) and the pets apps offer (docs/app-spec.md#pets, `<app>/<name>`). For the
+ * petdex pet: type a name from petdex.dev, the sheet URL is looked up in the public manifest and kept in
+ * the preferences. Empty means the bundled default.
  */
-export default function PetField(props: { pet: PetChoice | undefined; onChange: (p: PetChoice | undefined) => void; appPets: AppPetInfo[]; petApp: string | undefined; onPetApp: (app: string | undefined) => void }) {
-  const { appPets, petApp, onPetApp } = props;
+export default function PetField(props: { pet: PetChoice | undefined; onChange: (p: PetChoice | undefined) => void; appPets: AppPetInfo[]; kind: string | undefined; onKind: (kind: string | undefined) => void }) {
+  const { appPets, kind, onKind } = props;
   const { lang, t } = useLang();
-  if (!appPets.length) return <PetdexField {...props} />;
+  const fromApp = !!kind && !kind.startsWith("builtin:");
   return (
     <>
       <div className="setfield">
         <div className="setinput">
-          <select aria-label={t("pet.kind")} value={petApp ?? ""} onChange={(e) => onPetApp(e.target.value || undefined)}>
+          <select aria-label={t("pet.kind")} value={kind ?? ""} onChange={(e) => onKind(e.target.value || undefined)}>
             <option value="">{t("pet.petdex")}</option>
+            {Object.entries(BUILTIN).map(([name, pet]) => (
+              <option key={name} value={`builtin:${name}`}>
+                {t(pet.title)}
+              </option>
+            ))}
             {appPets.map((p) => (
               <option key={p.id} value={p.id}>
                 {localized(lang, p).title}
@@ -25,9 +31,9 @@ export default function PetField(props: { pet: PetChoice | undefined; onChange: 
             ))}
           </select>
         </div>
-        {petApp && <p className="setnote">{t("pet.fromApp")}</p>}
+        {fromApp && <p className="setnote">{t("pet.fromApp")}</p>}
       </div>
-      {!petApp && <PetdexField {...props} />}
+      {!kind && <PetdexField {...props} />}
     </>
   );
 }

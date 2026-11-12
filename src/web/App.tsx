@@ -6,7 +6,7 @@ import ModelPreference from "./ModelPreference.tsx";
 import { AccountSettings, loadAuth } from "./Auth.tsx";
 import Chat, { type Ask, type Draft } from "./Chat.tsx";
 import { linkedAgent, type PanelLink, parsePanelLink } from "./panel-link.ts";
-import Pet, { AppPet, type AppPetInfo, DEFAULT_SHEET } from "./Pet.tsx";
+import Pet, { AppPet, type AppPetInfo, BUILTIN, BuiltinPet, DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
 import Usage from "./Usage.tsx";
@@ -43,7 +43,7 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 // Every string the panel owns goes through `t` (i18n.ts); manifest text is picked with `localized`.
 
 /** `petApp` is an app's pet as `<app>/<name>` (docs/app-spec.md#pets); it wins over `pet` while that app offers it. */
-type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetChoice; petApp?: string };
+type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetChoice; petApp?: string; petBuiltin?: string };
 
 /** Floating panels over the page; one at a time. */
 type Panel = "settings" | "chat" | "tasks" | "terminal" | "inbox" | "shortcuts";
@@ -126,7 +126,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   };
   const togglePref = (k: "noPop" | "noPet" | "noWidget") => setPrefs((p) => savePrefs({ ...p, [k]: !p[k] }));
   const setPet = (pet: PetChoice | undefined) => setPrefs((p) => savePrefs({ ...p, pet }));
-  const setPetApp = (petApp: string | undefined) => setPrefs((p) => savePrefs({ ...p, petApp }));
+  // The pet menu's choice: a bundled pet (`builtin:<name>`), an app's pet (`<app>/<name>`), or neither.
+  const setPetKind = (kind: string | undefined) =>
+    setPrefs((p) => savePrefs({ ...p, petApp: kind && !kind.startsWith("builtin:") ? kind : undefined, petBuiltin: kind?.startsWith("builtin:") ? kind.slice(8) : undefined }));
   // The pets apps declare; read on load and again when the settings open, so a new app's pet shows up.
   const [appPets, setAppPets] = useState<AppPetInfo[] | null>(null);
   // A chosen sheet that no longer loads (the pet was re-uploaded, or petdex is down): look the name up
@@ -150,6 +152,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       .catch(() => setAppPets((p) => p ?? []));
   }, [setsOpen]);
   const appPet = prefs.petApp ? appPets?.find((p) => p.id === prefs.petApp) : undefined;
+  const builtinPet = prefs.petBuiltin && BUILTIN[prefs.petBuiltin] ? prefs.petBuiltin : undefined;
   // Until the list is read, a chosen app pet is not replaced by the default for a moment.
   const petPending = !!prefs.petApp && appPets === null;
   useEffect(() => {
@@ -904,7 +907,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         ) : null}
       </div>
       {screens && !IN_PHONE_APP && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={() => openLibrary(HOME, true)} />}
-      {!prefs.noPet && !petPending && (appPet ? <AppPet pet={appPet} /> : <Pet sheet={petSheet} onError={onPetError} />)}
+      {!prefs.noPet && !petPending && (appPet ? <AppPet pet={appPet} /> : builtinPet ? <BuiltinPet name={builtinPet} /> : <Pet sheet={petSheet} onError={onPetError} />)}
       {uninstalling && (
         <UninstallForm
           app={uninstalling}
@@ -965,7 +968,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                       {t("settings.pet")}
                       <input type="checkbox" role="switch" checked={!prefs.noPet} onChange={() => togglePref("noPet")} />
                     </label>
-                    {!prefs.noPet && <PetField pet={prefs.pet} onChange={setPet} appPets={appPets ?? []} petApp={appPet?.id} onPetApp={setPetApp} />}
+                    {!prefs.noPet && <PetField pet={prefs.pet} onChange={setPet} appPets={appPets ?? []} kind={appPet?.id ?? (builtinPet && `builtin:${builtinPet}`)} onKind={setPetKind} />}
                     <label className="setrow">
                       {t("settings.widgets")}
                       <input type="checkbox" role="switch" checked={!prefs.noWidget} onChange={() => togglePref("noWidget")} />
