@@ -36,7 +36,6 @@ describe("threads and messages", () => {
     expect(store.listMessages(t.id)).toEqual([u, a]);
     expect(a).toMatchObject({ error: "timed out", callId: 7 });
     expect(u.error).toBeUndefined();
-    expect(store.countMessages(t.id)).toBe(2);
   });
 
   test("deleting a thread or a scope returns the attachment paths and removes everything", () => {

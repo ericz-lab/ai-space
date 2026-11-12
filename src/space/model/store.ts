@@ -132,9 +132,14 @@ function scopeWhere(since: number | undefined, scope: string | LedgerScope | und
   return { sql: where.length ? `WHERE ${where.join(" AND ")}` : "", args };
 }
 
+export type LedgerHistory = { firstAt?: number; totals: UsageTotals; days: (UsageTotals & { day: string })[] };
+
 export class ModelStore {
   readonly db: Database;
   private readonly retentionMs: number;
+  /** Bumped on every write through this store; `PRAGMA data_version` covers the other connections'. */
+  private writes = 0;
+  private historyCache: { version: string; byScope: Map<string, LedgerHistory> } = { version: "", byScope: new Map() };
 
   constructor(path: string, opts: { retentionDays?: number } = {}) {
     this.db = new Database(path, { create: true });
@@ -187,6 +192,7 @@ export class ModelStore {
         c.trace ? JSON.stringify(c.trace) : null,
       );
     if (this.retentionMs) this.db.query("DELETE FROM model_calls WHERE started_at < ?").run(c.startedAt - this.retentionMs);
+    this.writes++;
     return { ...c, id: Number(r.lastInsertRowid), costUsd: this.get(Number(r.lastInsertRowid))?.costUsd };
   }
 
@@ -229,7 +235,11 @@ export class ModelStore {
       }
       return { imported, skipped };
     });
-    return run(rows);
+    try {
+      return run(rows);
+    } finally {
+      this.writes++;
+    }
   }
 
   /** Start of the earliest row, or undefined when the ledger is empty. */
@@ -241,6 +251,22 @@ export class ModelStore {
   get(id: number): ModelCall | undefined {
     const row = this.db.query<Row, [number]>(`SELECT *, ${MODEL_COST_SQL} AS effective_cost_usd FROM model_calls WHERE id = ?`).get(id);
     return row ? rowToCall(row) : undefined;
+  }
+
+  /** Several calls by id in one query (a chat thread's assistant turns); unknown ids are absent. */
+  getMany(ids: readonly number[]): Map<number, ModelCall> {
+    const out = new Map<number, ModelCall>();
+    const unique = [...new Set(ids)];
+    // SQLite's default limit on bound parameters is far above a thread's length, but stay under it anyway.
+    for (let i = 0; i < unique.length; i += 500) {
+      const chunk = unique.slice(i, i + 500);
+      const rows = this.db.query<Row, number[]>(`SELECT *, ${MODEL_COST_SQL} AS effective_cost_usd FROM model_calls WHERE id IN (${chunk.map(() => "?").join(",")})`).all(...chunk);
+      for (const row of rows) {
+        const call = rowToCall(row);
+        out.set(call.id, call);
+      }
+    }
+    return out;
   }
 
   list(opts: LedgerScope & { tag?: string; since?: number; limit?: number } = {}): ModelCall[] {
@@ -284,6 +310,26 @@ export class ModelStore {
       )
       .all(...args)
       .map((r) => ({ day: r.day, ...totalsOf(r) }));
+  }
+
+  /**
+   * The whole-ledger reads of a usage report: the first call and the per-day sums over
+   * `skipCallers`/`skipApps` only, the all-time totals within the full scope. They scan
+   * every row, and the panel polls the report, so the answer is kept until the ledger
+   * changes: a write through this store, or any commit by another connection to the
+   * database file (`PRAGMA data_version`, e.g. a peer rename's UPDATE).
+   */
+  history(scope: LedgerScope = {}): LedgerHistory {
+    const version = `${this.db.query<{ data_version: number }, []>("PRAGMA data_version").get()?.data_version}:${this.writes}`;
+    if (this.historyCache.version !== version) this.historyCache = { version, byScope: new Map() };
+    const key = JSON.stringify([scope.app ?? "", scope.skipCallers ?? [], scope.skipApps ?? []]);
+    const hit = this.historyCache.byScope.get(key);
+    if (hit) return hit;
+    const all: LedgerScope = { skipCallers: scope.skipCallers, skipApps: scope.skipApps };
+    const value: LedgerHistory = { firstAt: this.firstAt(all), totals: this.totals(0, scope), days: this.days(0, all) };
+    if (this.historyCache.byScope.size >= 32) this.historyCache.byScope.clear();
+    this.historyCache.byScope.set(key, value);
+    return value;
   }
 
   /** Tags an app's calls used since a point in time, for the panel's per-tag model rows. */

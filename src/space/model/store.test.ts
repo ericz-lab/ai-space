@@ -49,6 +49,15 @@ describe("ModelStore", () => {
     expect(store.list({ app: "other" })).toEqual([]);
   });
 
+  test("getMany returns the known calls of several ids in one map", () => {
+    const a = store.add(call());
+    const b = store.add(call({ startedAt: T0 + 1 }));
+    const got = store.getMany([a.id, b.id, a.id, 999_999]);
+    expect([...got.keys()].sort((x, y) => x - y)).toEqual([a.id, b.id]);
+    expect(got.get(a.id)).toEqual(store.get(a.id));
+    expect(store.getMany([]).size).toBe(0);
+  });
+
   test("totals and groups sum the four token kinds and count errors", () => {
     store.add(call());
     store.add(call({ tag: "story", model: "sonnet", status: "error", error: "x", usage: { inputTokens: 20, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 }, costUsd: 0.5 }));
@@ -95,6 +104,24 @@ describe("ModelStore", () => {
     expect(store.list({ since: 0 })).toHaveLength(2);
     store.add(call({ startedAt: T0 }));
     expect(store.list({ since: 0 }).map((c) => c.startedAt)).toEqual([T0, T0 - 9 * DAY]);
+  });
+
+  test("the whole-ledger history is reused until this or another connection writes", () => {
+    store.add(call({ startedAt: T0 - DAY }));
+    const first = store.history();
+    expect(first).toEqual({ firstAt: T0 - DAY, totals: store.totals(0), days: store.days(0) });
+    expect(store.history()).toBe(first);
+    expect(store.history({ app: "other" }).totals.calls).toBe(0);
+    store.add(call());
+    expect(store.history().totals.calls).toBe(2);
+    store.addImported([call({ startedAt: T0 + 1, origin: "import" })]);
+    expect(store.history().totals.calls).toBe(3);
+    expect(store.history({ app: "renamed" }).totals.calls).toBe(0);
+    const other = new ModelStore(join(dir, "space.db"));
+    other.db.query("UPDATE model_calls SET app = 'renamed'").run();
+    other.close();
+    expect(store.history({ app: "renamed" }).totals.calls).toBe(3);
+    expect(store.history().days).toEqual(store.days(0));
   });
 });
 
