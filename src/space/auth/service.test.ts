@@ -106,6 +106,20 @@ describe("failed sign-ins", () => {
     expect((await login(auth, "correct horse", "a")).ok).toBe(true);
   });
 
+  test("attempts sent at once count before their passwords are checked", async () => {
+    const { auth } = service();
+    await auth.init("correct horse");
+    const results = await Promise.all(Array.from({ length: 20 }, () => login(auth, "wrong", "a")));
+    expect(results.filter((r) => !r.ok && r.reason === "invalid")).toHaveLength(5);
+    expect(results.filter((r) => !r.ok && r.reason === "limited")).toHaveLength(15);
+  });
+
+  test("a correct password does not count against the space", async () => {
+    const { auth } = service();
+    await auth.init("correct horse");
+    for (let i = 0; i < 60; i++) expect((await login(auth, "correct horse", `c${i}`)).ok).toBe(true);
+  });
+
   test("a caller that varies its address is bounded by the space-wide count", async () => {
     const { auth } = service();
     await auth.init("correct horse");

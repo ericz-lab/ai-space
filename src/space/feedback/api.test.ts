@@ -34,11 +34,13 @@ function setup(o: { taskStatus?: string } = {}) {
       apps: () => [{ app: "ai-todo", title: "AI Todo", zh: "AI 待办", status: "active" }],
       machines: () => [{ value: "", label: "home" }, { value: "hub", label: "hub" }],
       models: () => [{ value: "claude/intermediate", runtime: "claude", tier: "intermediate", model: "opus" }],
+      routerKey: "rk",
     }),
   ) as Record<string, Record<string, Handler>>;
   const call = async (method: string, path: string, init: { body?: string; headers?: Record<string, string> } = {}) => {
     const url = new URL(path, "http://todo.example.com");
-    const res = await routes[url.pathname]![method]!(new Request(url, { method, body: init.body, headers: { host: "todo.example.com", ...init.headers } }));
+    // The router's key rides along unless a test sends its own (or none, as "").
+    const res = await routes[url.pathname]![method]!(new Request(url, { method, body: init.body, headers: { host: "todo.example.com", "x-space-router": "rk", ...init.headers } }));
     const text = await res.text();
     return { status: res.status, text, json: (() => { try { return JSON.parse(text); } catch { return null; } })(), headers: res.headers };
   };
@@ -61,6 +63,10 @@ describe("feedback routes", () => {
   test("config and recent need the router's app; off says only that", async () => {
     const { call, service } = setup();
     expect((await call("GET", "/_space/feedback/config")).status).toBe(400);
+    // Only the router's key makes X-Space-App the router's word: a client on the panel's port cannot name an app.
+    expect((await call("GET", "/_space/feedback/config", { headers: { "x-space-app": "ai-todo", "x-space-router": "" } })).status).toBe(400);
+    expect((await call("GET", "/_space/feedback/config", { headers: { "x-space-app": "ai-todo", "x-space-router": "guess" } })).status).toBe(400);
+    expect((await call("POST", "/_space/feedback", { body: JSON.stringify({ text: "x" }), headers: { ...page, "x-space-router": "guess" } })).status).toBe(400);
     expect((await call("GET", "/_space/feedback/config", { headers: { "x-space-app": "../x" } })).status).toBe(404);
     expect((await call("GET", "/_space/feedback/config", { headers: { "x-space-app": "ai-todo" } })).json).toEqual({ ok: true, enabled: false });
     service.saveSettings({ enabled: true });

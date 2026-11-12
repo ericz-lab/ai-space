@@ -17,7 +17,9 @@ import type { Route } from "./types.ts";
  * On every app's hostname, `/_space/*` goes to ai-space itself (the usage
  * heartbeat, docs/usage.md) with `X-Space-App` set to the app: the page
  * calls its own origin, and the app name is the router's word, not the
- * page's. The panel's own site drops any `X-Space-App` a client sends.
+ * page's. `X-Space-Router` carries ai-space's per-boot key with it, so a
+ * client that reaches ai-space's port directly cannot name an app. The
+ * panel's own site drops any `X-Space-App` a client sends.
  */
 
 export type CaddyfileOptions = {
@@ -31,6 +33,8 @@ export type CaddyfileOptions = {
   spacePort: number;
   /** `127.0.0.1:<port>` for hostnames no app claims; unset or empty = the 404. */
   fallback?: string;
+  /** ai-space's per-boot key, sent as `X-Space-Router` with every app's `/_space/*`; without it ai-space ignores `X-Space-App`. */
+  routerKey?: string;
 };
 
 export const CADDYFILE_HEADER = "# Written by ai-space from its registry; edits are overwritten. See docs/router.md.";
@@ -54,6 +58,7 @@ export function renderCaddyfile(routes: Route[], opts: CaddyfileOptions): string
             "\thandle /_space/* {",
             `\t\treverse_proxy 127.0.0.1:${opts.spacePort} {`,
             `\t\t\theader_up X-Space-App ${r.app}`,
+            ...(opts.routerKey ? [`\t\t\theader_up X-Space-Router ${opts.routerKey}`] : []),
             "\t\t}",
             "\t}",
             "\thandle {",

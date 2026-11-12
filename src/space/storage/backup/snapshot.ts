@@ -140,9 +140,25 @@ export function snapshotSqlite(src: string, dest: string): void {
 
 async function pgDump(url: string, dest: string): Promise<void> {
   if (!Bun.which("pg_dump")) throw new Error("a postgres database is declared but pg_dump is not on PATH");
-  const proc = Bun.spawn(["pg_dump", "-Fc", "-f", dest, url], { stdout: "ignore", stderr: "pipe" });
+  // The password goes in the environment, never on the command line, where any local user can read it.
+  const { url: target, password } = splitPassword(url);
+  const proc = Bun.spawn(["pg_dump", "-Fc", "-f", dest, "-d", target], { stdout: "ignore", stderr: "pipe", env: { ...process.env, ...(password ? { PGPASSWORD: password } : {}) } });
   const stderr = await new Response(proc.stderr).text();
   if ((await proc.exited) !== 0) throw new Error(`pg_dump failed: ${stderr.trim()}`);
+}
+
+/** A connection URL without its password, and the password. */
+export function splitPassword(url: string): { url: string; password: string } {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return { url, password: "" };
+  }
+  if (!u.password) return { url, password: "" };
+  const password = decodeURIComponent(u.password);
+  u.password = "";
+  return { url: u.toString(), password };
 }
 
 async function copyEntry(kind: SnapshotEntry["kind"], src: string, dest: string, path: string): Promise<SnapshotEntry> {

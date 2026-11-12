@@ -28,6 +28,8 @@ export type RouterOptions = {
   socket: string;
   /** `<workspace>/logs/router`. */
   logDir: string;
+  /** ai-space's per-boot key for `/_space/*` (caddyfile.ts). */
+  routerKey?: string;
   backend?: CaddyBackend;
   log?: (line: string) => void;
   /** How long to wait for more changes before writing; default 200 ms. */
@@ -101,7 +103,7 @@ export class Router {
       const routes = this.table();
       for (const r of routes) if (r.status === "conflict") this.log(`${r.app}: ${r.host} is already routed to another app; not rendered`);
       await mkdir(this.opts.logDir, { recursive: true });
-      const changed = await this.backend.write(renderCaddyfile(routes, { port: this.opts.config.port, socket: this.opts.socket, logDir: this.opts.logDir, spacePort: this.opts.panelPort, fallback: this.opts.config.fallback }));
+      const changed = await this.backend.write(renderCaddyfile(routes, { port: this.opts.config.port, socket: this.opts.socket, logDir: this.opts.logDir, spacePort: this.opts.panelPort, fallback: this.opts.config.fallback, routerKey: this.opts.routerKey }));
       // Reload on a change, and again after a failure even when nothing changed (Caddy may be up now).
       if (changed || !this.lastSync?.ok) {
         await this.backend.reload();

@@ -58,6 +58,8 @@ runtimes:
     expect(() => parseRuntimesYaml("runtimes:\n  x: { kind: gpt }", {})).toThrow(/kind must be one of/);
     expect(() => parseRuntimesYaml("runtimes:\n  x: { kind: claude-code, foo: 1 }", {})).toThrow(/unknown key "foo"/);
     expect(() => parseRuntimesYaml("runtimes:\n  x: { kind: claude-code, ssh: 'a b' }", {})).toThrow(/not a host name/);
+    // A leading "-" would be read by ssh as an option.
+    for (const kind of ["claude-code", "deepseek-harness", "codex-cli"]) expect(() => parseRuntimesYaml(`runtimes:\n  x: { kind: ${kind}, ssh: '-oProxyCommand=x' }`, {})).toThrow(/not a host name/);
     expect(() => parseRuntimesYaml("default: nope\nruntimes:\n  x: { kind: claude-code }", {})).toThrow(/default must name/);
     expect(() => parseRuntimesYaml("runtimes:\n  api: { kind: anthropic-api }", {})).toThrow(/no usable runtime/);
     expect(() => parseRuntimesYaml("runtimes: [", {})).toThrow(/invalid YAML/);

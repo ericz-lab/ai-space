@@ -26,6 +26,9 @@ export type Backend = "local" | `ssh:${string}` | "api" | `peer:${string}`;
  * A machine's name in a model string (`box:codex/basic`, docs/model-machines.md): a peer
  * (`SPACE_PEER_<NAME>`) or an ssh login under `machines:` in runtimes.yaml.
  */
+/** An ssh destination: a host, alias or user@host. It must not start with `-`, or ssh reads it as an option. */
+export const SSH_HOST_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._@-]*$/;
+
 export const MACHINE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 /** An ssh login that runs this space's runtimes for answers (`machines:` in runtimes.yaml). */

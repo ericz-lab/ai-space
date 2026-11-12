@@ -9,7 +9,8 @@ import { createBackupRoutes } from "./api.ts";
 import { listSnapshots, readSidecar } from "./catalog.ts";
 import { restoreSnapshot } from "./restore.ts";
 import { type BackupDeps, pruneApp, runBackup, stagingRoot } from "./run.ts";
-import { excludeMatcher } from "./snapshot.ts";
+import { createArchive, listArchive } from "./archive.ts";
+import { excludeMatcher, splitPassword } from "./snapshot.ts";
 import { parseBackupSpec } from "./spec.ts";
 import { BackupStore } from "./store.ts";
 import { FileTarget, openBackupTarget, parseTargetUrl } from "./target.ts";
@@ -167,6 +168,35 @@ describe("runBackup", () => {
     await expect(runBackup(deps, { app: "keep", dataDir, spec: parseBackupSpec(undefined) })).rejects.toThrow(/already running/);
     await Bun.write(join(stagingRoot(ws), "keep.lock"), "999999999"); // a dead pid is a stale lock
     await expect(runBackup(deps, { app: "keep", dataDir, spec: parseBackupSpec(undefined) })).resolves.toBeDefined();
+  });
+
+  test("of two runs started together, one takes the lock", async () => {
+    const dataDir = await seedApp("keep");
+    const runs = await Promise.allSettled([0, 1].map(() => runBackup(deps, { app: "keep", dataDir, spec: parseBackupSpec(undefined) })));
+    expect(runs.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(String((runs.find((r) => r.status === "rejected") as PromiseRejectedResult).reason)).toMatch(/already running/);
+  });
+});
+
+describe("archive", () => {
+  test("a failure on either side of the pipe fails the step", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "archive-"));
+    try {
+      await expect(createArchive(join(dir, "missing"), join(dir, "a.tar.zst"))).rejects.toThrow(/tar exited/);
+      await Bun.write(join(dir, "bad.tar.zst"), "not zstd");
+      await expect(listArchive(join(dir, "bad.tar.zst"))).rejects.toThrow(/zstd exited/);
+      await mkdir(join(dir, "stage"));
+      await Bun.write(join(dir, "stage", "x.txt"), "x");
+      await createArchive(join(dir, "stage"), join(dir, "ok.tar.zst"));
+      expect(await listArchive(join(dir, "ok.tar.zst"))).toEqual(["x.txt"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("pg_dump gets the password in the environment, not the URL", () => {
+    expect(splitPassword("postgres://app:s%40cret@127.0.0.1:5432/app_db?sslmode=disable")).toEqual({ url: "postgres://app@127.0.0.1:5432/app_db?sslmode=disable", password: "s@cret" });
+    expect(splitPassword("postgres://app@127.0.0.1/app_db")).toEqual({ url: "postgres://app@127.0.0.1/app_db", password: "" });
   });
 });
 

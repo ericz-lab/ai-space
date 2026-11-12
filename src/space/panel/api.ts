@@ -13,8 +13,9 @@ import type { ManifestCheck } from "../checks/spec.ts";
 /** A check as GET /api/checks lists it; `i18n` carries the app's translated title and the check's text. */
 export type CheckView = ManifestCheck & { id: string; app: string; appTitle: string; url: string; i18n?: Record<string, { appTitle?: string; title?: string; description?: string }> };
 import { retireAppDir } from "./uninstall.ts";
-import { type WidgetFeed, sourceUrl } from "./widgets.ts";
+import { EMBED_HEADERS, type WidgetFeed, sourceUrl } from "./widgets.ts";
 import { NoPet, type PetFeed } from "./pets.ts";
+
 
 /**
  * HTTP surface for the panel, shaped as a Bun.serve `routes` table.
@@ -334,7 +335,7 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
         } catch (e) {
           return error(502, `widget page unavailable: ${String((e as Error).message ?? e).slice(0, 200)}`);
         }
-        return new Response(upstream.body, { status: upstream.status, headers: { "content-type": upstream.headers.get("content-type") ?? "text/html; charset=utf-8", "cache-control": "no-store" } });
+        return new Response(upstream.body, { status: upstream.status, headers: { "content-type": upstream.headers.get("content-type") ?? "text/html; charset=utf-8", "cache-control": "no-store", ...EMBED_HEADERS } });
       }),
     },
 

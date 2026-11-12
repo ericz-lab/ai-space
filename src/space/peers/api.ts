@@ -5,6 +5,7 @@ import { peerId } from "./merge.ts";
 import { RenameError, type PeerRenamed, type RenameCounts } from "./rename.ts";
 import { sameOrigin } from "../auth.ts";
 import { bridge, wantsWebSocket } from "../terminal/api.ts";
+import { EMBED_HEADERS } from "../panel/widgets.ts";
 
 /**
  * The hub side of peers, shaped as a Bun.serve `routes` table.
@@ -168,7 +169,14 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
     "/api/peers/:peer/apps/:app/icon": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/apps/:app/appcolor": { GET: proxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/avatar": { GET: proxy(FORWARD_TIMEOUT_MS) },
-    "/api/peers/:peer/widgets/:app/:name/embed": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    // The peer's embed page arrives on this panel's origin: it keeps the sandbox the peer gave it.
+    "/api/peers/:peer/widgets/:app/:name/embed": {
+      GET: async (req, server) => {
+        const r = await proxy(FORWARD_TIMEOUT_MS)(req, server);
+        if (r) for (const [k, v] of Object.entries(EMBED_HEADERS)) r.headers.set(k, v);
+        return r;
+      },
+    },
     // A chat stream stays open as long as the peer's does; the browser leaving only detaches it,
     // the turn goes on on the peer as a background run (docs/panel.md#chat).
     "/api/peers/:peer/agents/:app/:agent/chat": { POST: proxy() },

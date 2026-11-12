@@ -234,6 +234,8 @@ describe("panel api", () => {
     expect(byId["notes/board"]).toMatchObject({ kind: "embed", ok: true });
     const embed = await fetch(`${base}/api/widgets/notes/board/embed?theme=dark`);
     expect(await embed.text()).toBe("<html>board dark</html>");
+    // The app's HTML is on the panel's origin: sandboxed even when the address is opened directly.
+    expect(embed.headers.get("content-security-policy")).toBe("sandbox allow-scripts");
     expect(await (await fetch(`${base}/api/widgets/notes/board/embed?lang=zh`)).text()).toBe("<html>board zh</html>");
     // A language that is not a tag is dropped, so the page gets only theme (and the fake answers its default).
     expect(await (await fetch(`${base}/api/widgets/notes/board/embed?theme=dark&lang=../x`)).text()).toBe("<html>board dark</html>");

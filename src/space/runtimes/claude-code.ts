@@ -4,7 +4,7 @@ import { LivePool } from "./live.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
-import { assertCompletionMode, CHAT_EFFORTS, FILE_NAME_PATTERN, PERMISSION_MODES, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, CHAT_EFFORTS, FILE_NAME_PATTERN, PERMISSION_MODES, SSH_HOST_PATTERN, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
 
 /**
  * Claude Code as a runtime. Three operations, one CLI:
@@ -48,7 +48,7 @@ export { PERMISSION_MODES };
 
 export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
   const sshHost = spec.sshHost?.trim() ?? "";
-  if (sshHost && !/^[A-Za-z0-9._@-]+$/.test(sshHost)) throw new Error(`runtime ${spec.name}: ssh host is not a host name: ${sshHost}`);
+  if (sshHost && !SSH_HOST_PATTERN.test(sshHost)) throw new Error(`runtime ${spec.name}: ssh host is not a host name: ${sshHost}`);
   const bin = spec.bin.length ? spec.bin : ["claude"];
   const backend: Backend = sshHost ? `ssh:${sshHost}` : "local";
   const live = new LivePool();

@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Workspace } from "../../workspace.ts";
 import { createArchive, requireArchiveTools } from "./archive.ts";
@@ -106,14 +106,31 @@ export async function pruneApp(deps: BackupDeps, app: string, keep: Keep): Promi
   return drop;
 }
 
+/** Create the lock file, or fail when a live run holds it; a dead run's lock is taken over. */
 async function acquireLock(lock: string, app: string): Promise<void> {
-  try {
-    const pid = Number((await readFile(lock, "utf8")).trim());
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      // `wx` creates the file only when it does not exist: of two runs started together, one wins.
+      await writeFile(lock, String(process.pid), { flag: "wx" });
+      return;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    let pid = 0;
+    let age = 0;
+    try {
+      pid = Number((await readFile(lock, "utf8")).trim());
+      age = Date.now() - (await stat(lock)).mtimeMs;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      continue; // released meanwhile
+    }
     if (pid && alive(pid)) throw new Error(`backup of ${app} is already running (pid ${pid})`);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    // An empty lock is a run between creating the file and writing its pid, unless it is old.
+    if (!pid && age < 60_000) throw new Error(`backup of ${app} is already running`);
+    await rm(lock, { force: true }); // left by a run that was killed
   }
-  await Bun.write(lock, String(process.pid));
+  throw new Error(`backup of ${app} is already running`);
 }
 
 function alive(pid: number): boolean {

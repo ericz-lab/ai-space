@@ -10,10 +10,10 @@ type Handler = (req: Request, server?: unknown) => Response | Promise<Response>;
 function setup() {
   const usage = new UsageService(new UsageStore(new Database(":memory:")));
   // As the entry point serves them: every write behind the same-origin guard.
-  const routes = guardBrowserWrites(createUsageRoutes({ service: usage, knownApp: (app) => app === "ai-todo" })) as Record<string, Record<string, Handler>>;
+  const routes = guardBrowserWrites(createUsageRoutes({ service: usage, knownApp: (app) => app === "ai-todo", routerKey: "rk" })) as Record<string, Record<string, Handler>>;
   const call = async (method: string, path: string, init: { body?: string; headers?: Record<string, string> } = {}) => {
     const url = new URL(path, "http://todo.example.com");
-    const res = await routes[url.pathname]![method]!(new Request(url, { method, body: init.body, headers: { host: "todo.example.com", ...init.headers } }));
+    const res = await routes[url.pathname]![method]!(new Request(url, { method, body: init.body, headers: { host: "todo.example.com", "x-space-router": "rk", ...init.headers } }));
     return { status: res.status, text: await res.text(), type: res.headers.get("content-type") };
   };
   return { usage, call };
@@ -36,6 +36,9 @@ describe("usage routes", () => {
     const origin = { origin: "http://todo.example.com" };
     expect((await call("POST", "/_space/usage/beat", { body, headers: origin })).status).toBe(400);
     expect((await call("POST", "/_space/usage/beat", { body, headers: { ...origin, "x-space-app": "nope" } })).status).toBe(404);
+    // Without the router's key the header is a client's, as on a direct request to the panel's port.
+    expect((await call("POST", "/_space/usage/beat", { body, headers: { ...origin, "x-space-app": "ai-todo", "x-space-router": "" } })).status).toBe(400);
+    expect((await call("POST", "/_space/usage/beat", { body, headers: { ...origin, "x-space-app": "ai-todo", "x-space-router": "guess" } })).status).toBe(400);
     expect((await call("POST", "/_space/usage/beat", { body, headers: { origin: "https://evil.example", "x-space-app": "ai-todo" } })).status).toBe(403);
     expect((await call("POST", "/_space/usage/beat", { body: JSON.stringify({ tab: 1 }), headers: { ...origin, "x-space-app": "ai-todo" } })).status).toBe(400);
     expect((await call("POST", "/_space/usage/beat", { body, headers: { ...origin, "x-space-app": "ai-todo" } })).status).toBe(204);

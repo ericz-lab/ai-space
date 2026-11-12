@@ -155,6 +155,11 @@ describe("renderCaddyfile", () => {
     );
   });
 
+  test("with a router key, every app's /_space/* carries it next to X-Space-App", () => {
+    const text = renderCaddyfile([{ app: "a", host: "a.example.com", target: "127.0.0.1:8710", status: "wildcard" }], { ...opts, routerKey: "k123" });
+    expect(text).toContain("\t\treverse_proxy 127.0.0.1:8700 {\n\t\t\theader_up X-Space-App a\n\t\t\theader_up X-Space-Router k123\n\t\t}\n");
+  });
+
   test("the panel's site goes straight to ai-space and drops a client's X-Space-App", () => {
     const text = renderCaddyfile([{ app: "space", host: "space.example.com", target: "127.0.0.1:8700", status: "wildcard" }], opts);
     expect(text).toContain("http://space.example.com:8080 {\n\treverse_proxy 127.0.0.1:8700 {\n\t\theader_up X-Space-User {header.Cf-Access-Authenticated-User-Email}\n\t\theader_up -X-Space-App\n\t}\n");
