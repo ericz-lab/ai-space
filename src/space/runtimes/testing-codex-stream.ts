@@ -22,7 +22,7 @@ await pumpLines(Bun.stdin.stream(), line => {
     setTimeout(() => {
       if (mode === "cut") { process.exit(0); }
       send({ method: "item/agentMessage/delta", params: { threadId: "test-thread", delta: "world" } });
-      send({ method: "thread/tokenUsage/updated", params: { threadId: "test-thread", tokenUsage: { total: { inputTokens: 110, cachedInputTokens: 100, outputTokens: 5 } } } });
+      send({ method: "thread/tokenUsage/updated", params: { threadId: "test-thread", tokenUsage: { total: { inputTokens: 130, cachedInputTokens: 100, cacheWriteInputTokens: 20, outputTokens: 5 } } } });
       send({ method: "turn/completed", params: { threadId: "test-thread", turn: { status: "completed" } } });
     }, 40);
   }

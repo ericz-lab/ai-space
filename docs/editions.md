@@ -1,6 +1,6 @@
 # Editions: Server, Client and Local
 
-Status: plan. None of the three editions ships as a release yet. This document says what each one is,
+Status: plan. None of the three editions ships as a release yet (`v0.1.0` is a draft). This document says what each one is,
 where the lines between them run, and what has to exist before each can be published. The work
 itself is tracked in separate items: the release pipeline, optional GitHub and Cloudflare, the
 built-in user system, and the Mac standalone install (see [The work, in order](#the-work-in-order)).
@@ -73,14 +73,17 @@ outside access, backups, notifications and peers are reported separately. A fail
 not a failed install.
 
 **Outside access** stays behind a protected entry. The service keeps listening on loopback. The
-supported entries are a Cloudflare Tunnel with Access ([ingress.md](ingress.md)) and, once the
-built-in user system exists, a login of ai-space's own. Binding to `0.0.0.0` does not replace
+supported entries are a Cloudflare Tunnel with Access ([ingress.md](ingress.md)) and the
+built-in sign-in, a login of ai-space's own ([auth.md](auth.md)). Binding to `0.0.0.0` does not replace
 either. `SPACE_API_TOKEN` protects the API, not the panel.
 
 **Today:** source install and git-push deploy work, the service reports its version and edition
 (`GET /api/space`), and a release tag builds an archive for Linux x64 and arm64 with an installer
-that upgrades and rolls back ([release.md](release.md)). Missing: a setup that does not ask for `gh` and Cloudflare during the basic install, and a
-login that does not depend on Cloudflare Access.
+that upgrades and rolls back ([release.md](release.md)). `space setup` is the basic install with no
+GitHub, Cloudflare, domain or bucket, and `setup github` / `ingress` / `backup` / `notifications` /
+`peers` add one extension each ([install.md](install.md)); the built-in sign-in protects the panel and
+the API without Cloudflare Access ([auth.md](auth.md)). Missing: the sign-in for app hostnames, which
+still need Access in front of them ([auth.md](auth.md#not-done-yet)).
 
 ## AI Space Client
 
@@ -183,8 +186,8 @@ a client asks before anyone has signed in.
   workspace), `external` otherwise: the app's way to tell its own service from someone else's
   ([local.md](local.md#ownership-and-exclusion)).
 
-The native clients do not call it yet; checking it before showing Connected is the next client
-change.
+The Linux and Windows clients check it before showing Connected; the Mac, iPhone and Android
+clients do not call it yet.
 
 ## How the editions relate
 
@@ -209,9 +212,9 @@ side.
 
 | # | Work | Unblocks |
 | --- | --- | --- |
-| 1 | GitHub CLI and Cloudflare become optional extensions of the Server's setup | A basic install with no accounts and no domain, for Server and Local |
+| 1 | GitHub CLI and Cloudflare become optional extensions of the Server's setup (built, [install.md](install.md)) | A basic install with no accounts and no domain, for Server and Local |
 | 2 | Release pipeline, phase 1: checks on every push, a version from the tag, the Client signed, notarized, in a `.dmg`, published as a draft release (built; signing waits for a Developer ID certificate) | Client edition |
-| 3 | Built-in user system: owner login, sessions, revocation, one access policy across the API (in progress separately) | A Server reachable without Cloudflare Access; device credentials for Local |
+| 3 | Built-in user system: owner login, sessions, revocation, one access policy across the API (stage 1 built, [auth.md](auth.md); app hostnames, more accounts and roles are stages 2 and 3) | A Server reachable without Cloudflare Access; device credentials for Local |
 | 4 | Release pipeline, phase 2: the Server release archive, install script, health check, upgrade test (built, [release.md](release.md)) | Server edition as a download |
 | 5 | Local prototype: the service from packaged resources on a clean Mac (built, [release.md](release.md#local-edition)) | Proves the Local edition can be packaged at all |
 | 6 | Managed mode: identity, ownership, exclusion, background helper, bundled `.spaceapp` apps, first-run flow (built, [local.md](local.md)) | Local edition |

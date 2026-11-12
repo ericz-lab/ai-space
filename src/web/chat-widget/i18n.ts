@@ -30,6 +30,7 @@ const T = {
 
 export type Strings = (typeof T)["zh"];
 
+/** Chinese when the language starts with `zh`, else English: the same default as the feedback button and the panel. */
 export function strings(lang: string | undefined): Strings {
-  return (lang ?? "").toLowerCase().startsWith("en") ? (T.en as unknown as Strings) : T.zh;
+  return (lang ?? "").toLowerCase().startsWith("zh") ? T.zh : (T.en as unknown as Strings);
 }

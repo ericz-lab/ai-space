@@ -3,6 +3,7 @@ import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type AppInfo, type RunInfo, type TaskInfo, dateTime, fmtDuration, getJson, isImgIcon, relTime, scheduleText, sendJson, untilTime } from "./api.ts";
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
+import { pollWhileVisible } from "./poll.ts";
 
 // Tasks window: scheduler state and per-task model selection, by machine and app.
 // - Reads `GET /api/tasks` when opened and every 30 s while open; the list is small (tens of tasks).
@@ -297,10 +298,10 @@ export default function Tasks({ open, onClose, onBack, embedded = false, selecte
     getJson<{ apps: AppInfo[] }>("/api/apps?all=1")
       .then((d) => live && setLabels(Object.fromEntries((d.apps || []).map((a) => [a.id || a.name, { title: a.title, ...(a.i18n ? { i18n: a.i18n } : {}), icon: a.icon }]))))
       .catch(() => {});
-    const timer = setInterval(load, 30_000);
+    const stop = pollWhileVisible(load, 30_000);
     return () => {
       live = false;
-      clearInterval(timer);
+      stop();
     };
   }, [open]);
 

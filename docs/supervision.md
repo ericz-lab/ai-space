@@ -62,8 +62,9 @@ TimeoutStopSec=30
 WantedBy=default.target
 ```
 
-- The first line is the marker. The space only ever changes or deletes a unit that starts with it;
-  anything else of that name is left alone and reported.
+- The first line is the marker. The space only ever changes or deletes a unit that starts with it
+  and names this workspace's env file (`<workspace>/run/env/<app>.env`), so two workspaces on one
+  machine never sweep each other's units; anything else of that name is left alone and reported.
 - The command is escaped for systemd (`\`, `"`, and `%` and `$` doubled), so the shell sees exactly
   the manifest's command, with `${VAR}` placeholders already resolved from the workspace `.env` as
   for tasks. A command over several lines is refused: put the lines into a script.
@@ -110,7 +111,7 @@ with what is on disk and in systemd:
 | yes | both identical | active | nothing |
 | yes | both identical | not active | `start` |
 | no | a unit of ours | — | `disable --now`, delete unit and env file, `daemon-reload`, `reset-failed` |
-| any | a unit of that name without the marker | — | refuse: `conflict` |
+| any | a unit of that name without the marker, or another workspace's | — | refuse: `conflict` |
 
 "Differs" is the rendered text against the file on disk. That is the rule that matters most: a sync
 that changes nothing never restarts an app, so `POST /api/apps/sync` stays cheap and safe to run at

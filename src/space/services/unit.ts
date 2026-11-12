@@ -46,7 +46,7 @@ export function renderUnit(u: UnitInput): string {
     "",
     "[Service]",
     `WorkingDirectory=${specifiers(u.dir)}`,
-    `EnvironmentFile=${specifiers(u.envFile)}`,
+    environmentFileLine(u.envFile),
     `ExecStart=/bin/sh -c ${execArg(u.command)}`,
     "Restart=always",
     "RestartSec=5",
@@ -126,6 +126,11 @@ export function renderEnvFile(vars: Record<string, string>): { text: string; ski
 export function execArg(command: string): string {
   if (/[\r\n]/.test(command.trim())) throw new Error("service.command must be a single line for the space to supervise it; move the lines into a script");
   return `"${specifiers(command.trim()).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "$$$$")}"`;
+}
+
+/** The unit's `EnvironmentFile=` line, as `renderUnit` writes it. */
+export function environmentFileLine(envFile: string): string {
+  return `EnvironmentFile=${specifiers(envFile)}`;
 }
 
 function specifiers(s: string): string {

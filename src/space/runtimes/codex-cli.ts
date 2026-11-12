@@ -287,10 +287,12 @@ export function parseCodexOutput(raw: string): { text?: string; error?: string; 
     if (ev.type === "turn.completed") {
       completed = true;
       const u = ev.usage;
-      if (u && [u.input_tokens, u.cached_input_tokens ?? 0, u.cache_write_input_tokens ?? 0, u.output_tokens].every((n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0) && (u.cached_input_tokens ?? 0) <= u.input_tokens!) {
+      if (u && [u.input_tokens, u.cached_input_tokens ?? 0, u.cache_write_input_tokens ?? 0, u.output_tokens].every((n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0) && (u.cached_input_tokens ?? 0) + (u.cache_write_input_tokens ?? 0) <= u.input_tokens!) {
         const cached = u.cached_input_tokens ?? 0;
-        // Codex input_tokens includes cached input; the Space ledger keeps them separate.
-        usage = { inputTokens: u.input_tokens! - cached, cacheReadTokens: cached, cacheWriteTokens: u.cache_write_input_tokens ?? 0, outputTokens: u.output_tokens! };
+        const written = u.cache_write_input_tokens ?? 0;
+        // Codex input_tokens includes cached and cache-written input; the Space ledger keeps all three
+        // separate (tokens = their sum), the same split as the app-server stream in codex-stream.ts.
+        usage = { inputTokens: u.input_tokens! - cached - written, cacheReadTokens: cached, cacheWriteTokens: written, outputTokens: u.output_tokens! };
       }
     }
   }

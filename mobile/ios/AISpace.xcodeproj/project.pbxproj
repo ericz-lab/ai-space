@@ -170,6 +170,7 @@
 		EFF1C8400FD10120AAD732BC /* SpaceHosts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF99819B0F76BC1FC470425F /* SpaceHosts.swift */; };
 		F1CDF6A5555E67857A776069 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CB67CF40D5499BA8D16CA25 /* RootView.swift */; };
 		F2899362FB12F68F4F063F07 /* NavigationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 285BD29476A76DD15C637C47 /* NavigationPolicy.swift */; };
+		424BFF3ECBEB7E347435E1A9 /* WebCookieSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23483EA7F803588AB6D9ABB4 /* WebCookieSession.swift */; };
 		F33376B856923A8B07D3476A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F21B26E574974C68CD38D1D1 /* SettingsView.swift */; };
 		F83FFD451E7463439410A564 /* SettingsLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5E160797DEAB29164DAEE2F /* SettingsLoader.swift */; };
 		F859C4C17BAA7B4909DCD16B /* TerminalViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 182FB2A8508235FC403AE212 /* TerminalViews.swift */; };
@@ -251,6 +252,7 @@
 		26C0493EFF865800D7C7EF64 /* CatalogueLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogueLoader.swift; sourceTree = "<group>"; };
 		26F3FFDFC616B6A7B6AACA5D /* HubUsageViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubUsageViews.swift; sourceTree = "<group>"; };
 		285BD29476A76DD15C637C47 /* NavigationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NavigationPolicy.swift; path = ../../desktop/macos/AISpace/Web/NavigationPolicy.swift; sourceTree = "<group>"; };
+		23483EA7F803588AB6D9ABB4 /* WebCookieSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WebCookieSession.swift; path = ../../desktop/macos/AISpace/Web/WebCookieSession.swift; sourceTree = "<group>"; };
 		28C349C58E0A6ED6AA197552 /* HubViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubViews.swift; sourceTree = "<group>"; };
 		2AEF6096C08833FAAA871263 /* MetalError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalError.swift; sourceTree = "<group>"; };
 		2C526382409915BFA955F929 /* BoxDrawingRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoxDrawingRenderer.swift; sourceTree = "<group>"; };
@@ -701,6 +703,7 @@
 				FBE53D581008930F0A0BC1AE /* ConnectionStore.swift */,
 				E3BCFF07B4727AF0C1CC2C42 /* DesktopRules.swift */,
 				285BD29476A76DD15C637C47 /* NavigationPolicy.swift */,
+				23483EA7F803588AB6D9ABB4 /* WebCookieSession.swift */,
 				15F72436C5BE5A54D6197356 /* OmniboxRules.swift */,
 				B9056473C1DE89BA7A1839A6 /* SpaceAPI.swift */,
 				5B688E2563D0E7D1F39FBC0E /* SpaceCheck.swift */,
@@ -937,6 +940,7 @@
 				F8F297B2B1D7CEFF0DB8CF9A /* IconSource.swift in Sources */,
 				E58D915CAF51481FB240313E /* IconStore.swift in Sources */,
 				F2899362FB12F68F4F063F07 /* NavigationPolicy.swift in Sources */,
+				424BFF3ECBEB7E347435E1A9 /* WebCookieSession.swift in Sources */,
 				1D1437F339465235BCF78FB1 /* OmniboxModels.swift in Sources */,
 				88C059CD78EF203CC1782B86 /* OmniboxRules.swift in Sources */,
 				401FCCC355C0BA78ED3E448E /* OmniboxStore.swift in Sources */,

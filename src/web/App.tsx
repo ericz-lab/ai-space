@@ -46,7 +46,7 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetChoice; petApp?: string };
 
 /** Floating panels over the page; one at a time. */
-type Panel = "settings" | "chat" | "tasks" | "usage" | "activity" | "appModels" | "events" | "terminal" | "inbox" | "shortcuts";
+type Panel = "settings" | "chat" | "tasks" | "terminal" | "inbox" | "shortcuts";
 
 /**
  * What is behind the page: the three glow blobs, or the preset's backdrop (theme.ts) framed from
@@ -948,11 +948,11 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                   <button className="setpage-back" onClick={() => (settingsPage === "tasks" && tasksApp ? setTasksApp(null) : setSettingsPage(null))}>
                     <span aria-hidden="true">‹</span> {settingsPage === "tasks" && tasksApp ? t("tasks.title") : t(SECTION_LABEL[setSection])}
                   </button>
-                  {settingsPage === "usage" && <Usage open embedded onClose={close} />}
-                  {settingsPage === "activity" && <Activity open embedded onClose={close} nameOf={nameOf} />}
-                  {settingsPage === "appModels" && <AppModels open embedded onClose={close} selected={appModelsApp} onSelect={openAppModel} />}
+                  {settingsPage === "usage" && <Usage />}
+                  {settingsPage === "activity" && <Activity nameOf={nameOf} />}
+                  {settingsPage === "appModels" && <AppModels selected={appModelsApp} onSelect={openAppModel} />}
                   {settingsPage === "tasks" && <Tasks open embedded onClose={close} selected={tasksApp} onSelect={setTasksApp} />}
-                  {settingsPage === "events" && <Events open embedded onClose={close} />}
+                  {settingsPage === "events" && <Events />}
                 </> : <>
                 <h3 className="setpage-title">{t(SECTION_LABEL[setSection])}</h3>
                 {setSection === "general" && (
@@ -1004,7 +1004,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                       }} />
                     </div>
                     <MachineClis />
-                    <AppModels open embedded onClose={close} selected={null} onSelect={openAppModel} />
+                    <AppModels selected={null} onSelect={openAppModel} />
                   </>
                 )}
                 {setSection === "automation" && (
@@ -1054,10 +1054,6 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         </div>
       )}
       <Tasks open={panel === "tasks"} onClose={close} onBack={openSettings} />
-      <Usage open={panel === "usage"} onClose={close} onBack={openSettings} />
-      <Activity open={panel === "activity"} onClose={close} onBack={openSettings} nameOf={nameOf} />
-      <AppModels open={panel === "appModels"} onClose={close} onBack={openSettings} />
-      <Events open={panel === "events"} onClose={close} onBack={openSettings} />
       <Terminal open={panel === "terminal"} onClose={close} />
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
       <Shortcuts open={panel === "shortcuts"} onClose={close} onOpenTasks={openTasks} />

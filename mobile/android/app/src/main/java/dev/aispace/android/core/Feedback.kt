@@ -30,7 +30,6 @@ data class FeedbackSettings(
     fun shown(app: String): Boolean = enabled && (apps[app]?.let { it == "on" } ?: appsDefault)
 
     companion object : JsonReader<FeedbackSettings> {
-        val modes = listOf("auto", "later")
         val efforts = listOf("high", "xhigh", "max")
 
         override fun from(o: JSONObject): FeedbackSettings {
@@ -229,9 +228,6 @@ data class FeedbackItem(
 }
 
 object Feedback {
-    /** The statuses this client has words for; another is shown as the Space sends it. */
-    val statuses = listOf("later", "queued", "fixing", "review", "failed", "skipped", "recorded", "accepted", "dropped")
-
     internal fun counts(o: JSONObject?): Map<String, Int> {
         if (o == null) return emptyMap()
         val out = LinkedHashMap<String, Int>()

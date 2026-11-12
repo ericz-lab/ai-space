@@ -28,7 +28,7 @@ test("app-server emits real deltas, isolates the thread and preserves usage", as
   const promise = streamCodex(bin("ok"), input, undefined, text => { expect(settled).toBe(false); chunks.push(text); });
   const result = await promise; settled = true;
   expect(chunks).toEqual(["hello ", "world"]);
-  expect(result).toMatchObject({ ok: true, text: "hello world", usage: { inputTokens: 10, cacheReadTokens: 100, outputTokens: 5 } });
+  expect(result).toMatchObject({ ok: true, text: "hello world", usage: { inputTokens: 10, cacheReadTokens: 100, cacheWriteTokens: 20, outputTokens: 5 } });
 });
 test("cut streams and tool requests fail explicitly without replay", async () => {
   expect(await streamCodex(bin("cut"), input, undefined, () => {})).toMatchObject({ ok: false });

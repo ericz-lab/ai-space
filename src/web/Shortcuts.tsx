@@ -3,6 +3,7 @@ import ActionRunner, { RunCard } from "./ActionRunner.tsx";
 import { getJson, relTime } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
 import { type Action, type RunView, actionKey, actionText } from "./shortcuts.ts";
+import { pollWhileVisible } from "./poll.ts";
 
 // Shortcuts window (docs/shortcuts.md#user-experience): the action catalogue with a search, one
 // action's form and result, and the recent runs. A run started here or in the command box keeps
@@ -36,8 +37,7 @@ export default function Shortcuts({ open, onClose, onOpenTasks }: { open: boolea
   const running = runs.some((r) => r.status === "running");
   useEffect(() => {
     if (!open) return;
-    const timer = setInterval(loadRuns, running ? 2_000 : 15_000);
-    return () => clearInterval(timer);
+    return pollWhileVisible(loadRuns, running ? 2_000 : 15_000);
   }, [open, running]);
 
   useEffect(() => {

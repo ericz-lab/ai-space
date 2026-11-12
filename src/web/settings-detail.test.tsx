@@ -7,10 +7,17 @@ import Tasks from "./Tasks.tsx";
 import Events from "./Events.tsx";
 
 const noop = () => {};
-const pages = { Activity, Usage, AppModels, Tasks, Events };
+// These pages exist only under Settings, so they render as its embedded detail.
+const pages = {
+  Activity: () => <Activity nameOf={(_kind, key) => key} />,
+  Usage: () => <Usage />,
+  AppModels: () => <AppModels selected={null} onSelect={noop} />,
+  Events: () => <Events />,
+  Tasks: () => <Tasks open embedded onClose={noop} onBack={noop} />,
+};
 for (const [name, Page] of Object.entries(pages)) {
   test(`${name} embeds without a nested dialog or duplicate navigation`, () => {
-    const html = renderToStaticMarkup(<Page open embedded onClose={noop} onBack={noop} nameOf={(_kind, key) => key} />);
+    const html = renderToStaticMarkup(<Page />);
     expect(html).toContain('class="settings-detail"');
     expect(html).toContain('role="region"');
     expect(html).not.toContain('role="dialog"');
@@ -19,11 +26,13 @@ for (const [name, Page] of Object.entries(pages)) {
     expect(html).not.toContain('title="Back"');
     expect(html).toContain('class="task-body"');
   });
-  test(`${name} retains standalone navigation`, () => {
-    const html = renderToStaticMarkup(<Page open onClose={noop} onBack={noop} nameOf={(_kind, key) => key} />);
-    expect(html).toContain('role="dialog"');
-    expect(html).toContain('class="overlay"');
-    expect(html).toContain('title="Close"');
-    expect(html).toContain('title="Back"');
-  });
 }
+
+// Tasks also opens as its own window (the shortcuts' "tasks" link).
+test("Tasks retains standalone navigation", () => {
+  const html = renderToStaticMarkup(<Tasks open onClose={noop} onBack={noop} />);
+  expect(html).toContain('role="dialog"');
+  expect(html).toContain('class="overlay"');
+  expect(html).toContain('title="Close"');
+  expect(html).toContain('title="Back"');
+});

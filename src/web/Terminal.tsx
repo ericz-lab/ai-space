@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { dateTime, fmtDuration, getJson, relTime } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
 import { type Appearance, currentAppearance, luminance, onAppearance } from "./theme.ts";
+import { pollWhileVisible } from "./poll.ts";
 
 // Terminal window (a floating panel): shells on this machine and on peer machines, in xterm.js.
 // - Mounted permanently (closing only slides it away) so sessions survive closing the panel.
@@ -78,8 +79,7 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
   useEffect(() => {
     if (!open) return;
     load();
-    const timer = setInterval(load, 30_000);
-    return () => clearInterval(timer);
+    return pollWhileVisible(load, 30_000);
   }, [open]);
 
   const bump = (tab: Tab, patch: Partial<Tab>) => {

@@ -13,13 +13,20 @@ final class SharedCaptureModel: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var receipt: String?
     private var generation = UUID()
+    /// The note typed since the draft was last written: a draft file carries its picture, so the
+    /// note is written once typing pauses (`textDelay`), not on every keystroke.
+    private var textDirty = false
+    private var textSave: Task<Void, Never>?
+    private let textDelay: Duration
     private var store: SharedCaptureStore?
     private let load: (Connection) async throws -> ScreenshotRules.Availability
     private let upload: (Connection, SharedCaptureDraft, ScreenshotRules.Target) async throws -> ScreenshotRules.Answer
 
     init(store suppliedStore: SharedCaptureStore? = nil,
+         textDelay: Duration = .milliseconds(600),
          load: ((Connection) async throws -> ScreenshotRules.Availability)? = nil,
          upload: ((Connection, SharedCaptureDraft, ScreenshotRules.Target) async throws -> ScreenshotRules.Answer)? = nil) {
+        self.textDelay = textDelay
         self.load = load ?? { space in
             try await Self.api(for: space).get("/api/capture", as: ScreenshotRules.Availability.self)
         }
@@ -65,6 +72,7 @@ final class SharedCaptureModel: ObservableObject {
 
     func edit(_ item: SharedCaptureDraft) async {
         guard !busy else { return }
+        flushText()
         do {
             guard let current = try store?.drafts().first(where: { $0.id == item.id }) else {
                 error = String(localized: "This picture was changed in another window. Reopen it from Pending Shares.")
@@ -79,6 +87,7 @@ final class SharedCaptureModel: ObservableObject {
 
     func changeSpace(_ id: UUID) async {
         guard var item = draft, !busy, !item.attempted else { return }
+        cancelTextSave()
         item.connection = id
         item.target = nil
         persist(item)
@@ -87,14 +96,41 @@ final class SharedCaptureModel: ObservableObject {
 
     func changeTarget(_ id: String) {
         guard var item = draft, !busy, !item.attempted else { return }
+        cancelTextSave()
         item.target = id
         persist(item)
     }
 
+    /// Shows the note at once and writes it when typing pauses; whatever writes the draft before
+    /// then (another choice, Save, another picture, closing the editor) writes the note with it.
     func changeText(_ text: String) {
         guard var item = draft, !busy, !item.attempted else { return }
         item.text = String(text.prefix(4000))
+        guard item.text != draft?.text else { return }
+        draft = item
+        textDirty = true
+        textSave?.cancel()
+        let delay = textDelay
+        textSave = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self?.flushText()
+        }
+    }
+
+    /// Writes a note still waiting for typing to pause.
+    func flushText() {
+        let dirty = textDirty
+        cancelTextSave()
+        guard dirty, let item = draft, !item.attempted else { return }
         persist(item)
+    }
+
+    /// The draft is about to be written whole, note included, or thrown away.
+    private func cancelTextSave() {
+        textSave?.cancel()
+        textSave = nil
+        textDirty = false
     }
 
     private func persist(_ item: SharedCaptureDraft) {
@@ -151,6 +187,7 @@ final class SharedCaptureModel: ObservableObject {
         guard canSave, var item = draft, let store,
               let space = spaces.first(where: { $0.id == item.connection }),
               let target = targets.first(where: { $0.id == item.target }) else { return }
+        cancelTextSave()
         busy = true
         error = nil
         defer { busy = false }
@@ -170,6 +207,7 @@ final class SharedCaptureModel: ObservableObject {
     func discard(_ item: SharedCaptureDraft) {
         guard !busy, let store else { return }
         do {
+            if draft?.id == item.id { cancelTextSave() }
             try store.remove(item.id)
             if draft?.id == item.id { draft = nil; generation = UUID(); loading = false }
             drafts = try store.drafts()

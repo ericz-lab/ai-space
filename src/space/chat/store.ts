@@ -204,10 +204,6 @@ export class ChatStore {
     return this.db.query<MessageRow, [number]>("SELECT * FROM chat_messages WHERE thread_id = ? ORDER BY id").all(threadId).map(message);
   }
 
-  countMessages(threadId: number): number {
-    return this.db.query<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM chat_messages WHERE thread_id = ?").get(threadId)!.n;
-  }
-
   // ---------------------------------------------------------------- turns
 
   /** A turn that starts running now. Throws when the thread already has one under this request id. */

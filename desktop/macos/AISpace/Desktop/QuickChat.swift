@@ -428,24 +428,6 @@ private struct FloatingChatBody: View {
     }
 }
 
-/// A borderless symbol button of the header, with a hover fill so it reads as a control.
-private struct HeaderButton: View {
-    let symbol: String
-    let help: LocalizedStringKey
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 13, weight: .medium))
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(HeaderButtonStyle())
-        .help(help)
-        .accessibilityLabel(Text(help))
-    }
-}
-
 struct HeaderButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         HeaderButtonBody(configuration: configuration)

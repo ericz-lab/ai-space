@@ -98,12 +98,6 @@ final class LocalManager: ObservableObject {
         await refresh()
     }
 
-    func forgetRuntimeChoice(_ name: String) async {
-        chosenRuntimes[name] = nil
-        UserDefaults.standard.set(chosenRuntimes, forKey: Self.chosenKey)
-        await refresh()
-    }
-
     func refresh() async {
         guard available else { return }
         do { status = try await run(LocalStatus.self, ["status"] + runtimeArgs) } catch let f as LocalFailure { failure = f } catch {
@@ -122,7 +116,8 @@ final class LocalManager: ObservableObject {
         retry?.cancel()
         retry = nil
         updateWaitingFor = nil
-        let label = migrate ? "Migrating…" : whenBusy == .wait ? "Waiting for the work in progress, then updating…" : (status?.state == .managed ? "Updating…" : "Setting up…")
+        let label = migrate ? String(localized: "Migrating…") : whenBusy == .wait ? String(localized: "Waiting for the work in progress, then updating…")
+            : (status?.state == .managed ? String(localized: "Updating…") : String(localized: "Setting up…"))
         await perform(label) {
             let current = try await run(LocalStatus.self, ["status"] + runtimeArgs)
             status = current
@@ -174,13 +169,13 @@ final class LocalManager: ObservableObject {
         }
     }
 
-    func start() async { await lifecycle("Starting…", "start") }
-    func stop() async { await lifecycle("Stopping…", "stop") }
-    func restart() async { await lifecycle("Restarting…", "restart") }
+    func start() async { await lifecycle(String(localized: "Starting…"), "start") }
+    func stop() async { await lifecycle(String(localized: "Stopping…"), "stop") }
+    func restart() async { await lifecycle(String(localized: "Restarting…"), "restart") }
 
     /// Before deleting the app: stops and unregisters the background service. The workspace stays.
     func removeService(model: AppModel) async {
-        await lifecycle("Removing…", "remove-service")
+        await lifecycle(String(localized: "Removing…"), "remove-service")
         if failure == nil, let c = model.store.managedConnection { model.store.setManaged(c.id, url: c.url, managed: false) }
     }
 
@@ -213,7 +208,7 @@ final class LocalManager: ObservableObject {
             if http.statusCode == 401 {
                 // Revoked, or a workspace that never knew it: Repair (install) makes a new one.
                 DeviceKeychain.delete(for: workspaceKey)
-                failure = LocalFailure(code: "device", error: "This Mac's sign-in to its Space is no longer valid. Use Repair to make a new one.")
+                failure = LocalFailure(code: "device", error: String(localized: "This Mac's sign-in to its Space is no longer valid. Use Repair to make a new one."))
                 return false
             }
             guard http.statusCode == 200 else { return false }

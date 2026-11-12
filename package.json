@@ -49,6 +49,7 @@
     "ios:build": "mobile/ios/scripts/build.sh",
     "ios:device": "mobile/ios/scripts/device.sh",
     "ios:test": "mobile/ios/scripts/test.sh",
+    "ios:test:sim": "mobile/ios/scripts/test-sim.sh",
     "ios:xcode": "mobile/ios/scripts/swiftterm.sh && xcodegen generate --spec mobile/ios/project.yml",
     "android:build": "cd mobile/android && ./gradlew :app:assembleDebug",
     "android:test": "cd mobile/android && ./gradlew :app:testDebugUnitTest"

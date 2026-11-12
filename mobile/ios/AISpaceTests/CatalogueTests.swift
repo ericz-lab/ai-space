@@ -507,7 +507,7 @@ struct AppBrowserTests {
         #expect(model.pagerID == Screens.home)
         #expect(model.tab == .panel)
         // Another Space starts on its first screen too, wherever this one was left.
-        model.tab = .settings
+        model.tab = .home
         model.select(second.id)
         #expect(model.pagerID == Screens.home)
     }
@@ -523,7 +523,7 @@ struct AppBrowserTests {
         model.addScreen(in: connection)
         let second = model.pagerID
         var tabs: [(UUID, String)] = []
-        for origin in [Pager.home, Screens.home, second, Pager.settings] {
+        for origin in [Pager.home, Screens.home, second] {
             // Swipes update the pager directly.
             model.pager.id = origin
             model.open(connection.url.appendingPathComponent("app-\(tabs.count)"), title: "App", in: connection)

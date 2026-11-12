@@ -1,4 +1,4 @@
-import { lstat, mkdir, open } from "node:fs/promises";
+import { copyFile, lstat, mkdir, open, stat, truncate } from "node:fs/promises";
 import { join } from "node:path";
 import type { PackageManifest } from "./manifest.ts";
 import type { PackageIndex } from "./contract.ts";
@@ -17,7 +17,24 @@ export type RuntimeOptions = {
   spawn?: (app: RuntimeApp, port: number, env: Record<string, string>) => Promise<Child>;
   probe?: (port: number, path: string) => Promise<boolean>;
   port?: () => number;
+  /** Size at which an app's `package.log` is kept as `package.log.1` and started over; default 10 MiB. */
+  maxLogBytes?: number;
 };
+
+const MAX_LOG_BYTES = 10 * 1024 ** 2;
+
+/**
+ * Keeps one previous generation of a log its writer holds open in append mode: the content is
+ * copied to `<file>.1` and the file truncated in place, so the writer's next line starts it over.
+ * True when it rotated.
+ */
+export async function rotateLog(file: string, maxBytes: number): Promise<boolean> {
+  const size = await stat(file).then((s) => s.size, () => 0);
+  if (size <= maxBytes) return false;
+  await copyFile(file, `${file}.1`);
+  await truncate(file, 0);
+  return true;
+}
 
 /** One owner per app process. Requests/tasks hold explicit leases until their work is finished. */
 export class PackageRuntime {
@@ -27,6 +44,7 @@ export class PackageRuntime {
   private closing = false;
   private readonly suspended = new Set<string>();
   private readonly timer: ReturnType<typeof setInterval>;
+  private readonly logTimer: ReturnType<typeof setInterval>;
 
   constructor(private readonly opts: RuntimeOptions) {
     this.now = opts.now ?? (() => performance.now());
@@ -36,6 +54,18 @@ export class PackageRuntime {
     });
     this.timer = setInterval(() => void this.sweep().catch(() => {}), 1000);
     this.timer.unref();
+    // A running process appends to its log for as long as it lives: keep each under its cap, hourly.
+    this.logTimer = setInterval(() => void this.rotateLogs().catch(() => {}), 3_600_000);
+    this.logTimer.unref();
+  }
+
+  /** Rotates the `package.log` of each registered app that is over its cap; returns those apps. */
+  async rotateLogs(): Promise<string[]> {
+    const rotated: string[] = [];
+    for (const app of this.apps.keys()) {
+      if (await rotateLog(join(this.opts.logDir, app, "package.log"), this.opts.maxLogBytes ?? MAX_LOG_BYTES)) rotated.push(app);
+    }
+    return rotated;
   }
 
   async register(app: RuntimeApp): Promise<void> {
@@ -135,7 +165,7 @@ export class PackageRuntime {
   }
 
   async close(graceMs = 10_000): Promise<void> {
-    this.closing = true; clearInterval(this.timer);
+    this.closing = true; clearInterval(this.timer); clearInterval(this.logTimer);
     const deadline = performance.now() + graceMs;
     while ([...this.apps.values()].some((s) => s.leases) && performance.now() < deadline) await Bun.sleep(20);
     await Promise.all([...this.apps.values()].map((s) => this.stop(s)));
@@ -160,7 +190,7 @@ export class PackageRuntime {
       const port = this.opts.port?.() ?? freePort();
       const env = await this.opts.envFor(s.app.manifest.app);
       if (this.closing) throw new Error("application runtime is shutting down");
-      child = await (this.opts.spawn ?? ((a, p, e) => spawnApp(a, p, e, this.opts.logDir)))(s.app, port, env);
+      child = await (this.opts.spawn ?? ((a, p, e) => spawnApp(a, p, e, this.opts.logDir, this.opts.maxLogBytes ?? MAX_LOG_BYTES)))(s.app, port, env);
       const deadline = performance.now() + (this.opts.startTimeoutMs ?? 30_000);
       while (performance.now() < deadline) {
         if (this.closing) throw new Error("application runtime is shutting down");
@@ -213,14 +243,17 @@ function freePort(): number {
   return port;
 }
 
-async function spawnApp(app: RuntimeApp, port: number, env: Record<string, string>, logDir: string): Promise<Child> {
+async function spawnApp(app: RuntimeApp, port: number, env: Record<string, string>, logDir: string, maxLogBytes: number): Promise<Child> {
   const launch = app.manifest.launch;
   if (launch?.kind !== "process") throw new Error("not a process application");
   const entry = join(app.dir, launch.entry);
   const args = launch.runtime === "bun" ? [process.execPath, entry, ...launch.args] : [entry, ...launch.args];
   const setsid = process.platform === "linux" ? Bun.which("setsid") : null;
   await mkdir(join(logDir, app.manifest.app), { recursive: true });
-  const log = await open(join(logDir, app.manifest.app, "package.log"), "a", 0o600);
+  const logFile = join(logDir, app.manifest.app, "package.log");
+  // A process that keeps failing to start is restarted many times; each start checks the cap too.
+  await rotateLog(logFile, maxLogBytes);
+  const log = await open(logFile, "a", 0o600);
   let proc: Bun.Subprocess;
   try {
     proc = Bun.spawn(setsid ? [setsid, ...args] : args, {

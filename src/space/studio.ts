@@ -74,7 +74,7 @@ async function files(dir: string, skip: Set<string> = new Set(), rel = ""): Prom
 export async function createSource(d: StudioDeps, input: { name: string; title?: string; description?: string }): Promise<string> {
   const name = input.name.trim();
   if (!NAME_RE.test(name)) throw new StudioError("the name must be lowercase letters, digits, dots, dashes or underscores, starting with a letter or digit");
-  if (d.store.list().some((o) => o.app === name && o.state === "installed")) throw new StudioError(`an app named ${name} is already installed`, 409);
+  if (d.store.installed(name)) throw new StudioError(`an app named ${name} is already installed`, 409);
   const dir = sourceDir(d.ws, name);
   if (await exists(dir)) throw new StudioError(`${dir} already exists`, 409);
   const title = input.title?.trim() || name;
@@ -125,7 +125,7 @@ export async function buildSource(d: StudioDeps, app: string): Promise<BuildResu
     throw new StudioError(`space.yaml: ${(e as Error).message}`);
   }
   if (manifest.app !== app) throw new StudioError(`space.yaml names the app ${manifest.app}, not ${app}`);
-  const installed = d.store.list().find((o) => o.app === app && o.state === "installed");
+  const installed = d.store.installed(app);
   if (installed && !newer(manifest.version, installed.version)) {
     const version = nextPatch(installed.version);
     yaml = yaml.replace(/^version:\s*\S+/m, `version: ${version}`);
@@ -178,7 +178,7 @@ export async function listSources(d: StudioDeps): Promise<StudioApp[]> {
     } catch {
       continue; // a spec-1 checkout or not an app: not the studio's
     }
-    const installed = d.store.list().find((o) => o.app === app && o.state === "installed");
+    const installed = d.store.installed(app);
     const built = installed ? await stat(join(d.ws.run, "studio", `${app}-${installed.version}.spaceapp`)).then((s) => s.mtimeMs, () => 0) : 0;
     let changed = !installed;
     if (installed) {

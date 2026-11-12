@@ -57,6 +57,8 @@ targets:
         group: Shared
       - path: ../../desktop/macos/AISpace/Web/NavigationPolicy.swift
         group: Shared
+      - path: ../../desktop/macos/AISpace/Web/WebCookieSession.swift
+        group: Shared
     dependencies:
       - target: SwiftTerm
       - target: ShareExtension

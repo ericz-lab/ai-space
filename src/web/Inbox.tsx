@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { type InboxItem, type InboxSummary, dateTime, getJson, relTime, sendJson } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
+import { pollWhileVisible } from "./poll.ts";
 
 // Inbox window (a floating panel): every app's notifications in one list (docs/notify.md#inbox).
 // - A thread is one app's notifications with the same key: a task that failed 300 times is one row with a count.
@@ -53,8 +54,7 @@ export default function Inbox({ open, onClose, onSummary }: { open: boolean; onC
     if (!open) return;
     setItems(null);
     load();
-    const timer = setInterval(load, 30_000);
-    return () => clearInterval(timer);
+    return pollWhileVisible(load, 30_000);
   }, [open, filter, app]);
 
   useEffect(() => {

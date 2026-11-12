@@ -499,8 +499,6 @@ final class ChatStore: ObservableObject {
     @Published private(set) var error: String?
     private var sessionID: String?
     private var runID: String?
-    private var task: Task<Void, Never>?
-    private static let reconnects = 5
     /// Called when a turn has settled, so the catalogue can show what the agent installed.
     var onTurnSettled: (() -> Void)?
 
@@ -692,7 +690,7 @@ final class ChatStore: ObservableObject {
         runID = nil
         pending = []
         steersSeen = 0
-        task = Task { [weak self] in
+        Task { [weak self] in
             await self?.follow(turn, into: index)
         }
     }
@@ -700,11 +698,11 @@ final class ChatStore: ObservableObject {
     private func follow(_ turn: QueuedTurn, into index: Int) async {
         var reply = ChatReply()
         var lastSeq = 0
-        var tries = 0
+        var failures = 0
         var asks: [String: Ask] = [:]
-        var body: [String: Any] = ["message": turn.text, "interactive": true]
-        if !turn.images.isEmpty { body["images"] = turn.images.map(\.body) }
-        if let sessionID { body["sessionId"] = sessionID }
+        // The phone has no permission picker: its turns run as the Mac's default, "Ask before
+        // changes", whose approvals the reply shows as cards.
+        var body = ChatTurnRequest(message: turn.text, permission: .readOnly, images: turn.images).body(sessionID: sessionID)
         if let intentID = turn.intentID {
             body["intentId"] = intentID
             body["timezone"] = turn.timezone ?? TimeZone.current.identifier
@@ -726,10 +724,16 @@ final class ChatStore: ObservableObject {
         do {
             var (id, stream) = try await api.events("POST", "\(base)/chat", json: body)
             runID = id
+            // Stop was pressed before the Space named the run: send it now that it has.
+            if stopRequested, let id { sendStop(id) }
             while !reply.finished {
                 do {
                     for try await message in stream {
-                        if let seq = message.id { lastSeq = seq }
+                        if let seq = message.id {
+                            guard seq > lastSeq else { continue }
+                            lastSeq = seq
+                        }
+                        failures = 0
                         reply.apply(message.data)
                         switch ChatRows.questionEvent(message.data) {
                         case .asked(let step, let questions)?: asks[step] = asks[step] ?? Ask(questions: questions)
@@ -744,14 +748,14 @@ final class ChatStore: ObservableObject {
                 }
                 if reply.finished || Task.isCancelled { break }
                 // The stream ended without the run saying it was done: follow the run again.
-                guard let run = runID, tries < Self.reconnects else {
+                failures += 1
+                guard let run = runID, failures <= ChatReconnect.maxFailures else {
                     reply.note = String(localized: "The connection was lost; the reply may still be running on the Space.")
                     break
                 }
-                tries += 1
                 reply.activity = .reconnecting
                 show()
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+                try await Task.sleep(for: ChatReconnect.delay(after: failures))
                 do {
                     (_, stream) = try await api.events("GET", "\(base)/runs/\(SpacePath.escape(run))/events?after=\(lastSeq)")
                 } catch SpaceAPIError.authenticationRequired {
@@ -796,10 +800,15 @@ final class ChatStore: ObservableObject {
         return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }
 
-    /// Stops the run on the Space; the stream then ends by itself.
+    /// Stops the run on the Space; the stream then ends by itself. Before the Space has named the
+    /// new run, the stop is sent as soon as it does (`follow`).
     func stop() {
         stopRequested = true
         guard let run = runID else { return }
+        sendStop(run)
+    }
+
+    private func sendStop(_ run: String) {
         Task { _ = try? await api.send("POST", "\(base)/runs/\(SpacePath.escape(run))/stop", json: [:]) }
     }
 }

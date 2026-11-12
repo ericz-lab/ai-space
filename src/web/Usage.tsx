@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { type AppInfo, dateTime, fmtDuration, getJson, relTime } from "./api.ts";
 import { type CallTrace, fallbackNote, traceLines } from "./call-trace.ts";
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
+import { pollWhileVisible } from "./poll.ts";
 
-// Usage window (a floating panel): what the model service recorded, read-only.
+// Model usage page under Settings: what the model service recorded, read-only.
 // - The ledger is the open Space's own: its apps' calls, including those it sent to another machine.
 //   The header names the Space.
-// - Reads `GET /api/model/usage?window=…` when opened and every 30 s while open.
+// - Reads `GET /api/model/usage?window=…` when shown and every 30 s while the tab is visible.
 // - One window at a time (5h matches a subscription's rolling quota; 24h, 7d, 30d for trends).
 // - Rows are app → tag → model, largest first; a model table and the last calls follow.
 // - On a hub the peers' calls are in too: the app as `<peer>/<app>` (who started it), the model as
@@ -190,7 +191,8 @@ function TokenCells({ t }: { t: { inputTokens?: number; cacheWriteTokens?: numbe
   );
 }
 
-export default function Usage({ open, onClose, onBack, embedded = false }: { open: boolean; onClose: () => void; onBack?: () => void; embedded?: boolean }) {
+/** Model usage, a page under Settings. */
+export default function Usage() {
   const { lang, t } = useLang();
   const [window, setWindow] = useState<(typeof WINDOWS)[number]>("24h");
   const [metric, setMetric] = useState<Metric>("tokens");
@@ -200,7 +202,6 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
   const [err, setErr] = useState("");
 
   useEffect(() => {
-    if (!open) return;
     let live = true;
     const load = () =>
       Promise.all([getJson<UsageInfo>(`/api/model/usage?window=${window}`), getJson<{ calls: CallInfo[] }>("/api/model/calls?limit=30")])
@@ -216,19 +217,12 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
       // Keyed by id: a peer's app is `<peer>/<app>`, as its calls are.
       .then((d) => setApps(Object.fromEntries((d.apps || []).map((a) => [a.id || a.name, { title: a.title, ...(a.i18n ? { i18n: a.i18n } : {}) }]))))
       .catch(() => {});
-    const timer = setInterval(load, 30_000);
+    const stop = pollWhileVisible(load, 30_000);
     return () => {
       live = false;
-      clearInterval(timer);
+      stop();
     };
-  }, [open, window]);
-
-  useEffect(() => {
-    if (!open || embedded) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose, embedded]);
+  }, [window]);
 
   const label = (app: string) => {
     const a = apps[app];
@@ -237,14 +231,9 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
   const tot = usage?.totals;
 
   return (
-    <div className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
-      <div className="tasks usage" role={embedded ? "region" : "dialog"} aria-label={t("usage.title")}>
+    <div className="settings-detail">
+      <div className="tasks usage" role="region" aria-label={t("usage.title")}>
         <div className="task-head">
-          {!embedded && onBack && (
-            <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
-              ‹
-            </button>
-          )}
           <b>{t("usage.title")}</b>
           <span className="chat-sub" title={t("usage.spaceHint")}>
             {usage ? `${usage.space ? `${t("usage.space", { space: usage.space })} · ` : ""}${t("usage.backend", { backend: usage.backend })}` : ""}
@@ -256,9 +245,6 @@ export default function Usage({ open, onClose, onBack, embedded = false }: { ope
               </button>
             ))}
           </span>
-          {!embedded && (<button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
-            ✕
-          </button>)}
         </div>
         <div className="task-body">
           <p className="task-note">{t("usage.costNote")}</p>

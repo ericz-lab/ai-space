@@ -1,5 +1,5 @@
 import { view as callView, STREAM_KEEPALIVE_MS } from "../model/api.ts";
-import { APP_PATTERN } from "../model/types.ts";
+import { APP_PATTERN, type ModelCall } from "../model/types.ts";
 import { type ChatService, Locked, Refused, type TurnResult } from "./service.ts";
 import { parseScope, parseTitle, parseTurnInput } from "./spec.ts";
 import { MAX_ATTACHMENT_BYTES, type Attachment, type Message, type Thread, type TurnRecord } from "./types.ts";
@@ -89,7 +89,9 @@ export function createChatRoutes(opts: ChatApiOptions): Routes {
   const threadView = (t: Thread) => {
     const attachments = new Map<number, Attachment[]>();
     for (const a of service.store.listAttachments(t.id)) if (a.messageId !== undefined) attachments.set(a.messageId, [...(attachments.get(a.messageId) ?? []), a]);
-    const messages = service.store.listMessages(t.id).map((m) => messageView(m, attachments.get(m.id) ?? [], service));
+    const list = service.store.listMessages(t.id);
+    const calls = service.callsOf(list.flatMap((m) => (m.callId === undefined ? [] : [m.callId])));
+    const messages = list.map((m) => messageView(m, attachments.get(m.id) ?? [], service, calls));
     const live = service.liveTurn(t.id);
     return { thread: view(t), messages, running: live !== undefined, ...(live ? { turn: turnInfo(live.record, live.text) } : {}) };
   };
@@ -354,8 +356,9 @@ export function attachmentView(a: Attachment) {
   return { id: a.id, name: a.name, type: a.type, size: a.size, url: `/api/chat/attachments/${a.id}` };
 }
 
-export function messageView(m: Message, attachments: Attachment[], service: ChatService) {
-  const call = m.callId === undefined ? undefined : service.callOf(m.callId);
+/** `calls` is the thread's ledger rows fetched in one query; without it the call is looked up alone. */
+export function messageView(m: Message, attachments: Attachment[], service: ChatService, calls?: Map<number, ModelCall>) {
+  const call = m.callId === undefined ? undefined : calls ? calls.get(m.callId) : service.callOf(m.callId);
   return {
     id: m.id, role: m.role, content: m.content, createdAt: new Date(m.createdAt).toISOString(),
     ...(m.error === undefined ? {} : { error: m.error }),

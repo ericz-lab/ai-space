@@ -13,6 +13,13 @@ export type InstallOperation = {
 };
 type Row = Omit<InstallOperation, "createdAt" | "updatedAt"> & { created_at: number; updated_at: number };
 
+/**
+ * Finished operations that nothing needs any more (`failed`, `removed`) are kept as history up to
+ * this many; older ones are dropped. Rows a change receipt names, and `installing`, `installed` and
+ * `retired` rows (the code a rollback can return to), are always kept.
+ */
+export const KEEP_FINISHED_OPERATIONS = 200;
+
 export class PackageStore {
   readonly spaceId: string;
   constructor(readonly db: Database) {
@@ -45,6 +52,7 @@ export class PackageStore {
     db.query("INSERT OR IGNORE INTO space_identity(singleton,id) VALUES(1,?)").run(crypto.randomUUID());
     this.spaceId = (db.query("SELECT id FROM space_identity WHERE singleton=1").get() as { id: string }).id;
     installationKey(this.spaceId, "validation");
+    this.prune();
   }
 
   get(id: string): InstallOperation | undefined {
@@ -54,6 +62,22 @@ export class PackageStore {
 
   list(): InstallOperation[] {
     return (this.db.query("SELECT * FROM package_operations ORDER BY created_at,id").all() as Row[]).map(view);
+  }
+
+  /** The installed operation of each app (at most one per app), or of one app. */
+  installed(): InstallOperation[];
+  installed(app: string): InstallOperation | undefined;
+  installed(app?: string): InstallOperation[] | InstallOperation | undefined {
+    if (app !== undefined) {
+      const row = this.db.query("SELECT * FROM package_operations WHERE app=? AND state='installed'").get(app) as Row | null;
+      return row ? view(row) : undefined;
+    }
+    return (this.db.query("SELECT * FROM package_operations WHERE state='installed' ORDER BY created_at,id").all() as Row[]).map(view);
+  }
+
+  /** Operations an interrupted install left in `installing`. */
+  installing(): InstallOperation[] {
+    return (this.db.query("SELECT * FROM package_operations WHERE state='installing' ORDER BY created_at,id").all() as Row[]).map(view);
   }
 
   /** Synchronous transaction also serializes other processes using this workspace database. */
@@ -79,6 +103,7 @@ export class PackageStore {
 
   finish(id: string, state: "installed" | "failed", error: string | null = null): InstallOperation {
     this.db.query("UPDATE package_operations SET state=?,error=?,updated_at=? WHERE id=? AND state='installing'").run(state, error, Date.now(), id);
+    if (state === "failed") this.prune();
     return this.get(id)!;
   }
 
@@ -93,6 +118,14 @@ export class PackageStore {
       this.db.query("UPDATE package_operations SET state=?,updated_at=? WHERE app=? AND state='installed'").run(id ? "retired" : "removed", Date.now(), app);
       if (id) this.db.query("UPDATE package_operations SET state='installed',updated_at=? WHERE id=?").run(Date.now(), id);
     }).immediate();
+    if (!id) this.prune();
+  }
+
+  /** Drops the finished operations beyond `KEEP_FINISHED_OPERATIONS` (see there for what stays). */
+  prune(keep = KEEP_FINISHED_OPERATIONS): number {
+    return this.db.query(`DELETE FROM package_operations WHERE state IN ('failed','removed')
+      AND id NOT IN (SELECT old_id FROM package_changes) AND id NOT IN (SELECT new_id FROM package_changes WHERE new_id IS NOT NULL)
+      AND id NOT IN (SELECT id FROM package_operations WHERE state IN ('failed','removed') ORDER BY updated_at DESC, id DESC LIMIT ?)`).run(keep).changes;
   }
 }
 

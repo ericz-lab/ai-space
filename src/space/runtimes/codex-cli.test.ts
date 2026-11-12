@@ -97,6 +97,13 @@ describe("Codex completions", () => {
     expect(parseCodexOutput("null").error).toBe("invalid Codex event");
     expect(parseCodexOutput('{"type":"turn.completed"}').error).toBe("empty Codex answer");
   });
+  test("splits cache-written input out of input_tokens, like the app-server stream", () => {
+    const answer = '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}\n';
+    const usage = (u: object) => parseCodexOutput(answer + JSON.stringify({ type: "turn.completed", usage: u })).usage;
+    expect(usage({ input_tokens: 1000, cached_input_tokens: 600, cache_write_input_tokens: 300, output_tokens: 5 }))
+      .toEqual({ inputTokens: 100, cacheReadTokens: 600, cacheWriteTokens: 300, outputTokens: 5 });
+    expect(usage({ input_tokens: 1000, cached_input_tokens: 800, cache_write_input_tokens: 300, output_tokens: 5 })).toBeUndefined();
+  });
 });
 
 describe("Codex images", () => {

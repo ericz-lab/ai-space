@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { ClaudeLive } from "./claude-live.ts";
+import { ClaudeLive, claudeLiveFingerprint } from "./claude-live.ts";
 import { LivePool } from "./live.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
@@ -51,7 +51,7 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
   if (sshHost && !SSH_HOST_PATTERN.test(sshHost)) throw new Error(`runtime ${spec.name}: ssh host is not a host name: ${sshHost}`);
   const bin = spec.bin.length ? spec.bin : ["claude"];
   const backend: Backend = sshHost ? `ssh:${sshHost}` : "local";
-  const live = new LivePool();
+  const live = new LivePool({ fingerprint: claudeLiveFingerprint });
 
   return {
     name: spec.name,

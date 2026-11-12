@@ -1,5 +1,5 @@
 import { parseActionSpec } from "../shortcuts/spec.ts";
-import { assertEventName, assertTriggerEvent, parseTriggers } from "../scheduler/events.ts";
+import { assertEventName, parseTriggers } from "../scheduler/events.ts";
 import { parseDuration } from "../scheduler/schedule.ts";
 import type { EventTrigger } from "../scheduler/types.ts";
 import { CAPTURE_KINDS, type Capability, type CaptureKind, type CaptureSpec, DEFAULT_CALL_TIMEOUT_MS, type EventConsumption, type EventPublication, type EventsSpec, HTTP_METHODS, type HttpMethod, MAX_CALL_TIMEOUT_MS } from "./types.ts";
@@ -147,11 +147,6 @@ function parseHttp(raw: unknown, ctx: string): { method: HttpMethod; path: strin
   if (!(HTTP_METHODS as readonly string[]).includes(method)) throw new Error(`${ctx}: unsupported method ${method}`);
   if (typeof raw.path !== "string" || !raw.path.startsWith("/")) throw new Error(`${ctx}: path must start with / (on the app's own service)`);
   return { method: method as HttpMethod, path: raw.path };
-}
-
-/** The trigger event names an app subscribes to, checked once more here so a bad manifest fails early. */
-export function assertConsumedEvents(spec: EventsSpec): void {
-  for (const c of spec.consumes) assertTriggerEvent(c.event);
 }
 
 function optionalString(v: unknown, what: string): string | undefined {

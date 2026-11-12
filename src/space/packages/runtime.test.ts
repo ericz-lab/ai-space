@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parsePackageManifest } from "./manifest.ts";
-import { PackageRuntime, type RuntimeApp } from "./runtime.ts";
+import { PackageRuntime, rotateLog, type RuntimeApp } from "./runtime.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const f of cleanups.splice(0).reverse()) await f(); });
@@ -93,4 +93,27 @@ test("real Bun process starts without inherited operator secrets and shuts down"
   lease.release();
   await runtime.close(0);
   await expect(runtime.acquire("demo")).rejects.toThrow(/shutting down/);
+});
+
+test("an app's package.log over its cap keeps one previous generation and starts over in place", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "space-log-")); cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const file = join(dir, "package.log");
+  expect(await rotateLog(file, 10)).toBe(false); // No log yet.
+  await Bun.write(file, "0123456789");
+  expect(await rotateLog(file, 10)).toBe(false); // At the cap, not over it.
+  await appendFile(file, "abc");
+  expect(await rotateLog(file, 10)).toBe(true);
+  expect(await Bun.file(`${file}.1`).text()).toBe("0123456789abc");
+  expect(await Bun.file(file).text()).toBe("");
+
+  // The runtime checks each registered app's log.
+  const logs = join(dir, "logs");
+  const runtime = new PackageRuntime({ logDir: logs, maxLogBytes: 4, envFor: async () => ({}), spawn: async () => { throw new Error("unused"); } });
+  cleanups.push(() => runtime.close(0));
+  await runtime.register(app());
+  await mkdir(join(logs, "demo"), { recursive: true });
+  await Bun.write(join(logs, "demo", "package.log"), "too long");
+  expect(await runtime.rotateLogs()).toEqual(["demo"]);
+  expect(await runtime.rotateLogs()).toEqual([]);
+  expect(await Bun.file(join(logs, "demo", "package.log.1")).text()).toBe("too long");
 });

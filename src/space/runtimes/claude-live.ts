@@ -1,5 +1,5 @@
 import { approvalTitle, liveFingerprint, LIVE_STOP_GRACE_MS, agentQuestions, PendingApprovals, questionAnswers, readLines, tail, type LiveProcess } from "./live.ts";
-import { PERMISSION_MODES, type AgentQuestion, type ApprovalDecision, type BackgroundJob, type ChatCallbacks, type ChatHandle, type ChatTurn, type QuestionAnswers, type SteerInput } from "./types.ts";
+import { CHAT_EFFORTS, PERMISSION_MODES, type AgentQuestion, type ApprovalDecision, type BackgroundJob, type ChatCallbacks, type ChatHandle, type ChatTurn, type QuestionAnswers, type SteerInput } from "./types.ts";
 
 /**
  * Claude Code live chat (docs/runtimes.md#live-chat): one `claude -p` process per conversation,
@@ -34,10 +34,23 @@ const KEEP_ENDED_JOBS = 20;
 /** The CLI's permission mode for a turn's tier: the panel's read-only default asks instead of refusing. */
 const modeOf = (t: ChatTurn) => ((PERMISSION_MODES as readonly string[]).includes(t.permissionMode ?? "") ? t.permissionMode! : "default");
 
+/** The turn's effort when the CLI knows it; `--effort` has no switch in a running process. */
+const effortOf = (t: ChatTurn) => (t.effort && (CHAT_EFFORTS as readonly string[]).includes(t.effort) ? t.effort : undefined);
+
+/**
+ * What a turn must match to reuse a live process: the agent identity, and the effort, which the
+ * process takes at spawn only. A later turn with another effort restarts the process on the session.
+ */
+export function claudeLiveFingerprint(turn: ChatTurn): string {
+  return `${liveFingerprint(turn)}:${effortOf(turn) ?? ""}`;
+}
+
 /** Arguments of a live process after the binary; exported for tests. */
 export function claudeLiveArgs(t: ChatTurn, extra: string[] = []): string[] {
   const args = [...TURN_ARGS, "--permission-mode", modeOf(t)];
   if (t.model) args.push("--model", t.model);
+  const effort = effortOf(t);
+  if (effort) args.push("--effort", effort);
   if (t.sessionId) args.push("--resume", t.sessionId);
   if (t.systemPrompt) args.push("--append-system-prompt", t.systemPrompt);
   if (t.allowedTools?.length) args.push("--allowedTools", t.allowedTools.join(","));
@@ -102,7 +115,7 @@ export class ClaudeLive implements LiveProcess {
     extra: string[] = [],
     private readonly maxWakes = LIVE_MAX_WAKES,
   ) {
-    this.fingerprint = liveFingerprint(first);
+    this.fingerprint = claudeLiveFingerprint(first);
     this.sid = first.sessionId ?? null;
     this.model = first.model;
     this.mode = modeOf(first);

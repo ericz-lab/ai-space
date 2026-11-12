@@ -520,13 +520,12 @@
 
 /* Local edition first run: agent CLIs and the default model */
 "Agents on this Mac" = "此 Mac 上的 Agent";
-"Install at least one and sign in to it in Terminal, then check again." = "请至少安装一个，并在终端中登录，然后重新检测。";
 "Check Again" = "重新检测";
 "Search Again" = "重新查找";
 "Choose…" = "选择…";
 "Choose the %@ program" = "选择 %@ 程序";
 "%@ is not a program that can run." = "%@ 不是可执行的程序。";
-"Install Claude Code or Codex first, or choose where it is." = "请先安装 Claude Code 或 Codex，或选择它所在的位置。";
+"Install Claude Code, Codex or DeepSeek Harness first, or choose where it is." = "请先安装 Claude Code、Codex 或 DeepSeek Harness，或选择它所在的位置。";
 "Choose the default model" = "选择默认模型";
 "Space Assistant, other agents and apps use it when nothing chooses a model for them. You can change it later in Settings." = "Space Assistant、其他 Agent 和应用在未指定模型时使用它。之后可在设置中修改。";
 "The choice was not saved: %@" = "选择未保存：%@";
@@ -544,7 +543,7 @@
 
 "The selected program could not be verified as this agent. Choose its executable and try again." = "无法确认所选程序是此 Agent。请选择对应的可执行文件后重试。";
 
-"Choose an installed agent to continue. Sign in to it in Terminal before using AI Space." = "请选择已安装的 Agent 以继续。使用 AI Space 前，请先在终端中登录该 Agent。";
+"Choose an installed agent to continue. Sign in first: Claude Code or Codex in Terminal, DeepSeek Harness in its app." = "请选择已安装的 Agent 以继续。请先登录：Claude Code 或 Codex 在终端中登录，DeepSeek Harness 在它自己的应用中登录。";
 
 "Permission" = "权限";
 
@@ -670,3 +669,72 @@
 "Refresh" = "刷新";
 "Sent %lld to the Fix Engineer." = "已交给修复工程师：%lld 条。";
 "Permission: %@" = "权限：%@";
+
+/* Local edition: first run, Settings and the background service (LocalViews.swift, LocalManager.swift) */
+"Connect to a Space elsewhere" = "连接到其他位置的 Space";
+"Set up AI Space on this Mac" = "在这台 Mac 上设置 AI Space";
+"Your apps, agents and their data stay on this Mac. AI Space runs in the background, also while this window is closed." = "你的应用、Agent 及其数据都保留在这台 Mac 上。AI Space 在后台运行，关闭此窗口后也会继续运行。";
+"Set Up" = "设置";
+"AI Space is installed on this Mac" = "这台 Mac 上已安装 AI Space";
+"It is running. Open it to continue." = "它正在运行。打开它以继续。";
+"It is not running. Opening it starts it again." = "它没有在运行。打开它会重新启动。";
+"This Mac already has an AI Space" = "这台 Mac 上已有一个 AI Space";
+"It was installed another way." = "它是通过其他方式安装的。";
+"Connect to it as it is, or let this app take it over. Taking over keeps its apps, data and settings; stop the running one first." = "可以直接连接它，也可以让本应用接管它。接管会保留它的应用、数据和设置；请先停止正在运行的那个。";
+"Connect to It" = "连接到它";
+"It is not running: start it, or take it over." = "它没有在运行：请启动它，或者接管它。";
+"Take It Over…" = "接管…";
+"Stop the running ai-space first." = "请先停止正在运行的 ai-space。";
+"Take over %@?" = "接管 %@？";
+"Take It Over" = "接管";
+"This app will run that workspace from now on, with its apps, data and settings as they are." = "从现在起由本应用运行该工作区，其中的应用、数据和设置保持不变。";
+"Checking this Mac…" = "正在检查这台 Mac…";
+"State" = "状态";
+"Installed" = "已安装";
+"In this app" = "本应用内置";
+"Workspace" = "工作区";
+"AI Space on This Mac" = "这台 Mac 上的 AI Space";
+"It runs in the background: closing or quitting this app leaves it running. Before deleting the app, remove the background service here; your workspace stays." = "它在后台运行：关闭或退出本应用不会停止它。删除本应用前，请先在这里移除后台服务；工作区会保留。";
+"Set Up AI Space on This Mac" = "在这台 Mac 上设置 AI Space";
+"This Mac has an ai-space this app did not install." = "这台 Mac 上有一个不是由本应用安装的 ai-space。";
+"Start" = "启动";
+"Restart" = "重新启动";
+"Install Again" = "重新安装";
+"Repair" = "修复";
+"Open Log" = "打开日志";
+"Remove Background Service…" = "移除后台服务…";
+"Remove the background service?" = "移除后台服务？";
+"AI Space stops and no longer starts at login. Your apps, data and settings stay in %@." = "AI Space 会停止，登录时也不再自动启动。你的应用、数据和设置保留在 %@。";
+"Not set up" = "未设置";
+"Installed another way" = "通过其他方式安装";
+"Background service removed" = "后台服务已移除";
+"Stopped" = "已停止";
+"Not running (%@)" = "未运行（%@）";
+"None found" = "未找到";
+"Migrating…" = "正在接管…";
+"Waiting for the work in progress, then updating…" = "正在等待进行中的工作完成，然后更新…";
+"Updating…" = "正在更新…";
+"Setting up…" = "正在设置…";
+"Stopping…" = "正在停止…";
+"Restarting…" = "正在重新启动…";
+"Removing…" = "正在移除…";
+"This Mac's sign-in to its Space is no longer valid. Use Repair to make a new one." = "这台 Mac 登录其 Space 的凭据已失效。请使用“修复”重新生成。";
+
+/* Local edition: app updates (AppUpdater.swift) */
+"Could not check for updates: %@" = "无法检查更新：%@";
+"Move AI Space to the Applications folder, open it from there, then update." = "请把 AI Space 移到“应用程序”文件夹，从那里打开后再更新。";
+"AI Space cannot replace itself in %@. Download the update and drag it there." = "AI Space 无法替换 %@ 中的自身。请下载更新并拖到该位置。";
+"Downloading %@…" = "正在下载 %@…";
+"Checking the download…" = "正在校验下载内容…";
+"Restarting AI Space…" = "正在重新启动 AI Space…";
+"The download failed." = "下载失败。";
+"The download has the wrong size." = "下载的文件大小不正确。";
+"The download does not match the release's checksum." = "下载内容与发行版的校验和不一致。";
+"This copy of AI Space is not signed by a developer, so it cannot check that an update is genuine. Download it from the release page." = "这份 AI Space 没有开发者签名，无法确认更新是否真实。请从发行页面下载。";
+"Could not open the update: %@" = "无法打开更新：%@";
+"The download is not AI Space %@ with the Local edition inside." = "下载内容不是内含本机版的 AI Space %@。";
+"The update has a different application identity." = "更新的应用标识不一致。";
+"The update's signature does not verify." = "更新的签名校验未通过。";
+"The update is signed by someone else than this app." = "更新与本应用的签名者不同。";
+"macOS does not accept the update (not notarized)." = "macOS 不接受该更新（未经公证）。";
+"Could not copy the update: %@" = "无法复制更新：%@";

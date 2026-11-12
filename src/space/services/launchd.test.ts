@@ -286,6 +286,16 @@ describe("supervisor on launchd", () => {
     expect(await Bun.file(join(t.root, "LaunchAgents", "space.kept.plist")).exists()).toBe(true);
   });
 
+  test("a LaunchAgent another workspace wrote, same label and marker, is never swept or removed", async () => {
+    const t = await setup();
+    await t.sup.apply(mf("demo"));
+    const other = new Supervisor({ mode: "space", envDir: join(t.root, "other-ws", "run", "env"), manager: t.manager, envFor: async () => ({}), appEnv: async () => ({}) });
+    expect(await other.sweep(new Set())).toEqual([]);
+    expect((await other.remove("demo")).removed).toBe(false);
+    expect(await Bun.file(t.plist).exists()).toBe(true);
+    expect(await t.sup.sweep(new Set())).toEqual(["demo"]);
+  });
+
   test("without a GUI session nothing is written", async () => {
     const root = await mkdtemp(join(tmpdir(), "space-ld-"));
     const manager = new Launchctl({ run: async () => ({ code: 125, stdout: "", stderr: "Domain does not support specified action" }), uid: UID, unitDir: join(root, "LaunchAgents"), logDir: join(root, "logs") });

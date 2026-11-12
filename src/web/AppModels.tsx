@@ -4,16 +4,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type AppInfo, getJson, isImgIcon, sendJson } from "./api.ts";
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
 
-// App models window: which model each app's calls run on when they name none (docs/model.md#app-models).
-// - Reads `GET /api/model/apps` when opened: per app, one row for the whole app and one per tag
+// App models page under Settings: which model each app's calls run on when they name none (docs/model.md#app-models).
+// - Reads `GET /api/model/apps` when shown: per app, one row for the whole app and one per tag
 //   (declared in space.yaml, overridden here, or seen in the ledger over 30 days).
 // - The list shows one line per app: the model its calls run on now, the layer that chose it, and
 //   how many purposes run on another model. A click opens the app's page.
 // - The app's page shows the app-wide row and one row per tag; each select sets or clears the
 //   panel override through the same-origin `PATCH /api/panel/apps/:app/model`, and saves at once.
-// - Which app is open is held by the caller when it passes `selected`/`onSelect`: Settings shows
-//   the list inside its Models section and the app's page as that section's sub-page, so its own
-//   back button returns to the list. The standalone window holds it here.
+// - Which app is open is held by the caller through `selected`/`onSelect`: Settings shows the list
+//   inside its Models section and the app's page as that section's sub-page, so its own back button
+//   returns to the list.
 // - On a hub, each peer's apps follow under that machine's name (docs/peers.md): read through
 //   `GET /api/peers/:peer/model/apps`, saved through `PATCH /api/peers/:peer/apps/:app/model`, and
 //   offered the peer's own choices, since the call runs there. Such an app is keyed `<peer>/<app>`.
@@ -167,28 +167,21 @@ export function AppModelDetail({ group, options, onSaved, t }: { group: AppGroup
   );
 }
 
-export default function AppModels({ open, onClose, onBack, embedded = false, selected: selectedProp, onSelect }: {
-  open: boolean;
-  onClose: () => void;
-  onBack?: () => void;
-  embedded?: boolean;
-  /** The app whose page is shown; null = the list. Pass with `onSelect` to hold it outside. */
-  selected?: string | null;
-  onSelect?: (app: string | null) => void;
+/** Each app's models, a page under Settings (and its list in the Models section). */
+export default function AppModels({ selected, onSelect: select }: {
+  /** The app whose page is shown; null = the list. Settings holds it, so its back button returns to the list. */
+  selected: string | null;
+  onSelect: (app: string | null) => void;
 }) {
   const { lang, t } = useLang();
   const [data, setData] = useState<{ apps: AppRows[]; options: Option[] } | null>(null);
   const [peers, setPeers] = useState<PeerModels[]>([]);
   const [labels, setLabels] = useState<Record<string, AppLabel>>({});
   const [err, setErr] = useState("");
-  const [selectedHere, setSelectedHere] = useState<string | null>(null);
-  const selected = selectedProp === undefined ? selectedHere : selectedProp;
-  const select = (app: string | null) => (onSelect ? onSelect(app) : setSelectedHere(app));
   const root = useRef<HTMLDivElement>(null);
   const lastOpened = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
     getJson<{ apps: AppRows[]; options: Option[] }>("/api/model/apps")
       .then((d) => {
         setData(d);
@@ -207,18 +200,7 @@ export default function AppModels({ open, onClose, onBack, embedded = false, sel
     getJson<{ apps: AppInfo[] }>("/api/apps?all=1")
       .then((d) => setLabels(Object.fromEntries((d.apps || []).map((a) => [a.id || a.name, { title: a.title, ...(a.i18n ? { i18n: a.i18n } : {}), icon: a.icon }]))))
       .catch(() => {});
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) setSelectedHere(null);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || embedded) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose, embedded]);
+  }, []);
 
   // An app's page starts at the top; back on the list, the app just left keeps the focus and stays in view.
   useEffect(() => {
@@ -254,14 +236,9 @@ export default function AppModels({ open, onClose, onBack, embedded = false, sel
     peer ? setPeers((ps) => ps.map((p) => (p.peer === peer && p.apps ? { ...p, apps: swap(p.apps, next) } : p))) : setData((d) => (d ? { ...d, apps: swap(d.apps, next) } : d));
 
   return (
-    <div ref={root} className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
-      <div className="tasks" role={embedded ? "region" : "dialog"} aria-label={selected ? (group?.title ?? selected) : t("appModels.title")}>
+    <div ref={root} className="settings-detail">
+      <div className="tasks" role="region" aria-label={selected ? (group?.title ?? selected) : t("appModels.title")}>
         <div className="task-head">
-          {!embedded && (selected || onBack) && (
-            <button className="chat-hbtn back" title={t("common.back")} onClick={() => (selected ? select(null) : onBack?.())}>
-              ‹
-            </button>
-          )}
           {selected && group && (
             <span className="svc-ico">
               <Ico icon={group.icon} />
@@ -269,9 +246,6 @@ export default function AppModels({ open, onClose, onBack, embedded = false, sel
           )}
           <b>{selected ? (group?.title ?? selected) : t("appModels.title")}</b>
           <span className="chat-sub">{group?.peer ? t("appModels.onPeer", { peer: group.peer }) : t("appModels.summary")}</span>
-          {!embedded && (<button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
-            ✕
-          </button>)}
         </div>
         <div className="task-body">
           {err && <p className="task-note">{t("common.unavailable", { error: err })}</p>}

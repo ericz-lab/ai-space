@@ -64,6 +64,10 @@ async function pipe(first: string[], second: string[]): Promise<string> {
     a.exited,
     b.exited,
   ]);
+  // When both fail, the cause is usually upstream (GNU tar fails on the empty stream a dead zstd
+  // leaves), unless upstream only died of SIGPIPE because downstream had already gone.
+  const brokenPipe = a.signalCode === "SIGPIPE" || codeA === 141;
+  if (codeA !== 0 && !brokenPipe) throw new Error(`${first[0]} exited with ${codeA}: ${errA.trim()}`);
   if (codeB !== 0) throw new Error(`${second[0]} exited with ${codeB}: ${errB.trim() || errA.trim()}`);
   if (codeA !== 0) throw new Error(`${first[0]} exited with ${codeA}: ${errA.trim()}`);
   return out;

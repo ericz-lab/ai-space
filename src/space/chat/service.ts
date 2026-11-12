@@ -127,6 +127,10 @@ export class ChatService {
     return this.model.store.get(id);
   }
 
+  callsOf(ids: readonly number[]): Map<number, ModelCall> {
+    return this.model.store.getMany(ids);
+  }
+
   // ---------------------------------------------------------------- model choice
 
   /**

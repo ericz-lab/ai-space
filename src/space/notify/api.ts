@@ -118,8 +118,8 @@ export function createNotifyRoutes(opts: NotifyApiOptions): Routes {
           const filter = parseInboxFilter(url.searchParams.get("filter"));
           const action = ["1", "true"].includes(url.searchParams.get("action") ?? "");
           const limit = Number(url.searchParams.get("limit") ?? 100);
-          const items = inbox.list({ app, filter, action, limit: Number.isFinite(limit) ? limit : 100 });
-          return json({ ok: true, items: items.map(inboxView), summary: inbox.summary() });
+          const { items, summary } = inbox.page({ app, filter, action, limit: Number.isFinite(limit) ? limit : 100 });
+          return json({ ok: true, items: items.map(inboxView), summary });
         } catch (e) {
           return error(400, (e as Error).message ?? String(e));
         }

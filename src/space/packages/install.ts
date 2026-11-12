@@ -42,7 +42,7 @@ export class PackageInstaller {
   }
 
   async load(app: string): Promise<RuntimeApp> {
-    const operation = this.store.list().find((o) => o.app === app && o.state === "installed");
+    const operation = this.store.installed(app);
     if (!operation) throw new Error(`no installed package: ${app}`);
     return this.readInstalled(operation);
   }
@@ -123,7 +123,7 @@ export class PackageInstaller {
   /** Run once at service startup, before accepting new install calls. Never runs package code. */
   async recover(): Promise<InstallOperation[]> {
     const recovered: InstallOperation[] = [];
-    for (const operation of this.store.list().filter((o) => o.state === "installing")) {
+    for (const operation of this.store.installing()) {
       try {
         await this.readInstalled(operation);
         recovered.push(this.store.finish(operation.id, "installed"));

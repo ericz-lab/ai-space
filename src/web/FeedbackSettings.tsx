@@ -3,6 +3,7 @@ import { getJson, relTime, sendJson } from "./api.ts";
 import { useLang } from "./i18n.ts";
 import type { Key } from "./i18n.ts";
 import { SavedChoice } from "./model-choices.tsx";
+import { pollWhileVisible } from "./poll.ts";
 
 /**
  * Settings → Feedback (docs/feedback.md): the button app pages show, what happens to what is sent
@@ -71,8 +72,7 @@ export default function FeedbackSettings() {
   // While something is being fixed, the list follows it.
   useEffect(() => {
     if (!items.some((i) => i.status === "fixing" || i.status === "queued")) return;
-    const id = setInterval(load, 10_000);
-    return () => clearInterval(id);
+    return pollWhileVisible(load, 10_000);
   }, [items, load]);
 
   // A switch or menu shows its new value at once and stays usable while the change is saved; only

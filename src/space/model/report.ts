@@ -30,8 +30,7 @@ export type UsageReport = {
 /** One machine's ledger over a window. `scope.app` narrows the sums; the history stays the whole ledger's days. */
 export function usageReport(store: ModelStore, window: Window, backend: string, scope: LedgerScope = {}, now = Date.now()): UsageReport {
   const since = now - WINDOW_MS[window];
-  const all: LedgerScope = { skipCallers: scope.skipCallers, skipApps: scope.skipApps };
-  const firstAt = store.firstAt(all);
+  const { firstAt, totals, days } = store.history(scope);
   return {
     window,
     since: new Date(since).toISOString(),
@@ -43,7 +42,7 @@ export function usageReport(store: ModelStore, window: Window, backend: string, 
     byRuntime: store.groupBy(["runtime", "model"], since, scope),
     byBackend: store.groupBy(["backend", "origin"], since, scope),
     byMachine: store.groupBy(["machine", "runtime"], since, scope),
-    history: { firstAt: firstAt === undefined ? undefined : new Date(firstAt).toISOString(), totals: store.totals(0, scope), days: store.days(0, all) },
+    history: { firstAt: firstAt === undefined ? undefined : new Date(firstAt).toISOString(), totals, days },
   };
 }
 

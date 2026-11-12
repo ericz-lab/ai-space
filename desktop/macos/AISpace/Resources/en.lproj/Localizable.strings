@@ -101,7 +101,7 @@
 
 "The selected program could not be verified as this agent. Choose its executable and try again." = "The selected program could not be verified as this agent. Choose its executable and try again.";
 
-"Choose an installed agent to continue. Sign in to it in Terminal before using AI Space." = "Choose an installed agent to continue. Sign in to it in Terminal before using AI Space.";
+"Choose an installed agent to continue. Sign in first: Claude Code or Codex in Terminal, DeepSeek Harness in its app." = "Choose an installed agent to continue. Sign in first: Claude Code or Codex in Terminal, DeepSeek Harness in its app.";
 
 "Permission" = "Permission";
 

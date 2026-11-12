@@ -83,6 +83,41 @@ import Testing
         #expect(uploads == 0)
         #expect(try store.drafts() == [draft])
     }
+
+    @Test func typingWritesTheDraftOnceItPauses() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SharedCaptureStore(directory: root)
+        let space = Connection(name: "Test", url: URL(string: "https://example.com")!)
+        try store.publish([space])
+        let target = ScreenshotRules.Target(id: "notes/image", app: "notes", title: "Notes")
+        let draft = SharedCaptureDraft(image: Data([0x89, 0x50, 0x4e, 0x47]), connection: space.id)
+        try store.save(draft)
+        var sent: [SharedCaptureDraft] = []
+        let model = SharedCaptureModel(store: store, textDelay: .seconds(60), load: { _ in .init(image: true, targets: [target]) },
+                                       upload: { _, item, _ in sent.append(item); return .init(label: "Saved") })
+        await model.edit(draft)
+        model.changeText("N")
+        model.changeText("Note")
+        // Shown at once, not yet written: the file also carries the picture.
+        #expect(model.draft?.text == "Note")
+        #expect(try store.drafts().first?.text == "")
+        model.flushText()
+        #expect(try store.drafts().first?.text == "Note")
+        // Save sends the note typed last even before the pause wrote it.
+        model.changeText("Note, final")
+        await model.save()
+        #expect(sent.map(\.text) == ["Note, final"])
+
+        let quick = SharedCaptureDraft(image: Data([0x89, 0x50, 0x4e, 0x47]), connection: space.id)
+        try store.save(quick)
+        let paused = SharedCaptureModel(store: store, textDelay: .milliseconds(10), load: { _ in .init(image: true, targets: [target]) })
+        await paused.edit(quick)
+        paused.changeText("Later")
+        for _ in 0..<100 where try store.drafts().first?.text != "Later" { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(try store.drafts().first?.text == "Later")
+    }
+
     @Test func boundedPreviewsPreserveAnAlreadySendablePNG() throws {
         #if os(macOS)
         let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 3200, pixelsHigh: 1600,

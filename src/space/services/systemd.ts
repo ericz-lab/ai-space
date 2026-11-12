@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Manifest } from "../scheduler/manifest.ts";
 import { type Runner, type Scope, type ServiceManager, type UnitState, type Verb, lastLine, spawnCollect } from "./manager.ts";
-import { UNIT_MARKER, renderEnvFile, renderUnitFor, unitName } from "./unit.ts";
+import { UNIT_MARKER, environmentFileLine, renderEnvFile, renderUnitFor, unitName } from "./unit.ts";
 
 /**
  * `systemctl` for the supervisor on Linux: user units by default, the system
@@ -39,8 +39,8 @@ export class Systemctl implements ServiceManager {
   operatorUnit(app: string): string {
     return `${app}.service`;
   }
-  owns(text: string): boolean {
-    return text.startsWith(UNIT_MARKER);
+  owns(text: string, envFile: string): boolean {
+    return text.startsWith(UNIT_MARKER) && text.split("\n").includes(environmentFileLine(envFile));
   }
   renderUnit(manifest: Manifest, command: string, envFile: string): string {
     return renderUnitFor(manifest, command, envFile);

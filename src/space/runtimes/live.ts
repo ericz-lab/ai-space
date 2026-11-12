@@ -62,14 +62,15 @@ export function liveFingerprint(turn: ChatTurn): string {
 export class LivePool {
   private readonly procs = new Map<LiveProcess, { timer?: ReturnType<typeof setTimeout>; idleSince: number }>();
 
-  constructor(private readonly opts: { idleMs?: number; maxIdle?: number; backgroundMs?: number } = {}) {}
+  /** `fingerprint`: what a turn must match to reuse a process, `liveFingerprint` unless the runtime fixes more at spawn. */
+  constructor(private readonly opts: { idleMs?: number; maxIdle?: number; backgroundMs?: number; fingerprint?: (turn: ChatTurn) => string } = {}) {}
 
   /**
    * A turn on this pool: the idle process holding the turn's session when it matches, else a new
    * one from `open`. A process whose conversation does not match is never reused.
    */
   run(turn: ChatTurn, cb: ChatCallbacks, open: () => LiveProcess): ChatHandle {
-    const fingerprint = liveFingerprint(turn);
+    const fingerprint = (this.opts.fingerprint ?? liveFingerprint)(turn);
     let proc: LiveProcess | undefined;
     if (turn.sessionId) {
       for (const p of this.procs.keys()) {

@@ -228,8 +228,6 @@ final class AppModel: ObservableObject {
 
     var selected: Connection? { selectedID.flatMap(store.connection) }
 
-    var selectedLive: SpaceLive? { selectedID.flatMap { lives[$0] } }
-
     func dataStore(_ id: UUID) -> WKWebsiteDataStore {
         cookieSession(id).dataStore
     }
@@ -798,8 +796,6 @@ final class AppModel: ObservableObject {
     var quickChats: AgentChats? { quickChatResolvedRef.flatMap { conversations($0) } }
 
     var quickChatController: ChatController? { quickChats?.current }
-
-    var quickChatLive: SpaceLive? { quickChatResolvedRef.flatMap { lives[$0.connection] } }
 
     /// Accepts a full `<connection> <agent>` key or a bare agent id (`app/name`, from a link).
     func quickChatSelect(agentID: String) {

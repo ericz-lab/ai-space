@@ -42,13 +42,14 @@ mobile/ios/
                          per page of the Space, and the chat), TerminalSession and TerminalStore (a shell's
                          ticket and socket, the open tabs), IconStore (icons, SVG drawing),
                          BackdropStore (a theme's artwork), paths
-    Web/                 WebSession (WKWebView and its delegates), WebContainer
+    Web/                 WebSession (WKWebView and its delegates), WebContainer; WebCookieSession is
+                         the Mac client's file, compiled from desktop/macos/AISpace/Web
     Views/               Home (library, screens, screen bar and editor), tiles, widget cards and
                          their blocks, app page, panel, settings, the Space's pages (Hub*Views,
                          ChatView), the terminal (TerminalViews, and TerminalSurface around SwiftTerm), connect, theme
     Resources/           the mark, the app icon, English and Chinese strings
   AISpaceTests/          swift-testing tests of Core/ and of CatalogueLoader, against scripted answers
-  scripts/               test.sh, build.sh (swiftc only), swiftterm.sh, icons.swift, sources.sh
+  scripts/               test.sh, build.sh (swiftc only), test-sim.sh (Xcode), swiftterm.sh, icons.swift, sources.sh
 ```
 
 Eight Foundation-only files are compiled from the Mac client where they are, not copied: `Connection`, `ConnectionStore`, `SpaceCheck`, `SpaceAPI` (with its cookie rules), `SpaceModels`, `ChatStream`, `DesktopRules` (the `aispace://` links) and `NavigationPolicy`. `scripts/sources.sh` and `project.yml` list them. The phone adds its own rules on top (a host list instead of one origin) rather than changing them. If both clients are kept, the natural next step is to move those files to a neutral directory (`clients/shared/`) in one commit that touches both projects; that was left out here so the Mac branch stays untouched. The Mac client now also compiles this client's `Core/` and `Live/` files (its `scripts/sources.sh`), so a change to one of them must build on both.
@@ -81,12 +82,15 @@ Two rules keep the sources compiling without Xcode, as in the Mac client: no `@S
 
 ```bash
 bun run ios:xcode    # regenerate AISpace.xcodeproj after adding or moving files
+bun run ios:test:sim # the whole AISpaceTests suite in the iOS Simulator (scripts/test-sim.sh)
 xcodebuild -project mobile/ios/AISpace.xcodeproj -scheme AISpace \
   -destination 'platform=iOS Simulator,name=iPhone 16' build test
 xcrun simctl boot 'iPhone 16'
 xcrun simctl install booted <DerivedData>/Build/Products/Debug-iphonesimulator/AISpace.app
 xcrun simctl launch booted dev.ai-space.ios
 ```
+
+`bun run ios:test:sim` is the only command that runs the tests behind `#if canImport(UIKit)` (web sessions and the cookie store, the icon cache, app tabs, the share editor and its shared Keychain): `ios:test` builds on the Mac without UIKit and skips them. It takes the first available iPhone simulator (`IOS_SIMULATOR=<name or UDID>` picks another), fetches SwiftTerm like `ios:xcode`, and passes extra arguments to `xcodebuild`, such as `-only-testing:AISpaceTests/WebCookieSessionTests`. It needs Xcode and is not part of `bun run check` or CI.
 
 The Simulator build and launch were checked with Xcode 27 and the iOS 27 runtime. On a Mac whose default developer directory is the Command Line Tools, prefix Xcode commands with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. A Space on the same Mac is reachable from the Simulator at `http://127.0.0.1:8700`.
 

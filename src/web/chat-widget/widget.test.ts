@@ -1,9 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { buildWidget } from "./build.ts";
+import { strings } from "./i18n.ts";
 import { renderMd } from "./md.ts";
 import { readSse } from "./sse.ts";
 
 describe("chat widget", () => {
+  test("words in the page's language: Chinese for zh, English otherwise, as the feedback button", () => {
+    const send = (lang: string | undefined): string => strings(lang).send;
+    expect(send("zh-CN")).toBe("发送");
+    expect(send("en")).toBe("Send");
+    expect(send("")).toBe("Send");
+    expect(send(undefined)).toBe("Send");
+    expect(send("fr")).toBe("Send");
+  });
+
   test("bundles to one browser script that defines SpaceChat and carries the stylesheet", async () => {
     const w = await buildWidget()();
     expect(w.js).toContain("SpaceChat");
