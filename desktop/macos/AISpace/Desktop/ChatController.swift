@@ -47,7 +47,6 @@ final class ChatController: ObservableObject, Identifiable {
     }
     /// Every run this conversation started or followed, so the same run is never followed twice.
     private(set) var runIDs: Set<String> = []
-    private var task: Task<Void, Never>?
     /// One thread's identity: loading an earlier chat starts another one, so a late answer for a
     /// steer of the old thread cannot land in it.
     private var conversation = UUID()
@@ -211,9 +210,16 @@ final class ChatController: ObservableObject, Identifiable {
         start(source: .new(ChatTurnRequest(message: text, permission: permission)))
     }
 
+    /// Stops the run on the Space; its stream then ends by itself. Before the Space has named the
+    /// new run, the stop is sent as soon as it does: dropping the stream instead would leave the
+    /// run going on the Space, unseen, still writing to this conversation.
     func stop() {
         stopRequested = true
-        guard let runID else { task?.cancel(); return }
+        guard let runID else { return }
+        sendStop(runID)
+    }
+
+    private func sendStop(_ runID: String) {
         Task { try? await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/stop", json: [:]) }
     }
 
@@ -264,7 +270,7 @@ final class ChatController: ObservableObject, Identifiable {
         }
         if case .attach(let id) = source { runID = id } else { runID = nil }
 
-        task = Task { [weak self] in
+        Task { [weak self] in
             guard let self else { return }
             var reply = initial
             var lastSeq = 0
@@ -278,6 +284,7 @@ final class ChatController: ObservableObject, Identifiable {
                         let body = turn.body(sessionID: sessionID)
                         opened = try await api.events("POST", "\(agent.base)/chat", json: body)
                         runID = opened.runID
+                        if stopRequested, let runID { sendStop(runID) }
                     } else { break }
                     for try await message in opened.stream {
                         if let id = message.id {
@@ -297,10 +304,10 @@ final class ChatController: ObservableObject, Identifiable {
                 }
                 if reply.finished || Task.isCancelled { break }
                 failures += 1
-                if failures > 20 { fail(index, ChatFailure(kind: .connection, detail: String(localized: "The connection to the agent was lost."))); break }
+                if failures > ChatReconnect.maxFailures { fail(index, ChatFailure(kind: .connection, detail: String(localized: "The connection to the agent was lost."))); break }
                 reply.activity = .reconnecting
                 update(index, reply)
-                try? await Task.sleep(for: .seconds(min(10, failures * 2)))
+                try? await Task.sleep(for: ChatReconnect.delay(after: failures))
             }
             if let sid = reply.sessionID { sessionID = sid }
             reply.activity = nil

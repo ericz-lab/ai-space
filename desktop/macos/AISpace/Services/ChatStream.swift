@@ -77,6 +77,16 @@ struct ChatTurnRequest: Equatable {
     }
 }
 
+/// How long a client keeps following a turn whose event stream keeps dropping, shared by the Mac
+/// and iPhone clients. Only consecutive failures count: an event that arrives resets the count, so
+/// a long turn on a flaky network is not cut off by drops it recovered from. The wait between
+/// tries grows to 10 s, so a turn is given up after about three minutes without any event.
+enum ChatReconnect {
+    static let maxFailures = 20
+
+    static func delay(after failures: Int) -> Duration { .seconds(min(10, max(1, failures) * 2)) }
+}
+
 /// What a chat turn shows while it runs.
 enum ChatActivity: Equatable {
     case starting

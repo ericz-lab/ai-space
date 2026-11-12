@@ -3,8 +3,9 @@ import WebKit
 /// One saved Space's WebKit store, and its cookies for the native calls. A persistent store read
 /// before WebKit has opened its profile can answer with no cookies at all, although valid ones are
 /// on disk: the native calls would then see a sign-in page where there is none. So the first read
-/// waits for a blank local page to load in the store, as the iPhone client does. This contacts
-/// nothing and extends no cookie.
+/// waits for a blank local page to load in the store; concurrent callers share that preparation.
+/// This contacts nothing and extends no cookie. The iPhone client compiles this file from here
+/// (mobile/ios/scripts/sources.sh).
 @MainActor
 final class WebCookieSession: NSObject, WKNavigationDelegate, WKHTTPCookieStoreObserver {
     var onCookies: (([HTTPCookie]) -> Void)?

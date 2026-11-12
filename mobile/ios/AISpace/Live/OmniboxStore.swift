@@ -9,7 +9,6 @@ final class OmniboxStore: ObservableObject {
     @Published private(set) var resolvedText = ""
     @Published private(set) var resolving = false
     @Published private(set) var preview: ShortcutResult?
-    @Published private(set) var runs: [ShortcutRun] = []
     @Published var error: String?
     private let send: (String, [String: Any]) async throws -> Data
     private var generation = 0
@@ -21,7 +20,7 @@ final class OmniboxStore: ObservableObject {
 
     func clear() {
         generation += 1
-        resolution = nil; resolvedText = ""; preview = nil; runs = []; error = nil; resolving = false
+        resolution = nil; resolvedText = ""; preview = nil; error = nil; resolving = false
         previews.removeAll()
     }
 
@@ -54,15 +53,6 @@ final class OmniboxStore: ObservableObject {
         } catch {
             if !Task.isCancelled, generation == self.generation { self.error = HubStore.message(error) }
         }
-    }
-
-    func refreshRuns() async {
-        let generation = generation
-        do {
-            let fresh = try Hub.rows(ShortcutRun.self, "runs", from: try await api.data("/api/shortcuts/runs?limit=20"))
-            guard !Task.isCancelled, generation == self.generation else { return }
-            runs = fresh
-        } catch { if !Task.isCancelled, generation == self.generation { self.error = HubStore.message(error) } }
     }
 }
 

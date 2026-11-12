@@ -48,7 +48,7 @@ final class AppUpdater: ObservableObject {
             let manifest: AppUpdateFeed.Manifest = try await fetchJSON(manifestURL)
             phase = AppUpdateFeed.pick(release, manifest: manifest, current: current).map { .available($0) } ?? .upToDate
         } catch {
-            phase = force ? .failed("Could not check for updates: \(error.localizedDescription)", page: nil) : .idle
+            phase = force ? .failed(String(localized: "Could not check for updates: \(error.localizedDescription)"), page: nil) : .idle
         }
     }
 
@@ -69,24 +69,24 @@ final class AppUpdater: ObservableObject {
         let app = Bundle.main.bundleURL
         let parent = app.deletingLastPathComponent()
         if app.path.contains("/AppTranslocation/") {
-            phase = .failed("Move AI Space to the Applications folder, open it from there, then update.", page: update.page)
+            phase = .failed(String(localized: "Move AI Space to the Applications folder, open it from there, then update."), page: update.page)
             return
         }
         guard FileManager.default.isWritableFile(atPath: parent.path) else {
-            phase = .failed("AI Space cannot replace itself in \(parent.path). Download the update and drag it there.", page: update.page)
+            phase = .failed(String(localized: "AI Space cannot replace itself in \(parent.path). Download the update and drag it there."), page: update.page)
             return
         }
-        phase = .installing(update, "Downloading \(update.version)…")
+        phase = .installing(update, String(localized: "Downloading \(update.version)…"))
         let staged = parent.appendingPathComponent(".AI Space \(UUID().uuidString).update.app")
         do {
             let dmg = try await download(update)
             defer { try? FileManager.default.removeItem(at: dmg) }
-            phase = .installing(update, "Checking the download…")
+            phase = .installing(update, String(localized: "Checking the download…"))
             try await Task.detached(priority: .userInitiated) {
                 try Self.verifyAndStage(dmg: dmg, update: update, running: app, staged: staged)
             }.value
             try? FileManager.default.removeItem(at: dmg)
-            phase = .installing(update, "Restarting AI Space…")
+            phase = .installing(update, String(localized: "Restarting AI Space…"))
             try relaunch(replacing: app, with: staged)
         } catch {
             try? FileManager.default.removeItem(at: staged)
@@ -96,9 +96,9 @@ final class AppUpdater: ObservableObject {
 
     private func download(_ update: AppUpdate) async throws -> URL {
         let (tmp, response) = try await URLSession.shared.download(from: update.dmg)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw UpdateError("The download failed.") }
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw UpdateError(String(localized: "The download failed.")) }
         let size = try FileManager.default.attributesOfItem(atPath: tmp.path)[.size] as? NSNumber
-        guard size?.intValue == update.size else { throw UpdateError("The download has the wrong size.") }
+        guard size?.intValue == update.size else { throw UpdateError(String(localized: "The download has the wrong size.")) }
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ai-space-update", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dmg = dir.appendingPathComponent(update.dmgName)
@@ -132,37 +132,37 @@ final class AppUpdater: ObservableObject {
 
     nonisolated private static func verifyAndStage(dmg: URL, update: AppUpdate, running: URL, staged: URL) throws {
         guard try AppUpdateFeed.sha256(of: dmg) == update.sha256 else {
-            throw UpdateError("The download does not match the release's checksum.")
+            throw UpdateError(String(localized: "The download does not match the release's checksum."))
         }
         guard let ours = team(running) else {
-            throw UpdateError("This copy of AI Space is not signed by a developer, so it cannot check that an update is genuine. Download it from the release page.")
+            throw UpdateError(String(localized: "This copy of AI Space is not signed by a developer, so it cannot check that an update is genuine. Download it from the release page."))
         }
         let mount = FileManager.default.temporaryDirectory.appendingPathComponent("ai-space-update-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: mount, withIntermediateDirectories: true)
         let attach = run("/usr/bin/hdiutil", ["attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", mount.path, dmg.path])
-        guard attach.code == 0 else { throw UpdateError("Could not open the update: \(attach.output.suffix(200))") }
+        guard attach.code == 0 else { throw UpdateError(String(localized: "Could not open the update: \(String(attach.output.suffix(200)))")) }
         defer {
             _ = run("/usr/bin/hdiutil", ["detach", "-force", mount.path])
             try? FileManager.default.removeItem(at: mount)
         }
         let app = mount.appendingPathComponent("AI Space.app")
         guard let bundle = LocalBundle.find(resources: app.appendingPathComponent("Contents/Resources")), bundle.version == update.version else {
-            throw UpdateError("The download is not AI Space \(update.version) with the Local edition inside.")
+            throw UpdateError(String(localized: "The download is not AI Space \(update.version) with the Local edition inside."))
         }
         guard let identity = Bundle(url: running)?.bundleIdentifier,
               Bundle(url: app)?.bundleIdentifier == identity else {
-            throw UpdateError("The update has a different application identity.")
+            throw UpdateError(String(localized: "The update has a different application identity."))
         }
         guard run("/usr/bin/codesign", ["--verify", "--strict", "--deep", app.path]).code == 0 else {
-            throw UpdateError("The update's signature does not verify.")
+            throw UpdateError(String(localized: "The update's signature does not verify."))
         }
-        guard team(app) == ours else { throw UpdateError("The update is signed by someone else than this app.") }
+        guard team(app) == ours else { throw UpdateError(String(localized: "The update is signed by someone else than this app.")) }
         guard run("/usr/sbin/spctl", ["--assess", "--type", "execute", app.path]).code == 0 else {
-            throw UpdateError("macOS does not accept the update (not notarized).")
+            throw UpdateError(String(localized: "macOS does not accept the update (not notarized)."))
         }
         try? FileManager.default.removeItem(at: staged)
         let copy = run("/usr/bin/ditto", [app.path, staged.path])
-        guard copy.code == 0 else { throw UpdateError("Could not copy the update: \(copy.output.suffix(200))") }
+        guard copy.code == 0 else { throw UpdateError(String(localized: "Could not copy the update: \(String(copy.output.suffix(200)))")) }
     }
 
     /// A small shell script, outliving this process, swaps the bundles once it has quit and opens

@@ -94,6 +94,12 @@ struct ChatStreamTests {
         #expect(ChatPermission.readOnly.rawValue == "")
     }
 
+    @Test func reconnectsBackOffToTenSeconds() {
+        #expect(ChatReconnect.delay(after: 1) == .seconds(2))
+        #expect(ChatReconnect.delay(after: 4) == .seconds(8))
+        #expect(ChatReconnect.delay(after: ChatReconnect.maxFailures) == .seconds(10))
+    }
+
     @Test func approvalsBecomeWaitingStepsAndResolve() {
         var r = ChatReply()
         r.apply(#"{"type":"approval_request","id":"req-1","tool":"Bash","title":"rm -rf build","detail":"wants to delete the build output"}"#)

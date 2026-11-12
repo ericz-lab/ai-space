@@ -6,11 +6,21 @@ struct SharedCaptureView: View {
     var close: () -> Void
 
     var body: some View {
-        #if os(macOS)
-        MacSharedCaptureView(model: model, close: close)
-        #else
-        phoneBody
-        #endif
+        Group {
+            #if os(macOS)
+            MacSharedCaptureView(model: model, close: finish)
+            #else
+            phoneBody
+            #endif
+        }
+        // Swiping the sheet away closes the editor without Done.
+        .onDisappear { model.flushText() }
+    }
+
+    /// A note typed just before closing is still written: the extension may end right after.
+    private func finish() {
+        model.flushText()
+        close()
     }
 
     private var phoneBody: some View {
@@ -90,7 +100,7 @@ struct SharedCaptureView: View {
                 }
             }
             .navigationTitle("ai-space")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done", action: close).disabled(model.busy || model.receiving) } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done", action: finish).disabled(model.busy || model.receiving) } }
             .interactiveDismissDisabled(model.busy || model.receiving)
             .confirmationDialog("Delete this pending picture?", isPresented: Binding(get: { model.deleting != nil }, set: { if !$0 { model.deleting = nil } })) {
                 Button("Delete", role: .destructive) { if let deleting = model.deleting { model.discard(deleting) }; model.deleting = nil }

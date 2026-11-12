@@ -50,16 +50,16 @@ struct LocalSetupView: View {
                 Button("Set Up") { Task { await local.install(defaultModel: defaultModel, into: model) } }
                     .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction)
                     .disabled(!ready(status))
-                    .help(status.runtimes.any ? (defaultModel == nil ? "Choose the default model first." : "") : "Install Claude Code, Codex or DeepSeek Harness first, or choose where it is.")
+                    .help(status.runtimes.any ? (defaultModel == nil ? String(localized: "Choose the default model first.") : "") : String(localized: "Install Claude Code, Codex or DeepSeek Harness first, or choose where it is."))
             case .managed:
                 Text("AI Space is installed on this Mac").font(.largeTitle)
-                Text(status.ownServiceRunning ? "It is running. Open it to continue." : "It is not running. Opening it starts it again.")
+                Text(status.ownServiceRunning ? String(localized: "It is running. Open it to continue.") : String(localized: "It is not running. Opening it starts it again."))
                     .foregroundStyle(.secondary)
                 Button("Open") { Task { await local.install(into: model) } }
                     .buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction)
             case .foreign:
                 Text("This Mac already has an AI Space").font(.largeTitle)
-                Text(status.reason ?? "It was installed another way.")
+                Text(status.reason ?? String(localized: "It was installed another way."))
                     .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
                 Text("Connect to it as it is, or let this app take it over. Taking over keeps its apps, data and settings; stop the running one first.")
                     .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
@@ -70,10 +70,10 @@ struct LocalSetupView: View {
                         if let url = URL(string: status.url) { model.add(name: "This Mac", url: url) }
                     }
                     .disabled(status.running == nil)
-                    .help(status.running == nil ? "It is not running: start it, or take it over." : "")
+                    .help(status.running == nil ? String(localized: "It is not running: start it, or take it over.") : "")
                     Button("Take It Over…") { confirmingMigrate = true }
                         .disabled(status.running != nil || status.workspace.locked == true || !ready(status))
-                        .help(status.running != nil ? "Stop the running ai-space first." : "")
+                        .help(status.running != nil ? String(localized: "Stop the running ai-space first.") : "")
                 }
                 .controlSize(.large)
                 .confirmationDialog("Take over \(status.workspace.path)?", isPresented: $confirmingMigrate) {
@@ -286,7 +286,7 @@ struct LocalSettingsSection: View {
         case .absent:
             Button("Set Up AI Space on This Mac") { Task { await local.install(into: model) } }
         case .foreign:
-            Text(s.reason ?? "This Mac has an ai-space this app did not install.").font(.callout).foregroundStyle(.secondary)
+            Text(s.reason ?? String(localized: "This Mac has an ai-space this app did not install.")).font(.callout).foregroundStyle(.secondary)
             Button("Take It Over…") { Task { await local.install(migrate: true, into: model) } }
                 .disabled(s.running != nil || s.workspace.locked == true)
         case .managed:
@@ -307,7 +307,7 @@ struct LocalSettingsSection: View {
                 } else if s.installed != nil {
                     Button("Start") { Task { await local.start() } }
                 }
-                Button(s.installed == nil ? "Install Again" : "Repair") { Task { await local.install(into: model) } }
+                Button(s.installed == nil ? String(localized: "Install Again") : String(localized: "Repair")) { Task { await local.install(into: model) } }
                 Spacer()
                 Button("Open Log") { local.openLog() }
             }
@@ -324,19 +324,19 @@ struct LocalSettingsSection: View {
 
     private func stateText(_ s: LocalStatus) -> String {
         switch s.state {
-        case .absent: return "Not set up"
-        case .foreign: return "Installed another way"
+        case .absent: return String(localized: "Not set up")
+        case .foreign: return String(localized: "Installed another way")
         case .managed:
-            if s.installed == nil { return "Background service removed" }
-            if s.service.running { return s.ownServiceRunning ? "Running" : "Starting…" }
-            if s.service.disabled { return "Stopped" }
-            return "Not running (\(s.service.detail))"
+            if s.installed == nil { return String(localized: "Background service removed") }
+            if s.service.running { return s.ownServiceRunning ? String(localized: "Running") : String(localized: "Starting…") }
+            if s.service.disabled { return String(localized: "Stopped") }
+            return String(localized: "Not running (\(s.service.detail))")
         }
     }
 
     private func runtimesText(_ r: LocalStatus.Runtimes) -> String {
         let found = [r.claude.map { _ in "Claude Code" }, r.codex.map { _ in "Codex" }, r.dsh.map { _ in "DeepSeek Harness" }].compactMap { $0 }
-        return found.isEmpty ? "None found" : found.joined(separator: ", ")
+        return found.isEmpty ? String(localized: "None found") : found.joined(separator: ", ")
     }
 }
 
