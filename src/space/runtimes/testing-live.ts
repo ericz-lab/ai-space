@@ -46,6 +46,7 @@ async function claude(args: string[]): Promise<void> {
   const sid = args.includes("--resume") ? args[args.indexOf("--resume") + 1]! : "live-session";
   let model = args.includes("--model") ? args[args.indexOf("--model") + 1]! : "default";
   let mode = args[args.indexOf("--permission-mode") + 1]!;
+  const effort = args.includes("--effort") ? args[args.indexOf("--effort") + 1]! : "default";
   // The running turn: what it waits for next.
   let turn: { waiting: "approval" | "question" | "steer" | null; command?: string } | null = null;
   const text = (t: string) => out({ type: "assistant", message: { content: [{ type: "text", text: t }] }, session_id: sid });
@@ -145,7 +146,7 @@ async function claude(args: string[]): Promise<void> {
       })();
     } else {
       turn = { waiting: null };
-      text(`echo: ${said} [pid ${process.pid}] [model ${model}] [mode ${mode}]`);
+      text(`echo: ${said} [pid ${process.pid}] [model ${model}] [mode ${mode}] [effort ${effort}]`);
       result();
     }
   }

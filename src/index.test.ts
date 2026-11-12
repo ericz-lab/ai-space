@@ -16,6 +16,15 @@ test("loadConfig applies defaults relative to the workspace", () => {
   expect(c.model).toEqual({ maxConcurrency: 4, retentionDays: 0, defaultModel: "sonnet" });
 });
 
+test("loadConfig keeps a zero drain and defaults an unset or invalid one", () => {
+  expect(loadConfig(ws, {}).drainMs).toBe(300_000);
+  expect(loadConfig(ws, { SPACE_DRAIN_SECONDS: "0" }).drainMs).toBe(0);
+  expect(loadConfig(ws, { SPACE_DRAIN_SECONDS: "30" }).drainMs).toBe(30_000);
+  expect(loadConfig(ws, { SPACE_DRAIN_SECONDS: "" }).drainMs).toBe(300_000);
+  expect(loadConfig(ws, { SPACE_DRAIN_SECONDS: "soon" }).drainMs).toBe(300_000);
+  expect(loadConfig(ws, { SPACE_DRAIN_SECONDS: "-5" }).drainMs).toBe(0);
+});
+
 test("loadConfig reads the model service keys", () => {
   const c = loadConfig(ws, { SPACE_MODEL_MAX_CONCURRENCY: "3", SPACE_MODEL_RETENTION_DAYS: "7", SPACE_MODEL_DEFAULT: "haiku" });
   expect(c.model).toEqual({ maxConcurrency: 3, retentionDays: 7, defaultModel: "haiku" });

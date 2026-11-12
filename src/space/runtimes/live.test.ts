@@ -170,6 +170,21 @@ test("Claude Code live arguments: approvals and questions over stdio, the tier a
   expect(claudeLiveArgs({ message: "x", cwd: "/", permissionMode: "acceptEdits" })).toContain("acceptEdits");
 });
 
+test("Claude Code live chat starts at the turn's effort and restarts the conversation's process when it changes", async () => {
+  const rt = make("claude");
+  const first = turn(rt, { message: "one", effort: "high" });
+  await first.done;
+  expect(texts(first).join(" ")).toContain("[effort high]");
+  const same = turn(rt, { message: "two", effort: "high", sessionId: first.sid });
+  await same.done;
+  expect(pidOf(same)).toBe(pidOf(first)!);
+  const other = turn(rt, { message: "three", effort: "low", sessionId: first.sid });
+  await other.done;
+  expect(other.sid).toBe(first.sid!);
+  expect(pidOf(other)).not.toBe(pidOf(first)!);
+  expect(texts(other).join(" ")).toContain("[effort low]");
+});
+
 test("Codex live policy: the default asks in a read-only sandbox; all permissions never asks", () => {
   expect(codexLivePolicy(undefined)).toMatchObject({ approvalPolicy: "on-request", sandbox: { mode: "read-only" } });
   expect(codexLivePolicy("acceptEdits")).toMatchObject({ approvalPolicy: "on-request", sandbox: { mode: "workspace-write" } });

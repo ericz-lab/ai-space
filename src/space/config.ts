@@ -155,7 +155,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     packagePort,
     packageBaseUrl: env.SPACE_PACKAGE_BASE_URL?.trim() || undefined,
     maxConcurrency: Math.max(1, Number(env.SPACE_MAX_CONCURRENCY ?? 2) || 2),
-    drainMs: Math.max(0, Number(env.SPACE_DRAIN_SECONDS ?? 300) || 300) * 1000,
+    drainMs: drainSeconds(env.SPACE_DRAIN_SECONDS) * 1000,
     pgAdminUrl: env.SPACE_PG_ADMIN_URL?.trim() ?? "",
     notifyTasks: env.SPACE_NOTIFY_TASKS?.trim() ?? "",
     eventRetentionMs: Math.max(1, Number(env.SPACE_EVENTS_RETENTION_DAYS ?? 30) || 30) * 24 * 3600_000,
@@ -196,6 +196,12 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
  * them until it is switched on purpose. The two operator templates belong to the operator's units: set
  * together with `space` they would describe units that no longer run the apps, so that is refused.
  */
+/** SPACE_DRAIN_SECONDS: 0 means no drain; unset, empty or not a number falls back to 300. */
+function drainSeconds(raw: string | undefined): number {
+  const n = raw?.trim() ? Number(raw) : NaN;
+  return Number.isFinite(n) ? Math.max(0, n) : 300;
+}
+
 export function loadSupervisor(env: Record<string, string | undefined>): "space" | "operator" {
   const raw = env.SPACE_SUPERVISOR?.trim() || "operator";
   if (raw !== "space" && raw !== "operator") throw new Error(`SPACE_SUPERVISOR must be space or operator, not "${raw}"`);
