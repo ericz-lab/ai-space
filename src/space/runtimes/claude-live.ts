@@ -96,6 +96,8 @@ export class ClaudeLive implements LiveProcess {
   private model: string | undefined;
   private mode: string;
   private stderr: { text: () => string } = { text: () => "" };
+  /** Why stdout could not be read further (an event line over the limit); the turn ends with it. */
+  private readError: string | undefined;
   private serial = 0;
   /** Where turns the process starts by itself, and job changes, go: the last turn's hooks. */
   private hooks: Pick<ChatCallbacks, "onWake" | "onJobs"> = {};
@@ -124,7 +126,11 @@ export class ClaudeLive implements LiveProcess {
     const proc = this.proc;
     this.stderr = tail(proc.stderr);
     void readLines(proc.stdout, (line) => this.line(line))
-      .catch(() => {})
+      // A line too long to read (or a broken pipe): end the process, so the turn ends with why.
+      .catch((e: unknown) => {
+        this.readError = (e as Error).message;
+        this.kill();
+      })
       .then(() => proc.exited)
       .then((code) => this.exited(code));
   }
@@ -366,7 +372,7 @@ export class ClaudeLive implements LiveProcess {
     if (ended) this.publishJobs();
     if (!this.current) return;
     const stopping = this.current.stopping;
-    this.endTurn(stopping ? "stopped" : (this.stderr.text().trim() || `runtime exited with ${code}`).slice(-800));
+    this.endTurn(stopping ? "stopped" : (this.readError ?? (this.stderr.text().trim() || `runtime exited with ${code}`)).slice(-800));
   }
 
   // ------------------------------------------------------------------ background jobs

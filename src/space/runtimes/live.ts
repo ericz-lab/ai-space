@@ -184,21 +184,33 @@ async function* chunks(stream: ReadableStream<Uint8Array>): AsyncGenerator<Uint8
   }
 }
 
-/** Read a stream line by line; resolves when it ends. */
-export async function readLines(stream: ReadableStream<Uint8Array>, onLine: (line: string) => void, maxLine = 8_000_000): Promise<void> {
+/** The longest event line a live runtime may write, in characters. */
+export const MAX_EVENT_LINE = 8_000_000;
+
+/**
+ * Read a stream line by line; resolves when it ends. A line longer than `maxLine` rejects at once
+ * with `lineTooLong`: the reader stops there, so the caller must end the process and the turn.
+ */
+export async function readLines(stream: ReadableStream<Uint8Array>, onLine: (line: string) => void, maxLine = MAX_EVENT_LINE): Promise<void> {
   const decoder = new TextDecoder();
   let rest = "";
   for await (const chunk of chunks(stream)) {
     rest += decoder.decode(chunk, { stream: true });
-    if (rest.length > maxLine && !rest.includes("\n")) throw new Error("runtime event exceeds limit");
     let nl: number;
     while ((nl = rest.indexOf("\n")) >= 0) {
+      if (nl > maxLine) throw new Error(lineTooLong(maxLine));
       const line = rest.slice(0, nl).trim();
       rest = rest.slice(nl + 1);
       if (line) onLine(line);
     }
+    if (rest.length > maxLine) throw new Error(lineTooLong(maxLine));
   }
   if (rest.trim()) onLine(rest.trim());
+}
+
+/** The turn's error when the runtime wrote a line over the limit. */
+export function lineTooLong(maxLine = MAX_EVENT_LINE): string {
+  return `the runtime wrote an event over ${Math.round(maxLine / 1_000_000)} MB, more than live chat reads; the turn was stopped`;
 }
 
 /** Keep the last `max` characters a stream writes (a runtime's stderr, for its error message). */

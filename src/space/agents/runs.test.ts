@@ -206,7 +206,7 @@ describe("run registry", () => {
 // The HTTP surface with a real child process: a stand-in claude CLI.
 const FAKE_CLI = `
 const args = process.argv.slice(2);
-const msg = args[args.indexOf("-p") + 1] ?? "";
+const msg = await new Response(Bun.stdin.stream()).text();
 const out = (o) => console.log(JSON.stringify(o));
 const [verb, file, count] = msg.split(" ");
 out({ type: "system", subtype: "init", session_id: "cafe0003-0000-4000-8000-000000000000", model: "fake" });

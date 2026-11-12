@@ -3,6 +3,7 @@ import { createClaudeCode } from "./claude-code.ts";
 import { claudeLiveArgs } from "./claude-live.ts";
 import { createCodexCli } from "./codex-cli.ts";
 import { codexLivePolicy } from "./codex-live.ts";
+import { lineTooLong, readLines } from "./live.ts";
 import { fakeLiveBin } from "./testing-live.ts";
 import type { ChatHandle, ChatTurn, RuntimeAdapter } from "./types.ts";
 
@@ -97,6 +98,15 @@ for (const which of ["claude", "codex"] as const) {
       });
       await denied.done;
       expect(texts(denied).at(-1)).toBe(which === "claude" ? "done deny" : "done decline");
+    });
+
+    test("an event line over the limit ends the turn at once with why, not at the timeout", async () => {
+      const rt = make(which);
+      const started = Date.now();
+      const t = turn(rt, { message: "huge" });
+      await t.done;
+      expect(t.error).toBe(lineTooLong());
+      expect(Date.now() - started).toBeLessThan(15_000);
     });
 
     test("a message added while the turn runs reaches the same turn", async () => {
@@ -199,4 +209,14 @@ test("a turn that is not interactive keeps the one-shot path", () => {
   expect(h.steer).toBeUndefined();
   h.kill();
   expect(finished).toBeUndefined();
+});
+
+test("readLines rejects a line over the limit, ended or not, and reads the rest", async () => {
+  const stream = (...parts: string[]) => new Response(parts.join("")).body!;
+  const seen: string[] = [];
+  await readLines(stream("a\n", "bb\n", "c"), (l) => seen.push(l), 5);
+  expect(seen).toEqual(["a", "bb", "c"]);
+  await expect(readLines(stream("ok\n", "x".repeat(6)), () => {}, 5)).rejects.toThrow(lineTooLong(5));
+  // A long line that arrives with its newline in the same chunk is caught too.
+  await expect(readLines(stream("x".repeat(6) + "\nok\n"), () => {}, 5)).rejects.toThrow(lineTooLong(5));
 });

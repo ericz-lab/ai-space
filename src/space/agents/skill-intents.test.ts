@@ -25,7 +25,7 @@ test("skill intent routing injects actual skill contents, preserves the sentence
   const cli = join(home, "fake.ts");
   await Bun.write(cli, `const args=process.argv.slice(2); const sid=crypto.randomUUID();
 console.log(JSON.stringify({type:"system",subtype:"init",session_id:sid}));
-console.log(JSON.stringify({type:"assistant",message:{content:[{type:"text",text:JSON.stringify({message:args[args.indexOf("-p")+1],system:args[args.indexOf("--append-system-prompt")+1],permission:args.includes("--permission-mode")?args[args.indexOf("--permission-mode")+1]:"default"})}]}}));
+console.log(JSON.stringify({type:"assistant",message:{content:[{type:"text",text:JSON.stringify({message:await new Response(Bun.stdin.stream()).text(),system:args[args.indexOf("--append-system-prompt")+1],permission:args.includes("--permission-mode")?args[args.indexOf("--permission-mode")+1]:"default"})}]}}));
 console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
   const db = new Database(":memory:");
   const store = new ShortcutStore(join(home, "shortcuts.db"));

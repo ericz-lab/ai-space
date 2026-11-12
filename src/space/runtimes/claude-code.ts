@@ -290,9 +290,12 @@ export function agentArgs(run: Pick<AgentRun, "model" | "permissionMode" | "allo
 
 // ---------------------------------------------------------------- chat
 
-/** Arguments after the binary; exported for tests. */
+/**
+ * Arguments after the binary; exported for tests. The message travels on stdin (`chatInput`): as an
+ * argument, one starting with `-` would be read as an option.
+ */
 export function chatArgs(t: ChatTurn, extra: string[] = []): string[] {
-  const args = ["-p", ...(t.images?.length ? ["--input-format", "stream-json"] : [t.message]), "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
+  const args = ["-p", ...(t.images?.length ? ["--input-format", "stream-json"] : []), "--output-format", "stream-json", "--verbose", "--include-partial-messages"];
   if (t.model) args.push("--model", t.model);
   if (t.sessionId) args.push("--resume", t.sessionId);
   if ((PERMISSION_MODES as readonly string[]).includes(t.permissionMode ?? "")) args.push("--permission-mode", t.permissionMode!);
@@ -301,6 +304,11 @@ export function chatArgs(t: ChatTurn, extra: string[] = []): string[] {
   if (t.allowedTools?.length) args.push("--allowedTools", t.allowedTools.join(","));
   args.push(...extra);
   return args;
+}
+
+/** What a one-shot chat turn writes to the CLI's stdin: the message, or a stream-json user message with its images. */
+export function chatInput(t: ChatTurn): string {
+  return t.images?.length ? chatImageInput(t) : t.message;
 }
 
 export function chatImageInput(t: ChatTurn): string {
@@ -314,7 +322,7 @@ function chatStream(cmd: string[], t: ChatTurn, cb: ChatCallbacks): { kill: () =
   let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
   try {
     proc = Bun.spawn(cmd, { cwd: t.cwd, env: t.env ?? process.env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-    if (t.images?.length) proc.stdin.write(chatImageInput(t));
+    proc.stdin.write(chatInput(t));
     proc.stdin.end();
   } catch (e) {
     queueMicrotask(() => cb.onFinish(`could not start the runtime: ${(e as Error).message}`));

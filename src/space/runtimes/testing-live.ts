@@ -9,6 +9,7 @@
  *                        `answered <answers as JSON>` or `skipped`
  *   `wait`               a long step: the turn waits for a steered message (answered with
  *                        `heard: <text>`) or a stop
+ *   `huge`               starts an event line over live chat's limit and never ends it or the turn
  *   anything else        `echo: <text> [pid <pid>]`, so a test can tell whether a process was reused
  *
  * Claude only (docs/runtimes.md#background-work):
@@ -23,6 +24,8 @@ export function fakeLiveBin(which: "claude" | "codex"): string[] {
 }
 
 type Json = Record<string, unknown>;
+/** The start of an event line longer than live chat reads (`MAX_EVENT_LINE`), never ended. */
+const HUGE_LINE = `{"type":"assistant","padding":"${"x".repeat(8_500_000)}`;
 const out = (m: unknown) => process.stdout.write(JSON.stringify(m) + "\n");
 
 async function* lines(): AsyncGenerator<Json> {
@@ -113,6 +116,9 @@ async function claude(args: string[]): Promise<void> {
     } else if (said === "wait") {
       turn = { waiting: "steer" };
       out({ type: "assistant", message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command: "sleep" } }] }, session_id: sid });
+    } else if (said === "huge") {
+      turn = { waiting: null };
+      process.stdout.write(HUGE_LINE);
     } else if (said.startsWith("bg:")) {
       const n = Number(said.slice("bg:".length));
       const job = { task_id: "job-1", task_type: "local_bash", description: "sleep a while" };
@@ -186,6 +192,8 @@ async function codex(args: string[]): Promise<void> {
       } else if (said === "wait") {
         turn.waiting = "steer";
         note("item/started", { item: { type: "commandExecution", id: "cmd-1", command: "sleep", status: "inProgress" } });
+      } else if (said === "huge") {
+        process.stdout.write(HUGE_LINE);
       } else {
         say(`echo: ${said} [pid ${process.pid}] [model ${p.model ?? "default"}] [approval ${p.approvalPolicy}] [sandbox ${(p.sandboxPolicy as Json | undefined)?.type}]`);
         complete("completed");

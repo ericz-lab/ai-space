@@ -183,6 +183,15 @@ describe("chat", () => {
     expect(again.sid).toBe("session-abc");
   });
 
+  test("the message goes on stdin, so one starting with a dash is not read as an option", async () => {
+    const runtime = createDeepseekHarness(spec());
+    const { events, error } = await collect(runtime, { message: "--help me with -x", cwd: process.cwd() });
+    expect(error).toBeNull();
+    const text = String((events[1] as { message: { content: { text: string }[] } }).message.content[0]!.text);
+    expect(text).toContain("answer to: --help me with -x");
+    expect(text).toMatch(/\[args: [^\]]* -\]/);
+  });
+
   test("a signed-in account runtime starts the one-shot chat on its account route", async () => {
     const runtime = createDeepseekHarness(spec({ provider: "deepseek-account" }));
     const { events, error } = await collect(runtime, { message: "hi", cwd: process.cwd(), systemPrompt: "You are the librarian." });

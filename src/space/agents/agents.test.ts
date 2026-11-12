@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LayoutStore } from "../panel/layout.ts";
@@ -14,13 +14,14 @@ import { runResponse } from "./runtime.ts";
 import { RunRegistry } from "./runs.ts";
 import { SessionStore } from "./sessions.ts";
 import { parseTranscript, transcriptPath } from "./transcript.ts";
+import { claudeProjectDir } from "../runtimes/transcripts.ts";
 
-// A stand-in for the claude CLI: prints its arguments back as stream-json events.
+// A stand-in for the claude CLI: prints the message (on stdin) and its arguments back as stream-json events.
 const FAKE_CLI = `
 const args = process.argv.slice(2);
-let msg = args[args.indexOf("-p") + 1] ?? "";
+let msg = await new Response(Bun.stdin.stream()).text();
 if (args.includes("--input-format")) {
-  const input = JSON.parse(await new Response(Bun.stdin.stream()).text());
+  const input = JSON.parse(msg);
   msg = JSON.stringify(input.message.content);
 }
 const resume = args.includes("--resume") ? args[args.indexOf("--resume") + 1] : "";
@@ -84,9 +85,9 @@ describe("chat images", () => {
 
 describe("chat runtime", () => {
   test("chatArgs builds the claude command line", () => {
-    expect(chatArgs({ message: "hi", cwd: "/x" })).toEqual(["-p", "hi", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
+    expect(chatArgs({ message: "hi", cwd: "/x" })).toEqual(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
     expect(chatArgs({ message: "hi", cwd: "/x", model: "opus", sessionId: "abc12345", permissionMode: "acceptEdits", systemPrompt: "S", allowedTools: ["Read", "Bash(ls *)"] }, ["--z"])).toEqual([
-      "-p", "hi", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model", "opus", "--resume", "abc12345", "--permission-mode", "acceptEdits", "--append-system-prompt", "S", "--allowedTools", "Read,Bash(ls *)", "--z",
+      "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model", "opus", "--resume", "abc12345", "--permission-mode", "acceptEdits", "--append-system-prompt", "S", "--allowedTools", "Read,Bash(ls *)", "--z",
     ]);
     expect(chatArgs({ message: "hi", cwd: "/x", permissionMode: "root" })).not.toContain("--permission-mode");
   });
@@ -196,6 +197,22 @@ describe("agents api", () => {
       { role: "user", text: "hello" },
       { role: "ai", text: "hi", tools: [], steps: [{ kind: "text", text: "hi" }] },
     ]);
+  });
+
+  test("a transcript is looked for where Claude Code files it: every other character a dash, long names hashed", async () => {
+    const sid = "cafe0002-0000-4000-8000-000000000000";
+    expect(transcriptPath("/nowhere/my_app dir/v1.2", sid, "/h")).toBe(`/h/.claude/projects/-nowhere-my-app-dir-v1-2/${sid}.jsonl`);
+    expect(claudeProjectDir("/srv/Café+x")).toBe("-srv-Caf--x");
+    // Pinned from the CLI's own function: cut at 200 characters, then the path's hash.
+    const long = "/home/me/apps/" + "long_app name/".repeat(15) + "x";
+    const dir = claudeProjectDir(long);
+    expect(dir).toHaveLength(207);
+    expect(dir.slice(195)).toBe("-long-s4t7bn");
+    // The real directory, as the CLI resolves its working directory.
+    const real = await realpath(home);
+    const link = join(home, "link_to home");
+    await symlink(real, link);
+    expect(transcriptPath(link, sid, "/h")).toBe(transcriptPath(real, sid, "/h"));
   });
 });
 

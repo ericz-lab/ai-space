@@ -32,7 +32,7 @@ import { terminalWebSocket } from "../terminal/api.ts";
 
 const FAKE_CLI = `
 const args = process.argv.slice(2);
-const msg = args[args.indexOf("-p") + 1] ?? "";
+const msg = await new Response(Bun.stdin.stream()).text();
 const out = (o) => console.log(JSON.stringify(o));
 out({ type: "system", subtype: "init", session_id: "cafe0001-0000-4000-8000-000000000000", model: "fake", cwd: process.cwd() });
 out({ type: "assistant", message: { content: [{ type: "text", text: "echo " + msg + " | cwd=" + process.cwd() }] } });
@@ -553,6 +553,20 @@ describe("bus over peers", () => {
     expect(new PeerStore(hubDb).cursor("david")).toBe(b.id);
     // The hub, serving as a peer itself, does not pass mirrored events on.
     expect((await get(hub, "/api/peer/events?since=0", { headers: { authorization: "Bearer hubtok" } })).body.events).toEqual([]);
+  });
+
+  test("a page filled with a hidden app's events still moves the hub's cursor on", async () => {
+    const start = new PeerStore(hubDb).cursor("david");
+    const hidden = Array.from({ length: 201 }, (_, i) => peerEvents.addEvent({ app: "secret", name: "tick", data: { i } }, 8_000 + i));
+    const page = await get(peerBase, `/api/peer/events?since=${start}&limit=2`, auth);
+    expect(page.body).toMatchObject({ events: [], next: hidden[1]!.id });
+    const seen = mirrored.length;
+    await peers.refreshAll(); // 200 hidden events: nothing mirrored, but the cursor moves past them
+    expect(new PeerStore(hubDb).cursor("david")).toBe(hidden[199]!.id);
+    const c = peerEvents.addEvent({ app: "media", name: "clip.added", data: { id: "c3" } }, 9_000);
+    await peers.refreshAll();
+    expect(mirrored.slice(seen)).toEqual([{ peer: "david", app: "media", name: "clip.added" }]);
+    expect(new PeerStore(hubDb).cursor("david")).toBe(c.id);
   });
 
   test("a call to an app only the peer provides is forwarded there as <hub>/<caller>, and the catalogue merges the peer's", async () => {
