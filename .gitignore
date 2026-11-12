@@ -13,6 +13,8 @@ xcuserdata/
 .env
 .env.*
 !.env.example
+# Per-machine Xcode signing (the Apple team id), see mobile/ios/Config/Signing.xcconfig
+Local.xcconfig
 
 # Dependencies / build
 node_modules/
