@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Manifest } from "../scheduler/manifest.ts";
 import { type RunResult, type Runner, type Scope, type ServiceManager, type UnitState, type Verb, lastLine, spawnCollect } from "./manager.ts";
-import { PLIST_HEAD, launchLabel, renderPlist, renderShellEnv } from "./plist.ts";
+import { PLIST_HEAD, launchLabel, plistString, renderPlist, renderShellEnv } from "./plist.ts";
 
 /**
  * `launchctl` for the supervisor on macOS (docs/supervision.md#macos): the
@@ -84,8 +84,8 @@ export class Launchctl implements ServiceManager {
   operatorUnit(app: string): string {
     return app;
   }
-  owns(text: string): boolean {
-    return text.startsWith(PLIST_HEAD);
+  owns(text: string, envFile: string): boolean {
+    return text.startsWith(PLIST_HEAD) && text.includes(plistString(envFile));
   }
   renderUnit(manifest: Manifest, command: string, envFile: string): string {
     return renderPlist({ app: manifest.app, dir: manifest.dir, command, envFile, logFile: this.logFile(manifest.app) });

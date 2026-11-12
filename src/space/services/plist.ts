@@ -44,7 +44,7 @@ export type PlistInput = {
  * file (mode 0600), not in the plist, which other users may read.
  */
 export function renderPlist(u: PlistInput): string {
-  const str = (s: string) => `<string>${xml(s)}</string>`;
+  const str = plistString;
   const command = u.command.trim();
   return [
     PLIST_HEAD,
@@ -92,6 +92,11 @@ export function renderShellEnv(vars: Record<string, string>): { text: string; sk
 }
 
 /** Text for a plist `<string>`; a control character XML cannot carry is refused rather than dropped. */
+/** A `<string>` element of the plist, as `renderPlist` writes it. */
+export function plistString(s: string): string {
+  return `<string>${xml(s)}</string>`;
+}
+
 function xml(s: string): string {
   if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(s)) throw new Error("a control character cannot go into a LaunchAgent; move it into a script");
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

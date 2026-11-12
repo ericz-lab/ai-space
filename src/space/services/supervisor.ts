@@ -123,7 +123,7 @@ export class Supervisor {
       this.last.delete(app);
       if (this.opts.mode !== "space") return { removed: false };
       const text = await this.readUnit(app);
-      if (!this.owned(text)) return { removed: false };
+      if (!this.owned(app, text)) return { removed: false };
       await this.teardown(app);
       return { removed: true };
     });
@@ -146,7 +146,7 @@ export class Supervisor {
     for (const f of files) {
       const app = this.opts.manager.appOfFile(f);
       if (!app || keep.has(app)) continue;
-      if (!this.owned(await this.readUnit(app))) continue;
+      if (!this.owned(app, await this.readUnit(app))) continue;
       try {
         await this.remove(app);
         removed.push(app);
@@ -158,7 +158,7 @@ export class Supervisor {
   }
 
   async status(app: string): Promise<ServiceStatus> {
-    const managed = this.opts.mode === "space" && this.owned(await this.readUnit(app));
+    const managed = this.opts.mode === "space" && this.owned(app, await this.readUnit(app));
     const unit = this.unitOf(app);
     let scope: Scope = "user";
     let state: UnitState | undefined;
@@ -184,7 +184,7 @@ export class Supervisor {
   control(app: string, action: "start" | "stop" | "restart"): Promise<void> {
     return this.serial(app, async () => {
       if (this.opts.mode !== "space") throw new SupervisorError(409, `services on this machine are the operator's (SPACE_SUPERVISOR=operator): ${this.opts.manager.command(action, this.opts.manager.operatorUnit(app))}`);
-      if (!this.owned(await this.readUnit(app))) throw new SupervisorError(409, `"${app}" has no unit of the space; sync it with status: active and a service`);
+      if (!this.owned(app, await this.readUnit(app))) throw new SupervisorError(409, `"${app}" has no unit of the space; sync it with status: active and a service`);
       await this.requireManager();
       await this.opts.manager[action](this.opts.manager.unitName(app));
     });
@@ -221,10 +221,10 @@ export class Supervisor {
     const op = await this.operatorUnit(app);
     const wasEnabled = op?.state.unitFileState === "enabled";
     const wasActive = op ? isRunning(op.state.activeState) : false;
-    const hadUnit = this.owned(await this.readUnit(app));
+    const hadUnit = this.owned(app, await this.readUnit(app));
     const fail = async (error: string): Promise<HandoverResult> => {
       try {
-        if (!hadUnit && this.owned(await this.readUnit(app))) {
+        if (!hadUnit && this.owned(app, await this.readUnit(app))) {
           await this.teardown(app);
           steps.push(`removed ${own}`);
         }
@@ -269,7 +269,7 @@ export class Supervisor {
     const steps: string[] = [];
     const op = await this.operatorUnit(app);
     if (!op) throw new SupervisorError(409, `there is no operator unit ${opUnit} (user or system) to hand "${app}" back to; install one first`);
-    if (this.owned(await this.readUnit(app))) {
+    if (this.owned(app, await this.readUnit(app))) {
       await this.teardown(app);
       steps.push(`removed ${own}`);
     }
@@ -345,8 +345,8 @@ export class Supervisor {
     const onDisk = await this.readUnit(app);
     if (onDisk === undefined && (!m.service || m.status !== "active")) return { app, action: "absent", at };
     await this.requireManager();
-    if (onDisk !== undefined && !this.owned(onDisk)) {
-      return { app, action: "conflict", at, error: `${unitPath} exists and was not written by ai-space; move it away` };
+    if (onDisk !== undefined && !this.owned(app, onDisk)) {
+      return { app, action: "conflict", at, error: `${unitPath} exists and was not written by ai-space for this workspace; move it away` };
     }
     if (!m.service || m.status !== "active") {
       if (onDisk === undefined) return { app, action: "absent", at };
@@ -458,9 +458,9 @@ export class Supervisor {
     return readText(join(this.opts.manager.unitDir, this.opts.manager.unitFile(app)));
   }
 
-  /** A unit file the space wrote; anything else of that name is the operator's and never touched. */
-  private owned(text: string | undefined): boolean {
-    return text !== undefined && this.opts.manager.owns(text);
+  /** A unit file this space wrote for the app; anything else of that name (the operator's, another workspace's) is never touched. */
+  private owned(app: string, text: string | undefined): boolean {
+    return text !== undefined && this.opts.manager.owns(text, this.envPath(app));
   }
 
   private record(r: ApplyResult): ApplyResult {

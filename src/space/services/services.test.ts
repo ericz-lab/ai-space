@@ -247,6 +247,17 @@ describe("supervisor", () => {
     expect((await t.sup.remove("kept")).removed).toBe(false);
   });
 
+  test("a unit another workspace wrote, same name and marker, is never swept, removed or overwritten", async () => {
+    const t = await setup();
+    await t.sup.apply(mf("demo"));
+    const other = new Supervisor({ mode: "space", envDir: join(t.root, "other-ws", "run", "env"), manager: new Systemctl({ run: t.sd.run, unitDir: join(t.root, "units") }), envFor: async () => ({}), appEnv: async () => ({}) });
+    expect(await other.sweep(new Set())).toEqual([]);
+    expect((await other.remove("demo")).removed).toBe(false);
+    expect(await other.apply(mf("demo"))).toMatchObject({ action: "conflict", error: expect.stringMatching(/not written by ai-space for this workspace/) });
+    expect(await Bun.file(t.unitPath).exists()).toBe(true);
+    expect(await t.sup.sweep(new Set())).toEqual(["demo"]);
+  });
+
   test("operator mode never touches systemd", async () => {
     const t = await setup({}, "operator");
     expect((await t.sup.apply(mf("demo"))).action).toBe("operator");

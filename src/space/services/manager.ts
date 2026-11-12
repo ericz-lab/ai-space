@@ -48,8 +48,13 @@ export interface ServiceManager {
   appOfFile(file: string): string | undefined;
   /** The operator's unit, named after the app. */
   operatorUnit(app: string): string;
-  /** Whether a unit file was written by the space: anything else of that name is never touched. */
-  owns(text: string): boolean;
+  /**
+   * Whether a unit file was written by this space: the space's marker and `envFile`, the
+   * app's environment file under this workspace. A unit of the same name that another
+   * workspace on the machine wrote (another SPACE_HOME, a test's temporary one) names
+   * its own environment file, so it is never touched, like an operator's.
+   */
+  owns(text: string, envFile: string): boolean;
   renderUnit(manifest: Manifest, command: string, envFile: string): string;
   /** The environment file the unit reads; names or values the format cannot hold are left out and listed. */
   renderEnv(vars: Record<string, string>): { text: string; skipped: string[] };
