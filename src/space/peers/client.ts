@@ -82,11 +82,15 @@ const SNAPSHOT_TIMEOUT_MS = 8_000;
 const EVENTS_PAGE = 200;
 /** A snapshot older than this many refresh periods counts as stale. */
 const STALE_PERIODS = 2;
+/** Failed refreshes in a row before a bus call to the peer is refused without trying. */
+const KNOWN_DOWN_FAILURES = 2;
 
 export class PeerClient {
   snapshot: PeerSnapshot | undefined;
   error: string | undefined;
   private lastOkAt: number | undefined;
+  /** Refreshes that failed in a row. */
+  private failures = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
   private inFlight: Promise<void> | undefined;
 
@@ -108,6 +112,15 @@ export class PeerClient {
   /** `ok` while the last successful refresh is recent; a restored snapshot alone is not. */
   health(): PeerHealth {
     return this.lastOkAt !== undefined && this.now() - this.lastOkAt < this.config.refreshMs * STALE_PERIODS ? "ok" : "down";
+  }
+
+  /**
+   * `down` and the last two refreshes failed: a call to the peer is then refused at once
+   * (docs/peers.md#failure-and-staleness). One lost snapshot on a poor link is not enough, and neither is the time
+   * just after boot, before any refresh has ended; a call is then forwarded as before.
+   */
+  knownDown(): boolean {
+    return this.failures >= KNOWN_DOWN_FAILURES && this.health() === "down";
   }
 
   status(): PeerStatus {
@@ -158,11 +171,13 @@ export class PeerClient {
       const snap = parseSnapshot(await r.json());
       this.snapshot = snap;
       this.error = undefined;
+      this.failures = 0;
       this.lastOkAt = this.now();
       this.opts.store?.set(this.name, snap);
       if (this.opts.onEvents) await this.pullEvents();
     } catch (e) {
       this.error = String((e as Error).message ?? e).slice(0, 200);
+      this.failures++;
     }
   }
 

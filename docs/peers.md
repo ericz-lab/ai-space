@@ -96,7 +96,7 @@ Module `src/space/peers/`:
 | File | Holds |
 | --- | --- |
 | `config.ts` | `SPACE_PEER_*` parsing: name, URL, token, extra headers, refresh. |
-| `client.ts` | One client per peer: `refresh()` on its own timer with the last good snapshot kept, `health()`, `forward(req, path)` for the proxied routes. Timeouts: 8 s for a snapshot, none for a chat stream (it stays open as long as the peer's does; the browser leaving detaches it, the turn goes on on the peer), 8 s for the other forwards. |
+| `client.ts` | One client per peer: `refresh()` on its own timer with the last good snapshot kept, `health()`, `knownDown()` (down and the last two refreshes failed), `forward(req, path)` for the proxied routes. Timeouts: 8 s for a snapshot, none for a chat stream (it stays open as long as the peer's does; the browser leaving detaches it, the turn goes on on the peer), 8 s for the other forwards. |
 | `store.ts` | The last good snapshot per peer in `space.db` (`peer_snapshots`), so a hub restart while a peer is down still lists its apps, muted. A peer dropped from `.env` loses its row at boot. |
 | `rename.ts` | `space peer rename`: the checks, the `.env` rewrite and the move of every row kept under the peer's name, in one transaction ([Renaming a peer](#renaming-a-peer)). |
 | `merge.ts` | Turns a snapshot into hub views: prefixes ids, sets `peer`, rewrites icon, avatar and embed routes to the hub's proxy, applies the hub's hidden set, marks stale entries. |
@@ -149,10 +149,10 @@ Not moved: the peer's own `SPACE_NAME` (the name it gives itself, which other hu
 | Situation | What the panel shows |
 | --- | --- |
 | Peer answers | Its entries, live health, widget items with the peer's `asOf`. |
-| Peer times out or errors | The last good snapshot, apps and widgets muted (`stale`), services `unknown`, the peer `down` with the last `asOf` and the error text; chat, embed and icons on those entries fail with 502 and the error, not a hub guess. |
+| Peer times out or errors | The last good snapshot, apps and widgets muted (`stale`), services `unknown`, the peer `down` with the last `asOf` and the error text; chat, embed and icons on those entries fail with 502 and the error, not a hub guess. Once two refreshes in a row have failed, a bus call to it is answered 503 `peer <name> is down (snapshot N min old)` at once, without forwarding, and `GET /api/capabilities` marks its apps `health: "down"` ([events.md](events.md#across-machines-peers)). |
 | No good snapshot ever (new peer, wrong token) | The peer only, `down`, with the error (`token rejected` for a 401). Nothing invented. |
 | Peer removed from `.env` | Its entries disappear on the next boot; its layout keys stay in `panel_kv` harmlessly, like a deleted app's. Its `peer_snapshots` row is deleted at boot. |
-| Hub restarted while a peer is down | The stored snapshot, `stale` and `down`, until the first refresh succeeds. |
+| Hub restarted while a peer is down | The stored snapshot, `stale` and `down`, until the first refresh succeeds. Until two refreshes have failed, a bus call is still forwarded: the hub does not yet know the peer is down. |
 
 A snapshot is refreshed in the background on its own timer, never on a browser request, so a slow peer costs the panel nothing; a request always reads the cache.
 

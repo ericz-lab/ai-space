@@ -15,10 +15,11 @@ import { OPERATOR as SPACE_OPERATOR, bearer, identify as identifyCaller, isOpera
  *   GET  /api/events/:id                    one event with its deliveries
  *   GET  /api/deliveries?app&status&limit   deliveries, newest first
  *   POST /api/deliveries/:id/retry          queue a dead or skipped delivery again (operator token)
- *   GET  /api/capabilities                  what every app provides, publishes and consumes
+ *   GET  /api/capabilities                  what every app provides, publishes and consumes; a peer's apps carry
+ *                                           the peer's `health` (`ok` or `down`) and `asOf`
  *   POST /api/call/:app/:capability         forward the request to the app's capability as the calling app; an app
  *                                           that is not here but on exactly one peer is reached through that peer
- *   POST /api/call/:peer/:app/:capability   the same, naming the peer
+ *   POST /api/call/:peer/:app/:capability   the same, naming the peer; a peer known to be down answers 503 at once
  *   GET  /api/calls?app&caller&limit        call history, newest first
  *   GET  /api/voice                         { transcribe: boolean }: whether a speech-to-text capability is reachable
  *   POST /api/voice/transcribe              multipart `file` (+ `language`, `context`), forwarded as the operator to the
@@ -72,13 +73,18 @@ export type CaptureTarget = { id: string; app: string; capability: string; peer?
 /** What the bus routes need from the peer hub; `name` is this space's own name, prefixed onto forwarded callers. */
 export type RemoteBus = {
   name: string;
-  capabilities(): (AppCapabilities & { peer: string })[];
+  /** `asOf` is the time of the peer's last good snapshot. */
+  capabilities(): (AppCapabilities & { peer: string; health: "ok" | "down"; asOf?: string })[];
   providerOf(app: string, capability?: string): { peer: RemotePeer } | { ambiguous: string[] } | undefined;
   get(name: string): RemotePeer | undefined;
 };
 
 export type RemotePeer = {
   name: string;
+  /** Down and the last refreshes failed: a call is refused instead of forwarded to a port that may never answer. */
+  knownDown(): boolean;
+  /** The last good snapshot, for the age in the refusal. */
+  snapshot?: { asOf: string };
   forward(req: Request, path: string, opts?: { timeoutMs?: number; headers?: Record<string, string> }): Promise<Response>;
 };
 
@@ -145,6 +151,12 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
     if (length > MAX_CALL_BODY_BYTES) return error(413, `body is ${length} bytes; the limit is ${MAX_CALL_BODY_BYTES}`);
     const startedAt = Date.now();
     const record = (status: number, ok: boolean, err?: string) => store.addCall({ caller, app: `${peer.name}/${app}`, capability: name, status, ok, durationMs: Date.now() - startedAt, ...(err ? { error: err } : {}), at: startedAt });
+    // A sleeping machine's tunnel port may still accept a connection and never answer: do not wait the call timeout on it.
+    if (peer.knownDown()) {
+      const asOf = Date.parse(peer.snapshot?.asOf ?? "");
+      const rec = record(0, false, `peer ${peer.name} is down (${Number.isFinite(asOf) ? `snapshot ${Math.max(0, Math.round((startedAt - asOf) / 60_000))} min old` : "no snapshot"})`);
+      return error(503, rec.error ?? `peer ${peer.name} is down`);
+    }
     let res: Response;
     try {
       res = await peer.forward(req, `/api/peer/call/${encodeURIComponent(app)}/${encodeURIComponent(name)}`, { timeoutMs: MAX_CALL_TIMEOUT_MS, headers: { "x-space-caller": `${opts.remote!.name}/${caller}`, ...(req.headers.get("accept") ? { accept: req.headers.get("accept")! } : {}) } });
@@ -283,7 +295,7 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
           ok: true,
           apps: [
             ...bus.capabilities().map((a) => ({ app: a.app, provides: a.provides, publishes: a.publishes, consumes: a.consumes, stats: store.callStats(a.app) })),
-            ...(opts.remote?.capabilities() ?? []).map((a) => ({ app: a.app, peer: a.peer, provides: a.provides, publishes: a.publishes, consumes: a.consumes, stats: store.callStats(a.app) })),
+            ...(opts.remote?.capabilities() ?? []).map((a) => ({ app: a.app, peer: a.peer, health: a.health, ...(a.asOf ? { asOf: a.asOf } : {}), provides: a.provides, publishes: a.publishes, consumes: a.consumes, stats: store.callStats(a.app) })),
           ],
         }),
     },

@@ -115,7 +115,7 @@ The target is called as `space` (so `callers`, when set, must include it) with a
 
 ## Catalogue
 
-`GET /api/capabilities` lists, per app, what it provides (with description, method, path, timeout, callers), what it publishes (with description and example) and what it consumes, plus call counts, failures and mean duration per capability. Peers' apps follow under `<peer>/<app>` with a `peer` field. This is what an agent reads to learn that "save this link" is `keep/save-link`, and what a new app reads to find which events exist.
+`GET /api/capabilities` lists, per app, what it provides (with description, method, path, timeout, callers), what it publishes (with description and example) and what it consumes, plus call counts, failures and mean duration per capability. Peers' apps follow under `<peer>/<app>` with a `peer` field, the peer's `health` (`ok` when it answers, `down` otherwise; the same rule as `GET /api/peers`) and `asOf`, the time of its last good snapshot. This is what an agent reads to learn that "save this link" is `keep/save-link`, and what a new app reads to find which events exist.
 
 Every agent chat session gets a condensed copy as the last section of its system prompt (`src/space/bus/prompt.ts`): one line per capability and per published event, with the `curl` for a call and for publishing, capped at 6 000 characters. An app's agent calls with its `SPACE_APP_TOKEN`, the space agent with the operator's `SPACE_API_TOKEN`.
 
@@ -135,7 +135,7 @@ GET  /api/events/stream                   the app's stream deliveries as SSE (ap
 POST /api/events/ack                      { delivery } (app token, or an external consumer's)
 GET  /api/deliveries?app&status&limit     deliveries, newest first
 POST /api/deliveries/:id/retry            queue a dead or skipped delivery again (operator token)
-GET  /api/capabilities                    the catalogue
+GET  /api/capabilities                    the catalogue (a peer's apps with its `health` and `asOf`)
 POST /api/call/:app/:capability           forward as the calling app
 GET  /api/calls?app&caller&limit          call history
 GET  /api/consumers                       external consumers (operator token; below)
@@ -178,7 +178,7 @@ When Portfolio needs Insight to research a symbol and wants the verdict back, th
 
 A hub ([peers.md](peers.md)) mirrors every event its peers publish: after each snapshot refresh it asks `GET /api/peer/events?since=<cursor>` for what is new, publishes each one here under the same app name with `peer: <name>` and the original time, and advances the cursor (kept in `peer_cursors` in `space.db`). Subscriptions on the hub then match a peer app's events exactly as a local app's: `consumes: [{ event: pulse/clue.found }]` works whether Pulse runs here or on a peer. Only events published on the peer itself are exported (mirrored ones are not), so a hub that is also someone's peer never passes events on twice, and a peer whose ids went backwards (a rebuilt database) restarts the cursor at its newest id. Latency is the peer's refresh period (30 s by default).
 
-A call to an app the hub does not hold is forwarded to the one peer whose snapshot lists that capability, through `POST /api/peer/call/<app>/<capability>`; the peer's bus runs it as the caller `<hub name>/<app>` (a provider that restricts `callers` must list that form to accept remote callers). Two peers holding the same app is an ambiguity the hub refuses (409); `POST /api/call/<peer>/<app>/<capability>` names the peer. Both sides record the call. Deliveries stay on the machine that made them: a peer's http subscription to a hub event is not a thing, the peer subscribes to what reaches its own bus.
+A call to an app the hub does not hold is forwarded to the one peer whose snapshot lists that capability, through `POST /api/peer/call/<app>/<capability>`; the peer's bus runs it as the caller `<hub name>/<app>` (a provider that restricts `callers` must list that form to accept remote callers). Two peers holding the same app is an ambiguity the hub refuses (409); `POST /api/call/<peer>/<app>/<capability>` names the peer. Both sides record the call. A peer the hub knows to be down (it is `down` and its last two snapshot refreshes failed, so one lost snapshot on a poor link does not refuse a call) is not asked: the call is answered 503 `{ ok: false, error: "peer <name> is down (snapshot N min old)" }` at once and recorded as failed, because a sleeping machine's tunnel port can accept a connection and never answer. Right after the hub starts, until two refreshes have failed, a call is forwarded as usual. An app that wants to skip such a peer up front reads `health` in the catalogue. Deliveries stay on the machine that made them: a peer's http subscription to a hub event is not a thing, the peer subscribes to what reaches its own bus.
 
 ## The panel
 

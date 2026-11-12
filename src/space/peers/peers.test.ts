@@ -573,6 +573,44 @@ describe("bus over peers", () => {
     expect(cat.body.apps.find((a: Body) => a.app === "david/media")).toMatchObject({ peer: "david", provides: [{ name: "clip" }] });
     expect((await get(hub, "/api/calls?app=david/media")).body.calls[0]).toMatchObject({ caller: "space", app: "david/media", capability: "clip", status: 200, ok: true });
   });
+
+  test("the catalogue carries each peer's health and snapshot time; a call to a peer that is down is refused at once", async () => {
+    await peers.refreshAll();
+    const asOf = peers.get("david")!.snapshot!.asOf;
+    expect(peers.capabilities().find((a) => a.app === "david/media")).toMatchObject({ peer: "david", health: "ok", asOf });
+    expect((await get(hub, "/api/capabilities")).body.apps.find((a: Body) => a.app === "david/media")).toMatchObject({ peer: "david", health: "ok", asOf });
+
+    outage = true;
+    clock += 25_000; // beyond two refresh periods
+    await peers.refreshAll();
+    // One lost snapshot: the catalogue says down, a call is still tried (and fails as unreachable).
+    expect(peers.get("david")!.knownDown()).toBe(false);
+    expect((await get(hub, "/api/call/david/media/clip", { method: "POST" })).status).toBe(502);
+    await peers.refreshAll();
+    expect((await get(hub, "/api/capabilities")).body.apps.find((a: Body) => a.app === "david/media")).toMatchObject({ peer: "david", health: "down", asOf });
+    // Forwarding would have failed with 502 "unreachable"; the hub does not try.
+    for (const path of ["/api/call/david/media/clip", "/api/call/media/clip"]) {
+      const r = await get(hub, path, { method: "POST" });
+      expect(r.status).toBe(503);
+      expect(r.body.error).toMatch(/^peer david is down \(snapshot \d+ min old\)$/);
+    }
+    expect((await get(hub, "/api/calls?app=david/media")).body.calls[0]).toMatchObject({ caller: "space", app: "david/media", capability: "clip", status: 0, ok: false, error: expect.stringContaining("is down") });
+
+    outage = false;
+    await peers.refreshAll();
+    expect((await fetch(`${hub}/api/call/david/media/clip`, { method: "POST" })).status).toBe(200);
+  });
+
+  test("a peer is known to be down only after two failed refreshes in a row: just after boot a call still goes through", async () => {
+    const fresh = new PeerHub([{ name: "x", url: peerBase, token: "wrong", headers: {}, refreshMs: 10_000 }], { fetch: hubFetch });
+    const x = fresh.get("x")!;
+    expect(x.health()).toBe("down");
+    expect(x.knownDown()).toBe(false);
+    await fresh.refreshAll();
+    expect(x.knownDown()).toBe(false);
+    await fresh.refreshAll();
+    expect(x.knownDown()).toBe(true);
+  });
 });
 
 describe("one tile per url", () => {

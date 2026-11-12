@@ -71,19 +71,22 @@ afterAll(() => {
   app.stop(true);
 });
 
-/** A stand-in for the peer hub: one peer holding `thesis/summarize`, and an app two peers both claim. */
+/** A stand-in for the peer hub: one peer holding `thesis/summarize`, an app two peers both claim, and a peer known to be down. */
 const forwarded: { path: string; caller: string | null; body: string }[] = [];
-const fakePeer = (name: string) => ({
+const SNAPSHOT_AT = "2026-11-02T08:00:00.000Z";
+const fakePeer = (name: string, down = false) => ({
   name,
+  knownDown: () => down,
+  snapshot: { asOf: SNAPSHOT_AT },
   forward: async (req: Request, path: string, o?: { headers?: Record<string, string> }) => {
     forwarded.push({ path, caller: o?.headers?.["x-space-caller"] ?? null, body: await req.text() });
     return Response.json({ from: name }, { headers: { "content-type": "application/json" } });
   },
 });
-const peersByName = { dailie: fakePeer("dailie"), david: fakePeer("david") };
+const peersByName = { dailie: fakePeer("dailie"), david: fakePeer("david"), asleep: fakePeer("asleep", true) };
 const remote = {
   name: "seoul",
-  capabilities: () => [{ app: "dailie/thesis", peer: "dailie", provides: [{ name: "summarize", method: "POST" as const, path: "/s", timeoutMs: 1000 }], publishes: [], consumes: [] }],
+  capabilities: () => [{ app: "dailie/thesis", peer: "dailie", health: "ok" as const, asOf: SNAPSHOT_AT, provides: [{ name: "summarize", method: "POST" as const, path: "/s", timeoutMs: 1000 }], publishes: [], consumes: [] }],
   providerOf: (app: string) => (app === "thesis" ? { peer: peersByName.dailie } : app === "twin" ? { ambiguous: ["dailie", "david"] } : undefined),
   get: (n: string) => peersByName[n as keyof typeof peersByName],
 };
@@ -186,7 +189,18 @@ describe("bus api", () => {
     expect(await named.json()).toEqual({ from: "david" });
     expect((await call("/api/calls?app=dailie/thesis")).body.calls[0]).toMatchObject({ caller: "portfolio", app: "dailie/thesis", capability: "summarize", status: 200, ok: true });
     const cat = await call("/api/capabilities");
-    expect(cat.body.apps.find((a: Body) => a.app === "dailie/thesis")).toMatchObject({ peer: "dailie" });
+    expect(cat.body.apps.find((a: Body) => a.app === "dailie/thesis")).toMatchObject({ peer: "dailie", health: "ok", asOf: SNAPSHOT_AT });
+  });
+
+  test("a call to a peer known to be down answers 503 at once, without forwarding, and is recorded as failed", async () => {
+    const before = forwarded.length;
+    const started = Date.now();
+    const r = await call("/api/call/asleep/thesis/summarize", { method: "POST", headers: { authorization: "Bearer portfolio-token", "content-type": "application/json" }, body: "{}" });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(r.status).toBe(503);
+    expect(r.body).toEqual({ ok: false, error: expect.stringMatching(/^peer asleep is down \(snapshot \d+ min old\)$/) });
+    expect(forwarded).toHaveLength(before);
+    expect((await call("/api/calls?app=asleep/thesis")).body.calls[0]).toMatchObject({ caller: "portfolio", app: "asleep/thesis", capability: "summarize", status: 0, ok: false, error: r.body.error });
   });
 
   test("calls are forwarded as the calling app and recorded; the catalogue lists it all", async () => {
@@ -283,7 +297,7 @@ describe("the panel's image capture", () => {
     b.syncApp("ai-spark", { events: { publishes: [], consumes: [] }, provides: [{ name: "capture-image", method: "POST", path: "/spark", timeoutMs: 5000, capture: sparkCapture }] });
     b.syncApp("ai-notes", { events: { publishes: [], consumes: [] }, provides: [{ name: "capture-image", method: "POST", path: "/notes", timeoutMs: 5000, capture: { kinds: ["image"], title: "Notes" } }, { name: "find", method: "POST", path: "/find", timeoutMs: 5000 }] });
     const withPeer = peerTarget
-      ? { ...remote, capabilities: () => [...remote.capabilities(), { app: "david/keep", peer: "david", provides: [{ name: "shot", method: "POST" as const, path: "/k", timeoutMs: 1000, capture: { kinds: ["image" as const], title: "Keep" } }], publishes: [], consumes: [] }] }
+      ? { ...remote, capabilities: () => [...remote.capabilities(), { app: "david/keep", peer: "david", health: "ok" as const, provides: [{ name: "shot", method: "POST" as const, path: "/k", timeoutMs: 1000, capture: { kinds: ["image" as const], title: "Keep" } }], publishes: [], consumes: [] }] }
       : remote;
     const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createBusRoutes({ bus: b, store, events: new Store(":memory:"), token: "op", remote: withPeer }) });
     return { url: `http://127.0.0.1:${server.port}`, store, stop: () => (server.stop(true), answering.stop(true)) };
