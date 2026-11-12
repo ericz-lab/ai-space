@@ -75,24 +75,11 @@ export class Inbox {
     this.prune();
   }
 
-  list(opts: { app?: string; filter?: InboxFilter; action?: boolean; limit?: number } = {}): InboxItem[] {
-    const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
-    const where: string[] = ["rn = 1"];
-    const args: (string | number)[] = [];
-    if (opts.app) {
-      where.push("app = ?");
-      args.push(opts.app);
-    }
-    if (opts.action) {
-      where.push(`level IN (${ACTION_LEVELS.map(() => "?").join(", ")})`);
-      args.push(...ACTION_LEVELS);
-    }
-    if (opts.filter === "unread") where.push("(read_at IS NULL OR read_at < last_at)");
-    else if (opts.filter === "open") where.push("(done_at IS NULL OR done_at < last_at)");
-    else if (opts.filter === "done") where.push("done_at >= last_at");
+  list(opts: InboxQuery = {}): InboxItem[] {
+    const { where, args, limit } = listWhere(opts);
     const rows = this.db
       .query<ItemRow, (string | number)[]>(
-        `SELECT * FROM (${THREADS}) WHERE ${where.join(" AND ")} ORDER BY last_at DESC, thread LIMIT ?`,
+        `SELECT * FROM (${THREADS}) WHERE ${where} ORDER BY last_at DESC, thread LIMIT ?`,
       )
       .all(...args, limit);
     return rows.map(rowToItem);
@@ -101,13 +88,29 @@ export class Inbox {
   /** Unread threads and threads still asking for something to be done. */
   summary(): InboxSummary {
     const row = this.db
-      .query<{ unread: number | null; open: number | null }, string[]>(
-        `SELECT SUM(read_at IS NULL OR read_at < last_at) AS unread,
-                SUM(level IN (${ACTION_LEVELS.map(() => "?").join(", ")}) AND (done_at IS NULL OR done_at < last_at)) AS open
-         FROM (${THREADS}) WHERE rn = 1`,
-      )
+      .query<{ unread: number | null; open: number | null }, string[]>(`SELECT ${SUMMARY_SQL} FROM (${THREADS}) WHERE rn = 1`)
       .get(...ACTION_LEVELS);
     return { unread: row?.unread ?? 0, open: row?.open ?? 0 };
+  }
+
+  /** `list` and `summary` together, from one pass over the notifications (the panel's poll). */
+  page(opts: InboxQuery = {}): { items: InboxItem[]; summary: InboxSummary } {
+    const { where, args, limit } = listWhere(opts);
+    // The summary row always comes back; a page with no item joins it to one row of nulls.
+    const rows = this.db
+      .query<ItemRow & { s_unread: number | null; s_open: number | null }, (string | number)[]>(
+        `WITH th AS MATERIALIZED (SELECT * FROM (${THREADS}) WHERE rn = 1),
+              s AS (SELECT ${SUMMARY_SQL} FROM th)
+         SELECT f.*, s.unread AS s_unread, s.open AS s_open FROM s
+         LEFT JOIN (SELECT * FROM th WHERE ${where} ORDER BY last_at DESC, thread LIMIT ?) f ON 1
+         ORDER BY f.last_at DESC, f.thread`,
+      )
+      .all(...ACTION_LEVELS, ...args, limit);
+    const first = rows[0];
+    return {
+      items: rows.filter((r) => r.thread !== null).map(rowToItem),
+      summary: { unread: first?.s_unread ?? 0, open: first?.s_open ?? 0 },
+    };
   }
 
   /**
@@ -160,6 +163,31 @@ export class Inbox {
     return this.db.query(`DELETE FROM inbox_state WHERE thread NOT IN (SELECT DISTINCT ${THREAD_SQL} FROM notifications)`).run().changes;
   }
 }
+
+type InboxQuery = { app?: string; filter?: InboxFilter; action?: boolean; limit?: number };
+
+/** The conditions of a list over the latest row of each thread (`rn = 1`), and the clamped limit. */
+function listWhere(opts: InboxQuery): { where: string; args: (string | number)[]; limit: number } {
+  const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
+  const where: string[] = ["rn = 1"];
+  const args: (string | number)[] = [];
+  if (opts.app) {
+    where.push("app = ?");
+    args.push(opts.app);
+  }
+  if (opts.action) {
+    where.push(`level IN (${ACTION_LEVELS.map(() => "?").join(", ")})`);
+    args.push(...ACTION_LEVELS);
+  }
+  if (opts.filter === "unread") where.push("(read_at IS NULL OR read_at < last_at)");
+  else if (opts.filter === "open") where.push("(done_at IS NULL OR done_at < last_at)");
+  else if (opts.filter === "done") where.push("done_at >= last_at");
+  return { where: where.join(" AND "), args, limit };
+}
+
+/** Unread threads and open action threads over the latest rows; takes `ACTION_LEVELS` as arguments. */
+const SUMMARY_SQL = `SUM(read_at IS NULL OR read_at < last_at) AS unread,
+  SUM(level IN (${ACTION_LEVELS.map(() => "?").join(", ")}) AND (done_at IS NULL OR done_at < last_at)) AS open`;
 
 /** One row per notification with its thread's count, first time and state; `rn = 1` is the latest of the thread. */
 const THREADS = `

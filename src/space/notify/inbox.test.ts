@@ -84,6 +84,20 @@ describe("Inbox", () => {
     expect(inbox.summary().unread).toBe(0);
   });
 
+  test("a page is the list and the summary of one query, also when the list is empty", () => {
+    expect(inbox.page()).toEqual({ items: [], summary: { unread: 0, open: 0 } });
+    add("a", 1000, { level: "warn" });
+    add("a", 1100, { level: "success" });
+    add("b", 1200, { level: "report", key: "k" });
+    add("b", 1300, { level: "report", key: "k" });
+    inbox.mark(["k:b:k"], { read: true }, 2000);
+    for (const opts of [{}, { app: "a" }, { action: true }, { filter: "unread" as const }, { filter: "done" as const }, { limit: 1 }]) {
+      expect(inbox.page(opts)).toEqual({ items: inbox.list(opts), summary: inbox.summary() });
+    }
+    expect(inbox.page({ filter: "done" }).items).toEqual([]);
+    expect(inbox.page({ filter: "done" }).summary).toEqual({ unread: 2, open: 1 });
+  });
+
   test("state of threads whose notifications were pruned is dropped on open", () => {
     const id = add("a", 1000);
     inbox.mark([id], { read: true }, 2000);
