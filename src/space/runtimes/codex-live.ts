@@ -63,6 +63,8 @@ export class CodexLive implements LiveProcess {
   private approvals: PendingApprovals<Approval> | null = null;
   private serial = 0;
   private stderr: { text: () => string } = { text: () => "" };
+  /** Why stdout could not be read further (an event line over the limit); the turn ends with it. */
+  private readError: string | undefined;
   private imageDir: string | undefined;
 
   constructor(bin: string[], private readonly first: ChatTurn) {
@@ -72,7 +74,11 @@ export class CodexLive implements LiveProcess {
     const proc = this.proc;
     this.stderr = tail(proc.stderr);
     void readLines(proc.stdout, (line) => this.line(line))
-      .catch(() => {})
+      // A line too long to read (or a broken pipe): end the process, so the turn ends with why.
+      .catch((e: unknown) => {
+        this.readError = (e as Error).message;
+        this.kill();
+      })
       .then(() => proc.exited)
       .then((code) => this.exited(code));
     this.ready = this.open();
@@ -305,7 +311,7 @@ export class CodexLive implements LiveProcess {
     this.calls.clear();
     if (this.imageDir) void rm(this.imageDir, { recursive: true, force: true });
     if (!this.current) return;
-    this.endTurn(this.current.stopping ? "stopped" : (this.stderr.text().trim() || `Codex app-server exited with ${code}`).slice(-800));
+    this.endTurn(this.current.stopping ? "stopped" : (this.readError ?? (this.stderr.text().trim() || `Codex app-server exited with ${code}`)).slice(-800));
   }
 
   private write(message: unknown): void {

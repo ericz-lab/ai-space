@@ -6,6 +6,16 @@ if (import.meta.main) {
   const args = process.argv.slice(3);
   const prompt = await new Response(Bun.stdin.stream()).text();
   if (mode === "hang") await Bun.sleep(60_000);
+  if (mode === "imagehang") {
+    // An image call that starts its thread, saves an image, then never finishes; its pid and
+    // working directory go to $CODEX_HOME/hang.json so a test can see they are gone after a kill.
+    const thread = "c0de0003-0000-4000-8000-000000000000";
+    const home = process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`;
+    await Bun.write(Bun.stdout, JSON.stringify({ type: "thread.started", thread_id: thread }) + "\n");
+    await Bun.write(`${home}/generated_images/${thread}/exec-1.png`, new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
+    await Bun.write(`${home}/hang.json`, JSON.stringify({ pid: process.pid, cwd: process.cwd() }));
+    await Bun.sleep(60_000);
+  }
   if (mode === "exit") { console.error("CLI crash"); process.exit(3); }
   if (mode === "failexit") {
     console.log(JSON.stringify({ type: "turn.failed", error: { message: "exceeded retry limit, last status: 429 Too Many Requests" } }));

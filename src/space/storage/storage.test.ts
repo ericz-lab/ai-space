@@ -113,6 +113,35 @@ describe("StorageService.syncApp", () => {
     await expect(storage.syncApp("my-app", { databases: [{ name: "main", backend: "postgres" }] })).rejects.toThrow(/SPACE_PG_ADMIN_URL/);
   });
 
+  // Needs a real server: SPACE_TEST_PG_ADMIN_URL=postgres://admin@127.0.0.1:5432/postgres (a superuser).
+  test.skipIf(!process.env.SPACE_TEST_PG_ADMIN_URL)("postgres sync keeps a working password and repairs a broken one", async () => {
+    const adminUrl = process.env.SPACE_TEST_PG_ADMIN_URL!;
+    const app = `pgtest${Date.now().toString(36)}`;
+    const pg = await StorageService.open({ ws, db, pgAdminUrl: adminUrl, log: () => {} });
+    const admin = new Bun.SQL(adminUrl);
+    try {
+      const first = (await pg.syncApp(app, { databases: [{ name: "main", backend: "postgres" }] })).databases[0]!.url;
+      // A second sync leaves the role and the recorded URL alone, so a running app keeps connecting.
+      const second = (await pg.syncApp(app, { databases: [{ name: "main", backend: "postgres" }] })).databases[0]!.url;
+      expect(second).toBe(first);
+      const conn = new Bun.SQL(second);
+      expect([...(await conn`SELECT 1 AS ok`)]).toEqual([{ ok: 1 }]);
+      await conn.close();
+
+      // When the recorded password no longer logs in, sync sets a new one and records it.
+      await admin.unsafe(`ALTER ROLE "${app}_main" PASSWORD 'changed-elsewhere'`);
+      const third = (await pg.syncApp(app, { databases: [{ name: "main", backend: "postgres" }] })).databases[0]!.url;
+      expect(third).not.toBe(first);
+      const again = new Bun.SQL(third);
+      expect([...(await again`SELECT 1 AS ok`)]).toEqual([{ ok: 1 }]);
+      await again.close();
+    } finally {
+      await admin.unsafe(`DROP DATABASE IF EXISTS "${app}_main" WITH (FORCE)`);
+      await admin.unsafe(`DROP ROLE IF EXISTS "${app}_main"`);
+      await admin.close();
+    }
+  });
+
   test("an app without storage still gets a data dir and a minimal space.env", async () => {
     const r = await storage.syncApp("plain", { databases: [] });
     expect(r.created).toEqual([join(ws.data, "plain")]);

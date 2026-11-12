@@ -219,7 +219,7 @@ financial-news agent intent.
 - **Validation** happens on the server for every entry point: unknown inputs, missing required ones, bad numbers, dates (checked component by component), times, choices and zones are 400s before anything runs. A run of any app action, and of any action with date, time or period inputs, needs `timezone`; the server never uses its own zone ([time.md](time.md)). A wall clock that a clock change skips is refused.
 - **Duplicates**: each submission carries a `requestId`; a second POST with it answers the first run (`duplicate: true`) and runs nothing. A finished write's form hides Create until "New" is pressed.
 - **Uncertain writes**: a write whose call timed out or whose answer was cut off after it went out is `unknown`, not `error` ("may have been created"). Retry is offered only when the provider is `idempotent`, and resends the same `idempotencyKey`, so the provider answers its first result if the write happened; otherwise the card says to check the app. A refused connection is a certain failure.
-- **Background**: the POST answers when the run ends or after 8 seconds (status `running`); the page polls the run. Shutdown waits for runs in flight.
+- **Background**: the POST answers when the run ends or after 8 seconds (status `running`); the page polls the run. Shutdown waits for runs in flight. A run the previous process left `running` (it was killed) ends at the next start as `error`, or `unknown` for a write, with an `interrupted:` error, so it can be retried; a task run keeps following the scheduler's record.
 - **Peers**: an action on a peer carries `peer` in the catalogue and in the run, and is called on that peer only (`/api/peer/call/...`); a failure is reported, never retried on another machine.
 
 ## API

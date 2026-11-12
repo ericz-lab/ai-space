@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Store } from "../scheduler/store.ts";
 import { Bus, CallError, type Fetch } from "./bus.ts";
 import { BusStore } from "./store.ts";
-import { ACK_TIMEOUT_MS, type DeliveryPayload, MAX_ATTEMPTS, RETRY_DELAYS_MS } from "./types.ts";
+import { ACK_TIMEOUT_MS, type DeliveryPayload, MAX_ATTEMPTS, MAX_STREAM_BACKLOG, RETRY_DELAYS_MS } from "./types.ts";
 
 test("dynamic package providers need no fixed port and release delivery response bodies", async () => {
   const events = new Store(":memory:"), store = new BusStore(":memory:");
@@ -213,6 +213,32 @@ describe("bus streams", () => {
     expect(h.store.getDelivery(second.id)).toMatchObject({ status: "pending", attempts: 2, lastError: "not acked in time" });
     expect(h.store.pendingStream("insight").map((d) => d.id)).toEqual([second.id]);
   });
+
+  test("a backlog over one page is pushed whole on connect, in order, before live ones", () => {
+    const h = harness();
+    h.bus.syncApp("insight", { events: { publishes: [], consumes: [{ event: "pulse/*", kind: "stream" }] } });
+    const queued = Array.from({ length: 1_203 }, (_, i) => h.publish("pulse", "tick", { i }).deliveries[0]!.id);
+    const got: number[] = [];
+    h.bus.subscribe("insight", (p) => got.push(p.delivery.id));
+    const live = h.publish("pulse", "tick", { i: "live" }).deliveries[0]!.id;
+    expect(got).toEqual([...queued, live]);
+    expect(h.store.pendingStream("insight")).toEqual([]);
+  });
+
+  test("an app that declares a stream and never connects keeps a capped backlog", () => {
+    const h = harness();
+    h.bus.syncApp("insight", {
+      events: { publishes: [], consumes: [{ event: "pulse/*", kind: "stream" }, { event: "pulse/*", kind: "http", method: "POST", path: "/hook" }] },
+    });
+    h.ports.delete("insight"); // http rows stay pending without a tick; they must not be trimmed
+    for (let i = 0; i < MAX_STREAM_BACKLOG + 3; i++) h.publish("pulse", "tick", { i });
+    const count = (kind: string, status: string) =>
+      h.store.db.query<{ n: number }, [string, string]>("SELECT COUNT(*) AS n FROM bus_deliveries WHERE app = 'insight' AND kind = ? AND status = ?").get(kind, status)!.n;
+    expect(count("stream", "pending")).toBe(MAX_STREAM_BACKLOG);
+    expect(count("stream", "skipped")).toBe(3);
+    expect(h.store.listDeliveries({ app: "insight", status: "skipped" })[0]?.lastError).toBe(`backlog over ${MAX_STREAM_BACKLOG} deliveries`);
+    expect(count("http", "pending")).toBe(MAX_STREAM_BACKLOG + 3);
+  }, 30_000);
 
   test("a stream delivery whose event was pruned is skipped on push", () => {
     const h = harness();

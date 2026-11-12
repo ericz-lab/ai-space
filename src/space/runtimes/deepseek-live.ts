@@ -147,6 +147,8 @@ export class DshLive implements LiveProcess {
   private approvals: PendingApprovals<Approval> | null = null;
   private serial = 0;
   private stderr: { text: () => string } = { text: () => "" };
+  /** Why stdout could not be read further (an event line over the limit); the turn ends with it. */
+  private readError: string | undefined;
   private model: { provider: string; model: string };
   private imageSupport = false;
 
@@ -168,7 +170,11 @@ export class DshLive implements LiveProcess {
     const proc = this.proc;
     this.stderr = tail(proc.stderr);
     void readLines(proc.stdout, (line) => this.line(line))
-      .catch(() => {})
+      // A line too long to read (or a broken pipe): end the process, so the turn ends with why.
+      .catch((e: unknown) => {
+        this.readError = (e as Error).message;
+        this.kill();
+      })
       .then(() => proc.exited)
       .then((code) => this.exited(code));
     this.ready = this.open();
@@ -386,7 +392,7 @@ export class DshLive implements LiveProcess {
     this.calls.clear();
     rmSync(this.dir, { recursive: true, force: true });
     if (!this.current) return;
-    this.endTurn(this.current.stopping ? "stopped" : (this.stderr.text().trim() || `DeepSeek Harness exited with ${code}`).slice(-800));
+    this.endTurn(this.current.stopping ? "stopped" : (this.readError ?? (this.stderr.text().trim() || `DeepSeek Harness exited with ${code}`)).slice(-800));
   }
 
   private write(message: unknown): void {

@@ -1,10 +1,11 @@
 /**
  * Spawn a runtime process, feed it stdin, collect both streams and wait,
- * honouring a timeout and an abort signal. The child is started in its own
- * process group where `setsid` exists (Linux) so a kill takes the whole tree,
- * not just a shell wrapper; without it (macOS) only the direct child is
- * killed. After a kill we stop waiting on the pipes: an orphaned grandchild
- * could otherwise hold stdout open.
+ * honouring a timeout and an abort signal. A kill takes the whole tree, not
+ * just a shell wrapper: where `setsid` exists (Linux) the child starts in its
+ * own process group and the group is killed; without it (macOS) the child
+ * stays in the service's group, so stopping the service still reaches it, and
+ * a kill takes the child and every descendant `ps` shows. After a kill we stop
+ * waiting on the pipes: an orphaned grandchild could otherwise hold stdout open.
  */
 
 import { access, constants, stat } from "node:fs/promises";
@@ -63,11 +64,13 @@ export async function spawnCollect(cmd: string[], opts: SpawnOptions = {}): Prom
   let timedOut = false;
   let aborted = false;
   const kill = () => {
-    try {
-      if (setsid) process.kill(-proc.pid, "SIGKILL");
-      else proc.kill("SIGKILL");
-    } catch {
-      /* already gone */
+    // The tree is listed before anything dies: a killed parent's children move to init.
+    for (const pid of setsid ? [-proc.pid] : [proc.pid, ...descendants(proc.pid)]) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
     }
   };
   const timer = opts.timeoutMs === undefined ? undefined : setTimeout(() => ((timedOut = true), kill()), opts.timeoutMs);
@@ -85,6 +88,27 @@ export async function spawnCollect(cmd: string[], opts: SpawnOptions = {}): Prom
     return { code: null, stdout: partial[0], stderr: partial[1], timedOut, aborted };
   }
   return { code, stdout: await stdout, stderr: await stderr, timedOut: false, aborted: false };
+}
+
+/** Every process below `root`, from one `ps` listing; none when it cannot be read. */
+export function descendants(root: number): number[] {
+  let listing = "";
+  try {
+    const r = Bun.spawnSync(["ps", "-A", "-o", "pid=,ppid="], { stdout: "pipe", stderr: "ignore" });
+    listing = r.stdout.toString();
+  } catch {
+    return [];
+  }
+  const children = new Map<number, number[]>();
+  for (const line of listing.split("\n")) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (!pid || !ppid) continue;
+    children.set(ppid, [...(children.get(ppid) ?? []), pid]);
+  }
+  const out: number[] = [];
+  const queue = [root];
+  while (queue.length) for (const pid of children.get(queue.shift()!) ?? []) if (!out.includes(pid)) out.push(pid), queue.push(pid);
+  return out;
 }
 
 /** Read newline-delimited output as it arrives; the last partial line is delivered at the end. */

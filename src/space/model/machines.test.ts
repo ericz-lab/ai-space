@@ -9,7 +9,7 @@ import { PeerHub } from "../peers/hub.ts";
 import { createPeerRuntime, peerRuntimes } from "../peers/model.ts";
 import { createPeerServeRoutes } from "../peers/serve.ts";
 import { createModelRoutes, createPeerModelRoutes } from "./api.ts";
-import { RuntimeHealth, probeRuntime, readStatus } from "./health.ts";
+import { RuntimeHealth, availabilityOf, probeRuntime, problemOf, readStatus, type ProbeResult } from "./health.ts";
 import { cellOf, probeTargets, statusTable } from "./machines.ts";
 import { ModelService, needsLocal } from "./service.ts";
 import { ModelStore } from "./store.ts";
@@ -323,6 +323,34 @@ describe("status table", () => {
     const r = await probeRuntime(down)({ machine: "bare", spec: claude, ssh: "bare-alias" });
     expect(r).toMatchObject({ reachable: false });
     expect(r.installed).toBeUndefined();
+  });
+
+  test("a status probe that times out is its own state, not signed out", async () => {
+    const claude: RuntimeSpec = { name: "claude", kind: "claude-code", bin: ["true"], chatArgs: [] };
+    const slow = (async (cmd: string[]) =>
+      cmd.includes("--version") ? { code: 0, stdout: "2.1.3 (Claude Code)", stderr: "", timedOut: false, aborted: false } : { code: null, stdout: "", stderr: "", timedOut: true, aborted: false }) as unknown as Parameters<typeof probeRuntime>[0];
+    const local = await probeRuntime(slow, { PATH: "/usr/bin:/bin" })({ machine: "", spec: claude });
+    expect(local).toMatchObject({ installed: true, version: "2.1.3", probeTimedOut: true });
+    expect(local.signedIn).toBeUndefined();
+    const remote = await probeRuntime(slow)({ machine: "box", spec: claude, ssh: "box" });
+    expect(remote).toMatchObject({ probeTimedOut: true });
+    expect(remote.signedIn).toBeUndefined();
+    expect(remote.installed).toBeUndefined();
+
+    // The cell keeps what an earlier probe found, and a call there is not put last as signed out.
+    let answer: ProbeResult = { installed: true, signedIn: true };
+    const health = new RuntimeHealth({ prober: async () => answer });
+    const target = { machine: "", spec: claude };
+    await health.probe([target]);
+    answer = { probeTimedOut: true, detail: "claude auth status: no answer within 30s" };
+    await health.probe([target]);
+    expect(health.get("", "claude")).toMatchObject({ installed: true, signedIn: true, probeTimedOut: true });
+    expect(problemOf(health.get("", "claude")!)).toBeUndefined();
+    expect(availabilityOf(health.get("", "claude"))).toEqual({ state: "ok" });
+    answer = { installed: true, signedIn: true };
+    await health.probe([target]);
+    expect(health.get("", "claude")!.probeTimedOut).toBeUndefined();
+    expect(health.get("", "claude")!.detail).toBeUndefined();
   });
 
   test("used cells that cannot answer are flagged; a peer's own report is merged under its name", () => {

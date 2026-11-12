@@ -249,4 +249,14 @@ class WidgetBlocksTests {
         assertFalse(WidgetLayout.isOutdated("2026-10-13T02:15:00.000Z", 600_000.0, now))
         assertFalse(WidgetLayout.isOutdated(null, 600_000.0, now))
     }
+
+    @Test fun aTabReturnsToThePageItWasOpenedFrom() {
+        val pages = setOf("#home", "#settings")
+        val screens = listOf(PanelScreen(id = "home"), PanelScreen(id = "s1"))
+        assertEquals("s1", Screens.returnPage("s1", screens, pages))
+        assertEquals("#home", Screens.returnPage("#home", screens, pages))
+        assertEquals("#settings", Screens.returnPage("#settings", screens, pages))
+        // A screen deleted since falls back to the first screen.
+        assertEquals("home", Screens.returnPage("s9", screens, pages))
+    }
 }

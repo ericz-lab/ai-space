@@ -189,8 +189,10 @@ export class Scheduler {
     state.lastStatus = "error";
     state.lastError = INTERRUPTED;
     state.lastDurationMs = Math.max(0, now - startedAt);
-    const run = this.store.addRun({ taskId: task.id, startedAt, endedAt: now, status: "error", error: INTERRUPTED, trigger: state.runningTrigger ?? "schedule" });
+    const carried = state.runningEvents?.eventIds ?? [];
+    const run = this.store.addRun({ taskId: task.id, startedAt, endedAt: now, status: "error", error: INTERRUPTED, trigger: state.runningTrigger ?? "schedule", ...(carried.length ? { eventIds: carried } : {}) });
     state.runningTrigger = undefined;
+    this.requeueRunningEvents(task, now);
     this.log(`task ${task.app}/${task.name}: interrupted after ${state.lastDurationMs}ms`);
     if (this.onFinish) {
       try {
@@ -199,6 +201,26 @@ export class Scheduler {
         this.log(`onFinish hook failed: ${(e as Error).message ?? String(e)}`);
       }
     }
+  }
+
+  /**
+   * Put the events a vanished run carried back in front of the queue, due now. Like a run the drain
+   * aborts, the cut-off delivery counts as an attempt (so an event can never loop forever) but adds
+   * no backoff. A task that is no longer enabled drops them, like any pending.
+   */
+  private requeueRunningEvents(task: Task, now: number): void {
+    const state = task.state;
+    const carried = state.runningEvents;
+    state.runningEvents = undefined;
+    if (!carried?.eventIds.length || !effectiveEnabled(task)) return;
+    const attempt = (carried.attempt ?? 0) + 1;
+    if (attempt >= MAX_EVENT_REDELIVERIES) {
+      this.log(`task ${task.app}/${task.name}: dropping ${carried.eventIds.length} event(s) after ${attempt} failed deliveries`);
+      return;
+    }
+    const later = state.pending?.eventIds.filter((id) => !carried.eventIds.includes(id)) ?? [];
+    state.pending = { eventIds: [...carried.eventIds, ...later], dueAt: now, deadlineAt: Math.max(state.pending?.deadlineAt ?? now, now), attempt };
+    this.log(`task ${task.app}/${task.name}: ${carried.eventIds.length} event(s) of the interrupted run queued again`);
   }
 
   /** Tasks of an app with a run in flight right now; an uninstall refuses to pull the ground from under them. */
@@ -270,6 +292,7 @@ export class Scheduler {
         if (task.state.runningAt !== undefined && !this.inflight.has(task.id) && now - task.state.runningAt > STUCK_RUN_MS) {
           this.log(`task ${task.app}/${task.name}: clearing stuck running marker`);
           task.state.runningAt = undefined;
+          this.requeueRunningEvents(task, now);
           changed = true;
         }
         if (this.fillNextRun(task, now)) changed = true;
@@ -342,6 +365,7 @@ export class Scheduler {
     task.state.pending = undefined;
     task.state.runningAt = startedAt;
     task.state.runningTrigger = trigger;
+    task.state.runningEvents = events.length ? { eventIds: events.map((e) => e.id), ...(attempt ? { attempt } : {}) } : undefined;
     task.state.lastError = undefined;
     this.store.saveState(task.id, task.state, startedAt);
     this.log(`task ${task.app}/${task.name}: started (${trigger}${events.length ? `, ${events.length} event(s)` : ""})`);
@@ -373,6 +397,7 @@ export class Scheduler {
     const s = task.state;
     s.runningAt = undefined;
     s.runningTrigger = undefined;
+    s.runningEvents = undefined;
     s.lastRunAt = startedAt;
     s.lastStatus = result.status;
     s.lastError = result.error;

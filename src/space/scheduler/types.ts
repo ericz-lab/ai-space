@@ -97,6 +97,11 @@ export type TaskState = {
   runningAt?: number;
   /** What started the run in flight; kept so a run this process never finished can still be recorded. */
   runningTrigger?: RunTrigger;
+  /**
+   * The events the run in flight carries, and their `attempt`. `launch` takes them out of `pending`, so
+   * without this a process killed mid-run would lose them; the next start queues them again.
+   */
+  runningEvents?: { eventIds: number[]; attempt?: number };
   lastRunAt?: number;
   lastStatus?: RunStatus;
   lastError?: string;

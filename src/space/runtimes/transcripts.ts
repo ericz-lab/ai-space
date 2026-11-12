@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TranscriptMessage, TranscriptStep } from "./types.ts";
@@ -22,7 +22,29 @@ export const SESSION_ID_RE = /^[a-z0-9-]{8,72}$/i;
 
 export function claudeTranscriptPath(cwd: string, sid: string, home = homedir()): string {
   if (!SESSION_ID_RE.test(sid)) throw new Error("invalid session id");
-  return join(home, ".claude", "projects", cwd.replace(/[/.]/g, "-"), `${sid}.jsonl`);
+  let real = cwd;
+  try {
+    real = realpathSync(cwd);
+  } catch {
+    /* a directory that is gone: its name as given */
+  }
+  return join(home, ".claude", "projects", claudeProjectDir(real), `${sid}.jsonl`);
+}
+
+/** Claude Code keeps a project's directory name to 200 characters, then adds a hash of the whole path. */
+const CLAUDE_PROJECT_DIR_MAX = 200;
+
+/**
+ * The directory name Claude Code files a working directory's sessions under, as the CLI itself
+ * makes it: every character but an ASCII letter or digit becomes `-`; a longer name is cut and
+ * followed by its path's 32-bit string hash in base 36.
+ */
+export function claudeProjectDir(cwd: string): string {
+  const name = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+  if (name.length <= CLAUDE_PROJECT_DIR_MAX) return name;
+  let hash = 0;
+  for (let i = 0; i < cwd.length; i++) hash = ((hash << 5) - hash + cwd.charCodeAt(i)) | 0;
+  return `${name.slice(0, CLAUDE_PROJECT_DIR_MAX)}-${Math.abs(hash).toString(36)}`;
 }
 
 export async function readClaudeTranscript(cwd: string, sid: string, home = homedir()): Promise<TranscriptMessage[] | null> {

@@ -67,6 +67,19 @@ class ConnectionRulesTests {
         assertEquals("https://space.example.com/", ConnectionRules.normalize(" space.example.com ").toString())
     }
 
+    @Test fun acceptsTheEmulatorsHostOverPlainHttp() {
+        // README: a Space on the machine running the emulator is http://10.0.2.2:8700.
+        assertEquals("http://10.0.2.2:8700/", ConnectionRules.normalize("http://10.0.2.2:8700").toString())
+        assertEquals("http://10.0.2.2:8700/", ConnectionRules.normalize("10.0.2.2:8700").toString())
+        assertFalse(ConnectionRules.isLoopback("10.0.2.2"))
+        try {
+            ConnectionRules.normalize("http://10.0.2.3:8700")
+            fail("another private address stays HTTPS-only")
+        } catch (e: ConnectionUrlException) {
+            assertEquals(ConnectionUrlError.insecureRemote, e.error)
+        }
+    }
+
     @Test fun dropsQueryAndFragmentAndLowercasesHost() {
         assertEquals("https://space.example.com/panel", ConnectionRules.normalize("HTTPS://Space.Example.com/panel?lang=zh#chat").toString())
     }

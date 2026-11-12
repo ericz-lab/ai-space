@@ -2,9 +2,9 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Soup from "gi://Soup?version=3.0";
 import WebKit from "gi://WebKit?version=6.0";
-import { decideNavigation, grantsMicrophone } from "../core/navigation.ts";
+import { crashReload, decideNavigation, grantsMicrophone } from "../core/navigation.ts";
 import { sameOrigin } from "../core/url.ts";
-import { APP_ROOT, DEBUG, dirs, log, path, readTextSync } from "./env.ts";
+import { APP_ROOT, DEBUG, dirs, log, path, readTextSync, t } from "./env.ts";
 
 /**
  * Web content of one saved Space: a WebKit network session of its own, persistent, apart from
@@ -134,9 +134,32 @@ export function createWebView(o: WebViewOptions): any {
     return false;
   });
   view.connect("notify::title", () => o.onTitle?.(view.get_title() ?? ""));
+  // A crashed page is reloaded with backoff; one that keeps crashing as it loads is given up on
+  // (crashReload) and shown as failed, where Try Again starts over.
+  let crashes: number[] = [];
+  let reloadSource = 0;
   view.connect("web-process-terminated", () => {
-    log("web process ended; reloading", view.get_uri());
-    view.reload();
+    const uri = view.get_uri() ?? "";
+    const next = crashReload(crashes, Date.now());
+    if (reloadSource) GLib.source_remove(reloadSource);
+    reloadSource = 0;
+    if (!next) {
+      crashes = [];
+      log("web process ended again; not reloading", uri);
+      o.onFailed?.(uri, t("pageCrashed"));
+      return;
+    }
+    crashes = next.recent;
+    log(`web process ended; reloading in ${next.delayMs} ms`, uri);
+    reloadSource = GLib.timeout_add(GLib.PRIORITY_DEFAULT, next.delayMs, () => {
+      reloadSource = 0;
+      view.reload();
+      return GLib.SOURCE_REMOVE;
+    });
+  });
+  view.connect("destroy", () => {
+    if (reloadSource) GLib.source_remove(reloadSource);
+    reloadSource = 0;
   });
   view.connect("decide-policy", (_v: unknown, decision: any, type: number) => {
     if (type === WebKit.PolicyDecisionType.RESPONSE) {

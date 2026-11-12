@@ -11,6 +11,11 @@ import type { Channel, Level, Notification } from "./types.ts";
  * wait (429 and provider-specific rate-limit codes); `final` means retrying
  * cannot help (4xx, a rejected payload). Anything else is a transient error
  * the engine retries a few times.
+ *
+ * A message can take several requests (split parts, several chats, a photo
+ * then text). Each one that went through is recorded in the delivery's
+ * `progress`, which the engine keeps across its retries, so a retry sends only
+ * what has not arrived yet.
  */
 
 export type Fetch = typeof fetch;
@@ -21,9 +26,32 @@ export type Outgoing = {
   appTitle: string;
   /** Image bytes when the app uploaded them; the engine reads them from disk. */
   image?: { bytes: Uint8Array; type: string };
+  /** What earlier tries of this delivery already sent; the engine passes the same object to each retry. */
+  progress?: Progress;
 };
 
 export type SendResult = { providerId?: string; /** Set when the image could not be sent and text went out instead. */ degraded?: string };
+
+/** The requests of one delivery that went through, by step, with what they reported. */
+export type Progress = { done: Map<string, string>; providerId?: string; degraded?: string };
+
+export function newProgress(): Progress {
+  return { done: new Map() };
+}
+
+/** Run one request of a delivery unless an earlier try already did; returns what it recorded. */
+async function once(p: Progress, step: string, send: () => Promise<string | void>): Promise<string> {
+  const before = p.done.get(step);
+  if (before !== undefined) return before;
+  const outcome = (await send()) ?? "sent";
+  p.done.set(step, outcome);
+  return outcome;
+}
+
+function resultOf(p: Progress, extra: SendResult = {}): SendResult {
+  const degraded = p.degraded ?? extra.degraded;
+  return { ...(p.providerId ? { providerId: p.providerId } : {}), ...(degraded ? { degraded } : {}) };
+}
 
 export class TransportError extends Error {
   readonly retryAfterMs?: number;
@@ -69,8 +97,7 @@ async function sendTelegram(out: Outgoing, fetch: Fetch): Promise<SendResult> {
   const text = renderText(out.notification, out.appTitle, HTML);
   const parts = splitText(text, out.channel.limits);
   const api = (method: string) => `https://api.telegram.org/bot${t.token}/${method}`;
-  let providerId: string | undefined;
-  let degraded: string | undefined;
+  const p = out.progress ?? newProgress();
 
   for (const chatId of t.chatIds) {
     const common = { chat_id: chatId, parse_mode: "HTML", ...(t.thread ? { message_thread_id: Number(t.thread) } : {}) };
@@ -78,26 +105,32 @@ async function sendTelegram(out: Outgoing, fetch: Fetch): Promise<SendResult> {
     const image = out.image ?? (out.notification.imageUrl ? { url: out.notification.imageUrl } : undefined);
     if (image) {
       const caption = parts.length === 1 && text.length <= TELEGRAM_CAPTION_MAX ? text : htmlCaption(splitParts(out.notification, out.appTitle).headline, TELEGRAM_CAPTION_MAX);
-      const form = new FormData();
-      for (const [k, v] of Object.entries(common)) form.set(k, String(v));
-      form.set("caption", caption);
-      if ("bytes" in image) form.set("photo", new Blob([image.bytes as Uint8Array<ArrayBuffer>], { type: image.type }), `photo.${ext(image.type)}`);
-      else form.set("photo", image.url);
-      try {
-        const body = await telegramCall(fetch, api("sendPhoto"), form, PHOTO_TIMEOUT_MS);
-        providerId ??= String(body.result?.message_id ?? "");
-        if (caption === text) textParts = [];
-      } catch (e) {
-        if (e instanceof TransportError && e.retryAfterMs !== undefined) throw e;
-        degraded = `image dropped: ${(e as Error).message}`;
-      }
+      const photo = await once(p, `photo:${chatId}`, async () => {
+        const form = new FormData();
+        for (const [k, v] of Object.entries(common)) form.set(k, String(v));
+        form.set("caption", caption);
+        if ("bytes" in image) form.set("photo", new Blob([image.bytes as Uint8Array<ArrayBuffer>], { type: image.type }), `photo.${ext(image.type)}`);
+        else form.set("photo", image.url);
+        try {
+          const body = await telegramCall(fetch, api("sendPhoto"), form, PHOTO_TIMEOUT_MS);
+          p.providerId ||= String(body.result?.message_id ?? "");
+          return "sent";
+        } catch (e) {
+          if (e instanceof TransportError && e.retryAfterMs !== undefined) throw e;
+          p.degraded = `image dropped: ${(e as Error).message}`;
+          return "dropped";
+        }
+      });
+      if (photo === "sent" && caption === text) textParts = [];
     }
-    for (const part of textParts) {
-      const body = await telegramCall(fetch, api("sendMessage"), JSON.stringify({ ...common, text: part, disable_web_page_preview: true }), TEXT_TIMEOUT_MS);
-      providerId ??= String(body.result?.message_id ?? "");
+    for (const [i, part] of textParts.entries()) {
+      await once(p, `text:${chatId}:${i}`, async () => {
+        const body = await telegramCall(fetch, api("sendMessage"), JSON.stringify({ ...common, text: part, disable_web_page_preview: true }), TEXT_TIMEOUT_MS);
+        p.providerId ||= String(body.result?.message_id ?? "");
+      });
     }
   }
-  return { ...(providerId ? { providerId } : {}), ...(degraded ? { degraded } : {}) };
+  return resultOf(p);
 }
 
 type TelegramBody = { ok?: boolean; description?: string; parameters?: { retry_after?: number }; result?: { message_id?: number } };
@@ -119,9 +152,8 @@ async function telegramCall(fetch: Fetch, url: string, body: FormData | string, 
 async function sendDiscord(out: Outgoing, fetch: Fetch): Promise<SendResult> {
   const url = `${out.channel.discord!.webhook}?wait=true`;
   const parts = splitText(renderText(out.notification, out.appTitle, DISCORD_MARKDOWN), out.channel.limits);
-  let providerId: string | undefined;
-  let degraded: string | undefined;
-  for (const [i, part] of parts.entries()) {
+  const p = out.progress ?? newProgress();
+  for (const [i, part] of parts.entries()) await once(p, `part:${i}`, async () => {
     let res: Response;
     if (i === 0 && out.image) {
       const form = new FormData();
@@ -129,7 +161,7 @@ async function sendDiscord(out: Outgoing, fetch: Fetch): Promise<SendResult> {
       form.set("files[0]", new Blob([out.image.bytes as Uint8Array<ArrayBuffer>], { type: out.image.type }), `image.${ext(out.image.type)}`);
       res = await post(fetch, url, form, PHOTO_TIMEOUT_MS);
       if (!res.ok && res.status !== 429) {
-        degraded = `image dropped: discord ${res.status} ${await res.text().catch(() => "")}`.trim();
+        p.degraded = `image dropped: discord ${res.status} ${await res.text().catch(() => "")}`.trim();
         res = await post(fetch, url, JSON.stringify({ content: part }), TEXT_TIMEOUT_MS, { "content-type": "application/json" });
       }
     } else {
@@ -142,9 +174,9 @@ async function sendDiscord(out: Outgoing, fetch: Fetch): Promise<SendResult> {
     }
     if (!res.ok) throw new TransportError(`discord: ${res.status} ${await res.text().catch(() => "")}`.trim(), { final: res.status < 500 });
     const body = (await res.json().catch(() => ({}))) as { id?: string };
-    providerId ??= body.id;
-  }
-  return { ...(providerId ? { providerId } : {}), ...(degraded ? { degraded } : {}) };
+    p.providerId ||= body.id;
+  });
+  return resultOf(p);
 }
 
 // ---------------------------------------------------------------- slack
@@ -155,9 +187,12 @@ async function sendSlack(out: Outgoing, fetch: Fetch): Promise<SendResult> {
   if (p.body) lines.push(SLACK_MRKDWN.escape(p.body));
   if (p.url) lines.push(`<${p.url}|${SLACK_MRKDWN.escape(p.url)}>`);
   if (out.notification.imageUrl) lines.push(out.notification.imageUrl);
-  for (const part of splitText(lines.join("\n"), out.channel.limits)) {
-    const res = await post(fetch, out.channel.slack!.webhook, JSON.stringify({ text: part }), TEXT_TIMEOUT_MS, { "content-type": "application/json" });
-    await expectOk(res, "slack");
+  const progress = out.progress ?? newProgress();
+  for (const [i, part] of splitText(lines.join("\n"), out.channel.limits).entries()) {
+    await once(progress, `part:${i}`, async () => {
+      const res = await post(fetch, out.channel.slack!.webhook, JSON.stringify({ text: part }), TEXT_TIMEOUT_MS, { "content-type": "application/json" });
+      await expectOk(res, "slack");
+    });
   }
   return imageNote(out);
 }
@@ -167,7 +202,8 @@ async function sendSlack(out: Outgoing, fetch: Fetch): Promise<SendResult> {
 async function sendFeishu(out: Outgoing, fetch: Fetch): Promise<SendResult> {
   const f = out.channel.feishu!;
   const text = withImageLink(renderText(out.notification, out.appTitle, PLAIN), out);
-  for (const part of splitText(text, out.channel.limits)) {
+  const p = out.progress ?? newProgress();
+  for (const [i, part] of splitText(text, out.channel.limits).entries()) await once(p, `part:${i}`, async () => {
     const payload: Record<string, unknown> = { msg_type: "text", content: { text: part } };
     if (f.secret) {
       const timestamp = String(Math.floor(Date.now() / 1000));
@@ -179,7 +215,7 @@ async function sendFeishu(out: Outgoing, fetch: Fetch): Promise<SendResult> {
     if (!res.ok) throw new TransportError(`feishu: ${res.status}`, { final: res.status < 500 && res.status !== 429, ...(res.status === 429 ? { retryAfterMs: 1000 } : {}) });
     const code = body.code ?? body.StatusCode ?? 0;
     if (code !== 0) throw new TransportError(`feishu: ${code} ${body.msg ?? ""}`.trim(), code === 11232 ? { retryAfterMs: 1000 } : { final: true });
-  }
+  });
   return imageNote(out);
 }
 
@@ -192,7 +228,8 @@ async function sendDingtalk(out: Outgoing, fetch: Fetch): Promise<SendResult> {
   if (p.body) lines.push("", DINGTALK_MARKDOWN.escape(p.body).replace(/\n/g, "  \n"));
   if (p.url) lines.push("", p.url);
   if (out.notification.imageUrl) lines.push("", `![](${out.notification.imageUrl})`);
-  for (const part of splitText(lines.join("\n"), out.channel.limits)) {
+  const progress = out.progress ?? newProgress();
+  for (const [i, part] of splitText(lines.join("\n"), out.channel.limits).entries()) await once(progress, `part:${i}`, async () => {
     let url = d.webhook;
     if (d.secret) {
       const timestamp = Date.now();
@@ -203,7 +240,7 @@ async function sendDingtalk(out: Outgoing, fetch: Fetch): Promise<SendResult> {
     const body = (await res.json().catch(() => ({}))) as { errcode?: number; errmsg?: string };
     if (!res.ok) throw new TransportError(`dingtalk: ${res.status}`, { final: res.status < 500 && res.status !== 429, ...(res.status === 429 ? { retryAfterMs: 60_000 } : {}) });
     if (body.errcode) throw new TransportError(`dingtalk: ${body.errcode} ${body.errmsg ?? ""}`.trim(), body.errcode === 130101 ? { retryAfterMs: 60_000 } : { final: true });
-  }
+  });
   return imageNote(out);
 }
 
@@ -218,23 +255,27 @@ async function sendWecom(out: Outgoing, fetch: Fetch): Promise<SendResult> {
     if (!res.ok) throw new TransportError(`wecom: ${res.status}`, { final: res.status < 500 && res.status !== 429, ...(res.status === 429 ? { retryAfterMs: 60_000 } : {}) });
     if (body.errcode) throw new TransportError(`wecom: ${body.errcode} ${body.errmsg ?? ""}`.trim(), body.errcode === 45009 ? { retryAfterMs: 60_000 } : { final: true });
   };
-  for (const part of splitText(text, out.channel.limits)) await call({ msgtype: "text", text: { content: part } });
-  let degraded: string | undefined;
-  if (out.image) {
-    if (out.image.bytes.byteLength > WECOM_IMAGE_MAX) {
-      degraded = "image dropped: wecom accepts at most 2 MB";
+  const p = out.progress ?? newProgress();
+  for (const [i, part] of splitText(text, out.channel.limits).entries()) await once(p, `part:${i}`, () => call({ msgtype: "text", text: { content: part } }));
+  const image = out.image;
+  if (image) {
+    if (image.bytes.byteLength > WECOM_IMAGE_MAX) {
+      p.degraded = "image dropped: wecom accepts at most 2 MB";
     } else {
-      const base64 = Buffer.from(out.image.bytes).toString("base64");
-      const md5 = new Bun.CryptoHasher("md5").update(out.image.bytes).digest("hex");
-      try {
-        await call({ msgtype: "image", image: { base64, md5 } });
-      } catch (e) {
-        if (e instanceof TransportError && e.retryAfterMs !== undefined) throw e;
-        degraded = `image dropped: ${(e as Error).message}`;
-      }
+      const base64 = Buffer.from(image.bytes).toString("base64");
+      const md5 = new Bun.CryptoHasher("md5").update(image.bytes).digest("hex");
+      await once(p, "image", async () => {
+        try {
+          await call({ msgtype: "image", image: { base64, md5 } });
+        } catch (e) {
+          if (e instanceof TransportError && e.retryAfterMs !== undefined) throw e;
+          p.degraded = `image dropped: ${(e as Error).message}`;
+          return "dropped";
+        }
+      });
     }
   }
-  return degraded ? { degraded } : {};
+  return resultOf(p);
 }
 
 // ---------------------------------------------------------------- bark / ntfy
@@ -245,7 +286,8 @@ const NTFY_PRIORITY: Record<Level, number> = { alert: 5, warn: 4, info: 3, succe
 async function sendBark(out: Outgoing, fetch: Fetch): Promise<SendResult> {
   const b = out.channel.bark!;
   const f = renderFields(out.notification, out.appTitle);
-  for (const part of splitText(f.body, out.channel.limits)) {
+  const p = out.progress ?? newProgress();
+  for (const [i, part] of splitText(f.body, out.channel.limits).entries()) await once(p, `part:${i}`, async () => {
     const payload = {
       device_key: b.deviceKey,
       title: f.title,
@@ -256,15 +298,15 @@ async function sendBark(out: Outgoing, fetch: Fetch): Promise<SendResult> {
     };
     const res = await post(fetch, `${b.base}/push`, JSON.stringify(payload), TEXT_TIMEOUT_MS, { "content-type": "application/json" });
     await expectOk(res, "bark");
-  }
+  });
   return imageNote(out);
 }
 
 async function sendNtfy(out: Outgoing, fetch: Fetch): Promise<SendResult> {
   const n = out.channel.ntfy!;
   const f = renderFields(out.notification, out.appTitle);
-  let providerId: string | undefined;
-  for (const part of splitText(f.body, out.channel.limits)) {
+  const p = out.progress ?? newProgress();
+  for (const [i, part] of splitText(f.body, out.channel.limits).entries()) await once(p, `part:${i}`, async () => {
     const payload = {
       topic: n.topic,
       title: f.title,
@@ -279,9 +321,9 @@ async function sendNtfy(out: Outgoing, fetch: Fetch): Promise<SendResult> {
     });
     await expectOk(res, "ntfy");
     const body = (await res.json().catch(() => ({}))) as { id?: string };
-    providerId ??= body.id;
-  }
-  return { ...(providerId ? { providerId } : {}), ...imageNote(out) };
+    p.providerId ||= body.id;
+  });
+  return resultOf(p, imageNote(out));
 }
 
 // ---------------------------------------------------------------- webhook / stdout

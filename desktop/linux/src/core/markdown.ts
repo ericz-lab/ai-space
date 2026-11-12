@@ -20,23 +20,40 @@ export const escapeMarkup = (s: string) => s.replace(/[&<>"'\x00]/g, (c) => ({ "
 const BARE_URL = /https?:\/\/[^\s<>　-〿一-鿿＀-￯]+/g;
 const trimUrl = (u: string) => u.replace(/[),.;:!?'"*]+$/, "");
 
+/** Whether the tags this file writes close in the order they opened; Pango shows nothing for markup that does not. */
+function wellNested(markup: string): boolean {
+  const open: string[] = [];
+  for (const [, close, tag] of markup.matchAll(/<(\/?)(b|i|tt|a)\b[^>]*>/g)) {
+    if (!close) open.push(tag!);
+    else if (open.pop() !== tag) return false;
+  }
+  return open.length === 0;
+}
+
 export function inlineMarkup(source: string): string {
   const slots: string[] = [];
   const stash = (m: string) => `\x00${slots.push(m) - 1}\x00`;
   const link = (url: string, label: string) => `<a href="${url.replace(/"/g, "&quot;")}">${label}</a>`;
-  return escapeMarkup(source)
+  const text = escapeMarkup(source)
     .replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (_, _t, code: string) => stash(`<tt>${code}</tt>`))
     .replace(/\\([\\`*{}_\[\]()#+.!|>-])/g, (_, c: string) => stash(c))
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, (_, label: string, url: string) => stash(link(url, label)))
     .replace(BARE_URL, (url) => {
       const clean = trimUrl(url);
       return stash(link(clean, clean)) + url.slice(clean.length);
-    })
-    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-    .replace(/__([^_]+)__/g, "<b>$1</b>")
-    .replace(/\*([^*\s][^*]*)\*/g, "<i>$1</i>")
-    .replace(/(^|\s)_([^_]+)_(?=\s|[.,!?]|$)/g, "$1<i>$2</i>")
-    .replace(/\x00(\d+)\x00/g, (_, i: string) => slots[Number(i)] ?? "");
+    });
+  const bold = (t: string) =>
+    t
+      .replace(/\*\*\*([^*]+?)\*\*\*/g, "<b><i>$1</i></b>")
+      .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+      .replace(/__([^_]+)__/g, "<b>$1</b>");
+  const italic = (t: string) => t.replace(/\*([^*\s][^*]*)\*/g, "<i>$1</i>").replace(/(^|\s)_([^_]+)_(?=\s|[.,!?]|$)/g, "$1<i>$2</i>");
+  // Bold and italics that overlap (`**a *b** c*`) would cross their tags: then the italics, and if
+  // need be the bold too, stay as the asterisks they were typed as, rather than an empty label.
+  let marked = italic(bold(text));
+  if (!wellNested(marked)) marked = bold(text);
+  if (!wellNested(marked)) marked = text;
+  return marked.replace(/\x00(\d+)\x00/g, (_, i: string) => slots[Number(i)] ?? "");
 }
 
 const LIST_ITEM = /^(\s*)([-+*]|\d+[.)])\s+(.*)$/;

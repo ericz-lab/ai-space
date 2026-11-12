@@ -339,7 +339,7 @@ export function translateEvent(line: string, state: { sid?: string; failed?: str
 }
 
 function chatStream(bin: string[], profile: string, patch: string, t: ChatTurn, cb: ChatCallbacks, env: Record<string, string | undefined>): { kill: () => void } {
-  let proc: Bun.Subprocess<"ignore", "pipe", "pipe"> | undefined;
+  let proc: Bun.Subprocess<"pipe", "pipe", "pipe"> | undefined;
   let killed = false;
   let dir: string | undefined;
   const cleanup = async () => {
@@ -354,8 +354,11 @@ function chatStream(bin: string[], profile: string, patch: string, t: ChatTurn, 
         await cleanup();
         return cb.onFinish("aborted");
       }
-      const args = [...bin, "--profile", profile, "--patch", file, "--json", ...(t.sessionId ? ["--session-id", t.sessionId] : []), t.message];
-      proc = Bun.spawn(args, { cwd: t.cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      // The message goes on stdin (`-`): as an argument, one starting with `-` would be read as an option.
+      const args = [...bin, "--profile", profile, "--patch", file, "--json", ...(t.sessionId ? ["--session-id", t.sessionId] : []), "-"];
+      proc = Bun.spawn(args, { cwd: t.cwd, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      proc.stdin.write(t.message);
+      proc.stdin.end();
     } catch (e) {
       await cleanup();
       return cb.onFinish(`could not start the runtime: ${(e as Error).message}`);

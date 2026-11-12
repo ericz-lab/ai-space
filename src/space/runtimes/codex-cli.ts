@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnCollect } from "./process.ts";
 import { streamCodex } from "./codex-stream.ts";
@@ -101,8 +101,9 @@ export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
     // Same script locally and over ssh: the prompt and the images arrive as one archive on stdin.
     async image(input, signal) {
       if (signal?.aborted) return { ok: false, error: "aborted", backend };
+      let job: Awaited<ReturnType<typeof codexImageCommand>> | undefined;
       try {
-        const job = await codexImageCommand(bin, input, !!host);
+        job = await codexImageCommand(bin, input, !!host);
         const cmd = host ? ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, `bash -lc ${quote(job.command)}`] : ["bash", "-c", job.command];
         const r = await spawnCollect(cmd, { stdin: job.archive, signal, timeoutMs: input.timeoutMs + 30_000 });
         if (r.aborted) return { ok: false, error: "aborted", backend };
@@ -114,6 +115,9 @@ export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
         return { ok: true, text: parsed.text!, images, usage: parsed.usage, backend };
       } catch (e) {
         return { ok: false, error: `could not run Codex: ${(e as Error).message}`, backend };
+      } finally {
+        // A killed script (timeout, abort) never ran its own cleanup. Over ssh the remote `timeout` and trap do.
+        if (job && !host) await cleanLocalImageJob(job.dir);
       }
     },
     chat(turn, cb) {
@@ -144,7 +148,9 @@ export function codexArgs(bin: string[], input: CompleteInput, dir: string, full
       ...(input.system ? ["-c", `model_instructions_file=${JSON.stringify(join(dir, "system.txt"))}`] : []), ...images, "-"];
   }
   const config: Record<string, string | number | boolean> = {
-    model_instructions_file: join(dir, "system.txt"),
+    // Full mode without `system` keeps Codex's own base instructions (docs/model-tiers-and-modes.md),
+    // also when web tools put it in this isolated setup; an empty file would replace them with nothing.
+    ...(input.system || input.mode !== "full" ? { model_instructions_file: join(dir, "system.txt") } : {}),
     developer_instructions: "",
     "agents.enabled": false,
     include_apps_instructions: false,
@@ -225,6 +231,18 @@ export async function codexImageCommand(bin: string[], input: ImageInput, remote
     `exit $rc`,
   ].join("\n");
   return { command, dir, archive: ustar(entries) };
+}
+
+/**
+ * What a local image call leaves when its script was killed before its own cleanup: the request
+ * directory and, once Codex had started the thread, the images it saved for it. A no-op after a
+ * script that finished.
+ */
+export async function cleanLocalImageJob(dir: string, env: Record<string, string | undefined> = process.env): Promise<void> {
+  const out = await Bun.file(join(dir, "out.jsonl")).text().catch(() => "");
+  const tid = /"thread_id": ?"([0-9A-Za-z-]+)"/.exec(out)?.[1];
+  if (tid) await rm(join(env.CODEX_HOME || join(env.HOME ?? homedir(), ".codex"), "generated_images", tid), { recursive: true, force: true }).catch(() => {});
+  await rm(dir, { recursive: true, force: true }).catch(() => {});
 }
 
 const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif" };

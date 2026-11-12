@@ -78,6 +78,13 @@ export async function restoreSnapshot(deps: BackupDeps, opts: RestoreOptions): P
     await rename(dataDir, asideDir);
     await mkdir(dataDir, { recursive: true });
     const files = await materialize(unpacked, dataDir);
+    // A snapshot without blob entries (blobs are opt-in) says nothing about the blob store: the current
+    // one moves back instead of staying behind in the aside directory, where the app would not find it.
+    const asideBlobs = join(asideDir, STAGE_BLOBS);
+    if (!manifest.entries.some((e) => e.kind === "blob") && (await exists(asideBlobs))) {
+      await rm(join(dataDir, STAGE_BLOBS), { recursive: true, force: true });
+      await rename(asideBlobs, join(dataDir, STAGE_BLOBS));
+    }
     // The generated env is not in the snapshot; keep the current one until the next sync rewrites it.
     const env = join(asideDir, "space.env");
     if (await exists(env)) await Bun.write(join(dataDir, "space.env"), Bun.file(env));

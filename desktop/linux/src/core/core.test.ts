@@ -9,7 +9,7 @@ import { LineSplitter, SSEParser } from "./sse.ts";
 import { appForUrl, decodeInbox, InboxSeen, parseDeepLink, visibleTabs } from "./desktop.ts";
 import { decodeLocal, hasSession, LocalFailure, needsDeviceCredential, newer, runtimeArgs, updateAvailable } from "./local.ts";
 import { markdownBlocks, inlineMarkup } from "./markdown.ts";
-import { decideNavigation, grantsMicrophone } from "./navigation.ts";
+import { crashReload, decideNavigation, grantsMicrophone } from "./navigation.ts";
 import { relativeTime } from "./format.ts";
 
 describe("connection URLs", () => {
@@ -209,6 +209,21 @@ describe("desktop rules", () => {
     expect(visibleTabs(["a", "b", "c", "d", "e", "f", "g"], "g")).toEqual(["a", "b", "c", "d", "g"]);
   });
 
+  test("a page that keeps crashing is reloaded with backoff, then given up on", () => {
+    let recent: number[] = [];
+    const delays: number[] = [];
+    for (const at of [0, 1_000, 3_000]) {
+      const next = crashReload(recent, at);
+      expect(next).not.toBeNull();
+      delays.push(next!.delayMs);
+      recent = next!.recent;
+    }
+    expect(delays).toEqual([1_000, 2_000, 4_000]);
+    expect(crashReload(recent, 7_000)).toBeNull();
+    // Crashes more than a minute apart start over.
+    expect(crashReload(recent, 70_000)).toEqual({ delayMs: 1_000, recent: [70_000] });
+  });
+
   test("navigation stays for the page and sign-in redirects; clicked links leave", () => {
     const home = "https://s.example.com/";
     const nav = (url: string, o: Partial<Parameters<typeof decideNavigation>[0]> = {}) => decideNavigation({ url, isMainFrame: true, isLinkActivation: false, opensNewWindow: false, fromHomePage: true, ...o }, home);
@@ -248,6 +263,12 @@ describe("Local edition output", () => {
 });
 
 describe("reply markdown", () => {
+  test("overlapping bold and italics never cross their tags", () => {
+    // Crossed tags are invalid Pango markup, which a GTK label shows as nothing at all.
+    expect(inlineMarkup("**bold *both** italic*")).toBe("<b>bold *both</b> italic*");
+    expect(inlineMarkup("*a **b* c**")).toBe("*a <b>b* c</b>");
+    expect(inlineMarkup("***x*** and **y** *z*")).toBe("<b><i>x</i></b> and <b>y</b> <i>z</i>");
+  });
   test("blocks and Pango markup, escaped", () => {
     expect(inlineMarkup("a <b> & **bold** *it* `x<y` [l](https://e.x/?a=1&b=2) javascript:x")).toBe('a &lt;b&gt; &amp; <b>bold</b> <i>it</i> <tt>x&lt;y</tt> <a href="https://e.x/?a=1&amp;b=2">l</a> javascript:x');
     const blocks = markdownBlocks("# Title\n\nPara one\nline two\n\n- a\n  wrapped\n  - b\n1. c\n\n> quote\n\n```ts\nconst a = 1;\n```\n\n| A | B |\n|---|---|\n| 1 | 22 |\n\n---");

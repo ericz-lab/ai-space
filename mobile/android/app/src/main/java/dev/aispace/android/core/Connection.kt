@@ -22,10 +22,18 @@ enum class ConnectionUrlError { empty, invalid, unsupportedScheme, credentials, 
 
 class ConnectionUrlException(val error: ConnectionUrlError) : Exception(error.name)
 
-/** What a connection URL may be: HTTPS anywhere, plain HTTP only to the device's loopback. */
+/**
+ * What a connection URL may be: HTTPS anywhere, plain HTTP only to the device's loopback and to the
+ * emulator's alias of its host's loopback (as `res/xml/network_security_config.xml`).
+ */
 object ConnectionRules {
     /** The default `SPACE_PORT` in src/space/config.ts. */
     const val localDefault = "http://127.0.0.1:8700"
+    /** The Android emulator's address of the machine it runs on. */
+    const val emulatorHost = "10.0.2.2"
+
+    /** A host plain HTTP may go to: loopback, or the emulator's host machine. */
+    fun allowsPlainHttp(host: String): Boolean = isLoopback(host) || host == emulatorHost
 
     fun isLoopback(host: String): Boolean {
         var h = host.lowercase()
@@ -48,7 +56,7 @@ object ConnectionRules {
         if (!text.contains("://")) {
             val host = text.split("/", limit = 2).first()
             val bare = host.split(":").first()
-            text = (if (isLoopback(bare) || host.startsWith("[::1]")) "http://" else "https://") + text
+            text = (if (allowsPlainHttp(bare) || host.startsWith("[::1]")) "http://" else "https://") + text
         }
         val parts = try {
             URI(text)
@@ -60,7 +68,7 @@ object ConnectionRules {
         val host = Urls.host(parts)
         if (host.isNullOrEmpty()) throw ConnectionUrlException(ConnectionUrlError.invalid)
         if (parts.rawUserInfo != null) throw ConnectionUrlException(ConnectionUrlError.credentials)
-        if (scheme == "http" && !isLoopback(host)) throw ConnectionUrlException(ConnectionUrlError.insecureRemote)
+        if (scheme == "http" && !allowsPlainHttp(host)) throw ConnectionUrlException(ConnectionUrlError.insecureRemote)
         val port = Urls.port(parts)?.let { ":$it" } ?: ""
         val path = parts.rawPath.takeUnless { it.isNullOrEmpty() } ?: "/"
         return try {

@@ -199,7 +199,9 @@ used. A redirect, 401 or 403 means "sign in"; native writes name the Space's ori
 do. The web views follow the Mac's navigation rules (`core/navigation.ts`): links that leave the
 Space open in the browser, new windows never open inside the app, and only the microphone (never
 the camera) is granted, to pages of the view's own origin or the connection's. A remote Space
-needs https; plain http is accepted for loopback only.
+needs https; plain http is accepted for loopback only. A page whose web process ends is loaded
+again after 1, 2 and then 4 seconds; a fourth crash within a minute stops there and shows the page
+as failed, with Try Again on an app's tab (`crashReload`).
 Every web view adds `AISpaceLinux/<version>` to WebKit's user agent, as the Mac client adds
 `AISpaceDesktop/` and the phones `AISpaceMobile/`, so a page (the feedback button,
 [feedback.md](feedback.md#context)) can tell this client from a browser.

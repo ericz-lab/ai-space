@@ -163,9 +163,7 @@ fun MainTabs(model: AppModel, connection: Connection) {
         val index = pages.indexOf(model.pagerID)
         if (index >= 0 && index != state.currentPage) state.scrollToPage(index)
     }
-    BackHandler(enabled = model.pagerID != Screens.home && model.page == null && !model.showingWebPanel && model.hubPage == null) {
-        model.pagerID = Screens.home
-    }
+    PagerBack(model)
 
     var windowSize by remember { mutableStateOf(IntSize.Zero) }
     val version by backdrops.version.collectAsState()
@@ -265,6 +263,20 @@ fun MainTabs(model: AppModel, connection: Connection) {
     }
     model.editingScreen?.let { id ->
         ScreenEditorSheet(model, connection, loader, icons, screen = id, onDismiss = { model.editingScreen = null })
+    }
+}
+
+/**
+ * The system back on Home, Settings or another screen returns to the first screen. The page on show
+ * is a flow, not snapshot state (a swipe must not recompose the pages), so it is collected here, where
+ * a change recomposes this handler alone; read straight in [MainTabs] it stayed what it was when the
+ * pager was first drawn, and back left the app.
+ */
+@Composable
+private fun PagerBack(model: AppModel) {
+    val id by model.pager.id.collectAsState()
+    BackHandler(enabled = id != Screens.home && model.page == null && !model.showingWebPanel && model.hubPage == null) {
+        model.pagerID = Screens.home
     }
 }
 

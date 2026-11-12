@@ -2,7 +2,7 @@ import { mkdir, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NotifyStore } from "./store.ts";
-import { type Fetch, TRANSPORTS, TransportError } from "./transports.ts";
+import { type Fetch, newProgress, TRANSPORTS, TransportError } from "./transports.ts";
 import {
   type Channel,
   type ChannelView,
@@ -32,7 +32,11 @@ import {
  *   skipped and one notice goes out;
  * - queued deliveries older than STALE_MS are skipped instead of arriving late;
  * - a disabled or unconfigured channel records `skipped`; enabling it later
- *   does not replay history.
+ *   does not replay history;
+ * - a retry sends only the requests of a message that did not go through yet
+ *   (kept in memory: after a restart a half-sent message is sent whole);
+ * - an uploaded image is deleted once no delivery of it is queued, including
+ *   when none ever was.
  */
 
 export const STALE_MS = 60 * 60_000;
@@ -202,6 +206,8 @@ export class NotifyService {
 
     const deliveries = this.store.addNotification(notification, plan);
     for (const d of deliveries) if (d.status === "queued") this.kick(d.channel);
+    // No worker will pick this one up, so none will remove its parked image.
+    if (!deliveries.some((d) => d.status === "queued")) await this.cleanupImage(notification.id);
 
     for (const name of capped) {
       const until = new Date(now + CAP_WINDOW_MS).toISOString().slice(11, 16);
@@ -288,9 +294,11 @@ export class NotifyService {
     let attempts = d.attempts;
     let rateWaits = 0;
     const image = n.imagePath ? await this.readImage(n) : undefined;
+    // What went through survives the retries below: a retry sends only the rest of the message.
+    const progress = newProgress();
     for (;;) {
       try {
-        const result = await TRANSPORTS[channel.kind]({ channel, notification: n, appTitle: this.appTitle(n.app), ...(image ? { image } : {}) }, this.fetch, this.log);
+        const result = await TRANSPORTS[channel.kind]({ channel, notification: n, appTitle: this.appTitle(n.app), progress, ...(image ? { image } : {}) }, this.fetch, this.log);
         this.store.updateDelivery(d.id, { status: "sent", attempts: attempts + 1, providerId: result.providerId, sentAt: this.now(), lastError: result.degraded }, this.now());
         if (result.degraded) this.log(`${n.app} → ${channel.name}: sent, ${result.degraded}`);
         return;

@@ -30,6 +30,8 @@ internal sealed class MainWindow : Window
     private bool _filling;
     private bool _fullScreen;
     private WindowState _beforeFullScreen;
+    /// <summary>Normal or maximized, as the window last was before it was minimized: what Bring restores.</summary>
+    private WindowState _shownState = WindowState.Normal;
 
     public MainWindow(AppModel model, Func<bool> quitting, Action openSettings, Action addSpace, Func<FrameworkElement> welcome)
     {
@@ -115,7 +117,9 @@ internal sealed class MainWindow : Window
     public void Bring()
     {
         if (!IsVisible) Show();
-        if (WindowState == WindowState.Minimized) WindowState = _model.Prefs.Window?.Maximized == true ? WindowState.Maximized : WindowState.Normal;
+        // As the window was before it was minimized, not as it was saved at the last close: it may
+        // have been maximized or restored since.
+        if (WindowState == WindowState.Minimized) WindowState = _shownState;
         Activate();
         var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
         Shell.Native.SetForegroundWindow(handle);
@@ -315,6 +319,12 @@ internal sealed class MainWindow : Window
         TaskbarItemInfo.Description = L.F("AI Space — {0} unread", text);
     }
 
+    protected override void OnStateChanged(EventArgs e)
+    {
+        base.OnStateChanged(e);
+        if (WindowState != WindowState.Minimized) _shownState = WindowState;
+    }
+
     private void Restore(Preferences.WindowPlace? place)
     {
         if (place is null || place.Width < MinWidth || place.Height < MinHeight)
@@ -335,7 +345,7 @@ internal sealed class MainWindow : Window
         Top = place.Top;
         Width = place.Width;
         Height = place.Height;
-        if (place.Maximized) WindowState = WindowState.Maximized;
+        if (place.Maximized) WindowState = _shownState = WindowState.Maximized;
     }
 
     private void SavePlace()

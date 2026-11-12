@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { loadManifest } from "../../scheduler/manifest.ts";
+import { MANIFEST_FILE, loadManifest } from "../../scheduler/manifest.ts";
 import { runStopCommand } from "../../panel/index.ts";
 import type { Workspace } from "../../workspace.ts";
 import { openDatabase, sqliteUrl } from "../db.ts";
@@ -79,6 +79,7 @@ async function backupOne(argv: string[], ctx: CliContext, deps: BackupDeps, out:
     return 2;
   }
   const job = await jobFor(app, ctx);
+  if (job.prune === false) err(`[backup] ${app}: space.yaml not found among readable manifests, but some could not be parsed; old snapshots are kept this run`);
   if (!job.spec.enabled) err(`[backup] ${app}: backup is disabled in space.yaml; running anyway because you asked`);
   const r = await runBackup(deps, job);
   for (const s of r.skipped) err(`[backup] ${app}: ${s}`);
@@ -156,28 +157,35 @@ async function restore(argv: string[], ctx: CliContext, deps: BackupDeps, out: (
   return 0;
 }
 
-/** The job for an app: its data dir, its manifest's backup section, and what the storage inventory knows. */
-async function jobFor(app: string, ctx: CliContext): Promise<BackupJob> {
+/**
+ * The job for an app: its data dir, its manifest's backup section, and what the storage inventory knows.
+ * When the app's manifest is not found while some space.yaml could not be parsed, that broken file may
+ * be the app's own (mid-edit, say): the snapshot is still taken with the default spec, but nothing is
+ * pruned, because the default retention could drop snapshots the app's real `keep:` holds on to.
+ */
+export async function jobFor(app: string, ctx: Pick<CliContext, "ws" | "storage" | "appDirs">): Promise<BackupJob> {
   if (app === SPACE_APP) return { app, dataDir: ctx.ws.data, spec: { ...DEFAULT_SPEC }, shallow: true };
   const dataDir = ctx.storage.appDataDir(app);
   if (!(await isDir(dataDir))) throw new Error(`${app} has no data directory (${dataDir})`);
-  const found = await findManifest(app, ctx);
+  const { found, unreadable } = await findManifest(app, ctx);
   const spec = parseBackupSpec(found?.backup);
   const postgres = (await ctx.storage.list(app)).filter((d) => d.backend === "postgres" && !d.orphaned).map((d) => ({ name: d.name, url: d.url }));
   const blobs = await ctx.storage.blobStore(app);
-  return { app, dataDir, spec, appDir: found?.dir, postgres, ...(blobs && !blobs.orphaned ? { blobUrl: blobs.url } : {}) };
+  return { app, dataDir, spec, appDir: found?.dir, postgres, ...(blobs && !blobs.orphaned ? { blobUrl: blobs.url } : {}), ...(!found && unreadable ? { prune: false } : {}) };
 }
 
-async function findManifest(app: string, ctx: CliContext): Promise<{ dir: string; backup?: unknown } | undefined> {
+async function findManifest(app: string, ctx: Pick<CliContext, "appDirs">): Promise<{ found?: { dir: string; backup?: unknown }; unreadable: boolean }> {
+  let unreadable = false;
   for (const dir of await ctx.appDirs()) {
     try {
       const m = await loadManifest(dir);
-      if (m.app === app) return { dir, backup: m.backup };
+      if (m.app === app) return { found: { dir, backup: m.backup }, unreadable };
     } catch {
-      /* an unparsable manifest elsewhere is not this app's problem */
+      // Another app's broken manifest is not this app's problem, unless this app's is the one that broke.
+      if (await Bun.file(join(dir, MANIFEST_FILE)).exists()) unreadable = true;
     }
   }
-  return undefined;
+  return { unreadable };
 }
 
 /** `space` plus every registered app (a directory with a manifest) that does not opt out: the apps that have a backup task. */

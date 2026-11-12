@@ -173,7 +173,7 @@ internal sealed class LocalManager(AppModel model)
             Failure = f;
             if (f.Status is { } s) Status = s;
         }
-        catch (Exception e) when (e is IOException or SpaceApiException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception e) when (IsExpected(e))
         {
             Failure = new LocalFailure("error", e.Message);
         }
@@ -186,23 +186,32 @@ internal sealed class LocalManager(AppModel model)
 
     // Commands
 
+    /// <summary>
+    /// Reads WSL and the service's state. Never throws: a failure is kept in <see cref="Failure"/>,
+    /// so <see cref="StartUp"/> still goes on to the keep-alive, the sign-in and the update.
+    /// </summary>
     public async Task Refresh()
     {
         if (!Available) return;
-        await CheckWsl();
-        if (Wsl == WslReadiness.Ready)
+        try
         {
-            try
-            {
-                Status = await Run<LocalStatus>("status");
-            }
-            catch (LocalFailure f)
-            {
-                Failure = f;
-            }
+            await CheckWsl();
+            if (Wsl == WslReadiness.Ready) Status = await Run<LocalStatus>("status");
+        }
+        catch (LocalFailure f)
+        {
+            Failure = f;
+        }
+        catch (Exception e) when (IsExpected(e))
+        {
+            Failure = new LocalFailure("error", e.Message);
         }
         Notify();
     }
+
+    /// <summary>What running <c>wsl.exe</c> and reading its answer can throw besides <see cref="LocalFailure"/>.</summary>
+    private static bool IsExpected(Exception e) =>
+        e is IOException or SpaceApiException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException;
 
     /// <summary>
     /// Sets up or updates the Space, then makes sure the app has it saved and is signed in to it. An

@@ -188,5 +188,8 @@ export const MAX_CONSUMER_SUBSCRIPTIONS = 50;
 export const MAX_CONSUMER_CALLS = 20;
 /** Open streams per consumer at once; one more is a 429. */
 export const MAX_CONSUMER_STREAMS = 4;
-/** Deliveries waiting for a consumer; older ones beyond this are skipped so an abandoned consumer cannot grow the table. */
-export const MAX_CONSUMER_BACKLOG = 5_000;
+/**
+ * Stream deliveries waiting for an app or consumer that is not connected; older ones beyond this are
+ * skipped, so an abandoned consumer, or an app that declares a stream and never reads it, cannot grow the table.
+ */
+export const MAX_STREAM_BACKLOG = 5_000;

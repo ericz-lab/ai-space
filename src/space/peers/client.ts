@@ -176,15 +176,21 @@ export class PeerClient {
     const r = await this.fetch(`${this.config.url}${EVENTS_PATH}?since=${this.cursor}&limit=${EVENTS_PAGE}`, { headers: this.authHeaders(), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) });
     if (r.status === 404) return 0;
     if (!r.ok) throw new Error(`events: HTTP ${r.status}`);
-    const body = (await r.json()) as { ok?: boolean; events?: PeerEvent[]; latestId?: number };
+    const body = (await r.json()) as { ok?: boolean; events?: PeerEvent[]; latestId?: number; next?: number };
     if (body.ok !== true || !Array.isArray(body.events)) throw new Error("events: not an event list");
     const latest = typeof body.latestId === "number" ? body.latestId : undefined;
+    // The last id the peer's page covered, hidden apps included (absent on older peers).
+    const next = typeof body.next === "number" && Number.isFinite(body.next) ? body.next : undefined;
     const events = body.events.filter((e) => typeof e.id === "number" && typeof e.app === "string" && typeof e.name === "string");
+    const before = this.cursor;
     if (events.length) {
       const inputs: EventInput[] = events.map((e) => ({ app: e.app, name: e.name.slice(e.app.length + 1), data: e.data && typeof e.data === "object" ? e.data : {}, peer: this.name, at: Date.parse(e.at) || this.now() }));
       this.opts.onEvents?.(this.name, inputs);
       this.cursor = events[events.length - 1]!.id;
-    } else if (latest !== undefined && latest < this.cursor) {
+    }
+    if (next !== undefined && next > this.cursor && (latest === undefined || next <= latest)) {
+      this.cursor = next;
+    } else if (this.cursor === before && latest !== undefined && latest < this.cursor) {
       this.cursor = latest;
     }
     this.opts.store?.setCursor(this.name, this.cursor);

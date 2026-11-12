@@ -146,6 +146,37 @@ describe("Codex images", () => {
     }
   });
 
+  test("a call that times out or is aborted kills Codex and leaves no files behind", async () => {
+    const home = await mkdtemp(join(tmpdir(), "codex-home-"));
+    const saved = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = home;
+    try {
+      for (const stop of ["abort", "timeout"] as const) {
+        const call = stop === "abort"
+          ? (async () => {
+              const controller = new AbortController();
+              const pending = adapter("imagehang").image!(imageInput(), controller.signal);
+              while (!(await Bun.file(join(home, "hang.json")).exists())) await Bun.sleep(20);
+              controller.abort();
+              return pending;
+            })()
+          // The call's own limit is its timeout plus 30 s of grace; a negative timeout makes that short.
+          : adapter("imagehang").image!(imageInput({ timeoutMs: -29_000 }));
+        expect(await call).toMatchObject({ ok: false, error: stop === "abort" ? "aborted" : expect.stringContaining("timed out") });
+        const { pid, cwd } = (await Bun.file(join(home, "hang.json")).json()) as { pid: number; cwd: string };
+        await Bun.sleep(100);
+        expect(() => process.kill(pid, 0)).toThrow();
+        expect(await Bun.file(join(cwd, "prompt.txt")).exists()).toBe(false);
+        expect(await readdir(join(home, "generated_images"))).toEqual([]);
+        await rm(join(home, "hang.json"));
+      }
+    } finally {
+      if (saved === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = saved;
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   test("splits the stream from the appended files", () => {
     const out = splitImageOutput('{"type":"turn.completed"}\n@@space-image@@ a.webp\nAQID\n@@space-image@@ b.txt\nAQID\n');
     expect(out.events).toBe('{"type":"turn.completed"}');
@@ -366,6 +397,12 @@ test("web tool lists enable native web access locally and over SSH without enabl
   const full = codexArgs(["codex"], input({ mode: "full", tools: ["WebSearch", "WebFetch"] }), "/tmp/web-only");
   expect(full).toContain("--ignore-user-config");
   expect(full).toContain('web_search="live"');
+  expect(full).toContain('model_instructions_file="/tmp/web-only/system.txt"');
+  // Without `system`, full mode keeps Codex's own instructions: no empty instructions file.
+  const native = codexArgs(["codex"], input({ mode: "full", system: "", tools: ["WebSearch"] }), "/tmp/web-only");
+  expect(native.some((a) => a.startsWith("model_instructions_file="))).toBe(false);
+  // Slim always gets its instructions file.
+  expect(codexArgs(["codex"], input({ mode: "slim", system: "" }), "/tmp/x")).toContain('model_instructions_file="/tmp/x/system.txt"');
   expect(await adapter().complete(input({ tools: ["WebSearch", "Bash"] }))).toMatchObject({ ok: false, error: expect.stringContaining("Bash") });
   await expect(adapter().complete(input({ mode: "slim", tools: ["WebSearch"] }))).rejects.toThrow(/slim/);
 });

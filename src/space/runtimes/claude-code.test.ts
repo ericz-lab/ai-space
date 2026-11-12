@@ -291,20 +291,31 @@ describe("chat", () => {
     expect(error).toBe("Failed to authenticate: OAuth session expired and could not be refreshed");
     expect(lines.at(-1)).toContain('"type":"result"');
   });
+
+  test("the message goes on stdin, so one starting with a dash is not read as an option", async () => {
+    const lines: string[] = [];
+    const error = await new Promise<string | null>((resolve) => {
+      createClaudeCode(spec()).chat({ message: "-v is what I typed", cwd: process.cwd() }, { onEvent: (l) => lines.push(l), onFinish: resolve });
+    });
+    expect(error).toBeNull();
+    const result = JSON.parse(lines.at(-1)!) as { result: string };
+    expect(result.result).toStartWith("answer to: -v is what I typed [args: -p --output-format stream-json");
+    expect(result.result).not.toContain("-v is what I typed]");
+  });
 });
 
 describe("chatArgs", () => {
   test("builds the stream-json command line with the spec's extra arguments last", () => {
-    expect(chatArgs({ message: "hi", cwd: "/x" })).toEqual(["-p", "hi", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
+    expect(chatArgs({ message: "hi", cwd: "/x" })).toEqual(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
     expect(chatArgs({ message: "hi", cwd: "/x", model: "opus", sessionId: "abc12345", permissionMode: "acceptEdits", systemPrompt: "S", allowedTools: ["Read", "Bash(ls *)"] }, ["--z"])).toEqual([
-      "-p", "hi", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model", "opus", "--resume", "abc12345", "--permission-mode", "acceptEdits", "--append-system-prompt", "S", "--allowedTools", "Read,Bash(ls *)", "--z",
+      "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--model", "opus", "--resume", "abc12345", "--permission-mode", "acceptEdits", "--append-system-prompt", "S", "--allowedTools", "Read,Bash(ls *)", "--z",
     ]);
     expect(chatArgs({ message: "hi", cwd: "/x", permissionMode: "root" })).not.toContain("--permission-mode");
   });
 
   test("passes a known effort level after the permission mode, and drops anything else", () => {
     expect(chatArgs({ message: "hi", cwd: "/x", permissionMode: "bypassPermissions", effort: "xhigh" })).toEqual([
-      "-p", "hi", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "bypassPermissions", "--effort", "xhigh",
+      "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "bypassPermissions", "--effort", "xhigh",
     ]);
     expect(chatArgs({ message: "hi", cwd: "/x", effort: "turbo" as never })).not.toContain("--effort");
   });

@@ -73,6 +73,12 @@ final class TerminalSession: ObservableObject {
         }
         guard !Task.isCancelled, state == .connecting, let url = TerminalRoute.socket(machine, ticket: ticket, space: api.base) else { return finish() }
         let task = await api.socket(url)
+        // Closed while the socket was being made: opening it now would start a shell nobody
+        // sees, left running until the idle limit. Unredeemed, the Space drops the ticket.
+        guard !Task.isCancelled, state == .connecting else {
+            task.cancel(with: .normalClosure, reason: nil)
+            return finish()
+        }
         self.task = task
         task.resume()
         // The first frame is the Space's `ready`; until it comes the socket may still be refused.
@@ -97,6 +103,9 @@ final class TerminalSession: ObservableObject {
             @unknown default: break
             }
         }
+        // Cancelled without `close()` (the view went away): the socket must not outlive the reader.
+        task.cancel(with: .normalClosure, reason: nil)
+        finish()
     }
 
     private func control(_ text: String) {

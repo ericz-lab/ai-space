@@ -222,7 +222,7 @@ export default function SettingsStatus() {
  * cell says why it rests (out of credit, quota used up, rate limited, connection failing).
  */
 function runtimeState(c: MachineCell, lang: Parameters<typeof failureText>[1]): { cls: string; key: Key; text?: string } {
-  const key: Key = c.reachable === false ? "runtimes.unreachable" : c.installed === false ? "runtimes.notInstalled" : c.signedIn === false ? "runtimes.notSignedIn" : c.limitedUntil ? "runtimes.limited" : c.checkedAt || c.lastOkAt ? "runtimes.ready" : "runtimes.unchecked";
+  const key: Key = c.reachable === false ? "runtimes.unreachable" : c.installed === false ? "runtimes.notInstalled" : c.signedIn === false ? "runtimes.notSignedIn" : c.limitedUntil ? "runtimes.limited" : c.probeTimedOut ? "runtimes.probeTimedOut" : c.checkedAt || c.lastOkAt ? "runtimes.ready" : "runtimes.unchecked";
   const text = key === "runtimes.limited" && c.restKind ? failureText(c.restKind, lang) : undefined;
   if (c.problem) return { cls: c.problem === "limited" ? "paused" : "down", key, ...(text ? { text } : {}) };
   return { cls: key === "runtimes.ready" ? "ok" : "archived", key, ...(text ? { text } : {}) };

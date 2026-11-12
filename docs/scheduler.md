@@ -35,7 +35,7 @@ A task is a schedule and/or event triggers, a target, and bookkeeping state.
 | `enabled`, `overrides` | The manifest value and the operator's overrides (`enabled`, `schedule`). Overrides survive re-sync. |
 | `source` | `manifest` or `api`. |
 | `orphaned` | A manifest task that disappeared from its manifest. Kept for history, never runs. |
-| `state` | `nextRunAt`, `runningAt`, `lastRunAt`, `lastStatus`, `lastError`, `lastDurationMs`, `consecutiveErrors`, and `pending` (queued event ids and when they are due). |
+| `state` | `nextRunAt`, `runningAt` (with `runningTrigger` and `runningEvents`), `lastRunAt`, `lastStatus`, `lastError`, `lastDurationMs`, `consecutiveErrors`, and `pending` (queued event ids and when they are due). |
 
 Effective values: a task runs when `overrides.enabled ?? enabled` is true and it is not orphaned, on `overrides.schedule ?? schedule`.
 
@@ -58,7 +58,7 @@ Rules the engine enforces:
 
 - **No overlap.** A task with `runningAt` set is never launched again. A manual run of a running task is refused.
 - **HTTP connections are per run.** Each HTTP job opens a fresh connection so a busy app cannot reject it on an expired pooled connection. A dropped POST is not automatically replayed: it may already have performed work.
-- **Timeouts are real.** HTTP requests wait until the task's `timeoutMs`, with Bun's connection idle timeout disabled so a quiet long-running job is not reported as failed early. Aborting the request does not terminate work inside the app: the app must enforce its own execution deadline. Commands and agents start in their own process group (where `setsid` exists) and the whole tree is killed; after that the engine stops waiting on their pipes so an orphaned grandchild cannot hold a slot.
+- **Timeouts are real.** HTTP requests wait until the task's `timeoutMs`, with Bun's connection idle timeout disabled so a quiet long-running job is not reported as failed early. Aborting the request does not terminate work inside the app: the app must enforce its own execution deadline. Commands and agents start in their own process group where `setsid` exists (elsewhere, as on macOS, the child and every descendant `ps` lists) and the whole tree is killed; after that the engine stops waiting on their pipes so an orphaned grandchild cannot hold a slot.
 - **Errors back off.** Consecutive failures push the next run to at least 30 s, 1 m, 5 m, 15 m, then 60 m after the failure, never earlier than the natural next slot. Success resets the counter.
 - **Missed runs execute.** A tick that finds nothing due only fills in missing `nextRunAt` values. It never advances a past-due value, so a run that was missed while the process was down or busy executes instead of being skipped.
 - **First run.** An `every` task runs as soon as it is created or re-enabled. `cron` and `at` wait for their natural moment; `manual` never has one.
@@ -137,7 +137,7 @@ Each event is `{ name, app, at, data }`.
 
 ### Restart and loss
 
-Pending events live in the task state in `space.db`, so a restart delivers them. Events published while ai-space is down get a connection error; the publisher decides whether to retry, and a task that also keeps a time schedule sweeps up what was missed. The `events` table keeps events for `SPACE_EVENTS_RETENTION_DAYS` (30 by default) for `GET /api/events`, run history and the bus's deliveries; a run whose events were pruned still lists their ids.
+Pending events live in the task state in `space.db`, so a restart delivers them. So do the events of the run in flight (`state.runningEvents`): when the process dies mid-run, the next start records the run as interrupted and queues its events again, ahead of newer ones, as one more delivery attempt. Events published while ai-space is down get a connection error; the publisher decides whether to retry, and a task that also keeps a time schedule sweeps up what was missed. The `events` table keeps events for `SPACE_EVENTS_RETENTION_DAYS` (30 by default) for `GET /api/events`, run history and the bus's deliveries; a run whose events were pruned still lists their ids.
 
 ### Not yet
 
@@ -251,7 +251,7 @@ A deploy waits longer than a minute about 3% of the time and longer than five ab
 A run the process could not finish at all (SIGKILL, power loss) is recorded on the next start:
 the stale `runningAt` marker becomes a run with `interrupted: …` as its error, so the history
 shows it and a task with `notify: { when: [error] }` reports it. It does not count towards the
-error backoff — the run did not fail, it was cut off — and the task stays due, so it runs again.
+error backoff — the run did not fail, it was cut off — and the task stays due, so it runs again. The events it carried go back into `pending` and ride on that run.
 
 ## Migrating an app
 

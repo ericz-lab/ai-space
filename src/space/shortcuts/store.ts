@@ -141,6 +141,21 @@ export class ShortcutStore {
     return rows.map(fromRow);
   }
 
+  /**
+   * End the runs a previous process left `running`: nothing in this process executes them, so they would
+   * stay running (and refuse a retry) forever. A write may have reached the provider before the process
+   * died, so it becomes `unknown`; anything else `error`. Task runs are left alone: their status comes
+   * from the scheduler's run record, which survives the restart. Returns how many were ended.
+   */
+  interruptRunning(error: string, now: number): number {
+    return this.db
+      .query(
+        `UPDATE shortcut_runs SET status = CASE WHEN effect = 'write' THEN 'unknown' ELSE 'error' END, error = ?, ended_at = ?
+           WHERE status = 'running' AND task_id IS NULL`,
+      )
+      .run(error, now).changes;
+  }
+
   patchRun(id: number, patch: RunPatch): Run | undefined {
     const cols: Record<keyof RunPatch, string> = { status: "status", result: "result", error: "error", resolved: "resolved", attempts: "attempts", callId: "call_id", taskId: "task_id", taskStartedAt: "task_started_at", endedAt: "ended_at" };
     const sets: string[] = [];
