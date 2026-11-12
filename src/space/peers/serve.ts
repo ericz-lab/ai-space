@@ -223,7 +223,10 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
               const since = Math.max(0, Number(q.get("since") ?? 0) || 0);
               const limit = Number(q.get("limit") ?? 200);
               const events = opts.events!.listEventsSince(since, Number.isFinite(limit) ? limit : 200, { localOnly: true });
-              return json({ ok: true, events: events.filter((e) => opts.allowApp?.(e.app) !== false).map((e) => ({ id: e.id, ...eventPayload(e) })), latestId: opts.events!.latestEventId() });
+              // `next` is the last id this page looked at, hidden apps included: a page they fill entirely
+              // still moves the hub's cursor on, instead of being asked for again forever.
+              const next = events.length ? events[events.length - 1]!.id : since;
+              return json({ ok: true, events: events.filter((e) => opts.allowApp?.(e.app) !== false).map((e) => ({ id: e.id, ...eventPayload(e) })), latestId: opts.events!.latestEventId(), next });
             }),
           },
         }
