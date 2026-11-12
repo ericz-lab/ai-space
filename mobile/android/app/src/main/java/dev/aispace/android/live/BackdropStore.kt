@@ -8,6 +8,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
+import android.util.LruCache
 import android.view.View
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URI
@@ -33,8 +35,9 @@ import java.net.URI
  * The drawn artwork some of the panel's themes have behind the page (`/backdrops/<name>.html`,
  * src/web/theme.ts), fetched from the Space with its session and drawn once to a bitmap by an offscreen
  * web view: the artwork is static, and a picture scrolls better under the pages than a live document.
- * Kept in memory and on disk per name, light or dark, and size: a launch shows the bitmap of the one
- * before at once (a2e99bb), and draws the artwork again behind it in case it changed.
+ * Kept on disk per name, light or dark, and size: a launch shows the bitmap of the one before as soon
+ * as it is read (a2e99bb, read off the main thread), and draws the artwork again behind it in case it
+ * changed. In memory only the few most recently used, bounded by bytes: each is a screen of pixels.
  *
  * Main thread only.
  */
@@ -47,7 +50,9 @@ class BackdropStore(
 ) {
     private class Job(val key: String, val name: String, val dark: Boolean, val width: Int, val height: Int)
 
-    private val images = HashMap<String, Bitmap>()
+    private val images = object : LruCache<String, Bitmap>(MEMORY_BYTES) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+    }
     private val failed = HashSet<String>()
     private val diskChecked = HashSet<String>()
 
@@ -74,19 +79,44 @@ class BackdropStore(
         if (width <= 50 || height <= 50) return null
         val prefix = "$name|$dark|"
         val key = prefix + "${width}x$height"
-        if (images[key] == null && diskChecked.add(key)) {
-            BitmapFactory.decodeFile(file(key).path)?.let {
-                images[key] = it
-                stale.add(key)
-            }
-        }
+        // Room for this size and one other (shown while this one is drawn) whatever the budget, or a
+        // large screen's bitmap would be evicted as it is put and drawn again and again.
+        val needed = (width.toLong() * height * 4 * 2).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        if (needed > images.maxSize()) images.resize(needed)
+        if (images[key] == null && diskChecked.add(key)) readFromDisk(key, width, height)
         val hit = images[key]
         if ((hit == null || key in stale) && current?.key != key && waiting?.key != key && key !in failed) {
             // Only the latest size asked for matters; not started from inside a composition.
             waiting = Job(key, name, dark, width, height)
             main.post { next() }
         }
-        return hit ?: images.entries.firstOrNull { it.key.startsWith(prefix) }?.value
+        return hit ?: images.snapshot().entries.firstOrNull { it.key.startsWith(prefix) }?.value
+    }
+
+    /**
+     * The bitmap an earlier launch saved, decoded on the IO dispatcher, no larger than the size asked
+     * for. A drawing that finished first is newer and is kept.
+     */
+    private fun readFromDisk(key: String, width: Int, height: Int) {
+        val path = file(key).path
+        scope.launch {
+            val decoded = withContext(Dispatchers.IO) {
+                try {
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeFile(path, bounds)
+                    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@withContext null
+                    var sample = 1
+                    while (bounds.outWidth / (sample * 2) >= width && bounds.outHeight / (sample * 2) >= height) sample *= 2
+                    BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+                } catch (e: OutOfMemoryError) {
+                    null
+                }
+            } ?: return@launch
+            if (images[key] != null) return@launch
+            images.put(key, decoded)
+            stale.add(key)
+            versionState.value += 1
+        }
     }
 
     /** A failed drawing is tried again after a sign-in (the session may have been the reason). */
@@ -131,7 +161,7 @@ class BackdropStore(
         val job = current
         if (job != null) {
             if (image != null) {
-                images[job.key] = image
+                images.put(job.key, image)
                 stale.remove(job.key)
                 save(image, file(job.key))
             } else {
@@ -180,6 +210,11 @@ class BackdropStore(
             }
             finish(bitmap)
         }, 600)
+    }
+
+    private companion object {
+        /** About three phone screens of ARGB pixels, and never more than an eighth of the heap. */
+        val MEMORY_BYTES: Int = minOf(32L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 8).toInt()
     }
 
     private inner class Client : WebViewClient() {

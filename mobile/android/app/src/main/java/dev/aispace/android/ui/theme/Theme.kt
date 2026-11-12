@@ -114,8 +114,6 @@ data class ThemeTokens(
     val sheet: Color get() = if (dark) mix(panel, Color(0xFF05060A), 0.4f).let { it.copy(alpha = it.alpha * 0.74f) } else panel.copy(alpha = panel.alpha * 0.8f)
     /** The sheet where nothing can be blurred behind it (before Android 12, or with animations off): opaque. */
     val sheetSolid: Color get() = sheet.compositeOver(ground)
-    /** The sheet's edge in dark mode (`rgba(255,255,255,.09)`); light mode keeps [hairline]. */
-    val sheetEdge: Color get() = if (dark) Color.White.copy(alpha = 0.09f) else hairline
     /** Behind code and a tool call's input and output (`--code-bg`). */
     val codeBackground: Color get() = if (dark) Color.Black.copy(alpha = 0.3f) else Color(14, 17, 22).copy(alpha = 0.06f)
     /** `--glass` as the web draws it on a sheet: the fill of the chat's cards and its composer. */

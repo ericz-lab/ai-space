@@ -142,9 +142,7 @@ data class PeerStatus(
 
 /** What kind of thing a catalogue entry is; the name is the prefix of the panel's entry key. */
 enum class EntryKind {
-    app, agent, widget;
-
-    val rawValue: String get() = name
+    app, agent, widget
 }
 
 /** Whether an entry can be expected to answer. */

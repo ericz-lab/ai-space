@@ -117,8 +117,6 @@ class WebSession(
     val progress: StateFlow<Float> = progressState.asStateFlow()
     private val urlState = MutableStateFlow<URI?>(null)
     val currentUrl: StateFlow<URI?> = urlState.asStateFlow()
-    private val titleState = MutableStateFlow("")
-    val pageTitle: StateFlow<String> = titleState.asStateFlow()
 
     /**
      * The page's own background (ARGB), for the system bars' areas around it (0bbbb62). Android has no
@@ -302,7 +300,6 @@ class WebSession(
         backState.value = view.canGoBack()
         forwardState.value = view.canGoForward()
         urlState.value = view.url?.let { Urls.parse(it) }
-        view.title?.let { titleState.value = it }
     }
 
     /**
@@ -480,10 +477,6 @@ class WebSession(
             if (view !== webView) return
             progressState.value = newProgress / 100f
             updateNavigation(view)
-        }
-
-        override fun onReceivedTitle(view: WebView, title: String?) {
-            if (view === webView) titleState.value = title ?: ""
         }
 
         /**
