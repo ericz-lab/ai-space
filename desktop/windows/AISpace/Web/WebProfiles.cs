@@ -147,10 +147,19 @@ internal sealed class WebProfiles(string folder)
         await host.CoreWebView2.Profile.ClearBrowsingDataAsync();
     }
 
-    /// <summary>A removed Space: its profile goes once no view of it is left.</summary>
+    /// <summary>
+    /// A removed Space: its profile goes once no view of it is left. The hidden view is made for it
+    /// when this launch never read its cookies (or the browser process restarted since), since the
+    /// profile can only be deleted through a view of it.
+    /// </summary>
     public async Task Forget(Guid connection, bool deleteData)
     {
-        if (!_hosts.Remove(connection, out var t)) return;
+        _hosts.Remove(connection, out var t);
+        if (t is null || t.IsFaulted)
+        {
+            if (!deleteData) return;
+            t = CreateHost(connection);
+        }
         try
         {
             var host = await t;
