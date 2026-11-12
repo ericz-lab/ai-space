@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useLang } from "./i18n.ts";
+import type { Key } from "./messages.ts";
 
 // Desk pet: a sprite sheet the panel walks along the bottom edge. Two kinds of sheet:
 // - the Codex format from petdex.dev (8 columns; v1 9 rows and v2 11 rows mean the same, cells 12:13).
 //   The bundled default is a capybara at /pet.webp, stored at half size; any other petdex sheet can be
 //   shown by name (see petdex.ts). These are loaded without a Referer, which petdex's hotlink
 //   protection insists on.
+// - a pet bundled with the panel in its own layout (BUILTIN): Claude, a 3D model rendered into a sheet
+//   by pets/claude.ts.
 // - an app's pet (docs/app-spec.md#pets): its own grid and animations, its sheet proxied by ai-space,
 //   and a mood the app answers: which animation it rests in, whether it roams, a line to say.
 // The sheet is an <img> moved inside a clipping box rather than a CSS background: an image needs no CORS.
@@ -68,6 +71,29 @@ const CODEX: Omit<Sprite, "src"> = {
   rests: [["idle", 0.55], ["wait", 0.27], ["wave", 0.18]],
   click: "jump",
 };
+/**
+ * Claude: the 3D mascot rendered by pets/claude.py, whose ANIMS this repeats (pet-claude.test.ts compares them).
+ * Its scuttle is drawn for this width and SPEED, so its feet stay planted; change them together with
+ * claude.py and re-render.
+ */
+const CLAUDE: Sprite = {
+  src: "/pet-claude.webp",
+  columns: 12,
+  rows: 5,
+  width: 80,
+  anims: {
+    walk: { row: 0, frames: 8, ms: 320 },
+    sleep: { row: 1, frames: 12, ms: 3600 },
+    look: { row: 2, frames: 12, ms: 2880 },
+    hop: { row: 3, frames: 12, ms: 900, pause: 1400 },
+    jump: { row: 4, frames: 12, ms: 720 },
+  },
+  right: "walk",
+  rests: [["look", 0.5], ["sleep", 0.38], ["hop", 0.12]],
+  click: "jump",
+};
+/** Pets bundled with the panel besides the default, by the name kept in the preferences (`petBuiltin`). */
+export const BUILTIN: Record<string, { title: Key; sprite: Sprite }> = { claude: { title: "pet.builtin.claude", sprite: CLAUDE } };
 const SPEED = 55; // px/s
 // The bubble comes and goes: shown this long, then hidden this long, again while the line stays.
 const SAY_SHOW_MS = 6_000;
@@ -81,6 +107,12 @@ type Cell = { w: number; h: number };
  */
 export default function Pet({ sheet = DEFAULT_SHEET, onError }: { sheet?: string; onError?: (sheet: string) => void }) {
   return <SpritePet sprite={{ ...CODEX, src: sheet }} fallback={DEFAULT_SHEET} onError={onError} />;
+}
+
+/** A pet bundled with the panel, by its name in BUILTIN. */
+export function BuiltinPet({ name }: { name: string }) {
+  const sprite = BUILTIN[name]?.sprite;
+  return sprite ? <SpritePet sprite={sprite} /> : null;
 }
 
 /** An app's pet: its mood is read through ai-space on the pet's refresh while the page is visible. */
