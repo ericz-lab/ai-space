@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getJson, sendJson } from "./api.ts";
 import { useLang } from "./i18n.ts";
+import { pollWhileVisible } from "./poll.ts";
 
 type App = { app: string; title: string; version: string; url: string; page?: boolean; state?: string; offline?: { features: string[]; online: string[] }; sourceIncluded?: boolean };
 type Catalogue = { spaceId: string; apps: App[]; remotes: { connectionId: string; spaceId: string; available: boolean; apps: App[] }[] };
@@ -44,8 +45,8 @@ export default function Packages({ onChange }: { onChange?: () => void }) {
         if (operation && !["pending", "installing"].includes(operation.state)) { remember(null); await load(); }
       } catch (e) { if (active) setError((e as Error).message); }
     };
-    void check(); const timer = setInterval(() => void check(), 3000);
-    return () => { active = false; clearInterval(timer); };
+    void check(); const stop = pollWhileVisible(check, 3000);
+    return () => { active = false; stop(); };
   }, [open, pending, busy, load, t]);
   const act = async (work: () => Promise<unknown>) => {
     setBusy(true); setError("");

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { type CapabilityApp, type DeliveryInfo, type EventInfo, dateTime, getJson, relTime } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
+import { pollWhileVisible } from "./poll.ts";
 
-// Events window (a floating panel): a read-only view of the bus (docs/events.md).
+// Events page under Settings: a read-only view of the bus (docs/events.md).
 // - The catalogue first: which apps provide capabilities and publish events, with call counts.
-// - Then the recent events (`GET /api/events`, refreshed every 30 s while open); a row opens to its deliveries
+// - Then the recent events (`GET /api/events`, refreshed every 30 s while shown and the tab is visible); a row opens to its deliveries
 //   (`GET /api/events/:id`): who got it by which method, and where each delivery stands.
 // Nothing here mutates: retrying a dead delivery needs the operator token, which the browser never holds.
 
@@ -99,7 +100,8 @@ function Catalogue({ apps }: { apps: CapabilityApp[] }) {
   );
 }
 
-export default function Events({ open, onClose, onBack, embedded = false }: { open: boolean; onClose: () => void; onBack?: () => void; embedded?: boolean }) {
+/** Events and calls, a page under Settings. */
+export default function Events() {
   const { lang, t } = useLang();
   const [events, setEvents] = useState<EventInfo[] | null>(null);
   const [apps, setApps] = useState<CapabilityApp[]>([]);
@@ -108,7 +110,6 @@ export default function Events({ open, onClose, onBack, embedded = false }: { op
   const [showCat, setShowCat] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
     const load = () =>
       getJson<{ events: EventInfo[] }>("/api/events?limit=100")
         .then((d) => {
@@ -120,34 +121,18 @@ export default function Events({ open, onClose, onBack, embedded = false }: { op
     getJson<{ apps: CapabilityApp[] }>("/api/capabilities")
       .then((d) => setApps(d.apps || []))
       .catch(() => {});
-    const timer = setInterval(load, 30_000);
-    return () => clearInterval(timer);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || embedded) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose, embedded]);
+    return pollWhileVisible(load, 30_000);
+  }, []);
 
   const providers = apps.filter((a) => a.provides.length).length;
   const publishers = apps.filter((a) => a.publishes.length).length;
 
   return (
-    <div className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
-      <div className="tasks" role={embedded ? "region" : "dialog"} aria-label={t("events.title")}>
+    <div className="settings-detail">
+      <div className="tasks" role="region" aria-label={t("events.title")}>
         <div className="task-head">
-          {!embedded && onBack && (
-            <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
-              ‹
-            </button>
-          )}
           <b>{t("events.title")}</b>
           <span className="chat-sub">{events === null ? "" : t("events.summary", { n: events.length, providers, publishers })}</span>
-          {!embedded && (<button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
-            ✕
-          </button>)}
         </div>
         <div className="task-body">
           <section className="task-group">

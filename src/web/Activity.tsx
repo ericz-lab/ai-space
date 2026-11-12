@@ -3,10 +3,11 @@ import { Fragment, useEffect, useState } from "react";
 import { activityBars, activityRange, type UsageWindow } from "./activity-range.ts";
 import { dateTime, fmtDuration, getJson, relTime, type UsageKind, type UsageRow } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
+import { pollWhileVisible } from "./poll.ts";
 
-// App usage window (a floating panel, docs/usage.md): how often each app, agent and panel window
-// was opened and for how long, read-only, in the Model usage window's style.
-// - Reads the selected window on open, on filter changes and every 60 s.
+// App usage page under Settings (docs/usage.md): how often each app, agent and panel window
+// was opened and for how long, read-only, in the Model usage page's style.
+// - Reads the selected window when shown, on filter changes and every 60 s while the tab is visible.
 // - Rows by time in use, then opens. An app without the heartbeat script has no time: a dash.
 
 const WINDOWS = ["7d", "30d", "90d", "all"] as const;
@@ -28,7 +29,8 @@ function Spark({ row, range }: { row: UsageRow; range: ReturnType<typeof activit
   );
 }
 
-export default function Activity({ open, onClose, onBack, embedded = false, nameOf }: { open: boolean; onClose: () => void; onBack?: () => void; embedded?: boolean; nameOf: (kind: UsageKind, key: string) => string }) {
+/** App usage, a page under Settings. */
+export default function Activity({ nameOf }: { nameOf: (kind: UsageKind, key: string) => string }) {
   const { lang, t } = useLang();
   const [window, setWindow] = useState<Win>("30d");
   const [kind, setKind] = useState<UsageKind | "all">("all");
@@ -39,7 +41,6 @@ export default function Activity({ open, onClose, onBack, embedded = false, name
   const [err, setErr] = useState("");
 
   useEffect(() => {
-    if (!open) return;
     let active = true;
     let request = 0;
     setRows(null);
@@ -66,16 +67,9 @@ export default function Activity({ open, onClose, onBack, embedded = false, name
       }
     };
     void load();
-    const timer = setInterval(load, 60_000);
-    return () => { active = false; clearInterval(timer); };
-  }, [open, window, kind]);
-
-  useEffect(() => {
-    if (!open || embedded) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose, embedded]);
+    const stop = pollWhileVisible(load, 60_000);
+    return () => { active = false; stop(); };
+  }, [window, kind]);
 
   const opens = rows?.reduce((n, r) => n + r.opens, 0) ?? 0;
   const timeMs = rows?.reduce((n, r) => n + (r.activeMs ?? 0), 0) ?? 0;
@@ -86,14 +80,9 @@ export default function Activity({ open, onClose, onBack, embedded = false, name
   const dash = "—";
 
   return (
-    <div className={embedded ? "settings-detail" : `overlay${open ? "" : " off"}`} onClick={(e) => !embedded && e.target === e.currentTarget && onClose()}>
-      <div className="tasks usage" role={embedded ? "region" : "dialog"} aria-label={t("activity.title")}>
+    <div className="settings-detail">
+      <div className="tasks usage" role="region" aria-label={t("activity.title")}>
         <div className="task-head">
-          {!embedded && onBack && (
-            <button className="chat-hbtn back" title={t("common.back")} onClick={onBack}>
-              ‹
-            </button>
-          )}
           <b>{t("activity.title")}</b>
           <span className="usage-windows">
             {WINDOWS.map((w) => (
@@ -102,9 +91,6 @@ export default function Activity({ open, onClose, onBack, embedded = false, name
               </button>
             ))}
           </span>
-          {!embedded && (<button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
-            ✕
-          </button>)}
         </div>
         <div className="task-body">
           <section className="task-group">

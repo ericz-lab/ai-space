@@ -97,9 +97,9 @@ test("an override change patches the app's model for that purpose, and an empty 
   ]);
 });
 
-test("standalone, an open app's page has a back button to the list", () => {
-  const html = renderToStaticMarkup(<AppModels open onClose={() => {}} selected="news" onSelect={() => {}} />);
-  expect(html).toContain('title="Back"');
+test("an open app's page is labelled by the app, inside Settings' page", () => {
+  const html = renderToStaticMarkup(<AppModels selected="news" onSelect={() => {}} />);
+  expect(html).toContain('class="settings-detail"');
   expect(html).toContain('aria-label="news"');
 });
 
