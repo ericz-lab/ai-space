@@ -174,6 +174,30 @@ describe("delivery", () => {
     await expect(svc.send("my-app", { text: "x", image: { data: "!!!", type: "image/png" } })).rejects.toThrow(/base64/);
   });
 
+  test("an uploaded image is removed when no delivery of it is queued", async () => {
+    const svc = service();
+    svc.syncApp("my-app", { default: "off", channels: ["off", "missing"], windowMs: 60_000 });
+    const data = Buffer.from("png-bytes").toString("base64");
+    const r = await svc.send("my-app", { text: "chart", image: { data, type: "image/png" }, channels: ["off", "missing"] });
+    expect(r.deliveries.map((d) => d.status)).toEqual(["skipped", "skipped"]);
+    expect(await readdir(join(dir, "my-app"))).toEqual([]);
+    expect(f.calls).toHaveLength(0);
+  });
+
+  test("a retry after part of a message went through sends only the rest", async () => {
+    const svc = service();
+    const text = `${"a".repeat(3000)}\n\n${"b".repeat(3000)}`;
+    // Part 1 arrives, part 2 fails once, then is rate limited once, then arrives.
+    f.reply(tgOk(1), { status: 502, body: {} }, { status: 429, body: { ok: false, parameters: { retry_after: 2 } } }, tgOk(2));
+    const r = await svc.send("my-app", { text, wait: true });
+    expect(r.deliveries[0]).toMatchObject({ status: "sent", attempts: 2, providerId: "1" });
+    const sent = f.calls.map((c) => String((c.body as { text: string }).text));
+    expect(sent).toHaveLength(4);
+    expect(sent[0]).toContain("aaa");
+    for (const later of sent.slice(1)) expect(later).not.toContain("aaa");
+    expect(sent.slice(1).every((t) => t.includes("bbb"))).toBe(true);
+  });
+
   test("queued deliveries older than an hour are skipped on start; younger ones resume", async () => {
     const svc = service();
     svc.stop(); // no workers: everything stays queued

@@ -194,7 +194,7 @@ The engine is an outbox with per-channel workers.
 
 1. **Accept.** Validate, resolve channels, check dedup, write the notification and one `queued` delivery per channel. Return.
 2. **Send.** Each channel has one worker that drains its queue in order. Between two sends it waits the channel's minimum gap (Telegram 1 s per chat, Discord 0.5 s, webhooks 0.2 s). This is the global rate limit the earlier copies lacked and one app's loop cannot starve another app.
-3. **Retry.** Network errors and 5xx retry three times with 1 s, 3 s, 10 s waits. A 429 waits for the provider's `retry_after` (Telegram `parameters.retry_after`, Discord `retry_after`, `Retry-After` header otherwise), at most 60 s, and does not count as an attempt. Other 4xx are final: the message is wrong, retrying cannot help.
+3. **Retry.** Network errors and 5xx retry three times with 1 s, 3 s, 10 s waits. A 429 waits for the provider's `retry_after` (Telegram `parameters.retry_after`, Discord `retry_after`, `Retry-After` header otherwise), at most 60 s, and does not count as an attempt. Other 4xx are final: the message is wrong, retrying cannot help. A message sent in several requests (split parts, several chats, a photo then text) is retried from the request that failed: the parts that arrived are not sent again. That record is kept in memory, so a message cut off by a restart is sent whole.
 4. **Degrade.** A failed photo upload retries as text with the same content, once. Text never gets lost because an image was too large.
 5. **Record.** Every attempt updates the delivery row. The last error text is kept as is, including the provider's body, which is what one needs to fix a broken webhook.
 
@@ -207,7 +207,7 @@ Rules the engine enforces:
 
 ## Storage
 
-Three tables in `<workspace>/data/space.db`, following the additive migration rule: `notifications` (id, app, level, title, text, url, key, has image, created) and `deliveries` (notification id, channel, status, attempts, last error, provider id, sent at), and `inbox_state` (thread, read at, done at; see [Inbox](#inbox)). Images are not stored in the database; `data` payloads are written to `<workspace>/data/<app>/notify/` and deleted after delivery. The store keeps the latest 2000 notifications per app.
+Three tables in `<workspace>/data/space.db`, following the additive migration rule: `notifications` (id, app, level, title, text, url, key, has image, created) and `deliveries` (notification id, channel, status, attempts, last error, provider id, sent at), and `inbox_state` (thread, read at, done at; see [Inbox](#inbox)). Images are not stored in the database; `data` payloads are written to `<workspace>/data/<app>/notify/` and deleted after delivery, or at once when no channel is to deliver them (all skipped). The store keeps the latest 2000 notifications per app.
 
 ## API
 
