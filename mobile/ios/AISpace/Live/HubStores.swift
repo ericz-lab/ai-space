@@ -427,9 +427,22 @@ final class InboxStore: HubStore {
         var summary: InboxSummary?
     }
 
+    private let fetch: (String) async throws -> Data
+    private let post: (String, [String: Any]) async throws -> Void
+    /// The last change on its way: each one waits for the one before, so a quick second tap is
+    /// sent after the first instead of being dropped while the first is saving.
+    private var changes: Task<Void, Never>?
+    private var pendingChanges = 0
+
+    init(api: SpaceAPI, fetch: ((String) async throws -> Data)? = nil, post: ((String, [String: Any]) async throws -> Void)? = nil) {
+        self.fetch = fetch ?? { try await api.data($0) }
+        self.post = post ?? { _ = try await api.send("POST", $0, json: $1) }
+        super.init(api: api)
+    }
+
     override func load() async throws {
         let asked = filter
-        let body = try Hub.decode(Body.self, from: try await api.data("/api/inbox?\(asked.query)&limit=200"))
+        let body = try Hub.decode(Body.self, from: try await fetch("/api/inbox?\(asked.query)&limit=200"))
         guard asked == filter else { return }
         items = body.items?.elements ?? []
         summary = body.summary ?? summary
@@ -446,13 +459,26 @@ final class InboxStore: HubStore {
             if let read { items[i].unread = !read }
             if let done { items[i].done = done }
         }
-        await save { _ = try await api.send("POST", "/api/inbox/mark", json: body) }
-        await refresh()
+        await change { try await self.post("/api/inbox/mark", body) }
     }
 
     func readAll() async {
-        await save { _ = try await api.send("POST", "/api/inbox/read-all", json: [:]) }
-        await refresh()
+        await change { try await self.post("/api/inbox/read-all", [:]) }
+    }
+
+    /// Sends one change after those already on their way, then reads again once the last of them
+    /// is in, so an earlier answer does not undo a later tap shown at once.
+    private func change(_ work: @escaping () async throws -> Void) async {
+        let previous = changes
+        pendingChanges += 1
+        let mine = Task { @MainActor in
+            await previous?.value
+            await self.save(work)
+        }
+        changes = mine
+        await mine.value
+        pendingChanges -= 1
+        if pendingChanges == 0 { await refresh() }
     }
 }
 
