@@ -28,6 +28,8 @@ type Tab = {
   ws?: WebSocket;
   state: "connecting" | "open" | "closed";
   started: boolean;
+  /** The tab was closed; a ticket or socket still on its way is let go instead of opening a shell. */
+  gone?: boolean;
 };
 
 const FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
@@ -144,10 +146,14 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
       }
       ticket = j.ticket;
     } catch (e) {
+      if (tab.gone) return;
       term.write(red((e as Error).message));
       bump(tab, { state: "closed" });
       return;
     }
+    // Closed while the ticket was on its way: redeeming it now would start a shell nobody sees,
+    // left running until the idle limit. Unredeemed, the Space drops the ticket by itself.
+    if (tab.gone) return;
     const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${base}/ws?ticket=${encodeURIComponent(ticket)}`);
     ws.binaryType = "arraybuffer";
     tab.ws = ws;
@@ -216,6 +222,7 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
   };
 
   const closeTab = (tab: Tab) => {
+    tab.gone = true;
     try {
       tab.ws?.close(1000, "closed");
     } catch {
