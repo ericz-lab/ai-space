@@ -102,6 +102,8 @@ export type MachineCell = {
   installed?: boolean;
   signedIn?: boolean;
   detail?: string;
+  /** The last status probe ran out of time; the other fields are the earlier answers. */
+  probeTimedOut?: boolean;
   checkedAt?: string;
   limitedUntil?: string;
   /** Why it rests (docs/model-machines.md#status); absent on an older Space's cell. */

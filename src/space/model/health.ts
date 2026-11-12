@@ -34,6 +34,11 @@ export type HealthCell = {
   path?: string;
   /** What the probe said when it did not pass (the CLI's own line). */
   detail?: string;
+  /**
+   * The last probe ran out of time: nothing was learned, so the earlier answers are kept. Not a
+   * sign-in failure, and it does not put the cell last.
+   */
+  probeTimedOut?: boolean;
   checkedAt?: string;
   /** Resting until then: calls that fall back put it last (docs/model-machines.md#fallback). */
   limitedUntil?: string;
@@ -47,7 +52,7 @@ export type HealthCell = {
   lastOkAt?: string;
 };
 
-export type ProbeResult = { reachable?: false; installed?: boolean; signedIn?: boolean; version?: string; path?: string; detail?: string };
+export type ProbeResult = { reachable?: false; installed?: boolean; signedIn?: boolean; version?: string; path?: string; detail?: string; probeTimedOut?: true };
 /** `discover`: the CLI is looked for by name (and in its usual places), not only on the service's PATH. */
 export type ProbeTarget = { machine: string; spec: RuntimeSpec; ssh?: string; discover?: boolean };
 export type Prober = (target: ProbeTarget) => Promise<ProbeResult>;
@@ -218,9 +223,13 @@ export function availabilityOf(c: Pick<HealthCell, "reachable" | "installed" | "
 
 function apply(c: HealthCell, r: ProbeResult, now: number): void {
   for (const k of ["reachable", "installed", "signedIn", "version", "path", "detail"] as const) {
-    if (r[k] === undefined || r[k] === "") delete c[k];
-    else (c as Record<string, unknown>)[k] = r[k];
+    // A probe that timed out learned nothing: what it did not say keeps its earlier answer.
+    if (r[k] === undefined || r[k] === "") {
+      if (!r.probeTimedOut || k === "detail") delete c[k];
+    } else (c as Record<string, unknown>)[k] = r[k];
   }
+  if (r.probeTimedOut) c.probeTimedOut = true;
+  else delete c.probeTimedOut;
   c.checkedAt = new Date(now).toISOString();
 }
 
@@ -254,8 +263,14 @@ export function probeRuntime(spawn: Spawn = spawnCollect, env: Record<string, st
     const extra = { ...(version ? { version } : {}), ...(path ? { path } : {}) };
     if (spec.kind === "deepseek-harness") return { ...dshSignedIn(spec.home, spec.provider ?? (path && isHarnessAppCli(path) ? "deepseek-account" : undefined), env), ...extra };
     const r = await spawn([...bin, ...statusArgs(spec.kind)], { timeoutMs: PROBE_TIMEOUT_MS, env });
+    if (r.timedOut) return { installed: true, ...extra, ...timedOut(`${bin[0]} ${statusArgs(spec.kind).join(" ")}`) };
     return { installed: true, ...extra, ...readStatus(spec.kind, r.code, r.stdout, r.stderr) };
   };
+}
+
+/** A probe that ran out of time: its own state, never read as signed out. */
+function timedOut(what: string): ProbeResult {
+  return { probeTimedOut: true, detail: `${what}: no answer within ${PROBE_TIMEOUT_MS / 1000}s` };
 }
 
 function defaultBin(kind: RuntimeSpec["kind"]): string {
@@ -330,6 +345,7 @@ async function probeRemote(spawn: Spawn, host: string, spec: RuntimeSpec, bin: s
     script = check + (spec.provider === "deepseek-account" ? `test -s ${dir}/.credentials.yaml` : `grep -qs '^DEEPSEEK_API_KEY=.' ${dir}/.env`);
   } else script = check + `${cmd} ${statusArgs(spec.kind).join(" ")}`;
   const r = await spawn(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, `bash -lc ${quote(script)}`], { timeoutMs: PROBE_TIMEOUT_MS });
+  if (r.timedOut) return timedOut(`ssh ${host}`);
   if (r.code === 255) return { reachable: false, detail: `ssh ${host}: ${(r.stderr.trim().split("\n").pop() ?? "").slice(0, 160)}` };
   if (r.code === 127) return { installed: false, detail: `${bin[0]} is not on ${host}'s login PATH` };
   const { version, rest } = splitVersion(r.stdout);
