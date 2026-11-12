@@ -123,7 +123,7 @@ Retention is counted, not dated, so a machine that was off for a week does not t
 - the first snapshot of each of the newest `weekly` ISO weeks,
 - the first snapshot of each of the newest `monthly` months,
 
-and deletes the rest, archive and sidecar together. One snapshot can satisfy more than one slot, so the default keeps at most 7 snapshots per app. Every snapshot is a full copy, so an app with a large data directory (pictures, a big database) costs its size times that count in the bucket; such an app should set a smaller `keep` (for example `{ daily: 2, weekly: 1, monthly: 1 }`). A snapshot that failed verification never fills a slot and is dropped, unless it is the only one left.
+and deletes the rest, archive and sidecar together. One snapshot can satisfy more than one slot, so the default keeps at most 7 snapshots per app. Every snapshot is a full copy, so an app with a large data directory (pictures, a big database) costs its size times that count in the bucket; such an app should set a smaller `keep` (for example `{ daily: 2, weekly: 1, monthly: 1 }`). A snapshot that failed verification never fills a slot and is dropped, unless it is the only one left. When a run cannot find the app's manifest while some `space.yaml` in the workspace fails to parse (it may be this app's, half-edited), the snapshot is taken with the default spec but nothing is pruned, so a temporarily broken file never costs snapshots the app's own `keep` would have held.
 
 The task is a `command` target, so the scheduler's timeout (`SPACE_BACKUP_TIMEOUT_MIN`, default 30), backoff and concurrency limit apply. A backup that overruns is killed; the next run removes what it left in staging. `SPACE_NOTIFY_TASKS` alerts after three failures in a row, as for every task.
 
@@ -155,7 +155,7 @@ bun src/index.ts restore <app> [--at <time>] --in-place [--stopped]
 
 1. Stops the app through `SPACE_SERVICE_STOP` when that is configured; otherwise the operator stops it and passes `--stopped`.
 2. Moves the current directory to `<workspace>/data/<app>.pre-restore-<stamp>/`, which ai-space never deletes.
-3. Unpacks, and keeps the current `space.env` (it is regenerated on the next sync anyway).
+3. Unpacks, and keeps the current `space.env` (it is regenerated on the next sync anyway). When the snapshot holds no blobs (they are opt-in), the current `blobs/` directory is moved back from the aside directory into the restored one, so a filesystem blob store is not left behind.
 4. Prints the start step. Starting is the operator's, because ai-space does not own the unit.
 
 A postgres dump is unpacked, not loaded; the command prints the `pg_restore` line to run. `space` refuses `--in-place`: its snapshot holds only `space.db`, which is copied by hand while ai-space is stopped.

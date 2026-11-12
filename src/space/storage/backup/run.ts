@@ -31,6 +31,8 @@ export type BackupJob = {
   shallow?: boolean;
   postgres?: { name: string; url: string }[];
   blobUrl?: string;
+  /** false skips retention after the upload: the spec is a fallback, not the app's declared `keep:`. */
+  prune?: boolean;
 };
 
 export type BackupResult = {
@@ -75,7 +77,8 @@ export async function runBackup(deps: BackupDeps, job: BackupJob): Promise<Backu
     const durationMs = Date.now() - started;
     await deps.store.record({ app: job.app, key, at: now.getTime(), bytes: archive.bytes, sha256: archive.sha256, status: "ok", durationMs, entries: manifest.entries.length });
 
-    const pruned = await pruneApp(deps, job.app, job.spec.keep);
+    const pruned = job.prune === false ? [] : await pruneApp(deps, job.app, job.spec.keep);
+    if (job.prune === false) log(`${job.app}: retention skipped`);
     if (pruned.length) log(`${job.app}: pruned ${pruned.length} old snapshot(s)`);
     return { key, at: manifest.at, bytes: archive.bytes, sha256: archive.sha256, entries: manifest.entries.length, durationMs, skipped: manifest.skipped, pruned };
   } catch (e) {

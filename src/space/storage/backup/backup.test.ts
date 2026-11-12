@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { type Workspace, ensureWorkspace } from "../../workspace.ts";
 import { type Db, openDatabase, sqliteUrl } from "../db.ts";
+import { StorageService } from "../storage.ts";
 import { createBackupRoutes } from "./api.ts";
+import { jobFor } from "./cli.ts";
 import { listSnapshots, readSidecar } from "./catalog.ts";
 import { restoreSnapshot } from "./restore.ts";
 import { type BackupDeps, pruneApp, runBackup, stagingRoot } from "./run.ts";
@@ -216,6 +218,32 @@ describe("retention in the target", () => {
     expect((await deps.store.list("keep")).map((r) => r.key)).toEqual(["keep/2026-09-04T03-00-00Z.tar.zst", "keep/2026-09-03T03-00-00Z.tar.zst"]);
     expect(await pruneApp(deps, "keep", spec.keep)).toEqual([]);
   });
+
+  test("an unreadable space.yaml keeps every snapshot instead of pruning by the default", async () => {
+    await seedApp("keep");
+    const appDir = join(ws.apps, "keep");
+    await Bun.write(join(appDir, "space.yaml"), "name: keep\nbackup:\n  keep: { daily: 10, weekly: 0, monthly: 0 }\n");
+    const storage = await StorageService.open({ ws, db, log: () => {} });
+    const ctx = { ws, storage, appDirs: async () => [appDir] };
+    for (let i = 0; i < 5; i++) {
+      clock = new Date(Date.UTC(2026, 8, 1 + i, 3));
+      await runBackup(deps, await jobFor("keep", ctx));
+    }
+    expect(await listSnapshots(deps.target, "keep")).toHaveLength(5);
+
+    // Mid-edit: the manifest does not parse. The default keeps 3 dailies; this run must not apply it.
+    await Bun.write(join(appDir, "space.yaml"), "name: keep\nbackup: [unclosed\n");
+    const job = await jobFor("keep", ctx);
+    expect(job.prune).toBe(false);
+    clock = new Date(Date.UTC(2026, 8, 6, 3));
+    const r = await runBackup(deps, job);
+    expect(r.pruned).toEqual([]);
+    expect(await listSnapshots(deps.target, "keep")).toHaveLength(6);
+
+    // A directory without any manifest is not a reason to hold back.
+    const plain = await jobFor("keep", { ...ctx, appDirs: async () => [join(ws.apps, "elsewhere")] });
+    expect(plain.prune).toBeUndefined();
+  });
 });
 
 describe("verify", () => {
@@ -295,6 +323,17 @@ describe("restore", () => {
     await expect(restoreSnapshot(deps, { app: "keep", to: out, at: "2026-01-01T00:00:00Z" })).rejects.toThrow(/no snapshot of keep at 2026-01-01T00-00-00Z/);
   });
 
+  test("--in-place restores blobs from a snapshot that includes them", async () => {
+    const dataDir = await seedApp("keep");
+    await runBackup(deps, { app: "keep", dataDir, spec: parseBackupSpec({ include: ["databases", "files", "blobs"] }) });
+    await Bun.write(join(dataDir, "blobs", "img", "x.png"), "changed");
+    await Bun.write(join(dataDir, "blobs", "new.png"), "new");
+    const r = await restoreSnapshot(deps, { app: "keep", inPlace: true, stopped: true });
+    expect(await Bun.file(join(dataDir, "blobs", "img", "x.png")).text()).toBe("png");
+    expect(await Bun.file(join(dataDir, "blobs", "new.png")).exists()).toBe(false);
+    expect(await Bun.file(join(r.asideDir!, "blobs", "new.png")).text()).toBe("new");
+  });
+
   test("--in-place moves the current data aside, keeps space.env, and refuses without a stop", async () => {
     const dataDir = await seedApp("keep");
     await runBackup(deps, { app: "keep", dataDir, spec: parseBackupSpec(undefined) });
@@ -309,6 +348,9 @@ describe("restore", () => {
     expect(await Bun.file(join(dataDir, "watchlist.json")).text()).toBe('{"a":1}');
     expect(await Bun.file(join(dataDir, "space.env")).text()).toBe("SPACE_APP=x\n");
     expect(await Bun.file(join(r.asideDir!, "watchlist.json")).text()).toBe('{"a":"changed"}');
+    // blobs/ is not in the default snapshot, so the current store comes back with the restored data.
+    expect(await Bun.file(join(dataDir, "blobs", "img", "x.png")).text()).toBe("png");
+    expect(await Bun.file(join(r.asideDir!, "blobs", "img", "x.png")).exists()).toBe(false);
     await expect(restoreSnapshot(deps, { app: SPACE_APP, inPlace: true, stopped: true })).rejects.toThrow(/--to/);
   });
 });

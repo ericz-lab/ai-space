@@ -162,7 +162,7 @@ export class StorageService {
       if (current && current.backend !== d.backend) {
         throw new Error(`storage: database ${app}/${d.name} is ${current.backend}; changing to ${d.backend} is not supported by sync`);
       }
-      const { url, createdPath } = await this.provision(app, d);
+      const { url, createdPath } = await this.provision(app, d, current?.url);
       if (createdPath) created.push(createdPath);
       await this.upsert({ app, name: d.name, backend: d.backend, url, source: "manifest", orphaned: false }, current);
     }
@@ -275,40 +275,57 @@ export class StorageService {
     return rows[0]?.app;
   }
 
-  private async provision(app: string, d: DatabaseSpec): Promise<{ url: string; createdPath?: string }> {
+  private async provision(app: string, d: DatabaseSpec, recordedUrl?: string): Promise<{ url: string; createdPath?: string }> {
     if (d.backend === "sqlite") {
       const path = join(this.appDataDir(app), `${d.name}.db`);
       const fresh = !(await Bun.file(path).exists());
       if (fresh) new Database(path, { create: true }).close();
       return { url: sqliteUrl(path), createdPath: fresh ? path : undefined };
     }
-    return { url: await this.provisionPostgres(app, d.name) };
+    return { url: await this.provisionPostgres(app, d.name, recordedUrl) };
   }
 
-  private async provisionPostgres(app: string, name: string): Promise<string> {
+  /**
+   * Create the app's role and database, or confirm them. The password of an existing role
+   * is kept when the recorded URL still logs in: resetting it on every sync would break the
+   * next connection of an app that is already running with the old URL. A new password is
+   * set only for a new role, or when nothing usable is recorded.
+   */
+  private async provisionPostgres(app: string, name: string, recordedUrl?: string): Promise<string> {
     if (!this.pgAdminUrl) throw new Error(`storage: ${app}/${name} needs postgres but SPACE_PG_ADMIN_URL is not set`);
     const ident = `${app}_${name}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").slice(0, 63);
-    const password = randomPassword();
+    const a = new URL(this.pgAdminUrl);
+    const urlWith = (password: string) =>
+      `postgres://${encodeURIComponent(ident)}:${encodeURIComponent(password)}@${a.hostname}${a.port ? `:${a.port}` : ""}/${ident}`;
     const admin = new SQL(this.pgAdminUrl);
+    let password: string;
     try {
       const role = await admin`SELECT 1 FROM pg_roles WHERE rolname = ${ident}`;
       if (role.length === 0) {
+        password = randomPassword();
         await admin.unsafe(`CREATE ROLE "${ident}" LOGIN PASSWORD '${password}'`);
         this.log(`[storage] created postgres role ${ident}`);
-      } else {
-        // The password is only known through the inventory; re-provisioning means we lost it.
-        await admin.unsafe(`ALTER ROLE "${ident}" PASSWORD '${password}'`);
       }
       const dbs = await admin`SELECT 1 FROM pg_database WHERE datname = ${ident}`;
       if (dbs.length === 0) {
         await admin.unsafe(`CREATE DATABASE "${ident}" OWNER "${ident}"`);
         this.log(`[storage] created postgres database ${ident}`);
       }
+      if (role.length > 0) {
+        const recorded = recordedPassword(recordedUrl, ident);
+        if (recorded !== undefined && (await canConnect(urlWith(recorded)))) {
+          password = recorded;
+        } else {
+          // The recorded password is missing or no longer logs in; the inventory is the only place it lives.
+          password = randomPassword();
+          await admin.unsafe(`ALTER ROLE "${ident}" PASSWORD '${password}'`);
+          this.log(`[storage] reset the password of postgres role ${ident}`);
+        }
+      }
     } finally {
       await admin.close();
     }
-    const a = new URL(this.pgAdminUrl);
-    return `postgres://${encodeURIComponent(ident)}:${encodeURIComponent(password)}@${a.hostname}${a.port ? `:${a.port}` : ""}/${ident}`;
+    return urlWith(password!);
   }
 
   /**
@@ -371,7 +388,8 @@ export class StorageService {
   private async upsert(d: Omit<ProvisionedDatabase, "createdAt" | "updatedAt">, current: ProvisionedDatabase | undefined): Promise<void> {
     const now = Date.now();
     if (current) {
-      // Keep the URL of an existing database unless the backend re-provisioned it (postgres password rotation).
+      // Keep the URL of an existing database unless the backend re-provisioned it (a postgres
+      // password reset, or a new host in SPACE_PG_ADMIN_URL).
       const url = current.backend === "postgres" ? d.url : current.url;
       await this.db.sql`UPDATE storage_databases SET url = ${url}, source = ${d.source}, orphaned = ${false}, updated_at = ${now} WHERE app = ${d.app} AND name = ${d.name}`;
       return;
@@ -478,6 +496,31 @@ function fromBlobRow(r: BlobRow): ProvisionedBlobStore {
 
 function assertName(v: string, what: string): void {
   if (!NAME_PATTERN.test(v)) throw new Error(`invalid ${what}: ${v}`);
+}
+
+/** The password in a recorded postgres URL, when it belongs to `role`. */
+function recordedPassword(url: string | undefined, role: string): string | undefined {
+  if (!url) return undefined;
+  try {
+    const u = new URL(url);
+    if (decodeURIComponent(u.username) !== role || !u.password) return undefined;
+    return decodeURIComponent(u.password);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether `url` logs in right now. */
+async function canConnect(url: string): Promise<boolean> {
+  const sql = new SQL(url, { max: 1, connectionTimeout: 5 });
+  try {
+    await sql`SELECT 1`;
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await sql.close().catch(() => {});
+  }
 }
 
 function randomPassword(): string {
