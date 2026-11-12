@@ -156,7 +156,7 @@ export class PackageLifecycle {
   private reserve(id: string, app: string, kind: Change["kind"], next?: string): Change {
     installationKey(id, app);
     return this.store.db.transaction(() => {
-      const old = this.store.list().find((o) => o.app === app && o.state === "installed");
+      const old = this.store.installed(app);
       if (!old) throw new Error(`no installed package: ${app}`);
       const now = Date.now();
       this.store.db.query("INSERT INTO package_changes(id,app,kind,old_id,new_id,state,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?)").run(id, app, kind, old.id, next ?? null, now, now);

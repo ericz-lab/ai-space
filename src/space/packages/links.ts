@@ -105,10 +105,11 @@ export class PackageLinks {
     const m = mapping(meta, "request", ["operation", "app", "path", "method", "headers"]);
     if (m.operation === "catalogue") return Response.json({ spaceId: this.connections.spaceId, ...(this.options.name ? { name: this.options.name } : {}), apps: this.options.apps().filter((a) => this.connections.allows(id, a.app)) });
     if (typeof m.app !== "string" || !this.connections.allows(id, m.app)) return Response.json({ error: "application access denied" }, { status: 403 });
-    if (m.operation === "icon") return (this.options.apps().some((a) => a.app === m.app) && await this.options.icon?.(m.app)) || Response.json({ error: "application has no icon" }, { status: 404 });
-    if (m.operation !== "fetch" && m.operation !== "socket") return Response.json({ error: "operation not allowed" }, { status: 403 });
+    if (m.operation !== "icon" && m.operation !== "fetch" && m.operation !== "socket") return Response.json({ error: "operation not allowed" }, { status: 403 });
     // Only locally owned apps are dispatched. No forwarding to another connection or admin API.
-    if (!this.options.apps().some((a) => a.app === m.app)) return Response.json({ error: "application not found" }, { status: 404 });
+    const owned = this.options.apps().some((a) => a.app === m.app);
+    if (m.operation === "icon") return (owned && await this.options.icon?.(m.app)) || Response.json({ error: "application has no icon" }, { status: 404 });
+    if (!owned) return Response.json({ error: "application not found" }, { status: 404 });
     if (!this.options.handle) return Response.json({ error: "application gateway not available" }, { status: 503 });
     return this.options.handle(c, m, body, signal);
   }

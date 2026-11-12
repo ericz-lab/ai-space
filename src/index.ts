@@ -117,7 +117,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     blockedPackages.add(change.app);
     console.error(`[packages] ${change.app}: interrupted ${change.kind} ${change.id} could not be recovered and the app stays off: ${error}`);
   }
-  for (const operation of packageStore.list().filter((o) => o.state === "installed" && !blockedPackages.has(o.app))) {
+  for (const operation of packageStore.installed().filter((o) => !blockedPackages.has(o.app))) {
     await activatePackage(operation.app).catch((e) => console.error(`[packages] ${operation.app}: ${(e as Error).message}`));
   }
   const packageConnections = new Connections(store.db, packageStore.spaceId);
@@ -126,7 +126,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     env,
     name: config.name,
     handle: (_connection, meta, body, signal) => packageGateway.local(meta, body, signal),
-    apps: () => packageStore.list().filter((o) => o.state === "installed" && packageRuntime.get(o.app)).map((o) => {
+    apps: () => packageStore.installed().filter((o) => packageRuntime.get(o.app)).map((o) => {
       const app = packageRuntime.get(o.app)!;
       const icon = sharedIcon(app);
       return { app: o.app, title: app.manifest.title ?? o.app, version: o.version, page: !!app.manifest.launch, ...(icon.text ? { icon: icon.text } : {}), ...(icon.file ? { iconFile: true } : {}) };

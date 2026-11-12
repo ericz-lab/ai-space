@@ -32,7 +32,7 @@ export function createPackagePanelRoutes(opts: Parameters<typeof createPackageRo
     } },
     "/_space/connections/:connection/apps/:app": { GET: entry },
     "/api/panel/package-catalogue": { GET: async () => {
-      const apps = opts.installer.store.list().filter((o) => o.state === "installed").map((o) => {
+      const apps = opts.installer.store.installed().map((o) => {
         const installed = opts.runtime.get(o.app);
         return { app: o.app, title: installed?.manifest.title ?? o.app, version: o.version, operationId: o.id,
           page: !!installed?.manifest.launch, state: opts.runtime.status(o.app)?.state ?? "unavailable",
