@@ -1,7 +1,7 @@
 import type { AgentView, AppView, ServiceView } from "../panel/view.ts";
 import type { WidgetView } from "../panel/widgets.ts";
 import type { AppCapabilities } from "../bus/bus.ts";
-import { PeerClient, type PeerClientOptions, type PeerStatus } from "./client.ts";
+import { PeerClient, type PeerClientOptions, type PeerHealth, type PeerStatus } from "./client.ts";
 import type { PeerConfig } from "./config.ts";
 import { mergeAgents, mergeApps, mergeServices, mergeWidgets } from "./merge.ts";
 
@@ -85,9 +85,12 @@ export class PeerHub {
     return this.collect((c) => mergeServices(c.name, c.snapshot!, hidden, c.health() !== "ok"));
   }
 
-  /** The peers' catalogues, each app under `<peer>/<app>` and marked with its peer. */
-  capabilities(): (AppCapabilities & { peer: string })[] {
-    return this.collect((c) => c.snapshot!.capabilities.map((a) => ({ ...a, app: `${c.name}/${a.app}`, peer: c.name })));
+  /** The peers' catalogues, each app under `<peer>/<app>` and marked with its peer, the peer's health and its snapshot's time. */
+  capabilities(): (AppCapabilities & { peer: string; health: PeerHealth; asOf: string })[] {
+    return this.collect((c) => {
+      const health = c.health();
+      return c.snapshot!.capabilities.map((a) => ({ ...a, app: `${c.name}/${a.app}`, peer: c.name, health, asOf: c.snapshot!.asOf }));
+    });
   }
 
   /** The peer whose snapshot lists the app as a provider (and of the capability, when given); several = ambiguous, none = undefined. */
