@@ -1,0 +1,4 @@
+// The Apple team that signs device builds is personal, so it is not in the repository:
+// put `DEVELOPMENT_TEAM = <your team id>` in Local.xcconfig next to this file (git-ignored).
+// Without it the Simulator still builds; scripts/device.sh picks a team on its own.
+#include? "Local.xcconfig"

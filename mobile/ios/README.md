@@ -100,7 +100,7 @@ The Simulator build and launch were checked with Xcode 27 and the iOS 27 runtime
 bun run ios:device   # build, renew the development profile, install over the copy on the phone, launch
 ```
 
-`scripts/device.sh` builds the Debug configuration for the first paired iPhone (`AISPACE_DEVICE=<udid>` picks another) with automatic signing for the first team signed in to Xcode (`AISPACE_TEAM` overrides it; the project leaves `DEVELOPMENT_TEAM` empty), lets `xcodebuild` create or renew the profiles (`-allowProvisioningUpdates`), and installs with `devicectl` over the app already there. The bundle id and team stay the same, so the app keeps its saved Spaces, sign-ins and screens; deleting the app first is never needed.
+`scripts/device.sh` builds the Debug configuration for the first paired iPhone (`AISPACE_DEVICE=<udid>` picks another) with automatic signing for the first team signed in to Xcode (`AISPACE_TEAM` overrides it; the repository carries no team), lets `xcodebuild` create or renew the profiles (`-allowProvisioningUpdates`), and installs with `devicectl` over the app already there. The bundle id and team stay the same, so the app keeps its saved Spaces, sign-ins and screens; deleting the app first is never needed.
 
 A free (Personal Team) profile lasts 7 days, after which iOS refuses to open the app. Xcode keeps using its cached profile until it has expired, so the script removes the app's and the Share Extension's cached profiles when less than two days are left, and the build fetches new ones. Run daily, it keeps the app working without a reinstall by hand. A LaunchAgent does that (`AISPACE_NO_LAUNCH=1` installs without opening the app):
 
@@ -317,7 +317,8 @@ Keychain access group `$(AppIdentifierPrefix)dev.ai-space.ios.share`. Do not rep
 prefix with an unprefixed string. `bun run ios:xcode` generates and embeds the extension.
 The ad-hoc Catalyst build does not package the extension or have these sharing entitlements.
 
-With the developer account signed in to Xcode:
+With the developer account signed in to Xcode. The team id is per machine and stays out of the repository: put `DEVELOPMENT_TEAM = <your-team-id>` in `mobile/ios/Config/Local.xcconfig` (git-ignored, included by `Config/Signing.xcconfig`), and both Xcode and `xcodebuild` pick it up, so `bun run ios:xcode` no longer loses it. Passing `DEVELOPMENT_TEAM=` on the command line, as below, works as well.
+
 
 ```bash
 xcodebuild -project mobile/ios/AISpace.xcodeproj -scheme AISpace \
