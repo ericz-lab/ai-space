@@ -62,6 +62,14 @@ describe("provides spec", () => {
     expect(cap!.callers).toEqual(["space", "seoul/space"]);
   });
 
+  test("accepts an external consumer in callers", () => {
+    const [cap] = parseProvidesSpec({ stats: { http: { path: "/s" }, callers: ["portfolio", "consumer:hub-sync"] } });
+    expect(cap!.callers).toEqual(["portfolio", "consumer:hub-sync"]);
+    expect(() => parseProvidesSpec({ a: { http: { path: "/x" }, callers: ["consumer:"] } })).toThrow(/callers must be/);
+    expect(() => parseProvidesSpec({ a: { http: { path: "/x" }, callers: ["consumer:hub/x"] } })).toThrow(/callers must be/);
+    expect(() => parseProvidesSpec({ a: { http: { path: "/x" }, callers: ["other:x"] } })).toThrow(/callers must be/);
+  });
+
   test("rejects bad capabilities", () => {
     expect(() => parseProvidesSpec({ "bad name": { http: { path: "/x" } } })).toThrow(/not a capability name/);
     expect(() => parseProvidesSpec({ a: { description: "no http" } })).toThrow(/http is required/);

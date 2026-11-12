@@ -181,7 +181,7 @@ export class BusStore {
       .map(rowToDelivery);
   }
 
-  /** stream deliveries waiting for a consumer of the app, oldest first. */
+  /** stream deliveries waiting for a consumer of the app, oldest first; `limit` is a page size. */
   pendingStream(app: string, limit = 500): Delivery[] {
     return this.db
       .query<DeliveryRow, [string, number]>("SELECT * FROM bus_deliveries WHERE status = 'pending' AND kind = 'stream' AND app = ? ORDER BY id LIMIT ?")
@@ -242,14 +242,18 @@ export class BusStore {
     return r.changes;
   }
 
-  /** Keep at most `max` pending deliveries for the app: the oldest beyond that are skipped. Returns how many. */
+  /**
+   * Keep at most `max` pending stream deliveries for the app or consumer: the oldest beyond that are
+   * skipped, so a stream nobody reads cannot grow the table. Returns how many.
+   */
   trimBacklog(app: string, max: number, now: number): number {
     const r = this.db
       .query(
         `UPDATE bus_deliveries SET status = 'skipped', last_error = 'backlog over ${Math.floor(max)} deliveries', ended_at = ?, next_at = NULL
-           WHERE app = ? AND status = 'pending' AND id NOT IN (SELECT id FROM bus_deliveries WHERE app = ? AND status = 'pending' ORDER BY id DESC LIMIT ?)`,
+           WHERE app = ? AND status = 'pending' AND kind = 'stream'
+             AND id < (SELECT id FROM bus_deliveries WHERE app = ? AND status = 'pending' AND kind = 'stream' ORDER BY id DESC LIMIT 1 OFFSET ?)`,
       )
-      .run(now, app, app, max);
+      .run(now, app, app, Math.max(0, Math.floor(max) - 1));
     return r.changes;
   }
 

@@ -13,7 +13,7 @@ import {
   type EventPublication,
   type EventsSpec,
   MAX_ATTEMPTS,
-  MAX_CONSUMER_BACKLOG,
+  MAX_STREAM_BACKLOG,
   RETRY_DELAYS_MS,
   consumerKey,
   deliveryPayload,
@@ -211,17 +211,16 @@ export class Bus {
         targets.add(key);
         const d = this.store.addDelivery({ eventId: event.id, event: event.name, app, kind: c.kind, ...(c.kind === "http" ? { method: c.method, path: c.path } : {}), createdAt: now });
         created.push(d);
-        if (c.kind === "stream") this.push(d, event);
-        else kick = true;
+        if (c.kind === "stream") {
+          if (!this.push(d, event)) this.trimStream(app, now);
+        } else kick = true;
       }
     }
     for (const [key, subs] of this.consumers) {
       if (!subs.some((c) => matches({ event: c.event, ...(c.filter ? { filter: c.filter } : {}) }, event))) continue;
       const d = this.store.addDelivery({ eventId: event.id, event: event.name, app: key, kind: "stream", createdAt: now });
       created.push(d);
-      this.push(d, event);
-      const dropped = this.store.trimBacklog(key, MAX_CONSUMER_BACKLOG, now);
-      if (dropped) this.log(`${key}: backlog over ${MAX_CONSUMER_BACKLOG}, ${dropped} oldest skipped`);
+      if (!this.push(d, event)) this.trimStream(key, now);
     }
     if (created.length) this.log(`event ${event.name} #${event.id}: ${created.map((d) => `${d.app} (${d.kind})`).join(", ")}`);
     if (kick && this.started) void this.tick();
@@ -249,7 +248,7 @@ export class Bus {
       }
       c.add(close);
     }
-    for (const d of this.store.pendingStream(app)) this.push(d);
+    this.pushBacklog(app);
     return () => {
       const s = this.listeners.get(app);
       s?.delete(listener);
@@ -289,6 +288,25 @@ export class Bus {
     this.store.patchDelivery(id, { status: "ok", endedAt: now, nextAt: undefined });
     this.armTimer();
     return this.store.getDelivery(id);
+  }
+
+  /**
+   * Push everything pending for the app, oldest first, page by page until nothing is left: a delivery
+   * left pending here would arrive after the newer ones pushed live, or only on the next connection.
+   */
+  private pushBacklog(app: string): void {
+    for (;;) {
+      if (!this.listeners.get(app)?.size) return;
+      const page = this.store.pendingStream(app);
+      if (!page.length) return;
+      // Every push moves its row out of `pending` (sent, or skipped for a pruned event), so the next page is new.
+      for (const d of page) this.push(d);
+    }
+  }
+
+  private trimStream(app: string, now: number): void {
+    const dropped = this.store.trimBacklog(app, MAX_STREAM_BACKLOG, now);
+    if (dropped) this.log(`${app}: stream backlog over ${MAX_STREAM_BACKLOG}, ${dropped} oldest skipped`);
   }
 
   private push(d: Delivery, event?: SpaceEvent): boolean {

@@ -9,7 +9,7 @@ import { createBusRoutes } from "./api.ts";
 import { Bus } from "./bus.ts";
 import { ConsumerError, Consumers, hashToken, parseConsumerInput } from "./consumers.ts";
 import { BusStore } from "./store.ts";
-import { ACK_TIMEOUT_MS, type DeliveryPayload, MAX_CONSUMER_BACKLOG } from "./types.ts";
+import { ACK_TIMEOUT_MS, type DeliveryPayload, MAX_STREAM_BACKLOG } from "./types.ts";
 
 /**
  * External consumers: the operator-made credential, its subscriptions and
@@ -156,9 +156,9 @@ describe("consumers on the bus", () => {
   test("an abandoned consumer's backlog is capped", () => {
     const h = harness();
     h.consumers.create(parseConsumerInput({ name: "idle", subscriptions: ["asset-center/*"] }));
-    for (let i = 0; i < MAX_CONSUMER_BACKLOG + 3; i++) h.publish("asset-center", "tick", { i });
+    for (let i = 0; i < MAX_STREAM_BACKLOG + 3; i++) h.publish("asset-center", "tick", { i });
     const counts = h.store.countDeliveries("consumer:idle");
-    expect(counts.pending).toBe(MAX_CONSUMER_BACKLOG);
+    expect(counts.pending).toBe(MAX_STREAM_BACKLOG);
     expect(counts.skipped).toBe(3);
     h.close();
     // Thousands of deliveries: about 2 s on a laptop, 6 s on a CI runner.
