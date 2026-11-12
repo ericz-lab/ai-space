@@ -6,7 +6,7 @@ import { Store } from "../scheduler/store.ts";
 import type { Run as TaskRun, Task } from "../scheduler/types.ts";
 import { createShortcutRoutes } from "./api.ts";
 import { intents } from "./resolve.ts";
-import { Shortcuts, normalize } from "./service.ts";
+import { INTERRUPTED, Shortcuts, normalize } from "./service.ts";
 import { ShortcutStore } from "./store.ts";
 
 const NOW = Date.parse("2026-10-16T23:30:00Z");
@@ -75,7 +75,7 @@ function harness(answer: Answer, opts: { tasks?: Task[]; runs?: TaskRun[]; rates
     listRuns: (id: string) => (opts.runs ?? []).filter((r) => r.taskId === id),
   };
   const shortcuts = new Shortcuts({ store, bus, scheduler, now: () => NOW, waitMs: 2_000 });
-  return { shortcuts, seen, started, tasks, store, close: () => (store.close(), busStore.close(), events.close()) };
+  return { shortcuts, seen, started, tasks, store, bus, scheduler, close: () => (store.close(), busStore.close(), events.close()) };
 }
 
 const ok = (j: unknown) => Response.json(j);
@@ -250,6 +250,33 @@ describe("runs", () => {
       expect(receipt.run.status).toBe("error");
       expect(receipt.run.error).toContain("no items");
       await expect(h.shortcuts.start({ action: "space/calendar", args: {} })).rejects.toThrow(/not configured/);
+    } finally {
+      h.close();
+    }
+  });
+
+  test("runs a previous process left running end at startup, and can be retried", async () => {
+    const task = { id: "t1", app: "daily", name: "report", state: { runningAt: NOW } } as unknown as Task;
+    const h = harness(() => ok({ ok: true, items: [{ id: 7, title: "Report" }] }), { tasks: [task] });
+    try {
+      const base = { args: {}, resolved: {}, timezone: TZ, createdAt: NOW };
+      const read = h.store.addRun({ ...base, requestId: "stale-read1", action: "feed/news", title: "News", effect: "read" })!;
+      const write = h.store.addRun({ ...base, requestId: "stale-write1", action: "todo/create", title: "Create todo", effect: "write", resolved: { title: "Report" }, idempotencyKey: "k1" })!;
+      const taskRun = h.store.addRun({ ...base, requestId: "stale-task1", action: "space/run-task", title: "Run task", effect: "run" })!;
+      h.store.patchRun(taskRun.id, { taskId: "t1", taskStartedAt: NOW });
+      // Running as far as the store knows, with nobody executing them: a retry is refused.
+      await expect(h.shortcuts.retry(read.id)).rejects.toThrow(/still running/);
+
+      // The next process.
+      const next = new Shortcuts({ store: h.store, bus: h.bus, scheduler: h.scheduler, now: () => NOW + 1_000 });
+      expect(next.getRun(read.id)).toMatchObject({ status: "error", error: INTERRUPTED, endedAt: NOW + 1_000 });
+      // A write may have happened: unknown, and retried only because the provider is idempotent.
+      expect(next.getRun(write.id)).toMatchObject({ status: "unknown", error: INTERRUPTED });
+      // A task run keeps following the scheduler.
+      expect(next.getRun(taskRun.id)!.status).toBe("running");
+
+      expect((await next.retry(read.id)).status).toBe("ok");
+      expect((await next.retry(write.id)).status).toBe("ok");
     } finally {
       h.close();
     }

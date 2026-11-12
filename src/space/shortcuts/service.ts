@@ -25,6 +25,8 @@ import { type Action, type ActionInput, type ActionSpec, MAX_ITEMS, type ListIte
 
 /** The caller name the bus records for the operator's own calls. */
 export const OPERATOR = "space";
+/** The error of a run the previous process never finished. */
+export const INTERRUPTED = "interrupted: Space restarted while the run was in progress";
 /** How long the starting request waits for a run before answering it as still running. */
 export const WAIT_MS = 8_000;
 /** How long a rates answer is reused for conversions; the answer's own `asOf` is shown either way. */
@@ -90,6 +92,9 @@ export class Shortcuts {
     this.now = opts.now ?? Date.now;
     this.waitMs = opts.waitMs ?? WAIT_MS;
     this.rates = opts.rates ?? RATES;
+    // A new process has nothing in flight: a run still marked running was cut off by the last one.
+    const stale = this.store.interruptRunning(INTERRUPTED, this.now());
+    if (stale) this.opts.log?.(`shortcuts: ${stale} run(s) interrupted by a restart`);
   }
 
   // ---------------------------------------------------------------- catalogue
