@@ -71,7 +71,7 @@ struct PetRulesTests {
     @Test func speedFollowsTheSizeSoTheFeetStayPlanted() {
         let r = FixedRandom([0])
         #expect(PetMotion(width: 80, stage: 500, now: 0, random: r.next).speed == 55)
-        #expect(PetMotion(width: 110, stage: 500, now: 0, random: r.next).speed == 55 * 110 / 80)
+        #expect(PetMotion(width: 110, stage: 500, now: 0, random: r.next).speed == 55.0 * 110 / 80)
     }
 
     @Test func doneSpinsOnceThenRests() {
