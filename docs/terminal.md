@@ -104,10 +104,23 @@ What the terminal does not do: it does not run as another user, does not confine
 - **Passphrase**: a field appears when the machine says one is required or the one given was wrong; the entry is kept in memory for the page.
 - **Terminal**: xterm.js with the fit addon; the shell is resized whenever the pane is. Light and dark themes follow the panel's.
 - A footer line says where the shell runs and what is recorded.
+- **On a phone** (a touch screen or a window under 640px) a row of keys sits under the terminal (Keys on a phone, below). A key cancels its `pointerdown` and `mousedown`, so xterm keeps the focus and the soft keyboard stays up, and goes out through `term.input`, the path typing takes. The full-screen panel follows the visual viewport (`--term-vh`, `--term-top`), so the row sits on the keyboard in iOS Safari and in Android Chrome alike, and the shell is told the rows that can be seen; with the keyboard up the footer line gives way.
+
+## Keys on a phone
+
+A phone's soft keyboard has no Esc, Tab, arrows or page keys, and Claude Code needs them: ↑↓ and Enter (or a number) in its choices, Esc to cancel, Shift+Tab to switch the permission mode, Ctrl+C to interrupt. The iPhone and Android clients and the panel in a phone browser show the same row of keys above the keyboard, from one table kept three times: `src/web/terminal-keys.ts`, `mobile/ios/AISpace/Core/TerminalKeys.swift` and `mobile/android/.../core/TerminalKeys.kt`, each with the same tests. Change the three together.
+
+- **Scrolling part**, in this order: Esc, Tab, ⇧Tab, Ctrl, Alt, ^C, PgUp, PgDn, Home, End, `~ | / -`, F1–F10. **Fixed at the right**: ← ↓ ↑ → (held, they repeat after 400 ms every 70 ms) and a key that hides the keyboard.
+- **Bytes**: Esc `1b`, Tab `09`, ⇧Tab `1b 5b 5a`, ^C `03`, PgUp `1b 5b 35 7e`, PgDn `1b 5b 36 7e`, F1–F4 `ESC O P`…`S`, F5–F10 `ESC [ 15 ~`…`21 ~`. The arrows, Home and End send `ESC [ x`, or `ESC O x` while the program has turned on application cursor mode.
+- **Ctrl and Alt are sticky**: a tap arms one for the next key, from the row or the keyboard, and the key spends it. On a key of the row they become xterm's modifier parameter (Ctrl+← is `ESC [ 1 ; 5 D`, Alt+PgUp `ESC [ 5 ; 3 ~`); on a character Ctrl gives its control code (Termux's rules: letters, `space 2 [ 3 \ 4 ] 5 ^ 6 _ 7 / 8`) and Alt puts an Escape before it. The iPhone keeps them in SwiftTerm's own `controlModifier` and `metaModifier`, the Android client in its `StickyModifiers`, the panel in a flag its `onData` reads.
+- A key acts when it is let go, so a swipe along the row scrolls it without typing; an arrow acts on the press.
+- The keys only send bytes; nothing on the server knows about them.
 
 ## Native clients
 
-The iPhone client draws the terminal itself (mobile/ios/README.md): SwiftTerm in place of xterm.js, over the same routes and frames. It is not a browser, so it sends what a same-origin page would: the access layer's cookie from its own web session and the Space's origin as `Origin`, on the ticket request and on the socket. Nothing on the server is particular to it.
+The iPhone client draws the terminal itself (mobile/ios/README.md): SwiftTerm in place of xterm.js, over the same routes and frames. It is not a browser, so it sends what a same-origin page would: the access layer's cookie from its own web session and the Space's origin as `Origin`, on the ticket request and on the socket. Nothing on the server is particular to it. Its key row (`Views/TerminalKeyRow.swift`) replaces SwiftTerm's own accessory through `TerminalView.inputAccessoryView`.
+
+The Android client (mobile/android/README.md) does the same with Termux's emulator and view; its key row is in `terminal/TerminalSurface.kt`.
 
 ## Routes
 
@@ -127,6 +140,7 @@ src/space/terminal/   config.ts (SPACE_TERMINAL_*, the environment strip), pty.t
                       pty_helper.py, service.ts (tickets, sessions, cap, idle sweep, passphrase lockout), store.ts (audit rows),
                       api.ts (routes, the websocket handler, the hub bridge; the same-origin check is in src/space/auth.ts), terminal.test.ts
 src/web/Terminal.tsx  the panel (xterm.js, tabs, machine picker, passphrase, history)
+src/web/TerminalKeyRow.tsx, terminal-keys.ts   the key row on a phone and its table (Keys on a phone)
 ```
 
 ## Failure modes considered
