@@ -1,4 +1,5 @@
 import Adw from "gi://Adw?version=1";
+import Gdk from "gi://Gdk?version=4.0";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import GObject from "gi://GObject";
@@ -8,6 +9,7 @@ import { type Agent, type Entry, pageUrl, pickText } from "../core/catalogue.ts"
 import type { DeepLink, InboxItem } from "../core/desktop.ts";
 import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
+import { type PetOpen, shownMood } from "../core/pet.ts";
 import { sameOrigin } from "../core/url.ts";
 import { ChatPage } from "./chat-page.ts";
 import { lang, openExternally, prefs, savePrefs, t } from "./env.ts";
@@ -15,6 +17,7 @@ import { type Builtin, HomePage } from "./home.ts";
 import { InboxPage } from "./inbox.ts";
 import type { LocalManager } from "./local-manager.ts";
 import type { AppModel, Space } from "./model.ts";
+import { WindowPet, desktopPetAvailable, petInWindow } from "./pet.ts";
 import { showSettings } from "./settings.ts";
 import { WebTabs } from "./tabs.ts";
 import { TerminalPage } from "./terminal.ts";
@@ -24,7 +27,8 @@ import { WelcomePage } from "./welcome.ts";
  * The main window: Home, Chat, Inbox, Terminal and the open Pages as views switched from the
  * header (from a bar at the bottom on a narrow window), the Space menu at the start of the
  * header, and a banner when the Space needs a sign-in, cannot be reached or shows what was last
- * known. Before any Space is saved it shows the welcome screen instead.
+ * known. Before any Space is saved it shows the welcome screen instead. The desk pet walks along
+ * the bottom of Home (pet.ts) unless it was put on the desktop or turned off.
  */
 
 export type View = "home" | "chat" | "inbox" | "terminal" | "pages";
@@ -36,6 +40,7 @@ export class MainWindow {
   readonly inbox: InboxPage;
   readonly terminal: TerminalPage;
   readonly tabs: WebTabs;
+  readonly pet: WindowPet;
   private readonly stack: any;
   private readonly root: any;
   private readonly banner: any;
@@ -87,12 +92,35 @@ export class MainWindow {
     };
     this.tabs.detach = (page) => this.detachTab(page);
 
+    // The desk pet over Home; Settings › General and its own menu move it or hide it (app.pet-sync).
+    const petSync = () => this.app.lookup_action("pet-sync")?.activate(null);
+    this.pet = new WindowPet({
+      open: (open) => this.openPet(open),
+      ...(desktopPetAvailable()
+        ? {
+            toDesktop: () => {
+              prefs.petPlace = "desktop";
+              savePrefs();
+              petSync();
+            },
+          }
+        : {}),
+      hide: () => {
+        prefs.noPet = true;
+        savePrefs();
+        petSync();
+      },
+      wanted: petInWindow,
+    });
+    const home = new Gtk.Overlay({ child: this.home.widget });
+    this.pet.attach(home);
+
     // Views
     this.stack = new Adw.ViewStack({ vexpand: true });
     const add = (name: View, child: any, title: string, icon: string) => {
       this.pages[name] = this.stack.add_titled_with_icon(child, name, title, icon);
     };
-    add("home", this.home.widget, t("home"), "go-home-symbolic");
+    add("home", home, t("home"), "go-home-symbolic");
     add("chat", this.chat.widget, t("chat"), "chat-message-new-symbolic");
     add("inbox", this.inbox.widget, t("inbox"), "mail-unread-symbolic");
     add("terminal", this.terminal.widget, t("terminal"), "utilities-terminal-symbolic");
@@ -159,6 +187,12 @@ export class MainWindow {
     this.root = new Gtk.Stack({ transition_type: Gtk.StackTransitionType.CROSSFADE });
     this.root.add_named(toolbar, "main");
     this.window.set_content(this.root);
+
+    // The pet runs only while it can be seen: Home on show, the window open and not minimized.
+    const petActive = () => this.pet.setActive(this.petSeen());
+    this.window.connect("notify::visible", petActive);
+    this.window.connect("realize", () => this.window.get_surface()?.connect("notify::state", petActive));
+    this.root.connect("notify::visible-child-name", petActive);
 
     this.installActions();
     model.on((change, space) => this.onModel(change, space));
@@ -232,6 +266,13 @@ export class MainWindow {
     if (view === "inbox") this.inbox.show(space);
     if (view === "terminal") this.terminal.show(space);
     if (view === "chat") this.chat.view.focus();
+    this.pet.setActive(this.petSeen());
+  }
+
+  private petSeen(): boolean {
+    if (!this.window.get_visible() || this.root.get_visible_child_name() !== "main" || this.stack.get_visible_child_name() !== "home") return false;
+    const state = this.window.get_surface()?.get_state() ?? 0;
+    return !(state & (Gdk.ToplevelState.MINIMIZED | (Gdk.ToplevelState.SUSPENDED ?? 0)));
   }
 
   // The Space shown
@@ -261,10 +302,13 @@ export class MainWindow {
     this.inbox.show(space);
     if (this.stack.get_visible_child_name() === "terminal") this.terminal.show(space);
     this.renderBadge();
+    this.pet.setMood(shownMood(space.mood));
     if (space.state.kind === "connecting" && !space.refreshing) void this.model.refresh(space);
   }
 
   private onModel(change: string, space: Space | undefined): void {
+    if ((change === "mood" && space === this.model.current) || change === "selection") this.pet.setMood(shownMood(this.model.current?.mood));
+    if (change === "mood") return;
     if (change === "connections" || change === "selection") {
       if (change === "selection" || !this.model.current || this.root.get_visible_child_name() === "welcome") this.showSpace();
       else this.renderSpaceMenu();
@@ -409,6 +453,13 @@ export class MainWindow {
     if (item.url) this.openUrl(space, item.url);
     else this.show("inbox");
     this.present();
+  }
+
+  /** A click on the desk pet (here or on the desktop): the chat its mood points at, or the inbox. */
+  openPet(open: PetOpen): void {
+    if (open.kind === "chat") return this.handleLink({ kind: "chat", agent: open.agent });
+    this.present();
+    if (this.model.current) this.show("inbox");
   }
 
   /** `aispace://` links: they may fill in a message but never send one. */

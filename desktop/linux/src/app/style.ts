@@ -72,6 +72,7 @@ ${ICON_SHAPES}
 .run-output { font-size: 0.88em; padding: 8px 12px; }
 .setnote { font-size: 0.92em; }
 .sidebar-heading { font-weight: 700; font-size: 0.85em; margin: 12px 12px 4px; }
+.pet-bubble { font-size: 12px; padding: 4px 9px; border-radius: 10px; background: alpha(@window_bg_color, 0.94); border: 1px solid alpha(@window_fg_color, 0.1); }
 window.quick-chat { background: transparent; }
 .qc-panel { border-radius: 16px; background: alpha(@window_bg_color, 0.96); border: 1px solid alpha(@window_fg_color, 0.1); }
 .qc, .qc-panel { font-size: 13px; }

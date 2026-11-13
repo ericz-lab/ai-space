@@ -100,7 +100,11 @@ final class PetDriver: ObservableObject {
             motion = m
             schedule()
         }
-        if lineChanged { restartBubble() }
+        // A new line shows now, from the start of its six seconds.
+        if lineChanged {
+            bubbleSince = nil
+            restartBubble()
+        }
     }
 
     /// Runs while the pet is on show; stopped, no timer is left.
