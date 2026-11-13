@@ -6,6 +6,8 @@ import { dateTime, fmtDuration, getJson, relTime } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
 import { type Appearance, currentAppearance, luminance, onAppearance } from "./theme.ts";
 import { pollWhileVisible } from "./poll.ts";
+import TerminalKeyRow from "./TerminalKeyRow.tsx";
+import { type Modifiers, NO_MODIFIERS, type TerminalKey, keySequence, typedSequence } from "./terminal-keys.ts";
 
 // Terminal window (a floating panel): shells on this machine and on peer machines, in xterm.js.
 // - Mounted permanently (closing only slides it away) so sessions survive closing the panel.
@@ -14,6 +16,9 @@ import { pollWhileVisible } from "./poll.ts";
 // - Opening a session is two requests: POST for a one-time ticket (same-origin, optional
 //   passphrase header), then the socket with the ticket. The passphrase lives in memory only.
 // - Nothing here decides what runs: the server picks the shell, the directory and the environment.
+// - On a phone a row of the keys a soft keyboard lacks sits under the terminal (TerminalKeyRow.tsx,
+//   terminal-keys.ts). Its keys go through `term.input`, so they reach the socket the way typing
+//   does; its sticky Ctrl and Alt also apply to the next character typed on the keyboard.
 
 type Machine = { name: string; peer?: string; enabled: boolean; health: "ok" | "down" };
 type Recent = { id: string; startedAt: number; endedAt?: number; exitCode?: number | null; reason?: string; agent: string; bytesIn: number; bytesOut: number };
@@ -61,6 +66,10 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
   const [pass, setPass] = useState("");
   const [needPass, setNeedPass] = useState<string | null>(null);
   const [hist, setHist] = useState(false);
+  const [mods, setMods] = useState<Modifiers>(NO_MODIFIERS);
+  const modsRef = useRef(mods);
+  modsRef.current = mods;
+  const panelRef = useRef<HTMLDivElement>(null);
   const passRef = useRef("");
   const counters = useRef<Record<string, number>>({});
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -114,6 +123,30 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // On a phone the soft keyboard covers the page without resizing it (iOS Safari, and Android Chrome
+  // by default): the full-screen panel follows the part that can be seen, so the key row sits on the
+  // keyboard and the shell is told the rows above it. data-kb marks the keyboard as up.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const el = panelRef.current;
+    if (!open || !vv || !el) return;
+    const apply = () => {
+      el.style.setProperty("--term-vh", `${vv.height}px`);
+      el.style.setProperty("--term-top", `${vv.offsetTop}px`);
+      if (window.innerHeight - vv.height > 120) el.dataset.kb = "";
+      else delete el.dataset.kb;
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    return () => {
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+      el.style.removeProperty("--term-vh");
+      el.style.removeProperty("--term-top");
+      delete el.dataset.kb;
+    };
+  }, [open]);
   // Every appearance change (mode, preset, preview) recolors the open terminals in place; the
   // sessions and their scrollback are untouched.
   useEffect(
@@ -184,7 +217,12 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
       if (e.code !== 1000 && e.reason && !CLOSED_REASON[e.reason]) term.write(dim(e.reason));
       load();
     };
-    term.onData((d) => ws.readyState === 1 && ws.send(enc.encode(d)));
+    term.onData((d) => {
+      // A Ctrl or Alt armed on the key row applies to the next character from the keyboard.
+      const { data, spent } = typedSequence(d, modsRef.current);
+      if (spent) disarm();
+      if (ws.readyState === 1) ws.send(enc.encode(data));
+    });
     term.onBinary((d) => ws.readyState === 1 && ws.send(Uint8Array.from(d, (ch) => ch.charCodeAt(0))));
     term.onResize(({ cols, rows }) => ws.readyState === 1 && ws.send(JSON.stringify({ type: "resize", cols, rows })));
   };
@@ -237,6 +275,33 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
     load();
   };
 
+  const disarm = () => {
+    modsRef.current = NO_MODIFIERS;
+    setMods(NO_MODIFIERS);
+  };
+
+  /** A key of the phone's row, for the current tab. */
+  const pressKey = (k: TerminalKey) => {
+    const tab = tabsRef.current.find((x) => x.key === curRef.current);
+    if (!tab) return;
+    if (k.kind.type === "modifier") {
+      const next = { ...modsRef.current, [k.kind.which]: !modsRef.current[k.kind.which] };
+      modsRef.current = next;
+      setMods(next);
+      return;
+    }
+    if (k.kind.type === "hideKeyboard") {
+      tab.term.blur();
+      return;
+    }
+    const m = modsRef.current;
+    // Spent before the input goes out, so onData does not apply them a second time.
+    if (m.ctrl || m.alt) disarm();
+    const seq = keySequence(k, tab.term.modes.applicationCursorKeysMode, m);
+    // As typed input: the view scrolls to the bottom and a selection clears.
+    if (seq) tab.term.input(seq);
+  };
+
   const unlock = () => {
     passRef.current = pass;
     setNeedPass(null);
@@ -250,7 +315,7 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
 
   return (
     <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="term" role="dialog" aria-label={t("term.title")}>
+      <div className="term" role="dialog" aria-label={t("term.title")} ref={panelRef}>
         <div className="task-head">
           <b>{t("term.title")}</b>
           <span className="chat-sub">{status ? `${t("term.openCount", { n: status.sessions.length + tabs.filter((x) => x.machine.peer && x.state === "open").length })}${status.idleMs ? ` · ${t("term.idleAfter", { idle: fmtDuration(status.idleMs, lang) })}` : ""}` : ""}</span>
@@ -350,6 +415,7 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
           {current && current.state === "connecting" && <span className="term-state">{t("term.connecting")}</span>}
         </div>
         <p className="term-note">{t("term.securityNote")}</p>
+        {current && <TerminalKeyRow mods={mods} onKey={pressKey} t={t} />}
       </div>
     </div>
   );
