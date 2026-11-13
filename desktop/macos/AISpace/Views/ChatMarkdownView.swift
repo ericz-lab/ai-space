@@ -45,21 +45,11 @@ private struct MarkdownBlock: View {
                 children
             }
         case .table(let columns):
-            ScrollView(.horizontal) {
-                Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-                    ForEach(node.children) { row in
-                        GridRow(alignment: .top) {
-                            ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
-                                Text(cell(row, index)).fontWeight(row.kind == .tableHeaderRow ? .semibold : .regular)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(minWidth: 80, maxWidth: 280, alignment: alignment(column))
-                                    .padding(.horizontal, 10).padding(.vertical, 8)
-                                    .background(row.kind == .tableHeaderRow ? Theme.solid : Color.clear)
-                            }
-                        }
-                        Divider().gridCellColumns(columns.count).gridCellUnsizedAxes(.horizontal)
-                    }
-                }
+            // Fit the reply's width with the text wrapping; scroll sideways only when the
+            // columns at their minimum width do not fit.
+            ViewThatFits(in: .horizontal) {
+                tableGrid(columns, fit: true)
+                ScrollView(.horizontal) { tableGrid(columns, fit: false) }
             }
         default:
             if !node.text.characters.isEmpty {
@@ -76,8 +66,31 @@ private struct MarkdownBlock: View {
         }
     }
 
-    private func cell(_ row: ChatMarkdownNode, _ index: Int) -> AttributedString {
-        row.children.first { $0.kind == .tableCell(columnIndex: index) }?.text ?? AttributedString()
+    private static let minColumn: CGFloat = 80
+    private static let maxColumn: CGFloat = 280
+
+    /// Every cell gets a definite width, so its text wraps there and the row grows; measured with
+    /// no width (in a sideways scroll view), the text took one line wider than its cell and drew
+    /// over the cells beside and below it. Fitting, a column takes up to what its longest cell
+    /// needs, and its ideal width is the minimum, which is what `ViewThatFits` measures.
+    /// Scrolling, a column is as wide as its longest cell needs, up to `maxColumn`.
+    private func tableGrid(_ columns: [PresentationIntent.TableColumn], fit: Bool) -> some View {
+        let widths = node.tableColumnWidths(columns.count, character: 7.5, minimum: Self.minColumn)
+        return Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+            ForEach(node.children) { row in
+                GridRow(alignment: .top) {
+                    ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
+                        Text(row.tableCell(index)).fontWeight(row.kind == .tableHeaderRow ? .semibold : .regular)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(minWidth: Self.minColumn, idealWidth: fit ? Self.minColumn : min(widths[index], Self.maxColumn),
+                                   maxWidth: fit ? widths[index] : min(widths[index], Self.maxColumn), alignment: alignment(column))
+                            .padding(.horizontal, 10).padding(.vertical, 8)
+                            .background(row.kind == .tableHeaderRow ? Theme.solid : Color.clear)
+                    }
+                }
+                Divider().gridCellColumns(columns.count).gridCellUnsizedAxes(.horizontal)
+            }
+        }
     }
 
     private func alignment(_ column: PresentationIntent.TableColumn) -> Alignment {

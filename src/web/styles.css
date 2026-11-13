@@ -962,9 +962,13 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
   background: color-mix(in srgb, var(--link) 8%, transparent); border-radius: 0 8px 8px 0; color: var(--muted);
 }
 .md hr { border: 0; border-top: 1px solid var(--glass-border); margin: 10px 0; }
+/* A table fits the reply's width and its cells wrap: words stay whole, code and links (paths,
+   URLs) break anywhere. The wrapper scrolls sideways only when the columns at their narrowest
+   (the longest word, or the minimum width) do not fit. */
 .md .tblwrap { overflow-x: auto; margin: 8px 0; }
-.md table { border-collapse: collapse; font-size: 12px; min-width: 60%; width: max-content; max-width: 220%; }
-.md th, .md td { border: 1px solid var(--glass-border); padding: 4px 8px; text-align: left; word-break: normal; overflow-wrap: normal; }
+.md table { border-collapse: collapse; font-size: 12px; min-width: 60%; }
+.md th, .md td { border: 1px solid var(--glass-border); padding: 4px 8px; text-align: left; vertical-align: top; min-width: 4.5em; word-break: normal; overflow-wrap: break-word; }
+.md :is(th, td) :is(code, a) { overflow-wrap: anywhere; }
 .md th { background: color-mix(in srgb, var(--link) 8%, transparent); }
 
 .md.live > *:last-child::after {

@@ -13,6 +13,16 @@ test("tables require separator rows, keep alignment and escaped pipes", () => {
   expect(html).toContain('<td style="text-align:right"><strong>ready</strong></td>');
   expect(mdHtml("| just text | and pipes |")).not.toContain('<table>');
 });
+test("tables fit the reply and wrap their cells, scrolling only when the columns cannot fit", async () => {
+  const css = await Bun.file(new URL("./styles.css", import.meta.url)).text();
+  const rule = (selector: string) => css.split("\n").find((line) => line.startsWith(`${selector} {`)) ?? "";
+  expect(mdHtml("a | b\n--- | ---\n1 | 2")).toStartWith('<div class="tblwrap"><table>');
+  expect(rule(".md .tblwrap")).toContain("overflow-x: auto");
+  expect(rule(".md table")).not.toContain("max-content");
+  expect(rule(".md th, .md td")).toContain("overflow-wrap: break-word");
+  expect(rule(".md th, .md td")).toContain("min-width:");
+  expect(rule(".md :is(th, td) :is(code, a)")).toContain("overflow-wrap: anywhere");
+});
 test("code remains literal, incomplete fences remain visible and HTML is inert", () => {
   expect(mdHtml('`**literal** https://example.com`')).toBe('<p><code>**literal** https://example.com</code></p>');
   expect(mdHtml('```sh\n\n<script>\n**literal**')).toBe('<pre>\n&lt;script&gt;\n**literal**</pre>');
