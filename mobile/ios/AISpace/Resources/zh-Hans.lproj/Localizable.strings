@@ -326,6 +326,20 @@
 "closed: ai-space stopped" = "已关闭：ai-space 已停止";
 "connection lost" = "连接已断开";
 
+/* Terminal key row (TerminalKeyRow) */
+"Escape" = "Esc 键";
+"Shift-Tab" = "Shift+Tab";
+"Control, applies to the next key" = "Control，作用于下一个键";
+"Alt, applies to the next key" = "Alt，作用于下一个键";
+"Control-C, interrupt" = "Ctrl+C，中断";
+"Page Up" = "向上翻页";
+"Page Down" = "向下翻页";
+"Left arrow" = "左方向键";
+"Down arrow" = "下方向键";
+"Up arrow" = "上方向键";
+"Right arrow" = "右方向键";
+"Hide keyboard" = "收起键盘";
+
 /* Universal search */
 "Recent Actions" = "最近操作";
 "Choose an action" = "请选择一个操作";
