@@ -80,6 +80,13 @@ final class AppModel: ObservableObject {
     @Published var showsWidgets = !UserDefaults.standard.bool(forKey: "hidesWidgets") {
         didSet { UserDefaults.standard.set(!showsWidgets, forKey: "hidesWidgets") }
     }
+    /// The desk pet along the bottom of the pages (docs/app-spec.md#space-mood), and how big it is.
+    @Published var showsPet = !UserDefaults.standard.bool(forKey: "hidesPet") {
+        didSet { UserDefaults.standard.set(!showsPet, forKey: "hidesPet") }
+    }
+    @Published var petSize = PetSize(rawValue: UserDefaults.standard.string(forKey: "petSize") ?? "") ?? .medium {
+        didSet { UserDefaults.standard.set(petSize.rawValue, forKey: "petSize") }
+    }
     /// The actions on the screens, asked for by a long press on a screen.
     @Published var showingScreenMenu = false
     @Published var query = ""
@@ -613,6 +620,15 @@ final class AppModel: ObservableObject {
                 return
             }
             if let entry = catalogue.app(named: app) { open(entry) }
+        }
+    }
+
+    /// A tap on the desk pet: the conversation of the agent the Space's mood points at, or the inbox.
+    func openPet(_ open: SpaceMood.Open) {
+        switch open.kind {
+        case "inbox": handle(DeepLink.inbox)
+        case "chat": if let agent = open.agent { handle(DeepLink.chat(agent: agent, text: nil)) }
+        default: break
         }
     }
 

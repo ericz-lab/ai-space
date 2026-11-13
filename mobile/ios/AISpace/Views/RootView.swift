@@ -67,6 +67,10 @@ struct MainTabs: View {
                 // Made again when the screens come or go, so it lies on the page on show.
                 .id(open)
             }
+            // The desk pet walks along the bottom of every page, under whatever comes up over them.
+            .overlay(alignment: .bottom) {
+                if open && model.showsPet { PhonePet(model: model, api: loader.api) }
+            }
             .onChange(of: open, initial: true) { _, open in
                 if !open && model.pagerID != Pager.home { model.pagerID = Pager.home }
             }
@@ -122,6 +126,32 @@ struct MainTabs: View {
                     .preferredColorScheme(model.appearance == .system ? nil : (model.appearance == .dark ? .dark : .light))
             }
         }
+    }
+}
+
+/// The desk pet on the iPhone (docs/app-spec.md#space-mood): the panel's Claude along the bottom of
+/// the pages, in the app only, showing the Space's mood. It asks for the mood every 30 seconds
+/// while it is on show, and nothing runs while a page covers it or the app is in the background.
+/// A tap opens the conversation or the inbox the mood points at, else Claude jumps.
+private struct PhonePet: View {
+    @ObservedObject var model: AppModel
+    let api: SpaceAPI
+    @Environment(\.scenePhase) private var phase
+    @StateObject private var driver = PetDriver()
+
+    var body: some View {
+        let active = phase == .active && model.page == nil && model.hubPage == nil && !model.showingSettings && !model.showingWebPanel
+        PetStage(driver: driver, size: model.petSize, active: active) { open in model.openPet(open) }
+            .task(id: active) {
+                guard active else { return }
+                while !Task.isCancelled {
+                    // A Space older than the mood route leaves the pet resting as without a mood.
+                    let mood = try? await api.get("/api/pets/mood", as: SpaceMood.self)
+                    if Task.isCancelled { break }
+                    driver.set(mood: PetMood.shown(mood))
+                    try? await Task.sleep(for: .seconds(30))
+                }
+            }
     }
 }
 

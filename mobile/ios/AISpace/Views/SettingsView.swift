@@ -177,6 +177,22 @@ struct SettingsSectionPage: View {
                 #endif
             }
             SettingsCard {
+                Toggle("Desk pet", isOn: $model.showsPet).settingsRow()
+                if model.showsPet {
+                    CardDivider()
+                    LabeledContent("Pet size") {
+                        Picker("Pet size", selection: $model.petSize) {
+                            Text("Small").tag(PetSize.small)
+                            Text("Medium").tag(PetSize.medium)
+                            Text("Large").tag(PetSize.large)
+                        }
+                        .labelsHidden()
+                    }
+                    .settingsRow(vertical: 6)
+                }
+            }
+            SettingsNote("Claude walks along the bottom of the pages and shows what the Space is doing: it looks on while agents work, hops in the corner while one waits for you, spins when a turn is done and sleeps when all is quiet. Tap it to open that chat or the inbox.")
+            SettingsCard {
                 pageRow("Inbox", "tray", .inbox)
                 CardDivider()
                 pageRow("Chat", "bubble.left.and.text.bubble.right", .chat(agent: nil))

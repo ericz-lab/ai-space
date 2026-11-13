@@ -603,3 +603,8 @@
 
 /* Desk pet */
 "Desk pet" = "桌宠";
+"Pet size" = "桌宠大小";
+"Small" = "小";
+"Medium" = "中";
+"Large" = "大";
+"Claude walks along the bottom of the pages and shows what the Space is doing: it looks on while agents work, hops in the corner while one waits for you, spins when a turn is done and sleeps when all is quiet. Tap it to open that chat or the inbox." = "Claude 在页面底部走来走去，显示 Space 正在做什么：agent 干活时它在旁边看，有 agent 等你时它在角落里跳，一轮做完时它转一圈，一切安静时它睡觉。点它可以打开对应的对话或收件箱。";
