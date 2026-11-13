@@ -93,6 +93,18 @@ export class Inbox {
     return { unread: row?.unread ?? 0, open: row?.open ?? 0 };
   }
 
+  /** Unread threads at an action level (`ACTION_LEVELS`), not done, whose latest notification came at or after `since`. */
+  alerts(since: number): number {
+    const row = this.db
+      .query<{ n: number }, (string | number)[]>(
+        `SELECT COUNT(*) AS n FROM (${THREADS}) WHERE rn = 1
+           AND level IN (${ACTION_LEVELS.map(() => "?").join(", ")})
+           AND (read_at IS NULL OR read_at < last_at) AND (done_at IS NULL OR done_at < last_at) AND last_at >= ?`,
+      )
+      .get(...ACTION_LEVELS, since);
+    return row?.n ?? 0;
+  }
+
   /** `list` and `summary` together, from one pass over the notifications (the panel's poll). */
   page(opts: InboxQuery = {}): { items: InboxItem[]; summary: InboxSummary } {
     const { where, args, limit } = listWhere(opts);

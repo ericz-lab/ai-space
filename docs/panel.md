@@ -238,7 +238,7 @@ The panel probes `GET 127.0.0.1:<port><service.health>` (two-second timeout), ca
 | `GET /api/apps/:app/icon`, `GET /api/agents/:app/:agent/avatar` | icon files from the app directory; paths cannot escape it |
 | `GET /api/widgets`, `GET /api/widgets/:app/:name/embed` | widget payloads and embed pages |
 | `GET /api/pets`, `GET /api/pets/:app/:name/sheet`, `GET /api/pets/:app/:name/mood` | the pets apps declare, their sheets and moods ([app-spec.md](app-spec.md#pets)) |
-| `GET /api/pets/mood` | the Space's mood for the built-in pets: agents working, waiting for you, failed or done, unread inbox, feedback, idle or asleep ([app-spec.md](app-spec.md#space-mood)) |
+| `GET /api/pets/mood` | the Space's mood for the built-in pets: agents working, waiting for you, failed or done, recent unread inbox alerts, feedback, idle or asleep ([app-spec.md](app-spec.md#space-mood)) |
 | `GET`/`PUT /api/panel/layout` | order, hidden apps, widget sizes, removed widgets and screens |
 | `GET /api/panel/appcolor?app=` | the app page's `theme-color`, for the phone shell |
 | `GET`/`PUT /api/panel/icons` | the icon packs with their files, and `{ active: <pack> \| null }` (Icon packs) |

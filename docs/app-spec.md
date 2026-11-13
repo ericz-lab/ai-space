@@ -278,7 +278,7 @@ ai-space reads the sheet and the mood (`/api/pets`, `/api/pets/:app/:name/sheet`
 The pets that come with ai-space (the panel's Claude, and the native clients' pets) show the Space itself rather than one app. ai-space works the mood out from what it already holds, and the clients only read it: `GET /api/pets/mood` (the panel's session, like `/api/pets`; `src/space/panel/mood.ts`) returns
 
 ```json
-{ "ok": true, "state": "waiting", "reason": "approval", "move": "stay", "say": { "en": "Planner is waiting for you", "zh": "规划师 在等你" }, "open": { "kind": "chat", "agent": "ai-todo/planner" }, "counts": { "running": 2, "waiting": 1, "failed": 0, "unread": 3, "feedback": 0 }, "asOf": "2026-11-13T10:00:00.000Z" }
+{ "ok": true, "state": "waiting", "reason": "approval", "move": "stay", "say": { "en": "Planner is waiting for you", "zh": "规划师 在等你" }, "open": { "kind": "chat", "agent": "ai-todo/planner" }, "counts": { "running": 2, "waiting": 1, "failed": 0, "unread": 3, "alerts": 0, "feedback": 0 }, "asOf": "2026-11-13T10:00:00.000Z" }
 ```
 
 The first rule that holds sets it:
@@ -289,12 +289,12 @@ The first rule that holds sets it:
 | `error` | a turn failed or timed out in the last 10 minutes, and that agent has not run since | `stay` | that agent's chat |
 | `working` | agent turns are running (a background turn counts) | `roam` | the newest one's chat |
 | `done` | a turn ended well in the last minute | `roam` | that agent's chat |
-| `waiting` (`reason: inbox`) | the inbox has unread threads | `roam` | the inbox |
+| `waiting` (`reason: inbox`) | the inbox has unread `alert` or `warn` threads, not done, that had news in the last 24 hours | `roam` | the inbox |
 | `waiting` (`reason: feedback`) | feedback waits on the person (`later` or `review`, [feedback.md](feedback.md)) | `roam` | none |
 | `sleep` | no turn started or ended for two hours | `stay` | none |
 | `idle` | otherwise | `roam` | none |
 
-`say` names the agent by its title (in Chinese when the manifest translates it) or counts them ("2 agents are working"); `idle` and `sleep` say nothing. A read is served again for 3 seconds. The turns are this machine's: a hub's mood does not include work running on its peers. Each client maps the state onto its pet's animations; for Claude (12 × 5 sheet: walk, sleep, look, hop, jump) the table is the same everywhere (`src/web/Pet.tsx` `CLAUDE.moods`, `desktop/macos/AISpace/Services/PetRules.swift`, `desktop/linux/src/core/pet.ts`):
+Plain unread notifications (`info`, `success`, `report`) do not make the pet wait: an inbox fed by news and reports is rarely empty, and a pet that always waits says nothing. `counts.unread` still reports every unread thread. `say` names the agent by its title (in Chinese when the manifest translates it) or counts them ("2 agents are working"); `idle` and `sleep` say nothing. A read is served again for 3 seconds. The turns are this machine's: a hub's mood does not include work running on its peers. Each client maps the state onto its pet's animations; for Claude (12 × 5 sheet: walk, sleep, look, hop, jump) the table is the same everywhere (`src/web/Pet.tsx` `CLAUDE.moods`, `desktop/macos/AISpace/Services/PetRules.swift`, `desktop/linux/src/core/pet.ts`):
 
 | `state` | Claude rests in | played once as it begins |
 | --- | --- | --- |
