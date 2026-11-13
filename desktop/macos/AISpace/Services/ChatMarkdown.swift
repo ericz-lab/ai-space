@@ -15,6 +15,24 @@ struct ChatMarkdownNode: Identifiable {
         }
         children[children.count - 1].append(path.dropFirst(), text: text)
     }
+
+    /// For a table row: the cell in column `index`, empty when the row has fewer cells.
+    func tableCell(_ index: Int) -> AttributedString {
+        children.first { $0.kind == .tableCell(columnIndex: index) }?.text ?? AttributedString()
+    }
+
+    /// For a table: how wide each column's longest cell is on one line, estimated from its
+    /// characters (a CJK character or an emoji counts as two `character` widths), and at least
+    /// `minimum`. A view gives a column up to this, so short columns keep their width and long
+    /// ones share the rest and wrap; a low estimate only wraps a line a little early.
+    func tableColumnWidths(_ count: Int, character: CGFloat, minimum: CGFloat) -> [CGFloat] {
+        (0..<count).map { index -> CGFloat in
+            let longest = children.map { row -> Int in
+                String(row.tableCell(index).characters).unicodeScalars.reduce(0) { $0 + ($1.value >= 0x2E80 ? 2 : 1) }
+            }.max() ?? 0
+            return max(minimum, CGFloat(longest) * character)
+        }
+    }
 }
 
 enum ChatMarkdown {

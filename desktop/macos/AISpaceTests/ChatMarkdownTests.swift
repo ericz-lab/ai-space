@@ -27,6 +27,19 @@ struct ChatMarkdownTests {
         #expect(status.text.runs.first?.inlinePresentationIntent?.contains(.stronglyEmphasized) == true)
     }
 
+    @Test func tableColumnsAreAsWideAsTheirLongestCell() throws {
+        let table = try #require(ChatMarkdown.parse("""
+        | # | Note | 备注 |
+        | --- | --- | --- |
+        | 1 | Wrap long table text | 中文 |
+        | 22 | 短 | 这一列全是中文 |
+        """).first)
+        // "#"/"22" stay at the minimum; Latin characters count once, CJK twice.
+        #expect(table.tableColumnWidths(3, character: 7, minimum: 40) == [40, 140, 98])
+        #expect(String(table.children[2].tableCell(2).characters) == "这一列全是中文")
+        #expect(table.children[1].tableCell(5).characters.isEmpty)
+    }
+
     @Test func codeIsLiteralAndListsKeepTheirHierarchy() {
         let nodes = ChatMarkdown.parse("""
         ## 标题
