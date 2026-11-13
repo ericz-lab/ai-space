@@ -8,4 +8,5 @@ export { retireAppDir, runStopCommand, type DirOutcome } from "./uninstall.ts";
 export { agentView, appView, avatarUrl, iconUrl, resolveLink, type AgentView, type AppView } from "./view.ts";
 export { WidgetFeed, sourceUrl, type WidgetItem, type WidgetView } from "./widgets.ts";
 export { PetFeed, type PetMood, type PetView } from "./pets.ts";
+export { SpaceMood, spaceMood, type MoodState, type SpaceMoodView } from "./mood.ts";
 export { parsePetSpec, type ManifestPet, type PetAnimation } from "./pet-spec.ts";

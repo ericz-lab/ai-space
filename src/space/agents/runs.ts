@@ -134,6 +134,8 @@ type Live = {
   grace?: ReturnType<typeof setTimeout>;
   /** Why the run is being ended, set by `stop`; the runtime's own error is kept out of it. */
   ending?: { status: RunStatus; error: string };
+  /** Approval requests and questions the turn waits on, by request id, until they are resolved. */
+  asking: Set<string>;
   ended: Promise<void>;
   resolveEnded: () => void;
 };
@@ -167,6 +169,11 @@ export class RunRegistry {
   /** The turns running now (docs/local.md#updates). */
   running(): RunInfo[] {
     return [...this.live.values()].filter((l) => l.info.status === "running").map((l) => l.info);
+  }
+
+  /** The running turns that wait on the person: an approval request or a question not yet answered. */
+  waiting(): RunInfo[] {
+    return [...this.live.values()].filter((l) => l.info.status === "running" && !l.ending && l.asking.size > 0).map((l) => ({ ...l.info }));
   }
 
   /** Start a turn on `runtime`. Throws RunBusyError when the conversation already has a turn running, RunClosedError while shutting down. */
@@ -321,7 +328,7 @@ export class RunRegistry {
     const info: RunInfo = { id: crypto.randomUUID(), ...fields, sid: null, status: "running", error: null, startedAt: this.now(), finishedAt: null, lastSeq: 0 };
     let resolveEnded = () => {};
     const ended = new Promise<void>((r) => (resolveEnded = r));
-    const run: Live = { info, events: [], bytes: 0, listeners: new Set(), handle: { kill: () => {} }, ended, resolveEnded };
+    const run: Live = { info, events: [], bytes: 0, listeners: new Set(), handle: { kill: () => {} }, asking: new Set(), ended, resolveEnded };
     this.live.set(info.id, run);
     this.db
       .query("INSERT INTO agent_runs (id, agent, session_id, message, runtime, model, status, started_at, trigger) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)")
@@ -384,6 +391,7 @@ export class RunRegistry {
   private push(run: Live, line: string): void {
     if (run.info.status !== "running" || run.ending) return;
     const ev = { seq: ++run.info.lastSeq, line, kind: kindOf(line) };
+    if (ev.kind === "approval_request" || ev.kind === "approval_resolved") track(run.asking, ev.kind, line);
     run.events.push(ev);
     run.bytes += line.length;
     if (run.bytes > this.opts.maxEventBytes) this.compact(run);
@@ -439,6 +447,19 @@ export class RunRegistry {
     finished.sort((a, b) => (a.info.finishedAt ?? 0) - (b.info.finishedAt ?? 0));
     while (finished.length > this.opts.keepFinished) this.live.delete(finished.shift()!.info.id);
   }
+}
+
+/** An approval request opens its id; its resolution closes it. A line that does not parse changes nothing. */
+function track(asking: Set<string>, kind: string, line: string): void {
+  let id: unknown;
+  try {
+    id = (JSON.parse(line) as { id?: unknown }).id;
+  } catch {
+    return;
+  }
+  if (typeof id !== "string" || !id) return;
+  if (kind === "approval_request") asking.add(id);
+  else asking.delete(id);
 }
 
 function kindOf(line: string): string {

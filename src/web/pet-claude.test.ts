@@ -16,6 +16,8 @@ test("the Claude pet's sprite says what pets/claude.py renders", async () => {
   for (const [name] of sprite.rests) expect(sprite.anims[name]).toBeDefined();
   expect(sprite.anims[sprite.right]).toBeDefined();
   expect(sprite.anims[sprite.click!]).toBeDefined();
+  // The Space's mood (docs/app-spec.md#space-mood) names only animations the sheet has.
+  for (const name of [...Object.values(sprite.moods!.rest), ...Object.values(sprite.moods!.once ?? {})]) expect(sprite.anims[name]).toBeDefined();
 });
 
 test("the bundled sheet is a WebP of the grid's size", async () => {

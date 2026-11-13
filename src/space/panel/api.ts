@@ -15,6 +15,7 @@ export type CheckView = ManifestCheck & { id: string; app: string; appTitle: str
 import { retireAppDir } from "./uninstall.ts";
 import { EMBED_HEADERS, type WidgetFeed, sourceUrl } from "./widgets.ts";
 import { NoPet, type PetFeed } from "./pets.ts";
+import type { SpaceMood } from "./mood.ts";
 
 
 /**
@@ -32,6 +33,7 @@ import { NoPet, type PetFeed } from "./pets.ts";
  *   GET    /api/widgets                  every widget's latest payload
  *   GET    /api/widgets/:app/:name/embed the page of a `kind: embed` widget, proxied from its source
  *   GET    /api/pets                     the desk pets apps declare (docs/app-spec.md#pets)
+ *   GET    /api/pets/mood                the Space's mood for the panel's own pet and the native clients' (docs/app-spec.md#space-mood)
  *   GET    /api/pets/:app/:name/sheet    a pet's sprite sheet, proxied from its source
  *   GET    /api/pets/:app/:name/mood     what the pet does now, from its mood source
  *   GET    /api/panel/layout             order + hidden
@@ -67,6 +69,8 @@ export type PanelApiOptions = {
   widgets: WidgetFeed;
   /** Desk pets apps declare; absent = none are offered. */
   pets?: PetFeed;
+  /** The Space's own mood (agent turns, approvals, inbox, feedback); absent = always idle. */
+  mood?: SpaceMood;
   health: HealthProbe;
   /** Sync a newly created app directory into the space (provision, schedule, register). */
   onCreate: (dir: string) => Promise<void>;
@@ -341,6 +345,10 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
 
     "/api/pets": {
       GET: wrap(async () => json({ ok: true, pets: opts.pets?.list(new Set(layout.read().hidden)) ?? [] })),
+    },
+
+    "/api/pets/mood": {
+      GET: wrap(async () => json(opts.mood?.read() ?? { ok: true, state: "idle", move: "roam", counts: { running: 0, waiting: 0, failed: 0, unread: 0, feedback: 0 }, asOf: new Date().toISOString() })),
     },
 
     "/api/pets/:app/:name/sheet": {
