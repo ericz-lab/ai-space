@@ -3,14 +3,14 @@ import type { RunInfo } from "../agents/runs.ts";
 /**
  * The Space's mood (docs/app-spec.md#space-mood): what the panel's own desk pet, and the native
  * clients' pets, show about the Space. ai-space works it out from what it already holds (the agent
- * turns running and just ended, the approvals they wait on, the inbox, the feedback waiting on the
- * person); a client only reads it and draws its pet accordingly. Rules, first match wins:
+ * turns running and just ended, the approvals they wait on, the inbox's recent alerts, the feedback
+ * waiting on the person); a client only reads it and draws its pet accordingly. Rules, first match wins:
  *
  *   waiting   a running turn waits on an approval or a question             stay, opens that chat
  *   error     a turn failed in the last 10 minutes and nothing came after   stay, opens that chat
  *   working   turns are running                                             roam, opens the newest
  *   done      a turn ended well in the last minute                          roam, opens that chat
- *   waiting   the inbox has unread threads (reason inbox)                   roam, opens the inbox
+ *   waiting   the inbox has unread alert or warn threads from the last day  roam, opens the inbox
  *   waiting   feedback waits on the person (reason feedback)                roam
  *   sleep     no turn started or ended for two hours                        stay
  *   idle      otherwise                                                     roam
@@ -32,7 +32,8 @@ export type SpaceMoodView = {
   /** A short line over the pet, in English and Chinese; absent = nothing to say. */
   say?: { en: string; zh: string };
   open?: MoodOpen;
-  counts: { running: number; waiting: number; failed: number; unread: number; feedback: number };
+  /** `unread` is every unread inbox thread, shown for reference; `alerts` is what sets the inbox's mood. */
+  counts: { running: number; waiting: number; failed: number; unread: number; alerts: number; feedback: number };
   asOf: string;
 };
 
@@ -46,6 +47,8 @@ export type MoodInput = {
   /** Turns that ended within QUIET_MS, any order. */
   ended: RunInfo[];
   unread: number;
+  /** Unread alert and warn threads from the last ALERT_MS: plain unread news does not wait on the person. */
+  alerts: number;
   feedback: number;
   title?: (agent: string) => AgentTitle | undefined;
 };
@@ -53,6 +56,8 @@ export type MoodInput = {
 export const ERROR_MS = 10 * 60_000;
 export const DONE_MS = 60_000;
 export const QUIET_MS = 2 * 60 * 60_000;
+/** How far back an unread alert still makes the pet wait: older ones stay in the inbox without it. */
+export const ALERT_MS = 24 * 60 * 60_000;
 /** A read is served again for this long: every client polls, and a burst of them costs one look. */
 export const MOOD_CACHE_MS = 3_000;
 
@@ -68,7 +73,7 @@ export function spaceMood(input: MoodInput, now: number): SpaceMoodView {
   const lastOf = new Map<string, RunInfo>();
   for (const r of ended) if (!lastOf.has(r.agent)) lastOf.set(r.agent, r);
   const failed = [...lastOf.values()].filter((r) => FAILED.has(r.status) && now - r.finishedAt! < ERROR_MS && !runningAgents.has(r.agent));
-  const counts = { running: input.running.length, waiting: input.waiting.length, failed: failed.length, unread: input.unread, feedback: input.feedback };
+  const counts = { running: input.running.length, waiting: input.waiting.length, failed: failed.length, unread: input.unread, alerts: input.alerts, feedback: input.feedback };
   const base = { ok: true as const, counts, asOf: new Date(now).toISOString() };
   const line = (one: (t: AgentTitle) => [string, string], many: (n: number) => [string, string], runs: RunInfo[]) => {
     const [en, zh] = runs.length === 1 ? one(name(runs[0]!.agent)) : many(runs.length);
@@ -111,8 +116,9 @@ export function spaceMood(input: MoodInput, now: number): SpaceMoodView {
     const t = name(last.agent);
     return { ...base, state: "done", move: "roam", say: { en: `${t.en} is done`, zh: `${zhOf(t)} 做完了` }, open: { kind: "chat", agent: last.agent } };
   }
-  if (input.unread > 0) {
-    return { ...base, state: "waiting", reason: "inbox", move: "roam", say: { en: input.unread === 1 ? "1 unread in the inbox" : `${input.unread} unread in the inbox`, zh: `收件箱有 ${input.unread} 条未读` }, open: { kind: "inbox" } };
+  if (input.alerts > 0) {
+    const n = input.alerts;
+    return { ...base, state: "waiting", reason: "inbox", move: "roam", say: { en: n === 1 ? "1 unread alert in the inbox" : `${n} unread alerts in the inbox`, zh: `收件箱有 ${n} 条警报未读` }, open: { kind: "inbox" } };
   }
   if (input.feedback > 0) {
     return { ...base, state: "waiting", reason: "feedback", move: "roam", say: { en: input.feedback === 1 ? "1 piece of feedback waits for you" : `${input.feedback} pieces of feedback wait for you`, zh: `${input.feedback} 条反馈等你处理` } };
@@ -127,6 +133,8 @@ export type MoodSources = {
   /** Turns running or ended within `ms`. */
   recent: (ms: number) => RunInfo[];
   unread?: () => number;
+  /** Unread alert and warn threads whose latest notification came at or after `since`. */
+  alerts?: (since: number) => number;
   feedback?: () => number;
   title?: (agent: string) => AgentTitle | undefined;
   now?: () => number;
@@ -155,6 +163,7 @@ export class SpaceMood {
         waiting: s.waiting(),
         ended: s.recent(QUIET_MS).filter((r) => r.status !== "running"),
         unread: count(s.unread),
+        alerts: count(s.alerts && (() => s.alerts!(now - ALERT_MS))),
         feedback: count(s.feedback),
         ...(s.title ? { title: s.title } : {}),
       },

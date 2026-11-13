@@ -6,7 +6,7 @@ import { workspacePaths } from "../workspace.ts";
 import { createPanelRoutes } from "./api.ts";
 import { HealthProbe } from "./health.ts";
 import { LayoutStore } from "./layout.ts";
-import { DONE_MS, ERROR_MS, MOOD_CACHE_MS, QUIET_MS, SpaceMood, spaceMood, type MoodInput } from "./mood.ts";
+import { ALERT_MS, DONE_MS, ERROR_MS, MOOD_CACHE_MS, QUIET_MS, SpaceMood, spaceMood, type MoodInput } from "./mood.ts";
 import { AppRegistry } from "./registry.ts";
 import { WidgetFeed } from "./widgets.ts";
 
@@ -31,7 +31,7 @@ function run(agent: string, status: RunStatus, startedAgo: number, endedAgo: num
   };
 }
 
-const quiet: MoodInput = { running: [], waiting: [], ended: [], unread: 0, feedback: 0 };
+const quiet: MoodInput = { running: [], waiting: [], ended: [], unread: 0, alerts: 0, feedback: 0 };
 const titles = (agent: string) => (agent === "ai-todo/planner" ? { en: "Planner", zh: "规划师" } : undefined);
 
 describe("space mood", () => {
@@ -55,7 +55,7 @@ describe("space mood", () => {
     const asking = run("ai-todo/planner", "running", 5_000);
     const mood = spaceMood({ ...quiet, running: [asking, run("a/b", "running", 1_000)], waiting: [asking], ended: [run("c/d", "error", 60_000, 30_000)], unread: 3, title: titles }, NOW);
     expect(mood).toMatchObject({ state: "waiting", reason: "approval", move: "stay", say: { en: "Planner is waiting for you", zh: "规划师 在等你" }, open: { kind: "chat", agent: "ai-todo/planner" } });
-    expect(mood.counts).toEqual({ running: 2, waiting: 1, failed: 1, unread: 3, feedback: 0 });
+    expect(mood.counts).toEqual({ running: 2, waiting: 1, failed: 1, unread: 3, alerts: 0, feedback: 0 });
   });
 
   test("a failure shows for ten minutes, until the agent runs again", () => {
@@ -84,14 +84,16 @@ describe("space mood", () => {
     expect(spaceMood({ ...quiet, ended: [run("a/b", "done", DONE_MS + 9_000, DONE_MS + 1_000)] }, NOW).state).toBe("idle");
   });
 
-  test("unread threads, then feedback, wait for the person while the pet roams", () => {
-    expect(spaceMood({ ...quiet, unread: 2, feedback: 4 }, NOW)).toMatchObject({ state: "waiting", reason: "inbox", move: "roam", say: { en: "2 unread in the inbox", zh: "收件箱有 2 条未读" }, open: { kind: "inbox" } });
-    expect(spaceMood({ ...quiet, unread: 1 }, NOW).say?.en).toBe("1 unread in the inbox");
+  test("unread alerts, then feedback, wait for the person while the pet roams", () => {
+    expect(spaceMood({ ...quiet, unread: 40, alerts: 2, feedback: 4 }, NOW)).toMatchObject({ state: "waiting", reason: "inbox", move: "roam", say: { en: "2 unread alerts in the inbox", zh: "收件箱有 2 条警报未读" }, open: { kind: "inbox" } });
+    expect(spaceMood({ ...quiet, alerts: 1 }, NOW).say?.en).toBe("1 unread alert in the inbox");
+    // Plain unread news does not wait on the person.
+    expect(spaceMood({ ...quiet, unread: 4050, ended: [run("a/b", "done", 30 * 60_000, 20 * 60_000)] }, NOW)).toMatchObject({ state: "idle", counts: { unread: 4050, alerts: 0 } });
     const fb = spaceMood({ ...quiet, feedback: 1 }, NOW);
     expect(fb).toMatchObject({ state: "waiting", reason: "feedback", move: "roam", say: { en: "1 piece of feedback waits for you", zh: "1 条反馈等你处理" } });
     expect(fb.open).toBeUndefined();
     // Work in progress outranks the inbox.
-    expect(spaceMood({ ...quiet, unread: 2, running: [run("a/b", "running", 1_000)] }, NOW).state).toBe("working");
+    expect(spaceMood({ ...quiet, alerts: 2, running: [run("a/b", "running", 1_000)] }, NOW).state).toBe("working");
   });
 });
 
@@ -115,6 +117,20 @@ describe("SpaceMood", () => {
     now += 2;
     mood.read();
     expect(reads).toBe(2);
+  });
+
+  test("asks the inbox for the alerts of the last ALERT_MS", () => {
+    let since = 0;
+    const mood = new SpaceMood({
+      running: () => [],
+      waiting: () => [],
+      recent: () => [],
+      unread: () => 4050,
+      alerts: (s) => ((since = s), 3),
+      now: () => NOW,
+    });
+    expect(mood.read()).toMatchObject({ state: "waiting", reason: "inbox", counts: { unread: 4050, alerts: 3 } });
+    expect(since).toBe(NOW - ALERT_MS);
   });
 });
 

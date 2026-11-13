@@ -458,6 +458,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       waiting: () => agentRuns.waiting(),
       recent: (ms) => agentRuns.list({ recentMs: ms, limit: 200 }),
       unread: () => moodInbox.summary().unread,
+      alerts: (since) => moodInbox.alerts(since),
       feedback: () => {
         const c = feedback.counts();
         return c.later + c.review;

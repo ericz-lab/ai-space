@@ -52,6 +52,22 @@ describe("Inbox", () => {
     expect(inbox.summary()).toEqual({ unread: 4, open: 2 });
   });
 
+  test("alerts counts recent unread alert and warn threads that are not done", () => {
+    add("thesis", 1000, { level: "alert", key: "old" });
+    add("pulse", 5000, { level: "warn", key: "w" });
+    add("pulse", 5100, { level: "alert", key: "read" });
+    add("pulse", 5200, { level: "alert", key: "done" });
+    add("news", 6000, { text: "digest" });
+    inbox.mark(["k:pulse:read"], { read: true }, 5500);
+    inbox.mark(["k:pulse:done"], { done: true }, 5500);
+    expect(inbox.alerts(4000)).toBe(1);
+    expect(inbox.alerts(0)).toBe(2);
+    // A newer alert in a read thread makes it count again.
+    add("pulse", 7000, { level: "alert", key: "read" });
+    expect(inbox.alerts(4000)).toBe(2);
+    expect(inbox.summary().unread).toBe(4);
+  });
+
   test("read and done hold until a newer notification arrives in the thread", () => {
     add("thesis", 1000, { level: "alert", key: "k1" });
     const info = add("news", 1100);
