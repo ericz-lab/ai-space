@@ -738,3 +738,19 @@
 "The update is signed by someone else than this app." = "更新与本应用的签名者不同。";
 "macOS does not accept the update (not notarized)." = "macOS 不接受该更新（未经公证）。";
 "Could not copy the update: %@" = "无法复制更新：%@";
+
+/* Desk pet */
+"Desk Pet" = "桌宠";
+"Desk pet" = "桌宠";
+"Show the desk pet" = "显示桌宠";
+"Where" = "位置";
+"In the window" = "在窗口里";
+"On the desktop, over every app" = "在桌面上，浮在所有应用之上";
+"Small" = "小";
+"Medium" = "中";
+"Large" = "大";
+"Put the Pet on the Desktop" = "把桌宠放到桌面";
+"Put the Pet in the Window" = "把桌宠放回窗口";
+"Hide the Desk Pet" = "隐藏桌宠";
+"Claude walks along the bottom and shows what the Space is doing. Click it to open that chat or the inbox. Space → Desk Pet shows or hides it too." = "Claude 在底部走来走去，显示 Space 正在做什么。点它可以打开对应的对话或收件箱。“Space → 桌宠”菜单也可以显示或隐藏它。";
+"Claude walks along the bottom and shows what the Space is doing: it looks on while agents work, hops in the corner while one waits for you, spins when a turn is done and sleeps when all is quiet. Click it to open that chat or the inbox. On the desktop, drag it along the bottom; right-click to hide it." = "Claude 在底部走来走去，显示 Space 正在做什么：agent 干活时它在旁边看，有 agent 等你时它在角落里跳，一轮做完时它转一圈，一切安静时它睡觉。点它可以打开对应的对话或收件箱。在桌面上可以沿底部拖动它；右键可以隐藏它。";

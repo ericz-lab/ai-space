@@ -91,7 +91,10 @@ final class AppModel: ObservableObject {
     private let cache = CatalogueCache(directory: DesktopPaths.caches)
 
     @Published private(set) var selectedID: UUID? {
-        didSet { if usageActive && oldValue != selectedID { setUsageActive(true, restart: true) } }
+        didSet {
+            if usageActive && oldValue != selectedID { setUsageActive(true, restart: true) }
+            if oldValue != selectedID { livesRefreshed.send() }
+        }
     }
     @Published var destination: Destination = .launcher {
         didSet {
@@ -501,6 +504,29 @@ final class AppModel: ObservableObject {
     private func livesChanged() {
         notifier.setBadge(lives.values.reduce(0) { $0 + $1.summary.unread })
         objectWillChange.send()
+        livesRefreshed.send()
+    }
+
+    // MARK: Desk pet
+
+    /// Sent after every refresh of a Space's live state, for what follows it outside the views
+    /// (the desktop pet's mood).
+    let livesRefreshed = PassthroughSubject<Void, Never>()
+    /// Whether the main window can be seen (not closed, minimized or covered, the screen awake);
+    /// the window's pet stops while it cannot. Kept by the app delegate.
+    @Published var mainWindowShown = true
+
+    /// The selected Space's mood, as its desk pet shows it.
+    var selectedMood: SpaceMood? { selected.flatMap { lives[$0.id]?.mood } }
+
+    /// What a click on the pet opens: an agent's conversation, or the inbox.
+    func openPet(_ open: SpaceMood.Open, connection: UUID) {
+        switch open.kind {
+        case "inbox": showMainWindow(connection: connection, .hub(.inbox))
+        case "chat":
+            if let agent = open.agent { showMainWindow(connection: connection, .hub(.chat(agent: agent))) }
+        default: break
+        }
     }
 
     // MARK: Main window

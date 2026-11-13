@@ -76,6 +76,19 @@ final class Preferences: ObservableObject {
         }
     }
 
+    /// The desk pet (docs/macos-desktop.md#desk-pet): Claude showing the Space's mood, in the main
+    /// window by default; on the desktop it walks along the bottom of the screen over every app.
+    @Published var pet: Bool { didSet { defaults.set(!pet, forKey: "hidesPet") } }
+    @Published var petPlace: PetPlace { didSet { defaults.set(petPlace.rawValue, forKey: "petPlace") } }
+    @Published var petSize: PetSize { didSet { defaults.set(petSize.rawValue, forKey: "petSize") } }
+    /// Where the desktop pet was put down, as a fraction of the screen's width; nil until it was dragged.
+    var deskPetSpot: Double? {
+        get { defaults.object(forKey: "deskPetSpot") as? Double }
+        set {
+            if let v = newValue { defaults.set(v, forKey: "deskPetSpot") } else { defaults.removeObject(forKey: "deskPetSpot") }
+        }
+    }
+
     private init() {
         chatPermission = ChatPermission(rawValue: defaults.string(forKey: "chat-perm") ?? "") ?? .readOnly
         menuBar = defaults.object(forKey: "menuBar") as? Bool ?? true
@@ -87,6 +100,9 @@ final class Preferences: ObservableObject {
         showsWidgets = !defaults.bool(forKey: "hidesWidgets")
         floatingBall = defaults.bool(forKey: "floatingBall")
         floatingBallSlots = defaults.dictionary(forKey: "floatingBallSlots") as? [String: [String]] ?? [:]
+        pet = !defaults.bool(forKey: "hidesPet")
+        petPlace = PetPlace(rawValue: defaults.string(forKey: "petPlace") ?? "") ?? .window
+        petSize = PetSize(rawValue: defaults.string(forKey: "petSize") ?? "") ?? .medium
         Theme.current = ThemePreset.named(themeID)
     }
 }

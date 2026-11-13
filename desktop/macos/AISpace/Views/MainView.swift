@@ -45,6 +45,8 @@ struct SpaceWindow: View {
                 .opacity(onLauncher ? 1 : 0)
                 .allowsHitTesting(onLauncher)
                 .accessibilityHidden(!onLauncher)
+                // The desk pet walks along the launcher's bottom edge, under whatever comes up over it.
+                .overlay(alignment: .bottom) { LauncherPet(model: model, connection: connection, onLauncher: onLauncher) }
             switch model.destination {
             case .launcher:
                 EmptyView()
@@ -90,6 +92,32 @@ struct SpaceWindow: View {
             }
         }
         .navigationTitle(Text(verbatim: connection.name))
+    }
+}
+
+/// The desk pet in the main window (docs/macos-desktop.md#desk-pet): Claude along the bottom of the
+/// launcher, showing the selected Space's mood. It stops while the launcher is covered or the
+/// window cannot be seen, and is not drawn when the pet lives on the desktop instead.
+struct LauncherPet: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    let onLauncher: Bool
+    @ObservedObject private var prefs = Preferences.shared
+    @StateObject private var driver = PetDriver()
+
+    var body: some View {
+        if prefs.pet && prefs.petPlace == .window {
+            PetStage(driver: driver, size: prefs.petSize, active: onLauncher && model.mainWindowShown) { open in
+                model.openPet(open, connection: connection.id)
+            }
+            .opacity(onLauncher ? 1 : 0)
+            .allowsHitTesting(onLauncher)
+            .contextMenu {
+                Button("Put the Pet on the Desktop") { prefs.petPlace = .desktop }
+                Button("Hide the Desk Pet") { prefs.pet = false }
+            }
+            .onChange(of: model.lives[connection.id]?.mood, initial: true) { _, mood in driver.set(mood: PetMood.shown(mood)) }
+        }
     }
 }
 

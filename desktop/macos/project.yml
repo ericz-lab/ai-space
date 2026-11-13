@@ -79,6 +79,12 @@ targets:
         group: Shared
       - path: ../../mobile/ios/AISpace/Views/SharedCaptureView.swift
         group: Shared
+      # The desk pet's drawing and its sheet, the panel's own.
+      - path: ../../mobile/ios/AISpace/Views/PetView.swift
+        group: Shared
+      - path: ../../src/web/public/pet-claude.webp
+        group: Shared
+        buildPhase: resources
     dependencies:
       - target: ShareExtension
         embed: true

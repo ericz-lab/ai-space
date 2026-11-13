@@ -50,6 +50,7 @@ cp AISpace/Info.plist "$APP/Contents/Info.plist"
 if [ -n "${BUILD_NUMBER:-}" ]; then plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP/Contents/Info.plist"; fi
 cp AISpace/Resources/AppIcon.icns AISpace/Resources/Logo.png "$APP/Contents/Resources/"
 cp AISpace/Resources/Claude.svg AISpace/Resources/Codex.svg AISpace/Resources/AgentIcons-LICENSE.txt "$APP/Contents/Resources/"
+cp "$PET_SHEET" "$APP/Contents/Resources/"
 cp -R AISpace/Resources/*.lproj "$APP/Contents/Resources/"
 
 # The hardened runtime refuses the microphone unless the entitlement asks for it, so voice input

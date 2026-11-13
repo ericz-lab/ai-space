@@ -39,8 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private lazy var quickChat = QuickChat(model: model)
     private lazy var hotKey = HotKey { [weak self] in self?.quickChat.toggle() }
     private lazy var floatingBall = FloatingBall(model: model) { [weak self] agent, text, near in self?.quickChat.show(agent: agent, text: text, near: near) }
+    private lazy var deskPet = DeskPet(model: model)
     private var watchers: Set<AnyCancellable> = []
     private var activity: NSObjectProtocol?
+    private var occlusion: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = Preferences.shared.appearance.nsAppearance
@@ -75,6 +77,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }.store(in: &watchers)
         Preferences.shared.$floatingBall.sink { [weak self] on in self?.floatingBall.set(visible: on) }.store(in: &watchers)
+        // The desk pet over every app; in the window, LauncherPet draws it instead.
+        Publishers.CombineLatest3(Preferences.shared.$pet, Preferences.shared.$petPlace, Preferences.shared.$petSize)
+            .sink { [weak self] on, place, size in self?.deskPet.set(visible: on && place == .desktop, size: size) }
+            .store(in: &watchers)
+        // The window's pet stops while the window cannot be seen.
+        occlusion = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window = self.window else { return }
+                let shown = window.isVisible && window.occlusionState.contains(.visible)
+                if self.model.mainWindowShown != shown { self.model.mainWindowShown = shown }
+            }
+        }
 
         // Inbox notifications and the menu bar need the 30-second refresh while the window is
         // hidden; App Nap would otherwise stretch it to minutes. Idle sleep stays allowed.
@@ -188,6 +202,7 @@ struct SpaceCommands: Commands {
             Button("Paste Picture") { model.pictureSharing.paste() }
             Button("Pending Shares") { model.pictureSharing.show() }
             Toggle("Floating Ball", isOn: $prefs.floatingBall)
+            Toggle("Desk Pet", isOn: $prefs.pet)
             Divider()
             Button("Back to Space") { model.showMainWindow(.launcher) }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
