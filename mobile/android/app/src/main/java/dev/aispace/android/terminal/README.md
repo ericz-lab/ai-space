@@ -21,8 +21,9 @@ terminal emulator and view of [Termux](https://github.com/termux/termux-app), ve
 ## Ours
 
 - `RemoteTerminalSession`: the emulator fed from a socket; `feed`, `onInput`, `onResize`.
-- `TerminalSurface`: the Compose wrapper: the view, the accessory keys above the keyboard,
-  colours, pinch to zoom, keyboard-aware sizing.
+- `TerminalSurface`: the Compose wrapper: the view, the accessory keys above the keyboard (the
+  table in `core/TerminalKeys.kt`, shared with the iOS client and the panel), colours, pinch to
+  zoom, keyboard-aware sizing.
 - `TerminalPalette`: the iOS client's terminal colours (from the panel's `src/web/theme.ts`).
 
 To update the vendored code, fetch the same files at a newer tag and reapply the changes above.

@@ -58,7 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.aispace.android.R
-import dev.aispace.android.terminal.emulator.KeyHandler
+import dev.aispace.android.core.TerminalKeys
 import dev.aispace.android.terminal.view.TerminalView
 import dev.aispace.android.terminal.view.TerminalViewClient
 import dev.aispace.android.terminal.view.textselection.SelectionHandleDrawable
@@ -70,13 +70,16 @@ import kotlinx.coroutines.launch
 
 /**
  * A session's terminal on screen: the emulator view (Termux's, vendored) in the terminal's own
- * colours, and above the soft keyboard a row of the keys a phone keyboard lacks, as the iOS
- * client has (SwiftTerm's accessory: Esc, Ctrl, Tab, ~ | / -, the arrows and a key that hides the
- * keyboard; Alt and F1–F10 in the row's scrolling part here).
+ * colours, and above the soft keyboard a row of the keys a phone keyboard lacks, from the table
+ * the iOS client and the web panel share ([TerminalKeys]): Esc, Tab, ⇧Tab, Ctrl, Alt, ^C, PgUp,
+ * PgDn, Home, End, ~ | / - and F1–F10 in the part that scrolls; the arrows and a key that hides
+ * the keyboard fixed at the right.
  *
  * - A tap gives the view the keyboard; a long press selects text, with Copy and Paste in the
  *   floating toolbar; a drag scrolls the scrollback; a pinch changes the font size, kept per session.
  * - Ctrl and Alt are sticky: a tap arms them for the next key, from the row or the keyboard.
+ * - The row's keys write the table's bytes to the session, the arrows, Home and End in the
+ *   emulator's cursor key mode.
  * - The view keeps to the area above the keyboard (and above the row), so the window size the
  *   shell is told is the part that can be seen. That needs the window to resize for the IME
  *   (edge-to-edge with `adjustResize`); this composable applies the IME inset itself, and pads
@@ -210,18 +213,40 @@ private class Client(private val host: TerminalHost, private val modifiers: Stic
     override fun logStackTrace(tag: String, e: Exception) { Log.e(tag, "", e) }
 }
 
-/** Sends a key through the view's key table (cursor key mode and modifiers included). */
-private fun sendKey(session: RemoteTerminalSession, modifiers: StickyModifiers, keyCode: Int) {
-    val view = session.view ?: return
-    var mod = 0
-    if (modifiers.takeCtrl()) mod = mod or KeyHandler.KEYMOD_CTRL
-    if (modifiers.takeAlt()) mod = mod or KeyHandler.KEYMOD_ALT
-    view.handleKeyCode(keyCode, mod)
+/**
+ * A key of the row: Ctrl and Alt arm or disarm, hide-keyboard hides it, and any other key spends
+ * the armed modifiers and writes the table's bytes, in the emulator's cursor key mode.
+ */
+private fun press(session: RemoteTerminalSession, modifiers: StickyModifiers, key: TerminalKeys.Key) {
+    when (key.kind) {
+        TerminalKeys.Kind.Modifier.CTRL -> modifiers.ctrl = !modifiers.ctrl
+        TerminalKeys.Kind.Modifier.ALT -> modifiers.alt = !modifiers.alt
+        TerminalKeys.Kind.HideKeyboard -> hideKeyboard(session)
+        else -> {
+            val mods = TerminalKeys.Modifiers(ctrl = modifiers.takeCtrl(), alt = modifiers.takeAlt())
+            val bytes = TerminalKeys.bytes(key, session.emulator.isCursorKeysApplicationMode, mods) ?: return
+            // As a key from the keyboard does: the cursor shows at once, even mid-blink.
+            session.emulator.setCursorBlinkState(true)
+            session.write(bytes, 0, bytes.size)
+        }
+    }
 }
 
-/** Types a character as the keyboard would; the view applies an armed Ctrl or Alt. */
-private fun sendChar(session: RemoteTerminalSession, char: Char) {
-    session.view?.inputCodePoint(char.code, false, false)
+/** Spoken names for the keys whose label says little; the rest read their label. */
+private fun spokenName(id: String): Int? = when (id) {
+    "esc" -> R.string.terminal_key_esc
+    "backTab" -> R.string.terminal_key_back_tab
+    "ctrl" -> R.string.terminal_key_ctrl
+    "alt" -> R.string.terminal_key_alt
+    "ctrlC" -> R.string.terminal_key_ctrl_c
+    "pageUp" -> R.string.terminal_key_page_up
+    "pageDown" -> R.string.terminal_key_page_down
+    "left" -> R.string.terminal_key_left
+    "down" -> R.string.terminal_key_down
+    "up" -> R.string.terminal_key_up
+    "right" -> R.string.terminal_key_right
+    "hideKeyboard" -> R.string.terminal_key_hide_keyboard
+    else -> null
 }
 
 private fun hideKeyboard(session: RemoteTerminalSession) {
@@ -246,45 +271,40 @@ private fun AccessoryRow(session: RemoteTerminalSession, modifiers: StickyModifi
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            KeyCap("Esc", colors) { sendKey(session, modifiers, KeyEvent.KEYCODE_ESCAPE) }
-            KeyCap("Ctrl", colors, active = modifiers.ctrl, description = stringResource(R.string.terminal_key_ctrl)) {
-                modifiers.ctrl = !modifiers.ctrl
-            }
-            KeyCap("Alt", colors, active = modifiers.alt, description = stringResource(R.string.terminal_key_alt)) {
-                modifiers.alt = !modifiers.alt
-            }
-            KeyCap("Tab", colors) { sendKey(session, modifiers, KeyEvent.KEYCODE_TAB) }
-            for (c in "~|/-") KeyCap(c.toString(), colors) { sendChar(session, c) }
-            for (n in 1..10) KeyCap("F$n", colors) { sendKey(session, modifiers, KeyEvent.KEYCODE_F1 + n - 1) }
+            for (key in TerminalKeys.scrolling) RowKey(key, session, modifiers, colors)
         }
         Row(
             Modifier.padding(start = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            KeyCap("←", colors, description = stringResource(R.string.terminal_key_left), repeat = true) {
-                sendKey(session, modifiers, KeyEvent.KEYCODE_DPAD_LEFT)
-            }
-            KeyCap("↓", colors, description = stringResource(R.string.terminal_key_down), repeat = true) {
-                sendKey(session, modifiers, KeyEvent.KEYCODE_DPAD_DOWN)
-            }
-            KeyCap("↑", colors, description = stringResource(R.string.terminal_key_up), repeat = true) {
-                sendKey(session, modifiers, KeyEvent.KEYCODE_DPAD_UP)
-            }
-            KeyCap("→", colors, description = stringResource(R.string.terminal_key_right), repeat = true) {
-                sendKey(session, modifiers, KeyEvent.KEYCODE_DPAD_RIGHT)
-            }
-            KeyCap(null, colors, description = stringResource(R.string.terminal_key_hide_keyboard)) { hideKeyboard(session) }
+            for (key in TerminalKeys.fixed) RowKey(key, session, modifiers, colors)
         }
     }
+}
+
+@Composable
+private fun RowKey(key: TerminalKeys.Key, session: RemoteTerminalSession, modifiers: StickyModifiers, colors: KeyColors) {
+    KeyCap(
+        label = if (key.kind == TerminalKeys.Kind.HideKeyboard) null else key.label,
+        colors = colors,
+        active = when (key.kind) {
+            TerminalKeys.Kind.Modifier.CTRL -> modifiers.ctrl
+            TerminalKeys.Kind.Modifier.ALT -> modifiers.alt
+            else -> false
+        },
+        description = spokenName(key.id)?.let { stringResource(it) },
+        repeat = key.repeats,
+    ) { press(session, modifiers, key) }
 }
 
 private class KeyColors(val bar: Color, val key: Color, val text: Color, val accent: Color)
 
 /**
- * One key of the row. A press acts at once (keys are pressed quickly in a row, so no waiting for
- * a tap to be confirmed); with [repeat], holding it repeats like a keyboard's arrow. Pressing
- * does not take focus, so the keyboard stays up. [label] null draws the hide-keyboard icon.
+ * One key of the row. It acts when it is let go, so a swipe along the row scrolls it without
+ * typing; with [repeat] (the arrows) it acts at once on the press and repeats while held, like a
+ * keyboard's arrow. Pressing does not take focus, so the keyboard stays up. [label] null draws
+ * the hide-keyboard icon.
  */
 @Composable
 private fun KeyCap(
@@ -315,26 +335,30 @@ private fun KeyCap(
                 onClick { action(); true }
             }
             .pointerInput(repeat) {
-                detectTapGestures(onPress = {
-                    pressed = true
-                    coroutineScope {
-                        action()
-                        val repeater = if (repeat) {
-                            launch {
-                                delay(400)
-                                while (isActive) {
-                                    action()
-                                    delay(70)
+                detectTapGestures(
+                    onPress = {
+                        pressed = true
+                        if (repeat) {
+                            coroutineScope {
+                                action()
+                                val repeater = launch {
+                                    delay(TerminalKeys.REPEAT_DELAY_MS)
+                                    while (isActive) {
+                                        action()
+                                        delay(TerminalKeys.REPEAT_INTERVAL_MS)
+                                    }
                                 }
+                                tryAwaitRelease()
+                                repeater.cancel()
                             }
                         } else {
-                            null
+                            tryAwaitRelease()
                         }
-                        tryAwaitRelease()
-                        repeater?.cancel()
-                    }
-                    pressed = false
-                })
+                        pressed = false
+                    },
+                    // Not after a swipe: the row's scroll takes those.
+                    onTap = { if (!repeat) action() },
+                )
             }
             .padding(horizontal = 10.dp),
         contentAlignment = Alignment.Center,
