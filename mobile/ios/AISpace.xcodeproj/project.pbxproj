@@ -182,6 +182,9 @@
 		FCEAF4083AEF74B7A26A5FB4 /* SearchState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88FBD8B158E4F2A6524F7113 /* SearchState.swift */; };
 		FD103492F0B6DB917E82E1D5 /* EscapeSequenceParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14D87ECF3542B72F6F80F8D1 /* EscapeSequenceParser.swift */; };
 		FEE039BF41D33A61173B11B0 /* ConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBE53D581008930F0A0BC1AE /* ConnectionStore.swift */; };
+		E9203765B00647FC782780D4 /* PetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99603FF3490E0491A4E51C7B /* PetView.swift */; };
+		72CD264A430D725FA79DA2C0 /* PetRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D985BDDDFD9E5703957C2 /* PetRules.swift */; };
+		CD5F5C945C48EF522659984A /* pet-claude.webp in Resources */ = {isa = PBXBuildFile; fileRef = 8C045544279ADF9E13FBE213 /* pet-claude.webp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -389,6 +392,9 @@
 		FB7A25846FEFD88832AA12D8 /* BufferLine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BufferLine.swift; sourceTree = "<group>"; };
 		FBE53D581008930F0A0BC1AE /* ConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ConnectionStore.swift; path = ../../desktop/macos/AISpace/Services/ConnectionStore.swift; sourceTree = "<group>"; };
 		FBF0A76C75AB625B76B33DA8 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		99603FF3490E0491A4E51C7B /* PetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PetView.swift; sourceTree = "<group>"; };
+		EF3D985BDDDFD9E5703957C2 /* PetRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PetRules.swift; path = ../../desktop/macos/AISpace/Services/PetRules.swift; sourceTree = "<group>"; };
+		8C045544279ADF9E13FBE213 /* pet-claude.webp */ = {isa = PBXFileReference; name = "pet-claude.webp"; path = "../../src/web/public/pet-claude.webp"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -439,6 +445,7 @@
 				28C349C58E0A6ED6AA197552 /* HubViews.swift */,
 				EE50E4A00E09E2C2B4DE15B0 /* OmniboxView.swift */,
 				A28DFB91B9A9CD6D9F067C72 /* PanelView.swift */,
+				99603FF3490E0491A4E51C7B /* PetView.swift */,
 				6CB67CF40D5499BA8D16CA25 /* RootView.swift */,
 				F0D47A42DF87D340B4D27BD6 /* ScreenshotOverlay.swift */,
 				F21B26E574974C68CD38D1D1 /* SettingsView.swift */,
@@ -709,6 +716,8 @@
 				E3BCFF07B4727AF0C1CC2C42 /* DesktopRules.swift */,
 				285BD29476A76DD15C637C47 /* NavigationPolicy.swift */,
 				15F72436C5BE5A54D6197356 /* OmniboxRules.swift */,
+				8C045544279ADF9E13FBE213 /* pet-claude.webp */,
+				EF3D985BDDDFD9E5703957C2 /* PetRules.swift */,
 				B9056473C1DE89BA7A1839A6 /* SpaceAPI.swift */,
 				5B688E2563D0E7D1F39FBC0E /* SpaceCheck.swift */,
 				998C0995C5D87D1292EA68F4 /* SpaceModels.swift */,
@@ -863,6 +872,7 @@
 				2BA1E1577F5322EB9EF76F11 /* InfoPlist.strings in Resources */,
 				AD67C731330EC453DC6F239F /* Localizable.strings in Resources */,
 				342CB96E3DECFC3B40C5CEC9 /* Logo.png in Resources */,
+				CD5F5C945C48EF522659984A /* pet-claude.webp in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -958,6 +968,8 @@
 				24EF1312FF0CA0B48098F819 /* OmniboxVoice.swift in Sources */,
 				A921D9E802D9E50E38247A82 /* PageControlPlacement.swift in Sources */,
 				C9AABB4CEE5832EB32C4856C /* PanelView.swift in Sources */,
+				72CD264A430D725FA79DA2C0 /* PetRules.swift in Sources */,
+				E9203765B00647FC782780D4 /* PetView.swift in Sources */,
 				6214CD03932110E16313DE4E /* QuickActions.swift in Sources */,
 				F1CDF6A5555E67857A776069 /* RootView.swift in Sources */,
 				B9BCE523559C42E776FA051D /* ScreenStore.swift in Sources */,

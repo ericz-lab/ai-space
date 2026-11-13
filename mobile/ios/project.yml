@@ -64,6 +64,12 @@ targets:
         group: Shared
       - path: ../../desktop/macos/AISpace/Web/WebCookieSession.swift
         group: Shared
+      # The desk pet's rules and its sheet, the panel's own.
+      - path: ../../desktop/macos/AISpace/Services/PetRules.swift
+        group: Shared
+      - path: ../../src/web/public/pet-claude.webp
+        group: Shared
+        buildPhase: resources
     dependencies:
       - target: SwiftTerm
       - target: ShareExtension

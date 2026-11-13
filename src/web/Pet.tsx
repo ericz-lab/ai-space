@@ -8,7 +8,8 @@ import type { Key } from "./messages.ts";
 //   shown by name (see petdex.ts). These are loaded without a Referer, which petdex's hotlink
 //   protection insists on.
 // - a pet bundled with the panel in its own layout (BUILTIN): Claude, a 3D model rendered into a sheet
-//   by pets/claude.ts.
+//   by pets/claude.ts. It shows the Space's mood (/api/pets/mood, docs/app-spec.md#space-mood) as the
+//   native clients' pets do (desktop/macos/AISpace/Services/PetRules.swift holds the same table).
 // - an app's pet (docs/app-spec.md#pets): its own grid and animations, its sheet proxied by ai-space,
 //   and a mood the app answers: which animation it rests in, whether it roams, a line to say.
 // The sheet is an <img> moved inside a clipping box rather than a CSS background: an image needs no CORS.
@@ -37,6 +38,18 @@ export type AppPetInfo = {
 };
 
 export type PetMood = { animation: string; move: "roam" | "stay"; say?: Record<string, string>; link?: string };
+/** A mood as the page draws it: besides an app's fields, an animation played once as it begins and what a click does. */
+type ShownMood = PetMood & { once?: string; open?: () => void };
+
+/** The Space's mood as GET /api/pets/mood answers it. */
+export type SpaceMood = {
+  ok: boolean;
+  state: "working" | "waiting" | "error" | "done" | "idle" | "sleep";
+  reason?: string;
+  move: "roam" | "stay";
+  say?: Record<string, string>;
+  open?: { kind: "chat"; agent: string } | { kind: "inbox" };
+};
 
 /** How to draw and move one sheet. `rows` undefined = derived from the image (Codex cells are 12:13). */
 type Sprite = {
@@ -53,6 +66,11 @@ type Sprite = {
   rests: [string, number][];
   /** Played once on a click when the mood has no link. */
   click?: string;
+  /**
+   * How the Space's mood shows: the animation the pet rests in for each state (`<state>/stay` when it
+   * waits in its corner; a state not listed rests as without a mood), and one played once as a state begins.
+   */
+  moods?: { rest: Record<string, string>; once?: Record<string, string> };
 };
 
 const CODEX: Omit<Sprite, "src"> = {
@@ -91,6 +109,7 @@ const CLAUDE: Sprite = {
   right: "walk",
   rests: [["look", 0.5], ["sleep", 0.38], ["hop", 0.12]],
   click: "jump",
+  moods: { rest: { working: "look", waiting: "look", "waiting/stay": "hop", error: "look", done: "look", sleep: "sleep" }, once: { done: "jump" } },
 };
 /** Pets bundled with the panel besides the default, by the name kept in the preferences (`petBuiltin`). */
 export const BUILTIN: Record<string, { title: Key; sprite: Sprite }> = { claude: { title: "pet.builtin.claude", sprite: CLAUDE } };
@@ -109,10 +128,56 @@ export default function Pet({ sheet = DEFAULT_SHEET, onError }: { sheet?: string
   return <SpritePet sprite={{ ...CODEX, src: sheet }} fallback={DEFAULT_SHEET} onError={onError} />;
 }
 
-/** A pet bundled with the panel, by its name in BUILTIN. */
+/** A pet bundled with the panel, by its name in BUILTIN; one with `moods` shows the Space's mood. */
 export function BuiltinPet({ name }: { name: string }) {
   const sprite = BUILTIN[name]?.sprite;
-  return sprite ? <SpritePet sprite={sprite} /> : null;
+  const space = useSpaceMood(!!sprite?.moods);
+  return sprite ? <SpritePet sprite={sprite} mood={sprite.moods && space ? shownMood(sprite.moods, space) : null} /> : null;
+}
+
+/** The Space's mood, read every 30 seconds while the page is visible; null until read, or when it cannot be. */
+function useSpaceMood(on: boolean): SpaceMood | null {
+  const [mood, setMood] = useState<SpaceMood | null>(null);
+  useEffect(() => {
+    setMood(null);
+    if (!on) return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = () => {
+      clearTimeout(timer);
+      if (document.visibilityState === "visible")
+        fetch("/api/pets/mood")
+          .then((r) => r.json())
+          .then((j: SpaceMood) => live && setMood(j.ok ? j : null))
+          .catch(() => live && setMood(null));
+      timer = setTimeout(read, 30_000);
+    };
+    const onVisible = () => document.visibilityState === "visible" && read();
+    read();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [on]);
+  return mood;
+}
+
+/** A Space mood in a sprite's terms; null (rest as without a mood) for a state the sprite does not list. */
+function shownMood(moods: NonNullable<Sprite["moods"]>, m: SpaceMood): ShownMood | null {
+  const animation = (m.move === "stay" ? moods.rest[`${m.state}/stay`] : undefined) ?? moods.rest[m.state];
+  if (!animation) return null;
+  const once = moods.once?.[m.state];
+  const target = m.open;
+  return {
+    animation,
+    move: m.move,
+    ...(m.say ? { say: m.say } : {}),
+    ...(once ? { once } : {}),
+    // The panel's own windows open from its address's fragment (panel-link.ts).
+    ...(target ? { open: () => void (location.hash = target.kind === "inbox" ? "inbox" : `chat=${encodeURIComponent(target.agent)}`) } : {}),
+  };
 }
 
 /** An app's pet: its mood is read through ai-space on the pet's refresh while the page is visible. */
@@ -158,7 +223,7 @@ export function AppPet({ pet }: { pet: AppPetInfo }) {
   return <SpritePet sprite={sprite} mood={mood} />;
 }
 
-function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite; mood?: PetMood | null; fallback?: string; onError?: (sheet: string) => void }) {
+function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite; mood?: ShownMood | null; fallback?: string; onError?: (sheet: string) => void }) {
   const { t, lang } = useLang();
   const [loaded, setLoaded] = useState<{ src: string; cell: Cell } | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -172,7 +237,7 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
   spriteRef.current = sprite;
   const moodRef = useRef(mood);
   const onMood = useRef<(() => void) | null>(null);
-  const moodKey = mood ? `${mood.animation}/${mood.move}` : "";
+  const moodKey = mood ? `${mood.animation}/${mood.move}/${mood.once ?? ""}` : "";
   useEffect(() => {
     moodRef.current = mood;
   });
@@ -319,7 +384,18 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
         behaveTimer = setTimeout(behave, calm ? 6000 + Math.random() * 10_000 : 1800 + Math.random() * 3500);
       }
     };
-    onMood.current = behave;
+    // Play an animation once, then go on as before; false when the sprite lacks it or plays it already.
+    const playOnce = (name: string | undefined) => {
+      if (!name || state === name || !sp().anims[name]) return false;
+      clearTimeout(behaveTimer);
+      oneShot = behave;
+      setState(name);
+      return true;
+    };
+    // A new mood may begin with an animation played once (Claude spins when a turn is done).
+    onMood.current = () => {
+      if (!playOnce(moodRef.current?.once)) behave();
+    };
     const mover = setInterval(() => {
       if (!walking()) return;
       x += (SPEED / 25) * (facing === "right" ? 1 : -1);
@@ -329,16 +405,14 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
       }
       draw();
     }, 40);
-    // Click: follow the mood's link, or play the click animation once.
+    // Click: open what the mood points at, follow its link, or play the click animation once.
     const el = box.current;
     const click = () => {
+      const open = moodRef.current?.open;
+      if (open) return open();
       const link = moodRef.current?.link;
       if (link) return void window.open(link, "_blank", "noopener");
-      const c = sp().click;
-      if (c && state !== c && sp().anims[c]) {
-        oneShot = behave;
-        setState(c);
-      }
+      playOnce(sp().click);
     };
     el.addEventListener("click", click);
     // A resized window moves the corner: a pet that stays follows it.
@@ -360,7 +434,7 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
 
   if (!loaded) return null;
   return (
-    <div className="pet" ref={box} title={say || mood?.link ? undefined : t("pet.clickMe")} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ width: W, height: Math.round(CH * scale) }}>
+    <div className="pet" ref={box} title={say || mood?.link || mood?.open ? undefined : t("pet.clickMe")} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ width: W, height: Math.round(CH * scale) }}>
       {say && (
         <span ref={sayEl} className={`pet-say${bubble || hover ? " on" : ""}`} role="status">
           {say}

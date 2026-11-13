@@ -32,6 +32,7 @@ export default function PetField(props: { pet: PetChoice | undefined; onChange: 
           </select>
         </div>
         {fromApp && <p className="setnote">{t("pet.fromApp")}</p>}
+        {kind === "builtin:claude" && <p className="setnote">{t("pet.fromSpace")}</p>}
       </div>
       {!kind && <PetdexField {...props} />}
     </>

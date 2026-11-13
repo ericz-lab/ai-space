@@ -4,6 +4,7 @@ import Soup from "gi://Soup?version=3.0";
 import WebKit from "gi://WebKit?version=6.0";
 import { type Key, type Lang, detectLang, translate } from "../core/i18n.ts";
 import type { Permission } from "../core/chat.ts";
+import type { PetPlace, PetSize } from "../core/pet.ts";
 import { type Appearance, type Section, type WebKey, languageOf, webText } from "../core/settings.ts";
 
 /**
@@ -146,6 +147,13 @@ export type Prefs = {
   floatingBallSlots?: Record<string, string[]>;
   /** Where the ball last stood (its top-left corner, in desktop pixels); unset until it was moved. */
   floatingBallOrigin?: { x: number; y: number };
+  /** Settings › General › Desk Pet off (it is on by default): no Claude in the window or on the desktop. */
+  noPet?: boolean;
+  /** Where the desk pet walks: along the bottom of Home (the default) or of the screen, over every app. */
+  petPlace?: PetPlace;
+  petSize?: PetSize;
+  /** Where the desktop pet was left, as a fraction of the screen's width; unset until it was dragged. */
+  deskPetSpot?: number;
   /** The Settings section shown last, so they reopen there (the panel's `settings-section`). */
   settingsSection?: Section;
 };

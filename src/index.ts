@@ -2,9 +2,9 @@ import { randomBytes } from "node:crypto";
 import { createVoiceRoutes, voiceTarget } from "./space/bus/voice.ts";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
-import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes } from "./space/agents/index.ts";
-import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
+import { Inbox, NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
+import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes, fixerAgentView, spaceAgentView } from "./space/agents/index.ts";
+import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
 import { PeerHub, PeerLedgers, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
@@ -442,6 +442,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   probeTimer.unref();
   void router.sync();
 
+  const moodInbox = new Inbox(notifyStore.db);
   const panelRoutes = createPanelRoutes({
     sharedApps: (hidden) => packageCatalogue.views(hidden),
     sharedIcon: (connection, app) => packageCatalogue.icon(connection, app),
@@ -451,6 +452,27 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     layout,
     widgets,
     pets: new PetFeed(registry),
+    // The Space's mood for the desk pets (docs/app-spec.md#space-mood); `feedback` is made below and read on a request.
+    mood: new SpaceMood({
+      running: () => agentRuns.running(),
+      waiting: () => agentRuns.waiting(),
+      recent: (ms) => agentRuns.list({ recentMs: ms, limit: 200 }),
+      unread: () => moodInbox.summary().unread,
+      feedback: () => {
+        const c = feedback.counts();
+        return c.later + c.review;
+      },
+      title: (agent) => {
+        const builtin = [spaceAgentView(), fixerAgentView()].find((v) => v.id === agent);
+        if (builtin) return { en: builtin.title, ...(builtin.i18n?.zh?.title ? { zh: builtin.i18n.zh.title } : {}) };
+        const [app, name] = agent.split("/");
+        const m = registry.get(app ?? "")?.manifest;
+        const a = m?.agents.find((x) => x.name === name);
+        if (!m || !a) return undefined;
+        const zh = m.i18n?.zh?.agents?.[a.name]?.title;
+        return { en: a.title, ...(zh ? { zh } : {}) };
+      },
+    }),
     health,
     peers,
     icons,

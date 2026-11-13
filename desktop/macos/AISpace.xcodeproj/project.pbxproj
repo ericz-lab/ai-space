@@ -207,6 +207,11 @@
 		FD1B2FEF2ED4D379A2386F1E /* ChatStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDB619A2B1FFFE69951FC9B /* ChatStream.swift */; };
 		FEFB9D3EEE59D225FB3D0B81 /* SpaceAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD93F537EFEEEEC0864886FF /* SpaceAPI.swift */; };
 		FF6A4F272A876909384C3B2E /* ShareAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE5D19CD94E19CD2E5693FE5 /* ShareAccess.swift */; };
+		F15746459C5F80C8194C270C /* PetRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E73A1001183CF4D6FD2476 /* PetRules.swift */; };
+		E33579C899C27E1F5B0E3C98 /* DeskPet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E91FC09CC3AA603EBB6F44B /* DeskPet.swift */; };
+		0265B4303A37489C1BD244EF /* PetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05A1A089D95D6FF79E02845B /* PetView.swift */; };
+		43379C71F0543C5751E44982 /* pet-claude.webp in Resources */ = {isa = PBXBuildFile; fileRef = 45FD0A85198E23212B283259 /* pet-claude.webp */; };
+		CC26D6CB569641C047EBD9A7 /* PetRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFDD09E66C4E4A1A3235880B /* PetRulesTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -438,6 +443,11 @@
 		FAFD46D448E37C8938D9C89D /* HubEventViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubEventViews.swift; sourceTree = "<group>"; };
 		FB7A25846FEFD88832AA12D8 /* BufferLine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BufferLine.swift; sourceTree = "<group>"; };
 		FBF0A76C75AB625B76B33DA8 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		59E73A1001183CF4D6FD2476 /* PetRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PetRules.swift; sourceTree = "<group>"; };
+		3E91FC09CC3AA603EBB6F44B /* DeskPet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeskPet.swift; sourceTree = "<group>"; };
+		05A1A089D95D6FF79E02845B /* PetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PetView.swift; path = ../../mobile/ios/AISpace/Views/PetView.swift; sourceTree = "<group>"; };
+		45FD0A85198E23212B283259 /* pet-claude.webp */ = {isa = PBXFileReference; name = "pet-claude.webp"; path = "../../src/web/public/pet-claude.webp"; sourceTree = "<group>"; };
+		AFDD09E66C4E4A1A3235880B /* PetRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PetRulesTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -476,6 +486,7 @@
 				79FA04E0E58950F0E6E217C6 /* FloatingBallRules.swift */,
 				02CE04AEC6643EA77E2763FC /* LocalEdition.swift */,
 				C3B7AD6171A3E6E6BD0B28C7 /* OmniboxRules.swift */,
+				59E73A1001183CF4D6FD2476 /* PetRules.swift */,
 				0EA25364930B8A7D19CFF960 /* PictureImport.swift */,
 				BD93F537EFEEEEC0864886FF /* SpaceAPI.swift */,
 				6D0E317F0870DDFFA7CC375B /* SpaceCheck.swift */,
@@ -567,6 +578,7 @@
 				9AD718835E4345CEE9F32724 /* MediaCapturePolicyTests.swift */,
 				52729B0ED8E899C5BA568374 /* NavigationPolicyTests.swift */,
 				56642E15ED0D6711DAF665F6 /* OmniboxRulesTests.swift */,
+				AFDD09E66C4E4A1A3235880B /* PetRulesTests.swift */,
 				AC4A9D3C349545C14C7ECBCF /* PictureImportTests.swift */,
 				B3DC0EA7B0142DEF3137D5B3 /* ScreenLayoutTests.swift */,
 				E10A2CAB5E54700355EBDC17 /* SpaceCheckTests.swift */,
@@ -786,6 +798,8 @@
 				A098773BFFBEE2E7F80DEC92 /* HubModels.swift */,
 				F0CD19F6BA1A1A4039715EFD /* HubStores.swift */,
 				E5EACC95EEC514964E466987 /* IconSource.swift */,
+				45FD0A85198E23212B283259 /* pet-claude.webp */,
+				05A1A089D95D6FF79E02845B /* PetView.swift */,
 				0F68A97DC5DEAEF60DD0BDC7 /* Screens.swift */,
 				59D831BAD0EF21A102AB9531 /* ScreenshotRules.swift */,
 				B8A0E69D58B593A1963F2300 /* ScreenStore.swift */,
@@ -818,6 +832,7 @@
 				8A4E10852AF48489764E969D /* AppUpdater.swift */,
 				A4B7FFA32C183F3DC418BE58 /* AppWindows.swift */,
 				06E5A196F46E34241D86027F /* ChatController.swift */,
+				3E91FC09CC3AA603EBB6F44B /* DeskPet.swift */,
 				9395A61BCB16B76A4D32B549 /* FloatingBall.swift */,
 				997D75FEF3DD86EA8D26B5A8 /* HotKey.swift */,
 				D297180F250D02598F6BFA05 /* IconStore.swift */,
@@ -962,6 +977,7 @@
 				08A77038A042BAE042BE8896 /* Codex.svg in Resources */,
 				AD67C731330EC453DC6F239F /* Localizable.strings in Resources */,
 				342CB96E3DECFC3B40C5CEC9 /* Logo.png in Resources */,
+				43379C71F0543C5751E44982 /* pet-claude.webp in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1046,6 +1062,7 @@
 				C0482ED95461E2E92CAAD43A /* Connection.swift in Sources */,
 				B60C1BC5DA19DC8431341F68 /* ConnectionSettings.swift in Sources */,
 				FA7B3C79D523D3142D7FE741 /* ConnectionStore.swift in Sources */,
+				E33579C899C27E1F5B0E3C98 /* DeskPet.swift in Sources */,
 				AB89490D5E4404A8926FFC80 /* DesktopRules.swift in Sources */,
 				B97DCA91F734B0AA433EB3E6 /* FloatingBall.swift in Sources */,
 				B0A23C45D4771CCF79B397C2 /* FloatingBallRules.swift in Sources */,
@@ -1071,6 +1088,8 @@
 				66527A45312BF979702938A1 /* OmniboxRules.swift in Sources */,
 				AF5E347C32F0B70C75E24E4E /* PanelSession.swift in Sources */,
 				63339534FB210EC40879A141 /* PanelWebView.swift in Sources */,
+				F15746459C5F80C8194C270C /* PetRules.swift in Sources */,
+				0265B4303A37489C1BD244EF /* PetView.swift in Sources */,
 				8DEF5210E35A635EB8D7EDC2 /* PictureImport.swift in Sources */,
 				454B23D0535E521100842308 /* PictureSharing.swift in Sources */,
 				767F15D30E46A926FF467A1F /* Preferences.swift in Sources */,
@@ -1126,6 +1145,7 @@
 				1F30D1A8C98E1EB84996A5C2 /* MediaCapturePolicyTests.swift in Sources */,
 				EC36CA0F525586D538A7C2DE /* NavigationPolicyTests.swift in Sources */,
 				8B3B586313099574E6394587 /* OmniboxRulesTests.swift in Sources */,
+				CC26D6CB569641C047EBD9A7 /* PetRulesTests.swift in Sources */,
 				1EA0A8B935916A2B3B03344B /* PictureImportTests.swift in Sources */,
 				E00E15BA575EB092EF9A6A26 /* ScreenLayoutTests.swift in Sources */,
 				05C11432649F2972E95B6C48 /* SharedCaptureModelTests.swift in Sources */,

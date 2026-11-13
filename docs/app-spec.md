@@ -273,6 +273,40 @@ Contract for `mood`. `GET <mood>` returns:
 
 ai-space reads the sheet and the mood (`/api/pets`, `/api/pets/:app/:name/sheet`, `/api/pets/:app/:name/mood`), so both may be loopback addresses and never reach the browser. It caches the sheet for an hour and the mood for `refresh`, and only ever calls URLs a manifest declares. A path needs a `service`. Pets are local to a machine: a hub does not list its peers' pets. Package (spec 2) manifests do not take `pets` yet.
 
+#### Space mood
+
+The pets that come with ai-space (the panel's Claude, and the native clients' pets) show the Space itself rather than one app. ai-space works the mood out from what it already holds, and the clients only read it: `GET /api/pets/mood` (the panel's session, like `/api/pets`; `src/space/panel/mood.ts`) returns
+
+```json
+{ "ok": true, "state": "waiting", "reason": "approval", "move": "stay", "say": { "en": "Planner is waiting for you", "zh": "规划师 在等你" }, "open": { "kind": "chat", "agent": "ai-todo/planner" }, "counts": { "running": 2, "waiting": 1, "failed": 0, "unread": 3, "feedback": 0 }, "asOf": "2026-11-13T10:00:00.000Z" }
+```
+
+The first rule that holds sets it:
+
+| `state` | When | `move` | `open` |
+| --- | --- | --- | --- |
+| `waiting` (`reason: approval`) | a running agent turn waits on an approval request or a question | `stay` | that agent's chat |
+| `error` | a turn failed or timed out in the last 10 minutes, and that agent has not run since | `stay` | that agent's chat |
+| `working` | agent turns are running (a background turn counts) | `roam` | the newest one's chat |
+| `done` | a turn ended well in the last minute | `roam` | that agent's chat |
+| `waiting` (`reason: inbox`) | the inbox has unread threads | `roam` | the inbox |
+| `waiting` (`reason: feedback`) | feedback waits on the person (`later` or `review`, [feedback.md](feedback.md)) | `roam` | none |
+| `sleep` | no turn started or ended for two hours | `stay` | none |
+| `idle` | otherwise | `roam` | none |
+
+`say` names the agent by its title (in Chinese when the manifest translates it) or counts them ("2 agents are working"); `idle` and `sleep` say nothing. A read is served again for 3 seconds. The turns are this machine's: a hub's mood does not include work running on its peers. Each client maps the state onto its pet's animations; for Claude (12 × 5 sheet: walk, sleep, look, hop, jump) the table is the same everywhere (`src/web/Pet.tsx` `CLAUDE.moods`, `desktop/macos/AISpace/Services/PetRules.swift`, `desktop/linux/src/core/pet.ts`):
+
+| `state` | Claude rests in | played once as it begins |
+| --- | --- | --- |
+| `working` | look | |
+| `waiting` | hop while it stays, look while it roams | |
+| `error` | look | |
+| `done` | look | jump (the spin) |
+| `sleep` | sleep | |
+| `idle` | look, sleep or hop at random, as without a mood | |
+
+A click opens `open` (the panel's chat or inbox window; the clients' own pages), else the pet jumps.
+
 ### `skills`
 
 Skills are instructions a runtime loads for a session. They follow the Claude Code skill format: one directory per skill with a `SKILL.md` whose frontmatter carries `name`, `description` (including the trigger phrases, in whatever language the user speaks), optional `argument-hint`, `allowed-tools` and `user-invocable`.
@@ -700,6 +734,7 @@ notify:
 | Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |
 | `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |
 | `pets`, `/api/pets` | Implemented (`src/space/panel/pet-spec.ts`, `src/space/panel/pets.ts`, `src/web/Pet.tsx`); this space only, not across peers; not in package manifests |
+| Space mood, `/api/pets/mood` | Implemented (`src/space/panel/mood.ts`); read by the panel's Claude pet and the Mac, iPhone and Linux clients' pets; this machine's turns only |
 | `checks`, `/api/checks` | Implemented (`src/space/checks/`, `src/space/panel/api.ts`); the inspection page is space-ops |
 | Panel (web UI, layout, manifest-only apps) | Implemented ([panel.md](panel.md)) |
 | `skills`, shared skills under `skills/` | Linked into `<workspace>/.claude/skills/` for sessions started by hand (`src/space/skills.ts`); an agent's own, shared and other apps' skills indexed in its chat prompt; scheduled agent tasks not yet |

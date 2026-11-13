@@ -7,6 +7,7 @@ import { type Connection, ConnectionList, decodeConnections, encodeConnections }
 import { normalizeConnectionUrl, sameOrigin } from "../core/url.ts";
 import { Conversation, type RunInfo } from "../core/conversation.ts";
 import { type InboxItem, type InboxSummary, InboxSeen, decodeInbox } from "../core/desktop.ts";
+import { type SpaceMood, decodeMood } from "../core/pet.ts";
 import { dirs, exists, log, logError, newId, path, prefs, readText, readTextSync, savePrefs, sleep, t, writeText } from "./env.ts";
 import { SpaceClient } from "./http.ts";
 import { collectSoon } from "./memory.ts";
@@ -18,7 +19,7 @@ import { cookieHeader, forgetSession } from "./web.ts";
  * conversations. Views listen for changes; the model never touches a widget.
  */
 
-export type Change = "connections" | "state" | "catalogue" | "inbox" | "chat" | "selection";
+export type Change = "connections" | "state" | "catalogue" | "inbox" | "chat" | "selection" | "mood";
 
 export class Space {
   readonly client: SpaceClient;
@@ -29,6 +30,8 @@ export class Space {
   catalogueAt = 0;
   stale = false;
   inbox: { items: InboxItem[]; summary: InboxSummary } = { items: [], summary: { unread: 0, open: 0 } };
+  /** What the Space is doing, for the desk pet (docs/app-spec.md#space-mood); undefined from a Space without the route. */
+  mood: SpaceMood | undefined;
   readonly seen = new InboxSeen();
   readonly conversations = new Map<string, Conversation>();
   refreshing: Promise<void> | undefined;
@@ -260,6 +263,12 @@ export class AppModel {
       log("state", space.conn.name, state);
       this.emit("state", space);
     }
+    // A Space that cannot be read has no mood: the pet rests as without one rather than show the last.
+    if (state.kind !== "ready" && space.mood) {
+      space.mood = undefined;
+      space.shown.changed("mood", undefined);
+      this.emit("mood", space);
+    }
   }
 
   private async look(space: Space, withCatalogue: boolean): Promise<void> {
@@ -279,12 +288,16 @@ export class AppModel {
       if (state.kind !== "ready") return this.setState(space, state);
       this.setState(space, { kind: "ready", ...(space.identity ? { version: space.identity.version, edition: space.identity.edition, ...(space.identity.name ? { name: space.identity.name } : {}) } : {}) });
 
-      const [, , runs] = await Promise.all([
+      const [, , runs, mood] = await Promise.all([
         this.loadInbox(space),
         withCatalogue || !space.catalogue ? this.loadCatalogue(space, JSON.parse(layout.body) as unknown) : Promise.resolve(),
         c.get("/api/agents/runs").catch(() => undefined),
+        // A Space older than the mood route leaves the pet resting as without a mood.
+        c.get("/api/pets/mood").catch(() => undefined),
       ]);
       this.attachRuns(space, runs);
+      space.mood = decodeMood(mood);
+      if (space.shown.changed("mood", space.mood)) this.emit("mood", space);
     } catch (e) {
       if (e instanceof SpaceError && e.kind === "signin") return this.setState(space, { kind: "signin" });
       if (e instanceof NotASpaceError) return this.setState(space, { kind: "incompatible", detail: e.message });

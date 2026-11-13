@@ -302,6 +302,21 @@ const en = {
   ballOnePicture: "Drop one picture at a time.",
   ballNotAPicture: "That is not a picture.",
   ballUnreadable: "Could not read this picture.",
+  deskPet: "Desk Pet",
+  deskPetShow: "Show the desk pet",
+  deskPetHint: "Claude walks along the bottom and shows what the Space is doing: it looks on while agents work, hops in the corner while one waits for you, spins when a turn is done and sleeps when all is quiet. Click it to open that chat or the inbox; right-click to move or hide it.",
+  deskPetWhere: "Where",
+  deskPetInWindow: "In the window",
+  deskPetOnDesktop: "On the desktop, over every app",
+  deskPetNoDisplay: "On the desktop it needs X11 or XWayland, which this desktop does not offer; it stays in the window.",
+  deskPetWayland: "On Wayland it runs through XWayland, as the floating ball does, and stays under full-screen windows. Drag it along the bottom to move it.",
+  deskPetSize: "Size",
+  petSmall: "Small",
+  petMedium: "Medium",
+  petLarge: "Large",
+  petToDesktop: "Put the Pet on the Desktop",
+  petToWindow: "Put the Pet in the Window",
+  petHide: "Hide the Desk Pet",
 } as const;
 
 export type Key = keyof typeof en;
@@ -600,6 +615,21 @@ const zh: Record<Key, string> = {
   ballOnePicture: "一次只能拖一张图片。",
   ballNotAPicture: "这不是图片。",
   ballUnreadable: "无法读取这张图片。",
+  deskPet: "桌宠",
+  deskPetShow: "显示桌宠",
+  deskPetHint: "Claude 在底部走来走去，显示 Space 正在做什么：agent 干活时它在旁边看，有 agent 等你时它在角落里跳，一轮做完时它转一圈，一切安静时它睡觉。点它可以打开对应的对话或收件箱；右键可以移动或隐藏它。",
+  deskPetWhere: "位置",
+  deskPetInWindow: "在窗口里",
+  deskPetOnDesktop: "在桌面上，浮在所有应用之上",
+  deskPetNoDisplay: "放在桌面上需要 X11 或 XWayland，这个桌面没有提供；它会留在窗口里。",
+  deskPetWayland: "在 Wayland 上，它和悬浮球一样通过 XWayland 运行，会在全屏窗口之下。沿底部拖动可以移动它。",
+  deskPetSize: "大小",
+  petSmall: "小",
+  petMedium: "中",
+  petLarge: "大",
+  petToDesktop: "把桌宠放到桌面",
+  petToWindow: "把桌宠放回窗口",
+  petHide: "隐藏桌宠",
 };
 
 export type Lang = "en" | "zh";

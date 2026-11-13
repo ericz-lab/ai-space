@@ -5,6 +5,7 @@ import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import { parseDeepLink } from "../core/desktop.ts";
 import type { Detail, Section } from "../core/settings.ts";
+import { DeskPet } from "./desk-pet.ts";
 import { APP_ID, APP_ROOT, log, logError, path, prefs, readTextSync, t } from "./env.ts";
 import { FloatingBall } from "./floating-ball.ts";
 import { Notifier } from "./inbox.ts";
@@ -37,6 +38,7 @@ export class Application {
   private main: MainWindow | undefined;
   private quick!: QuickChat;
   private ball!: FloatingBall;
+  private deskPet!: DeskPet;
   private started = false;
 
   constructor() {
@@ -77,7 +79,20 @@ export class Application {
       main.present();
       showSettings(main.window, this.model, this.local, "general");
     });
-    this.app.connect("shutdown", () => this.ball.stop());
+    // The desk pet on the desktop; the one in the window is the window's (window.ts).
+    this.deskPet = new DeskPet(
+      this.model,
+      (open, startupId) => {
+        const main = this.window();
+        if (startupId) main.window.set_startup_id(startupId);
+        main.openPet(open);
+      },
+      () => this.app.lookup_action("pet-sync")?.activate(null),
+    );
+    this.app.connect("shutdown", () => {
+      this.ball.stop();
+      this.deskPet.stop();
+    });
     const notifier = new Notifier(this.app, this.model, (space, item) => this.window().openInboxItem(space, item));
     this.model.onFreshInbox = (space, items) => notifier.post(space, items);
 
@@ -97,6 +112,11 @@ export class Application {
       this.ball.sync();
       this.ball.refresh();
     });
+    // Settings › General or the pet's own menu changed the desk pet: shown or not, where, how big.
+    act("pet-sync", () => {
+      this.deskPet.sync();
+      this.main?.pet.sync();
+    });
 
     if (this.local.available) {
       void this.local.refresh().then(async () => {
@@ -107,6 +127,7 @@ export class Application {
     this.model.refreshAll();
     this.model.startPolling();
     this.ball.sync();
+    this.deskPet.sync();
     startMemoryStats();
   }
 

@@ -16,6 +16,7 @@ where Linux allows, and says below where it does less.
 | Apps | The Space's pages in tabs: apps, the web panel, links from the inbox or a chat. A link to another app opens in that app's tab, a link off the Space in the browser. A tab moves to a window of its own and back |
 | Quick Chat | A small window with one conversation: `ai-space --quick-chat` shows it or hides it. GNOME and KDE let no app register a global shortcut, so Settings shows the command to bind under Keyboard › Custom Shortcuts |
 | Floating ball | A small round ball over every window and every workspace, off until Settings › General › Floating Ball turns it on ([below](#floating-ball)). Resting the pointer on it opens a dial of four sections around a hub; each Space sets its own sections on this computer (an app or an agent, Default, or None; the defaults are Keep, Space Assistant, Todo and Design Studio). Clicking a section opens Quick Chat on its agent (an app's own agent, else Space Assistant told where the work goes); a picture dropped on a section opens it with the picture attached, one dropped on the hub opens Space Assistant with it. Drag the ball to move it (its place is remembered); right-click for Quick Chat, Settings and Hide |
+| Desk pet | The web panel's Claude walking along the bottom of Home, or of the screen over every app ([below](#desk-pet)); on by default, set in Settings › General › Desk Pet. It shows what the current Space is doing: it looks on while agents work, hops in its corner while one waits for an approval, spins when a turn is done and sleeps when all is quiet, with a line about it in a bubble. A click opens that agent's chat or the inbox; right-click to move it between the window and the desktop, or hide it |
 | Settings | Laid out as the web panel's Settings, in its words: the sections on the left, one on the right, and the pages a section opens inside it with Back ([below](#settings)). Then This Computer (the Local edition) and Peer, this computer as a peer of a Space used elsewhere ([below](#peer)) |
 
 The window has Home, Chat, Inbox, Terminal and Apps in the header (in a bar at the bottom on a
@@ -48,6 +49,7 @@ desktop/linux/
                   the Local manager, notifications
   src/main.ts     the entry point (`gjs -m main.js`)
   src/ball/       the floating ball's own process (`gjs -m ball.js`, GTK 3 on X11)
+  src/pet/        the desk pet's own process on the desktop (`gjs -m pet.js`, GTK 3 on X11)
   terminal/       the terminal page: xterm.js and the session glue, bundled for the browser
   share/          the desktop entry and AppStream metadata
   build.ts        the build (below)
@@ -98,7 +100,7 @@ What the app keeps:
 | --- | --- |
 | `~/.config/ai-space/connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
 | `~/.config/ai-space/screens.json` | Home's screens, per saved Space |
-| `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand, the machine chosen for each agent on several machines, appearance, language, widgets on screens, the Settings section shown last, the floating ball (on or off, its place, each Space's sections) |
+| `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand, the machine chosen for each agent on several machines, appearance, language, widgets on screens, the Settings section shown last, the floating ball (on or off, its place, each Space's sections), the desk pet (on or off, where, its size, its place on the desktop) |
 | `~/.local/share/ai-space/desktop/<connection>/` | each Space's web data: cookies (its sign-in), storage, cache |
 | `~/.cache/ai-space/catalogue-<connection>.json` | the last catalogue, shown marked as such while the Space cannot be reached |
 | `~/.config/autostart/dev.ai_space.Desktop.desktop` | Start at login (`ai-space --background`) |
@@ -155,6 +157,51 @@ Chat is a Wayland window the desktop places. Opened by its shortcut, Quick Chat 
 the desktop puts it. Pictures
 promised by a source without data or a file (XDND direct save) are not taken. There is no Share
 Picture editor on Linux, so a picture dropped on the hub goes to Space Assistant in Quick Chat.
+
+## Desk pet
+
+The web panel's built-in Claude (`src/web/Pet.tsx`, the sheet `src/web/public/pet-claude.webp`
+made by `src/web/pets/claude.py`, copied beside `main.js` by `build.ts`), as on the Mac
+([macos-desktop.md](macos-desktop.md#desk-pet)) and the iPhone, so every client shows one figure.
+Its rules are the Mac's `PetRules.swift` ported to `src/core/pet.ts` and tested with `bun test`
+(the Mac's `PetRulesTests`, with y pointing down): the sheet's animations, the table from the
+mood to them, walking and resting, the bubble's timing, the desktop window's frame and the place
+it was left. A test keeps the table equal to the web's.
+
+What it shows is the current Space's mood, `GET /api/pets/mood`
+([app-spec.md#space-mood](app-spec.md#space-mood)), read with every look at the Space (each 30
+seconds, and when the selection changes): it looks on while agents work or one ran into a
+problem, walks to its corner and hops there while a turn waits for an approval or a question,
+spins once when a turn is done and sleeps after two quiet hours; idle, it walks and rests as on
+the web. The mood's line (`say`, in the app's language) shows for six seconds out of twenty
+above it, and while the pointer is on it. A click opens what the mood points at, a waiting or
+failed agent's chat or the inbox, else plays the jump. A Space that cannot be reached, or one
+older than the route, leaves it walking and resting with no mood.
+
+Settings › General › Desk Pet: Show the desk pet (on by default), Where (In the window, or On
+the desktop, over every app; the second is greyed with no `DISPLAY`) and Size (small 60, medium
+80, large 110 px). Right-clicking the pet moves it to the other place or hides it. With the
+desktop's animations off (GNOME's Reduce Animations, `gtk-enable-animations`) it is not shown,
+as the Mac hides it under Reduce Motion.
+
+- In the window (`src/app/pet.ts`, `WindowPet`): drawing areas over Home (a `Gtk.Overlay`), the
+  sprite moved along the bottom edge and only it taking the pointer, the bubble beside it. Its
+  timer runs only while Home is on show in a window that is visible and not minimised, and fires
+  only when the cell or the place changes (at most 20 times a second while it walks).
+- On the desktop (`src/app/desk-pet.ts`, `src/pet/pet.ts`): a process of its own, `pet.js`, run as
+  the floating ball is (GTK 3 on X11 through XWayland, [above](#floating-ball)): an
+  override-redirect window along the bottom of the primary monitor's work area, the pet's width
+  plus 440 px wide (room for the bubble on either side) and 72 px taller than the pet, moved with
+  it, the input shape only over the sprite. Drag it along the bottom to move it; where it was left
+  is kept as a fraction of the screen's width (`deskPetSpot`) and clamped when monitors change.
+  It holds still while the pointer rests on it. The app writes `ToPet` lines on its stdin (the
+  sheet's path, the size, the place, dark or light, the menu's words, the mood and its line) and
+  reads `FromPet` lines on its stdout (checked by `decodeFromPet`): moved, a click to open (with
+  the click's time as an X11 startup id, as the ball's), a menu item. If it ends by itself it is
+  started again, at most three times a minute; it ends with the app.
+
+The rules, the build and the desktop pet's drawing (`AISPACE_PET_SHOT`, [below](#debugging)) are
+checked; the two pets have not been tried by hand on a desktop yet.
 
 ## Settings
 
@@ -223,7 +270,9 @@ action such as `new-terminal`, `panel`, `search` or `next-screen`, an app action
 floating ball had sent it, such as `ball={"type":"open","section":"todo"}`; repeatable) and `--screenshot <file.png>`, which saves the window
 (Quick Chat when it is open) after `AISPACE_SCREENSHOT_DELAY` milliseconds (4000) and quits.
 `AISPACE_BALL_SHOT=<file.png>` makes the floating ball draw itself and its open dial into a PNG
-whenever the app sends it the dial, which needs no screenshot permission from the desktop. `AISPACE_LOCAL_BUNDLE` points the Local
+whenever the app sends it the dial, which needs no screenshot permission from the desktop.
+`AISPACE_PET_SHOT=<file.png>` makes the desktop pet draw three poses (resting with its bubble,
+walking, the jump) into a PNG once the app sends it a mood, and quit without showing a window. `AISPACE_LOCAL_BUNDLE` points the Local
 manager at another release tree.
 
 ## Memory
@@ -256,6 +305,6 @@ build it runs. `AISPACE_MEMSTAT=<seconds>` makes any run print its RSS and threa
 
 - Voice input in the message field.
 - Dragging tiles and cards into order (Edit This Screen moves them with buttons), and a card two columns wide.
-- The web panel's theme presets and colour adjustments in Settings › Appearance (the Panel page's own Settings has them), the hover-details and desk-pet switches, which only the panel draws, and the panel's 30-second refresh of the Settings pages (here, Reload).
+- The web panel's theme presets and colour adjustments in Settings › Appearance (the Panel page's own Settings has them), the hover-details switch and the panel's own desk-pet switch, which only the panel draws (the app's desk pet is set in General), and the panel's 30-second refresh of the Settings pages (here, Reload).
 - Updating the app itself; the Local edition updates its service from the release the app carries.
 - A global shortcut of its own (see Quick Chat above).

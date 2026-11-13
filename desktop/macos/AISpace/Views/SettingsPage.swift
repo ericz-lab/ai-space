@@ -145,6 +145,7 @@ struct SettingsPage: View {
             if model.local.available { LocalSettingsSection(model: model, local: model.local) }
             general
             FloatingBallSettings(connection: connection, loader: loader, prefs: prefs)
+            DeskPetSettings(prefs: prefs)
             more
         case .appearance:
             appearance
@@ -823,6 +824,34 @@ struct FloatingBallSettings: View {
                 prefs.floatingBallSlots[connection.id.uuidString] = FloatingBallRules.setting(
                     section, to: key.isEmpty ? nil : key, in: prefs.floatingBallSlots[connection.id.uuidString])
             })
+    }
+}
+
+/// The desk pet on this Mac (docs/macos-desktop.md#desk-pet): shown or not, in the main window or
+/// over every app, and how big. It shows the selected Space's mood either way.
+struct DeskPetSettings: View {
+    @ObservedObject var prefs: Preferences
+
+    var body: some View {
+        Section {
+            Toggle("Show the desk pet", isOn: $prefs.pet)
+            if prefs.pet {
+                Picker("Where", selection: $prefs.petPlace) {
+                    Text("In the window").tag(PetPlace.window)
+                    Text("On the desktop, over every app").tag(PetPlace.desktop)
+                }
+                Picker("Size", selection: $prefs.petSize) {
+                    Text("Small").tag(PetSize.small)
+                    Text("Medium").tag(PetSize.medium)
+                    Text("Large").tag(PetSize.large)
+                }
+            }
+        } header: {
+            Text("Desk Pet")
+        } footer: {
+            Text("Claude walks along the bottom and shows what the Space is doing: it looks on while agents work, hops in the corner while one waits for you, spins when a turn is done and sleeps when all is quiet. Click it to open that chat or the inbox. On the desktop, drag it along the bottom; right-click to hide it.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
     }
 }
 

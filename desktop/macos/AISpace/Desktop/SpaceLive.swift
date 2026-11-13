@@ -19,6 +19,8 @@ final class SpaceLive: ObservableObject {
     @Published private(set) var inbox: [InboxItem] = []
     @Published private(set) var summary = InboxSummary(unread: 0, open: 0)
     @Published private(set) var running: [ChatRun] = []
+    /// The Space's mood for the desk pet (docs/app-spec.md#space-mood); nil from a Space without it.
+    @Published private(set) var mood: SpaceMood?
     @Published private(set) var lastRefresh: Date?
 
     /// Called with threads that became unread since the last look.
@@ -75,6 +77,9 @@ final class SpaceLive: ObservableObject {
             if !fresh.isEmpty { onNewInbox(fresh) }
             // A peer without the runs route still counts as reachable.
             running = (try? await api.get("/api/agents/runs?recent=0", as: RunsResponse.self).runs.filter { $0.status == "running" }) ?? []
+            // A Space older than the mood route leaves the pet resting as without a mood.
+            let mood = try? await api.get("/api/pets/mood", as: SpaceMood.self)
+            if mood != self.mood { self.mood = mood }
             status = .ok
         } catch SpaceAPIError.authenticationRequired {
             status = .signInNeeded

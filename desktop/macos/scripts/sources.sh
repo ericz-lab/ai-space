@@ -17,3 +17,7 @@ SHARED="$SHARED $IOS_DIR/Core/ScreenshotRules.swift $IOS_DIR/Core/SharedCaptureS
 SHARED_CORE="$SHARED_CORE $IOS_DIR/Core/ScreenshotRules.swift $IOS_DIR/Core/SharedCaptureStore.swift"
 
 SHARED="$SHARED ShareExtension/MacSharedPicture.swift"
+# The desk pet's drawing (its rules are Services/PetRules.swift, which the phone compiles in turn).
+SHARED="$SHARED $IOS_DIR/Views/PetView.swift"
+# The desk pet's sheet, the panel's own (src/web/public), copied into the app by build.sh.
+PET_SHEET=../../src/web/public/pet-claude.webp

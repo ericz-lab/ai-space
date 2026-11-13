@@ -6,6 +6,7 @@ import type { Connection } from "../core/connections.ts";
 import { type Entry, entryKey, pickText } from "../core/catalogue.ts";
 import { EMPTY_SLOT, FALLBACK_TITLE, SECTIONS, type Section as BallSection, refFor, setting, slot } from "../core/floating-ball.ts";
 import { FloatingBall } from "./floating-ball.ts";
+import { desktopPetAvailable } from "./pet.ts";
 import { LANGS } from "../../../../src/web/messages.ts";
 import { APP_ID, APP_ROOT, exists, lang, logError, path, prefs, savePrefs, t, tw, writeText } from "./env.ts";
 import type { LocalManager } from "./local-manager.ts";
@@ -366,6 +367,7 @@ function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) =>
   quick.add(commandRow(`${launcher()} --quick-chat`, toast));
   page.add(quick);
   page.add(floatingBallGroup(ctx, model));
+  page.add(deskPetGroup(ctx));
 
   // The launcher turned WebKit's sandbox off because the system blocks what it needs.
   if (GLib.getenv("AISPACE_WEB_SANDBOX") === "off") {
@@ -430,6 +432,61 @@ function floatingBallGroup(ctx: Ctx, model: AppModel): any {
     savePrefs();
     sync();
     for (const r of rows) r.set_visible(show.get_active());
+  });
+  return group;
+}
+
+/**
+ * The desk pet on this computer (the Mac's DeskPetSettings): shown or not, in the window or on the
+ * desktop over every app (where X11 or XWayland can run it), and how big. It shows the current
+ * Space's mood either way.
+ */
+function deskPetGroup(ctx: Ctx): any {
+  const desktop = desktopPetAvailable();
+  const group = new Adw.PreferencesGroup({ title: t("deskPet"), description: t("deskPetHint") });
+  const sync = () => ctx.dialog.get_root()?.get_application()?.lookup_action("pet-sync")?.activate(null);
+  const show = new Adw.SwitchRow({ title: t("deskPetShow"), active: !prefs.noPet });
+  group.add(show);
+  const where = choiceRow(
+    t("deskPetWhere"),
+    [
+      { value: "window", label: t("deskPetInWindow") },
+      { value: "desktop", label: t("deskPetOnDesktop"), disabled: !desktop },
+    ],
+    desktop && prefs.petPlace === "desktop" ? "desktop" : "window",
+    (value) => {
+      prefs.petPlace = value === "desktop" ? "desktop" : "window";
+      savePrefs();
+      sync();
+    },
+    !desktop ? t("deskPetNoDisplay") : GLib.getenv("WAYLAND_DISPLAY") ? t("deskPetWayland") : undefined,
+  ).row;
+  const size = choiceRow(
+    t("deskPetSize"),
+    [
+      { value: "small", label: t("petSmall") },
+      { value: "medium", label: t("petMedium") },
+      { value: "large", label: t("petLarge") },
+    ],
+    prefs.petSize ?? "medium",
+    (value) => {
+      prefs.petSize = value === "small" || value === "large" ? value : "medium";
+      savePrefs();
+      sync();
+    },
+  ).row;
+  group.add(where);
+  group.add(size);
+  const follow = () => {
+    where.set_visible(show.get_active());
+    size.set_visible(show.get_active());
+  };
+  follow();
+  show.connect("notify::active", () => {
+    prefs.noPet = !show.get_active();
+    savePrefs();
+    sync();
+    follow();
   });
   return group;
 }

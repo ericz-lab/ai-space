@@ -14,6 +14,20 @@ struct GeneralSettings: View {
             Toggle("Show the floating ball", isOn: $prefs.floatingBall)
             Text("A small ball over every app. Drop a picture on it to keep the picture in an app of the Space; drag the ball to move it, click it for Pending Shares. Space → Floating Ball shows or hides it too.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Show the desk pet", isOn: $prefs.pet)
+            if prefs.pet {
+                Picker("Where", selection: $prefs.petPlace) {
+                    Text("In the window").tag(PetPlace.window)
+                    Text("On the desktop, over every app").tag(PetPlace.desktop)
+                }
+                Picker("Size", selection: $prefs.petSize) {
+                    Text("Small").tag(PetSize.small)
+                    Text("Medium").tag(PetSize.medium)
+                    Text("Large").tag(PetSize.large)
+                }
+            }
+            Text("Claude walks along the bottom and shows what the Space is doing. Click it to open that chat or the inbox. Space → Desk Pet shows or hides it too.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Show in the menu bar", isOn: $prefs.menuBar)
             Toggle("Notify me of new inbox messages", isOn: $prefs.notifications)
             Text("The unread count also shows on the Dock icon. Notifications follow the Space's inbox; nothing is sent twice.")

@@ -49,7 +49,7 @@ $PB -c "Add :NSHighResolutionCapable bool true" "$APP/Contents/Info.plist"
 # The Mac client owns aispace:// on a Mac; this build must not take its links.
 $PB -c "Delete :CFBundleURLTypes" "$APP/Contents/Info.plist"
 
-cp AISpace/Resources/Logo.png "$APP/Contents/Resources/"
+cp AISpace/Resources/Logo.png "$PET_SHEET" "$APP/Contents/Resources/"
 cp -R AISpace/Resources/*.lproj "$APP/Contents/Resources/"
 
 codesign --force --timestamp=none --sign - "$APP"
