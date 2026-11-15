@@ -8,4 +8,9 @@
     <string name="terminal_key_hide_keyboard">Hide keyboard</string>
     <string name="terminal_key_ctrl">Control, applies to the next key</string>
     <string name="terminal_key_alt">Alt, applies to the next key</string>
+    <string name="terminal_key_esc">Escape</string>
+    <string name="terminal_key_back_tab">Shift-Tab</string>
+    <string name="terminal_key_ctrl_c">Control-C, interrupt</string>
+    <string name="terminal_key_page_up">Page Up</string>
+    <string name="terminal_key_page_down">Page Down</string>
 </resources>

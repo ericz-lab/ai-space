@@ -674,6 +674,34 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 .term-pane .xterm { height: 100%; }
 .term-state { position: absolute; right: 10px; top: 8px; font-size: 11px; color: var(--muted); }
 .term-note { flex: none; margin: 0; padding: 6px 14px calc(8px + env(safe-area-inset-bottom)); font-size: 11px; color: var(--muted); }
+/* The key row on a phone (TerminalKeyRow.tsx): keys that scroll, then the arrows and hide-keyboard
+   fixed at the right. Only touch screens and narrow windows show it; with the keyboard up
+   (data-kb, set by Terminal.tsx) it sits right on the keyboard and the note gives way. */
+.term-keys { display: none; flex: none; align-items: center; gap: 6px; padding: 6px 12px calc(6px + env(safe-area-inset-bottom)); }
+.term-keys-scroll {
+  flex: 1; min-width: 0; display: flex; gap: 5px; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none; touch-action: pan-x; overscroll-behavior-x: contain;
+}
+.term-keys-scroll::-webkit-scrollbar { display: none; }
+.term-keys-fixed { flex: none; display: flex; gap: 5px; }
+.term-key {
+  flex: none; min-width: 36px; height: 34px; padding: 0 8px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--hairline); background: color-mix(in srgb, var(--text) 7%, var(--panel)); color: var(--text);
+  font: 14px/1 ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; white-space: nowrap; cursor: pointer;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.term-key:active { background: color-mix(in srgb, var(--accent) 30%, var(--panel)); }
+.term-key.on { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+/* A held arrow must not turn into a pan or a long-press menu. */
+.term-key.hold { touch-action: none; font-size: 17px; }
+.term-key svg { display: block; }
+@media (hover: none), (max-width: 640px) {
+  .term-keys { display: flex; }
+  .term-note:has(+ .term-keys) { padding-bottom: 0; }
+  .term[data-kb] .term-note { display: none; }
+  .term[data-kb] .term-keys { padding-bottom: 6px; }
+}
 
 /* Chat: a floating panel in the middle of the page. A sidebar on its left holds New session, the agents
    and the recent sessions; on a phone the avatar bar and the history button take its place. */
@@ -1127,6 +1155,9 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
   /* Panels take the whole screen on a phone. */
   .overlay, .overlay.top { padding: 0; }
   .panel.settings, .chat, .tasks, .term { width: 100%; height: 100%; max-height: none; border-radius: 0; border: none; }
+  /* The terminal keeps to the part of the screen the soft keyboard leaves (Terminal.tsx sets the
+     visual viewport's height and offset), so its key row sits on the keyboard. */
+  .term { position: absolute; left: 0; top: var(--term-top, 0px); height: var(--term-vh, 100%); }
   .overlay.top .panel { max-height: none; }
   .task-body { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
   .chat-input { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }

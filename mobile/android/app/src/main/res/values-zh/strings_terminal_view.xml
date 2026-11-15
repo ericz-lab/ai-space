@@ -7,4 +7,9 @@
     <string name="terminal_key_hide_keyboard">收起键盘</string>
     <string name="terminal_key_ctrl">Control，作用于下一个键</string>
     <string name="terminal_key_alt">Alt，作用于下一个键</string>
+    <string name="terminal_key_esc">Esc 键</string>
+    <string name="terminal_key_back_tab">Shift+Tab</string>
+    <string name="terminal_key_ctrl_c">Ctrl+C，中断</string>
+    <string name="terminal_key_page_up">向上翻页</string>
+    <string name="terminal_key_page_down">向下翻页</string>
 </resources>

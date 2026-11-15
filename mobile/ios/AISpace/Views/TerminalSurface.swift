@@ -34,6 +34,11 @@ private extension UIColor {
 
 /// One session's terminal on screen: the emulator view, kept with its scrollback while the
 /// session's tab exists, and the wiring between it and the session's socket.
+///
+/// Above the keyboard is our key row (`TerminalKeyRow`, the keys of `TerminalKeys`) in place of
+/// SwiftTerm's accessory. Its sticky Ctrl and Alt are SwiftTerm's own `controlModifier` and
+/// `metaModifier`, so the next letter typed on the keyboard takes them too; SwiftTerm posts a
+/// notification when a typed key spends one, and the row follows.
 @MainActor
 final class TerminalTab: ObservableObject, Identifiable {
     let id = UUID()
@@ -41,11 +46,13 @@ final class TerminalTab: ObservableObject, Identifiable {
     let session: TerminalSession
     let host: TerminalHostView
     private let bridge = TerminalBridge()
+    private let keyRow: TerminalKeyRow
 
     init(title: String, session: TerminalSession, passphrase: String?, openLink: @escaping (URL) -> Void) {
         self.title = title
         self.session = session
         host = TerminalHostView()
+        keyRow = TerminalKeyRow()
         let view = host.terminal
         view.terminalDelegate = bridge
         session.onOutput = { [weak view] bytes in view?.feed(byteArray: bytes) }
@@ -58,6 +65,10 @@ final class TerminalTab: ObservableObject, Identifiable {
             let t = view.getTerminal()
             session.start(cols: t.cols, rows: t.rows, passphrase: passphrase)
         }
+        view.inputAccessoryView = keyRow
+        keyRow.onKey = { [weak self] key in self?.press(key) }
+        bridge.onModifierSpent = { [weak self] in self?.showModifiers() }
+        bridge.watchModifiers(of: view)
     }
 
     func focus() {
@@ -68,6 +79,33 @@ final class TerminalTab: ObservableObject, Identifiable {
     func type(_ line: String) {
         session.send(ArraySlice(Array((line + "\r").utf8)))
     }
+
+    /// A key of the row: Ctrl and Alt arm or disarm, hide-keyboard hides it, and any other key
+    /// spends the armed modifiers and sends the table's bytes, the arrows, Home and End in the
+    /// terminal's cursor key mode. They go through the view as typing does, so it scrolls to the caret.
+    private func press(_ key: TerminalKeys.Key) {
+        let view = host.terminal
+        switch key.kind {
+        case .modifier(.ctrl):
+            view.controlModifier.toggle()
+        case .modifier(.alt):
+            view.metaModifier.toggle()
+        case .hideKeyboard:
+            _ = view.resignFirstResponder()
+        default:
+            let mods = TerminalKeys.Modifiers(ctrl: view.controlModifier, alt: view.metaModifier)
+            view.controlModifier = false
+            view.metaModifier = false
+            if let bytes = TerminalKeys.bytes(key, appCursor: view.getTerminal().applicationCursor, mods: mods) {
+                view.send(bytes)
+            }
+        }
+        showModifiers()
+    }
+
+    private func showModifiers() {
+        keyRow.showArmed(ctrl: host.terminal.controlModifier, alt: host.terminal.metaModifier)
+    }
 }
 
 /// SwiftTerm's delegate, which is not bound to the main actor; UIKit calls it there.
@@ -75,6 +113,18 @@ private final class TerminalBridge: NSObject, TerminalViewDelegate {
     var onSend: @MainActor (ArraySlice<UInt8>) -> Void = { _ in }
     var onSize: @MainActor (Int, Int) -> Void = { _, _ in }
     var onLink: @MainActor (URL) -> Void = { _ in }
+    var onModifierSpent: @MainActor () -> Void = {}
+
+    /// SwiftTerm posts these when a typed key spends the sticky Ctrl or Alt (on the main thread,
+    /// where it reads the keyboard). The center lets the observation go with this object.
+    func watchModifiers(of view: TerminalView) {
+        NotificationCenter.default.addObserver(self, selector: #selector(modifierSpent(_:)), name: .terminalViewControlModifierReset, object: view)
+        NotificationCenter.default.addObserver(self, selector: #selector(modifierSpent(_:)), name: .terminalViewMetaModifierReset, object: view)
+    }
+
+    @objc private func modifierSpent(_ note: Notification) {
+        MainActor.assumeIsolated { onModifierSpent() }
+    }
 
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         MainActor.assumeIsolated { onSend(data) }

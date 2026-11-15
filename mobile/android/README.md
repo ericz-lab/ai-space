@@ -33,7 +33,8 @@ mobile/android/
     AISpaceApplication.kt, MainActivity.kt, DebugLaunch.kt
     core/                pure Kotlin, no android.*: iOS Core/ and the Mac client's shared Foundation files
                          (Connection, ConnectionStore, SpaceCheck, SpaceApi on OkHttp, models, ChatStream,
-                         DesktopRules, NavigationPolicy), HubModels, TerminalModels, widget blocks, screens,
+                         DesktopRules, NavigationPolicy), HubModels, TerminalModels, TerminalKeys (the
+                         terminal's key row, the same table as iOS and the panel), widget blocks, screens,
                          AgentGroups (one agent across machines), Feedback, MachineInventory (CLIs by machine)
     live/                CatalogueLoader, SettingsLoader, IconStore (+ SVG via an offscreen WebView),
                          BackdropStore, the stores of the Space's pages, ChatStore, TerminalStore and
