@@ -171,6 +171,10 @@ distribution's loopback, which WSL forwards to Windows' `127.0.0.1`.
 | `dsh` (DeepSeek Harness) | the desktop app's own CLI in its bundle, or one on the tool PATH; its signed-in account, or `DEEPSEEK_API_KEY` for an API-key installation |
 | `zstd` | needed only once backups are turned on (`SPACE_BACKUP_URL`); they are off by default |
 
+A Mac that is a hub's peer also needs its tunnel and needs to stay awake: the service does not run
+`cloudflared` or keep the Mac from sleeping. The LaunchAgent and the sleep settings are in
+[install.md](install.md#5-cloudflare-tunnel-and-dns), *On a Mac*.
+
 
 ## Updates
 
