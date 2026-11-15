@@ -167,7 +167,7 @@ export class PeerClient {
     try {
       const r = await this.fetch(this.config.url + SNAPSHOT_PATH, { headers: this.authHeaders(), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) });
       if (r.status === 401 || r.status === 403) throw new Error("token rejected");
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw new Error(await httpError(r));
       const snap = parseSnapshot(await r.json());
       this.snapshot = snap;
       this.error = undefined;
@@ -253,6 +253,26 @@ export class PeerClient {
   private now(): number {
     return this.opts.now ? this.opts.now() : Date.now();
   }
+}
+
+/** Cloudflare's own 1xxx codes that mean the peer's tunnel, not the peer, is what failed. */
+const CLOUDFLARE_CODES: Record<string, string> = {
+  "1033": "tunnel not connected",
+  "1016": "origin DNS error",
+};
+
+/**
+ * Why a refresh got an error status. Cloudflare answers 530 itself when the peer's tunnel has no
+ * connector (the machine asleep, offline, or its `cloudflared` stopped), with a body such as
+ * `error code: 1033`; that says more than the status alone (docs/peers.md#failure-and-staleness).
+ */
+export async function httpError(r: Response): Promise<string> {
+  if (r.status !== 530) return `HTTP ${r.status}`;
+  const body = await r.text().catch(() => "");
+  const code = /error code:?\s*(1\d{3})\b/i.exec(body.slice(0, 4096))?.[1];
+  if (!code) return "HTTP 530";
+  const meaning = CLOUDFLARE_CODES[code];
+  return meaning ? `${meaning} (Cloudflare ${code})` : `HTTP 530 (Cloudflare ${code})`;
 }
 
 /** Accept only the shape the hub relies on; anything else is a peer of another version. */
