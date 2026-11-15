@@ -1,5 +1,6 @@
 import type { CallView, PeerLedger, PeerLedgerSource, UsageReport } from "../model/index.ts";
 import type { Window } from "../model/types.ts";
+import { httpError } from "./client.ts";
 import type { PeerHub } from "./hub.ts";
 
 /**
@@ -52,7 +53,7 @@ export class PeerLedgers implements PeerLedgerSource {
           const r = await client.request(url, { signal: AbortSignal.timeout(this.opts.timeoutMs ?? LEDGER_TIMEOUT_MS) });
           if (r.status === 404) return fallback("this peer runs an older ai-space without the ledger route");
           if (r.status === 401 || r.status === 403) return fallback("token rejected");
-          if (!r.ok) return fallback(`HTTP ${r.status}`);
+          if (!r.ok) return fallback(await httpError(r));
           const j = (await r.json()) as { ok?: boolean; name?: unknown; error?: unknown };
           if (j?.ok !== true) return fallback(typeof j?.error === "string" ? j.error : "not a ledger");
           const data = parse(j);

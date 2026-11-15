@@ -259,6 +259,49 @@ Each rule creates the proxied CNAME in DNS. Nothing else in DNS is needed. Keep 
 
 **The CLI route (recommended for scripts and agents).** Every dashboard step above and in steps 6 and 7 has a `cf` command, Cloudflare's unified CLI (`bun add -g cf`, Node 22+): the tunnel, its token, the ingress, the DNS records including the wildcard, the Access applications and the bucket. The commands, in the order that keeps Access ahead of the hostnames, are in [cloudflare.md](cloudflare.md); `setup` prints them with this machine's values. Run them from any machine logged in with `cf auth login`; the server only needs the token. The connector stays the `cloudflared` unit above.
 
+**On a Mac (a peer behind its own tunnel)**
+
+A Mac that is a peer ([peers.md](peers.md#deploying-a-peer)) runs `cloudflared` from a LaunchAgent instead of the systemd unit; ai-space does not write this one. `KeepAlive` true starts it again after any exit, including the clean one after it gives up reconnecting when the network went away in sleep (`no more connections active and exiting`); `ThrottleInterval` spaces the restarts. Save it as `~/Library/LaunchAgents/ai.space.<name>-tunnel.plist`, with the tunnel's name for `<name>` and your user name for `<you>` (launchd expands no `~`); `which cloudflared` gives the binary's path:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.space.<name>-tunnel</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/cloudflared</string>
+    <string>--no-autoupdate</string>
+    <string>--config</string><string>/Users/<you>/.cloudflared/<name>.yml</string>
+    <string>tunnel</string>
+    <string>run</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/<you>/Library/Logs/ai.space.<name>-tunnel.log</string>
+  <key>StandardErrorPath</key><string>/Users/<you>/Library/Logs/ai.space.<name>-tunnel.log</string>
+</dict>
+</plist>
+```
+
+The `--config` file is a locally managed tunnel's (`tunnel:`, `credentials-file:`, and an ingress rule from `space-<name>.example.com` to `http://127.0.0.1:8700`). For a dashboard-managed tunnel, drop the `--config` pair, put the token under `EnvironmentVariables` as `TUNNEL_TOKEN`, and `chmod 600` the plist. If the log keeps showing QUIC timeouts (a network that blocks UDP 7844), add `protocol: http2` to the config file. Load it, and restart it after a change:
+
+```bash
+plutil -lint ~/Library/LaunchAgents/ai.space.<name>-tunnel.plist
+launchctl bootout gui/$(id -u)/ai.space.<name>-tunnel 2>/dev/null    # when an older copy is loaded
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.space.<name>-tunnel.plist
+launchctl kickstart -k gui/$(id -u)/ai.space.<name>-tunnel          # restart without reloading
+launchctl print gui/$(id -u)/ai.space.<name>-tunnel | grep -E 'state|pid|last exit'
+```
+
+A sleeping Mac closes its tunnel: Cloudflare answers the hub itself with 530 `error code: 1033`, and `space peer ls` on the hub shows `tunnel not connected (Cloudflare 1033)`. A 502 instead means the tunnel is up and ai-space on the Mac is not answering. ai-space does not keep the Mac awake ([macos-desktop.md](macos-desktop.md#window-and-background-behavior)); to keep it reachable while it is on power:
+
+- System Settings › Battery › Options (on a desktop Mac, Energy): turn on **Prevent automatic sleeping on power adapter when the display is off**, and set **Wake for network access** to *Only on Power Adapter* or *Always*.
+- The same from a terminal: `sudo pmset -c sleep 0 displaysleep 10 womp 1 tcpkeepalive 1`; `pmset -g` shows what is in effect.
+- A MacBook still sleeps when its lid is closed, unless it runs closed on power with an external display; no setting avoids that, so expect the peer `down` then. A peer that must always answer belongs on a machine that does not sleep.
+
 ## 6. Cloudflare Access
 
 The panel routes carry no token (see [panel.md](panel.md)): whoever reaches the panel can open a chat with write permissions, which is a shell as this user. The access layer in front of the tunnel is the authentication. Create it before the panel hostname goes live.

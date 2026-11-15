@@ -151,6 +151,7 @@ Not moved: the peer's own `SPACE_NAME` (the name it gives itself, which other hu
 | Peer answers | Its entries, live health, widget items with the peer's `asOf`. |
 | Peer times out or errors | The last good snapshot, apps and widgets muted (`stale`), services `unknown`, the peer `down` with the last `asOf` and the error text; chat, embed and icons on those entries fail with 502 and the error, not a hub guess. Once two refreshes in a row have failed, a bus call to it is answered 503 `peer <name> is down (snapshot N min old)` at once, without forwarding, and `GET /api/capabilities` marks its apps `health: "down"` ([events.md](events.md#across-machines-peers)). |
 | No good snapshot ever (new peer, wrong token) | The peer only, `down`, with the error (`token rejected` for a 401). Nothing invented. |
+| Peer's tunnel has no connector (the machine asleep or offline, its `cloudflared` stopped) | As for an error; Cloudflare answers 530 with its own code, and the error names it: `tunnel not connected (Cloudflare 1033)`. A 502 instead is the tunnel up and the peer's service not answering. |
 | Peer removed from `.env` | Its entries disappear on the next boot; its layout keys stay in `panel_kv` harmlessly, like a deleted app's. Its `peer_snapshots` row is deleted at boot. |
 | Hub restarted while a peer is down | The stored snapshot, `stale` and `down`, until the first refresh succeeds. Until two refreshes have failed, a bus call is still forwarded: the hub does not yet know the peer is down. |
 
@@ -188,7 +189,7 @@ A peer app whose `url` is already on the panel (a local app's, or an earlier pee
 
 1. Install ai-space on the second machine as a user unit (`deploy/install.sh`), workspace `~/.ai-space`, apps under `apps/` as on any machine.
 2. In its `.env`: `SPACE_HUB_TOKEN` (random) and `SPACE_NAME`.
-3. Publish its port on a hostname of the machine's tunnel; exempt `/api/peer/*` from the access layer or note the layer's service credentials. A machine with no tunnel can keep an SSH reverse tunnel to the hub's machine instead (`ssh -N -R 127.0.0.1:8711:127.0.0.1:8700 hub`), and the hub uses `http://127.0.0.1:8711`; the Linux app sets this up, with steps 2 and 4, in Settings › Peer ([linux-desktop.md](linux-desktop.md#peer)).
+3. Publish its port on a hostname of the machine's tunnel; exempt `/api/peer/*` from the access layer or note the layer's service credentials. A machine with no tunnel can keep an SSH reverse tunnel to the hub's machine instead (`ssh -N -R 127.0.0.1:8711:127.0.0.1:8700 hub`), and the hub uses `http://127.0.0.1:8711`; the Linux app sets this up, with steps 2 and 4, in Settings › Peer ([linux-desktop.md](linux-desktop.md#peer)). A Mac runs `cloudflared` from a LaunchAgent that restarts it, and sleeps unless told not to: [install.md](install.md#5-cloudflare-tunnel-and-dns), *On a Mac*.
 4. In the hub's `.env`: `SPACE_PEER_<NAME>`, `_TOKEN` and, if needed, `_HEADERS`; restart the hub. `GET /api/peers` shows `ok` and the counts, or the error.
 5. Delete the link apps listed under `duplicates`.
 6. Backups: give the peer the same `SPACE_S3_*` credentials (or its own bucket). Its snapshots land under `backups/<SPACE_NAME>/`, apart from the hub's; never point two machines at one prefix, since both have a `space` app and may share app names. See [backup.md](backup.md#several-machines).
