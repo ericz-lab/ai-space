@@ -170,7 +170,8 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
         // Only what lives here: a peer that is itself a hub does not pass its own peers on
         // (a hub of hubs would list them twice, under the wrong name).
         const own = <T extends { peer?: string; app?: string; name?: string }>(list: T[]) => list.filter((x) => !x.peer && opts.allowApp?.(x.app ?? x.name ?? "") !== false);
-        return json({
+        // Every hub reads this every 30 s and it runs to tens of kilobytes, so it goes gzipped to a hub that takes it.
+        return gzipped(req, json({
           ok: true,
           name: opts.name,
           ...(opts.id ? { id: opts.id } : {}),
@@ -184,7 +185,7 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
           ...(opts.model && opts.modelInfo?.() ? { model: opts.modelInfo() } : {}),
           ...(opts.inventory ? { inventory: opts.inventory() } : {}),
           asOf: new Date().toISOString(),
-        });
+        }));
       }),
     },
     "/api/peer/apps/:app": { DELETE: guard(mirror(opts.panel, "/api/apps/:app", "DELETE")) },
@@ -338,6 +339,15 @@ function handlerOf(routes: Routes, path: string, method: Method): Handler {
   const h = typeof entry === "function" ? entry : entry?.[method];
   if (!h) throw new Error(`no ${method} handler for ${path}`);
   return h;
+}
+
+/** The answer gzipped when the request accepts gzip (Bun's fetch does, and unpacks it). */
+async function gzipped(req: Request, res: Response): Promise<Response> {
+  if (!/\bgzip\b/i.test(req.headers.get("accept-encoding") ?? "")) return res;
+  const headers = new Headers(res.headers);
+  headers.set("content-encoding", "gzip");
+  headers.set("vary", "accept-encoding");
+  return new Response(Bun.gzipSync(new Uint8Array(await res.arrayBuffer())), { status: res.status, headers });
 }
 
 function json(body: unknown, status = 200): Response {
