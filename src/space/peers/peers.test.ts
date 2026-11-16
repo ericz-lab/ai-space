@@ -288,6 +288,13 @@ describe("peer side", () => {
     expect(r.body.widgets.map((w: Body) => w.id)).toEqual(["media/board", "media/latest"]);
     expect(r.body.services).toEqual([{ app: "media", title: "Media", icon: "/api/apps/media/icon", port: 8731, health: "ok", status: "active", hidden: false }]);
     expect(typeof r.body.asOf).toBe("string");
+    // Gzipped for a hub that takes it, which Bun's fetch does and unpacks; plain for one that does not.
+    const packed = await fetch(`${peerBase}/api/peer/snapshot`, { headers: { authorization: "Bearer s3cret", "accept-encoding": "gzip" }, decompress: false });
+    expect(packed.headers.get("content-encoding")).toBe("gzip");
+    expect(JSON.parse(new TextDecoder().decode(Bun.gunzipSync(new Uint8Array(await packed.arrayBuffer())))).name).toBe("peer-box");
+    const plain = await fetch(`${peerBase}/api/peer/snapshot`, { headers: { authorization: "Bearer s3cret", "accept-encoding": "identity" }, decompress: false });
+    expect(plain.headers.get("content-encoding")).toBeNull();
+    expect(((await plain.json()) as Body).name).toBe("peer-box");
     expect((await fetch(`${peerBase}/api/peer/apps/media/icon`)).status).toBe(401);
     expect((await get(peerBase, "/api/peer/apps/media/appcolor", { headers: { authorization: "Bearer s3cret" } })).body).toEqual({ ok: true, color: "#abcdef" });
   });
