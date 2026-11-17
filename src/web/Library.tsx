@@ -187,7 +187,7 @@ export default function Library({
   };
   // Enter in the search acts on the only match left: opens it, or in add mode adds it.
   const onSearchKey = (ev: React.KeyboardEvent) => {
-    if (ev.key !== "Enter" || shown.length !== 1) return;
+    if (ev.key !== "Enter" || ev.nativeEvent.isComposing || ev.keyCode === 229 || shown.length !== 1) return;
     const only = shown[0] as Entry;
     if (addMode) {
       if (!targetScreen?.items.includes(only.key)) add(only);

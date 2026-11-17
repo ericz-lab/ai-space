@@ -95,7 +95,7 @@ export function AddForm({ onClose, onSaved, onCreated }: { onClose: () => void; 
           <>
             <div className="field">
               <label>{t("add.link")}</label>
-              <input value={link} onChange={(e) => setLink(e.target.value)} disabled={busy} placeholder={t("add.placeholder")} onKeyDown={(e) => e.key === "Enter" && !busy && save()} />
+              <input value={link} onChange={(e) => setLink(e.target.value)} disabled={busy} placeholder={t("add.placeholder")} onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229 && !busy && save()} />
             </div>
             <div className="form-hint">{t("add.hint")}</div>
           </>
