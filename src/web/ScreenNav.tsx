@@ -5,7 +5,8 @@ import { useLang } from "./i18n.ts";
 // handle stays visible so the way is there without hovering), a dock at the bottom with the
 // library, home and one icon per screen, a search button, and a first-use hint. With a mouse the
 // dock stays out of sight until the pointer comes near the bottom of the window (or the keyboard
-// focus enters it); touch screens always show it.
+// focus enters it); other touch screens always show it. A phone shows no dock: the same buttons
+// stand in a row at the top of the page instead (PhoneNav), which scrolls with it and covers nothing.
 // Position -1 is the library; 0 is home; the operator's screens follow.
 
 const HINT_KEY = "panel-screens-hint";
@@ -19,20 +20,15 @@ const hintSeen = () => {
   }
 };
 
-export default function ScreenNav({
-  pos,
-  names,
-  onGo,
-  onNew,
-  onSearch,
-}: {
+type NavProps = {
   pos: number;
   /** Display names of the screens, home first. */
   names: string[];
   onGo: (pos: number) => void;
-  onNew: () => void;
   onSearch: () => void;
-}) {
+};
+
+export default function ScreenNav({ pos, names, onGo, onNew, onSearch }: NavProps & { onNew: () => void }) {
   const { t } = useLang();
   const [hint, setHint] = useState(() => !hintSeen());
   const dismiss = () => {
@@ -78,35 +74,7 @@ export default function ScreenNav({
         </button>
       )}
       <nav className={`dock${near || hint ? " shown" : ""}`} aria-label={t("screens.nav")}>
-        <button className={`dock-btn${pos === -1 ? " on" : ""}`} onClick={() => onGo(-1)} aria-label={t("screens.library")} aria-current={pos === -1 ? "page" : undefined}>
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <rect x="2.5" y="2.5" width="6" height="6" rx="1.6" />
-            <rect x="11.5" y="2.5" width="6" height="6" rx="1.6" />
-            <rect x="2.5" y="11.5" width="6" height="6" rx="1.6" />
-            <rect x="11.5" y="11.5" width="6" height="6" rx="1.6" />
-          </svg>
-        </button>
-        <button className={`dock-btn${pos === 0 ? " on" : ""}`} onClick={() => onGo(0)} aria-label={names[0]} aria-current={pos === 0 ? "page" : undefined}>
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M3 9.2 10 3l7 6.2V17a.5.5 0 0 1-.5.5h-4v-5h-5v5h-4A.5.5 0 0 1 3 17z" />
-          </svg>
-        </button>
-        {/* The operator's screens: a monitor, in the line style of the other dock icons. */}
-        {names.slice(1).map((n, i) => (
-          <button key={i} className={`dock-btn dock-screen${pos === i + 1 ? " on" : ""}`} onClick={() => onGo(i + 1)} aria-label={n} aria-current={pos === i + 1 ? "page" : undefined}>
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <rect x="2.5" y="3.5" width="15" height="10" rx="2" />
-              <path d="M10 13.5V17M6.5 17h7" />
-            </svg>
-          </button>
-        ))}
-        <span className="dock-sep" />
-        <button className="dock-btn" onClick={onSearch} aria-label={t("screens.search")} aria-keyshortcuts="Meta+K Control+K">
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <circle cx="8.5" cy="8.5" r="5" />
-            <path d="m12.5 12.5 4.5 4.5" />
-          </svg>
-        </button>
+        <ScreenButtons pos={pos} names={names} onGo={onGo} onSearch={onSearch} />
       </nav>
       {hint && (
         <div className="screens-hint" role="note">
@@ -117,5 +85,57 @@ export default function ScreenNav({
         </div>
       )}
     </>
+  );
+}
+
+/** The library, home, one monitor per screen and search: the dock's buttons, and the phone's row. */
+function ScreenButtons({ pos, names, onGo, onSearch }: NavProps) {
+  const { t } = useLang();
+  return (
+    <>
+      <button className={`dock-btn${pos === -1 ? " on" : ""}`} onClick={() => onGo(-1)} aria-label={t("screens.library")} aria-current={pos === -1 ? "page" : undefined}>
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <rect x="2.5" y="2.5" width="6" height="6" rx="1.6" />
+          <rect x="11.5" y="2.5" width="6" height="6" rx="1.6" />
+          <rect x="2.5" y="11.5" width="6" height="6" rx="1.6" />
+          <rect x="11.5" y="11.5" width="6" height="6" rx="1.6" />
+        </svg>
+      </button>
+      <button className={`dock-btn${pos === 0 ? " on" : ""}`} onClick={() => onGo(0)} aria-label={names[0]} aria-current={pos === 0 ? "page" : undefined}>
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M3 9.2 10 3l7 6.2V17a.5.5 0 0 1-.5.5h-4v-5h-5v5h-4A.5.5 0 0 1 3 17z" />
+        </svg>
+      </button>
+      {/* The operator's screens: a monitor, in the line style of the other dock icons. */}
+      {names.slice(1).map((n, i) => (
+        <button key={i} className={`dock-btn dock-screen${pos === i + 1 ? " on" : ""}`} onClick={() => onGo(i + 1)} aria-label={n} aria-current={pos === i + 1 ? "page" : undefined}>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <rect x="2.5" y="3.5" width="15" height="10" rx="2" />
+            <path d="M10 13.5V17M6.5 17h7" />
+          </svg>
+        </button>
+      ))}
+      <span className="dock-sep" />
+      <button className="dock-btn" onClick={onSearch} aria-label={t("screens.search")} aria-keyshortcuts="Meta+K Control+K">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="8.5" cy="8.5" r="5" />
+          <path d="m12.5 12.5 4.5 4.5" />
+        </svg>
+      </button>
+    </>
+  );
+}
+
+/**
+ * A phone's way between the screens: the dock's buttons in a row at the top of the page, in its
+ * flow, so nothing floats over what is being read. The stylesheet shows it on a phone only (a
+ * touch screen 640 px wide or less), where it hides the dock.
+ */
+export function PhoneNav(props: NavProps) {
+  const { t } = useLang();
+  return (
+    <nav className="phone-nav" aria-label={t("screens.nav")}>
+      <ScreenButtons {...props} />
+    </nav>
   );
 }
