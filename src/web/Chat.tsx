@@ -4,7 +4,7 @@ import { applyJobs, ChatSteps, historySteps, stepGroups, submitsChat, type ChatJ
 import { Glyph, JobsBadge, NoticeStep, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { type AgentGroup, groupAgents, groupKeyOf, groupOf, preferredMachine, rememberMachine } from "./agent-groups.ts";
+import { type AgentGroup, conversationTabs, groupAgents, groupKeyOf, groupOf, preferredMachine, rememberMachine } from "./agent-groups.ts";
 import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun, type MachineInventory } from "./api.ts";
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
@@ -696,25 +696,28 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   // conversation's agent outside it.
   const sideGroups = [...groups];
   for (const [, v] of tabs) if (v.agent && !groupOf(sideGroups, v.agent)) sideGroups.push({ key: groupKeyOf(v.agent), primary: v.agent, machines: [v.agent] });
+  // The phone's avatar bar: the open conversations, one avatar per agent like the sidebar.
+  const avatars = conversationTabs(tabs.flatMap(([, v]) => (v.agent ? [v.agent] : [])), agent);
   const shown = localized(lang, agent);
 
   return (
     // Always mounted so conversations survive closing; the overlay is hidden, not removed.
     <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <aside className="chat" role="dialog" aria-label={shown.title}>
-      {tabs.length > 1 && (
+      {avatars.length > 1 && (
         <div className="chat-tabs">
-          {tabs.map(([k, v]) => (
+          {avatars.map((tab) => (
             <button
-              key={k}
-              className={`chat-tab ${k === key ? "on" : ""}`}
-              title={v.agent ? `${localized(lang, v.agent).title}${v.agent.peer ? ` · ${v.agent.peer}` : ""}` : k}
+              key={tab.key}
+              className={`chat-tab ${tab.key === group.key ? "on" : ""}`}
+              title={`${localized(lang, tab.agent).title}${tab.agent.peer ? ` · ${tab.agent.peer}` : ""}`}
+              aria-current={tab.key === group.key ? "true" : undefined}
               onClick={() => {
-                if (k !== key && v.agent) onSwitch?.(v.agent);
+                if (tab.key !== group.key) onSwitch?.(tab.agent);
               }}
             >
-              <Ava icon={v.agent?.avatar} />
-              {v.busy && <i className="tab-busy" />}
+              <Ava icon={tab.agent.avatar} />
+              {tab.ids.some((id) => convs[id]?.busy) && <i className="tab-busy" />}
             </button>
           ))}
         </div>
@@ -755,8 +758,11 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
             <span className="chat-ava">
               <Ava icon={agent.avatar} />
             </span>
-            <b>{shown.title}</b>
-            <span className="chat-sub">{conv.busy ? `${t("chat.thinking")}${conv.queued ? t("chat.queued", { n: conv.queued }) : ""}` : conv.sid ? t("chat.inSession") : t("chat.newSession")}</span>
+            {/* The name and the state: side by side, or one above the other on a phone (styles.css). */}
+            <span className="chat-name">
+              <b title={shown.title}>{shown.title}</b>
+              <span className="chat-sub">{conv.busy ? `${t("chat.thinking")}${conv.queued ? t("chat.queued", { n: conv.queued }) : ""}` : conv.sid ? t("chat.inSession") : t("chat.newSession")}</span>
+            </span>
             <JobsBadge jobs={conv.jobs ?? []} />
             {conv.busy && (
               <button className="chat-hbtn" title={t("chat.interrupt")} aria-label={t("chat.interrupt")} onClick={stop}>
@@ -780,6 +786,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
                 {machines.map((m) => <option key={m.id} value={m.peer ?? ""} disabled={m.stale && m.id !== agent.id}>{machineLabel(m)}</option>)}
               </select></label>
             )}
+            {/* The model menu is named on a phone only, where the menus stand in rows under their names. */}
+            <label className="chat-permission"><span className="chat-opt-name">{t("chat.model")}</span>
             {agent.modelOptions ? (
               <select className="chat-model" value={selectedBaseModel} disabled={conv.busy} onChange={(e) => pickBaseModel(e.target.value)} title={t("chat.runtimeModelTitle")} aria-label={t("chat.runtimeModelTitle")}>
                 <option value="">{t("chat.modelDefault")} · {agent.runtime}</option>
@@ -798,7 +806,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
                 <option value="opus">{t("chat.modelOpus")}</option>
                 <option value="fable">{t("chat.modelFable")}</option>
               </select>
-            )}
+            )}</label>
             <label className="chat-permission">{t("chat.permTitle")}
             <select className="chat-model" value={perm} onChange={pickPerm} title={t("chat.permTitle")} aria-label={t("chat.permTitle")}>
               <option value="">{t("chat.permRead")}</option>

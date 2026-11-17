@@ -784,6 +784,29 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 .chat-opts { display: flex; gap: 6px; margin-top: 8px; }
 .chat-head b { font-size: 15px; }
 .chat-sub { font-size: 12px; font-weight: 400; color: var(--muted); margin-right: auto; }
+/* The name and the state stand in the head's row by themselves, except on a phone (below). */
+.chat-name { display: contents; }
+/* The model menu's name shows on a phone only (below). */
+.chat-opt-name { display: none; }
+@media (max-width: 640px) {
+  /* A phone's head: the name over its state, so neither breaks across lines next to the buttons;
+     a name too long for the row ends in an ellipsis (its full text is the title). */
+  .chat .chat-head { padding: 10px 12px; }
+  .chat-head-top { gap: 8px; }
+  .chat-name { display: flex; flex-direction: column; min-width: 0; margin-right: auto; line-height: 1.3; }
+  .chat-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-name .chat-sub { margin-right: 0; white-space: nowrap; }
+  /* Machine, model and permission: one row each, the names in a narrow column and each menu across
+     the rest, so the choice reads in full. 16 px keeps iOS from zooming into a menu when it opens. */
+  .chat-opts { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
+  .chat-opts .chat-permission { display: contents; }
+  .chat-opt-name { display: inline; }
+  .chat .chat-opts .chat-model { width: 100%; max-width: none; font-size: 16px; padding: 4px 10px; }
+  .chat-tabs { width: 44px; }
+  /* The agent's icon shows in the avatar bar on the left only: the head and an empty
+     conversation's greeting give its name without repeating the icon. */
+  .chat .chat-ava, .chat .hello-ava { display: none; }
+}
 .chat-hbtn {
   width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--glass-border);
   background: var(--glass); color: var(--muted); font-size: 13px; cursor: pointer;
@@ -1388,7 +1411,7 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
 
 /* The dock: library, home, one monitor per screen, search. With a mouse it rises into view when the
    pointer nears the bottom of the window (`shown`) or the keyboard focus enters it; touch screens
-   keep it in view. */
+   keep it in view, except a phone, which has none (`.phone-nav` below). */
 .dock {
   position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, calc(100% + 24px)); z-index: 26;
   opacity: 0; transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease;
@@ -1412,6 +1435,19 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
 :root[data-theme="dark"] :is(.dock-btn.on, .dock-btn:hover) { background: rgba(255, 255, 255, 0.12); }
 .dock-sep { width: 1px; height: 24px; margin: 0 4px; background: var(--hairline); }
 .dock-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* A phone (a touch screen 640 px wide or less) shows no dock at all: the same buttons head the page
+   in a row instead (`.phone-nav`, ScreenNav.tsx), the library, home and the screens on the left and
+   search on the right. The row is part of the page and scrolls with it, so it never covers the
+   content. Wider screens and mice never show it. */
+.phone-nav { display: none; }
+@media (hover: none) and (max-width: 640px) {
+  .dock { display: none; }
+  .phone-nav { display: flex; align-items: center; gap: 10px; margin: -14px -6px 14px; }
+  /* Drawn as in the dock, with a 44 px touch target. */
+  .phone-nav .dock-btn { position: relative; }
+  .phone-nav .dock-btn::before { content: ""; position: absolute; inset: -5px; }
+  .phone-nav .dock-sep { flex: 1; visibility: hidden; margin: 0; }
+}
 
 .screens-hint {
   position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 26;

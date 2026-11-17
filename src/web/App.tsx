@@ -17,7 +17,7 @@ import Inbox from "./Inbox.tsx";
 import Library, { libraryEntries } from "./Library.tsx";
 import Omnibox from "./Omnibox.tsx";
 import Shortcuts from "./Shortcuts.tsx";
-import ScreenNav from "./ScreenNav.tsx";
+import ScreenNav, { PhoneNav } from "./ScreenNav.tsx";
 import { BUILTINS, type Builtin, HOME, type Screen, addScreen, entryKey, move, parseKey, pin, removeScreen, seedScreens, unpin } from "./screens.ts";
 import { canonicalItems, groupAgents, groupById, groupOf, preferredMachine } from "./agent-groups.ts";
 import { BUILTIN_ICONS, fmtDuration, getJson, recordOpen, relTime, repoUrl, sendJson, type AgentInfo, type AppInfo, type BuiltinIcons, type InboxSummary, type UsageKind, type UsageRow, type WidgetInfo } from "./api.ts";
@@ -482,6 +482,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     if (search) setLibFocus((n) => n + 1);
     go(-1);
   };
+  // The search button of the dock (and of a phone's row at the top) opens the library's search.
+  const searchLibrary = () => openLibrary(HOME, true);
   // Screens carry no names on the page: home, then "Screen 2", "Screen 3"… by position, the
   // numbers the dock shows. These names are for the library's target menu and screen readers.
   const screenName = (s: Screen) => (s.id === HOME ? t("screens.home") : t("screens.defaultName", { n: rows.indexOf(s) + 1 }));
@@ -865,6 +867,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     <>
       <Backdrop />
       <div className={`shell${pos === -1 ? " wide" : ""}`}>
+        {/* A phone has no dock: its buttons head the page instead (ScreenNav.tsx). */}
+        {screens && !IN_PHONE_APP && <PhoneNav pos={pos} names={rows.map(screenName)} onGo={go} onSearch={searchLibrary} />}
         {pos === -1 ? (
           <section className={`screen ${dir}`} key="library">
             <h2>{t("screens.library")}</h2>
@@ -906,7 +910,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
           </section>
         ) : null}
       </div>
-      {screens && !IN_PHONE_APP && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={() => openLibrary(HOME, true)} />}
+      {screens && !IN_PHONE_APP && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={searchLibrary} />}
       {!prefs.noPet && !petPending && (appPet ? <AppPet pet={appPet} /> : builtinPet ? <BuiltinPet name={builtinPet} /> : <Pet sheet={petSheet} onError={onPetError} />)}
       {uninstalling && (
         <UninstallForm
