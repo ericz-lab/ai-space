@@ -79,6 +79,35 @@ export function preferredMachine(g: AgentGroup, remembered: string | undefined =
   return m && !m.stale ? m : g.primary;
 }
 
+/** One avatar of the chat's avatar bar on a phone: `agent` is the variant a tap opens, `ids` every variant with a conversation. */
+export type ConversationTab = { key: string; agent: AgentInfo; ids: string[] };
+
+/**
+ * The avatar bar: one avatar per agent with an open conversation, however many machines it has
+ * one on, as the sidebar lists the agents once; the machine is picked in the chat's head. A tap
+ * opens the variant shown now, else the machine chosen last while it answers, else the first
+ * answering one with a conversation, else the first. Avatars keep the order their agents' first
+ * conversations have.
+ */
+export function conversationTabs(open: AgentInfo[], shown: Pick<AgentInfo, "id">, remembered: (key: string) => string | undefined = rememberedMachine): ConversationTab[] {
+  const byKey = new Map<string, AgentInfo[]>();
+  for (const a of open) {
+    const key = groupKeyOf(a);
+    const variants = byKey.get(key);
+    if (!variants) byKey.set(key, [a]);
+    else if (!variants.some((v) => v.id === a.id)) variants.push(a);
+  }
+  return [...byKey].map(([key, variants]) => {
+    const peer = remembered(key);
+    const agent =
+      variants.find((v) => v.id === shown.id) ??
+      (peer === undefined ? undefined : variants.find((v) => (v.peer ?? "") === peer && !v.stale)) ??
+      variants.find((v) => !v.stale) ??
+      variants[0]!;
+    return { key, agent, ids: variants.map((v) => v.id) };
+  });
+}
+
 /**
  * Screen items with every agent key pointed at its group's primary and repeats dropped, so a
  * layout pinned before the grouping (one key per machine) shows one tile; keys of agents the

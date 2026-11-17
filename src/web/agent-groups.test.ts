@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { canonicalItems, groupAgents, groupById, groupOf, preferredMachine } from "./agent-groups.ts";
+import { canonicalItems, conversationTabs, groupAgents, groupById, groupOf, preferredMachine } from "./agent-groups.ts";
 import type { AgentInfo } from "./api.ts";
 
 const agent = (id: string, peer?: string): AgentInfo => {
@@ -59,6 +59,27 @@ describe("agent groups", () => {
     const g = groupAgents([assistant, remote])[0]!;
     expect(g.key).toBe("space/assistant");
     expect(g.machines).toEqual([assistant, remote]);
+  });
+
+  test("the phone's avatar bar shows an agent once, whatever the machines it has a conversation on", () => {
+    const remote = agent("david/space/assistant", "david");
+    const never = () => undefined;
+    const tabs = conversationTabs([assistant, local, remote, david], remote, never);
+    expect(tabs.map((t) => t.key)).toEqual(["space/assistant", "space-ops/engineer"]);
+    expect(tabs.map((t) => t.ids)).toEqual([["space/assistant", "david/space/assistant"], ["space-ops/engineer", "david/space-ops/engineer"]]);
+    // The shown variant for the shown agent; the first conversation's for another one.
+    expect(tabs.map((t) => t.agent)).toEqual([remote, local]);
+    expect(conversationTabs([assistant, assistant], assistant, never)).toEqual([{ key: "space/assistant", agent: assistant, ids: ["space/assistant"] }]);
+  });
+
+  test("an avatar opens the machine chosen last while it answers, else the first answering one", () => {
+    const open = [local, david, eric];
+    expect(conversationTabs(open, assistant, () => "eric")[0]!.agent).toBe(eric);
+    expect(conversationTabs(open, assistant, () => "")[0]!.agent).toBe(local);
+    const localOff = { ...local, stale: true };
+    const ericOff = { ...eric, stale: true };
+    expect(conversationTabs([localOff, david, ericOff], assistant, () => "eric")[0]!.agent).toBe(david);
+    expect(conversationTabs([localOff, ericOff], assistant, () => undefined)[0]!.agent).toBe(localOff);
   });
 
   test("screen items point every machine's key at the primary, once; unknown keys stay", () => {

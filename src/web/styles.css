@@ -784,6 +784,29 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 .chat-opts { display: flex; gap: 6px; margin-top: 8px; }
 .chat-head b { font-size: 15px; }
 .chat-sub { font-size: 12px; font-weight: 400; color: var(--muted); margin-right: auto; }
+/* The name and the state stand in the head's row by themselves, except on a phone (below). */
+.chat-name { display: contents; }
+/* The model menu's name shows on a phone only (below). */
+.chat-opt-name { display: none; }
+@media (max-width: 640px) {
+  /* A phone's head: the name over its state, so neither breaks across lines next to the buttons;
+     a name too long for the row ends in an ellipsis (its full text is the title). */
+  .chat .chat-head { padding: 10px 12px; }
+  .chat-head-top { gap: 8px; }
+  .chat-name { display: flex; flex-direction: column; min-width: 0; margin-right: auto; line-height: 1.3; }
+  .chat-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-name .chat-sub { margin-right: 0; white-space: nowrap; }
+  /* Machine, model and permission: one row each, the names in a narrow column and each menu across
+     the rest, so the choice reads in full. 16 px keeps iOS from zooming into a menu when it opens. */
+  .chat-opts { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
+  .chat-opts .chat-permission { display: contents; }
+  .chat-opt-name { display: inline; }
+  .chat .chat-opts .chat-model { width: 100%; max-width: none; font-size: 16px; padding: 4px 10px; }
+  .chat-tabs { width: 44px; }
+  /* The agent's icon shows in the avatar bar on the left only: the head and an empty
+     conversation's greeting give its name without repeating the icon. */
+  .chat .chat-ava, .chat .hello-ava { display: none; }
+}
 .chat-hbtn {
   width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--glass-border);
   background: var(--glass); color: var(--muted); font-size: 13px; cursor: pointer;
