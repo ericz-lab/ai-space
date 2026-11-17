@@ -1,13 +1,17 @@
-import { assertSchedule } from "../../scheduler/schedule.ts";
+import { assertSchedule, parseDuration } from "../../scheduler/schedule.ts";
 import { BACKUP_SOURCES, type BackupSource, type BackupSpec, DEFAULT_INCLUDE, DEFAULT_KEEP, DEFAULT_SPEC, type Keep } from "./types.ts";
 
 /**
  * The `backup:` manifest section. Absent means "back up with the defaults";
- * `false` opts out; a mapping adjusts schedule, retention, sources and excludes.
- * Parsing is strict, like the rest of the manifest.
+ * `false` opts out; a mapping adjusts schedule, timeout, retention, sources and
+ * excludes. Parsing is strict, like the rest of the manifest.
  */
 
-const KEYS = ["enabled", "schedule", "timezone", "keep", "include", "exclude"];
+const KEYS = ["enabled", "schedule", "timezone", "timeout", "keep", "include", "exclude"];
+
+/** A backup task's own timeout: at least a minute, at most a day (it runs daily). */
+const MIN_TIMEOUT_MS = 60_000;
+const MAX_TIMEOUT_MS = 86_400_000;
 
 export function parseBackupSpec(raw: unknown, ctx = "backup"): BackupSpec {
   if (raw === undefined || raw === null || raw === true) return { ...DEFAULT_SPEC };
@@ -35,10 +39,22 @@ export function parseBackupSpec(raw: unknown, ctx = "backup"): BackupSpec {
     }
   }
 
+  let timeoutMs: number | undefined;
+  if (r.timeout !== undefined) {
+    if (typeof r.timeout !== "string" && typeof r.timeout !== "number") throw new Error(`${ctx}.timeout must be a duration such as 90m`);
+    try {
+      timeoutMs = parseDuration(r.timeout);
+    } catch (e) {
+      throw new Error(`${ctx}.timeout: ${(e as Error).message}`);
+    }
+    if (timeoutMs < MIN_TIMEOUT_MS || timeoutMs > MAX_TIMEOUT_MS) throw new Error(`${ctx}.timeout must be between 1m and 24h`);
+  }
+
   return {
     enabled,
     ...(schedule ? { schedule } : {}),
     ...(timezone ? { timezone } : {}),
+    ...(timeoutMs ? { timeoutMs } : {}),
     keep: parseKeep(r.keep, `${ctx}.keep`),
     include: parseInclude(r.include, `${ctx}.include`),
     exclude: parseExclude(r.exclude, `${ctx}.exclude`),

@@ -20,6 +20,11 @@ describe("backupTask", () => {
     expect((t.target as { command: string }).command).toStartWith("'/opt/my tools/bun' ");
   });
 
+  test("the manifest's timeout replaces the workspace one for that app only", () => {
+    expect(backupTask("design", parseBackupSpec({ timeout: "90m" }), d)!.timeoutMs).toBe(5_400_000);
+    expect(backupTask("keep", parseBackupSpec({}), d)!.timeoutMs).toBe(60_000);
+  });
+
   test("opting out yields no task", () => {
     expect(backupTask("keep", parseBackupSpec(false), d)).toBeUndefined();
   });

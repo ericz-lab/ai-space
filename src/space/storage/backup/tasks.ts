@@ -34,7 +34,7 @@ export function backupTask(app: string, spec: BackupSpec, d: TaskDefaults): Mani
     description: `Snapshot ${app}'s data directory to the backup target`,
     schedule: { kind: "cron", expr: scheduleFor(app, spec, d.schedule), ...(spec.timezone ? { tz: spec.timezone } : {}) },
     target: command(d, ["backup", app]),
-    timeoutMs: d.timeoutMs,
+    timeoutMs: spec.timeoutMs ?? d.timeoutMs,
     enabled: true,
   };
 }
