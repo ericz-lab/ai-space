@@ -85,7 +85,7 @@ function PetdexField({ pet, onChange }: { pet: PetChoice | undefined; onChange: 
           }}
           onBlur={apply}
           onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) (e.target as HTMLInputElement).blur();
           }}
         />
         {/* Always in the DOM so the row keeps its width; hidden until there is something to clear. */}
