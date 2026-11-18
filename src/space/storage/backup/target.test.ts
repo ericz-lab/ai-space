@@ -11,20 +11,30 @@ afterEach(() => {
   for (const s of stops.splice(0)) s();
 });
 
-/** Drops the first `drop` connections as soon as a request arrives, answers 200 to the rest. */
+/**
+ * Drops the first `drop` connections as soon as a request arrives, and answers 200 to every whole
+ * request (headers and body read) on the others.
+ */
 function flakyEndpoint(drop: number) {
   let connections = 0;
-  const server = Bun.listen<{ n: number }>({
+  const server = Bun.listen<{ n: number; buf: string }>({
     hostname: "127.0.0.1",
     port: 0,
     socket: {
       open(s) {
-        s.data = { n: ++connections };
+        s.data = { n: ++connections, buf: "" };
       },
-      data(s) {
+      data(s, chunk) {
         if (s.data.n <= drop) return void s.terminate();
-        s.write('HTTP/1.1 200 OK\r\nContent-Length: 0\r\nETag: "x"\r\nConnection: close\r\n\r\n');
-        s.end();
+        s.data.buf += chunk.toString("latin1");
+        for (;;) {
+          const end = s.data.buf.indexOf("\r\n\r\n");
+          if (end < 0) return;
+          const length = Number(/\r\ncontent-length:\s*(\d+)/i.exec(s.data.buf.slice(0, end))?.[1] ?? 0);
+          if (s.data.buf.length < end + 4 + length) return;
+          s.data.buf = s.data.buf.slice(end + 4 + length);
+          s.write('HTTP/1.1 200 OK\r\nContent-Length: 0\r\nETag: "x"\r\n\r\n');
+        }
       },
     },
   });
