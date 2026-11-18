@@ -72,6 +72,16 @@ describe("agent groups", () => {
     expect(conversationTabs([assistant, assistant], assistant, never)).toEqual([{ key: "space/assistant", agent: assistant, ids: ["space/assistant"] }]);
   });
 
+  test("the shown agent has its avatar without a conversation yet, alone or after the open ones", () => {
+    const never = () => undefined;
+    expect(conversationTabs([], assistant, never)).toEqual([{ key: "space/assistant", agent: assistant, ids: ["space/assistant"] }]);
+    expect(conversationTabs([assistant], assistant, never)).toEqual([{ key: "space/assistant", agent: assistant, ids: ["space/assistant"] }]);
+    expect(conversationTabs([other], assistant, never).map((t) => t.agent)).toEqual([other, assistant]);
+    // Another machine's conversation of the shown agent: one avatar, opening the shown machine.
+    const remote = agent("david/space/assistant", "david");
+    expect(conversationTabs([remote], assistant, never)).toEqual([{ key: "space/assistant", agent: assistant, ids: ["david/space/assistant", "space/assistant"] }]);
+  });
+
   test("an avatar opens the machine chosen last while it answers, else the first answering one", () => {
     const open = [local, david, eric];
     expect(conversationTabs(open, assistant, () => "eric")[0]!.agent).toBe(eric);
