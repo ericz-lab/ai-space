@@ -39,11 +39,11 @@ export function parseTargetUrl(url: string): { kind: "file"; dir: string } | { k
   throw new Error(`SPACE_BACKUP_URL must be s3://bucket/prefix/ or file:///dir/, got ${u || "(empty)"}`);
 }
 
-export function openBackupTarget(url: string, s3?: S3Config): BackupTarget {
+export function openBackupTarget(url: string, s3?: S3Config, opts: S3TargetOptions = {}): BackupTarget {
   const parsed = parseTargetUrl(url);
   if (parsed.kind === "file") return new FileTarget(parsed.dir);
   if (!s3) throw new Error(`SPACE_BACKUP_URL is ${url} but SPACE_S3_ACCESS_KEY_ID / SPACE_S3_SECRET_ACCESS_KEY are not set`);
-  return new S3Target(parsed.bucket, parsed.prefix, s3);
+  return new S3Target(parsed.bucket, parsed.prefix, s3, opts);
 }
 
 export class FileTarget implements BackupTarget {
@@ -104,15 +104,50 @@ export class FileTarget implements BackupTarget {
   }
 }
 
+/**
+ * Waits before the second, third and fourth attempt of an S3 call that failed on the way, not by
+ * the service's answer. A laptop that sleeps through its backup slot wakes for a few seconds at a
+ * time and goes back to sleep mid-upload, which drops the connection (Bun reports `ConnectionClosed`,
+ * "an unexpected error has occurred"); the wait runs on while it sleeps, so a later attempt lands
+ * on a later wake. 6¼ minutes in all, well inside the task's timeout.
+ */
+export const S3_RETRY_DELAYS_MS = [15_000, 60_000, 5 * 60_000];
+
+/**
+ * Codes of a Bun `S3Error` worth another attempt: the connection failed or timed out, or the service
+ * asked to try again. Anything else (AccessDenied, NoSuchBucket, a bad signature) is the answer.
+ */
+const TRANSIENT_S3_CODE = /^(Connection\w*|E[A-Z]+|\w*Time[dD]?Out|\w*Timeout|InternalError|ServiceUnavailable|SlowDown)$/;
+
+export function isTransientS3Error(e: unknown): boolean {
+  const code = (e as { code?: unknown } | undefined)?.code;
+  return typeof code === "string" && TRANSIENT_S3_CODE.test(code);
+}
+
+export type S3TargetOptions = {
+  /** Waits between attempts; `[]` makes one attempt. Default S3_RETRY_DELAYS_MS. */
+  retryDelaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
+  /** Told about each attempt that failed and will be made again. */
+  log?: (message: string) => void;
+};
+
 export class S3Target implements BackupTarget {
   readonly kind = "s3" as const;
   readonly url: string;
   private readonly client: S3Client;
+  private readonly delays: readonly number[];
+  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly log: (message: string) => void;
   constructor(
     readonly bucket: string,
     readonly prefix: string,
     s3: S3Config,
+    opts: S3TargetOptions = {},
   ) {
+    this.delays = opts.retryDelaysMs ?? S3_RETRY_DELAYS_MS;
+    this.sleep = opts.sleep ?? ((ms) => Bun.sleep(ms));
+    this.log = opts.log ?? (() => {});
     this.url = `s3://${bucket}/${prefix}`;
     this.client = new S3Client({
       accessKeyId: s3.accessKeyId,
@@ -125,26 +160,49 @@ export class S3Target implements BackupTarget {
   private full(key: string): string {
     return `${this.prefix}${key}`;
   }
+  /**
+   * Run one S3 call, again after each delay while it fails on the way. The error that ends it
+   * names the S3 code, the operation and the attempts, since Bun's own message for a dropped
+   * connection says only "an unexpected error has occurred".
+   */
+  private async attempt<T>(op: string, key: string, fn: () => Promise<T>): Promise<T> {
+    for (let i = 0; ; i++) {
+      try {
+        return await fn();
+      } catch (e) {
+        const code = (e as { code?: unknown }).code;
+        const what = `${(e as Error).message ?? String(e)}${typeof code === "string" ? ` (S3 ${code})` : ""}`;
+        const delay = this.delays[i];
+        if (delay === undefined || !isTransientS3Error(e)) {
+          throw new Error(`S3 ${op} ${this.url}${key}: ${what}${i ? ` after ${i + 1} attempts` : ""}`, { cause: e });
+        }
+        this.log(`S3 ${op} ${key}: ${what}; attempt ${i + 2} of ${this.delays.length + 1} in ${Math.round(delay / 1000)}s`);
+        await this.sleep(delay);
+      }
+    }
+  }
   async put(key: string, localPath: string): Promise<void> {
-    await this.client.write(this.full(key), Bun.file(localPath));
+    await this.attempt("put", key, () => this.client.write(this.full(key), Bun.file(localPath)));
   }
   async putText(key: string, text: string): Promise<void> {
-    await this.client.write(this.full(key), text, { type: "application/json" });
+    await this.attempt("put", key, () => this.client.write(this.full(key), text, { type: "application/json" }));
   }
   async get(key: string, localPath: string): Promise<void> {
     await mkdir(dirname(localPath), { recursive: true });
-    await Bun.write(localPath, this.client.file(this.full(key)));
+    await this.attempt("get", key, () => Bun.write(localPath, this.client.file(this.full(key))));
   }
   async getText(key: string): Promise<string | undefined> {
-    const f = this.client.file(this.full(key));
-    if (!(await f.exists())) return undefined;
-    return f.text();
+    return this.attempt("get", key, async () => {
+      const f = this.client.file(this.full(key));
+      if (!(await f.exists())) return undefined;
+      return f.text();
+    });
   }
   async list(prefix: string): Promise<ObjectInfo[]> {
     const out: ObjectInfo[] = [];
     let startAfter: string | undefined;
     for (;;) {
-      const page = await this.client.list({ prefix: this.full(prefix), maxKeys: 1000, ...(startAfter ? { startAfter } : {}) });
+      const page = await this.attempt("list", prefix, () => this.client.list({ prefix: this.full(prefix), maxKeys: 1000, ...(startAfter ? { startAfter } : {}) }));
       for (const o of page.contents ?? []) {
         if (o.key.startsWith(this.prefix)) out.push({ key: o.key.slice(this.prefix.length), size: o.size ?? 0 });
       }
@@ -155,6 +213,6 @@ export class S3Target implements BackupTarget {
     return out;
   }
   async delete(key: string): Promise<void> {
-    await this.client.delete(this.full(key));
+    await this.attempt("delete", key, () => this.client.delete(this.full(key)));
   }
 }

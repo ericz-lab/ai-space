@@ -37,6 +37,9 @@ export const statusNoun: Noun = {
         const running = (tasks?.tasks ?? []).filter((t) => t.state.runningAt);
         const down = (services?.services ?? []).filter((s) => s.health === "down");
         const staleBackups = (backups?.backups ?? []).filter((b) => b.stale);
+        // Fresh means the last good snapshot is younger than the limit (48 h by default), so a failed
+        // last run can still be fresh; say so, or "all fresh" reads as "all well".
+        const failedBackups = (backups?.backups ?? []).filter((b) => !b.stale && b.lastStatus === "error");
         if (ctx.flags.json) {
           ctx.print.data({ ok: health.ok, url: c.url, services: services?.services ?? [], tasks: { total: tasks?.tasks.length ?? 0, failing, overdue, running }, backups: backups?.backups ?? [], model, peers: peers?.peers ?? [] });
           return 0;
@@ -54,7 +57,7 @@ export const statusNoun: Noun = {
         p.line(`tasks     ${all.length} · ${all.filter((t) => t.enabled).length} enabled${running.length ? ` · ${running.length} running` : ""}${failing.length ? ` · ${failing.length} FAILING: ${failing.map(taskRef).join(", ")}` : ""}${overdue.length ? ` · ${overdue.length} overdue: ${overdue.map(taskRef).join(", ")}` : ""}`);
         if (backups) {
           const b = backups.backups;
-          p.line(`backups   ${backups.target ? `${b.length} apps → ${backups.target}` : backups.enabled === false ? "off (SPACE_BACKUP_URL is not set)" : "no target (SPACE_BACKUP_URL)"}${staleBackups.length ? ` · ${staleBackups.length} STALE: ${staleBackups.map((x) => x.app).join(", ")}` : b.length ? " · all fresh" : ""}`);
+          p.line(`backups   ${backups.target ? `${b.length} apps → ${backups.target}` : backups.enabled === false ? "off (SPACE_BACKUP_URL is not set)" : "no target (SPACE_BACKUP_URL)"}${staleBackups.length ? ` · ${staleBackups.length} STALE: ${staleBackups.map((x) => x.app).join(", ")}` : b.length ? " · all fresh" : ""}${failedBackups.length ? ` · last run FAILED for ${failedBackups.length}: ${failedBackups.map((x) => x.app).join(", ")}` : ""}`);
         }
         if (model) p.line(`model     ${model.runtimes.map((r) => `${r.name}${r.default ? "*" : ""}`).join(", ")} · ${model.running} running, ${model.waiting} waiting (cap ${model.maxConcurrency})`);
         if (peers?.peers.length) p.line(`peers     ${peers.peers.map((x) => `${x.name} ${x.health}${x.asOf ? ` (${ago(x.asOf, now)})` : ""}`).join(" · ")}`);
