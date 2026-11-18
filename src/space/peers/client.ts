@@ -84,6 +84,11 @@ const EVENTS_PAGE = 200;
 const STALE_PERIODS = 2;
 /** Failed refreshes in a row before a bus call to the peer is refused without trying. */
 const KNOWN_DOWN_FAILURES = 2;
+/**
+ * What the hub asks a peer for. Its `/api/peer/...` routes answer JSON anyway; the header is for Cloudflare in front of a
+ * tunnel, which shapes its own 530 by `Accept`: JSON with the code for this one, an HTML page for Bun's default `*\/*`.
+ */
+const ACCEPT_JSON = { accept: "application/json" };
 
 export class PeerClient {
   snapshot: PeerSnapshot | undefined;
@@ -165,7 +170,7 @@ export class PeerClient {
 
   private async refreshOnce(): Promise<void> {
     try {
-      const r = await this.fetch(this.config.url + SNAPSHOT_PATH, { headers: this.authHeaders(), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) });
+      const r = await this.fetch(this.config.url + SNAPSHOT_PATH, { headers: { ...ACCEPT_JSON, ...this.authHeaders() }, signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) });
       if (r.status === 401 || r.status === 403) throw new Error("token rejected");
       if (!r.ok) throw new Error(await httpError(r));
       const snap = parseSnapshot(await r.json());
@@ -188,7 +193,7 @@ export class PeerClient {
    * A peer without the route (older version) is left alone.
    */
   async pullEvents(): Promise<number> {
-    const r = await this.fetch(`${this.config.url}${EVENTS_PATH}?since=${this.cursor}&limit=${EVENTS_PAGE}`, { headers: this.authHeaders(), signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) });
+    const r = await this.fetch(`${this.config.url}${EVENTS_PATH}?since=${this.cursor}&limit=${EVENTS_PAGE}`, { headers: { ...ACCEPT_JSON, ...this.authHeaders() }, signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS) });
     if (r.status === 404) return 0;
     if (!r.ok) throw new Error(`events: HTTP ${r.status}`);
     const body = (await r.json()) as { ok?: boolean; events?: PeerEvent[]; latestId?: number; next?: number };
@@ -236,9 +241,11 @@ export class PeerClient {
     return new Response(up.body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store", ...(runId ? { "x-run-id": runId } : {}) } });
   }
 
-  /** A request of this space's own to the peer's `/api/peer/...` path (forwarded model calls). */
+  /** A request of this space's own to the peer's `/api/peer/...` path (forwarded model calls); JSON unless the caller asks for something else (a stream). */
   request(path: string, init: RequestInit & { headers?: Record<string, string> } = {}): Promise<Response> {
-    return this.fetch(this.config.url + path, { ...init, headers: { ...this.authHeaders(), ...(init.headers ?? {}) } });
+    const own = init.headers ?? {};
+    const accept = Object.keys(own).some((k) => k.toLowerCase() === "accept") ? {} : ACCEPT_JSON;
+    return this.fetch(this.config.url + path, { ...init, headers: { ...accept, ...this.authHeaders(), ...own } });
   }
 
   /** The headers every request to the peer carries: the access layer's extras and the bearer token. */
@@ -261,18 +268,38 @@ const CLOUDFLARE_CODES: Record<string, string> = {
   "1016": "origin DNS error",
 };
 
+/** How far into a 530's body to look for the code: Cloudflare's HTML page puts it after kilobytes of inline CSS. */
+const ERROR_BODY_LIMIT = 64 * 1024;
+
 /**
  * Why a refresh got an error status. Cloudflare answers 530 itself when the peer's tunnel has no
- * connector (the machine asleep, offline, or its `cloudflared` stopped), with a body such as
- * `error code: 1033`; that says more than the status alone (docs/peers.md#failure-and-staleness).
+ * connector (the machine asleep, offline, or its `cloudflared` stopped), with its own code in the
+ * body; that says more than the status alone (docs/peers.md#failure-and-staleness).
  */
 export async function httpError(r: Response): Promise<string> {
   if (r.status !== 530) return `HTTP ${r.status}`;
-  const body = await r.text().catch(() => "");
-  const code = /error code:?\s*(1\d{3})\b/i.exec(body.slice(0, 4096))?.[1];
+  const body = (await r.text().catch(() => "")).slice(0, ERROR_BODY_LIMIT);
+  const code = cloudflareCode(r.headers.get("content-type") ?? "", body);
   if (!code) return "HTTP 530";
   const meaning = CLOUDFLARE_CODES[code];
   return meaning ? `${meaning} (Cloudflare ${code})` : `HTTP 530 (Cloudflare ${code})`;
+}
+
+/**
+ * Cloudflare's 1xxx code in the shape its `Accept` rules pick: JSON (`"error_code": 1033`) for `application/json`, Markdown
+ * frontmatter (`error_code: 1033`) for `text/markdown`, an HTML page (`<span class="cf-error-code">1033</span>`) for `*\/*`,
+ * which a zone's custom error page also sends whatever was asked, and plain `error code: 1033`, which curl gets.
+ */
+function cloudflareCode(contentType: string, body: string): string | undefined {
+  if (/\bjson\b/i.test(contentType)) {
+    try {
+      const c = (JSON.parse(body) as { error_code?: unknown } | null)?.error_code;
+      if ((typeof c === "number" || typeof c === "string") && /^1\d{3}$/.test(String(c))) return String(c);
+    } catch {
+      // Not JSON after all: look for the text forms below.
+    }
+  }
+  return /(?:error[ _]code"?\s*:?\s*|cf-error-code["']?\s*>\s*)(1\d{3})\b/i.exec(body)?.[1];
 }
 
 /** Accept only the shape the hub relies on; anything else is a peer of another version. */
