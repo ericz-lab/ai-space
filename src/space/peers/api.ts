@@ -52,6 +52,13 @@ export type PeerApiOptions = {
   registry: AppRegistry;
   /** Renaming a peer (rename.ts `renamePeer` with the hub's database and `.env`); absent = 404. */
   rename?: (from: string, to: string) => Promise<PeerRenamed & { moved: RenameCounts }>;
+  /**
+   * Who is calling the peers' agent routes (agents/api.ts `callerAppOf`): `null` for the owner, an app's
+   * name for its token, `""` for any other credential. Absent: everyone is the owner.
+   */
+  callerApp?: (req: Request) => Promise<string | null>;
+  /** Apps the operator lets reach every app's agents with their own token (SPACE_AGENT_CALLERS), on the peers too. */
+  agentCallers?: readonly string[];
 };
 
 // The server argument only matters to the app proxy, which may upgrade the request to a socket.
@@ -87,6 +94,22 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
       } catch (e) {
         return error(502, `peer ${client.name} unreachable: ${String((e as Error).message ?? e).slice(0, 200)}`);
       }
+    };
+
+  /**
+   * A peer's agent routes for the owner, or for an app the operator lists in SPACE_AGENT_CALLERS
+   * (docs/panel.md#apps-and-their-agents); never a peer's Space Assistant. The peer sees the hub's token either way.
+   */
+  const agentProxy =
+    (timeoutMs?: number): Handler =>
+    async (req, server) => {
+      if (opts.callerApp) {
+        const caller = await opts.callerApp(req);
+        const target = req.params.app;
+        const granted = !!caller && !!target && target !== "space" && !!opts.agentCallers?.includes(caller);
+        if (caller !== null && !granted) return error(403, "an app may reach a peer's agents only when the operator lists it in SPACE_AGENT_CALLERS");
+      }
+      return proxy(timeoutMs)(req, server);
     };
 
   return {
@@ -179,17 +202,17 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
     },
     // A chat stream stays open as long as the peer's does; the browser leaving only detaches it,
     // the turn goes on on the peer as a background run (docs/panel.md#chat).
-    "/api/peers/:peer/agents/:app/:agent/chat": { POST: proxy() },
+    "/api/peers/:peer/agents/:app/:agent/chat": { POST: agentProxy() },
     "/api/peers/:peer/agents/runs": { GET: proxy(FORWARD_TIMEOUT_MS) },
-    "/api/peers/:peer/agents/:app/:agent/runs": { GET: proxy(FORWARD_TIMEOUT_MS) },
-    "/api/peers/:peer/agents/:app/:agent/runs/:id": { GET: proxy(FORWARD_TIMEOUT_MS) },
-    "/api/peers/:peer/agents/:app/:agent/runs/:id/events": { GET: proxy() },
-    "/api/peers/:peer/agents/:app/:agent/runs/:id/stop": { POST: proxy(FORWARD_TIMEOUT_MS) },
-    "/api/peers/:peer/agents/:app/:agent/runs/:id/steer": { POST: proxy(FORWARD_TIMEOUT_MS) },
-    "/api/peers/:peer/agents/:app/:agent/runs/:id/approvals/:rid": { POST: proxy(FORWARD_TIMEOUT_MS) },
-    "/api/peers/:peer/agents/:app/:agent/watch": { GET: proxy() },
-    "/api/peers/:peer/agents/:app/:agent/sessions": { GET: proxy(FORWARD_TIMEOUT_MS) },
-    "/api/peers/:peer/agents/:app/:agent/sessions/:sid": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/runs": { GET: agentProxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/runs/:id": { GET: agentProxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/runs/:id/events": { GET: agentProxy() },
+    "/api/peers/:peer/agents/:app/:agent/runs/:id/stop": { POST: agentProxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/runs/:id/steer": { POST: agentProxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/runs/:id/approvals/:rid": { POST: agentProxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/watch": { GET: agentProxy() },
+    "/api/peers/:peer/agents/:app/:agent/sessions": { GET: agentProxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/sessions/:sid": { GET: agentProxy(FORWARD_TIMEOUT_MS) },
     // An app on this hub reading a peer app's API; the peer bounds the call with its own timeout.
     "/api/peers/:peer/apps/:app/proxy/*": {
       GET: (req, server) => {

@@ -500,8 +500,9 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) }
         : {}),
   });
+  const callerApp = (req: Request) => callerAppOf(req, { operatorToken: config.apiToken, hubToken: config.hubToken, isDevice: (t) => Boolean(auth.verifyDevice(t)), appForToken: (t) => storage.appForToken(t) });
   const agentRoutes = createAgentRoutes({ actionCatalogue: () => shortcuts.catalogue(), shortcuts: shortcutStore, holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()], sharedSkills: SHARED_SKILLS,
-    callerApp: (req) => callerAppOf(req, { operatorToken: config.apiToken, hubToken: config.hubToken, isDevice: (t) => Boolean(auth.verifyDevice(t)), appForToken: (t) => storage.appForToken(t) }), agentCallers: config.agentCallers });
+    callerApp, agentCallers: config.agentCallers });
   // Feedback from app pages, and the Fix Engineer (`space/ui-fixer`) it hands the fixes to (docs/feedback.md).
   const chatRoute = (agentRoutes["/api/agents/:app/:agent/chat"] as { POST: Parameters<typeof localFixer>[0] }).POST;
   const todoPlaces = {
@@ -642,7 +643,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest })],
       ["owner", agentRoutes],
       // A rename moves what this hub keeps under the peer's name and tells the apps (docs/peers.md#renaming-a-peer).
-      ["owner", createPeerRoutes({ hub: peers, layout, registry, rename: (from, to) => renamePeer({ hub: peers, db: store.db, envFile: ws.envFile, env, taken: (name) => Boolean(registry.get(name)), publish: (data) => scheduler.publish({ app: SPACE_APP, name: "peer.renamed", data }) }, from, to) })],
+      ["owner", createPeerRoutes({ hub: peers, layout, registry, callerApp, agentCallers: config.agentCallers, rename: (from, to) => renamePeer({ hub: peers, db: store.db, envFile: ws.envFile, env, taken: (name) => Boolean(registry.get(name)), publish: (data) => scheduler.publish({ app: SPACE_APP, name: "peer.renamed", data }) }, from, to) })],
       ["owner", terminalRoutes],
       ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, id: packageStore.spaceId, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), tasks: createPeerTaskRoutes({ scheduler, store, runtimes }), feedback: createFeedbackPeerServeRoutes(feedbackLists), inventory: () => peerRow(runtimeHealth, runtimes), ledger: createPeerUsageRoutes({ service: model, name: config.name, skipApps: () => packageStore.list().filter((o) => o.state === "installed").map((o) => o.app) }), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
       ["public", createWebRoutes()],
@@ -687,6 +688,17 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       "/api/agents/:app/:agent/watch": "app",
       "/api/agents/:app/:agent/sessions": "app",
       "/api/agents/:app/:agent/sessions/:sid": "app",
+      // The peers' agents for an app listed in SPACE_AGENT_CALLERS; the route checks the caller (peers/api.ts).
+      "/api/peers/:peer/agents/:app/:agent/chat": "app",
+      "/api/peers/:peer/agents/:app/:agent/runs": "app",
+      "/api/peers/:peer/agents/:app/:agent/runs/:id": "app",
+      "/api/peers/:peer/agents/:app/:agent/runs/:id/events": "app",
+      "/api/peers/:peer/agents/:app/:agent/runs/:id/stop": "app",
+      "/api/peers/:peer/agents/:app/:agent/runs/:id/steer": "app",
+      "/api/peers/:peer/agents/:app/:agent/runs/:id/approvals/:rid": "app",
+      "/api/peers/:peer/agents/:app/:agent/watch": "app",
+      "/api/peers/:peer/agents/:app/:agent/sessions": "app",
+      "/api/peers/:peer/agents/:app/:agent/sessions/:sid": "app",
       "/api/checks": "app-read",
       "/api/panel/packages/apps/:app/checks/:check": "app-read",
       // An app's /api/ paths on a peer, as an app on this machine reaches another app's port directly (space-ops, ai-usage, asset-center).
