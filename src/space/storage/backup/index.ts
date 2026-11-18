@@ -1,7 +1,7 @@
 export * from "./types.ts";
 export { parseBackupSpec, backupMinute, scheduleFor } from "./spec.ts";
 export { selectRetained, type Candidate } from "./retention.ts";
-export { openBackupTarget, parseTargetUrl, FileTarget, S3Target, type BackupTarget, type ObjectInfo } from "./target.ts";
+export { openBackupTarget, parseTargetUrl, FileTarget, S3Target, type BackupTarget, type ObjectInfo, type S3TargetOptions } from "./target.ts";
 export { BackupStore, type BackupSummary } from "./store.ts";
 export { stageSnapshot, snapshotSqlite, excludeMatcher, type SnapshotInput } from "./snapshot.ts";
 export { createArchive, extractArchive, listArchive, hashFile, missingArchiveTools, requireArchiveTools, ARCHIVE_TOOLS } from "./archive.ts";

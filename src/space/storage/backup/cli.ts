@@ -53,7 +53,8 @@ export async function backupCli(command: BackupCommand, argv: string[], ctx: Cli
   }
   const db = await openDatabase(sqliteUrl(ctx.dbPath));
   try {
-    const deps: BackupDeps = { ws: ctx.ws, target: openBackupTarget(ctx.backupUrl, ctx.s3), store: await BackupStore.open(db), log: (m) => err(`[backup] ${m}`) };
+    const log = (m: string) => err(`[backup] ${m}`);
+    const deps: BackupDeps = { ws: ctx.ws, target: openBackupTarget(ctx.backupUrl, ctx.s3, { log }), store: await BackupStore.open(db), log };
     switch (command) {
       case "backup":
         return await backupOne(argv, ctx, deps, out, err);

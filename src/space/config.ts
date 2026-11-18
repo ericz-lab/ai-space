@@ -239,7 +239,7 @@ export async function openBackups(config: Config, log: (m: string) => void = (m)
   if (!config.backupUrl) log("[backup] off: SPACE_BACKUP_URL is not set (docs/backup.md)");
   else {
     try {
-      target = openBackupTarget(config.backupUrl, config.s3);
+      target = openBackupTarget(config.backupUrl, config.s3, { log: (m) => log(`[backup] ${m}`) });
       if (target.kind === "file") log(`[backup] target ${target.url} is on this machine; a copy on the same disk is not a backup`);
     } catch (e) {
       log(`[backup] ${(e as Error).message}`);

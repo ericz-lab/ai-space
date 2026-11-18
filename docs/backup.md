@@ -212,7 +212,7 @@ How it hooks into what exists:
 - Every task's command is the absolute bun binary and entry file (`process.execPath`, `import.meta.path`), run in the ai-space checkout with `SPACE_HOME` pinned, so the subprocess finds the same workspace the scheduler uses.
 - `setup` checks for `tar` and `zstd` and mentions the default target in its S3 section.
 
-Tests: `spec`, `retention` and `tasks` are unit-tested; `backup.test.ts` runs the whole pipeline on a temporary workspace with a live WAL database against a `FileTarget`, including verification of a tampered archive, prune after a failed verification, `--to` on a fresh workspace, and `--in-place`.
+Tests: `spec`, `retention` and `tasks` are unit-tested, and `target` retries against a fake endpoint that drops connections; `backup.test.ts` runs the whole pipeline on a temporary workspace with a live WAL database against a `FileTarget`, including verification of a tampered archive, prune after a failed verification, `--to` on a fresh workspace, and `--in-place`.
 
 ## Failure modes considered
 
@@ -223,7 +223,8 @@ Tests: `spec`, `retention` and `tasks` are unit-tested; `backup.test.ts` runs th
 | Two backups of one app at once | The scheduler never runs one task concurrently with itself; the CLI takes a lock file and exits with a message. A lock from a dead process is ignored. |
 | `space.db` locked by the running ai-space | The read side never blocks under WAL; the index write waits `busy_timeout`, then the run fails, but the object and sidecar are already in the target and verification indexes them later. |
 | App writes to a `.db` that is not in WAL mode | `VACUUM INTO` waits for the writer's transaction to end, up to `busy_timeout`; a long transaction fails the snapshot, which the task reports. |
-| Target unreachable | Upload fails fast; staging cleaned; task fails and backs off. `backup-verify` catches the growing age. |
+| Target unreachable | A connection that fails or drops (Bun's `S3Error` code `ConnectionClosed`, `ConnectionRefused`, an `E…` errno, a timeout) or a service that says try again (`InternalError`, `ServiceUnavailable`, `SlowDown`) is tried again after 15 s, 1 min and 5 min, each retry logged; an answer such as `AccessDenied` fails at once. When the last attempt fails too: staging cleaned, task fails with the S3 code in its error, and the next try is the next daily slot. `backup-verify` catches the growing age. |
+| Machine asleep at the slot | A laptop on battery with the lid closed wakes for a few seconds at a time; the overdue task starts in such a wake and the machine sleeps again mid-upload, which drops the connection. The retry waits run on through the sleep, so a later attempt lands on a later wake; `space status` says when the last run failed while the newest good snapshot is still fresh. |
 | Corrupt snapshot | Found by the weekly verify; marked; the next prune drops it when a good one exists. |
 | Machine lost | `backups` and `restore --to` need only the bucket credentials and a checkout of ai-space. |
 | An operator points `SPACE_BACKUP_URL` at a prefix with other files | Only keys of the form `<app>/<stamp>.tar.zst` with a sidecar are ever listed or deleted. |
