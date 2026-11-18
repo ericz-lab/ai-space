@@ -696,7 +696,8 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
   // conversation's agent outside it.
   const sideGroups = [...groups];
   for (const [, v] of tabs) if (v.agent && !groupOf(sideGroups, v.agent)) sideGroups.push({ key: groupKeyOf(v.agent), primary: v.agent, machines: [v.agent] });
-  // The phone's avatar bar: the open conversations, one avatar per agent like the sidebar.
+  // The phone's avatar bar: the open conversations, one avatar per agent like the sidebar, the shown
+  // agent's always among them (agent-groups.ts).
   const avatars = conversationTabs(tabs.flatMap(([, v]) => (v.agent ? [v.agent] : [])), agent);
   const shown = localized(lang, agent);
 
@@ -704,24 +705,24 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     // Always mounted so conversations survive closing; the overlay is hidden, not removed.
     <div className={`overlay${open ? "" : " off"}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <aside className="chat" role="dialog" aria-label={shown.title}>
-      {avatars.length > 1 && (
-        <div className="chat-tabs">
-          {avatars.map((tab) => (
-            <button
-              key={tab.key}
-              className={`chat-tab ${tab.key === group.key ? "on" : ""}`}
-              title={`${localized(lang, tab.agent).title}${tab.agent.peer ? ` · ${tab.agent.peer}` : ""}`}
-              aria-current={tab.key === group.key ? "true" : undefined}
-              onClick={() => {
-                if (tab.key !== group.key) onSwitch?.(tab.agent);
-              }}
-            >
-              <Ava icon={tab.agent.avatar} />
-              {tab.ids.some((id) => convs[id]?.busy) && <i className="tab-busy" />}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Shown on a phone only (styles.css), and there always, a single conversation too: the agent's
+          icon shows nowhere else on a phone. */}
+      <div className="chat-tabs">
+        {avatars.map((tab) => (
+          <button
+            key={tab.key}
+            className={`chat-tab ${tab.key === group.key ? "on" : ""}`}
+            title={`${localized(lang, tab.agent).title}${tab.agent.peer ? ` · ${tab.agent.peer}` : ""}`}
+            aria-current={tab.key === group.key ? "true" : undefined}
+            onClick={() => {
+              if (tab.key !== group.key) onSwitch?.(tab.agent);
+            }}
+          >
+            <Ava icon={tab.agent.avatar} />
+            {tab.ids.some((id) => convs[id]?.busy) && <i className="tab-busy" />}
+          </button>
+        ))}
+      </div>
       <nav className="chat-side" aria-label={t("chat.recent")}>
         <button className="chat-new" onClick={reset}>
           <Glyph name="compose" size={15} weight={1.3} />

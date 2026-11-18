@@ -79,19 +79,21 @@ export function preferredMachine(g: AgentGroup, remembered: string | undefined =
   return m && !m.stale ? m : g.primary;
 }
 
-/** One avatar of the chat's avatar bar on a phone: `agent` is the variant a tap opens, `ids` every variant with a conversation. */
+/** One avatar of the chat's avatar bar on a phone: `agent` is the variant a tap opens, `ids` every variant with a conversation, and the shown one. */
 export type ConversationTab = { key: string; agent: AgentInfo; ids: string[] };
 
 /**
  * The avatar bar: one avatar per agent with an open conversation, however many machines it has
- * one on, as the sidebar lists the agents once; the machine is picked in the chat's head. A tap
- * opens the variant shown now, else the machine chosen last while it answers, else the first
- * answering one with a conversation, else the first. Avatars keep the order their agents' first
- * conversations have.
+ * one on, as the sidebar lists the agents once; the machine is picked in the chat's head. The
+ * shown agent always has its avatar, a new conversation before its first message too, since on a
+ * phone the bar is the one place its icon shows. A tap opens the variant shown now, else the
+ * machine chosen last while it answers, else the first answering one with a conversation, else the
+ * first. Avatars keep the order their agents' first conversations have; the shown agent without
+ * one comes last, where its conversation goes once it starts.
  */
-export function conversationTabs(open: AgentInfo[], shown: Pick<AgentInfo, "id">, remembered: (key: string) => string | undefined = rememberedMachine): ConversationTab[] {
+export function conversationTabs(open: AgentInfo[], shown: AgentInfo, remembered: (key: string) => string | undefined = rememberedMachine): ConversationTab[] {
   const byKey = new Map<string, AgentInfo[]>();
-  for (const a of open) {
+  for (const a of [...open, shown]) {
     const key = groupKeyOf(a);
     const variants = byKey.get(key);
     if (!variants) byKey.set(key, [a]);
