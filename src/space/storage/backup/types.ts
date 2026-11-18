@@ -16,6 +16,8 @@ export type BackupSpec = {
   /** Cron expression; undefined = the workspace default with a per-app minute. */
   schedule?: string;
   timezone?: string;
+  /** Timeout of the app's backup task; undefined = SPACE_BACKUP_TIMEOUT_MIN. */
+  timeoutMs?: number;
   keep: Keep;
   include: BackupSource[];
   /** Extra excludes for the `files` source, gitignore-style, relative to the data dir. */

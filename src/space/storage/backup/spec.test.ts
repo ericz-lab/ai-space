@@ -20,14 +20,20 @@ describe("parseBackupSpec", () => {
   });
 
   test("a mapping adjusts schedule, retention, sources and excludes", () => {
-    const s = parseBackupSpec({ schedule: "30 4 * * *", timezone: "Asia/Seoul", keep: { daily: 1 }, include: ["databases", "blobs"], exclude: ["cache/", "*.tmp"] });
-    expect(s).toEqual({ enabled: true, schedule: "30 4 * * *", timezone: "Asia/Seoul", keep: { daily: 1, weekly: 2, monthly: 2 }, include: ["databases", "blobs"], exclude: ["cache/", "*.tmp"] });
+    const s = parseBackupSpec({ schedule: "30 4 * * *", timezone: "Asia/Seoul", timeout: "90m", keep: { daily: 1 }, include: ["databases", "blobs"], exclude: ["cache/", "*.tmp"] });
+    expect(s).toEqual({ enabled: true, schedule: "30 4 * * *", timezone: "Asia/Seoul", timeoutMs: 5_400_000, keep: { daily: 1, weekly: 2, monthly: 2 }, include: ["databases", "blobs"], exclude: ["cache/", "*.tmp"] });
+    expect(parseBackupSpec({ timeout: "2h" }).timeoutMs).toBe(7_200_000);
+    expect(parseBackupSpec({}).timeoutMs).toBeUndefined();
   });
 
   test("rejects what it does not understand", () => {
     expect(() => parseBackupSpec("yes")).toThrow(/true, false or a mapping/);
     expect(() => parseBackupSpec({ nope: 1 })).toThrow(/unknown key "nope"/);
     expect(() => parseBackupSpec({ schedule: "not cron" })).toThrow(/schedule/);
+    expect(() => parseBackupSpec({ timeout: "soon" })).toThrow(/timeout: invalid duration/);
+    expect(() => parseBackupSpec({ timeout: true })).toThrow(/timeout must be a duration/);
+    expect(() => parseBackupSpec({ timeout: 90 })).toThrow(/between 1m and 24h/);
+    expect(() => parseBackupSpec({ timeout: "2d" })).toThrow(/between 1m and 24h/);
     expect(() => parseBackupSpec({ keep: { daily: -1 } })).toThrow(/non-negative/);
     expect(() => parseBackupSpec({ keep: { daily: 0, weekly: 0, monthly: 0 } })).toThrow(/keeps nothing/);
     expect(() => parseBackupSpec({ include: [] })).toThrow(/non-empty/);

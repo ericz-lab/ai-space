@@ -429,6 +429,7 @@ Optional. Every app with a data directory is snapshotted daily without declaring
 backup: false                      # opt out; or a mapping:
 backup:
   schedule: "0 3 * * *"            # default: the workspace hour with a per-app minute
+  timeout: 90m                     # default: SPACE_BACKUP_TIMEOUT_MIN (30m)
   keep: { daily: 3, weekly: 2, monthly: 2 }
   include: [databases, files]      # add blobs for a filesystem blob store
   exclude: ["cache/"]              # on top of the built-in excludes
