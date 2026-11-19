@@ -28,7 +28,7 @@ Six rules apply to every app:
 2. **One name everywhere.** The app name is lowercase kebab-case (`[a-z0-9][a-z0-9._-]*`) and is the directory name, the repository name, the `name` in `space.yaml`, the systemd unit name and the data directory name. Pick it before creating anything; renaming touches all five.
 3. **Configuration is environment.** Secrets and machine-specific values come from `<workspace>/.env` (shared) and the app's own `.env` (ignored by git). The repository only ever holds `.env.example`. ai-space hands provisioned values over through `space.env`.
 4. **Listen on loopback.** A service binds `127.0.0.1` on the port given by `PORT`. Exposure to the outside is the space's job (tunnel, auth), never the app's.
-5. **Declare, do not integrate.** Everything the app wants from ai-space is declared in `space.yaml`. The app does not import ai-space code and does not need to be written in TypeScript.
+5. **Declare, do not integrate.** Everything the app wants from ai-space is declared in `space.yaml`. The app does not import ai-space code and does not need to be written in TypeScript ([rust-apps.md](rust-apps.md) for one in Rust).
 6. **Be honest.** Data an app cannot obtain is left empty or marked missing, never invented. Every record can answer "where from, when". History is appended, not rewritten. Widgets and agents inherit these three rules.
 
 ## Directory layout
