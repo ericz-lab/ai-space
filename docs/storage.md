@@ -288,7 +288,7 @@ storage:
   backup:
     schedule: "0 3 * * *"
     timezone: UTC
-    keep: { daily: 3, weekly: 2, monthly: 2 }
+    keep: { daily: 1, weekly: 1, monthly: 1 }
     include: [database, blobs]   # blobs on s3 are skipped unless copy: true
 ```
 
