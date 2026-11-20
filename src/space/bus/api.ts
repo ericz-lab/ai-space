@@ -95,34 +95,13 @@ type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "DELETE",
 export const OPERATOR = "space";
 const KEEPALIVE_MS = 20_000;
 
-export function createBusRoutes(opts: BusApiOptions): Routes {
-  const { bus, store, events } = opts;
-  const token = opts.token?.trim() ?? "";
-  const keepaliveMs = opts.keepaliveMs ?? KEEPALIVE_MS;
-
-  /** The app behind the token, or OPERATOR for the operator token; undefined = not authorized. */
-  const identify = async (req: Request): Promise<string | undefined> => {
-    const caller = await identifyCaller(req, { token, appForToken: opts.appForToken });
-    return caller === undefined ? undefined : caller === SPACE_OPERATOR ? OPERATOR : caller.app;
-  };
-
-  /** The external consumer behind the presented credential, when the token is not an app's or the operator's. */
-  const consumerOf = (req: Request): Consumer | undefined => {
-    const presented = bearer(req);
-    return presented ? opts.consumers?.authenticate(presented) : undefined;
-  };
-
-  const guard =
-    (h: Handler): Handler =>
-    async (req) => {
-      if (!isOperator(req, token)) return error(401, "unauthorized");
-      try {
-        return await h(req);
-      } catch (e) {
-        return error(400, (e as Error).message ?? String(e));
-      }
-    };
-
+/**
+ * A capability call as the bus routes make it, for the routes here and for the speech layer's
+ * `voice-studio` adapter (docs/speech.md): on this space through the bus, or forwarded to a peer's
+ * `/api/peer/call/...` as `<this space>/<caller>`; both recorded in `bus_calls` as before.
+ */
+export function capabilityCaller(opts: { bus: Bus; store: BusStore; remote?: RemoteBus }) {
+  const { bus, store } = opts;
   const callLocal = async (req: Request, caller: string, app: string, name: string): Promise<Response> => {
     const length = Number(req.headers.get("content-length") ?? 0);
     if (length > MAX_CALL_BODY_BYTES) return error(413, `body is ${length} bytes; the limit is ${MAX_CALL_BODY_BYTES}`);
@@ -171,6 +150,39 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
     headers.set("x-space-call-peer", peer.name);
     return new Response(res.body, { status: res.status, headers });
   };
+
+  return { callLocal, callRemote };
+}
+
+export function createBusRoutes(opts: BusApiOptions): Routes {
+  const { bus, store, events } = opts;
+  const token = opts.token?.trim() ?? "";
+  const keepaliveMs = opts.keepaliveMs ?? KEEPALIVE_MS;
+
+  /** The app behind the token, or OPERATOR for the operator token; undefined = not authorized. */
+  const identify = async (req: Request): Promise<string | undefined> => {
+    const caller = await identifyCaller(req, { token, appForToken: opts.appForToken });
+    return caller === undefined ? undefined : caller === SPACE_OPERATOR ? OPERATOR : caller.app;
+  };
+
+  /** The external consumer behind the presented credential, when the token is not an app's or the operator's. */
+  const consumerOf = (req: Request): Consumer | undefined => {
+    const presented = bearer(req);
+    return presented ? opts.consumers?.authenticate(presented) : undefined;
+  };
+
+  const guard =
+    (h: Handler): Handler =>
+    async (req) => {
+      if (!isOperator(req, token)) return error(401, "unauthorized");
+      try {
+        return await h(req);
+      } catch (e) {
+        return error(400, (e as Error).message ?? String(e));
+      }
+    };
+
+  const { callLocal, callRemote } = capabilityCaller({ bus, store, remote: opts.remote });
 
   // Where a capability the panel forwards to is: this space, exactly one peer, or nowhere (several peers is nowhere too).
   const providerAt = (cap: { app: string; capability: string }): "local" | RemotePeer | undefined => {
