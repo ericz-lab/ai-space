@@ -1,0 +1,17 @@
+{
+  "asOf": "2026-11-19",
+  "currency": "USD",
+  "source": "https://developers.openai.com/api/docs/pricing",
+  "note": "OpenAI's list prices for its own API (api.openai.com); a provider's price: in providers.yaml wins. Token-priced models (gpt-4o-mini-tts) are left out: their cost is not a function of minutes or characters.",
+  "transcribePerMinute": {
+    "whisper-1": 0.006,
+    "gpt-4o-transcribe": 0.006,
+    "gpt-4o-transcribe-diarize": 0.006,
+    "gpt-4o-mini-transcribe": 0.003,
+    "gpt-transcribe": 0.0045
+  },
+  "speakPerMillionChars": {
+    "tts-1": 15,
+    "tts-1-hd": 30
+  }
+}
