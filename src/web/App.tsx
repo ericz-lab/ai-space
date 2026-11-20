@@ -1,5 +1,6 @@
 import type { AgentIntentView } from "../space/shortcuts/agent-intents.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CatalogWelcome } from "./AppCatalog.tsx";
 import { AddForm, UninstallForm } from "./AppForms.tsx";
 import MachineClis from "./MachineClis.tsx";
 import ModelPreference from "./ModelPreference.tsx";
@@ -37,7 +38,7 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 // the home screen the panel opens on, then the operator's own; each screen shows only what is
 // pinned to it. Settings, the inbox and the terminal are built-in tiles; they, the chat and the
 // tasks list open as floating panels over the page (an overlay that closes on a click outside).
-// Edit mode (long-press the background): add an app from a link, unpin, drag to reorder, uninstall.
+// Edit mode (long-press the background): add an app (catalog, new or link), unpin, drag to reorder, uninstall.
 // Everything comes from the apps' manifests through the panel API; the browser holds no secrets.
 // Entries from peer machines say where they run in their hover details and are muted while that peer is down.
 // Every string the panel owns goes through `t` (i18n.ts); manifest text is picked with `localized`.
@@ -104,7 +105,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const accent = useAccentParam();
   const [editing, setEditing] = useState(false);
   // The screen an app added from a link is pinned to; `null` when added from the library.
-  const [adding, setAdding] = useState<{ pinTo: string | null } | null>(null);
+  const [adding, setAdding] = useState<{ pinTo: string | null; preselect?: boolean } | null>(null);
   // The app dropped on the uninstall zone, awaiting confirmation; `zoneHot` while a tile hovers the zone.
   const [uninstalling, setUninstalling] = useState<AppInfo | null>(null);
   const [zoneHot, setZoneHot] = useState(false);
@@ -906,6 +907,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               </div>
             )}
             {screen.id === HOME && !editing && <Omnibox entries={entries} onOpen={openEntry} onAsk={askAssistant} focusSignal={omniFocus} onOpenShortcuts={openShortcuts} onOpenTasks={openTasks} onAgentIntent={askSkillAgent} />}
+            {screen.id === HOME && !editing && <CatalogWelcome onOpen={() => setAdding({ pinTo: null, preselect: true })} />}
             {renderScreen(screen)}
           </section>
         ) : null}
@@ -924,7 +926,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       )}
       {adding && (
         <AddForm
+          preselect={adding.preselect}
           onClose={() => setAdding(null)}
+          onInstalled={reload}
           onSaved={(app) => {
             if (app && adding.pinTo) pinEntry(entryKey("app", app.id), adding.pinTo);
             setAdding(null);

@@ -1,17 +1,18 @@
 import { useState } from "react";
 import { sendJson, type AppInfo } from "./api.ts";
+import { CatalogPane } from "./AppCatalog.tsx";
 import { localized, useLang } from "./i18n.ts";
 
-// The panel's two dialogs in edit mode: add an app (make a new one inside the Space, or from a
-// link), and confirm an uninstall.
+// The panel's two dialogs in edit mode: add an app (from the app catalog, make a new one inside the
+// Space, or from a link), and confirm an uninstall.
 
 export type CreatedApp = { app: string; version: string; dir: string; description: string };
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
-export function AddForm({ onClose, onSaved, onCreated }: { onClose: () => void; onSaved: (app?: AppInfo) => void; onCreated?: (made: CreatedApp) => void }) {
+export function AddForm({ onClose, onSaved, onCreated, onInstalled, preselect = false }: { onClose: () => void; onSaved: (app?: AppInfo) => void; onCreated?: (made: CreatedApp) => void; onInstalled?: () => void; preselect?: boolean }) {
   const { t } = useLang();
-  const [mode, setMode] = useState<"new" | "link">(onCreated ? "new" : "link");
+  const [mode, setMode] = useState<"catalog" | "new" | "link">("catalog");
   const [link, setLink] = useState("");
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
@@ -51,22 +52,27 @@ export function AddForm({ onClose, onSaved, onCreated }: { onClose: () => void; 
   };
   return (
     <div className="overlay" onClick={busy ? undefined : onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal${mode === "catalog" ? " wide" : ""}`} onClick={(e) => e.stopPropagation()}>
         <h3>
           {t("add.title")}
-          <span className="modal-sub">{mode === "new" ? t("create.sub") : t("add.sub")}</span>
+          <span className="modal-sub">{mode === "catalog" ? t("catalog.sub") : mode === "new" ? t("create.sub") : t("add.sub")}</span>
         </h3>
-        {onCreated && (
-          <div role="tablist" style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <div role="tablist" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+          <button role="tab" aria-selected={mode === "catalog"} className={`lib-chip${mode === "catalog" ? " on" : ""}`} onClick={() => (setMode("catalog"), setErr(""))} disabled={busy}>
+            {t("catalog.tab")}
+          </button>
+          {onCreated && (
             <button role="tab" aria-selected={mode === "new"} className={`lib-chip${mode === "new" ? " on" : ""}`} onClick={() => (setMode("new"), setErr(""))} disabled={busy}>
               {t("create.tab")}
             </button>
-            <button role="tab" aria-selected={mode === "link"} className={`lib-chip${mode === "link" ? " on" : ""}`} onClick={() => (setMode("link"), setErr(""))} disabled={busy}>
-              {t("add.tab")}
-            </button>
-          </div>
-        )}
-        {mode === "new" ? (
+          )}
+          <button role="tab" aria-selected={mode === "link"} className={`lib-chip${mode === "link" ? " on" : ""}`} onClick={() => (setMode("link"), setErr(""))} disabled={busy}>
+            {t("add.tab")}
+          </button>
+        </div>
+        {mode === "catalog" ? (
+          <CatalogPane preselect={preselect} busy={busy} setBusy={setBusy} onInstalled={() => onInstalled?.()} onClose={onClose} />
+        ) : mode === "new" ? (
           <>
             <div className="field">
               <label>{t("create.title")}</label>
@@ -100,7 +106,8 @@ export function AddForm({ onClose, onSaved, onCreated }: { onClose: () => void; 
             <div className="form-hint">{t("add.hint")}</div>
           </>
         )}
-        {err && <div className="form-err">{err}</div>}
+        {mode !== "catalog" && err && <div className="form-err">{err}</div>}
+        {mode !== "catalog" && (
         <div className="actions">
           <button className="btn2" onClick={onClose} disabled={busy}>
             {t("common.cancel")}
@@ -115,6 +122,7 @@ export function AddForm({ onClose, onSaved, onCreated }: { onClose: () => void; 
             </button>
           )}
         </div>
+        )}
       </div>
     </div>
   );
