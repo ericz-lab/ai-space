@@ -57,6 +57,7 @@
 - 🔌 **总线。** App 之间的事件与调用，至少一次投递，带目录和历史。→ [events](docs/events.md)
 - 🔔 **通知。** 一次调用即可发到 Telegram、Discord、Slack、飞书、钉钉、企业微信、Bark、ntfy 或 webhook；有队列、限速、重试，并汇总到面板的收件箱。→ [notify](docs/notify.md)
 - 🧠 **模型调用。** 所有 app 共用一个 `POST /api/model/run`，有并发上限，token 按 app、用途和模型记账。→ [model](docs/model.md)
+- 🎙️ **语音。** 转写、合成和实时听写共用一个 `/api/speech/*`，可用自建供应者或 API，带回退、按 app 的仅本地开关，并按秒和字数记账。→ [speech](docs/speech.md)
 - 💬 **对话。** 带图片附件的会话线程，以及可嵌入 app 页面的聊天组件。→ [chat](docs/chat.md)
 - 💾 **存储与备份。** 每个 app 一个 SQLite 或 PostgreSQL 数据库加一个对象存储；每日快照到任意 S3 桶，每周校验，可恢复。→ [storage](docs/storage.md) · [backup](docs/backup.md)
 - 🛠️ **服务托管。** ai-space 可以把每个 app 的服务作为 systemd 用户单元（macOS 上是 LaunchAgent）运行，并与 manifest 保持一致。→ [supervision](docs/supervision.md)
@@ -211,7 +212,7 @@ space backup ls                       # 每个 app 数据的快照
 | [Cloudflare](docs/cloudflare.md) | [调度器](docs/scheduler.md) | [服务托管](docs/supervision.md) | [入口](docs/ingress.md) |
 | [机器](docs/machines.md) | [事件与调用](docs/events.md) | [Peers](docs/peers.md) | [时间字段](docs/time.md) |
 | | [存储](docs/storage.md) | [终端](docs/terminal.md) | [多语言](docs/i18n.md) |
-| | [通知](docs/notify.md) · [模型](docs/model.md) · [对话](docs/chat.md) | [面板](docs/panel.md) · [使用统计](docs/usage.md) | [路线图](docs/roadmap.md) |
+| | [通知](docs/notify.md) · [模型](docs/model.md) · [语音](docs/speech.md) · [对话](docs/chat.md) | [面板](docs/panel.md) · [使用统计](docs/usage.md) | [路线图](docs/roadmap.md) |
 
 ## 🧑‍💻 开发
 

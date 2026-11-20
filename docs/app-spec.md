@@ -92,7 +92,7 @@ i18n:                              # translations of the display text, by langua
 | `repo` | string | The origin URL. |
 | `i18n` | mapping | Translations of `title` and `description`, and by name of the agents', widgets', checks' and pets' text, keyed by language tag (`zh`, `zh-Hant`, `pt-BR`). The panel shows the reader's language when the manifest has it and the plain field otherwise; names are never translated. Only declared agent, widget, check and pet names may appear. See [i18n](i18n.md). |
 
-Sections: `service`, `agents`, `widgets`, `pets`, `skills`, `tasks`, `events`, `provides`, `storage`, `backup`, `model`, `checks`, `notify`, `deploy`. Each is optional.
+Sections: `service`, `agents`, `widgets`, `pets`, `skills`, `tasks`, `events`, `provides`, `storage`, `backup`, `model`, `speech`, `checks`, `notify`, `deploy`. Each is optional.
 
 ```yaml
 i18n:
@@ -451,6 +451,17 @@ model:
 
 `model: basic` is short for `model: { default: basic }`. The operator can override any of it per app and tag in Settings → Models, on the app's page; a model the request itself names is above both, so leave `model` out of requests and declare it here. The resolution order and the ledger's `modelSource` are in [model.md](model.md#app-models).
 
+### `speech`
+
+An app transcribes, speaks and streams dictation through `/api/speech/*` with its `SPACE_APP_TOKEN`; the space picks the provider (self-hosted or an API) and falls back on account and link failures ([speech.md](speech.md)). An app whose audio must stay on the operator's machines says so:
+
+```yaml
+speech:
+  local-only: true                 # default: false; only self-hosted providers take this app's calls
+```
+
+A cloud provider in a fallback list is then skipped for the app's calls, and a cloud first choice is refused with a 403.
+
 ### `checks`
 
 The day's work an operator should be able to look at: whether today's import ran, whether today's digest was published. An inspection page (space-ops) reads each check on its own cadence and shows one of **done**, **pending** (not done, not due yet), **late** (not done after `due`, or not done with no `due`), **off** (nothing is due today) and **unknown** (unreachable, or a field is missing). A check is not a fault: it never opens an incident or sends a notification. Execution failures stay with the task; a check says whether the outcome is there.
@@ -609,6 +620,7 @@ API, for apps and their agents:
 | `POST /api/agents/:app/:agent/chat` | One chat turn, streamed as server-sent events; `sessionId` continues a session. |
 | `POST /api/notify`, `GET /api/notifications?app` | Send a notification; read the app's own delivery history. |
 | `POST /api/model/run` | One model call for the app, counted in the ledger ([model.md](model.md)). |
+| `POST /api/speech/transcribe`, `POST /api/speech/speak`, `WS /api/speech/live` | Speech for the app on the space's providers, with fallback and a ledger ([speech.md](speech.md)). |
 | `/api/chat/threads…`, `/api/chat/widget.js` | Conversations with history and images, kept by the space per app, and the widget an app's page embeds to show them ([chat.md](chat.md)). |
 | `GET /api/spec` (planned) | The spec version and JSON Schema this ai-space enforces. |
 
@@ -732,6 +744,7 @@ notify:
 | Router, `/api/router` | Implemented (`src/space/router/`): with `SPACE_ROUTER=caddy` every app's hostname is routed on the machine, no per-app registration ([router.md](router.md)) |
 | `agents`, chat route | Implemented (`src/space/agents/`) on every chat runtime; `skills` listed in the agent's prompt per turn; `memory` parsed but not applied yet; an app reaches its own agents with its token, and every app's when the operator lists it in `SPACE_AGENT_CALLERS` ([panel.md](panel.md#apps-and-their-agents)) |
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |
+| Speech service, `/api/speech/*`, `speech` | Implemented (`src/space/speech/`): `voice-studio` and `openai-compatible` providers; `dashscope`, live through an API and `clone` later ([speech.md](speech.md#later)) |
 | Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |
 | `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |
 | `pets`, `/api/pets` | Implemented (`src/space/panel/pet-spec.ts`, `src/space/panel/pets.ts`, `src/web/Pet.tsx`); this space only, not across peers; not in package manifests |
