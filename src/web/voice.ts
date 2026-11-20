@@ -141,10 +141,11 @@ export class LiveVoice {
       this.onState("recording");
       clearTimeout(this.timer);
       this.timer = setTimeout(() => this.stop(), 90_000);
-      const url = new URL("/api/voice/realtime", location.href);
+      // The Space's live dictation (docs/speech.md#live-protocol): whichever provider it is configured with.
+      const url = new URL("/api/speech/live", location.href);
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const socket = this.socket = new WebSocket(url);
-      socket.onopen = () => socket.send(JSON.stringify({ type: "start", format: "pcm_s16le", sample_rate: 16000, channels: 1, language: "" }));
+      socket.onopen = () => socket.send(JSON.stringify({ type: "start", format: "pcm_s16le", sample_rate: 16000, channels: 1, language: "", tag: "voice-input" }));
       socket.onmessage = ({ data }) => {
         if (this.disposed) return;
         try {

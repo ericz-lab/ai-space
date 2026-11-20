@@ -21,9 +21,6 @@ import { OPERATOR as SPACE_OPERATOR, bearer, identify as identifyCaller, isOpera
  *                                           that is not here but on exactly one peer is reached through that peer
  *   POST /api/call/:peer/:app/:capability   the same, naming the peer; a peer known to be down answers 503 at once
  *   GET  /api/calls?app&caller&limit        call history, newest first
- *   GET  /api/voice                         { transcribe: boolean }: whether a speech-to-text capability is reachable
- *   POST /api/voice/transcribe              multipart `file` (+ `language`, `context`), forwarded as the operator to the
- *                                           transcriber capability (voice-studio/transcribe, here or on one peer)
  *   GET  /api/capture                       { image, targets }: the capabilities that declare `capture: { kinds: [image] }`,
  *                                           here and on the peers, for the client to choose from (docs/events.md#capture)
  *   POST /api/capture/image?to=<target>     multipart `file` (+ `text`, `via`, `id`), forwarded as the operator to the chosen
@@ -40,8 +37,9 @@ import { OPERATOR as SPACE_OPERATOR, bearer, identify as identifyCaller, isOpera
  * by `stream` and `ack` for its own deliveries and by `call` for the capabilities on its list,
  * and by nothing else. Reads are open like the rest of the API.
  *
- * `/api/voice/*` and `/api/capture/*` are the panel's: like the agent chat they take no token (a browser write is
- * held to the panel's own origin by `guardBrowserWrites`), and they call as the operator.
+ * `/api/capture/*` is the panel's: like the agent chat it takes no token (a browser write is held to the panel's
+ * own origin by `guardBrowserWrites`), and it calls as the operator. The panel's voice routes (`/api/voice/*`) moved
+ * to the speech layer (src/space/speech/api.ts, docs/speech.md).
  */
 
 export type BusApiOptions = {
@@ -58,13 +56,10 @@ export type BusApiOptions = {
   remote?: RemoteBus;
   /** External consumers (docs/events.md#external-consumers); without it their routes answer 404. */
   consumers?: Consumers;
-  /** The capability voice input is transcribed by; default `voice-studio/transcribe` (docs/panel.md#omnibox). */
-  transcriber?: { app: string; capability: string };
   /** Where a picture goes when the client names no target (clients older than the target list); default `ai-spark/capture-image`. */
   imageCapturer?: { app: string; capability: string };
 };
 
-export const TRANSCRIBER = { app: "voice-studio", capability: "transcribe" };
 export const IMAGE_CAPTURER = { app: "ai-spark", capability: "capture-image" };
 
 /** A place a client's picture can go, as `GET /api/capture` lists it; `id` is what `?to=` names. */
@@ -196,7 +191,6 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
     if (!at) return error(503, `no ${cap.app}/${cap.capability} on this space or its peers`);
     return at === "local" ? callLocal(req, OPERATOR, cap.app, cap.capability) : callRemote(req, OPERATOR, at, cap.app, cap.capability);
   };
-  const transcriber = opts.transcriber ?? TRANSCRIBER;
   const imageCapturer = opts.imageCapturer ?? IMAGE_CAPTURER;
   /** Every capability that keeps a captured picture: this space's first, then each peer's. */
   const captureTargets = (): CaptureTarget[] => {
@@ -210,14 +204,6 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
   };
 
   return {
-    "/api/voice": {
-      GET: () => json({ ok: true, transcribe: providerAt(transcriber) !== undefined }),
-    },
-
-    "/api/voice/transcribe": {
-      POST: (req) => forwardAsOperator(req, transcriber),
-    },
-
     "/api/capture": {
       GET: () => {
         const targets = captureTargets();

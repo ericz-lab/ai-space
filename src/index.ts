@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { createVoiceRoutes, voiceTarget } from "./space/bus/voice.ts";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { Inbox, NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
@@ -16,7 +15,8 @@ import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts"
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
 import { refreshCodexTiers } from "./space/runtimes/codex-upgrade.ts";
-import { Bus, BusStore, Consumers, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
+import { Bus, BusStore, Consumers, capabilityCaller, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
+import { SpeechService, SpeechStore, buildAdapters, createSpeechRoutes, loadSpeech } from "./space/speech/index.ts";
 import { type Manifest, Scheduler, Store, createPeerTaskRoutes, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts";
 import { BACKUP_TASK, SPACE_APP, backupTask, createBackupRoutes, parseBackupSpec, spaceManifest } from "./space/storage/backup/index.ts";
@@ -294,6 +294,32 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     ]).then(() => undefined);
   const probeRuntimes = () => void probeAll().catch((e) => console.error(`[model] runtime probe failed: ${(e as Error).message}`));
   const remote = { name: config.name, capabilities: () => peers.capabilities(), providerOf: (app: string, cap?: string) => peers.providerOf(app, cap), get: (name: string) => peers.get(name) };
+  // Speech (docs/speech.md): providers by kind from providers.yaml, else voice-studio here or on its one peer.
+  // A file that does not load leaves speech off with the reason, and the space running.
+  const speechLoaded = await loadSpeech(ws.home, env).then((l) => ({ ...l, error: undefined }), (e: Error) => ({ config: undefined, source: "file" as const, warnings: [], error: e.message }));
+  if (speechLoaded.error) console.error(`[speech] ${speechLoaded.error}; speech calls answer 503 until it is fixed`);
+  for (const w of speechLoaded.warnings) console.warn(`[speech] ${w}`);
+  for (const p of speechLoaded.config?.providers ?? []) if (p.kind === "voice-studio" && p.machine && !peers.get(p.machine)) console.error(`[speech] provider ${p.name} names machine ${p.machine}, which is not a peer here`);
+  const speechCalls = capabilityCaller({ bus, store: busStore, remote });
+  const speech = new SpeechService({
+    ...(speechLoaded.config ? { config: speechLoaded.config } : {}),
+    ...(speechLoaded.error ? { configError: speechLoaded.error } : {}),
+    source: speechLoaded.source,
+    warnings: speechLoaded.warnings,
+    adapters: speechLoaded.config
+      ? buildAdapters(speechLoaded.config, {
+          voiceStudio: {
+            hasLocal: (app, cap) => Boolean(bus.capability(app, cap)),
+            servicePort: (app) => registry.get(app)?.manifest.service?.port,
+            callLocal: speechCalls.callLocal,
+            callRemote: (req, caller, peer, app, cap) => speechCalls.callRemote(req, caller, peer, app, cap),
+            peers,
+          },
+        })
+      : [],
+    store: new SpeechStore(config.dbPath),
+    localOnly: (app) => registry.get(app)?.manifest.speech?.localOnly === true,
+  });
   // Shortcuts (docs/shortcuts.md): the actions the command box and the Shortcuts panel run, as the operator.
   const shortcutStore = new ShortcutStore(config.dbPath);
   const shortcuts = new Shortcuts({
@@ -597,7 +623,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         },
         appForToken: (t) => storage.appForToken(t),
       })],
-      ["app", createVoiceRoutes(() => voiceTarget(bus, remote, (app) => registry.get(app)?.manifest.service?.port))],
+      ["app", createSpeechRoutes({ service: speech, token: config.apiToken, appForToken: (t) => storage.appForToken(t) })],
       ["app", createBusRoutes({ bus, store: busStore, events: store, token: config.apiToken, appForToken: (t) => storage.appForToken(t), remote, consumers })],
       ["owner", createShortcutRoutes({ shortcuts })],
       ["owner", createStorageRoutes({ storage, token: config.apiToken })],
