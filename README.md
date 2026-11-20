@@ -143,6 +143,8 @@ Everything ai-space owns on a machine lives in one directory, `~/.ai-space` by d
 
 `bun run init` creates it and installs the default apps, each a public repository cloned into `apps/` and started by its own installer. Today that is [ai-usage](https://github.com/ericz-lab/ai-usage). `SPACE_DEFAULT_APPS=none` in `.env` skips them; a list of clone URLs replaces them.
 
+More apps come from the **app catalog** ([ai-space-apps](https://github.com/ericz-lab/ai-space-apps)): the panel's Add app → App catalog, or `space app install <name>`. By default an app arrives as a signed package and nothing is cloned, fetched or run; `--source` clones it into `app-src/<name>` and builds it on your machine, so you can change it. Details in [docs/app-catalog.md](docs/app-catalog.md).
+
 ## ⌨️ Usage
 
 The panel is the everyday entry. For scripts, tasks and SSH there is one `space` command on `PATH`:
@@ -211,7 +213,7 @@ The per-area table is in [docs/app-spec.md](docs/app-spec.md#implementation-stat
 | [Install by hand](docs/install.md) | [`space-app` skill](skills/space-app/SKILL.md) | [Backup](docs/backup.md) | [Router](docs/router.md) |
 | [Cloudflare](docs/cloudflare.md) | [Scheduler](docs/scheduler.md) | [Supervision](docs/supervision.md) | [Ingress](docs/ingress.md) |
 | [Machines](docs/machines.md) | [Events & calls](docs/events.md) | [Peers](docs/peers.md) | [Time fields](docs/time.md) |
-| | [Storage](docs/storage.md) | [Terminal](docs/terminal.md) | [i18n](docs/i18n.md) |
+| [App catalog](docs/app-catalog.md) | [Storage](docs/storage.md) | [Terminal](docs/terminal.md) | [i18n](docs/i18n.md) |
 | | [Notify](docs/notify.md) · [Model](docs/model.md) · [Speech](docs/speech.md) · [Chat](docs/chat.md) | [Panel](docs/panel.md) · [Usage](docs/usage.md) | [Roadmap](docs/roadmap.md) |
 
 ## 🧑‍💻 Development
