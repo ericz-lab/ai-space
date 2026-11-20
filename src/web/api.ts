@@ -117,6 +117,44 @@ export type MachineCell = {
   problem?: "unreachable" | "not installed" | "not signed in" | "limited";
 };
 
+/** One speech provider as `GET /api/speech` reports it (docs/speech.md#status). */
+export type SpeechCell = {
+  provider: string;
+  kind: string;
+  capabilities: string[];
+  selfHosted: boolean;
+  /** "" = this machine, a peer's name, or an API's host. */
+  where: string;
+  /** Why the configuration keeps it off (a key variable not set, a kind not built yet). */
+  off?: string;
+  located: boolean;
+  reachable?: boolean;
+  signedIn?: boolean;
+  detail?: string;
+  limitedUntil?: string;
+  restKind?: MachineCell["restKind"];
+  restSaid?: boolean;
+  lastError?: string;
+  lastErrorKind?: MachineCell["lastErrorKind"];
+  lastOkAt?: string;
+  /** Where the configuration uses it: `asr`, `tts fallback`, … */
+  roles: string[];
+  used: boolean;
+  problem?: "off" | "unreachable" | "not signed in" | "limited";
+};
+
+/** `GET /api/speech`: the providers, the choices, and the last 24 hours. */
+export type SpeechStatus = {
+  configured: boolean;
+  source: string;
+  configError?: string;
+  warnings: string[];
+  default: Partial<Record<"asr" | "tts" | "live", string>>;
+  fallback: Partial<Record<"asr" | "tts" | "live", string[]>>;
+  providers: SpeechCell[];
+  usage24h: { calls: number; errors: number; audioSeconds: number; chars: number; costUsd: number };
+};
+
 export type PeerInfo = {
   name: string;
   url: string;
