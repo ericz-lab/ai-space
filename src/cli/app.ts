@@ -4,7 +4,8 @@ import { type TaskView, confirm, listTasks, scheduleText, taskRef } from "./comm
 import { deployVerb } from "./deploy.ts";
 import { newApp } from "./newapp.ts";
 import { buildVerb, createVerb } from "./studio.ts";
-import { inspectPackageVerb, packVerb, installPackageVerb, packagesVerb, openPackageVerb, packageChangeVerb } from "./package.ts";
+import { catalogVerb, installOrCatalog } from "./catalog.ts";
+import { inspectPackageVerb, packVerb, packagesVerb, openPackageVerb, packageChangeVerb, releaseVerb, keygenVerb } from "./package.ts";
 import { ago, bytes, until } from "./output.ts";
 import { ApiError, type Ctx, type Noun, UsageError } from "./types.ts";
 
@@ -235,18 +236,21 @@ export function shellQuote(v: string): string {
 
 export const appNoun: Noun = {
   name: "app",
-  summary: "the apps of the workspace: list, show, sync, deploy, service, start/stop/restart, supervise, hide, uninstall, env, new",
+  summary: "the apps of the workspace: list, show, sync, deploy, service, start/stop/restart, supervise, hide, uninstall, env, new; the app catalog: catalog, install, upgrade",
   verbs: {
     create: { usage: "NAME [--title T] [--description D]", summary: "make a new app inside the Space: source in app-src/NAME from the template, packed and installed (no GitHub)", run: createVerb },
     build: { usage: "NAME", summary: "pack app-src/NAME and install it, or upgrade the installed app (patch version +1)", run: buildVerb },
-    install: { usage: "FILE [--allow-unsigned] [--operation-id UUID]", summary: "install a prepared package on the selected Space", run: installPackageVerb() },
-    upgrade: { usage: "FILE [--allow-unsigned] [--operation-id UUID]", summary: "replace an installed package, retaining previous code and data", run: installPackageVerb(true) },
+    catalog: { usage: "[--refresh]", summary: "apps of the app catalog: release, what is installed, whether an update waits, what each needs", run: catalogVerb },
+    install: { usage: "NAME [--source [--ref REF]] [--with-source] [--trust] | FILE [--allow-unsigned] [--operation-id UUID]", summary: "install an app of the catalog (signed package, or --source: cloned to app-src and built here), or a package file", run: installOrCatalog() },
+    upgrade: { usage: "NAME [--source|--package] [--trust] | FILE [--allow-unsigned] [--operation-id UUID]", summary: "bring a catalog app to its new release (or its checkout forward), or replace a package from a file; code and data are retained", run: installOrCatalog(true) },
     packages: { usage: "", summary: "Space identity and package installation history", run: packagesVerb },
     open: { usage: "APP [--space-id UUID --connection UUID]", summary: "print a one-use URL for a local or authorized remote package app", run: openPackageVerb },
     rollback: { usage: "APP RETAINED_OPERATION_ID [--yes] [--operation-id UUID]", summary: "restore retained package code without restoring data", run: packageChangeVerb("rollback") },
     "remove-package": { usage: "APP [--yes] [--operation-id UUID]", summary: "unregister a package and retain code and data", run: packageChangeVerb("remove") },
     pack: { usage: "DIR --output FILE [--include PATH,...] [--manifest FILE] [--target OS/ARCH] [--source-included] [--sign-key FILE]", summary: "create an offline application package from explicitly selected prepared files", run: packVerb },
     "inspect-package": { usage: "FILE [--trusted-key FILE] [--check-host]", summary: "verify package contents and inspect its signature without executing code", run: inspectPackageVerb },
+    release: { usage: "[DIR] [--output-dir D] [--variant bundle|source|both] [--sign-key FILE]", summary: "build a checkout (space.release.yaml or space.yaml, its build: section) into packages to publish", run: releaseVerb },
+    keygen: { usage: "--out FILE", summary: "a publisher's Ed25519 signing key: FILE (private, mode 600) and FILE.pub, with its key ID", run: keygenVerb },
     ls: { usage: "[--panel]", summary: "every app (--panel: only what the panel shows)", run: ls },
     show: { usage: "APP", summary: "manifest, storage, backups and tasks of one app", run: show },
     sync: { usage: "[APP]", summary: "re-read one space.yaml, or every app directory", run: sync },

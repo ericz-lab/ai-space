@@ -38,7 +38,9 @@ import { readVersion } from "./space/version.ts";
 import { withUserToolDirs } from "./space/host-tools.ts";
 import { readOwnership } from "./space/local.ts";
 import { createPackageRoutes } from "./space/packages/api.ts";
+import { BUILTIN_PUBLISHERS } from "./space/packages/publishers.ts";
 import { createStudioRoutes } from "./space/studio.ts";
+import { AppCatalog, createAppCatalogRoutes } from "./space/packages/app-catalog.ts";
 import { createUiKitRoutes, loadUiKit, uiKitResponse } from "./space/ui-kit.ts";
 import { createActivityRoutes } from "./space/activity.ts";
 import { PackageStore } from "./space/packages/store.ts";
@@ -90,7 +92,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const packageInstaller = new PackageInstaller(ws, packageStore);
   await packageInstaller.recover();
   const version = await readVersion();
-  const packageTrustKeys = await Promise.all(config.packageTrustKeys.map((path) => Bun.file(path).text()));
+  // Publishers ai-space ships with (packages/publishers.json), then the operator's own keys.
+  const packageTrustKeys = [...BUILTIN_PUBLISHERS.map((p) => p.publicKey), ...await Promise.all(config.packageTrustKeys.map((path) => Bun.file(path).text()))];
   const storage = await openStorage(ws, config);
   const packageEnvFor = async (app: string) => ({ ...await loadAppEnv(storage.appDataDir(app)), ...await storage.envFor(app) });
   const appEnvFor = (app: string) => packageStore.list().some((o) => o.app === app && o.state === "installed") ? packageEnvFor(app) : storage.envFor(app);
@@ -120,6 +123,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   for (const operation of packageStore.installed().filter((o) => !blockedPackages.has(o.app))) {
     await activatePackage(operation.app).catch((e) => console.error(`[packages] ${operation.app}: ${(e as Error).message}`));
   }
+  const studioDeps = { ws, installer: packageInstaller, lifecycle: packageLifecycle, store: packageStore, activate: activatePackage, log: (l: string) => console.error(`[studio] ${l}`) };
+  const appCatalog = new AppCatalog({ db: store.db, sources: config.appCatalogs, studio: studioDeps, trustedKeys: packageTrustKeys });
   const packageConnections = new Connections(store.db, packageStore.spaceId);
   let packageGateway: PackageGateway;
   const packageLinks = new PackageLinks(packageConnections, {
@@ -658,7 +663,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", panelRoutes],
       ["owner", createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage })],
       ["owner", createActivityRoutes({ token: config.apiToken, tasks: () => scheduler.running(), modelCalls: () => model.inFlight(), agentTurns: () => agentRuns.running(), terminals: () => terminal.status().active, packageChanges: () => packageInstaller.busy + packageLifecycle.busy })],
-      ["owner", createStudioRoutes({ ws, installer: packageInstaller, lifecycle: packageLifecycle, store: packageStore, activate: activatePackage, token: config.apiToken, log: (l) => console.error(`[studio] ${l}`) })],
+      ["owner", createStudioRoutes({ ...studioDeps, token: config.apiToken })],
+      ["owner", createAppCatalogRoutes(appCatalog, config.apiToken)],
       ["owner", createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks })],
       ["owner", createConnectionRoutes({ links: packageLinks, token: config.apiToken })],
       ["owner", createPackageOpenRoutes(packageGateway, config.apiToken)],

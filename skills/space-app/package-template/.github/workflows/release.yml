@@ -1,0 +1,82 @@
+name: release
+
+# A `v<version>` tag publishes the app (ai-space docs/app-catalog.md#publishing-an-app):
+# `space app release` builds the checkout by its build: section in a scratch copy, packs the
+# release (and, with a build, the same release with its source included), signs both with the
+# publisher key, and attaches them to the GitHub release. With CATALOG_TOKEN set, it also proposes
+# the new release to the app catalog.
+#
+# Secrets: SPACE_SIGN_KEY (the Ed25519 private key from `space app keygen`, PEM; required),
+# CATALOG_TOKEN (a token that may push branches and open pull requests on the catalog; optional).
+# Variables: AI_SPACE_REF (the ai-space tag or branch whose CLI builds; default main),
+# CATALOG_REPO (default ericz-lab/ai-space-apps).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      CATALOG_TOKEN: ${{ secrets.CATALOG_TOKEN }}
+      CATALOG_REPO: ${{ vars.CATALOG_REPO || 'ericz-lab/ai-space-apps' }}
+      AI_SPACE_REF: ${{ vars.AI_SPACE_REF || 'main' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.0
+
+      - name: The ai-space CLI
+        run: |
+          git clone --quiet --depth 1 --branch "$AI_SPACE_REF" https://github.com/ericz-lab/ai-space.git "$RUNNER_TEMP/ai-space"
+          (cd "$RUNNER_TEMP/ai-space" && bun install --frozen-lockfile --production)
+
+      - name: The tag names the release's version
+        run: |
+          manifest=space.release.yaml; [ -f "$manifest" ] || manifest=space.yaml
+          version=$(bun -e "console.log(Bun.YAML.parse(await Bun.file('$manifest').text()).version)")
+          app=$(bun -e "console.log(Bun.YAML.parse(await Bun.file('$manifest').text()).name)")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "the tag is $GITHUB_REF_NAME, $manifest says $version"; exit 1; }
+          echo "APP=$app" >> "$GITHUB_ENV"; echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build, pack and sign
+        env:
+          SPACE_SIGN_KEY: ${{ secrets.SPACE_SIGN_KEY }}
+        run: |
+          test -n "$SPACE_SIGN_KEY" || { echo "set the SPACE_SIGN_KEY secret (space app keygen)"; exit 1; }
+          umask 077
+          printf '%s\n' "$SPACE_SIGN_KEY" > "$RUNNER_TEMP/sign.pem"
+          bun "$RUNNER_TEMP/ai-space/src/index.ts" app release . --output-dir "$RUNNER_TEMP/out" --sign-key "$RUNNER_TEMP/sign.pem" --json > "$RUNNER_TEMP/release.json"
+          rm -f "$RUNNER_TEMP/sign.pem"
+          cat "$RUNNER_TEMP/release.json"
+
+      - name: The GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/out/*.spaceapp --title "$APP $VERSION" --notes "Install on an ai-space Space: \`space app install $APP\` (or from the panel's app catalog)."
+
+      - name: Propose it to the app catalog
+        if: env.CATALOG_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.CATALOG_TOKEN }}
+        run: |
+          out="$RUNNER_TEMP/out"
+          git clone --quiet --depth 1 "https://x-access-token:${CATALOG_TOKEN}@github.com/${CATALOG_REPO}.git" "$RUNNER_TEMP/catalog"
+          cd "$RUNNER_TEMP/catalog"
+          branch="release/$APP-$VERSION"
+          git checkout -q -b "$branch"
+          source_args=()
+          [ -f "$out/$APP-$VERSION-source.spaceapp" ] && source_args=(--source-package "$out/$APP-$VERSION-source.spaceapp")
+          bun scripts/release-entry.ts "$APP" --tag "$GITHUB_REF_NAME" --package "$out/$APP-$VERSION.spaceapp" "${source_args[@]}" \
+            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          bun scripts/build.ts
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qam "feat($APP): release $VERSION"
+          git push -q origin "$branch"
+          gh pr create --repo "$CATALOG_REPO" --head "$branch" --title "$APP $VERSION" --body "The release of $GITHUB_REPOSITORY $GITHUB_REF_NAME."
