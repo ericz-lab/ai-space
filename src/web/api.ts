@@ -31,6 +31,8 @@ export type ModelChoice = { value: string; runtime: string; tier: "basic" | "jun
 /** One agent CLI on one machine (`GET /api/model/inventory`). */
 export type CliInfo = { cli: string; kind: string; installed?: boolean; signedIn?: boolean; version?: string; path?: string; detail?: string; checkedAt?: string; configured: boolean; runtimes: string[] };
 export type MachineInventory = { machine: string; via: "local" | "ssh" | "peer"; reachable?: boolean; stale?: boolean; old?: boolean; clis: CliInfo[] };
+/** magpie on this machine (docs/runtimes.md#magpie): where it listens, its models, which runtimes use it, what adding it makes. */
+export type MagpieInfo = { bin?: string; url: string; running: boolean; version?: string; models: string[]; error?: string; configured: boolean; runtimes: string[]; adds: "claude-code" | "anthropic-api" };
 
 /** Icons of the panel's own tiles; `/api/apps` returns the active icon pack's over these. */
 export const BUILTIN_ICONS = { inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" };

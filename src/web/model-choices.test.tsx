@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CliCell } from "./MachineClis.tsx";
+import { CliCell, MagpieRow } from "./MachineClis.tsx";
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { translate } from "./messages.ts";
 
@@ -29,4 +29,20 @@ test("the inventory cell: missing, signed out, a runtime, and an add button only
   expect(peer).not.toContain("Add to runtimes.yaml");
   expect(peer).toContain("Not a runtime there");
   expect(renderToStaticMarkup(<CliCell c={{ ...base, installed: true, configured: true, runtimes: ["codex"] }} local busy={false} onAdd={noop} t={t} />)).toContain("Runtime: codex");
+});
+
+test("magpie: a pointer when absent, a start hint when down, a model picker and add when it answers, its runtime once used", () => {
+  const base = { url: "http://127.0.0.1:3425", running: false, models: [] as string[], configured: false, runtimes: [] as string[], adds: "claude-code" as const };
+  const row = (m: Partial<typeof base> & { bin?: string }, pending = false) => renderToStaticMarkup(<MagpieRow m={{ ...base, ...m }} pending={pending} busy={false} onAdd={noop} t={t} />);
+  expect(row({})).toContain("GLM, Kimi, MiniMax");
+  expect(row({ bin: "/usr/local/bin/magpie" })).toContain("does not answer at http://127.0.0.1:3425");
+  const up = row({ running: true, models: ["zhipu/glm-4.6", "moonshot/kimi-k2.5"] });
+  expect(up).toContain("with 2 models");
+  expect(up).toContain('<option value="moonshot/kimi-k2.5">moonshot/kimi-k2.5</option>');
+  expect(up).toContain("Add as a runtime");
+  expect(up).toContain("Claude Code runs through magpie");
+  expect(row({ running: true, models: ["a/b"], adds: "anthropic-api" } as never)).toContain("answers apps&#x27; calls only");
+  expect(row({ running: true })).toContain("no model yet");
+  expect(row({ running: true, models: ["a/b"] }, true)).toContain("Restart ai-space");
+  expect(row({ running: true, models: ["a/b"], configured: true, runtimes: ["magpie"] })).toContain("used by runtime magpie");
 });
