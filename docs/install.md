@@ -42,7 +42,7 @@ Starting it inside the checkout matters: the agent reads `AGENTS.md` and the doc
 
 In both shapes, `bun run setup` is interactive and made for a terminal; an agent fills `~/.ai-space/.env` from `.env.example` instead (`deploy/install.sh` creates the file), restarts the unit, and runs the checks of step 10. Ask it to show you the `.env` values it chose before it writes them.
 
-There is no `curl | bash` installer on purpose: ai-space is only useful with a coding agent, so the agent is the installer.
+The short way, without this file: `curl -fsSL https://ai-space.me/install.sh | bash` installs the newest release (no git, no Bun, nothing asked; [release.md](release.md#one-command-install)) and leaves the panel on `http://127.0.0.1:8700/`. It still needs one coding agent signed in on the machine, as step 2 here. This file is the full path: from source, with the extensions.
 
 Secrets end up in exactly two places: the workspace `.env` (`~/.ai-space/.env`, read by ai-space and by `${VAR}` in manifests) and the tools' own stores (`~/.claude`, `~/.config/gh`, `~/.cloudflared`). Nothing is committed.
 

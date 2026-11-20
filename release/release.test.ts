@@ -37,7 +37,7 @@ describe("the server archive", () => {
   });
 
   test("both installers are valid shell", async () => {
-    for (const script of ["release/install.sh", "deploy/install.sh", "desktop/macos/scripts/package.sh", "desktop/linux/install.sh", "desktop/linux/ai-space.sh"]) {
+    for (const script of ["release/install.sh", "release/get.sh", "deploy/install.sh", "desktop/macos/scripts/package.sh", "desktop/linux/install.sh", "desktop/linux/ai-space.sh"]) {
       const p = Bun.spawn(["sh", "-n", script], { cwd: join(import.meta.dir, ".."), stderr: "pipe" });
       expect({ script, code: await p.exited }).toEqual({ script, code: 0 });
     }
@@ -52,9 +52,10 @@ describe("the release manifest", () => {
       await Bun.write(join(dir, "ai-space-client-1.0.0-macos-arm64-unsigned.dmg"), "client");
       await Bun.write(join(dir, "ai-space-linux-local-1.0.0-x64.tar.gz"), "linux");
       await Bun.write(join(dir, "ai-space-windows-local-1.0.0-x64.zip"), "windows");
+      await Bun.write(join(dir, "install.sh"), "#!/usr/bin/env bash\n");
       await Bun.write(join(dir, "SHA256SUMS"), "stale");
       const list = await artifacts(dir);
-      expect(list.map((a) => a.name)).toEqual(["ai-space-client-1.0.0-macos-arm64-unsigned.dmg", "ai-space-linux-local-1.0.0-x64.tar.gz", "ai-space-server-1.0.0-linux-x64.tar.gz", "ai-space-windows-local-1.0.0-x64.zip"]);
+      expect(list.map((a) => a.name)).toEqual(["ai-space-client-1.0.0-macos-arm64-unsigned.dmg", "ai-space-linux-local-1.0.0-x64.tar.gz", "ai-space-server-1.0.0-linux-x64.tar.gz", "ai-space-windows-local-1.0.0-x64.zip", "install.sh"]);
       expect(list[2]!.sha256).toBe(new Bun.CryptoHasher("sha256").update("server").digest("hex"));
       expect(sums(list)).toBe(list.map((a) => `${a.sha256}  ${a.name}\n`).join(""));
       const text = notes({ product: "ai-space", version: "1.0.0", commit: "0123456789abcdef", created: "", artifacts: list });
@@ -63,6 +64,7 @@ describe("the release manifest", () => {
       expect(text).toContain("Local edition for Linux");
       expect(text).toContain("Local edition for Windows");
       expect(text).toContain("bash <dir>/install.sh");
+      expect(text).toContain("curl -fsSL https://ai-space.me/install.sh | bash");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
