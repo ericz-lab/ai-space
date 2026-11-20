@@ -59,7 +59,10 @@ beforeAll(() => {
     },
   });
 });
-afterAll(() => gpu.stop(true));
+// Not awaited: on Bun 1.3, stop() after a server-closed WebSocket session never settles, and the hook times out.
+afterAll(() => {
+  gpu.stop(true);
+});
 
 /** A peer that provides voice-studio and answers its calls itself. */
 function peer(name: string, url = "https://peer.invalid"): StudioPeer & { forwarded: Seen[] } {
