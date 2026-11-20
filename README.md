@@ -57,6 +57,7 @@ Underneath, the core gives every app what a running AI system needs and nobody w
 - 🔌 **Bus.** Events and calls between apps, delivered at least once, with a catalogue and a history. → [events](docs/events.md)
 - 🔔 **Notify.** One call reaches Telegram, Discord, Slack, Feishu, DingTalk, WeCom, Bark, ntfy or a webhook; queued, rate limited, retried, and gathered in a panel inbox. → [notify](docs/notify.md)
 - 🧠 **Model calls.** One `POST /api/model/run` for every app, a concurrency cap, and a ledger of tokens by app, purpose and model. → [model](docs/model.md)
+- 🎙️ **Speech.** Transcription, speech and live dictation through one `/api/speech/*`, on a self-hosted provider or an API, with fallback, a local-only switch per app and a ledger in seconds and characters. → [speech](docs/speech.md)
 - 💬 **Chat.** Threads with image attachments and an embeddable widget for apps' own pages. → [chat](docs/chat.md)
 - 💾 **Storage & backup.** Per-app SQLite or PostgreSQL and a blob store; daily snapshots to any S3 bucket, weekly verification, restore. → [storage](docs/storage.md) · [backup](docs/backup.md)
 - 🛠️ **Supervision.** ai-space can run each app's service as a systemd user unit (a LaunchAgent on macOS) and keep it in step with the manifest. → [supervision](docs/supervision.md)
@@ -211,7 +212,7 @@ The per-area table is in [docs/app-spec.md](docs/app-spec.md#implementation-stat
 | [Cloudflare](docs/cloudflare.md) | [Scheduler](docs/scheduler.md) | [Supervision](docs/supervision.md) | [Ingress](docs/ingress.md) |
 | [Machines](docs/machines.md) | [Events & calls](docs/events.md) | [Peers](docs/peers.md) | [Time fields](docs/time.md) |
 | | [Storage](docs/storage.md) | [Terminal](docs/terminal.md) | [i18n](docs/i18n.md) |
-| | [Notify](docs/notify.md) · [Model](docs/model.md) · [Chat](docs/chat.md) | [Panel](docs/panel.md) · [Usage](docs/usage.md) | [Roadmap](docs/roadmap.md) |
+| | [Notify](docs/notify.md) · [Model](docs/model.md) · [Speech](docs/speech.md) · [Chat](docs/chat.md) | [Panel](docs/panel.md) · [Usage](docs/usage.md) | [Roadmap](docs/roadmap.md) |
 
 ## 🧑‍💻 Development
 

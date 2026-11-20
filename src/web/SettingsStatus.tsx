@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { getJson, relTime, sendJson, untilTime, type BackupInfo, type MachineCell, type PeerInfo, type ServiceInfo } from "./api.ts";
+import { getJson, relTime, sendJson, untilTime, type BackupInfo, type MachineCell, type PeerInfo, type ServiceInfo, type SpeechCell, type SpeechStatus } from "./api.ts";
 import { failureText } from "./call-trace.ts";
 import { localized, useLang } from "./i18n.ts";
 import type { Key } from "./messages.ts";
 import { HEALTH, Icon, STATUS } from "./Tiles.tsx";
+import { fmtCost } from "./Usage.tsx";
 
 /**
- * The status part of the settings: peers, runtimes, services and backups fold into one summary line; the rows
- * show when it is expanded. A problem is a service or peer that is down, a runtime something uses that
- * cannot answer (docs/model-machines.md#status), or a backup that went stale.
+ * The status part of the settings: peers, runtimes, speech providers, services and backups fold into one
+ * summary line; the rows show when it is expanded. A problem is a service or peer that is down, a runtime
+ * or speech provider something uses that cannot answer (docs/model-machines.md#status, docs/speech.md#status),
+ * a speech configuration that does not load, or a backup that went stale.
  * Loaded each time the settings open so the health dots are fresh (the server caches probes for 15 s
  * and peer snapshots for their refresh period).
  */
@@ -44,6 +46,14 @@ export default function SettingsStatus() {
       .then((d) => setMachines({ cells: d.machines || [], serves: d.servesPeers || [], fallback: d.fallback || {} }))
       .catch(() => setMachines({ cells: [], serves: [], fallback: {} }));
   }, []);
+  // Speech providers (docs/speech.md#status): the same kind of cell, one per provider, beside the runtimes.
+  const [speech, setSpeech] = useState<SpeechStatus | null>(null);
+  useEffect(() => {
+    // An older Space has no /api/speech; the group then stays away.
+    getJson<SpeechStatus>("/api/speech")
+      .then((d) => setSpeech({ ...d, providers: d.providers || [], warnings: d.warnings || [] }))
+      .catch(() => setSpeech(null));
+  }, []);
   const [backups, setBackups] = useState<BackupInfo[] | null>(null);
   const [backupsOn, setBackupsOn] = useState(true);
   useEffect(() => {
@@ -61,6 +71,8 @@ export default function SettingsStatus() {
     ? services.services.filter((s) => s.status === "active" && s.health === "down").length +
       services.peers.filter((p) => p.health !== "ok").length +
       (machines?.cells.filter((c) => c.problem).length ?? 0) +
+      (speech?.providers.filter((c) => c.problem).length ?? 0) +
+      (speech?.configError ? 1 : 0) +
       backups.filter((b) => b.stale && !b.retired).length
     : 0;
   const statusSummary = statusLoaded
@@ -69,6 +81,7 @@ export default function SettingsStatus() {
         backupsOn || backups.length ? t("settings.countBackups", { n: backups.length }) : "",
         services.peers.length ? t("settings.countPeers", { n: services.peers.length }) : "",
         machines?.cells.length ? t("settings.countRuntimes", { n: machines.cells.length }) : "",
+        speech?.providers.length ? t("settings.countSpeech", { n: speech.providers.length }) : "",
       ]
         .filter(Boolean)
         .join(" · ")
@@ -145,6 +158,68 @@ export default function SettingsStatus() {
           {machines.serves.length > 0 && <p className="setnote">{t("runtimes.serves", { list: machines.serves.join(", ") })}</p>}
         </>
       )}
+      {speech && (speech.providers.length > 0 || speech.configError) && (
+        <>
+          <p className="sethead sub">{t("settings.speech")}</p>
+          {speech.configError && <p className="setnote">{t("speech.configError", { error: speech.configError })}</p>}
+          {speech.providers.map((c) => {
+            const state = speechState(c, lang);
+            return (
+              <div
+                key={c.provider}
+                className="svcrow"
+                title={[
+                  `${c.kind} · ${t(c.selfHosted ? "speech.selfHosted" : "speech.api")}`,
+                  t("speech.can", { list: c.capabilities.join(", ") }),
+                  c.roles.length ? t("speech.roles", { list: c.roles.join(", ") }) : t("runtimes.unused"),
+                  c.off ?? "",
+                  c.detail ?? "",
+                  c.lastOkAt ? t("runtimes.lastOk", { time: relTime(c.lastOkAt, lang) }) : "",
+                  c.limitedUntil
+                    ? c.restKind
+                      ? `${t("runtimes.restUntil", { time: untilTime(c.limitedUntil, lang), cause: failureText(c.restKind, lang) })}${c.restSaid ? ` (${t("runtimes.restSaid")})` : ""}`
+                      : t("runtimes.limitedUntil", { time: untilTime(c.limitedUntil, lang) })
+                    : "",
+                  c.lastErrorKind ? t("runtimes.lastErrorKind", { kind: failureText(c.lastErrorKind, lang) }) : "",
+                  c.lastError ?? "",
+                ]
+                  .filter(Boolean)
+                  .join("\n")}
+              >
+                <span className="svc-ico">🎙</span>
+                <span className="svc-name">{c.provider}</span>
+                <span className="svc-peer">{c.where || t("runtimes.thisMachine")}</span>
+                {c.lastOkAt && <span className="svc-port">{relTime(c.lastOkAt, lang)}</span>}
+                <span className={`status ${state.cls}`}>
+                  <i />
+                  {state.text ?? t(state.key)}
+                </span>
+              </div>
+            );
+          })}
+          {speech.providers.length > 0 && (
+            <p className="setnote">
+              {t("speech.defaults", { list: (["asr", "tts", "live"] as const).filter((r) => speech.default[r]).map((r) => `${r} → ${speech.default[r]}`).join("; ") })}
+            </p>
+          )}
+          {Object.values(speech.fallback).some((l) => l && l.length) && (
+            <p className="setnote">{t("runtimes.fallback", { list: Object.entries(speech.fallback).filter(([, l]) => l && l.length).map(([role, l]) => `${role} → ${(l ?? []).join(", ")}`).join("; ") })}</p>
+          )}
+          {speech.usage24h.calls > 0 && (
+            <p className="setnote">
+              {t("speech.usage24h", {
+                calls: speech.usage24h.calls.toLocaleString(),
+                minutes: (speech.usage24h.audioSeconds / 60).toFixed(1),
+                chars: speech.usage24h.chars.toLocaleString(),
+                cost: fmtCost(speech.usage24h.costUsd),
+              })}
+            </p>
+          )}
+          {speech.warnings.map((w) => (
+            <p key={w} className="setnote">{w}</p>
+          ))}
+        </>
+      )}
       <p className="sethead sub">{t("settings.services")}</p>
       {services === null ? (
         <p className="setnote">{t("common.loading")}</p>
@@ -215,6 +290,17 @@ export default function SettingsStatus() {
       )}
     </>
   );
+}
+
+/**
+ * A speech provider's dot and word, read like a runtime's: red only for a provider the configuration uses
+ * that cannot answer, amber while it rests, grey when nothing uses it.
+ */
+export function speechState(c: SpeechCell, lang: Parameters<typeof failureText>[1]): { cls: string; key: Key; text?: string } {
+  const key: Key = c.off ? "speech.off" : !c.located ? "speech.notFound" : c.reachable === false ? "runtimes.unreachable" : c.signedIn === false ? "runtimes.notSignedIn" : c.limitedUntil ? "runtimes.limited" : "runtimes.ready";
+  const text = key === "runtimes.limited" && c.restKind ? failureText(c.restKind, lang) : undefined;
+  if (c.problem) return { cls: c.problem === "limited" ? "paused" : "down", key, ...(text ? { text } : {}) };
+  return { cls: key === "runtimes.ready" ? "ok" : "archived", key, ...(text ? { text } : {}) };
 }
 
 /**

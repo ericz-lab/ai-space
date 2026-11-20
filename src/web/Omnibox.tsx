@@ -14,7 +14,7 @@ import { Icon } from "./Tiles.tsx";
 // The home screen's command box (docs/panel.md#omnibox): one field that finds an app, agent, widget
 // or built-in tile by name, and hands anything else to Space Assistant as a new conversation. Enter
 // acts on the highlighted row: the first match when its name holds what was typed, the "ask" row
-// otherwise; ⌘/Ctrl+Enter always asks. The microphone streams audio to voice-studio and updates
+// otherwise; ⌘/Ctrl+Enter always asks. The microphone streams audio to the Space's live dictation and updates
 // the field with provisional and final text; it never sends by itself.
 //
 // It also runs actions (docs/shortcuts.md): arithmetic shows its value as it is typed, "100 USD to
