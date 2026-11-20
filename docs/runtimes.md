@@ -116,30 +116,51 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 
 ## magpie
 
-[magpie](https://github.com/yetone/magpie) is a local gateway: one Anthropic Messages endpoint in front of many providers, with its own keys, accounts, protocol translation and failover. ai-space does not grow a gateway of its own; a space that has magpie running uses it as an `anthropic-api` runtime:
+[magpie](https://github.com/yetone/magpie) is a local gateway: one Anthropic Messages endpoint in front of many providers (GLM, Kimi, MiniMax, DeepSeek and the rest), with its own keys, accounts, protocol translation and failover. ai-space does not grow a gateway of its own, does not install magpie and does not change its settings; a space on a machine where magpie runs uses it in one of two forms.
+
+**Claude Code through magpie** (the usual one: chat, agent tasks and answers, with Claude Code's tools):
+
+```yaml
+runtimes:
+  claude:
+    kind: claude-code
+  magpie:
+    kind: claude-code
+    magpie: http://127.0.0.1:3425  # the gateway's address; no path
+    models:                        # magpie's ids: provider/model, or one of its groups
+      basic: zhipu/glm-4.5-air
+      intermediate: zhipu/glm-4.6
+```
+
+Each process of that runtime gets `ANTHROPIC_BASE_URL` set to the gateway, `ANTHROPIC_AUTH_TOKEN=magpie-ai-space` (magpie needs no key from loopback; this one names the caller, so magpie's usage page counts these calls as ai-space's), each pinned tier as the model behind Claude Code's alias for it (`ANTHROPIC_DEFAULT_HAIKU_MODEL` for basic, `_SONNET_` junior, `_OPUS_` intermediate, `_FABLE_` advanced) and the basic pin as `ANTHROPIC_SMALL_FAST_MODEL`, so the CLI's background calls go there too. `ANTHROPIC_API_KEY` is left out of that process. Only that process sees this: `~/.claude` is not touched, and the plain `claude` runtime keeps the CLI's own sign-in. An `env` block in the user's own Claude Code settings that sets these same variables can win over them; ai-space does not edit it.
+
+- **Its tiers** are its pins only (no Claude defaults); `magpie/<provider>/<model>` sends magpie's own id. Pins may contain `/` for that reason.
+- **Local only**: `ssh:` and a `machine:` fallback entry on it are refused, since the gateway listens on this machine's loopback.
+- **Status**: the CLI's own login is not asked. The cell counts as signed in while the gateway answers its model list with at least one model ([model-machines.md](model-machines.md#status)).
+
+**The API form**, for a machine without Claude Code (answers only: no tools, no files, no full mode; a fallback entry on it is skipped for such a call):
 
 ```yaml
 runtimes:
   magpie:
     kind: anthropic-api
     url: http://127.0.0.1:3425/v1/messages
-    apiKeyEnv: MAGPIE_API_KEY     # in .env: MAGPIE_API_KEY=magpie-ai-space; magpie counts the calls under "ai-space"
-    models:                       # magpie's ids: provider/model, or one of its groups
+    apiKeyEnv: MAGPIE_API_KEY     # in .env: MAGPIE_API_KEY=magpie-ai-space
+    models:
       basic: deepseek/deepseek-chat
-      intermediate: anthropic/claude-sonnet-4-5
 fallback:
   codex/basic: [magpie/basic]     # magpie answers when the Codex login is out of quota
 ```
 
-- **Names**: `magpie/basic` resolves through the pins; `magpie/<provider>/<model>` sends magpie's own id. An API runtime's pin may contain `/` for that reason; other runtimes' may not.
-- **Where it can be used**: a request's `model`, a manifest's `model:` tags, `SPACE_MODEL_DEFAULT`, `default: magpie` in this file, and fallback entries. The panel's overrides and model pickers list Claude Code and Codex tiers only, as before. As for any API runtime: no tools, no files, no full mode; a fallback entry on it is skipped for such a call.
-- **What answered**: magpie names the model that served a call in `X-Magpie-Model`; the call's [trace](model.md#trace) keeps it as `served`, so a group or magpie's own failover is visible in the ledger. A refused call's `Retry-After` is appended to the error (`(retry after 30s)`) and sets how long the cell rests.
+- **Finding it**: `MAGPIE_ADDR` when set, else the address the running gateway wrote to `gateway.json` in magpie's settings folder (`$XDG_CONFIG_HOME/magpie` or `~/.config/magpie`), else `127.0.0.1:3425`; then one `GET /v1/models` (no tokens spent). `src/space/runtimes/magpie.ts`.
+- **Adding it**: `space setup` offers it when the gateway answers and no runtime uses it yet: pick a model for every tier and one for basic, and it writes the runtime to `runtimes.yaml` (the Claude Code form when `claude` is installed, else the API form and `MAGPIE_API_KEY` in `.env`). Settings, Models (the CLIs on this machine) shows the same row: whether magpie answers, its models, and **Add as a runtime** (`POST /api/model/runtimes {"kind":"magpie","models":{...}}`). Either way, a restart loads it.
+- **What answered**: magpie names the model that served a call in `X-Magpie-Model`; an API call's [trace](model.md#trace) keeps it as `served`, so a group or magpie's own failover is visible in the ledger. A refused call's `Retry-After` is appended to the error (`(retry after 30s)`) and sets how long the cell rests.
 - **Cost**: priced like any API call when the model it names has a list price here, else left without one; magpie's own Usage page has its figures.
-- **Not done here**: pointing the Claude Code or Codex CLI runtimes at magpie (an `ANTHROPIC_BASE_URL` or provider setting injected per runtime). Each CLI's own sign-in is used, as before.
+- **Not done here**: the Codex CLI through magpie (its provider settings), and `served` for calls made through Claude Code (the CLI does not pass the gateway's headers on).
 
 ## Code
 
-`src/space/runtimes/`: `types.ts` (operations, specs, adapter interface), `process.ts` (spawn, collect, kill the process group on timeout), `claude-code.ts`, `live.ts` (live chat's process pool and events), `claude-live.ts`, `codex-live.ts` and `deepseek-live.ts` (live chat over each runtime's protocol), `deepseek-harness.ts`, `anthropic-api.ts` (also [magpie](#magpie)), `transcripts.ts` (past sessions from each runtime's records), `config.ts` (`runtimes.yaml` and the environment fallback), `registry.ts` (by name, `runtime/model` resolution), `testing.ts`, `testing-dsh.ts`, `testing-dsh-acp.ts` and `testing-live.ts` (the fake CLIs tests use).
+`src/space/runtimes/`: `types.ts` (operations, specs, adapter interface), `process.ts` (spawn, collect, kill the process group on timeout), `claude-code.ts`, `live.ts` (live chat's process pool and events), `claude-live.ts`, `codex-live.ts` and `deepseek-live.ts` (live chat over each runtime's protocol), `deepseek-harness.ts`, `anthropic-api.ts`, `magpie.ts` (finding [magpie](#magpie) and a Claude Code process's environment for it), `transcripts.ts` (past sessions from each runtime's records), `config.ts` (`runtimes.yaml` and the environment fallback), `registry.ts` (by name, `runtime/model` resolution), `testing.ts`, `testing-dsh.ts`, `testing-dsh-acp.ts` and `testing-live.ts` (the fake CLIs tests use).
 
 ## Follow-ups
 
@@ -147,7 +168,7 @@ fallback:
 - Chat events normalised across runtimes, with ai-space keeping its own transcripts; today the browser reads Claude Code's `stream-json` (other runtimes' adapters translate into it) and past sessions are read from each runtime's own files.
 - DeepSeek off-peak pricing in the ledger (the price table takes the peak rate), and a price table in `runtimes.yaml` for models the adapters do not know.
 - Routing by tag, budgets. Every agent already offers a runtime and model-tier picker, and an app's override sets its agents' default. Fallback lists between machines and runtimes are built ([model-machines.md](model-machines.md#fallback)).
-- An environment per CLI runtime (`env:`), so a Claude Code or Codex runtime can answer through [magpie](#magpie) too.
+- The Codex CLI through [magpie](#magpie), as Claude Code does now.
 
 ## Capability tiers
 

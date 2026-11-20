@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { ClaudeLive, claudeLiveFingerprint } from "./claude-live.ts";
 import { LivePool } from "./live.ts";
+import { magpieClaudeEnv } from "./magpie.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
-import { assertCompletionMode, CHAT_EFFORTS, FILE_NAME_PATTERN, PERMISSION_MODES, SSH_HOST_PATTERN, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type Usage } from "./types.ts";
+import { assertCompletionMode, CHAT_EFFORTS, FILE_NAME_PATTERN, PERMISSION_MODES, SSH_HOST_PATTERN, type AgentRun, type Backend, type ChatCallbacks, type ChatTurn, type ClaudeCodeSpec, type CompleteFile, type CompleteInput, type CompleteOutcome, type OnDelta, type RuntimeAdapter, type TierModels, type Usage } from "./types.ts";
 
 /**
  * Claude Code as a runtime. Three operations, one CLI:
@@ -46,9 +47,13 @@ import { assertCompletionMode, CHAT_EFFORTS, FILE_NAME_PATTERN, PERMISSION_MODES
 
 export { PERMISSION_MODES };
 
-export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
+export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels }): RuntimeAdapter {
   const sshHost = spec.sshHost?.trim() ?? "";
   if (sshHost && !SSH_HOST_PATTERN.test(sshHost)) throw new Error(`runtime ${spec.name}: ssh host is not a host name: ${sshHost}`);
+  if (sshHost && spec.magpie) throw new Error(`runtime ${spec.name}: a runtime that answers through magpie runs on this machine, not over ssh`);
+  // Through magpie (docs/runtimes.md#magpie): every process this runtime starts gets the gateway in its environment.
+  const envOf = (base: Record<string, string | undefined> | undefined) => (spec.magpie ? magpieClaudeEnv(spec.magpie, spec.models, base ?? process.env) : base);
+  const withEnv = (turn: ChatTurn): ChatTurn => (spec.magpie ? { ...turn, env: envOf(turn.env) } : turn);
   const bin = spec.bin.length ? spec.bin : ["claude"];
   const backend: Backend = sshHost ? `ssh:${sshHost}` : "local";
   const live = new LivePool({ fingerprint: claudeLiveFingerprint });
@@ -76,12 +81,12 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
         const stdin = remote.spool ? remote.spool.archive : input.prompt;
         return runCompletion(["ssh", "-o", "BatchMode=yes", sshHost, `bash -lc '${remote.command}'`], input, stdin, backend, signal, onDelta);
       }
-      return runCompletion(cliArgs(bin, input, stream), input, input.prompt + filesNote(input.files ?? [], (f) => f.path), "local", signal, onDelta);
+      return runCompletion(cliArgs(bin, input, stream), input, input.prompt + filesNote(input.files ?? [], (f) => f.path), "local", signal, onDelta, envOf(process.env));
     },
 
     async runAgent(run) {
       const cmd = [...bin, ...agentArgs(run)];
-      const r = await spawnCollect(cmd, { cwd: run.cwd, env: run.env, stdin: run.prompt, signal: run.signal });
+      const r = await spawnCollect(cmd, { cwd: run.cwd, env: envOf(run.env), stdin: run.prompt, signal: run.signal });
       const output = joinOutput(r.stdout, r.stderr);
       if (r.timedOut || r.aborted) return { ok: false, error: "timed out", output, timedOut: true, backend: "local" };
       if (r.code !== 0) return { ok: false, error: reportedError(r.stdout.trim()) ?? `exit code ${r.code}`, output, timedOut: false, backend: "local" };
@@ -91,7 +96,8 @@ export function createClaudeCode(spec: ClaudeCodeSpec): RuntimeAdapter {
       return { ok: true, output, text: parsed.text, usage: parsed.usage, costUsd: parsed.costUsd, timedOut: false, backend: "local" };
     },
 
-    chat(turn, cb) {
+    chat(original, cb) {
+      const turn = withEnv(original);
       if (turn.interactive) return live.run(turn, cb, () => new ClaudeLive(bin, turn, spec.chatArgs));
       return chatStream([...bin, ...chatArgs(turn, spec.chatArgs)], turn, cb);
     },
@@ -243,7 +249,7 @@ export function readStreamLine(line: string): { delta: string } | { result: stri
   return undefined;
 }
 
-async function runCompletion(cmd: string[], input: CompleteInput, stdin: string | Uint8Array, backend: Backend, signal?: AbortSignal, onDelta?: OnDelta): Promise<CompleteOutcome> {
+async function runCompletion(cmd: string[], input: CompleteInput, stdin: string | Uint8Array, backend: Backend, signal?: AbortSignal, onDelta?: OnDelta, env: Record<string, string | undefined> = process.env): Promise<CompleteOutcome> {
   let result: string | undefined;
   const onLine = onDelta
     ? (line: string) => {
@@ -255,7 +261,7 @@ async function runCompletion(cmd: string[], input: CompleteInput, stdin: string 
     : undefined;
   let r: Awaited<ReturnType<typeof spawnCollect>>;
   try {
-    r = await spawnCollect(cmd, { env: cliEnv(input), stdin, signal, timeoutMs: input.timeoutMs, onLine });
+    r = await spawnCollect(cmd, { env: cliEnv(input, env), stdin, signal, timeoutMs: input.timeoutMs, onLine });
   } catch (e) {
     return { ok: false, error: `could not start ${cmd[0]}: ${(e as Error).message}`, backend };
   }
