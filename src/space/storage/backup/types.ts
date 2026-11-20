@@ -24,8 +24,8 @@ export type BackupSpec = {
   exclude: string[];
 };
 
-/** At most 7 snapshots per app. Every snapshot is a full copy, so the count multiplies an app's size in the bucket. */
-export const DEFAULT_KEEP: Keep = { daily: 3, weekly: 2, monthly: 2 };
+/** One daily, one weekly, one monthly: at most 3 snapshots per app. Every snapshot is a full copy, so the count multiplies an app's size in the bucket. */
+export const DEFAULT_KEEP: Keep = { daily: 1, weekly: 1, monthly: 1 };
 export const DEFAULT_INCLUDE: BackupSource[] = ["databases", "files"];
 /** Never copied by the `files` source: the blob store (its own source), caches, the generated env, SQLite side files. */
 export const DEFAULT_EXCLUDES = ["blobs/", "notify/", ".snapshot/", "space.env", "*.db-wal", "*.db-shm", "*.db-journal", "*.log", "*.lock", ".DS_Store"];

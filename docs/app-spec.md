@@ -430,7 +430,7 @@ backup: false                      # opt out; or a mapping:
 backup:
   schedule: "0 3 * * *"            # default: the workspace hour with a per-app minute
   timeout: 90m                     # default: SPACE_BACKUP_TIMEOUT_MIN (30m)
-  keep: { daily: 3, weekly: 2, monthly: 2 }
+  keep: { daily: 1, weekly: 1, monthly: 1 }
   include: [databases, files]      # add blobs for a filesystem blob store
   exclude: ["cache/"]              # on top of the built-in excludes
 ```
