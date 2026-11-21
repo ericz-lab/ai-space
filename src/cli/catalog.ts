@@ -21,7 +21,7 @@ type EntryView = {
   state: string;
 };
 type CatalogView = { sources: { url: string; ok: boolean; stale?: boolean; error?: string; apps: number }[]; apps: EntryView[]; git: boolean };
-type Result = { app: string; version: string; action: string; from: string; dir?: string; ref?: string | null };
+type Result = { app: string; version: string; action: string; from: string; dir?: string; ref?: string | null; source?: { dir: string; action: string; saved?: string } };
 
 export const catalogVerb = async (ctx: Ctx, argv: string[]): Promise<number> => {
   const p = parseArgs(argv, { refresh: { kind: "bool" } });
@@ -60,19 +60,24 @@ export function namesPackageFile(arg: string, cwd: string): boolean {
 }
 
 const catalogChange = (upgrade: boolean) => async (ctx: Ctx, argv: string[]): Promise<number> => {
-  const p = parseArgs(argv, { source: { kind: "bool" }, package: { kind: "bool" }, ref: { kind: "value" }, "with-source": { kind: "bool" }, trust: { kind: "bool" } });
+  const p = parseArgs(argv, { source: { kind: "bool" }, package: { kind: "bool" }, ref: { kind: "value" }, "with-source": { kind: "bool" }, "no-source": { kind: "bool" }, "replace-source": { kind: "bool" }, trust: { kind: "bool" } });
   const name = need(p.positional, 0, "NAME");
   noMore(p.positional, 1);
   if (p.flags.source && p.flags.package) throw new Error("--source and --package exclude each other");
   const from = p.flags.source ? "source" : p.flags.package ? "package" : undefined;
-  const body = { ...(from ? { from } : {}), ...(p.flags["with-source"] ? { withSource: true } : {}), ...(p.flags.ref ? { ref: String(p.flags.ref), from: "source" } : {}), ...(p.flags.trust ? { trust: true } : {}) };
+  const body = { ...(from ? { from } : {}), ...(p.flags["with-source"] ? { withSource: true } : {}), ...(p.flags["no-source"] ? { withSource: false } : {}), ...(p.flags["replace-source"] ? { replaceSource: true } : {}), ...(p.flags.ref ? { ref: String(p.flags.ref), from: "source" } : {}), ...(p.flags.trust ? { trust: true } : {}) };
   const c = await ctx.client();
   const path = `/api/app-catalog/${encodeURIComponent(name)}/${upgrade ? "upgrade" : "install"}`;
   let res: { result: Result };
   try {
     res = await c.post<{ result: Result }>(path, body, { timeoutMs: 15 * 60_000 });
   } catch (e) {
-    const b = (e as ApiError).body as { code?: string; publisher?: { name: string; keyId: string; url?: string } } | undefined;
+    const b = (e as ApiError).body as { code?: string; error?: string; publisher?: { name: string; keyId: string; url?: string } } | undefined;
+    if (e instanceof ApiError && b?.code === "source-modified") {
+      ctx.io.err(b.error ?? e.message);
+      if (from !== "source" && !p.flags.ref) ctx.io.err(`keep yours: space app build ${name}    take the release: space app upgrade ${name} --replace-source`);
+      return 1;
+    }
     if (!(e instanceof ApiError) || b?.code !== "trust-required" || !b.publisher) throw e;
     const who = b.publisher;
     ctx.io.err(`${name} is published by ${who.name}${who.url ? ` (${who.url})` : ""}, key ${who.keyId}; this Space does not trust them yet.`);
@@ -87,7 +92,9 @@ const catalogChange = (upgrade: boolean) => async (ctx: Ctx, argv: string[]): Pr
   if (ctx.flags.json) return ctx.print.data(res), 0;
   const r = res.result;
   ctx.print.line(`${r.app} ${r.version} ${r.action} from ${r.from}${r.ref ? ` (${r.ref})` : ""}`);
-  if (r.dir) ctx.print.line(`its source is ${r.dir}; change it there, then: space app build ${r.app}`);
+  if (r.source?.action === "kept") ctx.print.line(`${r.source.dir} is yours and was left as it is; the release's source was not copied`);
+  else if (r.source?.action === "replaced") ctx.print.line(`your changed source was moved to ${r.source.saved}`);
+  if (r.dir && r.source?.action !== "kept") ctx.print.line(`its source is ${r.dir}; change it there, then: space app build ${r.app}`);
   return 0;
 };
 

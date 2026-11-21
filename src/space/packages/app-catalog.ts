@@ -12,6 +12,7 @@ import { integer, releaseVersion } from "./contract.ts";
 import { inspectPackage, readPackageFile, sha256 } from "./pack.ts";
 import { keyIdOf } from "./publishers.ts";
 import { buildEnv } from "./release.ts";
+import { placeSource, sourceCondition, type SourceOutcome } from "./source-copy.ts";
 
 /**
  * The app catalog (docs/app-catalog.md): apps someone published for any Space, listed in a
@@ -191,13 +192,19 @@ export type CatalogEntryView = {
   catalog: string;
   publisher: { id: string; name: string; keyId: string; url?: string; trusted: boolean };
   latest: { version: string; tag: string; sourcePackage: boolean; requires: CatalogRelease["requires"] } | null;
-  installed: { version: string; origin: "package" | "source" | "local"; ref: string | null; dev: boolean } | null;
+  /** `source`: the copy in app-src the Space made, untouched or changed by the owner; `own` for a directory that is not such a copy (a checkout, an app made here); absent without one. */
+  installed: { version: string; origin: "package" | "source" | "local"; ref: string | null; dev: boolean; source?: "pristine" | "modified" | "own" } | null;
   state: AppState;
 };
 export type CatalogView = { sources: SourceState[]; apps: CatalogEntryView[]; trusted: { keyId: string; name: string }[]; git: boolean };
 
-export type InstallRequest = { from?: "package" | "source"; withSource?: boolean; ref?: string; trust?: boolean };
-export type InstallResult = { app: string; version: string; action: "installed" | "upgraded"; from: "package" | "source"; dir?: string; ref?: string | null };
+/**
+ * `withSource`: a package install takes the release's source package when it has one, and puts an
+ * editable copy in `app-src/<app>`; `false` takes the bundle alone. `replaceSource`: on an upgrade,
+ * a copy the owner changed is moved aside and the new release's takes its place.
+ */
+export type InstallRequest = { from?: "package" | "source"; withSource?: boolean; replaceSource?: boolean; ref?: string; trust?: boolean };
+export type InstallResult = { app: string; version: string; action: "installed" | "upgraded"; from: "package" | "source"; dir?: string; ref?: string | null; source?: SourceOutcome };
 
 export type AppCatalogDeps = {
   db: Database;
@@ -353,12 +360,14 @@ export class AppCatalog {
         const p = l.catalog!.publishers.find((x) => x.id === a.publisher)!;
         const op = this.d.studio.store.installed(a.name);
         const origin = op ? this.origin(a.name) : undefined;
+        const condition = op ? await sourceCondition(sourceDir(this.ws, a.name)).catch(() => undefined) : undefined;
         const installed = op ? {
           version: op.version,
           origin: origin && origin.version === op.version ? origin.origin : "local" as const,
           ref: origin?.ref ?? null,
           // A source install that follows a branch rather than the release tag is a development version.
           dev: origin?.origin === "source" && origin.version === op.version && !!origin.ref && origin.ref !== a.latest?.tag,
+          ...(condition && condition.state !== "absent" ? { source: condition.state === "unmanaged" ? "own" as const : condition.state } : {}),
         } : null;
         const state: AppState = installed ? (a.latest && newerVersion(a.latest.version, installed.version) ? "update" : "installed")
           : await this.legacy(a.name) ? "legacy" : a.latest ? "available" : "unreleased";
@@ -414,7 +423,15 @@ export class AppCatalog {
     const installed = this.d.studio.store.installed(entry.name);
     if (installed && !newerVersion(release.version, installed.version)) throw new CatalogError(`${entry.name} ${installed.version} is installed; the catalog's release is ${release.version}`, 409, "current");
     this.requireTrust(publisher, req, entry.name);
-    const variant = req.withSource && release.sourcePackage ? "source" : "bundle";
+    const variant = req.withSource !== false && release.sourcePackage ? "source" : "bundle";
+    const editable = sourceDir(this.ws, entry.name);
+    if (installed && variant === "source" && !req.replaceSource) {
+      // Taking the release would run code without the owner's changes: their call, not ours.
+      const condition = await sourceCondition(editable);
+      if (condition.state === "modified") {
+        throw new CatalogError(`you changed the source of ${entry.name} (app-src/${entry.name}: ${condition.changed.slice(0, 5).join(", ")}${condition.changed.length > 5 ? ", …" : ""}); keep running yours, or take the release and have your copy moved aside`, 409, "source-modified", { changed: condition.changed, dir: editable });
+      }
+    }
     const chosen = variant === "source" ? release.sourcePackage! : release.package;
     const url = new URL(chosen.url, catalog);
     if (!allowedLocation(url, catalog.startsWith("file:"))) throw new CatalogError(`the package location ${url.href} is not allowed`, 409, "location");
@@ -442,7 +459,13 @@ export class AppCatalog {
     }
     this.setOrigin({ app: entry.name, origin: "package", catalog, ref: release.tag, variant, version: release.version });
     s.log?.(`${installed ? "upgraded" : "installed"} ${entry.name} ${release.version} from the catalog`);
-    return { app: entry.name, version: release.version, action: installed ? "upgraded" : "installed", from: "package", ref: release.tag };
+    let source: SourceOutcome | undefined;
+    if (variant === "source") {
+      // The app is installed and running; a copy that cannot be made is reported, not a failed install.
+      try { source = await placeSource(await s.installer.load(entry.name), editable, entry.name, release.version, { replace: req.replaceSource === true }); }
+      catch (e) { s.log?.(`${entry.name}: could not put its source in ${editable}: ${(e as Error).message}`); }
+    }
+    return { app: entry.name, version: release.version, action: installed ? "upgraded" : "installed", from: "package", ref: release.tag, ...(source ? { source, dir: source.dir } : {}) };
   }
 
   private async runGit(args: string[], cwd: string): Promise<string> {
@@ -479,6 +502,10 @@ export class AppCatalog {
     if (req.ref !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/.test(req.ref)) throw new CatalogError("ref must be a branch or tag name", 400);
     if (!allowedLocation(new URL(entry.repo), catalog.startsWith("file:"))) throw new CatalogError(`the repository ${entry.repo} is not allowed`, 409, "location");
     const dir = sourceDir(this.ws, entry.name);
+    // A copy the Space made from a package is not a checkout: an untouched one gives way to the clone, a changed one is the owner's.
+    const copy = await sourceCondition(dir);
+    if (copy.state === "modified") throw new CatalogError(`app-src/${entry.name} holds the source you changed, not a checkout of the repository; build it with: space app build ${entry.name}, or move it away to install from the repository`, 409, "source-modified", { changed: copy.changed, dir });
+    if (copy.state === "pristine") await rm(dir, { recursive: true, force: true });
     const present = await lstat(dir).then(() => true, () => false);
     let ref: string | null = req.ref ?? entry.latest?.tag ?? null;
     if (!present) {
@@ -529,7 +556,7 @@ const json = (data: unknown, status = 200) => Response.json(data, { status, head
 
 /**
  *   GET    /api/app-catalog[?refresh=1]                  owner: catalogs, apps with their state, confirmed publishers
- *   POST   /api/app-catalog/:app/install  {from?, withSource?, ref?, trust?}   owner
+ *   POST   /api/app-catalog/:app/install  {from?, withSource?, replaceSource?, ref?, trust?}   owner
  *   POST   /api/app-catalog/:app/upgrade  {from?, ref?, trust?}               owner
  *   DELETE /api/app-catalog/publishers/:keyId             owner: stop trusting a confirmed publisher
  */
@@ -548,7 +575,7 @@ export function createAppCatalogRoutes(catalog: AppCatalog, token: string) {
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     if (b.from !== undefined && b.from !== "package" && b.from !== "source") throw new CatalogError("from is package or source");
     if (b.ref !== undefined && typeof b.ref !== "string") throw new CatalogError("ref must be a string");
-    return { ...(b.from ? { from: b.from as "package" | "source" } : {}), withSource: b.withSource === true, ...(typeof b.ref === "string" ? { ref: b.ref } : {}), trust: b.trust === true };
+    return { ...(b.from ? { from: b.from as "package" | "source" } : {}), ...(typeof b.withSource === "boolean" ? { withSource: b.withSource } : {}), ...(b.replaceSource === true ? { replaceSource: true } : {}), ...(typeof b.ref === "string" ? { ref: b.ref } : {}), trust: b.trust === true };
   };
   return {
     "/api/app-catalog": {

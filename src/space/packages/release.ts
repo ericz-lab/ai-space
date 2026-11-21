@@ -14,7 +14,7 @@ import { packApplication } from "./pack.ts";
 
 export const RELEASE_MANIFEST = "space.release.yaml";
 /** Never copied or packed: version control and its CI, installed dependencies, local secrets and data, earlier builds. */
-export const SOURCE_EXCLUDE = new Set([".git", ".github", "node_modules", ".env", ".DS_Store", "data", "dist-packages"]);
+export const SOURCE_EXCLUDE = new Set([".git", ".github", "node_modules", ".env", ".DS_Store", "data", "dist-packages", ".space-source.json"]);
 const COMMAND_TIMEOUT_MS = 10 * 60_000;
 const LOG_LIMIT = 64 * 1024;
 
