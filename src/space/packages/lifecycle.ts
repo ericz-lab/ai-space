@@ -11,6 +11,8 @@ type Change = { id: string; app: string; kind: "upgrade" | "rollback" | "uninsta
 type Row = { id: string; app: string; kind: Change["kind"]; old_id: string; new_id: string | null; state: Change["state"]; error: string | null; created_at: number; updated_at: number };
 type Hooks = {
   suspend: (app: string) => Promise<() => void>; activate: (app: string) => Promise<void>; remove: (app: string) => Promise<void>;
+  /** After an uninstall committed: drop what the Space kept about running the app. A version switch never calls it. */
+  forget?: (app: string) => Promise<void>;
   /** Proves the newly activated version starts; a throw restores the previous code. */
   verify?: (app: string) => Promise<void>;
 };
@@ -126,6 +128,7 @@ export class PackageLifecycle {
       await this.hooks.remove(change.app);
       this.store.switchInstalled(change.app, change.newId ?? undefined);
       if (change.newId) { await this.hooks.activate(change.app); await this.hooks.verify?.(change.app); }
+      else await this.hooks.forget?.(change.app);
       return this.finish(change.id, "done");
     } catch (e) {
       // A failed activation can already have written app data. Only program files are restored.

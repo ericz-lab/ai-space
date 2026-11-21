@@ -177,8 +177,14 @@ test("the owner's mode replaces the manifest's, is kept in the settings store an
   expect(saved.has("demo")).toBe(false);
   now += 1000; await second.sweep(); expect(stops).toBe(2);
   expect(second.status("demo")).toMatchObject({ state: "idle", mode: "on-demand" });
+  // A version switch takes the app out and puts it back: the choice stays. An uninstall forgets it.
   await second.configure("demo", "background");
   await second.remove("demo");
+  expect(saved.get("demo")).toEqual({ mode: "background" });
+  await second.register(app());
+  expect(second.status("demo")).toMatchObject({ state: "running", mode: "background" });
+  await second.remove("demo");
+  await second.forget("demo");
   expect(saved.has("demo")).toBe(false);
 });
 

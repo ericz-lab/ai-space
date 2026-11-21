@@ -230,7 +230,10 @@ export class PackageRuntime {
     if (!s) return;
     if (s.leases) throw new Error(`${app} is still in use`);
     await this.stop(s); this.apps.delete(app);
-    // An uninstalled app leaves no choice behind: installed again, it starts as its manifest says.
+  }
+
+  /** An uninstalled app leaves no choice behind: installed again, it starts as its manifest says. */
+  async forget(app: string): Promise<void> {
     this.opts.settings?.set(app, {});
   }
 

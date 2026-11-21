@@ -18,9 +18,9 @@ async function fixture() {
   const db = new Database(":memory:"); cleanup.push(() => db.close());
   const store = new PackageStore(db), installer = new PackageInstaller(ws, store);
   const runtime = new PackageRuntime({ logDir: ws.logs, envFor: async () => ({}) }); cleanup.push(() => runtime.close(0));
-  let failVersion = "";
+  let failVersion = ""; const forgotten: string[] = [];
   const activate = async (app: string) => { const loaded = await installer.load(app); if (loaded.manifest.version === failVersion) throw new Error("activation rejected"); await runtime.register(loaded); };
-  const lifecycle = new PackageLifecycle(installer, { suspend: (app) => runtime.suspend(app), activate, remove: (app) => runtime.remove(app), verify: (app) => runtime.verify(app) });
+  const lifecycle = new PackageLifecycle(installer, { suspend: (app) => runtime.suspend(app), activate, remove: (app) => runtime.remove(app), verify: (app) => runtime.verify(app), forget: async (app) => { forgotten.push(app); } });
   const pack = async (version: string) => {
     const dir = join(root, "source");
     await Bun.write(join(dir, "space.yaml"), `spec: 2\nname: demo\nversion: ${version}\nrequires: {spaceApi: 1}\noffline: {features: [Read], online: []}\nlaunch: {kind: static, root: web}\n`);
@@ -31,7 +31,7 @@ async function fixture() {
   };
   const first = await installer.install(await pack("1.0.0"), { allowUnsigned: true }); await activate("demo");
   await Bun.write(join(ws.data, "demo/notes.txt"), "user data");
-  return { root, ws, db, store, installer, runtime, lifecycle, first, pack, fail: (v: string) => { failVersion = v; } };
+  return { root, ws, db, store, installer, runtime, lifecycle, first, pack, forgotten, fail: (v: string) => { failVersion = v; } };
 }
 
 test("upgrade, rollback and uninstall retain data and code; operation retries are idempotent", async () => {
@@ -43,7 +43,10 @@ test("upgrade, rollback and uninstall retain data and code; operation retries ar
   expect((await f.lifecycle.upgrade(bytes, { id, allowUnsigned: true })).id).toBe(id);
   expect((await f.lifecycle.rollback("demo", f.first.id)).state).toBe("done");
   expect((await f.installer.load("demo")).manifest.version).toBe("1.0.0");
+  // What the owner chose for running the app outlives version switches; only an uninstall drops it.
+  expect(f.forgotten).toEqual([]);
   const removed = await f.lifecycle.uninstall("demo");
+  expect(f.forgotten).toEqual(["demo"]);
   expect(removed.state).toBe("done"); expect(f.runtime.get("demo")).toBeUndefined();
   await expect(f.installer.load("demo")).rejects.toThrow(/no installed/);
   expect(await Bun.file(join(f.ws.data, "demo/notes.txt")).text()).toBe("user data");
