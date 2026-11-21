@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { installationKey } from "./contract.ts";
-import type { RuntimeSetting } from "./runtime.ts";
+import { RUNTIME_MODES, type RuntimeSetting } from "./runtime.ts";
 
 export type InstallOperation = {
   id: string;
@@ -50,7 +50,8 @@ export class PackageStore {
       id TEXT PRIMARY KEY, app TEXT NOT NULL, kind TEXT NOT NULL, old_id TEXT NOT NULL, new_id TEXT,
       state TEXT NOT NULL, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     ); CREATE UNIQUE INDEX IF NOT EXISTS package_pending_change ON package_changes(app) WHERE state='pending';`);
-    db.exec("CREATE TABLE IF NOT EXISTS package_runtime (app TEXT PRIMARY KEY, mode TEXT, stopped INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)");
+    db.exec("CREATE TABLE IF NOT EXISTS package_runtime (app TEXT PRIMARY KEY, mode TEXT, stopped INTEGER NOT NULL DEFAULT 0, port INTEGER, updated_at INTEGER NOT NULL)");
+    if (!(db.query("SELECT 1 FROM pragma_table_info('package_runtime') WHERE name='port'").get())) db.exec("ALTER TABLE package_runtime ADD COLUMN port INTEGER");
     db.query("INSERT OR IGNORE INTO space_identity(singleton,id) VALUES(1,?)").run(crypto.randomUUID());
     this.spaceId = (db.query("SELECT id FROM space_identity WHERE singleton=1").get() as { id: string }).id;
     installationKey(this.spaceId, "validation");
@@ -125,15 +126,16 @@ export class PackageStore {
 
   /** What the owner chose for an app's process on this Space (see `RuntimeSetting`); empty when nothing. */
   runtimeSetting(app: string): RuntimeSetting {
-    const row = this.db.query("SELECT mode,stopped FROM package_runtime WHERE app=?").get(app) as { mode: string | null; stopped: number } | null;
-    return { ...(row?.mode === "on-demand" || row?.mode === "background" ? { mode: row.mode } : {}), ...(row?.stopped ? { stopped: true } : {}) };
+    const row = this.db.query("SELECT mode,stopped,port FROM package_runtime WHERE app=?").get(app) as { mode: string | null; stopped: number; port: number | null } | null;
+    const mode = RUNTIME_MODES.find((m) => m === row?.mode);
+    return { ...(mode ? { mode } : {}), ...(row?.stopped ? { stopped: true } : {}), ...(row?.port ? { port: row.port } : {}) };
   }
 
   /** Keeps the choice; an empty one removes the row. */
   setRuntimeSetting(app: string, setting: RuntimeSetting): void {
-    if (!setting.mode && !setting.stopped) { this.db.query("DELETE FROM package_runtime WHERE app=?").run(app); return; }
-    this.db.query("INSERT INTO package_runtime(app,mode,stopped,updated_at) VALUES(?,?,?,?) ON CONFLICT(app) DO UPDATE SET mode=excluded.mode,stopped=excluded.stopped,updated_at=excluded.updated_at")
-      .run(app, setting.mode ?? null, setting.stopped ? 1 : 0, Date.now());
+    if (!setting.mode && !setting.stopped && !setting.port) { this.db.query("DELETE FROM package_runtime WHERE app=?").run(app); return; }
+    this.db.query("INSERT INTO package_runtime(app,mode,stopped,port,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(app) DO UPDATE SET mode=excluded.mode,stopped=excluded.stopped,port=excluded.port,updated_at=excluded.updated_at")
+      .run(app, setting.mode ?? null, setting.stopped ? 1 : 0, setting.port ?? null, Date.now());
   }
 
   /** Drops the finished operations beyond `KEEP_FINISHED_OPERATIONS` (see there for what stays). */
