@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { mkdir, open, rename, rmdir } from "node:fs/promises";
 
 /**
@@ -47,4 +48,22 @@ export async function syncDirectory(path: string): Promise<void> {
  */
 export function executableAgrees(mode: number, executable: boolean): boolean {
   return WINDOWS || !!(mode & 0o111) === executable;
+}
+
+/**
+ * Makes the working directory the real one when the process was started in a link to it. A
+ * release on Windows runs from `<prefix>\current`, a junction to `releases\<version>`: Bun's HTML
+ * bundle resolves the page's own files to the real directory but addresses them relative to the
+ * working directory, and with the two apart every script and stylesheet of the panel gets an
+ * address that answers 404. POSIX keeps the directory it was given, as before.
+ */
+export function settleWorkingDirectory(platform: string = process.platform, cwd: { get(): string; set(dir: string): void } = { get: () => process.cwd(), set: (dir) => process.chdir(dir) }, real: (path: string) => string = realpathSync): void {
+  if (platform !== "win32") return;
+  try {
+    const here = cwd.get();
+    const there = real(here);
+    if (there !== here) cwd.set(there);
+  } catch {
+    /* a directory that cannot be resolved is left as it is */
+  }
 }

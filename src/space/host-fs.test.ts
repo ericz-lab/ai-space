@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { executableAgrees, renameToAbsent, syncDirectory } from "./host-fs.ts";
+import { executableAgrees, renameToAbsent, settleWorkingDirectory, syncDirectory } from "./host-fs.ts";
 
 const dirs: string[] = [];
 const tmp = async () => {
@@ -45,4 +45,21 @@ test("the executable flag is checked against the mode only where the host keeps 
   expect(executableAgrees(0o644, false)).toBe(true);
   expect(executableAgrees(0o644, true)).toBe(windows);
   expect(executableAgrees(0o755, false)).toBe(windows);
+});
+
+test("a working directory reached through a link becomes the real one on Windows, and is left alone elsewhere", () => {
+  const link = String.raw`C:\p\current`;
+  const release = String.raw`C:\p\releases\1.0.0`;
+  const moved: string[] = [];
+  const cwd = (dir: string) => ({ get: () => dir, set: (to: string) => void moved.push(to) });
+  const real = (p: string) => (p === link ? release : p);
+  settleWorkingDirectory("win32", cwd(link), real);
+  expect(moved).toEqual([release]);
+  // Already the real one; another system; a directory that cannot be resolved: nothing moves.
+  settleWorkingDirectory("win32", cwd(release), real);
+  settleWorkingDirectory("linux", cwd(link), real);
+  settleWorkingDirectory("win32", cwd(link), () => {
+    throw new Error("ENOENT");
+  });
+  expect(moved).toEqual([release]);
 });
