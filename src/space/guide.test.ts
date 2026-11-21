@@ -86,9 +86,9 @@ describe("guide", () => {
     expect(await Bun.file(join(mine, "CLAUDE.md")).text()).toBe("my own rules\n");
 
     const linked = await home();
-    if (await hostLinking.file("/elsewhere/CLAUDE.md", join(linked, "CLAUDE.md"))) {
+    if (await hostLinking.file("elsewhere.md", join(linked, "CLAUDE.md"))) {
       await syncGuide(linked);
-      expect(await readlink(join(linked, "CLAUDE.md"))).toBe("/elsewhere/CLAUDE.md");
+      expect(await readlink(join(linked, "CLAUDE.md"))).toBe("elsewhere.md");
     }
   });
 
