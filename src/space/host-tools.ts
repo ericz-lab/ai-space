@@ -133,4 +133,17 @@ export function hostShell(name: "sh" | "bash" | "/bin/sh", env: Env = process.en
   throw new Error(`no POSIX shell on this machine: install Git for Windows, or set SPACE_SHELL to a ${exe}`);
 }
 
+/**
+ * The shell a person works in on Windows, for the web terminal: PowerShell 7 when it is installed,
+ * else Windows PowerShell, which every Windows has, else the command interpreter.
+ */
+export function windowsShell(env: Env, which: (name: string) => string | null = (n) => Bun.which(n, pathOf(env, "win32") === undefined ? {} : { PATH: pathOf(env, "win32")! }), exists: (path: string) => boolean = existsSync): string[] {
+  const pwsh = which("pwsh");
+  if (pwsh) return [pwsh, "-NoLogo"];
+  const system = win32.join(env.SystemRoot?.trim() || "C:\\Windows", "System32");
+  const powershell = win32.join(system, "WindowsPowerShell", "v1.0", "powershell.exe");
+  if (exists(powershell)) return [powershell, "-NoLogo"];
+  return [env.ComSpec?.trim() || win32.join(system, "cmd.exe")];
+}
+
 export type ShellProbe = { which(name: string, PATH: string | undefined): string | null; exists(path: string): boolean };

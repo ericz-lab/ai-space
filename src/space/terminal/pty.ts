@@ -1,4 +1,5 @@
 import { accessSync, constants } from "node:fs";
+import { release } from "node:os";
 import { join, resolve } from "node:path";
 import { whichUsable } from "../host-tools.ts";
 
@@ -8,11 +9,13 @@ import { whichUsable } from "../host-tools.ts";
  * wrapper around `forkpty`: `pty_helper.py` on the standard `pty` module,
  * which every Linux server has, or the same program in C (`pty_helper.c`,
  * shipped built as `runtime/space-pty` by the Local edition, for a Mac with
- * no working python3). Output arrives as bytes; input and resizes go in; a
- * kill hangs the process up and, if it stays, kills it.
+ * no working python3). Windows has no `forkpty`: there the wrapper is
+ * `conpty_helper.ts`, the same protocol over a pseudoconsole (ConPTY), run by
+ * this Bun as a process of its own. Output arrives as bytes; input and resizes
+ * go in; a kill hangs the process up and, if it stays, kills it.
  */
 
-export type PtyBackend = "helper" | "bun" | "python";
+export type PtyBackend = "helper" | "bun" | "python" | "conpty";
 
 export type PtyOptions = {
   cmd: string[];
@@ -44,10 +47,13 @@ const KILL_GRACE_MS = 2_000;
  * `Bun.Terminal` (checked on 1.3.14 through 1.4.2) attaches the PTY as plain
  * stdio without a controlling terminal: bash warns "no job control", Ctrl-C
  * reaches nothing. It stays as the last fallback.
- * `SPACE_TERMINAL_PTY=helper|bun|python` forces one.
+ * `SPACE_TERMINAL_PTY=helper|bun|python` forces one. On Windows the one
+ * backend is `conpty`, from the first build that has pseudoconsoles.
  */
-export function detectPtyBackend(env: Record<string, string | undefined> = process.env): PtyBackend | undefined {
+export function detectPtyBackend(env: Record<string, string | undefined> = process.env, host: { platform: string; release: string } = { platform: process.platform, release: release() }): PtyBackend | undefined {
   const forced = env.SPACE_TERMINAL_PTY?.trim().toLowerCase();
+  if (host.platform === "win32") return (forced === undefined || forced === "" || forced === "conpty") && hasConPty(host.release) ? "conpty" : undefined;
+  if (forced === "conpty") return undefined;
   const hasHelper = Boolean(ptyHelper(env));
   const hasBun = typeof (Bun as unknown as { Terminal?: unknown }).Terminal === "function";
   const hasPython = Boolean(whichUsable("python3"));
@@ -58,6 +64,12 @@ export function detectPtyBackend(env: Record<string, string | undefined> = proce
   if (hasPython) return "python";
   if (hasBun) return "bun";
   return undefined;
+}
+
+/** Pseudoconsoles came with Windows 10 version 1809, build 17763. */
+export function hasConPty(osRelease: string): boolean {
+  const [major, , build] = osRelease.split(".").map((n) => Number(n));
+  return (major ?? 0) > 10 || ((major ?? 0) === 10 && (build ?? 0) >= 17763);
 }
 
 /** Where a release ships the built helper: `<release>/runtime/space-pty`. */
@@ -76,6 +88,7 @@ export function ptyHelper(env: Record<string, string | undefined> = process.env)
 
 export function spawnPty(backend: PtyBackend, opts: PtyOptions): PtyHandle {
   if (backend === "bun") return spawnBun(opts);
+  if (backend === "conpty") return spawnFramed([process.execPath, CONPTY_HELPER, ...opts.cmd], opts);
   if (backend === "helper") return spawnFramed([ptyHelper() ?? BUNDLED_PTY_HELPER, ...opts.cmd], opts);
   return spawnFramed([whichUsable("python3") ?? "python3", HELPER, ...opts.cmd], opts);
 }
@@ -127,6 +140,7 @@ function spawnBun(opts: PtyOptions): PtyHandle {
 }
 
 const HELPER = join(import.meta.dir, "pty_helper.py");
+const CONPTY_HELPER = join(import.meta.dir, "conpty_helper.ts");
 
 /** A forkpty helper speaking the frame protocol of `pty_helper.py`, started as `argv`. */
 function spawnFramed(argv: string[], opts: PtyOptions): PtyHandle {
