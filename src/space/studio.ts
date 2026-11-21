@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { appendFile, cp, mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { isOperator } from "./auth.ts";
 import { SPACE_ROOT } from "./config.ts";
@@ -6,7 +6,7 @@ import { whichUsable } from "./host-tools.ts";
 import type { PackageInstaller } from "./packages/install.ts";
 import type { PackageLifecycle } from "./packages/lifecycle.ts";
 import { parsePackageManifest } from "./packages/manifest.ts";
-import { packApplication } from "./packages/pack.ts";
+import { buildRelease, readSourceManifest, ReleaseError, SOURCE_EXCLUDE } from "./packages/release.ts";
 import type { PackageStore } from "./packages/store.ts";
 import type { Workspace } from "./workspace.ts";
 
@@ -27,7 +27,7 @@ export const PACKAGE_TEMPLATE = join(SPACE_ROOT, "skills", "space-app", "package
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const PLACEHOLDERS = { name: "my-app", title: "My App", description: "One sentence saying what the app does." };
 /** Never packed: version control, dependencies installed in place, local secrets, earlier builds. */
-const EXCLUDE = new Set([".git", "node_modules", ".env", ".DS_Store", "data", "dist-packages"]);
+const EXCLUDE = SOURCE_EXCLUDE;
 
 export class StudioError extends Error {
   constructor(
@@ -109,39 +109,45 @@ export function nextPatch(version: string): string {
 export type BuildResult = { app: string; version: string; action: "installed" | "upgraded"; package: string };
 
 /**
- * Pack the source and install it, or upgrade the installed app. The version in `space.yaml` is
- * raised when it is not above the installed one, and written back, so the source says what runs.
+ * Pack the source and install it, or upgrade the installed app. The version in the declaration
+ * (`space.release.yaml` when the checkout has one, else `space.yaml`) is raised when it is not above
+ * the installed one, and written back, so the source says what runs. A declaration with a `build:`
+ * section is built in a scratch copy first (packages/release.ts); its log goes to
+ * `logs/<app>/build.log`, and a failed build installs nothing and keeps what runs.
  */
 export async function buildSource(d: StudioDeps, app: string): Promise<BuildResult> {
   if (!NAME_RE.test(app)) throw new StudioError("bad app name");
   const dir = sourceDir(d.ws, app);
-  const manifestPath = join(dir, "space.yaml");
-  if (!(await exists(manifestPath))) throw new StudioError(`no source at ${dir}`, 404);
-  let yaml = await Bun.file(manifestPath).text();
-  let manifest;
+  if (!(await exists(join(dir, "space.yaml"))) && !(await exists(join(dir, "space.release.yaml")))) throw new StudioError(`no source at ${dir}`, 404);
+  let source;
   try {
-    manifest = parsePackageManifest(yaml);
+    source = await readSourceManifest(dir);
   } catch (e) {
     throw new StudioError(`space.yaml: ${(e as Error).message}`);
   }
+  let { manifest } = source;
   if (manifest.app !== app) throw new StudioError(`space.yaml names the app ${manifest.app}, not ${app}`);
   const installed = d.store.installed(app);
   if (installed && !newer(manifest.version, installed.version)) {
     const version = nextPatch(installed.version);
-    yaml = yaml.replace(/^version:\s*\S+/m, `version: ${version}`);
-    await Bun.write(manifestPath, yaml);
+    const yaml = source.yaml.replace(/^version:\s*\S+/m, `version: ${version}`);
+    await Bun.write(source.file, yaml);
     manifest = parsePackageManifest(yaml);
   }
 
-  const include = (await readdir(dir)).filter((n) => !EXCLUDE.has(n) && !n.endsWith(".spaceapp")).sort();
   const outDir = join(d.ws.run, "studio");
   await mkdir(outDir, { recursive: true });
-  const output = join(outDir, `${app}-${manifest.version}.spaceapp`);
-  await rm(output, { force: true });
+  const logFile = join(d.ws.logs, app, "build.log");
+  await mkdir(join(d.ws.logs, app), { recursive: true });
+  await appendFile(logFile, `\n== ${new Date().toISOString()} build ${app} ${manifest.version}\n`);
+  let output: string;
   try {
-    await packApplication({ dir, include, output, target: { os: "any", arch: "any" }, sourceIncluded: true });
+    const release = await buildRelease({ dir, outDir, variants: ["source"], workRoot: outDir, fileName: (_v, name, version) => `${name}-${version}.spaceapp`, log: (line) => d.log?.(line) });
+    await appendFile(logFile, release.log);
+    output = release.packages[0]!.path;
   } catch (e) {
-    throw new StudioError(`pack: ${(e as Error).message}`);
+    if (e instanceof ReleaseError) await appendFile(logFile, e.log);
+    throw new StudioError(`${manifest.build ? "build" : "pack"}: ${(e as Error).message} (log: ${logFile})`);
   }
   const bytes = new Uint8Array(await Bun.file(output).arrayBuffer());
   d.log?.(`${installed ? "upgrading" : "installing"} ${app} ${manifest.version}`);
@@ -174,9 +180,9 @@ export async function listSources(d: StudioDeps): Promise<StudioApp[]> {
     const dir = join(root, app);
     let manifest;
     try {
-      manifest = parsePackageManifest(await Bun.file(join(dir, "space.yaml")).text());
+      manifest = (await readSourceManifest(dir)).manifest;
     } catch {
-      continue; // a spec-1 checkout or not an app: not the studio's
+      continue; // a spec-1 checkout without a release declaration, or not an app: not the studio's
     }
     const installed = d.store.installed(app);
     const built = installed ? await stat(join(d.ws.run, "studio", `${app}-${installed.version}.spaceapp`)).then((s) => s.mtimeMs, () => 0) : 0;

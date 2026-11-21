@@ -1,7 +1,11 @@
-import { resolve } from "node:path";
+import { createHash, generateKeyPairSync } from "node:crypto";
+import { open } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { assertTarget, choice } from "../space/packages/contract.ts";
 import { assertPackageCompatibility } from "../space/packages/manifest.ts";
 import { inspectPackage, packApplication, readPackageFile } from "../space/packages/pack.ts";
+import { buildRelease, ReleaseError } from "../space/packages/release.ts";
 import { need, noMore, parseArgs } from "./args.ts";
 import type { Ctx } from "./types.ts";
 import { confirm } from "./common.ts";
@@ -87,3 +91,43 @@ export const packageChangeVerb = (kind: "rollback" | "remove") => async (ctx: Ct
   ctx.print.data(await (await ctx.client()).json(kind === "rollback" ? "POST" : "DELETE", `/api/packages/apps/${encodeURIComponent(app)}${kind === "rollback" ? "/rollback" : ""}`, operationId ? { operationId } : undefined, { headers: { "idempotency-key": id }, timeoutMs: 120_000 }));
   return 0;
 };
+
+/** `space app release DIR`: build a checkout into packages for publishing (docs/app-catalog.md#publishing-an-app). Runs here, without the Space. */
+export async function releaseVerb(ctx: Ctx, argv: string[]): Promise<number> {
+  const { flags, positional } = parseArgs(argv, { "output-dir": { kind: "value" }, "sign-key": { kind: "value" }, variant: { kind: "value" } });
+  const dir = resolve(ctx.io.cwd, positional[0] ?? ".");
+  noMore(positional, 1);
+  const variant = choice(String(flags.variant ?? "both"), "--variant", ["bundle", "source", "both"]);
+  const result = await buildRelease({
+    dir, outDir: resolve(ctx.io.cwd, String(flags["output-dir"] ?? join(tmpdir(), "space-packages"))),
+    variants: variant === "both" ? ["bundle", "source"] : [variant],
+    ...(flags["sign-key"] ? { signingKey: await Bun.file(resolve(ctx.io.cwd, String(flags["sign-key"]))).text() } : {}),
+    log: (line) => ctx.io.err(line),
+  }).catch((e) => {
+    if (e instanceof ReleaseError && e.log) ctx.io.err(e.log.trimEnd());
+    throw e;
+  });
+  if (ctx.flags.json) ctx.print.data({ app: result.app, version: result.version, packages: result.packages });
+  else for (const p of result.packages) ctx.print.line(`${p.path}  sha256 ${p.sha256}  ${p.bytes} bytes${p.sourceIncluded ? "  (source included)" : ""}`);
+  return 0;
+}
+
+/**
+ * `space app keygen --out FILE`: a publisher's Ed25519 signing key. The private key goes to FILE
+ * (mode 600, never overwritten), its public key to FILE.pub; the key ID printed is what catalogs and
+ * `inspect-package` show. Keep the private key out of every repository.
+ */
+export async function keygenVerb(ctx: Ctx, argv: string[]): Promise<number> {
+  const { flags, positional } = parseArgs(argv, { out: { kind: "value" } });
+  noMore(positional, 0);
+  const out = resolve(ctx.io.cwd, need(flags.out ? [String(flags.out)] : [], 0, "--out FILE"));
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const pub = publicKey.export({ type: "spki", format: "pem" }).toString();
+  const keyId = createHash("sha256").update(publicKey.export({ type: "spki", format: "der" })).digest("hex");
+  const handle = await open(out, "wx", 0o600);
+  try { await handle.writeFile(privateKey.export({ type: "pkcs8", format: "pem" }).toString()); } finally { await handle.close(); }
+  await Bun.write(`${out}.pub`, pub);
+  if (ctx.flags.json) ctx.print.data({ privateKey: out, publicKey: `${out}.pub`, keyId });
+  else ctx.print.kv([["private key", out], ["public key", `${out}.pub`], ["key id", keyId]]);
+  return 0;
+}

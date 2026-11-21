@@ -15,12 +15,22 @@ export type PackageManifest = Omit<Manifest, "spec" | "service" | "url" | "deplo
   requires: { spaceApi: number; bun?: string };
   offline: { features: string[]; online: string[] };
   launch?: AppLaunch;
+  /** How a source checkout becomes this package on a developer's machine; never run at install. */
+  build?: SourceBuild;
 };
+
+/**
+ * `build:`: the commands `space app build` and `space app release` run in a scratch copy of the
+ * source before packing it (docs/app-catalog.md#building-from-source). Installing a package never
+ * runs them. `include` is what the package carries; `source` is added when a release includes its
+ * source (default: every top-level entry of the checkout).
+ */
+export type SourceBuild = { install: string[]; run: string[]; include: string[]; source?: string[] };
 
 const COMMON = ["name", "title", "description", "icon", "status", "repo", "i18n", "agents", "widgets", "skills", "tasks", "storage", "notify", "backup", "events", "provides", "model", "checks"];
 
 export function parsePackageManifest(yaml: string): PackageManifest {
-  const doc = mapping(Bun.YAML.parse(yaml), "manifest", ["spec", "version", "requires", "offline", "launch", ...COMMON]);
+  const doc = mapping(Bun.YAML.parse(yaml), "manifest", ["spec", "version", "requires", "offline", "launch", "build", ...COMMON]);
   if (doc.spec !== 2) throw new Error("package manifest must use spec: 2; legacy checkouts must be explicitly migrated");
   const name = text(doc.name, "name", 64);
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(name) || name === "." || name === "..") throw new Error("invalid package app name");
@@ -31,6 +41,7 @@ export function parsePackageManifest(yaml: string): PackageManifest {
   const offline = { features: labels(o.features, "offline.features"), online: labels(o.online, "offline.online") };
   if (offline.features.some((f) => offline.online.includes(f))) throw new Error("a feature cannot be both offline and online");
   const launch = doc.launch === undefined ? undefined : parseLaunch(doc.launch);
+  const build = doc.build === undefined ? undefined : parseBuild(doc.build);
   if (launch?.kind === "process" && launch.runtime === "bun" && !requires.bun) throw new Error("a bun launch requires requires.bun");
   if (launch?.kind !== "process" && doc.checks !== undefined) throw new Error("checks require a process launch");
 
@@ -58,7 +69,7 @@ export function parsePackageManifest(yaml: string): PackageManifest {
     if (task.schedule.kind === "cron" && !task.schedule.tz) throw new Error(`task ${task.name} requires an explicit timezone`);
     if (task.schedule.kind === "at" && !/(Z|[+-]\d{2}:\d{2})$/i.test(task.schedule.at)) throw new Error(`task ${task.name} requires an offset-bearing at timestamp`);
   }
-  return { ...rest, spec: 2, version, requires, offline, ...(launch ? { launch } : {}) };
+  return { ...rest, spec: 2, version, requires, offline, ...(launch ? { launch } : {}), ...(build ? { build } : {}) };
 }
 
 export function assertPackageCompatibility(manifest: PackageManifest, bunVersion?: string): void {
@@ -90,6 +101,22 @@ function parseLaunch(raw: unknown): AppLaunch {
   if (l.args !== undefined && (!Array.isArray(l.args) || l.args.length > 100)) throw new Error("launch.args must be a list of at most 100 arguments");
   const args = ((l.args ?? []) as unknown[]).map((arg, i) => text(arg, `launch.args[${i}]`, 4096));
   return { kind, runtime, entry, args, mode, idleTimeoutMs, health };
+}
+
+function parseBuild(raw: unknown): SourceBuild {
+  const b = mapping(raw, "build", ["install", "run", "include", "source"]);
+  const commands = (value: unknown, where: string): string[] => {
+    const list = value === undefined ? [] : typeof value === "string" ? [value] : value;
+    if (!Array.isArray(list) || list.length > 10) throw new Error(`${where} must be a command or a list of at most 10 commands`);
+    return list.map((c, i) => text(c, `${where}[${i}]`, 1000));
+  };
+  const paths = (value: unknown, where: string): string[] => {
+    if (!Array.isArray(value) || !value.length || value.length > 100) throw new Error(`${where} must list 1 to 100 files or directories`);
+    const list = value.map((p, i) => packagePath(p, `${where}[${i}]`));
+    if (list.includes("space.yaml")) throw new Error(`${where} must not name space.yaml: the manifest is always included`);
+    return list;
+  };
+  return { install: commands(b.install, "build.install"), run: commands(b.run, "build.run"), include: paths(b.include, "build.include"), ...(b.source === undefined ? {} : { source: paths(b.source, "build.source") }) };
 }
 
 function labels(raw: unknown, where: string): string[] {

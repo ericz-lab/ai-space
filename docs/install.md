@@ -381,6 +381,11 @@ What the hub token grants is everything the panel grants: chats with write permi
 
 ## 10. First app and checks
 
+The quickest first app comes from the app catalog: the panel's Add app → App catalog, or
+`space app install <name>` (the signed package; `--source` clones and builds it in
+`app-src/<name>` instead; [app-catalog.md](app-catalog.md)). An app of your own, or one that is
+deployed by `git push`, goes in by hand as below.
+
 Put an app in place and walk through every service once. The `space-app` skill (`skills/space-app/SKILL.md`) does this in a chat; by hand:
 
 ```bash

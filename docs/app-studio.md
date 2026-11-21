@@ -23,14 +23,18 @@ GitHub and without a coding tool outside the product.
 3. **Change it later.** Ask the assistant again, or edit the files any other way (the web terminal,
    an editor on the machine), then `space app build NAME`.
 
-`build` packs the directory as it is (everything at the top level except `.git`, `node_modules`,
-`.env`, `data`, earlier `.spaceapp` files) into `<workspace>/run/studio/NAME-<version>.spaceapp` with
+`build` reads `space.release.yaml` when the source has one, else `space.yaml`. Without a `build:`
+section it packs the directory as it is (everything at the top level except `.git`, `.github`,
+`node_modules`, `.env`, `data`, earlier `.spaceapp` files) into `<workspace>/run/studio/NAME-<version>.spaceapp` with
 the source included, and installs it through the package installer, or upgrades the installed app
 through the package lifecycle ([app-packages.md](app-packages.md#upgrades-rollback-and-removal)):
 the previous version is kept for a rollback, and an upgrade whose app does not start and answer its
 health path puts the previous one back. When `space.yaml`'s version is not above the installed one,
 the build raises the patch version and writes it back, so the source says what runs. One build runs
-at a time.
+at a time. With a `build:` section (an app installed from the app catalog's source, for one) the
+source is built in a scratch copy first and the package carries what the section includes
+([app-catalog.md](app-catalog.md#building-from-source)); the build's output goes to
+`logs/<app>/build.log`.
 
 ## The template
 
@@ -57,8 +61,10 @@ package gateway, so the Space needs `SPACE_PACKAGE_PORT`; the Local edition sets
 
 ## Limits
 
-- No dependencies from npm: a package carries no `node_modules` and installs nothing
-  ([app-packages.md](app-packages.md#build-and-inspect-a-package)). Bun's built-ins go a long way.
+- The template has no dependencies from npm: a package carries no `node_modules` and installs
+  nothing ([app-packages.md](app-packages.md#build-and-inspect-a-package)). An app that needs them
+  adds a `build:` section that installs them and bundles the result
+  ([app-catalog.md](app-catalog.md#building-from-source)).
 - Making the app needs an agent runtime the Space can use (Claude Code, Codex, ...). Without one,
   the template is installed and the source can still be changed by hand.
 - Apps from `space app new` (spec 1, a Git repository and a deploy channel) are the other way to

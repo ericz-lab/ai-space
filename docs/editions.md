@@ -221,6 +221,7 @@ side.
 | 7 | Release pipeline, phase 3: Local built and signed in the same run (built, [release.md](release.md#local-edition)) | Local edition as a download |
 | 8 | Creating, changing and installing apps from inside ai-space (built, [app-studio.md](app-studio.md)) | Apps without GitHub and a coding tool outside the product |
 | 9 | Updates inside the installed app, coordinated with running work and database migrations (built; signed release acceptance pending, [local.md](local.md#updates)) | Keeping Local current without a manual reinstall |
+| 10 | The app catalog: published apps as signed packages, or built from their source, from the panel or one command (built in the Space; the first signed releases pending, [app-catalog.md](app-catalog.md)) | Apps for any Space without Git, and the default apps as packages |
 
 Step 1 and steps 2–3 do not depend on each other. Steps 5 and 6 come after 1 and 3, because a Local
 install has to stand without accounts and needs a credential for its own client.

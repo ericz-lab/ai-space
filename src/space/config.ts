@@ -7,6 +7,7 @@ import type { Workspace } from "./workspace.ts";
 import { type TerminalConfig, loadTerminalConfig } from "./terminal/index.ts";
 import { type RouterConfig, loadRouterConfig } from "./router/index.ts";
 import { type Edition, parseEdition } from "./identity.ts";
+import { catalogSources } from "./packages/catalog-sources.ts";
 
 /**
  * ai-space configuration: the workspace `.env` (and the process environment)
@@ -38,6 +39,8 @@ export type Config = {
   apiToken: string;
   /** Host-owned Ed25519 public key files for package publishers; never supplied by uploaders. */
   packageTrustKeys: string[];
+  /** Where the app catalog is read from (SPACE_APP_CATALOG, docs/app-catalog.md): https URLs and local files, in order. */
+  appCatalogs: string[];
   packagePort?: number;
   packageBaseUrl?: string;
   maxConcurrency: number;
@@ -152,6 +155,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
       .map((p) => resolve(p.replace(/^~(?=$|\/)/, process.env.HOME ?? "~"))),
     apiToken: env.SPACE_API_TOKEN?.trim() ?? "",
     packageTrustKeys: (env.SPACE_PACKAGE_TRUST_KEYS ?? "").split(",").map((s) => s.trim()).filter(Boolean).map((p) => resolve(ws.home, p)),
+    appCatalogs: catalogSources(env.SPACE_APP_CATALOG, ws.home),
     packagePort,
     packageBaseUrl: env.SPACE_PACKAGE_BASE_URL?.trim() || undefined,
     maxConcurrency: Math.max(1, Number(env.SPACE_MAX_CONCURRENCY ?? 2) || 2),

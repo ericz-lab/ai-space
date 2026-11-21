@@ -23,6 +23,9 @@ Use `--target linux/arm64` (or another supported pair) for native artifacts and 
 
 To sign, pass `--sign-key /path/to/ed25519-private.pem`; keep keys outside the staging tree. Inspect with `--trusted-key /path/to/publisher-public.pem`. Signature status is `unsigned`, `untrusted` (no matching independently supplied key), or `verified`; a wrong signature for a supplied trusted key fails inspection. Successful inspection alone is not an installation trust decision. The current reader/packer imposes a 128 MiB compressed and decompressed working limit, below the format ceiling, and rejects oversized input. Inspection verifies the entire payload without extracting it.
 
+A source checkout with a `build:` section is built and packed in one step by `space app release`,
+and apps published that way install from the app catalog: [app-catalog.md](app-catalog.md).
+
 ## One application declaration
 
 `app/space.yaml` owns application identity, version, launch behavior and the existing tasks, agents, skills, storage, events and other components. The outer index does not repeat application identity or capabilities. Source inclusion is a distribution property, not an access policy.

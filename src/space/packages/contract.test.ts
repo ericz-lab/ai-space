@@ -79,6 +79,16 @@ describe("application contract", () => {
     ]) expect(() => parsePackageManifest(app(patch))).toThrow();
   });
 
+  test("a source build is declared, not run, and its paths stay inside the package", () => {
+    const m = parsePackageManifest(app({ build: { install: "bun install --frozen-lockfile", run: ["bun run build"], include: ["dist", "icon.png"], source: ["src", "package.json"] } }));
+    expect(m.build).toEqual({ install: ["bun install --frozen-lockfile"], run: ["bun run build"], include: ["dist", "icon.png"], source: ["src", "package.json"] });
+    expect(parsePackageManifest(app({ build: { include: ["web"] } })).build).toEqual({ install: [], run: [], include: ["web"] });
+    expect(parsePackageManifest(app()).build).toBeUndefined();
+    for (const build of [{ run: "bun run build" }, { include: [] }, { include: ["../outside"] }, { include: ["space.yaml"] }, { include: ["dist"], hook: "x" }, { include: ["dist"], run: ["two\nlines"] }]) {
+      expect(() => parsePackageManifest(app({ build }))).toThrow();
+    }
+  });
+
   test("task-only apps do not need a service and calendar schedules require explicit intent", () => {
     const tasks = [{ name: "refresh", schedule: "0 9 * * *", timezone: "Asia/Seoul", run: { command: "bun jobs/refresh.ts" } }];
     const m = parsePackageManifest(app({ launch: undefined, tasks }));

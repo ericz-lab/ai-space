@@ -20,7 +20,7 @@ One executable, `space`, on `PATH` on every machine that runs ai-space, and on t
 space status                          the machine at a glance
 space auth    status | init | reset-password | revoke-sessions | device-add | devices | device-revoke
 space app     ls | show | sync | deploy | service | start | stop | restart | supervise | hide | unhide | uninstall | env | new
-              create | build | pack | inspect-package | install | upgrade | packages | open | rollback | remove-package
+              create | build | catalog | release | keygen | pack | inspect-package | install | upgrade | packages | open | rollback | remove-package
 space task    ls | show | run | runs | enable | disable | create | rm
 space logs    <app> [-n 100] [-f]     an app's log, or `space logs space` for ai-space itself
 space model   usage | calls | status | run | import
@@ -69,6 +69,8 @@ Rules:
 | `space local status [--claude P] [--codex P] [--dsh P]` / `install [--migrate] [--device <name>] [--default-model <runtime/tier>] [--wait\|--now] [--claude P] [--codex P] [--dsh P]` / `start` / `stop` / `restart` / `remove-service` | the Local edition's installation on this Mac, what its app runs; `--claude`/`--codex`/`--dsh` name agent CLIs over the search, a first install needs `--default-model`, and an upgrade while the Space is busy is refused unless `--wait` (until idle) or `--now` (drain it) ([local.md](local.md)) | disk and launchd, works without ai-space |
 | `space status` | health, app services with their health, tasks failing or overdue, last backup per app, model calls in flight, peers up or down; one screen | `/healthz`, `/api/services`, `/api/tasks`, `/api/backups`, `/api/model/status`, `/api/peers` |
 | `space app ls [--panel]` | every app: title, status, service health, url, hidden (`--panel`: only what the panel shows) | `GET /api/apps?all=1` |
+| `space app catalog [--refresh]` / `space app install NAME [--source [--ref REF]] [--with-source] [--trust]` / `space app upgrade NAME [--source\|--package] [--trust]` | apps of the app catalog: what is listed, installed and updatable; install the signed package or build from source in `app-src/NAME` ([app-catalog.md](app-catalog.md)) | `/api/app-catalog/*` |
+| `space app release [DIR] [--output-dir D] [--variant bundle\|source\|both] [--sign-key FILE]` / `space app keygen --out FILE` | build a checkout by its `build:` section into the packages to publish; make a publisher's signing key ([app-catalog.md](app-catalog.md#publishing-an-app)) | disk, works without ai-space |
 | `space app pack DIR --output FILE [--include PATH,...] [--manifest FILE] [--target OS/ARCH] [--source-included] [--sign-key FILE]` | build a package from explicitly selected prepared files, without network or build hooks ([app-packages.md](app-packages.md)) | disk, works without ai-space |
 | `space app inspect-package FILE [--trusted-key FILE] [--check-host]` | verify every file and inspect signature/compatibility without executing code | disk, works without ai-space |
 | `space app show APP` | the manifest as synced, storage, tasks, agents, widgets, last backup | `GET /api/apps/:app`, `.../storage`, `.../backups` |
