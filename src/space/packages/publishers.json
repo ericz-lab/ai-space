@@ -1,1 +1,7 @@
-[]
+[
+  {
+    "name": "ericz-lab",
+    "keyId": "a303acd260c502a942b6028e8e1a44ca33ce067aae5f26e5bb18641dc2b016fc",
+    "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6R0AKvUI2opD/LjaMe732VZlUj6jQ2Q/ZKnF/W8mtnE=\n-----END PUBLIC KEY-----\n"
+  }
+]
