@@ -73,10 +73,17 @@ function Install-Command {
   $shim = "@echo off`r`nrem Written by the ai-space installer. Runs the release that `current` points at.`r`n`"%~dp0..\current\runtime\bun.exe`" `"%~dp0..\current\src\index.ts`" %*`r`n"
   [System.IO.File]::WriteAllText((Join-Path $bin 'space.cmd'), $shim, (New-Object System.Text.ASCIIEncoding))
   if ($env:AI_SPACE_NO_PATH) { return }
-  $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-  $parts = @(); if ($userPath) { $parts = $userPath.Split(';') | Where-Object { $_ } }
+  # The user's own Path, read and written in the registry as it stands (its kind, its %VAR%
+  # references), and only when the directory is missing; src/space/service.ts takes it off the same way.
+  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+  $raw = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+  $kind = if ($raw) { $key.GetValueKind('Path') } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+  $parts = @($raw.Split(';'))
   if ($parts -notcontains $bin) {
-    [Environment]::SetEnvironmentVariable('Path', (($parts + $bin) -join ';'), 'User')
+    $key.SetValue('Path', ((@($parts | Where-Object { $_ }) + $bin) -join ';'), $kind)
+    # A registry write alone tells no running program; setting and clearing a variable does.
+    [Environment]::SetEnvironmentVariable('AI_SPACE_PATH_CHANGED', '1', 'User')
+    [Environment]::SetEnvironmentVariable('AI_SPACE_PATH_CHANGED', $null, 'User')
     Write-Output "the space command is $bin\space.cmd; it is on your Path in terminals opened from now on"
   }
 }

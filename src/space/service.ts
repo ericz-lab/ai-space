@@ -455,6 +455,29 @@ async function exists(path: string): Promise<boolean> {
 
 // ---------------------------------------------------------------- uninstall
 
+/**
+ * PowerShell that adds a directory to the user's own Path or takes it off, the way
+ * release/install.ps1 does. The value is read and written in the registry as it stands, with its
+ * kind and its `%VAR%` references, and only when the directory is really to be added or removed:
+ * a Path that needs no change is not rewritten. The last two statements tell running programs
+ * that the environment changed, which a registry write alone does not.
+ */
+export function userPathScript(change: "add" | "remove", dir: string): string {
+  const quoted = `'${dir.replace(/'/g, "''")}'`;
+  return [
+    `$dir = ${quoted}`,
+    "$key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)",
+    "$raw = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')",
+    "$kind = if ($raw) { $key.GetValueKind('Path') } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }",
+    "$parts = @($raw.Split(';'))",
+    "$has = $parts -contains $dir",
+    change === "add"
+      ? "if (-not $has) { $key.SetValue('Path', ((@($parts | Where-Object { $_ }) + $dir) -join ';'), $kind) }"
+      : "if ($has) { $key.SetValue('Path', (@($parts | Where-Object { $_ -ne $dir }) -join ';'), $kind) }",
+    `if (${change === "add" ? "-not $has" : "$has"}) { [Environment]::SetEnvironmentVariable('AI_SPACE_PATH_CHANGED', '1', 'User'); [Environment]::SetEnvironmentVariable('AI_SPACE_PATH_CHANGED', $null, 'User') }`,
+  ].join("; ");
+}
+
 export type UninstallStep = { what: "app-service" | "service" | "link" | "program" | "workspace"; target: string; detail: string };
 
 export type UninstallPlan = { workspace: string; steps: UninstallStep[]; kept: string[] };
@@ -520,8 +543,7 @@ export async function runUninstall(d: ServiceDeps, plan: UninstallPlan): Promise
       await h.unregister?.();
       await h.manager.daemonReload().catch(() => {});
     } else if (s.what === "link" && d.platform === "win32") {
-      // The user's own Path, as the installer wrote it: every entry but the command's directory.
-      const script = `$b = '${s.target.replace(/'/g, "''")}'; $p = [Environment]::GetEnvironmentVariable('Path', 'User'); if ($p) { [Environment]::SetEnvironmentVariable('Path', (($p.Split(';') | Where-Object { $_ -and $_ -ne $b }) -join ';'), 'User') }`;
+      const script = userPathScript("remove", s.target);
       const r = await d.run([join(system32Of(d), "WindowsPowerShell", "v1.0", "powershell.exe"), "-NoProfile", "-Command", script]);
       if (r.code !== 0) d.log(`  ${r.stderr.trim() || "could not change the Path"}`);
     } else if (s.what === "link") {

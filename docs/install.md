@@ -418,11 +418,15 @@ Then check, in this order:
 6. Stop a task's target once so it fails three times, or post a test notification: the message arrives on the default channel.
 7. `git push <host> main` from the laptop redeploys and the unit comes back within seconds.
 
-## Windows, from a checkout
+## Windows
 
-The Server starts on Windows itself, without WSL, from a checkout. This is the first step toward a one-command install there; what is listed as missing below still is.
+The Server runs on Windows itself, without WSL. The short way installs the newest release, with no Bun and nothing asked ([release.md](release.md#one-command-install)):
 
-Needed: Bun (the version in `.bun-version` or newer), Git, and an agent CLI that is signed in (`claude`). In PowerShell:
+```powershell
+irm https://ai-space.me/install.ps1 | iex
+```
+
+From a checkout it needs Bun (the version in `.bun-version` or newer), Git, and an agent CLI that is signed in (`claude`). In PowerShell:
 
 ```powershell
 git clone https://github.com/ericz-lab/ai-space.git; cd ai-space
@@ -441,7 +445,7 @@ bun src/index.ts start
 
 - **The background service.** `bun src/index.ts service install` registers a task of the Task Scheduler that starts ai-space when you log on, in your own session, where your agent CLIs are signed in ([release.md](release.md#the-background-service)); `service status`, `stop`, `start`, `restart` and `remove` as elsewhere. Its output goes to `<workspace>\logs\space.log`. A stop ends the process at once: there is no drain on Windows.
 
-Not there yet on Windows: an app run on its own (`space app mode APP standalone`), the one-command installer and the web terminal.
+Not there yet on Windows: an app run on its own (`space app mode APP standalone`) and the web terminal.
 
 ## What is not covered yet
 

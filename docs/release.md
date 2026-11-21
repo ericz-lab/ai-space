@@ -102,6 +102,27 @@ opens it on a desktop; over SSH it prints the port forward instead.
 When no agent CLI is found (`claude`, `codex`, `dsh`) it says how to get one: ai-space works through
 one signed-in CLI, and the installer never installs one. Running it again upgrades.
 
+On Windows 10 and 11 the same thing is one PowerShell command, on Windows itself, without WSL:
+
+```powershell
+irm https://ai-space.me/install.ps1 | iex
+```
+
+`install.ps1` is `release/get.ps1` as the release carries it. It picks the release's
+`ai-space-server-<version>-windows-x64.tar.gz` (which also runs on Windows on Arm, emulated),
+checks it against `SHA256SUMS`, unpacks it with Windows' own `tar.exe` and runs the archive's
+`install.ps1` (`release/install.ps1`): the program under `%LOCALAPPDATA%\ai-space` as
+`releases\<version>` with a junction `current`, the workspace `%USERPROFILE%\.ai-space`, the `space`
+command (`%LOCALAPPDATA%\ai-space\bin\space.cmd`, added to the user's `Path`), and the background
+service, a Task Scheduler task started at logon ([below](#the-background-service)). It needs no
+elevation, Bun or account, waits for the health check, and puts the previous release back when the
+new one does not answer. The same variables apply, set as `$env:AI_SPACE_VERSION = "0.2.0"` and so
+on before the command; `AI_SPACE_NO_PATH=1` leaves the user's `Path` alone. `space upgrade` and
+`space uninstall` work as on the other systems; a program cannot delete its own running files on
+Windows, so `uninstall` hands the program directory to a command that removes it a few seconds
+after it ends. Git for Windows is not installed by it: Claude Code needs it, and ai-space runs the
+build commands of apps in its shell.
+
 On the first install the workspace is new, and `init` makes it usable as it is
 ([install.md](install.md#a-new-workspace)): no app is cloned with git (apps come from the app
 catalog on the panel's first-use card), the package gateway gets a port (`SPACE_PACKAGE_PORT`, 8702
