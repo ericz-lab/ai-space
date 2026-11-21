@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { lstat, mkdir, mkdtemp, readlink, rm, symlink } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { linkDirectory } from "./links.ts";
 import { appSkills, collectSkills, describeSkillLinks, linkSkills, listSkills, skillLinkDir } from "./skills.ts";
 
 async function skill(dir: string, name: string): Promise<string> {
@@ -38,9 +39,9 @@ async function links(dir: string): Promise<Record<string, string>> {
 describe("skills", () => {
   test("listSkills and appSkills only see directories with a SKILL.md", async () => {
     const f = await fixture();
-    expect((await listSkills(f.shared)).map((d) => d.split("/").pop())).toEqual(["notify", "space-app"]);
+    expect((await listSkills(f.shared)).map((d) => basename(d))).toEqual(["notify", "space-app"]);
     expect(await listSkills(join(f.root, "missing"))).toEqual([]);
-    expect((await appSkills(f.why)).map((d) => d.split("/").pop())).toEqual(["news-search", "notify"]);
+    expect((await appSkills(f.why)).map((d) => basename(d))).toEqual(["news-search", "notify"]);
     // skills/ wins over .claude/skills/ for the same name
     await skill(join(f.why, "skills"), "news-search");
     expect(await appSkills(f.why)).toEqual([join(f.why, "skills", "news-search"), join(f.why, ".claude", "skills", "notify")]);
@@ -83,7 +84,7 @@ describe("skills", () => {
     // An app leaves, a skill is deleted: their links go; the user's own entries stay.
     await rm(join(f.video, "skills", "find-video-clip"), { recursive: true });
     const mine = await skill(join(f.root, "mine"), "my-skill");
-    await symlink(mine, join(dir, "my-skill"));
+    await linkDirectory(mine, join(dir, "my-skill"));
     await mkdir(join(dir, "real-dir"));
     const third = await linkSkills(f.home, f.shared, [f.video]);
     expect(third.removed.sort()).toEqual(["find-video-clip", "news-search", "whymove-notify"]);

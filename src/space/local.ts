@@ -1,14 +1,14 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { cp, mkdir, readdir, readlink, rename, rm, stat, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { Database } from "bun:sqlite";
 import { AuthService } from "./auth/service.ts";
 import { AuthStore } from "./auth/store.ts";
 import { readOperatorToken } from "./auth/operator-token.ts";
 import { inspectPackage, readPackageFile } from "./packages/pack.ts";
 import { SPACE_ROOT } from "./config.ts";
-import { whichUsable, withUserToolDirs } from "./host-tools.ts";
+import { pathOf, whichUsable, withPath, withUserToolDirs } from "./host-tools.ts";
 import { workspaceLocked } from "./instance.ts";
 import { Launchctl } from "./services/launchd.ts";
 import type { Runner, UnitState } from "./services/manager.ts";
@@ -185,7 +185,7 @@ export function isHarnessAppCli(path: string): boolean {
  * CLI lives off PATH.
  */
 export async function findRuntimes(env: Record<string, string | undefined> = process.env, home = homedir(), chosen: Partial<Runtimes> = {}): Promise<Runtimes> {
-  const PATH = withUserToolDirs(env.PATH ?? "/usr/bin:/bin", home);
+  const PATH = withUserToolDirs(pathOf(env) ?? "/usr/bin:/bin", home);
   const candidatesFor = (name: AgentName): string[] => {
     const c = chosen[name];
     if (c === null) return [];
@@ -203,7 +203,7 @@ export async function findRuntimes(env: Record<string, string | undefined> = pro
       if (!executableFile(path)) continue;
       try {
         const timeoutMs = name === "dsh" ? 5000 : 3000;
-        const result = await spawnRuntime([path, "--version"], { env: { ...env, HOME: home, PATH }, timeoutMs });
+        const result = await spawnRuntime([path, "--version"], { env: withPath({ ...env, HOME: home }, PATH), timeoutMs });
         const version = result.stdout.trim();
         if (result.code !== 0 || result.timedOut) continue;
         const matches = name === "claude" ? /^\d+\.\d+\.\d+[^\n]*\(Claude Code\)$/i.test(version)
@@ -212,7 +212,7 @@ export async function findRuntimes(env: Record<string, string | undefined> = pro
         if (!matches) continue;
         // The app bundle's path already identifies the harness; another `dsh` must name it in help.
         if (name === "dsh" && !isHarnessAppCli(path)) {
-          const help = await spawnRuntime([path, "--help"], { env: { ...env, HOME: home, PATH }, timeoutMs });
+          const help = await spawnRuntime([path, "--help"], { env: withPath({ ...env, HOME: home }, PATH), timeoutMs });
           if (help.code !== 0 || help.timedOut || !/DeepSeek Harness/i.test(help.stdout + help.stderr)) continue;
         }
         return path;
@@ -227,7 +227,7 @@ export async function findRuntimes(env: Record<string, string | undefined> = pro
 }
 
 function executableFile(path: string): boolean {
-  if (!path.startsWith("/")) return false;
+  if (!isAbsolute(path)) return false;
   try {
     accessSync(path, constants.X_OK);
     return statSync(path).isFile();

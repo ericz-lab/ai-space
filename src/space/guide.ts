@@ -1,6 +1,7 @@
-import { lstat, symlink, unlink } from "node:fs/promises";
+import { lstat, unlink } from "node:fs/promises";
 import { hostname, userInfo } from "node:os";
 import { join } from "node:path";
+import { type Linking, hostLinking } from "./links.ts";
 
 /**
  * The workspace guide for a coding agent someone starts by hand in the
@@ -15,7 +16,9 @@ import { join } from "node:path";
  *                     filled in, plus a "Local notes" section holding
  *                     AGENTS.local.md; rewritten on boot, `init` and every apps
  *                     sync whenever the rendering differs from the file
- *   CLAUDE.md         a symlink to AGENTS.md, made when missing
+ *   CLAUDE.md         a symlink to AGENTS.md, made when missing; where Windows
+ *                     refuses the link (`links.ts`), a copy rewritten with the
+ *                     guide for as long as nobody else has changed it
  *
  * One generated file means every tool sees the template and the operator's
  * notes together, with no import syntax (which only Claude Code has, and which
@@ -149,7 +152,7 @@ export type GuideSync = { created: string[]; updated: string[] };
  * only the old `@AGENTS.md` import is replaced by the link; any other file or
  * link of that name is the operator's and stays).
  */
-export async function syncGuide(home: string, machine: Machine = localMachine(home)): Promise<GuideSync> {
+export async function syncGuide(home: string, machine: Machine = localMachine(home), linking: Linking = hostLinking): Promise<GuideSync> {
   const r: GuideSync = { created: [], updated: [] };
   const localPath = join(home, LOCAL_FILE);
   const localFile = Bun.file(localPath);
@@ -183,8 +186,12 @@ export async function syncGuide(home: string, machine: Machine = localMachine(ho
     st = undefined;
   }
   if (!st) {
-    await symlink(GUIDE_FILE, claudePath);
+    if (!(await linking.file(GUIDE_FILE, claudePath))) await Bun.write(claudePath, want);
     r.created.push(claudePath);
+  } else if (linking.copies && st.isFile() && had !== undefined && had !== want && (await Bun.file(claudePath).text()) === had) {
+    // The copy this host keeps in place of the link: it still holds the guide as it was. Like a
+    // link it follows the guide silently; the guide is what `updated` reports.
+    await Bun.write(claudePath, want);
   }
   return r;
 }

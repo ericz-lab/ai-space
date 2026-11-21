@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { whichUsable, withUserToolDirs } from "../host-tools.ts";
+import { pathOf, whichUsable, withUserToolDirs } from "../host-tools.ts";
 import { MODEL_TIERS, type ModelTier, type TierModels } from "./types.ts";
 
 /**
@@ -105,7 +105,7 @@ export const MAGPIE_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/;
 export async function findMagpie(deps: MagpieDeps = {}): Promise<MagpieInfo> {
   const env = deps.env ?? process.env;
   const home = deps.home ?? homedir();
-  const which = deps.which ?? ((name: string) => whichUsable(name, { PATH: withUserToolDirs(env.PATH ?? "/usr/bin:/bin", home) }) ?? appBinary());
+  const which = deps.which ?? ((name: string) => whichUsable(name, { PATH: withUserToolDirs(pathOf(env) ?? "/usr/bin:/bin", home) }) ?? appBinary());
   const bin = which("magpie");
   const where: ReturnType<typeof magpieAddress> = deps.url ? { url: deps.url.replace(/\/+$/, ""), from: "env" } : magpieAddress({ ...deps, env, home });
   const base: MagpieInfo = { ...(bin ? { bin } : {}), url: where.url, from: where.from, ...(where.version ? { version: where.version } : {}), running: false, models: [] };

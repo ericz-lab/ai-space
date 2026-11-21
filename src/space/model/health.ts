@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { whichUsable, withUserToolDirs } from "../host-tools.ts";
+import { pathOf, whichUsable, withUserToolDirs } from "../host-tools.ts";
 import { dshAppCandidates, isHarnessAppCli } from "../local.ts";
 import { findMagpie } from "../runtimes/magpie.ts";
 import { spawnCollect } from "../runtimes/process.ts";
@@ -291,7 +291,7 @@ function defaultBin(kind: RuntimeSpec["kind"]): string {
 /** A CLI by name on the service's PATH and the user's tool directories; the harness also in its desktop app. */
 export function findCli(name: string, env: Record<string, string | undefined>, home: string): string | undefined {
   if (isAbsolute(name)) return existsSync(name) ? name : undefined;
-  const found = whichUsable(name, { PATH: withUserToolDirs(env.PATH ?? "/usr/bin:/bin", home) });
+  const found = whichUsable(name, { PATH: withUserToolDirs(pathOf(env) ?? "/usr/bin:/bin", home) });
   if (found) return found;
   if (name === "dsh") return dshAppCandidates(home).find((p) => existsSync(p));
   return undefined;
