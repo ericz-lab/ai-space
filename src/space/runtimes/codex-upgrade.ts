@@ -4,6 +4,7 @@ import { RUNTIMES_FILE, parseRuntimesYaml } from "./config.ts";
 import { spawnCollect } from "./process.ts";
 import type { RuntimeRegistry } from "./registry.ts";
 import { MODEL_TIERS, type CodexCliSpec, type ModelTier, type RuntimeSpec, type TierModels } from "./types.ts";
+import { hostShell } from "../host-tools.ts";
 
 /**
  * Codex tiers follow the installed CLI: at boot each codex runtime reads
@@ -75,7 +76,7 @@ const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 
 /** The same login shell locally and over ssh, so `codex` resolves as it does for the operator. */
 function onHost(host: string | undefined, script: string): string[] {
-  return host ? ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, `bash -lc ${quote(script)}`] : ["bash", "-lc", script];
+  return host ? ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, `bash -lc ${quote(script)}`] : [hostShell("bash"), "-lc", script];
 }
 
 const defaultRun: Run = async (cmd, opts) => {

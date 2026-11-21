@@ -10,6 +10,7 @@ import { LivePool } from "./live.ts";
 import { readCodexTranscript, SESSION_ID_RE } from "./transcripts.ts";
 import { ustar } from "./tar.ts";
 import { assertCompletionMode, SSH_HOST_PATTERN, type AgentRun, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type GeneratedImage, type ImageInput, type RuntimeAdapter, type Usage } from "./types.ts";
+import { hostShell } from "../host-tools.ts";
 
 /** Codex completions, agent runs and persistent local chat. Authentication stays in the CLI home. */
 export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
@@ -104,7 +105,7 @@ export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
       let job: Awaited<ReturnType<typeof codexImageCommand>> | undefined;
       try {
         job = await codexImageCommand(bin, input, !!host);
-        const cmd = host ? ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, `bash -lc ${quote(job.command)}`] : ["bash", "-c", job.command];
+        const cmd = host ? ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, `bash -lc ${quote(job.command)}`] : [hostShell("bash"), "-c", job.command];
         const r = await spawnCollect(cmd, { stdin: job.archive, signal, timeoutMs: input.timeoutMs + 30_000 });
         if (r.aborted) return { ok: false, error: "aborted", backend };
         if (r.timedOut || r.code === 124) return { ok: false, error: `timed out after ${Math.round(input.timeoutMs / 1000)}s`, backend };

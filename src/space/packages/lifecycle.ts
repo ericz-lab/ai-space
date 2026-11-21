@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
-import { lstat, mkdir, open, rename } from "node:fs/promises";
+import { lstat, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
+import { syncDirectory } from "../host-fs.ts";
 import { workspacePaths } from "../workspace.ts";
 import { installationKey } from "./contract.ts";
 import { PackageInstaller, type InstallOptions } from "./install.ts";
@@ -194,4 +195,3 @@ export class PackageLifecycle {
 
 function view(r: Row): Change { return { id: r.id, app: r.app, kind: r.kind, oldId: r.old_id, newId: r.new_id, state: r.state, error: r.error, createdAt: new Date(r.created_at).toISOString(), updatedAt: new Date(r.updated_at).toISOString() }; }
 async function exists(path: string): Promise<boolean> { try { await lstat(path); return true; } catch (e) { if ((e as { code?: string }).code === "ENOENT") return false; throw e; } }
-async function syncDirectory(path: string): Promise<void> { const f = await open(path, "r"); try { await f.sync(); } finally { await f.close(); } }

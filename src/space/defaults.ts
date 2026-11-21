@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { whichUsable } from "./host-tools.ts";
+import { hostShell, whichUsable } from "./host-tools.ts";
 import type { Manifest } from "./scheduler/manifest.ts";
 import type { Workspace } from "./workspace.ts";
 
@@ -146,7 +146,7 @@ export async function installDefaultApps(ws: Workspace, apps: DefaultApp[], opts
       continue;
     }
     log(`running ${installer}`);
-    const inst = await run(["bash", installer], dir, { SPACE_SUPERVISOR: opts.supervisor ?? "operator" });
+    const inst = await run([hostShell("bash"), installer], dir, { SPACE_SUPERVISOR: opts.supervisor ?? "operator" });
     if (inst.code !== 0) reports.push({ name: app.name, status: "failed", detail: `deploy/install.sh: ${lastLine(inst.output, `exit ${inst.code}`)}` });
     else reports.push({ name: app.name, status: "installed", detail: lastLine(inst.output, "") || undefined });
   }
