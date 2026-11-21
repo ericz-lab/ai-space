@@ -14,7 +14,7 @@ import { EXIT } from "./types.ts";
  */
 
 let root = "";
-const unitFile = process.platform === "darwin" ? `${SERVER_LABEL}.plist` : SERVER_UNIT;
+const unitFile = process.platform === "darwin" ? `${SERVER_LABEL}.plist` : process.platform === "win32" ? "ai-space.xml" : SERVER_UNIT;
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "space-cli-service-"));
@@ -47,7 +47,7 @@ describe("space service", () => {
   test("restart without the unit says how to install it", async () => {
     const r = await runCli(["service", "restart"], () => {}, { env: await env() });
     expect(r.code).toBe(EXIT.failed);
-    expect(r.err.join("\n")).toContain("bash deploy/install.sh");
+    expect(r.err.join("\n")).toContain(process.platform === "win32" ? "space service install" : "bash deploy/install.sh");
   });
 });
 

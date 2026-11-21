@@ -168,6 +168,20 @@ running, and that difference lives in one place: `space service` (`src/space/ser
 | On stop | SIGTERM, then the drain (`TimeoutStopSec=360`) | SIGTERM, then the drain (`ExitTimeOut` 360) |
 | Its log | the journal: `journalctl --user -u ai-space` | `<workspace>/logs/space.log` |
 
+On Windows the manager is the Task Scheduler (`src/space/services/schtasks.ts`), and the service is a task, not a Windows service: a service runs in session 0 under another logon, where the user's agent CLIs are neither on the search path nor signed in, while a task in the user's own session has both.
+
+| | Windows |
+| --- | --- |
+| Manager | the Task Scheduler, a task named `ai-space` that any user may register for their own logon |
+| Definition | `%LOCALAPPDATA%\ai-space\service\ai-space.xml`, and the launcher it runs, `ai-space.cmd` |
+| Runs | the launcher under `conhost.exe --headless` (no console window): `SPACE_HOME` set, the Bun's directory first on `Path`, `<bun> src\index.ts` in the program directory |
+| Starts | when the user logs on |
+| After a crash | started again by the Task Scheduler, after a minute at the earliest, five times |
+| On stop | the process and everything it started are ended at once: Windows has no signal to drain on, so work in flight ends with it |
+| Its log | `<workspace>\logs\space.log` |
+
+Whether it runs is read from the workspace's lock (`run\service.lock`, `run\service.json`), which the service holds for its life and which names its pid: the Task Scheduler's own state comes back in the system's language, and its "end" stops the launcher but leaves what the launcher started.
+
 `space logs space` reads either. `space service install [--root <dir>] [--bun <path>]` writes the
 definition for that code and Bun and (re)starts it; `status`, `start`, `stop` (off until started
 again), `restart` and `remove` do what they say, and `space service workspace` prints the workspace

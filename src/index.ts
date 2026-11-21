@@ -37,6 +37,7 @@ import { createIdentityRoutes } from "./space/identity.ts";
 import { readVersion } from "./space/version.ts";
 import { withUserToolDirs } from "./space/host-tools.ts";
 import { readOwnership } from "./space/local.ts";
+import { logsToFile } from "./space/service.ts";
 import { createPackageRoutes } from "./space/packages/api.ts";
 import { BUILTIN_PUBLISHERS } from "./space/packages/publishers.ts";
 import { createStudioRoutes } from "./space/studio.ts";
@@ -679,7 +680,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createRouterRoutes({ router })],
       ["owner", createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)), routerKey })],
       ["owner", feedbackRoutes],
-      ["owner", createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(process.platform === "darwin" && !env.SPACE_SERVICE_LOGS?.trim() ? { spaceTemplate: `tail -n {lines} {follow} '${join(ws.logs, "space.log").replace(/'/g, `'\\''`)}'` } : {}), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) })],
+      ["owner", createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(logsToFile() && !env.SPACE_SERVICE_LOGS?.trim() ? { spaceTemplate: `tail -n {lines} {follow} '${join(ws.logs, "space.log").replace(/'/g, `'\\''`)}'` } : {}), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) })],
       ["owner", createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest })],
       ["owner", agentRoutes],
       // A rename moves what this hub keeps under the peer's name and tells the apps (docs/peers.md#renaming-a-peer).
