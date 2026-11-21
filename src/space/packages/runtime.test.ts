@@ -3,7 +3,7 @@ import { appendFile, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parsePackageManifest } from "./manifest.ts";
-import { PackageRuntime, rotateLog, type RuntimeApp } from "./runtime.ts";
+import { PackageRuntime, rotateLog, type RuntimeApp, type RuntimeSetting, type StandaloneHost } from "./runtime.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const f of cleanups.splice(0).reverse()) await f(); });
@@ -140,7 +140,7 @@ test("stop holds the app off until start; restart replaces the process", async (
 });
 
 test("the owner's mode replaces the manifest's, is kept in the settings store and forgotten on removal", async () => {
-  const saved = new Map<string, { mode?: "on-demand" | "background"; stopped?: boolean }>();
+  const saved = new Map<string, RuntimeSetting>();
   let now = 0, starts = 0, stops = 0;
   const make = () => new PackageRuntime({
     logDir: "/unused", now: () => now, port: () => 1234, envFor: async () => ({}), probe: async () => true,
@@ -194,4 +194,84 @@ test("a static app has no process to control", async () => {
   expect(f.runtime.status("demo")).toMatchObject({ state: "static", kind: "static" });
   await expect(f.runtime.control("demo", "restart")).rejects.toThrow(/no process to restart/);
   await expect(f.runtime.configure("demo", "background")).rejects.toThrow(/no process/);
+});
+
+test("a standalone app is the system's: it survives the Space closing, is found again, and is watched", async () => {
+  const saved = new Map<string, RuntimeSetting>();
+  const log: string[] = [];
+  let now = 0, spawns = 0, active = false, available: string | undefined;
+  const host: StandaloneHost = {
+    unavailable: async () => available,
+    start: async (a, port) => { log.push(`start ${a.manifest.app}@${a.manifest.version} :${port}`); active = true; },
+    stop: async (a) => { log.push(`stop ${a}`); active = false; },
+    remove: async (a) => { log.push(`remove ${a}`); active = false; },
+    state: async () => ({ active, ...(active ? { pid: 9001, since: "2026-11-20T10:00:00.000Z" } : {}) }),
+    unit: (a) => `space-${a}-abcd1234.service`,
+  };
+  let nextPort = 5000;
+  const make = () => new PackageRuntime({
+    logDir: "/unused", now: () => now, port: () => nextPort++, envFor: async () => ({}), probe: async () => true, standalone: host,
+    settings: { get: (a) => saved.get(a) ?? {}, set: (a, s) => { if (Object.keys(s).length) saved.set(a, s); else saved.delete(a); } },
+    spawn: async () => {
+      spawns++;
+      let code: number | null = null; let done: (n: number) => void = () => {};
+      return { exited: new Promise<number>((resolve) => { done = resolve; }), get exitCode() { return code; }, stop: async () => { code = 0; done(0); } };
+    },
+  });
+  const first = make();
+  await first.register(app("background"));
+  expect(spawns).toBe(1);
+  available = "no systemd user manager answers";
+  await expect(first.configure("demo", "standalone")).rejects.toThrow(/cannot run on its own here: no systemd/);
+  expect(first.status("demo")).toMatchObject({ state: "running", mode: "background" });
+  available = undefined;
+  await first.configure("demo", "standalone");
+  expect(log).toEqual(["start demo@1.0.0 :5001"]);
+  expect(saved.get("demo")).toEqual({ mode: "standalone", port: 5001 });
+  expect(first.status("demo")).toMatchObject({ state: "running", mode: "standalone", declaredMode: "background", unit: "space-demo-abcd1234.service", pid: 9001, port: 5001, startedAt: "2026-11-20T10:00:00.000Z" });
+  // The Space stops: the app is not.
+  await first.close(0);
+  expect(log).toEqual(["start demo@1.0.0 :5001"]);
+  expect(active).toBe(true);
+
+  // The next Space registers it on the same port; the host leaves an unchanged service alone.
+  const second = make(); cleanups.push(() => second.close(0));
+  await second.register(app("background"));
+  expect(log.at(-1)).toBe("start demo@1.0.0 :5001");
+  expect(spawns).toBe(1);
+  // It died outside the Space's sight: seen within 5 seconds, then started again after the backoff.
+  active = false;
+  now += 5000; await second.sweep();
+  expect(log.filter((l) => l.startsWith("start"))).toHaveLength(2);
+  expect(second.status("demo")).toMatchObject({ state: "failed", error: "the application's service is not running" });
+  now += 1000; await second.sweep();
+  expect(log.filter((l) => l.startsWith("start"))).toHaveLength(3);
+  expect(second.status("demo")?.state).toBe("running");
+  // Stop holds, through the system; start brings it back.
+  await second.control("demo", "stop");
+  expect(log.at(-1)).toBe("stop demo");
+  now += 60_000; await second.sweep();
+  expect(log.at(-1)).toBe("stop demo");
+  await second.control("demo", "start");
+  expect(log.at(-1)).toBe("start demo@1.0.0 :5001");
+  // Back to a child of the Space: the service is removed and its port forgotten.
+  await second.configure("demo", undefined);
+  expect(log.slice(-2)).toEqual(["stop demo", "remove demo"]);
+  expect(saved.has("demo")).toBe(false);
+  expect(spawns).toBe(2);
+  expect(second.status("demo")).toMatchObject({ state: "running", mode: "background" });
+  expect(second.status("demo")?.unit).toBeUndefined();
+  // A version switch while standalone: the service is switched off, kept, and started on the same port.
+  await second.configure("demo", "standalone");
+  const port = saved.get("demo")!.port;
+  await second.remove("demo");
+  expect(log.at(-1)).toBe("stop demo");
+  expect(saved.get("demo")).toEqual({ mode: "standalone", port });
+  await second.register({ ...app("background"), manifest: { ...app("background").manifest, version: "2.0.0" } });
+  expect(log.at(-1)).toBe(`start demo@2.0.0 :${port}`);
+  // Uninstalled: the service goes with the app.
+  await second.remove("demo");
+  await second.forget("demo");
+  expect(log.slice(-2)).toEqual(["stop demo", "remove demo"]);
+  expect(saved.has("demo")).toBe(false);
 });

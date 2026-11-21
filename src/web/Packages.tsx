@@ -3,7 +3,7 @@ import { getJson, sendJson } from "./api.ts";
 import { useLang } from "./i18n.ts";
 import { pollWhileVisible } from "./poll.ts";
 
-type Runtime = { state: string; kind: string; mode?: string; declaredMode?: string; pid?: number; startedAt?: string; error?: string };
+type Runtime = { state: string; kind: string; mode?: string; declaredMode?: string; unit?: string; pid?: number; startedAt?: string; error?: string };
 type App = { app: string; title: string; version: string; url: string; page?: boolean; state?: string; runtime?: Runtime; offline?: { features: string[]; online: string[] }; sourceIncluded?: boolean };
 type Catalogue = { spaceId: string; apps: App[]; remotes: { connectionId: string; spaceId: string; available: boolean; apps: App[] }[] };
 type Connection = { id: string; remoteSpaceId: string; direction: string; apps: string[]; enabled: boolean; connected: boolean };
@@ -75,6 +75,7 @@ export default function Packages({ onChange }: { onChange?: () => void }) {
         <p className="setnote">{t(`packages.runtime.${a.state ?? "unavailable"}` as Parameters<typeof t>[0])}
           {a.runtime?.pid ? <> · {t("packages.runtime.pid")} {a.runtime.pid}</> : null}
           {a.runtime?.startedAt ? <> · {t("packages.runtime.since")} {new Date(a.runtime.startedAt).toLocaleString()}</> : null}
+          {a.runtime?.unit ? <><br />{t("packages.runtime.unit")}: {a.runtime.unit}</> : null}
           {a.runtime?.error && a.state !== "running" ? <><br />{a.runtime.error}</> : null}</p>
         {a.runtime?.kind === "process" && <div className="package-line">
           {a.state === "running" || a.state === "starting"
@@ -85,7 +86,7 @@ export default function Packages({ onChange }: { onChange?: () => void }) {
             const mode = e.target.value === a.runtime!.declaredMode ? "default" : e.target.value;
             void act(() => sendJson("POST", `/api/panel/packages/apps/${a.app}/runtime`, { mode }));
           }}>
-            {(["on-demand", "background"] as const).map((m) => <option key={m} value={m}>{t(`packages.mode.${m}`)}{m === a.runtime!.declaredMode ? ` (${t("packages.mode.declared")})` : ""}</option>)}
+            {(["on-demand", "background", "standalone"] as const).map((m) => <option key={m} value={m}>{t(`packages.mode.${m}`)}{m === a.runtime!.declaredMode ? ` (${t("packages.mode.declared")})` : ""}</option>)}
           </select>
         </div>}
         <p className="setnote">{t(a.sourceIncluded ? "packages.sourceYes" : "packages.sourceNo")}</p>
