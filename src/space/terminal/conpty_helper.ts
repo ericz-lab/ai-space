@@ -18,20 +18,24 @@ import { connect, type Socket } from "node:net";
 const { u32, u64, i32 } = FFIType;
 const P = FFIType.ptr;
 
-const k32 = dlopen("kernel32.dll", {
-  CreateNamedPipeW: { args: [P, u32, u32, u32, u32, u32, u32, P], returns: u64 },
-  CreatePseudoConsole: { args: [u32, u64, u64, u32, P], returns: i32 },
-  ResizePseudoConsole: { args: [u64, u32], returns: i32 },
-  ClosePseudoConsole: { args: [u64], returns: FFIType.void },
-  InitializeProcThreadAttributeList: { args: [P, u32, u32, P], returns: i32 },
-  UpdateProcThreadAttribute: { args: [P, u32, u64, u64, u64, P, P], returns: i32 },
-  CreateProcessW: { args: [P, P, P, P, i32, u32, P, P, P, P], returns: i32 },
-  WaitForSingleObject: { args: [u64, u32], returns: u32 },
-  GetExitCodeProcess: { args: [u64, P], returns: i32 },
-  TerminateProcess: { args: [u64, u32], returns: i32 },
-  CloseHandle: { args: [u64], returns: i32 },
-  GetLastError: { args: [], returns: u32 },
-}).symbols;
+/** Opened when the helper runs: importing this file (a test reads `quoteArg`) must work on any system. */
+const openKernel32 = () =>
+  dlopen("kernel32.dll", {
+    CreateNamedPipeW: { args: [P, u32, u32, u32, u32, u32, u32, P], returns: u64 },
+    CreatePseudoConsole: { args: [u32, u64, u64, u32, P], returns: i32 },
+    ResizePseudoConsole: { args: [u64, u32], returns: i32 },
+    ClosePseudoConsole: { args: [u64], returns: FFIType.void },
+    InitializeProcThreadAttributeList: { args: [P, u32, u32, P], returns: i32 },
+    UpdateProcThreadAttribute: { args: [P, u32, u64, u64, u64, P, P], returns: i32 },
+    CreateProcessW: { args: [P, P, P, P, i32, u32, P, P, P, P], returns: i32 },
+    WaitForSingleObject: { args: [u64, u32], returns: u32 },
+    GetExitCodeProcess: { args: [u64, P], returns: i32 },
+    TerminateProcess: { args: [u64, u32], returns: i32 },
+    CloseHandle: { args: [u64], returns: i32 },
+    GetLastError: { args: [], returns: u32 },
+  }).symbols;
+
+let k32: ReturnType<typeof openKernel32>;
 
 const INVALID_HANDLE = 0xffffffffffffffffn;
 const PIPE_ACCESS_DUPLEX = 3; // `node:net` opens its end for reading and writing, whichever way the bytes go
@@ -77,6 +81,7 @@ async function main(cmd: string[]): Promise<void> {
     process.stderr.write("usage: conpty_helper.ts <command> [args...]\n");
     process.exit(2);
   }
+  k32 = openKernel32();
   const cols = clamp(Number(process.env.PTY_COLS));
   const rows = clamp(Number(process.env.PTY_ROWS) || 24);
 
