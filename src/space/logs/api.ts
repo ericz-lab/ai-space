@@ -23,6 +23,8 @@ export type LogsApiOptions = {
   knownApp: (app: string) => boolean;
   /** The template for apps, when theirs is not `template` (the supervisor's log files under launchd); `space` keeps `template`. */
   appTemplate?: string;
+  /** The template for `space` itself, when its log is not `template`'s (under launchd it is a file in the workspace, there is no journal). */
+  spaceTemplate?: string;
   /** The unit of an app when it is not named after the app (the supervisor's `space-<app>.service`). */
   unitOf?: (app: string) => string | undefined;
   spawn?: (req: LogsRequest) => LogsProcess;
@@ -34,7 +36,7 @@ type Handler = (req: Request & { params: Record<string, string> }) => Response |
 
 export function createLogsRoutes(opts: LogsApiOptions): Record<string, { GET: Handler }> {
   const token = opts.token?.trim() ?? "";
-  const spawn = opts.spawn ?? ((req: LogsRequest) => spawnLogs(req.app !== "space" && opts.appTemplate ? opts.appTemplate : opts.template, req));
+  const spawn = opts.spawn ?? ((req: LogsRequest) => spawnLogs(req.app === "space" ? (opts.spaceTemplate ?? opts.template) : (opts.appTemplate ?? opts.template), req));
 
   return {
     "/api/apps/:app/logs": {

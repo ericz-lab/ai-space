@@ -35,6 +35,8 @@ space connection ls | create | grant | enable | disable | rm
 space router  show | sync
 space api     <METHOD> <path> [body]  the escape hatch: one raw call with the token added
 space local   status | install | start | stop | restart | remove-service
+space service status | install | start | stop | restart | remove | workspace
+space upgrade | uninstall | open
 space init | setup | start | install-defaults | codex-upgrade
 space completion zsh | bash
 ```
@@ -67,6 +69,9 @@ Rules:
 | `space auth status` / `init [--password-stdin]` / `reset-password [--password-stdin]` / `revoke-sessions` / `device-add <name>` / `devices` / `device-revoke <id>` | the owner's password, sessions and device credentials of the built-in sign-in ([auth.md](auth.md)); the password is asked without echo or read from stdin, never an argument | disk (`space.db`), works without ai-space |
 | `space app create NAME [--title T] [--description D]` / `space app build NAME` | apps made inside the Space: the source in `app-src/NAME` from the template, packed and installed or upgraded ([app-studio.md](app-studio.md)) | `/api/studio/*` |
 | `space local status [--claude P] [--codex P] [--dsh P]` / `install [--migrate] [--device <name>] [--default-model <runtime/tier>] [--wait\|--now] [--claude P] [--codex P] [--dsh P]` / `start` / `stop` / `restart` / `remove-service` | the Local edition's installation on this Mac, what its app runs; `--claude`/`--codex`/`--dsh` name agent CLIs over the search, a first install needs `--default-model`, and an upgrade while the Space is busy is refused unless `--wait` (until idle) or `--now` (drain it) ([local.md](local.md)) | disk and launchd, works without ai-space |
+| `space service status` / `install [--root DIR] [--bun PATH]` / `start` / `stop` / `restart` / `remove` / `workspace` | ai-space's own background service on this machine: the systemd user unit on Linux, the LaunchAgent on a Mac; `install` is what `deploy/install.sh` runs, `restart` is for after an `.env` edit ([release.md](release.md#the-background-service)) | disk and systemd or launchd, works without ai-space |
+| `space upgrade [--version X] [--check] [--force]` / `space uninstall [--workspace] [--yes] [--dry-run]` | a release installation: install the newest release over it (rollback when it does not answer), or remove the services, the `space` command and the program; the workspace stays unless `--workspace` ([release.md](release.md#one-command-install)) | the release's files, disk, the service manager |
+| `space open [--print]` | open the panel in the browser, or print its address | none |
 | `space status` | health, app services with their health, tasks failing or overdue, last backup per app, model calls in flight, peers up or down; one screen | `/healthz`, `/api/services`, `/api/tasks`, `/api/backups`, `/api/model/status`, `/api/peers` |
 | `space app ls [--panel]` | every app: title, status, service health, url, hidden (`--panel`: only what the panel shows) | `GET /api/apps?all=1` |
 | `space app catalog [--refresh]` / `space app install NAME [--source [--ref REF]] [--with-source] [--trust]` / `space app upgrade NAME [--source\|--package] [--trust]` | apps of the app catalog: what is listed, installed and updatable; install the signed package or build from source in `app-src/NAME` ([app-catalog.md](app-catalog.md)) | `/api/app-catalog/*` |

@@ -94,12 +94,12 @@ export const GUIDE_TEMPLATE = `## Layout
 
 ## The running service
 
-ai-space listens on the host and port in \`.env\` (\`SPACE_HOST\`, \`SPACE_PORT\`; default \`127.0.0.1:8700\`) as the user unit \`ai-space\`:
+ai-space listens on the host and port in \`.env\` (\`SPACE_HOST\`, \`SPACE_PORT\`; default \`127.0.0.1:8700\`) as a background service of this user (\`space service\`: the systemd user unit \`ai-space\` on Linux, the LaunchAgent \`ai.space.server\` on a Mac):
 
 \`\`\`sh
 space status                                  # health, services, failing tasks, backups, model load, peers
-space logs space -n 50                        # ai-space's own log (journalctl --user -u ai-space)
-systemctl --user restart ai-space             # after editing .env
+space logs space -n 50                        # ai-space's own log
+space service restart                         # after editing .env
 \`\`\`
 
 The \`space\` command (\`docs/cli.md\`; \`space help\` lists it all, \`space <noun> help\` one noun) is the shell for everything below: \`space app ls\`, \`space app sync [<app>]\`, \`space task ls\`, \`space task run <app>/<task> --wait\`, \`space task runs <app>/<task>\`, \`space task disable <app>/<task>\`, \`space logs <app> -f\`, \`space model usage\`, \`space notify send\`, \`space backup ls\`, \`space backup run <app>\`, \`space peer ls\`, \`space router show\`; \`--json\` prints what the route returned, \`space api <METHOD> <path> [body]\` calls any route with the token added. Inside a task's command it needs no \`--app\`: \`SPACE_APP\` and \`SPACE_APP_TOKEN\` are set.

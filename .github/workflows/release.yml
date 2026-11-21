@@ -43,14 +43,20 @@ jobs:
     uses: ./.github/workflows/check.yml
 
   server:
-    name: server ${{ matrix.arch }}
+    name: server ${{ matrix.os }} ${{ matrix.arch }}
     needs: [version, check]
     strategy:
       matrix:
         include:
           - runner: ubuntu-24.04
+            os: linux
             arch: x64
           - runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
+          # The same archive for a Mac (Apple silicon): the Bun inside is the system's own build.
+          - runner: macos-26
+            os: macos
             arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
@@ -72,7 +78,7 @@ jobs:
         run: bun release/smoke.ts dist/ai-space-server-*.tar.gz
       - uses: actions/upload-artifact@v4
         with:
-          name: server-${{ matrix.arch }}
+          name: server-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*.tar.gz
           if-no-files-found: error
 

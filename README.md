@@ -94,7 +94,7 @@ git remote add <host> <host>:~/.ai-space/repos/ai-space.git
 git push <host> main      # checks out into ~/.ai-space/core, runs deploy/install.sh, restarts the unit
 ```
 
-`deploy/install.sh` installs `deploy/ai-space.service` into `~/.config/systemd/user/`, enables linger, and restarts the service. Logs: `journalctl --user -u ai-space -f`.
+`deploy/install.sh` installs `deploy/ai-space.service` into `~/.config/systemd/user/`, enables linger, and restarts the service (on a Mac it writes a LaunchAgent instead; `space service` drives either). Logs: `space logs space -f`.
 
 Then run `bun run setup` in `~/.ai-space/core`. It does the basic configuration first: checks the tools the basic install needs (bun, git, one logged-in AI runtime), asks for the core values, and chooses who runs the apps' services. Then it offers the optional extensions, each of which can also be run later on its own: `space setup github`, `ingress` (a domain through a tunnel, with Cloudflare's `cf` commands printed), `backup`, `notifications`, `peers`.
 

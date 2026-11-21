@@ -94,7 +94,7 @@ git remote add <host> <host>:~/.ai-space/repos/ai-space.git
 git push <host> main      # 检出到 ~/.ai-space/core，运行 deploy/install.sh，重启单元
 ```
 
-`deploy/install.sh` 把 `deploy/ai-space.service` 装进 `~/.config/systemd/user/`，开启 linger，重启服务。日志：`journalctl --user -u ai-space -f`。
+`deploy/install.sh` 把 `deploy/ai-space.service` 装进 `~/.config/systemd/user/`，开启 linger，重启服务（在 Mac 上改为写一个 LaunchAgent；两者都由 `space service` 管理）。日志：`space logs space -f`。
 
 然后在 `~/.ai-space/core` 里运行 `bun run setup`。它先做基础配置：检查基础安装需要的工具（bun、git、一个已登录的 AI 运行时），询问核心配置项，并选择由谁运行各 app 的服务。之后再提供可选扩展，每一项也可以以后单独运行：`space setup github`、`ingress`（经隧道的域名访问，会打印 Cloudflare 的 `cf` 命令）、`backup`、`notifications`、`peers`。
 

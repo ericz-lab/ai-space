@@ -22,6 +22,7 @@ import { notifyNoun } from "./notify.ts";
 import { peerNoun } from "./peer.ts";
 import { connectionNoun } from "./connection.ts";
 import { routerNoun } from "./router.ts";
+import { openNoun, serviceNoun, uninstallNoun, upgradeNoun } from "./service.ts";
 import { statusNoun } from "./status.ts";
 import { taskNoun } from "./task.ts";
 
@@ -35,7 +36,7 @@ import { taskNoun } from "./task.ts";
  * the docs and the scheduler's tasks spell keeps working.
  */
 
-export const NOUNS: Noun[] = [statusNoun, authNoun, appNoun, taskNoun, logsNoun, modelNoun, usageNoun, notifyNoun, backupNoun, chatNoun, eventNoun, consumerNoun, peerNoun, connectionNoun, routerNoun, apiNoun, localNoun, ...lifecycleNouns, completionNoun];
+export const NOUNS: Noun[] = [statusNoun, authNoun, appNoun, taskNoun, logsNoun, modelNoun, usageNoun, notifyNoun, backupNoun, chatNoun, eventNoun, consumerNoun, peerNoun, connectionNoun, routerNoun, apiNoun, localNoun, serviceNoun, upgradeNoun, uninstallNoun, openNoun, ...lifecycleNouns, completionNoun];
 
 /** Older spellings of `src/index.ts`: word → noun and verb. */
 export const ALIASES: Record<string, string[]> = {
@@ -121,7 +122,7 @@ export async function run(argv: string[], options: RunOptions = {}): Promise<num
   let args = words.slice(2);
   // A noun alone prints its help, unless its default verb takes no argument at all (`space status`, `space init`).
   const bare = noun.defaultVerb ? noun.verbs[noun.defaultVerb] : undefined;
-  if (verbName === "help" || (verbName === undefined && bare?.usage !== "")) {
+  if (verbName === "help" || (verbName === undefined && bare?.usage !== "" && !noun.bare)) {
     for (const l of nounHelp(noun)) io.out(l);
     return EXIT.ok;
   }

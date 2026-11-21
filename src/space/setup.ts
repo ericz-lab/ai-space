@@ -63,6 +63,8 @@ export type SetupDeps = {
   hostname(): string;
   /** magpie on this machine (docs/runtimes.md#magpie): where it listens and what it offers. */
   findMagpie(): Promise<MagpieInfo>;
+  /** ai-space's own background service on this machine (src/space/service.ts): whether it is installed, how to restart it, where its log is. */
+  service(): Promise<{ installed: boolean; restart(): Promise<void>; logs: string }>;
 };
 
 export type SetupOutcome = {
@@ -546,14 +548,14 @@ export async function runSetup(d: SetupDeps, opts: SetupOptions = {}): Promise<S
 
   /* restart */
   let restarted = false;
-  const unit = await d.run(["systemctl", "--user", "is-enabled", "ai-space"]);
-  if ((keys.length || runtimesAdd) && unit.stdout.trim() === "enabled") {
+  const service = await d.service();
+  if ((keys.length || runtimesAdd) && service.installed) {
     if (await io.confirm("Restart the ai-space unit now?", true)) {
-      const r = await d.run(["systemctl", "--user", "restart", "ai-space"]);
-      restarted = r.code === 0;
-      io.say(restarted ? "  restarted; journalctl --user -u ai-space -n 30" : `  restart failed: ${r.stderr.trim()}`);
+      const failed = await service.restart().then(() => undefined, (e: Error) => e.message);
+      restarted = failed === undefined;
+      io.say(restarted ? `  restarted; ${service.logs}` : `  restart failed: ${failed}`);
     }
-  } else if (unit.stdout.trim() !== "enabled") {
+  } else if (!service.installed) {
     io.say("The ai-space unit is not installed yet: bash deploy/install.sh");
   }
 
@@ -1050,5 +1052,12 @@ export function realDeps(io: SetupIO, ws: Workspace, env: Record<string, string 
     randomToken: () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
     hostname: () => hostname().split(".")[0]!.toLowerCase(),
     findMagpie: () => findMagpie({ env }),
+    async service() {
+      // Imported here: service.ts reads local.ts, which reads this file.
+      const { realServiceDeps, serviceRestart, serviceStatus } = await import("./service.ts");
+      const d = { ...realServiceDeps(), env: { ...env, SPACE_HOME: ws.home } };
+      const s = await serviceStatus(d);
+      return { installed: s.installed, restart: async () => void (await serviceRestart(d)), logs: s.logs };
+    },
   };
 }

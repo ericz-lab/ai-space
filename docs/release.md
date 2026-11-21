@@ -15,6 +15,7 @@ person: the pipeline ends in a draft GitHub Release.
 | --- | --- | --- |
 | `ai-space-server-<version>-linux-x64.tar.gz` | Server | The service, its production dependencies and a pinned Bun, for Linux on x64 |
 | `ai-space-server-<version>-linux-arm64.tar.gz` | Server | The same for arm64 |
+| `ai-space-server-<version>-macos-arm64.tar.gz` | Server | The same for a Mac on Apple silicon |
 | `ai-space-client-<version>-macos-arm64.dmg` | Client | The Mac app, signed with a Developer ID and notarized |
 | `ai-space-client-<version>-macos-arm64-unsigned.dmg` | Client | Built when no signing identity is configured: for testing, macOS blocks it for everyone else |
 | `ai-space-local-<version>-macos-arm64.dmg` | Local | The Mac app with the service inside ([local.md](local.md)), signed and notarized |
@@ -31,7 +32,7 @@ person: the pipeline ends in a draft GitHub Release.
 
 Only systems and architectures that are built and checked are published. Not yet: the Mac Share
 extension (it needs an Xcode build with a development team, `desktop:share:build`), Intel Macs,
-a signed Windows app, a Server edition for macOS or Windows.
+a signed Windows app, a Server edition for Intel Macs or for Windows (there it runs inside WSL 2).
 
 ## Cutting a release
 
@@ -91,12 +92,13 @@ curl -fsSL https://ai-space.me/install.sh | bash
 ```
 
 `https://ai-space.me/install.sh` redirects to the latest release's `install.sh` (`release/get.sh`),
-so the command always runs the installer that came with the newest published release. On Linux
-with systemd it picks the Server archive for the machine (x64 or arm64) from the same release,
-checks it against `SHA256SUMS`, unpacks it in a temporary folder and runs the archive's own
-`install.sh` ([below](#installing-the-server-edition)). It asks nothing, needs no sudo, Bun, git or
-account, and refuses to run as root. At the end it prints the panel's address
-(`http://127.0.0.1:8700/`) and opens it on a desktop; over SSH it prints the port forward instead.
+so the command always runs the installer that came with the newest published release. The same
+command works on Linux with systemd (x64 or arm64) and on a Mac (Apple silicon): it picks the
+Server archive for the machine from the same release, checks it against `SHA256SUMS`, unpacks it
+in a temporary folder and runs the archive's own `install.sh`
+([below](#installing-the-server-edition)). It asks nothing, needs no sudo, Bun, git or account, and
+refuses to run as root. At the end it prints the panel's address (`http://127.0.0.1:8700/`) and
+opens it on a desktop; over SSH it prints the port forward instead.
 When no agent CLI is found (`claude`, `codex`, `dsh`) it says how to get one: ai-space works through
 one signed-in CLI, and the installer never installs one. Running it again upgrades.
 
@@ -110,32 +112,76 @@ Settings, all optional, as environment variables before `bash`:
 | `AI_SPACE_DOWNLOAD` | Where the release's files are: a mirror, or `file://<dir>` with the files downloaded already |
 | `AI_SPACE_NO_OPEN` | `1`: do not open a browser at the end |
 
-Not yet: the Mac (the installer stops and says so; the Local app is the Mac's way for now),
-Windows (the Local zip), a machine without a systemd user manager.
+It stops, having changed nothing, on a machine whose workspace belongs to the AI Space app (the
+Local edition, [local.md](local.md)): that app already runs ai-space there with a service of its
+own. Not yet: Intel Macs, Windows outside WSL 2 (the Local zip sets WSL up), a Linux machine
+without a systemd user manager.
+
+Afterwards, on the machine:
+
+| Command | What it does |
+| --- | --- |
+| `space open [--print]` | Opens the panel in the browser, or prints its address |
+| `space upgrade [--version <x.y.z>] [--check]` | Installs the newest release over this one, as running the one-command installer again would: same program directory, same workspace, a rollback when the new release does not answer. `--check` only says what is available |
+| `space uninstall [--workspace] [--yes] [--dry-run]` | Stops and unregisters ai-space's service and the apps' services it wrote, removes the `space` command and deletes the program. The workspace (apps, databases, `.env`) stays unless `--workspace` is given; it asks first unless `--yes` |
+| `space service status \| start \| stop \| restart` | The background service ([below](#the-background-service)) |
 
 ## Installing the Server edition
 
-On Linux with systemd, as the user that will own ai-space (lingering on, as in
-[install.md](install.md) step 1):
+On Linux with systemd, or on a Mac, as the user that will own ai-space (on Linux with lingering
+on, as in [install.md](install.md) step 1):
 
 ```bash
-tar -xzf ai-space-server-<version>-linux-<arch>.tar.gz
-bash ai-space-server-<version>-linux-<arch>/install.sh
+tar -xzf ai-space-server-<version>-<linux|macos>-<arch>.tar.gz
+bash ai-space-server-<version>-<linux|macos>-<arch>/install.sh
 ```
 
 `install.sh` copies the release to `~/.local/share/ai-space/releases/<version>` (`AI_SPACE_PREFIX`
 moves it), points `current` at it, and runs `current/deploy/install.sh` with the release's own Bun:
-the workspace (`~/.ai-space` or `SPACE_HOME`), the user unit running from `current`, the `space`
-command in `~/.local/bin`, `/healthz`. The machine needs no Bun, Git or developer tools; when it has
+the workspace (`~/.ai-space` or `SPACE_HOME`), the background service running from `current`
+([below](#the-background-service)), the `space` command in `~/.local/bin`, `/healthz`. The machine needs no Bun, Git or developer tools; when it has
 no Bun, the release's is linked as `~/.local/bin/bun` and comes first on the unit's `PATH`, so the
 apps' services find it too. Then `space setup` as in [install.md](install.md) step 4.
 
 The program and the data stay apart: everything under `~/.local/share/ai-space` can be deleted and
 installed again without touching apps, databases or `.env`.
 
+## The background service
+
+One installer serves both systems; what differs is the service manager that keeps ai-space
+running, and that difference lives in one place: `space service` (`src/space/service.ts`), which
+`deploy/install.sh` calls instead of writing a unit itself.
+
+| | Linux | Mac |
+| --- | --- | --- |
+| Manager | systemd, the user's manager | launchd, the user's GUI domain |
+| Definition | `~/.config/systemd/user/ai-space.service` (`deploy/ai-space.service` with this machine's paths) | `~/Library/LaunchAgents/ai.space.server.plist` |
+| Runs | `<bun> src/index.ts` in the program directory, `SPACE_HOME` set | the same |
+| Starts | at boot, with lingering on (`loginctl enable-linger`, asked for by the installer) | when the user logs in at the Mac |
+| After a crash | restarted (`Restart=on-failure`) | restarted (`KeepAlive`, not after a clean exit) |
+| On stop | SIGTERM, then the drain (`TimeoutStopSec=360`) | SIGTERM, then the drain (`ExitTimeOut` 360) |
+| Its log | the journal: `journalctl --user -u ai-space` | `<workspace>/logs/space.log` |
+
+`space logs space` reads either. `space service install [--root <dir>] [--bun <path>]` writes the
+definition for that code and Bun and (re)starts it; `status`, `start`, `stop` (off until started
+again), `restart` and `remove` do what they say, and `space service workspace` prints the workspace
+the installed service runs on. A workspace that belongs to the AI Space app keeps the app's
+service (`ai-space-local.service`, `ai.space.local`): `restart` drives that one, `install` and
+`remove` refuse.
+
+A Mac is not a server by default. A LaunchAgent runs only while its user is logged in, so a Mac
+that should serve after a reboot needs automatic login, and one that should serve all day needs
+sleep turned off (`sudo pmset -a sleep 0`); the installer says so and changes neither. Apps under
+`SPACE_SUPERVISOR=space` have the same condition ([supervision.md](supervision.md#macos)).
+
 ## Upgrading
 
-Install the next archive the same way. `current` moves to the new release, the unit restarts, and
+`space upgrade` does it in one step: it reads the newest release's `manifest.json`, and when that
+is another build than the installed one, downloads that release's `install.sh` and runs it with
+this installation's program directory and workspace. By hand:
+
+
+Install the next archive the same way. `current` moves to the new release, the service restarts, and
 the installer waits for the health check. The last three releases are kept.
 
 ### Rollback
