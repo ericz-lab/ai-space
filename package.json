@@ -29,6 +29,7 @@
     "release:windows": "bun release/windows.ts",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck && bun test",
+    "test:windows": "bun test ./src/space/host-tools.test.ts ./src/space/host-fs.test.ts ./src/space/guide.test.ts ./src/space/skills.test.ts ./src/space/workspace.test.ts ./src/space/instance.test.ts ./src/cli/lifecycle.test.ts ./src/cli/service.test.ts ./src/space/services/schtasks.test.ts ./src/space/packages/lifecycle.test.ts ./src/space/logs ./src/space/terminal/conpty.test.ts ./release/get-ps1.test.ts",
     "hooks": "git config core.hooksPath .githooks",
     "feishu:deploy": "bun deploy/feishu-oidc/deploy.ts deploy",
     "feishu:verify": "bun deploy/feishu-oidc/deploy.ts verify",

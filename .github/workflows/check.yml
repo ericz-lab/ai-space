@@ -29,6 +29,23 @@ jobs:
       - run: bun run typecheck
       - run: bun test
 
+  # The Server on Windows itself (docs/install.md#windows). Not the whole suite yet: `test:windows` in
+  # package.json lists the tests of the code that differs there (links, the workspace lock, the search
+  # path and shell, package installs, the Task Scheduler service, the installer, the pseudoconsole).
+  # A test file joins the list once it passes on Windows; the aim is plain `bun test` here too.
+  server-windows:
+    name: Server on Windows
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test:windows
+
   android:
     name: Android client
     runs-on: ubuntu-24.04
