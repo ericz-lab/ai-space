@@ -130,7 +130,7 @@ The journal and Space UUID live in additive tables in `space.db`. At service sta
 
 ## Package process lifecycle
 
-The host loads installed applications from its journal and receipt, checking hashes and compatibility before registration. `GET /api/packages/apps/:app/runtime` is operator-only and reports static/idle/starting/running/failed/paused state, active lease count and an internal port when running. It is not a public application URL. File installation may succeed while activation fails; the upload response then includes the installed operation and a separate activation error.
+The host loads installed applications from its journal and receipt, checking hashes and compatibility before registration. `GET /api/packages/apps/:app/runtime` is operator-only and reports static/idle/starting/running/stopped/failed/paused state, active lease count, the launch mode in force and the declared one, and the process ID, start time and internal port when running. It is not a public application URL. File installation may succeed while activation fails; the upload response then includes the installed operation and a separate activation error.
 
 `PackageRuntime.acquire` shares a single startup across concurrent requests. Each caller releases its lease exactly once when the work ends. An idle process stops only after the last release and its declared idle interval. Background processes remain running and restart after crashes with bounded backoff. Health waits time out; failed starts terminate the child and release the caller's lease. Static serving permits only indexed regular files under the declared root and rejects links and path traversal. The app gateway must hold process leases through response streams and WebSocket lifetimes.
 
@@ -184,9 +184,35 @@ An upgrade installs into a private staging workspace, then takes an exclusive ru
 
 These are **code** rollbacks. App startup may perform its own database migrations or make external writes; switching program files back cannot reverse those changes. Publishers must keep data backward-compatible within versions intended for rollback, and operators must take a verified application backup before an incompatible migration. Arbitrary migration scripts and automatic database restore are not part of this version. Directory syncs protect the main rename boundaries, but this is not a claim of transactional rollback of every filesystem/database or sudden-power-loss scenario. Cross-filesystem staging is unsupported: workspace apps and run directories must share a filesystem.
 
+### The owner's control of a process
+
+A process app is a child of the Space: the Space starts it, restarts it after a crash (with a growing delay, 30 seconds at most) and stops it when the Space itself stops, so no app leaves a service of its own in the operating system. The manifest's `launch.mode` is the app's default; the owner of a Space may choose otherwise, per app, and the choice is local to that Space (table `package_runtime`), survives upgrades and rollbacks of the app and is forgotten when the app is removed:
+
+- **Mode.** `on-demand` starts the process at its first use and stops it after `idleTimeoutMs` without one; `background` keeps it running; `standalone` hands it to the operating system ([below](#running-on-its-own)). `default` returns to the manifest's.
+- **Stop, start, restart.** A stop ends the process, cuts the requests in flight and holds: visitors and scheduled tasks get `<app> is stopped`, and nothing starts it, also after the Space restarts, until a start or restart. An upgrade of a stopped app still starts the new version once to check its health, then stops it again.
+
+`POST /api/packages/apps/:app/runtime` (operator; the panel's copy is `/api/panel/packages/apps/:app/runtime`) takes `{ action: "start" | "stop" | "restart" }`, `{ mode: "on-demand" | "background" | "standalone" | "default" }`, or both (the mode is set first), and answers `{ ok, runtime }` with the state after it; 409 with the reason and the state when the app is changing version, paused, or failed its health check; 400 for a static app, which has no process. The CLI is `space app start | stop | restart | service | mode APP`.
+
+A restart or stop of the Space stops every process app with it, except the ones running on their own.
+
+### Running on its own
+
+The owner may give one app a third mode, `standalone`, that no manifest can declare: the app becomes a service of the operating system, a systemd user unit on Linux or a LaunchAgent on macOS, written and driven by the Space but not a child of it. It keeps running while the Space is restarted, upgraded or stopped, the system restarts it after a crash, and it starts at login (at boot, on Linux with lingering). Use it for an app whose work must not pause with the Space; the others are simpler left to the Space.
+
+- **Name.** `space-<app>-<id>.service` or the label `space.<app>-<id>`, where `<id>` is the first 8 characters of the Space's identity, so two workspaces of one user never meet on a name. The unit file lives where the user's units do (`~/.config/systemd/user`, `~/Library/LaunchAgents`).
+- **Port.** Chosen once when the mode is set and kept (`package_runtime.port`), on `127.0.0.1`. The panel reaches the app through the gateway as before.
+- **Environment.** What a child process gets, in `<workspace>/run/env/<app>-<id>.env` (mode 0600); it holds the app's token for the Space API.
+- **Log.** `<workspace>/logs/<app>/package.log`, as for a child process.
+- **When the Space starts** it writes the same files again and compares: an unchanged, running service is left alone, so the process is the same one as before the restart. A new version of the app, or a changed environment, stops the old process and starts the new one.
+- **While the Space is down** the app runs but nothing reaches it through the panel, and its calls to the Space API fail until the Space is back; an app made to run on its own must bear that.
+- **Start, stop, restart** go through the system: a stop also keeps it from starting at login. Every 5 seconds the Space asks the system whether the service still runs and starts it again when it does not.
+- **Leaving the mode**, or uninstalling the app, stops the service and deletes its files. `space uninstall` removes the services of the workspace's standalone apps with the Space's own.
+
+The mode is refused where no service manager answers for the user (no systemd user manager, no macOS login session); the answer says so.
+
 ## Panel controls
 
-Settings → Application packages installs/uploads packages, switches versions, removes unused installations while retaining data, lists local and connected app entries, creates connections and selects individual local apps to share. Application pages also open from their local library tile, and apps shared by a connected Space appear in the app grid and library labelled with that Space's name. Remote outages are shown as unavailable; a remote app is never substituted with an unrelated local copy. The CLI offers the same lifecycle and connection operations (see `docs/cli.md`). Connecting an outgoing peer currently references a credential already provisioned in its host environment; the UI never reads existing tokens back.
+Settings → Application packages installs/uploads packages, shows each local process app's state (process ID, since when, the last error) with Start / Stop / Restart and its run mode, switches versions, removes unused installations while retaining data, lists local and connected app entries, creates connections and selects individual local apps to share. Application pages also open from their local library tile, and apps shared by a connected Space appear in the app grid and library labelled with that Space's name. Remote outages are shown as unavailable; a remote app is never substituted with an unrelated local copy. The CLI offers the same lifecycle and connection operations (see `docs/cli.md`). Connecting an outgoing peer currently references a credential already provisioned in its host environment; the UI never reads existing tokens back.
 
 `/api/panel/packages/*`, `/api/panel/connections/*` and `/api/panel/package-catalogue` use the existing operator panel trust boundary: the whole panel must remain behind the operator's loopback/ingress authentication, and the global same-origin write guard applies. They do not require the CLI bearer token in browser JavaScript. These routes are never mounted on the isolated app gateway. Incoming connection tokens are shown once to the operator who creates/rotates them. Package use grants do not expose any panel-management route. `/_space/apps/:app` and the corresponding connection entry route issue temporary app sessions without putting operator credentials in app URLs.
 

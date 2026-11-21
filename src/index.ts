@@ -45,6 +45,7 @@ import { createUiKitRoutes, loadUiKit, uiKitResponse } from "./space/ui-kit.ts";
 import { createActivityRoutes } from "./space/activity.ts";
 import { PackageStore } from "./space/packages/store.ts";
 import { PackageInstaller } from "./space/packages/install.ts";
+import { StandaloneServices } from "./space/packages/standalone.ts";
 import { PackageRuntime } from "./space/packages/runtime.ts";
 import { Connections } from "./space/packages/connections.ts";
 import { PackageLinks, createConnectionRoutes } from "./space/packages/links.ts";
@@ -97,7 +98,13 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const storage = await openStorage(ws, config);
   const packageEnvFor = async (app: string) => ({ ...await loadAppEnv(storage.appDataDir(app)), ...await storage.envFor(app) });
   const appEnvFor = (app: string) => packageStore.list().some((o) => o.app === app && o.state === "installed") ? packageEnvFor(app) : storage.envFor(app);
-  const packageRuntime = new PackageRuntime({ envFor: packageEnvFor, logDir: ws.logs });
+  // An app the owner switched to run on its own is a service of the operating system (docs/app-packages.md#running-on-its-own).
+  const serviceUnitDir = env.SPACE_SERVICE_UNITS?.trim() || undefined;
+  const standalone = new StandaloneServices({
+    manager: process.platform === "darwin" ? new Launchctl({ logDir: ws.logs, ...(serviceUnitDir ? { unitDir: serviceUnitDir } : {}) }) : new Systemctl({ unitDir: serviceUnitDir ?? join(env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config"), "systemd", "user") }),
+    spaceId: packageStore.spaceId, envDir: join(ws.run, "env"), logDir: ws.logs,
+  });
+  const packageRuntime = new PackageRuntime({ envFor: packageEnvFor, logDir: ws.logs, standalone, settings: { get: (app) => packageStore.runtimeSetting(app), set: (app, setting) => packageStore.setRuntimeSetting(app, setting) } });
   let registerPackage: ((dir: string) => Promise<void>) | undefined;
   const activatePackage = async (app: string) => {
     const installed = await packageInstaller.load(app);
@@ -109,6 +116,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     suspend: (app) => packageRuntime.suspend(app),
     activate: activatePackage,
     verify: (app) => packageRuntime.verify(app),
+    forget: (app) => packageRuntime.forget(app),
     remove: async (app) => {
       await packageRuntime.remove(app);
       scheduler.forget(app); registry.remove(app); bus.forget(app);
@@ -462,7 +470,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     console.error(`[space] ${app}: no directory in the workspace, ${s.orphaned.length} task(s) orphaned`);
   }
   // The units of apps that left while the space was down; a skipped directory still owns its unit.
-  for (const app of await supervisor.sweep(new Set([...registry.list().map((e) => e.manifest.app), ...skippedNames]))) console.error(`[services] ${app}: no app of that name, its unit was removed`);
+  for (const app of await supervisor.sweep(new Set([...registry.list().map((e) => e.manifest.app), ...skippedNames, ...packageStore.installed().map((o) => standalone.key(o.app))]))) console.error(`[services] ${app}: no app of that name, its unit was removed`);
   notify.start();
   bus.start();
   await scheduler.start();

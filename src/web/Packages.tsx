@@ -3,7 +3,8 @@ import { getJson, sendJson } from "./api.ts";
 import { useLang } from "./i18n.ts";
 import { pollWhileVisible } from "./poll.ts";
 
-type App = { app: string; title: string; version: string; url: string; page?: boolean; state?: string; offline?: { features: string[]; online: string[] }; sourceIncluded?: boolean };
+type Runtime = { state: string; kind: string; mode?: string; declaredMode?: string; unit?: string; pid?: number; startedAt?: string; error?: string };
+type App = { app: string; title: string; version: string; url: string; page?: boolean; state?: string; runtime?: Runtime; offline?: { features: string[]; online: string[] }; sourceIncluded?: boolean };
 type Catalogue = { spaceId: string; apps: App[]; remotes: { connectionId: string; spaceId: string; available: boolean; apps: App[] }[] };
 type Connection = { id: string; remoteSpaceId: string; direction: string; apps: string[]; enabled: boolean; connected: boolean };
 type Operation = { id: string; app: string; version: string; state: string };
@@ -71,7 +72,23 @@ export default function Packages({ onChange }: { onChange?: () => void }) {
       <div className="package-line"><b>{a.title}</b><span>{a.version}</span>{a.page !== false && <a href={a.url} target="_blank" rel="noopener noreferrer">{t("packages.open")}</a>}</div>
       {a.offline && <p className="setnote">{t("packages.offline")}: {a.offline.features.join(" · ") || t("packages.none")}<br />{t("packages.online")}: {a.offline.online.join(" · ") || t("packages.none")}</p>}
       {local && <>
-        <p className="setnote">{t(`packages.runtime.${a.state ?? "unavailable"}` as Parameters<typeof t>[0])}</p>
+        <p className="setnote">{t(`packages.runtime.${a.state ?? "unavailable"}` as Parameters<typeof t>[0])}
+          {a.runtime?.pid ? <> · {t("packages.runtime.pid")} {a.runtime.pid}</> : null}
+          {a.runtime?.startedAt ? <> · {t("packages.runtime.since")} {new Date(a.runtime.startedAt).toLocaleString()}</> : null}
+          {a.runtime?.unit ? <><br />{t("packages.runtime.unit")}: {a.runtime.unit}</> : null}
+          {a.runtime?.error && a.state !== "running" ? <><br />{a.runtime.error}</> : null}</p>
+        {a.runtime?.kind === "process" && <div className="package-line">
+          {a.state === "running" || a.state === "starting"
+            ? <button disabled={busy} onClick={() => { if (window.confirm(t("packages.stopConfirm"))) void act(() => sendJson("POST", `/api/panel/packages/apps/${a.app}/runtime`, { action: "stop" })); }}>{t("packages.stop")}</button>
+            : <button disabled={busy || a.state === "paused" || a.state === "archived"} onClick={() => void act(() => sendJson("POST", `/api/panel/packages/apps/${a.app}/runtime`, { action: "start" }))}>{t("packages.start")}</button>}
+          <button disabled={busy || a.state === "paused" || a.state === "archived"} onClick={() => void act(() => sendJson("POST", `/api/panel/packages/apps/${a.app}/runtime`, { action: "restart" }))}>{t("packages.restart")}</button>
+          <select aria-label={t("packages.mode")} disabled={busy} value={a.runtime.mode} onChange={(e) => {
+            const mode = e.target.value === a.runtime!.declaredMode ? "default" : e.target.value;
+            void act(() => sendJson("POST", `/api/panel/packages/apps/${a.app}/runtime`, { mode }));
+          }}>
+            {(["on-demand", "background", "standalone"] as const).map((m) => <option key={m} value={m}>{t(`packages.mode.${m}`)}{m === a.runtime!.declaredMode ? ` (${t("packages.mode.declared")})` : ""}</option>)}
+          </select>
+        </div>}
         <p className="setnote">{t(a.sourceIncluded ? "packages.sourceYes" : "packages.sourceNo")}</p>
         <div className="package-line">
           <select aria-label={t("packages.rollback")} disabled={busy} defaultValue="" onChange={(e) => {
