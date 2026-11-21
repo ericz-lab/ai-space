@@ -58,8 +58,16 @@ jobs:
           - runner: macos-26
             os: macos
             arch: arm64
+          # The Server on Windows itself, no WSL: bun.exe inside, install.ps1 beside it.
+          - runner: windows-2025
+            os: windows
+            arch: x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
+    defaults:
+      run:
+        # One shell for every system; the steps below are written for it.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -75,6 +83,8 @@ jobs:
           git -c user.name=release -c user.email=release@localhost commit -qam "release $VERSION" || true
       - run: bun release/server.ts --out dist
       - name: smoke test
+        # The smoke test starts the archive through its bash launcher; the Windows archive is covered by release/get.test.ts.
+        if: matrix.os != 'windows'
         run: bun release/smoke.ts dist/ai-space-server-*.tar.gz
       - uses: actions/upload-artifact@v4
         with:
@@ -286,7 +296,8 @@ jobs:
           merge-multiple: true
       - name: the one-command installer
         # ai-space.me/install.sh sends curl to this release asset (docs/release.md#one-command-install).
-        run: cp release/get.sh dist/install.sh
+        # ai-space.me/install.ps1 does the same for Windows: irm https://ai-space.me/install.ps1 | iex.
+        run: cp release/get.sh dist/install.sh && cp release/get.ps1 dist/install.ps1
       - name: checksums and manifest
         run: bun release/manifest.ts dist --version "${{ needs.version.outputs.version }}" --commit "$GITHUB_SHA" --run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
       - name: draft release
