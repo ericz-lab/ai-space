@@ -278,6 +278,9 @@ jobs:
           # The release files only, not the WSL bundles the Windows app carries inside.
           pattern: "{server,linux,windows,client,local}-*"
           merge-multiple: true
+      - name: the one-command installer
+        # ai-space.me/install.sh sends curl to this release asset (docs/release.md#one-command-install).
+        run: cp release/get.sh dist/install.sh
       - name: checksums and manifest
         run: bun release/manifest.ts dist --version "${{ needs.version.outputs.version }}" --commit "$GITHUB_SHA" --run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
       - name: draft release

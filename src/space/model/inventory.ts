@@ -1,10 +1,11 @@
-import { rename } from "node:fs/promises";
+import { chmod, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { isOperator } from "../auth.ts";
 import { isHarnessAppCli } from "../local.ts";
 import { RUNTIMES_FILE, parseRuntimesYaml, runtimesFromEnv } from "../runtimes/config.ts";
+import { MAGPIE_CALLER_KEY, MAGPIE_MODEL_PATTERN, type MagpieInfo, findMagpie } from "../runtimes/magpie.ts";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
-import { RUNTIME_NAME_PATTERN, type RuntimesConfig } from "../runtimes/types.ts";
+import { MODEL_TIERS, RUNTIME_NAME_PATTERN, type RuntimeSpec, type RuntimesConfig, type TierModels } from "../runtimes/types.ts";
 import { AGENT_CLIS, type HealthCell, type RuntimeHealth } from "./health.ts";
 
 /**
@@ -17,6 +18,12 @@ import { AGENT_CLIS, type HealthCell, type RuntimeHealth } from "./health.ts";
  *   POST /api/model/status/probe       probe every runtime and CLI again now, refresh the peers; answers as GET
  *   POST /api/model/runtimes {kind}    add the CLI found here as a runtime in runtimes.yaml (operator only);
  *                                      { ok, runtime, restart: true }: it is offered after ai-space restarts
+ *   POST /api/model/runtimes {kind: "magpie", model | models}
+ *                                      add magpie's gateway as a runtime (docs/runtimes.md#magpie): Claude Code
+ *                                      through it when this machine has Claude Code, else its Messages API;
+ *                                      the models must be ones magpie offers now
+ *
+ * The inventory's `magpie` says whether magpie is on this machine and what it offers.
  */
 
 export type CliEntry = {
@@ -92,7 +99,34 @@ export type InventoryOptions = {
   /** Operator token; with the owner's session it is who may change runtimes.yaml. */
   token: string;
   env?: Record<string, string | undefined>;
+  /** Look for magpie on this machine; tests replace it. */
+  magpie?: () => Promise<MagpieInfo>;
 };
+
+/** magpie on this machine, as the panel shows it (docs/runtimes.md#magpie). */
+export type MagpieView = MagpieInfo & {
+  /** Some runtime answers through this gateway (a Claude Code runtime with `magpie:`, or an API runtime at its `/v1/messages`). */
+  configured: boolean;
+  runtimes: string[];
+  /** What adding it makes: Claude Code through magpie (chat, agents, tools), or its Messages API (answers only). */
+  adds: "claude-code" | "anthropic-api";
+};
+
+/** A runtime that answers through the gateway at `url`: Claude Code with `magpie:` there, or an API runtime at its `/v1/messages`. */
+export function usesGateway(spec: RuntimeSpec, url: string): boolean {
+  if (spec.kind === "claude-code") return spec.magpie === url;
+  if (spec.kind === "anthropic-api") return spec.apiUrl.replace(/\/v1\/messages\/?$/, "") === url;
+  return false;
+}
+
+/** magpie's row: what the probe found, which runtimes use that gateway, and what adding it would make. */
+export function magpieView(info: MagpieInfo, runtimes: RuntimeRegistry, claude: CliEntry | undefined): MagpieView {
+  const uses = runtimes.list().filter((r) => {
+    const spec = runtimes.spec(r.name);
+    return spec ? usesGateway(spec, info.url) : false;
+  });
+  return { ...info, configured: uses.length > 0, runtimes: uses.map((r) => r.name), adds: claude?.installed && claude.path ? "claude-code" : "anthropic-api" };
+}
 
 export function inventory(opts: Pick<InventoryOptions, "health" | "runtimes" | "peers">): MachineInventory[] {
   const rows = [machineRow(opts.health, opts.runtimes, "", "local"), ...opts.runtimes.machineList().map((m) => machineRow(opts.health, opts.runtimes, m.name, "ssh"))];
@@ -132,6 +166,60 @@ export function addRuntimeText(current: string | undefined, entry: { cli: string
   return { text: next, name };
 }
 
+/**
+ * runtimes.yaml with a runtime that answers through magpie, as `magpie` or the next free `magpie-<n>`:
+ * Claude Code through the gateway when `claude` is its path (chat, agent tasks and answers, with
+ * tools), else the gateway's Messages API (answers only), whose caller key goes in `.env` as
+ * MAGPIE_API_KEY. Every tier is pinned, since Claude's own model names mean nothing to magpie.
+ */
+export function addMagpieRuntimeText(current: string | undefined, entry: { url: string; models: TierModels; claude?: string }, env: Record<string, string | undefined> = process.env): { text: string; name: string; envUpdates: Record<string, string> } {
+  const text = current ?? envRuntimesText(runtimesFromEnv(env));
+  const lines = text.split("\n");
+  const at = lines.findIndex((l) => /^runtimes:\s*(#.*)?$/.test(l));
+  if (at < 0) throw new Error(`${RUNTIMES_FILE} has no block-style runtimes: mapping to add to; add the runtime by hand`);
+  const { config } = parseRuntimesYaml(text, { ...env, MAGPIE_API_KEY: env.MAGPIE_API_KEY || MAGPIE_CALLER_KEY });
+  const already = config.runtimes.find((r) => usesGateway(r, entry.url));
+  if (current !== undefined && already) throw new Error(`${RUNTIMES_FILE} already has runtime ${already.name} through magpie; restart ai-space to use it`);
+  const taken = new Set(config.runtimes.map((r) => r.name));
+  let name = "magpie";
+  for (let i = 2; taken.has(name); i++) name = `magpie-${i}`;
+  const child = lines.slice(at + 1).find((l) => l.trim() && !l.trim().startsWith("#"));
+  const i1 = /^(\s+)/.exec(child ?? "")?.[1] ?? "  ";
+  const i2 = i1 + i1;
+  const block = [`${i1}${name}:`];
+  const envUpdates: Record<string, string> = {};
+  if (entry.claude) {
+    block.push(`${i2}# Claude Code answering through magpie: GLM, Kimi, MiniMax and the other providers magpie holds (docs/runtimes.md#magpie)`, `${i2}kind: claude-code`, `${i2}bin: [${JSON.stringify(entry.claude)}]`, `${i2}magpie: ${entry.url}`);
+  } else {
+    block.push(`${i2}# magpie's Messages API: answers only, no tools or chat (docs/runtimes.md#magpie)`, `${i2}kind: anthropic-api`, `${i2}url: ${entry.url}/v1/messages`, `${i2}apiKeyEnv: MAGPIE_API_KEY`);
+    if (!env.MAGPIE_API_KEY?.trim()) envUpdates.MAGPIE_API_KEY = MAGPIE_CALLER_KEY;
+  }
+  block.push(`${i2}models:`);
+  for (const tier of MODEL_TIERS) if (entry.models[tier]) block.push(`${i2}${i1}${tier}: ${JSON.stringify(entry.models[tier])}`);
+  lines.splice(at + 1, 0, ...block);
+  const next = lines.join("\n");
+  const parsed = parseRuntimesYaml(next, { ...env, ...envUpdates });
+  if (!parsed.config.runtimes.some((r) => r.name === name)) throw new Error(`the new ${RUNTIMES_FILE} does not carry runtime ${name}`);
+  return { text: next, name, envUpdates };
+}
+
+/** The tiers a request names: one model for all four, or a model per tier; each one magpie offers. */
+export function magpieTiers(body: { model?: unknown; models?: unknown }, offered: string[]): TierModels | { error: string } {
+  const out: TierModels = {};
+  if (typeof body.model === "string" && body.model) for (const tier of MODEL_TIERS) out[tier] = body.model;
+  if (body.models && typeof body.models === "object") {
+    for (const [tier, model] of Object.entries(body.models as Record<string, unknown>)) {
+      if (!(MODEL_TIERS as readonly string[]).includes(tier)) return { error: `unknown tier ${tier}` };
+      if (typeof model === "string" && model) out[tier as keyof TierModels] = model;
+    }
+  }
+  const picked = Object.values(out);
+  if (!picked.length) return { error: "name the model magpie should answer with (model, or models by tier)" };
+  const bad = picked.find((m) => !MAGPIE_MODEL_PATTERN.test(m!) || !offered.includes(m!));
+  if (bad) return { error: `magpie does not offer ${bad}; check again and pick one of its models` };
+  return out;
+}
+
 /** The environment's runtimes as a file, so writing one keeps what the space runs today. Keys stay in the environment. */
 function envRuntimesText(config: RuntimesConfig): string {
   const out = ["# Written by ai-space when a runtime was added from the panel; it replaces SPACE_MODEL_* (docs/runtimes.md).", ...(config.default ? [`default: ${config.default}`] : []), "runtimes:"];
@@ -149,7 +237,10 @@ function envRuntimesText(config: RuntimesConfig): string {
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 
 export function createInventoryRoutes(opts: InventoryOptions) {
-  const list = () => json({ ok: true, machines: inventory(opts) });
+  const env = opts.env ?? process.env;
+  const findMagpieHere = opts.magpie ?? (() => findMagpie({ env }));
+  const localClaude = () => machineRow(opts.health, opts.runtimes, "", "local").clis.find((c) => c.kind === "claude-code");
+  const list = async () => json({ ok: true, machines: inventory(opts), magpie: magpieView(await findMagpieHere(), opts.runtimes, localClaude()) });
   return {
     "/api/model/inventory": { GET: list },
     "/api/model/status/probe": {
@@ -162,7 +253,8 @@ export function createInventoryRoutes(opts: InventoryOptions) {
     "/api/model/runtimes": {
       POST: async (req: Request) => {
         if (!isOperator(req, opts.token)) return json({ ok: false, error: "unauthorized" }, 401);
-        const body = (await req.json().catch(() => null)) as { kind?: unknown } | null;
+        const body = (await req.json().catch(() => null)) as { kind?: unknown; model?: unknown; models?: unknown } | null;
+        if (body?.kind === "magpie") return addMagpie(body);
         const known = AGENT_CLIS.find((c) => c.kind === body?.kind);
         if (!known) return json({ ok: false, error: `kind must be one of ${AGENT_CLIS.map((c) => c.kind).join(", ")}` }, 400);
         // Only what this space found itself: the path comes from its own probe, never from the request.
@@ -184,4 +276,40 @@ export function createInventoryRoutes(opts: InventoryOptions) {
       },
     },
   };
+
+  /** Add magpie as a runtime: only a gateway this space found answering, with models it offers. */
+  async function addMagpie(body: { model?: unknown; models?: unknown }): Promise<Response> {
+    const info = await findMagpieHere();
+    if (!info.running) return json({ ok: false, error: `magpie does not answer (${info.error ?? info.url}); start it, then check again` }, 409);
+    const view = magpieView(info, opts.runtimes, localClaude());
+    if (view.configured) return json({ ok: false, error: `magpie is already a runtime (${view.runtimes.join(", ")})` }, 409);
+    const tiers = magpieTiers(body, info.models);
+    if ("error" in tiers) return json({ ok: false, error: tiers.error }, 400);
+    const file = join(opts.home, RUNTIMES_FILE);
+    const f = Bun.file(file);
+    const claude = localClaude();
+    let next: ReturnType<typeof addMagpieRuntimeText>;
+    try {
+      next = addMagpieRuntimeText((await f.exists()) ? await f.text() : undefined, { url: info.url, models: tiers, ...(view.adds === "claude-code" ? { claude: claude!.path! } : {}) }, env);
+    } catch (e) {
+      return json({ ok: false, error: (e as Error).message }, 409);
+    }
+    if (Object.keys(next.envUpdates).length) {
+      // The caller key is not a secret (magpie needs none from loopback); it names ai-space in magpie's usage.
+      // Loaded here, not at the top: setup.ts imports this file for the same runtimes.yaml edit.
+      const { updateEnvText } = await import("../setup.ts");
+      const envFile = join(opts.home, ".env");
+      const ef = Bun.file(envFile);
+      await writeAtomic(envFile, updateEnvText((await ef.exists()) ? await ef.text() : "", next.envUpdates), 0o600);
+    }
+    await writeAtomic(file, next.text);
+    return json({ ok: true, runtime: next.name, kind: view.adds, restart: true });
+  }
+}
+
+async function writeAtomic(file: string, text: string, mode?: number): Promise<void> {
+  const tmp = `${file}.${process.pid}.tmp`;
+  await Bun.write(tmp, text);
+  if (mode !== undefined) await chmod(tmp, mode);
+  await rename(tmp, file);
 }

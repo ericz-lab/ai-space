@@ -42,7 +42,7 @@ Starting it inside the checkout matters: the agent reads `AGENTS.md` and the doc
 
 In both shapes, `bun run setup` is interactive and made for a terminal; an agent fills `~/.ai-space/.env` from `.env.example` instead (`deploy/install.sh` creates the file), restarts the unit, and runs the checks of step 10. Ask it to show you the `.env` values it chose before it writes them.
 
-There is no `curl | bash` installer on purpose: ai-space is only useful with a coding agent, so the agent is the installer.
+The short way, without this file: `curl -fsSL https://ai-space.me/install.sh | bash` installs the newest release (no git, no Bun, nothing asked; [release.md](release.md#one-command-install)) and leaves the panel on `http://127.0.0.1:8700/`. It still needs one coding agent signed in on the machine, as step 2 here. This file is the full path: from source, with the extensions.
 
 Secrets end up in exactly two places: the workspace `.env` (`~/.ai-space/.env`, read by ai-space and by `${VAR}` in manifests) and the tools' own stores (`~/.claude`, `~/.config/gh`, `~/.cloudflared`). Nothing is committed.
 
@@ -147,7 +147,7 @@ git push <host> main      # checks out into the unit's checkout (~/.ai-space/cor
 
 **Workspace `.env`**
 
-The interactive way: `space setup` (or `bun run setup` in `~/.ai-space/core`). It does the basic configuration: checks the tools of steps 1 and 2 (bun, git and its identity, one logged-in runtime, Claude Code or Codex) and lingering for the systemd user manager, asks for the core values below and who runs the apps' services. It then lists the extensions with their state and configures the ones you name, now or later with `space setup github`, `ingress`, `backup`, `notifications` or `peers`; an extension's tools (`gh`, `cloudflared`, `cf`, `caddy`, `tar`, `zstd`) are checked only when it is on. It sends a test message, probes the bucket, shows a summary with secrets masked, writes `~/.ai-space/.env` keeping every line it did not touch, restarts the unit, and ends with "Basic install: ready" or what is missing, then each extension as `off`, `on` or `incomplete`. Existing values are the defaults, so re-running it is how a value is changed later, and re-running the basic part keeps every extension's values.
+The interactive way: `space setup` (or `bun run setup` in `~/.ai-space/core`). It does the basic configuration: checks the tools of steps 1 and 2 (bun and one logged-in runtime: Claude Code, Codex or DeepSeek Harness; git and its identity are optional, needed only for apps from source, `space app new` and the Fix Engineer), offers [magpie](runtimes.md#magpie) as a runtime when its gateway answers on this machine and lingering for the systemd user manager, asks for the core values below and who runs the apps' services. It then lists the extensions with their state and configures the ones you name, now or later with `space setup github`, `ingress`, `backup`, `notifications` or `peers`; an extension's tools (`gh`, `cloudflared`, `cf`, `caddy`, `tar`, `zstd`) are checked only when it is on. It sends a test message, probes the bucket, shows a summary with secrets masked, writes `~/.ai-space/.env` keeping every line it did not touch, restarts the unit, and ends with "Basic install: ready" or what is missing, then each extension as `off`, `on` or `incomplete`. Existing values are the defaults, so re-running it is how a value is changed later, and re-running the basic part keeps every extension's values.
 
 By hand: edit `~/.ai-space/.env`; `.env.example` in the checkout lists every key. Set now:
 

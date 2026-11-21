@@ -60,7 +60,12 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
     if ! "$BUN" src/index.ts install-defaults; then
       echo "default apps: an installer failed (the core is fine); retry with: $BUN src/index.ts install-defaults" >&2
     fi
-    grep -qE '^SPACE_API_TOKEN=.+' "$SPACE_HOME/.env" || echo "next: $BUN src/index.ts setup   (the basic configuration; GitHub, outside access, backups, notifications and peers are optional, later: space setup <name>)"
+    if [ -f "$HERE/RELEASE.json" ]; then
+      # A release: the panel is the next step; `space setup` stays for the optional settings.
+      grep -qE '^SPACE_API_TOKEN=.+' "$SPACE_HOME/.env" || echo "next: open http://127.0.0.1:${SPACE_PORT:-8700}/ in a browser (optional settings later: space setup)"
+    else
+      grep -qE '^SPACE_API_TOKEN=.+' "$SPACE_HOME/.env" || echo "next: $BUN src/index.ts setup   (the basic configuration; GitHub, outside access, backups, notifications and peers are optional, later: space setup <name>)"
+    fi
     exit 0
   fi
 done

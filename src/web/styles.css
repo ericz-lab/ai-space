@@ -341,6 +341,10 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .cli-cell small { font-size: 12px; color: var(--muted); }
 .cli-cell .btn2 { padding: 2px 10px; font-size: 12px; }
 .cli-dim { color: var(--muted); }
+.magpie-row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px; margin: 4px 16px 0; padding: 10px 0 2px; border-top: 1px solid var(--hairline); font-size: 13px; }
+.magpie-row > b { font-weight: 500; }
+.magpie-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+.magpie-add .setselect { max-width: 100%; min-width: 0; }
 @media (max-width: 640px) {
   .setlayout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
   .setnav { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 0 12px 8px; border-bottom: 1px solid var(--hairline); scrollbar-width: none; }

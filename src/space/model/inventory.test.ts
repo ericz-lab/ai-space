@@ -6,7 +6,8 @@ import { markOwner } from "../auth.ts";
 import { parseRuntimesYaml } from "../runtimes/config.ts";
 import { RuntimeRegistry, type OptionAvailability } from "../runtimes/registry.ts";
 import { AGENT_CLIS, RuntimeHealth, availabilityOf, probeRuntime, readVersion, splitVersion, type ProbeResult, type ProbeTarget } from "./health.ts";
-import { addRuntimeText, createInventoryRoutes, inventory, machineRow, peerRow } from "./inventory.ts";
+import type { MagpieInfo } from "../runtimes/magpie.ts";
+import { addMagpieRuntimeText, addRuntimeText, createInventoryRoutes, inventory, machineRow, magpieTiers, peerRow } from "./inventory.ts";
 
 /** Which CLIs each machine has, and the choices that follow from it: docs/model-machines.md#inventory. */
 
@@ -183,6 +184,34 @@ describe("adding a CLI to runtimes.yaml", () => {
   });
 });
 
+describe("adding magpie to runtimes.yaml", () => {
+  test("Claude Code through it, every tier pinned; a taken name gets a suffix; comments kept", () => {
+    const current = "# mine\nruntimes:\n  magpie:\n    kind: codex-cli\n";
+    const r = addMagpieRuntimeText(current, { url: "http://127.0.0.1:3425", models: { basic: "a/b", junior: "c/d", intermediate: "c/d", advanced: "c/d" }, claude: "/opt/claude" }, {});
+    expect(r.name).toBe("magpie-2");
+    expect(r.envUpdates).toEqual({});
+    expect(r.text.startsWith("# mine\n")).toBe(true);
+    const spec = parseRuntimesYaml(r.text, {}).config.runtimes.find((x) => x.name === "magpie-2");
+    expect(spec).toMatchObject({ kind: "claude-code", bin: ["/opt/claude"], magpie: "http://127.0.0.1:3425", models: { basic: "a/b", advanced: "c/d" } });
+  });
+
+  test("no Claude Code: the Messages API, its caller key for .env unless already set", () => {
+    const r = addMagpieRuntimeText(undefined, { url: "http://127.0.0.1:3425", models: { basic: "a/b" } }, {});
+    expect(r.envUpdates).toEqual({ MAGPIE_API_KEY: "magpie-ai-space" });
+    expect(parseRuntimesYaml(r.text, { MAGPIE_API_KEY: "magpie-ai-space" }).config.runtimes.map((x) => x.name)).toEqual(["magpie", "claude"]);
+    expect(addMagpieRuntimeText(undefined, { url: "http://127.0.0.1:3425", models: { basic: "a/b" } }, { MAGPIE_API_KEY: "k" }).envUpdates).toEqual({});
+  });
+
+  test("the tiers a request names, each one magpie offers", () => {
+    const offered = ["zhipu/glm-4.6", "moonshot/kimi-k2.5"];
+    expect(magpieTiers({ model: "zhipu/glm-4.6" }, offered)).toEqual({ basic: "zhipu/glm-4.6", junior: "zhipu/glm-4.6", intermediate: "zhipu/glm-4.6", advanced: "zhipu/glm-4.6" });
+    expect(magpieTiers({ models: { basic: "moonshot/kimi-k2.5" } }, offered)).toEqual({ basic: "moonshot/kimi-k2.5" });
+    expect(magpieTiers({ model: "x/y" }, offered)).toEqual({ error: "magpie does not offer x/y; check again and pick one of its models" });
+    expect(magpieTiers({ models: { huge: "zhipu/glm-4.6" } }, offered)).toEqual({ error: "unknown tier huge" });
+    expect("error" in magpieTiers({}, offered)).toBe(true);
+  });
+});
+
 describe("routes", () => {
   let home: string;
   beforeEach(async () => {
@@ -192,7 +221,8 @@ describe("routes", () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  const setup = async (answers: Record<string, ProbeResult>, yaml = "runtimes:\n  claude:\n    kind: claude-code\n") => {
+  const magpieDown: MagpieInfo = { url: "http://127.0.0.1:3425", from: "default", running: false, models: [], error: "nothing answers at http://127.0.0.1:3425" };
+  const setup = async (answers: Record<string, ProbeResult>, yaml = "runtimes:\n  claude:\n    kind: claude-code\n", magpie: MagpieInfo = magpieDown) => {
     await writeFile(join(home, "runtimes.yaml"), yaml);
     const runtimes = new RuntimeRegistry(parseRuntimesYaml(yaml, {}).config);
     const health = new RuntimeHealth({ prober: table(answers) });
@@ -208,6 +238,7 @@ describe("routes", () => {
       home,
       token: "op",
       env: {},
+      magpie: async () => magpie,
     });
     return { routes, probes: () => probes };
   };
@@ -239,6 +270,43 @@ describe("routes", () => {
     expect(text).toContain('"/opt/codex"');
     expect(text).not.toContain("evil");
     expect(parseRuntimesYaml(text, {}).config.runtimes.map((x) => x.name)).toEqual(["codex", "claude"]);
+  });
+
+  test("magpie: shown with what adding it makes; added only when it answers, with models it offers", async () => {
+    const up: MagpieInfo = { bin: "/usr/local/bin/magpie", url: "http://127.0.0.1:3425", from: "gateway.json", running: true, models: ["zhipu/glm-4.6", "moonshot/kimi-k2.5"] };
+    const down = await setup({});
+    const shown = (await (await call(down.routes["/api/model/inventory"], "GET")).json()) as { magpie: { running: boolean; configured: boolean; adds: string } };
+    expect(shown.magpie).toMatchObject({ running: false, configured: false, adds: "anthropic-api" });
+    expect((await call(down.routes["/api/model/runtimes"], "POST", { kind: "magpie", model: "zhipu/glm-4.6" })).status).toBe(409);
+
+    // Claude Code is found here: magpie is added as Claude Code through it.
+    const { routes } = await setup({ "|claude": { installed: true, path: "/opt/claude", signedIn: false } }, "runtimes:\n  claude:\n    kind: claude-code\n", up);
+    await call(routes["/api/model/status/probe"], "POST");
+    expect(((await (await call(routes["/api/model/inventory"], "GET")).json()) as { magpie: { adds: string } }).magpie.adds).toBe("claude-code");
+    const add = routes["/api/model/runtimes"];
+    expect((await call(add, "POST", { kind: "magpie", model: "zhipu/glm-4.6" }, "wrong")).status).toBe(401);
+    expect((await call(add, "POST", { kind: "magpie" })).status).toBe(400);
+    expect((await call(add, "POST", { kind: "magpie", model: "evil/model" })).status).toBe(400);
+    const ok = await call(add, "POST", { kind: "magpie", model: "zhipu/glm-4.6", models: { basic: "moonshot/kimi-k2.5" } });
+    expect(await ok.json()).toEqual({ ok: true, runtime: "magpie", kind: "claude-code", restart: true });
+    const config = parseRuntimesYaml(await Bun.file(join(home, "runtimes.yaml")).text(), {}).config;
+    expect(config.runtimes.find((r) => r.name === "magpie")).toEqual({ name: "magpie", kind: "claude-code", bin: ["/opt/claude"], chatArgs: [], magpie: "http://127.0.0.1:3425", models: { basic: "moonshot/kimi-k2.5", junior: "zhipu/glm-4.6", intermediate: "zhipu/glm-4.6", advanced: "zhipu/glm-4.6" } });
+    expect(await Bun.file(join(home, ".env")).exists()).toBe(false);
+    // Added and not running yet: a second add says to restart.
+    const again = await call(add, "POST", { kind: "magpie", model: "zhipu/glm-4.6" });
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toContain("restart ai-space");
+  });
+
+  test("magpie without Claude Code here: its Messages API, with the caller key in .env", async () => {
+    const up: MagpieInfo = { url: "http://127.0.0.1:3425", from: "default", running: true, models: ["zhipu/glm-4.6"] };
+    const { routes } = await setup({}, "runtimes:\n  codex:\n    kind: codex-cli\n", up);
+    const ok = await call(routes["/api/model/runtimes"], "POST", { kind: "magpie", model: "zhipu/glm-4.6" });
+    expect(await ok.json()).toEqual({ ok: true, runtime: "magpie", kind: "anthropic-api", restart: true });
+    const env = await Bun.file(join(home, ".env")).text();
+    expect(env).toContain("MAGPIE_API_KEY=magpie-ai-space");
+    const config = parseRuntimesYaml(await Bun.file(join(home, "runtimes.yaml")).text(), { MAGPIE_API_KEY: "magpie-ai-space" }).config;
+    expect(config.runtimes.find((r) => r.name === "magpie")).toMatchObject({ kind: "anthropic-api", apiUrl: "http://127.0.0.1:3425/v1/messages", models: { basic: "zhipu/glm-4.6" } });
   });
 
   test("the owner's session counts as the operator", async () => {

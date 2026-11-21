@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { whichUsable, withUserToolDirs } from "../host-tools.ts";
 import { dshAppCandidates, isHarnessAppCli } from "../local.ts";
+import { findMagpie } from "../runtimes/magpie.ts";
 import { spawnCollect } from "../runtimes/process.ts";
 import type { OptionAvailability } from "../runtimes/registry.ts";
 import type { RuntimeSpec } from "../runtimes/types.ts";
@@ -242,7 +243,7 @@ export function readVersion(text: string): string | undefined {
 }
 
 /** The default prober: no tokens spent, the same command line the adapter itself would run. */
-export function probeRuntime(spawn: Spawn = spawnCollect, env: Record<string, string | undefined> = process.env, home = homedir()): Prober {
+export function probeRuntime(spawn: Spawn = spawnCollect, env: Record<string, string | undefined> = process.env, home = homedir(), fetchFn: typeof fetch = fetch): Prober {
   return async ({ spec, ssh, discover }) => {
     if (spec.kind === "anthropic-api") return { installed: true, signedIn: Boolean(spec.apiKey) };
     let bin = spec.bin.length ? spec.bin : [defaultBin(spec.kind)];
@@ -262,10 +263,20 @@ export function probeRuntime(spawn: Spawn = spawnCollect, env: Record<string, st
     const version = await localVersion(spawn, bin, env);
     const extra = { ...(version ? { version } : {}), ...(path ? { path } : {}) };
     if (spec.kind === "deepseek-harness") return { ...dshSignedIn(spec.home, spec.provider ?? (path && isHarnessAppCli(path) ? "deepseek-account" : undefined), env), ...extra };
+    // Through magpie the CLI's own sign-in is not used: what counts is that the gateway answers with models.
+    if (spec.kind === "claude-code" && spec.magpie) return { installed: true, ...extra, ...(await magpieSignedIn(spec.magpie, env, fetchFn)) };
     const r = await spawn([...bin, ...statusArgs(spec.kind)], { timeoutMs: PROBE_TIMEOUT_MS, env });
     if (r.timedOut) return { installed: true, ...extra, ...timedOut(`${bin[0]} ${statusArgs(spec.kind).join(" ")}`) };
     return { installed: true, ...extra, ...readStatus(spec.kind, r.code, r.stdout, r.stderr) };
   };
+}
+
+/** A runtime through magpie is "signed in" while its gateway answers its model list with at least one model. */
+async function magpieSignedIn(url: string, env: Record<string, string | undefined>, fetchFn: typeof fetch): Promise<ProbeResult> {
+  const m = await findMagpie({ env, url, fetch: fetchFn, which: () => undefined });
+  if (!m.running) return { signedIn: false, detail: `magpie: ${m.error ?? "no answer"}` };
+  if (!m.models.length) return { signedIn: false, detail: `magpie at ${m.url} offers no model yet: add a provider in magpie` };
+  return { signedIn: true };
 }
 
 /** A probe that ran out of time: its own state, never read as signed out. */

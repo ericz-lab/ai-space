@@ -58,6 +58,7 @@ async function deps(io: SetupIO, env: Record<string, string | undefined>, over: 
     fetch: (async () => new Response(JSON.stringify({ ok: true, result: [] }))) as unknown as typeof fetch,
     randomToken: () => "tok-" + "a".repeat(60),
     hostname: () => "box",
+    findMagpie: async () => ({ url: "http://127.0.0.1:3425", from: "default", running: false, models: [] }),
     ...over,
   };
 }
@@ -172,6 +173,53 @@ describe("runSetup", () => {
     expect((await runSetup(codex)).missing).toEqual([]);
     const none = await deps(scripted([["Write them?", false]]), { SPACE_API_TOKEN: "t" }, { which: async () => undefined });
     expect((await runSetup(none)).missing).toEqual(["AI runtime"]);
+  });
+
+  test("git is optional: a release install without git or a git identity is ready", async () => {
+    const io = scripted([["Write them?", false]]);
+    const d = await deps(io, { SPACE_API_TOKEN: "t" }, {
+      which: async (cmd) => (cmd === "claude" ? "/usr/bin/claude" : undefined),
+      run: async (cmd) => (cmd[0] === "git" ? { code: 127, stdout: "", stderr: "missing" } : cmd[0] === "claude" ? { code: 0, stdout: '{"result":"ok"}\n', stderr: "" } : { code: 0, stdout: "1.3.0\n", stderr: "" }),
+    });
+    expect((await runSetup(d)).missing).toEqual([]);
+    const log = io.log.join("\n");
+    expect(log).toMatch(/--\s+git\s+not installed\s+→\s+apt-get install git \(optional/);
+    expect(log).not.toContain("git identity");
+  });
+
+  test("DeepSeek Harness alone is a runtime", async () => {
+    const d = await deps(scripted([["Write them?", false]]), { SPACE_API_TOKEN: "t" }, {
+      which: async (cmd) => (cmd === "dsh" ? "/usr/bin/dsh" : undefined),
+      run: async (cmd) => (cmd[0] === "sh" ? { code: 0, stdout: "", stderr: "" } : { code: 0, stdout: "1.3.0\n", stderr: "" }),
+    });
+    expect((await runSetup(d)).missing).toEqual([]);
+  });
+
+  test("magpie answering here: offered as Claude Code through it, written to runtimes.yaml with the summary", async () => {
+    const io = scripted([["Add magpie as a runtime", true], ["Model for every tier", "2"], ["basic tier", "zhipu/glm-4.5-air"], ["Write them?", true], ["Restart the ai-space unit", false]]);
+    const d = await deps(io, { SPACE_API_TOKEN: "t" }, {
+      which: async (cmd) => (cmd === "claude" ? "/opt/claude" : undefined),
+      findMagpie: async () => ({ bin: "/usr/local/bin/magpie", url: "http://127.0.0.1:3425", from: "default", running: true, models: ["zhipu/glm-4.5-air", "zhipu/glm-4.6", "moonshot/kimi-k2.5"] }),
+    });
+    await runSetup(d);
+    expect(io.remaining).toEqual([]);
+    const log = io.log.join("\n");
+    expect(log).toMatch(/ok\s+magpie\s+answering at http:\/\/127\.0\.0\.1:3425, 3 models/);
+    expect(log).toContain("runtimes.yaml: add runtime magpie (Claude Code through magpie)");
+    const { parseRuntimesYaml } = await import("./runtimes/config.ts");
+    const config = parseRuntimesYaml(await Bun.file(join(d.ws.home, "runtimes.yaml")).text(), {}).config;
+    expect(config.runtimes.find((r) => r.name === "magpie")).toMatchObject({ kind: "claude-code", bin: ["/opt/claude"], magpie: "http://127.0.0.1:3425", models: { basic: "zhipu/glm-4.5-air", junior: "zhipu/glm-4.6", intermediate: "zhipu/glm-4.6", advanced: "zhipu/glm-4.6" } });
+
+    // Run again: magpie is a runtime now, nothing is offered.
+    const again = scripted([["Write them?", false]]);
+    await runSetup({ ...d, io: again });
+    expect(again.log.join("\n")).toContain("used by runtime magpie");
+  });
+
+  test("magpie absent: one optional line, nothing asked", async () => {
+    const io = scripted([["Write them?", false]]);
+    await runSetup(await deps(io, { SPACE_API_TOKEN: "t" }));
+    expect(io.log.join("\n")).toMatch(/--\s+magpie\s+not found\s+→\s+optional/);
   });
 
   test("re-run with every extension set: changes nothing, writes nothing, keeps the extensions", async () => {

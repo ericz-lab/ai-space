@@ -319,6 +319,12 @@ export type ClaudeCodeSpec = {
   chatArgs: string[];
   /** Home directory whose `.claude/projects` holds the transcripts; default the process's (tests). */
   transcriptHome?: string;
+  /**
+   * magpie's gateway (`http://127.0.0.1:3425`): the CLI answers through it, with ai-space's caller key
+   * and the `models:` pins as its models (docs/runtimes.md#magpie). Such a runtime runs on this
+   * machine only, never over ssh.
+   */
+  magpie?: string;
 };
 
 /** The Messages API with a key: answers only, no tools, no login state. */

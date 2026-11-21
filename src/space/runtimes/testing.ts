@@ -11,7 +11,8 @@
  * an init line, the answer in two text deltas and the same result envelope last.
  * A prompt that ends with an "Attached files" block makes it report each file's
  * size on disk (`[files: a1.png=812 a2.jpg=missing]`), so a test can prove the
- * bytes reached the runtime.
+ * bytes reached the runtime. Started with magpie's caller key (a runtime through magpie), it appends
+ * that address, its token and the alias models it was given.
  *
  * Used as the `bin` of a claude-code runtime in tests; `fakeModelBin()` builds the command.
  */
@@ -43,7 +44,10 @@ if (import.meta.main) {
     process.exit(1);
   }
   const files = [...prompt.matchAll(/^- ([a-z0-9]+\.[a-z]+): (.+)$/gm)].map(([, name, path]) => `${name}=${Bun.file(path!).size || "missing"}`);
-  const result = `answer to: ${prompt} [args: ${args.join(" ")}]${process.env.MAX_THINKING_TOKENS !== undefined ? ` [thinking: ${process.env.MAX_THINKING_TOKENS}]` : ""}${files.length ? ` [files: ${files.join(" ")}]` : ""}`;
+  // Through a gateway (magpie): what the process was given, so a test sees where it would send its calls.
+  const e = process.env;
+  const gateway = e.ANTHROPIC_AUTH_TOKEN?.startsWith("magpie-") ? ` [gateway: ${e.ANTHROPIC_BASE_URL} token=${e.ANTHROPIC_AUTH_TOKEN ?? ""} haiku=${e.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? ""} opus=${e.ANTHROPIC_DEFAULT_OPUS_MODEL ?? ""} apikey=${e.ANTHROPIC_API_KEY ? "set" : "unset"}]` : "";
+  const result = `answer to: ${prompt} [args: ${args.join(" ")}]${process.env.MAX_THINKING_TOKENS !== undefined ? ` [thinking: ${process.env.MAX_THINKING_TOKENS}]` : ""}${files.length ? ` [files: ${files.join(" ")}]` : ""}${gateway}`;
   if (args.includes("stream-json")) {
     const delta = (text: string) => JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } } });
     console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "fake" }));

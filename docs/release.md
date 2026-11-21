@@ -25,6 +25,7 @@ person: the pipeline ends in a draft GitHub Release.
 | `ai-space-windows-client-<version>-x64.zip` | Client | The Windows app ([windows-desktop.md](windows-desktop.md)), not signed; `AISpace.exe` in it runs and offers to install itself for the user |
 | `ai-space-windows-local-<version>-x64.zip` | Local | The Windows app with the Linux release it sets up in WSL 2 ([local.md](local.md#on-windows)) |
 | `ai-space-windows-client-…-arm64.zip`, `ai-space-windows-local-…-arm64.zip` | Client, Local | The same for arm64 |
+| `install.sh` | Server | The one-command installer ([below](#one-command-install)); `release/get.sh` in the repository |
 | `SHA256SUMS` | | `sha256sum -c SHA256SUMS --ignore-missing` checks a download |
 | `manifest.json` | | Version, commit, the run that built it, every file's size and SHA-256 |
 
@@ -82,6 +83,35 @@ Environments; restrict it to tags and add a required reviewer so only a trusted 
 The certificate comes from an Apple Developer Program membership (Certificates → Developer ID
 Application). An "Apple Development" certificate does not notarize. Without these secrets the run
 still produces the `-unsigned` DMG.
+
+## One-command install
+
+```bash
+curl -fsSL https://ai-space.me/install.sh | bash
+```
+
+`https://ai-space.me/install.sh` redirects to the latest release's `install.sh` (`release/get.sh`),
+so the command always runs the installer that came with the newest published release. On Linux
+with systemd it picks the Server archive for the machine (x64 or arm64) from the same release,
+checks it against `SHA256SUMS`, unpacks it in a temporary folder and runs the archive's own
+`install.sh` ([below](#installing-the-server-edition)). It asks nothing, needs no sudo, Bun, git or
+account, and refuses to run as root. At the end it prints the panel's address
+(`http://127.0.0.1:8700/`) and opens it on a desktop; over SSH it prints the port forward instead.
+When no agent CLI is found (`claude`, `codex`, `dsh`) it says how to get one: ai-space works through
+one signed-in CLI, and the installer never installs one. Running it again upgrades.
+
+Settings, all optional, as environment variables before `bash`:
+
+| Variable | What it does |
+| --- | --- |
+| `AI_SPACE_VERSION` | That release (`0.2.0` or `v0.2.0`) instead of the latest |
+| `AI_SPACE_PREFIX` | Where the program goes (default `~/.local/share/ai-space`) |
+| `SPACE_HOME` | Where the workspace goes (default `~/.ai-space`) |
+| `AI_SPACE_DOWNLOAD` | Where the release's files are: a mirror, or `file://<dir>` with the files downloaded already |
+| `AI_SPACE_NO_OPEN` | `1`: do not open a browser at the end |
+
+Not yet: the Mac (the installer stops and says so; the Local app is the Mac's way for now),
+Windows (the Local zip), a machine without a systemd user manager.
 
 ## Installing the Server edition
 
@@ -196,6 +226,10 @@ is checked against.
 - The tag's run is green, and `manifest.json` names the tag's commit.
 - On a clean Linux machine (no Bun): install the archive, `space status`, open the panel over an
   SSH forward; install it over the previous release and see the apps and data still there.
+- The one-command installer against the draft (its files are not public yet):
+  `gh release download v<version> --dir rel && AI_SPACE_DOWNLOAD=file://$PWD/rel bash rel/install.sh`
+  on a clean Linux machine, then the panel opens and `space status` answers. After publishing,
+  `curl -fsSL https://ai-space.me/install.sh | bash` on another one.
 - On a GNOME desktop (Ubuntu 24.04): unpack the Linux client, `./install.sh`, open it from the app
   grid, connect it to a Space, send a chat message, open a terminal; with the Local tarball, set up
   the Space on that machine and see `systemctl --user status ai-space-local` running.

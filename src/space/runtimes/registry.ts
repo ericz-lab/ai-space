@@ -41,6 +41,11 @@ export type MachineTierOption = TierOption & { machine: string };
 /** Kinds whose answers can run over ssh. */
 const SSH_KINDS = new Set<RuntimeSpec["kind"]>(["claude-code", "codex-cli", "deepseek-harness"]);
 
+/** Whether a runtime's answers can run on another machine's login: its kind can, and it does not go through magpie here. */
+function runsOverSsh(spec: RuntimeSpec): boolean {
+  return SSH_KINDS.has(spec.kind) && !(spec.kind === "claude-code" && spec.magpie);
+}
+
 /** `machine:runtime/model` → its parts; `undefined` when the string names no machine. */
 export function splitMachine(model: string): { machine: string; runtime: string; model: string } | undefined {
   const slash = model.indexOf("/");
@@ -91,7 +96,8 @@ export class RuntimeRegistry {
       const sshHost = "sshHost" in spec ? spec.sshHost : undefined;
       this.byName.set(spec.name, sshHost ? { ...adapter, machine: sshHost } : adapter);
       this.specs.set(spec.name, spec);
-      this.models.set(spec.name, { ...TIER_DEFAULTS[spec.kind], ...spec.models });
+      // Through magpie, Claude's own names mean nothing: only the pins (magpie's ids) give the tiers.
+      this.models.set(spec.name, { ...(spec.kind === "claude-code" && spec.magpie ? {} : TIER_DEFAULTS[spec.kind]), ...spec.models });
     }
     for (const [key, list] of Object.entries(config.fallback ?? {})) this.fallback.set(key, [...list]);
     if (config.default === undefined) this.default = undefined;
@@ -143,7 +149,7 @@ export class RuntimeRegistry {
     if (cached) return cached;
     const spec = this.specs.get(runtime);
     if (!spec) throw new Error(`unknown runtime: ${runtime}`);
-    if (!SSH_KINDS.has(spec.kind)) throw new Error(`runtime ${runtime} (${spec.kind}) cannot run on another machine`);
+    if (!runsOverSsh(spec)) throw new Error(`runtime ${runtime} (${spec.kind}${spec.kind === "claude-code" ? " through magpie" : ""}) cannot run on another machine`);
     const { streamCompletions: _, ...rest } = spec as RuntimeSpec & { streamCompletions?: boolean };
     const adapter: RuntimeAdapter = { ...createAdapter({ ...rest, sshHost: m.ssh } as RuntimeSpec, this.deps), machine };
     this.machineAdapters.set(key, adapter);
@@ -221,7 +227,7 @@ export class RuntimeRegistry {
         if (model) out.push({ value: `${machine}:${runtime}/${tier}`, machine, runtime, tier, model, capabilities: { complete: true, agent: false, chat: false, image }, ...(availability.state === "disabled" ? { unavailable: availability.reason } : {}) });
       }
     };
-    for (const m of this.machines.values()) for (const spec of this.specs.values()) if (SSH_KINDS.has(spec.kind)) push(m.name, spec.name, spec.kind === "codex-cli", this.models.get(spec.name) ?? {}, this.availability?.(m.name, spec.name));
+    for (const m of this.machines.values()) for (const spec of this.specs.values()) if (runsOverSsh(spec)) push(m.name, spec.name, spec.kind === "codex-cli", this.models.get(spec.name) ?? {}, this.availability?.(m.name, spec.name));
     for (const o of this.remote?.offered() ?? []) push(o.machine, o.runtime, o.image, o.tiers, o.availability);
     return out;
   }

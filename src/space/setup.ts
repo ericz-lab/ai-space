@@ -1,17 +1,21 @@
 import { chmod } from "node:fs/promises";
-import { hostname } from "node:os";
+import { homedir, hostname } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { cfCommands, parseWhoami, renderCfScript } from "./cloudflare.ts";
 import { TRANSPORTS, parseChannelUrl } from "./notify/index.ts";
 import type { Channel, ChannelKind } from "./notify/types.ts";
 import { PEER_NAME_RE } from "./peers/config.ts";
+import { addMagpieRuntimeText, usesGateway } from "./model/inventory.ts";
+import { RUNTIMES_FILE, parseRuntimesYaml } from "./runtimes/config.ts";
+import { type MagpieInfo, findMagpie } from "./runtimes/magpie.ts";
 import type { Workspace } from "./workspace.ts";
 
 /**
  * `bun src/index.ts setup`: the interactive first-install walk-through.
  *
- * The basic install first: the tools it needs (bun, git, one AI runtime, a user service
- * manager), the core values and who runs the apps' services. Then the optional extensions
+ * The basic install first: the tools it needs (bun, one AI runtime, a user service manager; git
+ * only for developer work), magpie when it runs here, the core values and who runs the apps' services. Then the optional extensions
  * (github, ingress, backup, notifications, peers), each only when picked, or on its own as
  * `setup <extension>`; an extension's tools are checked only when it is on, so a machine
  * with no GitHub, Cloudflare, domain or bucket completes the basic install. Verifies what
@@ -57,6 +61,8 @@ export type SetupDeps = {
   fetch: typeof fetch;
   randomToken(): string;
   hostname(): string;
+  /** magpie on this machine (docs/runtimes.md#magpie): where it listens and what it offers. */
+  findMagpie(): Promise<MagpieInfo>;
 };
 
 export type SetupOutcome = {
@@ -210,23 +216,28 @@ export const CHANNEL_FORMS: Record<ChannelKind, { fields: Field[]; build: (a: Re
 type Check = { name: string; ok: boolean; detail: string; hint?: string; optional?: boolean };
 
 /**
- * What the basic install needs: bun, git with an identity (a new app is a local repository),
- * one AI runtime that answers, and a user service manager when the space runs the apps' services.
- * Nothing here needs an account other than the runtime's, a domain, or a network service.
+ * What the basic install needs: bun, one AI runtime that answers, and a user service manager when
+ * the space runs the apps' services. Nothing here needs an account other than the runtime's, a
+ * domain, or a network service. git is shown but optional: only developer work needs it (installing
+ * an app from its source, `space app new`, the Fix Engineer), and a release install runs without it.
  */
 export async function checkBasicTools(d: SetupDeps): Promise<Check[]> {
   const checks: Check[] = [];
   const bun = await d.run(["bun", "--version"]);
   checks.push({ name: "bun", ok: bun.code === 0, detail: bun.stdout.trim(), hint: "curl -fsSL https://bun.sh/install | bash" });
   const git = await d.run(["git", "--version"]);
-  checks.push({ name: "git", ok: git.code === 0, detail: git.stdout.trim(), hint: "apt-get install git" });
-  const gitUser = await d.run(["git", "config", "--global", "user.email"]);
-  checks.push({
-    name: "git identity",
-    ok: gitUser.code === 0 && gitUser.stdout.trim() !== "",
-    detail: gitUser.stdout.trim(),
-    hint: 'git config --global user.name "…" && git config --global user.email "…"',
-  });
+  const gitHint = "optional: apps from source, space app new and the Fix Engineer need it";
+  checks.push({ name: "git", ok: git.code === 0, detail: git.code === 0 ? git.stdout.trim() : "not installed", hint: `apt-get install git (${gitHint})`, optional: true });
+  if (git.code === 0) {
+    const gitUser = await d.run(["git", "config", "--global", "user.email"]);
+    checks.push({
+      name: "git identity",
+      ok: gitUser.code === 0 && gitUser.stdout.trim() !== "",
+      detail: gitUser.stdout.trim(),
+      hint: `git config --global user.name "…" && git config --global user.email "…" (${gitHint})`,
+      optional: true,
+    });
+  }
 
   // One runtime is enough: each is shown, and only "none answers" counts as missing.
   const runtimes: Check[] = [];
@@ -248,13 +259,19 @@ export async function checkBasicTools(d: SetupDeps): Promise<Check[]> {
     const loggedIn = status.code === 0;
     runtimes.push({ name: "codex", ok: loggedIn, detail: (status.stdout || status.stderr).trim().split("\n")[0] ?? "", hint: "codex login", optional: true });
   }
+  if (await d.which("dsh")) {
+    // DeepSeek Harness: a key in its home, or its signed-in account (docs/runtimes.md#preparing-a-deepseek-harness).
+    const home = d.env.DSH_HOME?.trim() || `${d.env.HOME || homedir()}/.dsh`;
+    const key = await d.run(["sh", "-c", 'test -s "$1/.credentials.yaml" || grep -qs "^DEEPSEEK_API_KEY=." "$1/.env"', "sh", home]);
+    runtimes.push({ name: "dsh", ok: key.code === 0, detail: key.code === 0 ? "key or account in the harness home" : "no DeepSeek key or account", hint: "put DEEPSEEK_API_KEY in ~/.dsh/.env, or sign in to the DeepSeek Harness app", optional: true });
+  }
   checks.push(...runtimes);
   if (!runtimes.some((r) => r.ok)) {
     checks.push({
       name: "AI runtime",
       ok: false,
-      detail: runtimes.length ? "none logged in" : "neither claude nor codex on PATH",
-      hint: "install and log in to one: curl -fsSL https://claude.ai/install.sh | bash, or Codex (docs/runtimes.md)",
+      detail: runtimes.length ? "none logged in" : "no claude, codex or dsh on PATH",
+      hint: "install and log in to one: curl -fsSL https://claude.ai/install.sh | bash, or Codex, or DeepSeek Harness (docs/runtimes.md)",
     });
   }
 
@@ -442,6 +459,8 @@ export async function runSetup(d: SetupDeps, opts: SetupOptions = {}): Promise<S
 
   const missing: string[] = [];
   let selected: Extension[];
+  /** runtimes.yaml with a runtime added (magpie), written with `.env` after the summary. */
+  let runtimesAdd: RuntimesAdd | undefined;
   if (opts.only) {
     selected = [opts.only];
   } else {
@@ -450,6 +469,7 @@ export async function runSetup(d: SetupDeps, opts: SetupOptions = {}): Promise<S
     const checks = await checkBasicTools(d);
     sayChecks(io, checks);
     for (const c of checks) if (!c.ok && !c.optional) missing.push(c.name);
+    runtimesAdd = await sectionMagpie(sec);
     io.say();
 
     /* 2. core */
@@ -500,20 +520,25 @@ export async function runSetup(d: SetupDeps, opts: SetupOptions = {}): Promise<S
 
   /* summary and write */
   const keys = Object.keys(updates);
-  if (!keys.length) {
+  if (!keys.length && !runtimesAdd) {
     io.say("Nothing changed.");
   } else {
-    io.say(`Changes to ${d.ws.envFile}:`);
+    if (keys.length) io.say(`Changes to ${d.ws.envFile}:`);
     for (const k of keys) io.say(`  ${k}=${isSecretKey(k) ? mask(updates[k]!) : updates[k]}`);
+    if (runtimesAdd) io.say(`${runtimesAdd.file}: add runtime ${runtimesAdd.name} (${runtimesAdd.what})`);
     if (await io.confirm("Write them?", true)) {
-      const file = Bun.file(d.ws.envFile);
-      const text = (await file.exists()) ? await file.text() : "";
-      await Bun.write(d.ws.envFile, updateEnvText(text, updates));
-      await chmod(d.ws.envFile, 0o600);
+      if (keys.length) {
+        const file = Bun.file(d.ws.envFile);
+        const text = (await file.exists()) ? await file.text() : "";
+        await Bun.write(d.ws.envFile, updateEnvText(text, updates));
+        await chmod(d.ws.envFile, 0o600);
+      }
+      if (runtimesAdd) await Bun.write(runtimesAdd.file, runtimesAdd.text);
       io.say("  written.");
     } else {
       io.say("  not written.");
       keys.length = 0;
+      runtimesAdd = undefined;
       for (const k of Object.keys(updates)) delete updates[k];
     }
   }
@@ -522,7 +547,7 @@ export async function runSetup(d: SetupDeps, opts: SetupOptions = {}): Promise<S
   /* restart */
   let restarted = false;
   const unit = await d.run(["systemctl", "--user", "is-enabled", "ai-space"]);
-  if (keys.length && unit.stdout.trim() === "enabled") {
+  if ((keys.length || runtimesAdd) && unit.stdout.trim() === "enabled") {
     if (await io.confirm("Restart the ai-space unit now?", true)) {
       const r = await d.run(["systemctl", "--user", "restart", "ai-space"]);
       restarted = r.code === 0;
@@ -553,6 +578,55 @@ export async function runSetup(d: SetupDeps, opts: SetupOptions = {}): Promise<S
     else await sayEdgePlan(d, env);
   }
   return { written: keys, missing, extensions, restarted };
+}
+
+type RuntimesAdd = { file: string; text: string; name: string; what: string };
+
+/**
+ * magpie (docs/runtimes.md#magpie): shown with the tools, and when its gateway answers here and no
+ * runtime uses it yet, offered as one: Claude Code through it when `claude` is installed (chat,
+ * agent tasks, answers, with tools), else its Messages API (answers only). Nothing is written here.
+ */
+async function sectionMagpie({ d, set, merged }: Section): Promise<RuntimesAdd | undefined> {
+  const { io } = d;
+  const line = (ok: boolean, detail: string, hint?: string) => io.say(`  ${ok ? "ok  " : "--  "} ${"magpie".padEnd(13)} ${detail}${hint ? `  →  ${hint}` : ""}`);
+  const info = await d.findMagpie();
+  if (!info.bin && !info.running) return line(false, "not found", "optional: one gateway for GLM, Kimi, MiniMax and other providers (docs/runtimes.md#magpie)"), undefined;
+  if (!info.running) return line(false, `installed, its gateway does not answer at ${info.url}`, "start it (magpie serve, or open the magpie app), then run setup again"), undefined;
+  line(true, `answering at ${info.url}, ${info.models.length} model${info.models.length === 1 ? "" : "s"}`);
+  const file = join(d.ws.home, RUNTIMES_FILE);
+  const current = (await Bun.file(file).exists()) ? await Bun.file(file).text() : undefined;
+  if (current !== undefined) {
+    try {
+      const { config } = parseRuntimesYaml(current, merged());
+      const uses = config.runtimes.filter((r) => usesGateway(r, info.url));
+      if (uses.length) return io.say(`         used by runtime ${uses.map((r) => r.name).join(", ")}`), undefined;
+    } catch (e) {
+      return io.say(`         ${RUNTIMES_FILE} does not parse (${(e as Error).message}); add magpie by hand (docs/runtimes.md#magpie)`), undefined;
+    }
+  }
+  if (!info.models.length) return io.say("         it offers no model yet: add a provider in magpie, then run setup again"), undefined;
+  const claudeBin = (d.env.SPACE_CHAT_BIN?.trim().split(/\s+/)[0] ?? "") || "claude";
+  const claude = await d.which(claudeBin);
+  const what = claude ? "Claude Code through magpie: chat, agent tasks and answers" : "magpie's Messages API: answers only (install Claude Code for chat and agent tasks)";
+  if (!(await io.confirm(`  Add magpie as a runtime (${what})?`, true))) return undefined;
+  const shown = info.models.slice(0, 30);
+  shown.forEach((m, i) => io.say(`    ${String(i + 1).padStart(2)}. ${m}`));
+  if (info.models.length > shown.length) io.say(`    … and ${info.models.length - shown.length} more; any id magpie lists works`);
+  const pick = async (q: string, def: string) => {
+    for (;;) {
+      const a = (await io.ask(q, { default: def })).trim();
+      const n = Number(a);
+      const model = Number.isInteger(n) && n >= 1 && n <= shown.length ? shown[n - 1]! : a;
+      if (info.models.includes(model)) return model;
+      io.say("  a number from the list, or one of magpie's model ids");
+    }
+  };
+  const main = await pick("  Model for every tier (number or id)", shown[0]!);
+  const models = { basic: await pick("  basic tier (quick, cheap calls)", main), junior: main, intermediate: main, advanced: main };
+  const next = addMagpieRuntimeText(current, { url: info.url, models, ...(claude ? { claude } : {}) }, merged());
+  for (const [k, v] of Object.entries(next.envUpdates)) set(k, v);
+  return { file, text: next.text, name: next.name, what: claude ? "Claude Code through magpie" : "magpie's Messages API" };
 }
 
 /** Without outside access: how to open the panel and the apps from another machine. */
@@ -975,5 +1049,6 @@ export function realDeps(io: SetupIO, ws: Workspace, env: Record<string, string 
     fetch,
     randomToken: () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex"),
     hostname: () => hostname().split(".")[0]!.toLowerCase(),
+    findMagpie: () => findMagpie({ env }),
   };
 }
