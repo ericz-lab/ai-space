@@ -436,7 +436,10 @@ bun src/index.ts start
 - **Links.** A user without Developer Mode may not make symbolic links. The skills in `<workspace>\.claude\skills\` are directory junctions, and `CLAUDE.md` is a copy of `AGENTS.md` that ai-space rewrites with it until someone else edits the copy. With Developer Mode on, `CLAUDE.md` is a symbolic link as elsewhere.
 - **One service per workspace.** The lock on `run\service.lock` is a handle opened with no sharing instead of `flock`; a second `start` on the same workspace is refused the same way.
 
-Not there yet on Windows: installing and running apps, the background service (`space service`), the one-command installer, the web terminal, and everything that runs a `bash` or `sh` command (command tasks, `deploy:` sections, an app's installer).
+- **Apps.** An app of the catalog installs, opens, stops, starts, upgrades, rolls back and is removed as elsewhere (`space app install ai-todo`, `space app build ai-todo` from its source in `app-src\`). Windows keeps no executable bit, so an installed file is checked by its size and digest alone, and a package built on Windows marks no file executable.
+- **Commands.** A manifest's `build:` and `deploy:` commands, command tasks and the operator's log and stop templates are written for a POSIX shell. On Windows they run in the one Git for Windows ships (`<Git>\bin\sh.exe`, found from `git` on `Path` or in `Program Files`); `SPACE_SHELL` names another. `C:\Windows\System32\bash.exe` is never used: it starts WSL. Inside that shell the working directory reads as an MSYS path (`/c/Users/...`).
+
+Not there yet on Windows: an app run on its own (`space app mode APP standalone`), the background service (`space service`), the one-command installer and the web terminal.
 
 ## What is not covered yet
 

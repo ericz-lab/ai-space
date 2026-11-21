@@ -1,5 +1,6 @@
-import { lstat, mkdir, open, rename, rm, rmdir, statfs } from "node:fs/promises";
+import { lstat, mkdir, open, rm, statfs } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { executableAgrees, renameToAbsent } from "../host-fs.ts";
 import type { Workspace } from "../workspace.ts";
 import { assertTarget, installationKey } from "./contract.ts";
 import { parsePackageIndex } from "./contract.ts";
@@ -60,7 +61,7 @@ export class PackageInstaller {
       for (let i = 1; i < pieces.length; i++) if (!(await lstat(join(dir, ...pieces.slice(0, i)))).isDirectory()) throw new Error("installed path has an unsafe ancestor");
       const file = join(dir, f.path);
       const s = await lstat(file);
-      if (!s.isFile() || s.size !== f.size || !!(s.mode & 0o111) !== f.executable || sha256(new Uint8Array(await Bun.file(file).arrayBuffer())) !== f.sha256) throw new Error(`installed file failed recovery validation: ${f.path}`);
+      if (!s.isFile() || s.size !== f.size || !executableAgrees(s.mode, f.executable) || sha256(new Uint8Array(await Bun.file(file).arrayBuffer())) !== f.sha256) throw new Error(`installed file failed recovery validation: ${f.path}`);
     }
     const manifest = parsePackageManifest(await Bun.file(join(dir, "space.yaml")).text());
     if (manifest.app !== operation.app || manifest.version !== operation.version) throw new Error("installed manifest does not match the journal");
@@ -91,7 +92,6 @@ export class PackageInstaller {
     const destination = join(this.ws.apps, app);
     let published = false;
     let ownsStage = false;
-    let reservedDestination = false;
     try {
       if (await exists(destination)) throw new Error(`${app} already has an app directory; explicit migration is required`);
       await mkdir(stage, { mode: 0o700 });
@@ -105,17 +105,14 @@ export class PackageInstaller {
       // The receipt commits the exact operation and archive hash; it is not an app-owned file.
       const receipt = await open(join(stage, RECEIPT), "wx", 0o600);
       try { await receipt.writeFile(JSON.stringify({ id: operation.id, digest: operation.digest, index: inspected.index })); await receipt.sync(); } finally { await receipt.close(); }
-      // Reserve an absent destination atomically, so rename never replaces another existing tree.
-      await mkdir(destination, { mode: 0o700 });
-      reservedDestination = true;
-      await rename(stage, destination);
+      // The destination is reserved atomically, so the rename never replaces another existing tree.
+      await renameToAbsent(stage, destination);
       published = true;
       return this.store.finish(operation.id, "installed");
     } catch (e) {
       // A published tree can be recovered from its receipt after restart; do not erase it on a DB error.
       if (published) throw e;
       if (ownsStage) await rm(stage, { recursive: true, force: true });
-      if (reservedDestination) await rmdir(destination).catch(() => {}); // Only remove an empty reservation.
       return this.store.finish(operation.id, "failed", (e as Error).message);
     }
   }

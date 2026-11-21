@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { loadManifest, type Manifest } from "../scheduler/manifest.ts";
 import { installCommands } from "./spec.ts";
+import { hostShell } from "../host-tools.ts";
 
 /**
  * The host side of a deploy (docs/app-spec.md#deploy): put a revision into the app directory, then
@@ -195,7 +196,7 @@ async function spawnCollect(cmd: string[], cwd: string): Promise<{ code: number;
 /** The default shell: the command's stdout and stderr, line by line, into the log. */
 export function shellStreaming(log: (line: string) => void): Shell {
   return async (command, cwd) => {
-    const proc = Bun.spawn(["/bin/sh", "-c", command], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: commandEnv() });
+    const proc = Bun.spawn([hostShell("/bin/sh"), "-c", command], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: commandEnv() });
     await Promise.all([lines(proc.stdout, log), lines(proc.stderr, log)]);
     return proc.exited;
   };

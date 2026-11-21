@@ -1,7 +1,9 @@
 import { cp, mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative, sep } from "node:path";
 import { parsePackageManifest, type PackageManifest } from "./manifest.ts";
 import { packApplication } from "./pack.ts";
+import { hostShell } from "../host-tools.ts";
 
 /**
  * A source checkout made into packages (docs/app-catalog.md#building-from-source). The spec-2
@@ -112,7 +114,7 @@ export async function buildRelease(opts: ReleaseOptions): Promise<ReleaseResult>
   }
 
   const build = manifest.build;
-  const work = await mkdtemp(join(opts.workRoot ?? (process.env.TMPDIR || "/tmp"), `space-build-${app}-`));
+  const work = await mkdtemp(join(opts.workRoot ?? tmpdir(), `space-build-${app}-`));
   try {
     // Nested dependency and data directories stay behind too; only the path below the checkout counts.
     const skip = (from: string) => relative(opts.dir, from).split(sep).some((p) => SOURCE_EXCLUDE.has(p));
@@ -140,7 +142,7 @@ export async function buildRelease(opts: ReleaseOptions): Promise<ReleaseResult>
 
 /** `/bin/sh -c` in the scratch copy with `buildEnv`, output into the log, killed after ten minutes. */
 async function runShell(command: string, cwd: string, log: (chunk: string) => void): Promise<number> {
-  const proc = Bun.spawn(["/bin/sh", "-c", command], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: buildEnv() });
+  const proc = Bun.spawn([hostShell("/bin/sh"), "-c", command], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", env: buildEnv() });
   const timer = setTimeout(() => proc.kill("SIGKILL"), COMMAND_TIMEOUT_MS);
   const drain = async (stream: ReadableStream<Uint8Array>) => {
     const decoder = new TextDecoder();

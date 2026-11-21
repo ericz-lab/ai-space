@@ -1,6 +1,7 @@
 import { lstat, mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { Workspace } from "../workspace.ts";
+import { hostShell } from "../host-tools.ts";
 
 /**
  * Uninstalling an app from the panel: stop its service, take its directory
@@ -43,7 +44,7 @@ const APP_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export async function runStopCommand(template: string, app: string, opts: { timeoutMs?: number } = {}): Promise<{ ok: boolean; error?: string }> {
   if (!APP_RE.test(app)) return { ok: false, error: "invalid app name" };
   const cmd = template.replaceAll("{app}", app);
-  const proc = Bun.spawn(["sh", "-c", cmd], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const proc = Bun.spawn([hostShell("sh"), "-c", cmd], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const timer = setTimeout(() => proc.kill(), opts.timeoutMs ?? 60_000);
   try {
     const [code, out, err] = await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
