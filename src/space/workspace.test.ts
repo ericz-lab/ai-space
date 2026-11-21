@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { discoverApps, ensureWorkspace, loadWorkspaceEnv, resolveHome, workspacePaths } from "./workspace.ts";
 
 describe("workspace", () => {
   test("resolveHome defaults to ~/.ai-space and expands ~", () => {
     expect(resolveHome({})).toBe(join(homedir(), ".ai-space"));
     expect(resolveHome({ SPACE_HOME: "~/elsewhere" })).toBe(join(homedir(), "elsewhere"));
-    expect(resolveHome({ SPACE_HOME: "/abs/space" })).toBe("/abs/space");
+    expect(resolveHome({ SPACE_HOME: "/abs/space" })).toBe(resolve("/abs/space"));
   });
 
   test("ensureWorkspace creates the layout once and is idempotent", async () => {

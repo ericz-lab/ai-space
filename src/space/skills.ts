@@ -1,5 +1,6 @@
-import { lstat, mkdir, readdir, readlink, symlink, unlink } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { lstat, mkdir, readdir, readlink, unlink } from "node:fs/promises";
+import { basename, join, resolve, sep } from "node:path";
+import { linkDirectory } from "./links.ts";
 
 /**
  * One skill directory for the whole workspace.
@@ -113,7 +114,7 @@ export async function linkSkills(home: string, shared: string | undefined, appDi
 
   const wanted = new Map(sources.map((s) => [s.name, s.dir]));
   // Links into these are ours: the shared skills, the workspace's apps/ and any extra app dir.
-  const roots = [shared, join(home, "apps"), ...appDirs].filter((p): p is string => !!p).map((p) => resolve(p) + "/");
+  const roots = [shared, join(home, "apps"), ...appDirs].filter((p): p is string => !!p).map((p) => resolve(p) + sep);
   const removed: string[] = [];
   for (const name of await readdir(dir)) {
     const path = join(dir, name);
@@ -140,7 +141,7 @@ export async function linkSkills(home: string, shared: string | undefined, appDi
   }
   for (const [name, target] of wanted) {
     try {
-      await symlink(target, join(dir, name));
+      await linkDirectory(target, join(dir, name));
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; // a real directory of that name: the user's, keep it
     }
