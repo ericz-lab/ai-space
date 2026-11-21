@@ -42,7 +42,7 @@ Starting it inside the checkout matters: the agent reads `AGENTS.md` and the doc
 
 In both shapes, `bun run setup` is interactive and made for a terminal; an agent fills `~/.ai-space/.env` from `.env.example` instead (`deploy/install.sh` creates the file), restarts the unit, and runs the checks of step 10. Ask it to show you the `.env` values it chose before it writes them.
 
-The short way, without this file: `curl -fsSL https://ai-space.me/install.sh | bash` installs the newest release (no git, no Bun, nothing asked; [release.md](release.md#one-command-install)) and leaves the panel on `http://127.0.0.1:8700/`. It still needs one coding agent signed in on the machine, as step 2 here. This file is the full path: from source, with the extensions.
+The short way, without this file: `curl -fsSL https://ai-space.me/install.sh | bash` installs the newest release on Linux or on a Mac (no git, no Bun, nothing asked; [release.md](release.md#one-command-install)) and leaves the panel on `http://127.0.0.1:8700/`. It still needs one coding agent signed in on the machine, as step 2 here. This file is the full path: from source, with the extensions.
 
 Secrets end up in exactly two places: the workspace `.env` (`~/.ai-space/.env`, read by ai-space and by `${VAR}` in manifests) and the tools' own stores (`~/.claude`, `~/.config/gh`, `~/.cloudflared`). Nothing is committed.
 
@@ -143,7 +143,7 @@ git remote add <host> <host>:~/.ai-space/repos/ai-space.git
 git push <host> main      # checks out into the unit's checkout (~/.ai-space/core by default), runs deploy/install.sh, restarts the unit
 ```
 
-**From a release archive** instead of a checkout: a tagged release has an archive for Linux x64 and arm64 with its own Bun, so the machine needs no Bun or Git for ai-space itself. `tar -xzf ai-space-server-<version>-linux-<arch>.tar.gz && bash ai-space-server-<version>-linux-<arch>/install.sh` installs the same unit, and installing the next archive upgrades it, with a rollback if it does not come up ([release.md](release.md)).
+**From a release archive** instead of a checkout: a tagged release has an archive for Linux x64 and arm64 and for a Mac on Apple silicon, each with its own Bun, so the machine needs no Bun or Git for ai-space itself. `tar -xzf ai-space-server-<version>-linux-<arch>.tar.gz && bash ai-space-server-<version>-linux-<arch>/install.sh` installs the same unit (on a Mac a LaunchAgent, [release.md](release.md#the-background-service)), and installing the next archive upgrades it, with a rollback if it does not come up ([release.md](release.md)).
 
 **Workspace `.env`**
 
@@ -174,7 +174,7 @@ ai-space refuses to start with `SPACE_SUPERVISOR=space` and either template set:
 Restart and check:
 
 ```bash
-systemctl --user restart ai-space
+space service restart           # systemctl --user restart ai-space; on a Mac the LaunchAgent
 space logs space -n 30          # journalctl --user -u ai-space -n 30 --no-pager
 space status                    # curl -s http://127.0.0.1:8700/healthz, and the rest
 space app ls

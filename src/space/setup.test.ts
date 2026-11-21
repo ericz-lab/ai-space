@@ -59,6 +59,7 @@ async function deps(io: SetupIO, env: Record<string, string | undefined>, over: 
     randomToken: () => "tok-" + "a".repeat(60),
     hostname: () => "box",
     findMagpie: async () => ({ url: "http://127.0.0.1:3425", from: "default", running: false, models: [] }),
+    service: async () => ({ installed: true, restart: async () => void ran.push(["service", "restart"]), logs: "journalctl --user -u ai-space" }),
     ...over,
   };
 }
@@ -143,7 +144,7 @@ describe("runSetup", () => {
     expect(text).toContain("SPACE_API_TOKEN=tok-");
     expect(text).toContain("SPACE_NOTIFY_DEFAULT=telegram://123:ABC@-100");
     expect(text).toContain("SPACE_NOTIFY_TASKS=default");
-    expect(d.ran).toContainEqual(["systemctl", "--user", "restart", "ai-space"]);
+    expect(d.ran).toContainEqual(["service", "restart"]);
     // the summary masks secrets
     expect(io.log.join("\n")).not.toContain("SPACE_NOTIFY_DEFAULT=telegram://123");
   });

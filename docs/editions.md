@@ -64,7 +64,8 @@ scripts that create a workspace and register a background service.
 git-push deploy of `deploy/post-receive`). The source channel stays.
 
 **Runs** under the system's service manager: a systemd user unit on Linux
-(`deploy/ai-space.service`), launchd on a Mac that stays on. Apps run under the same supervisor
+(`deploy/ai-space.service`), a LaunchAgent on a Mac that stays on; `space service` writes and
+drives either ([release.md](release.md#the-background-service)). Apps run under the same supervisor
 ([supervision.md](supervision.md)).
 
 **Basic install ends** when the service answers its health check on `127.0.0.1:8700`, the panel opens
@@ -78,8 +79,8 @@ built-in sign-in, a login of ai-space's own ([auth.md](auth.md)). Binding to `0.
 either. `SPACE_API_TOKEN` protects the API, not the panel.
 
 **Today:** source install and git-push deploy work, the service reports its version and edition
-(`GET /api/space`), and a release tag builds an archive for Linux x64 and arm64 with an installer
-that upgrades and rolls back ([release.md](release.md)). `space setup` is the basic install with no
+(`GET /api/space`), and a release tag builds an archive for Linux x64 and arm64 and for a Mac on Apple silicon, with
+one installer for both systems that upgrades and rolls back ([release.md](release.md)). `space setup` is the basic install with no
 GitHub, Cloudflare, domain or bucket, and `setup github` / `ingress` / `backup` / `notifications` /
 `peers` add one extension each ([install.md](install.md)); the built-in sign-in protects the panel and
 the API without Cloudflare Access ([auth.md](auth.md)). Missing: the sign-in for app hostnames, which

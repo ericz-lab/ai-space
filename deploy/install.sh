@@ -1,35 +1,36 @@
 #!/usr/bin/env bash
-# Install (or refresh) ai-space as a user-level systemd service on this machine.
+# Install (or refresh) ai-space as a background service of this user: a systemd user unit on
+# Linux, a LaunchAgent on a Mac (`space service install`, src/space/service.ts).
 # Run from the checkout: bash deploy/install.sh. A release archive runs it through its own
 # install.sh (release/install.sh), with BUN set to the Bun inside the release.
-# Idempotent: creates the workspace, installs the unit, enables linger, restarts.
+# Idempotent: creates the workspace, writes the unit, restarts, waits for the health check.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 BUN="${BUN:-$HOME/.bun/bin/bun}"
 [ -x "$BUN" ] || { echo "bun not found at $BUN (curl -fsSL https://bun.sh/install | bash)"; exit 1; }
+export BUN
 
-UNIT=~/.config/systemd/user/ai-space.service
+cd "$HERE"
+# A release (RELEASE.json) ships its dependencies; a checkout installs them from the lockfile.
+[ -f "$HERE/RELEASE.json" ] || "$BUN" install --frozen-lockfile
 
 # The workspace: SPACE_HOME when set, else the one the installed unit already uses
 # (a git-push deploy runs without the operator's environment), else ~/.ai-space.
 # Made absolute, because the unit gets it verbatim.
-if [ -z "${SPACE_HOME:-}" ] && [ -f "$UNIT" ]; then
-  SPACE_HOME="$(sed -n 's|^Environment=SPACE_HOME=||p' "$UNIT" | head -n1)"
-  SPACE_HOME="${SPACE_HOME/#%h/$HOME}"
-fi
-SPACE_HOME="${SPACE_HOME:-$HOME/.ai-space}"
-SPACE_HOME="${SPACE_HOME/#\~/$HOME}"
+SPACE_HOME="$("$BUN" src/index.ts service workspace)"
 mkdir -p "$SPACE_HOME"
 SPACE_HOME="$(cd "$SPACE_HOME" && pwd)"
 export SPACE_HOME
+# A workspace the AI Space app installed runs the app's own service: two would fight over it.
+if grep -q '"managedBy": *"ai-space-local"' "$SPACE_HOME/installation.json" 2>/dev/null; then
+  echo "$SPACE_HOME belongs to the AI Space app (the Local edition), which runs its own background service; nothing was changed. Use the app to run, update or remove it." >&2
+  exit 1
+fi
 # The health check below asks the port the service listens on, which `setup` keeps in the workspace's .env.
 if [ -z "${SPACE_PORT:-}" ] && [ -f "$SPACE_HOME/.env" ]; then
   SPACE_PORT="$(sed -n 's/^SPACE_PORT=//p' "$SPACE_HOME/.env" | head -n 1 | tr -d "\"' \r")"
 fi
 
-cd "$HERE"
-# A release (RELEASE.json) ships its dependencies; a checkout installs them from the lockfile.
-[ -f "$HERE/RELEASE.json" ] || "$BUN" install --frozen-lockfile
 "$BUN" src/index.ts init
 
 # The `space` command on PATH (~/.local/bin is on the unit's and the profile's PATH; docs/cli.md).
@@ -39,17 +40,10 @@ if [ -f "$HERE/RELEASE.json" ] && ! command -v bun >/dev/null && [ ! -x "$HOME/.
   ln -sfn "$BUN" ~/.local/bin/bun
 fi
 
-mkdir -p ~/.config/systemd/user
-# The unit's PATH starts with the directory of this Bun, so the apps' services (which inherit
-# it) find the same one; for the usual ~/.bun/bin it is already there.
-BUN_DIR="$(dirname "$BUN")"
-PATH_FIX=""
-[ "$BUN_DIR" = "$HOME/.bun/bin" ] || PATH_FIX="s|^Environment=PATH=|Environment=PATH=$BUN_DIR:|;"
-sed "s|%h/.ai-space/core|$HERE|; s|^Environment=SPACE_HOME=.*|Environment=SPACE_HOME=$SPACE_HOME|; s|%h/.bun/bin/bun|$BUN|; $PATH_FIX" deploy/ai-space.service > "$UNIT"
-loginctl enable-linger "${USER:-$(id -un)}" 2>/dev/null || true
-systemctl --user daemon-reload
-systemctl --user enable --now ai-space
-systemctl --user restart ai-space
+# The unit for this checkout, workspace and Bun, written and (re)started by the service manager
+# of this system. Its PATH starts with the directory of this Bun, so the apps' services (which
+# inherit it) find the same one.
+"$BUN" src/index.ts service install --root "$HERE" --bun "$BUN"
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 2
   if curl -fsS "http://127.0.0.1:${SPACE_PORT:-8700}/healthz"; then
@@ -60,6 +54,10 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
     if ! "$BUN" src/index.ts install-defaults; then
       echo "default apps: an installer failed (the core is fine); retry with: $BUN src/index.ts install-defaults" >&2
     fi
+    case ":$PATH:" in
+      *":$HOME/.local/bin:"*) ;;
+      *) echo "the space command is $HOME/.local/bin/space; that directory is not on your PATH yet: export PATH=\"\$HOME/.local/bin:\$PATH\" (in your shell profile)" ;;
+    esac
     if [ -f "$HERE/RELEASE.json" ]; then
       # A release: the panel is the next step; `space setup` stays for the optional settings.
       grep -qE '^SPACE_API_TOKEN=.+' "$SPACE_HOME/.env" || echo "next: open http://127.0.0.1:${SPACE_PORT:-8700}/ in a browser (optional settings later: space setup)"
@@ -69,6 +67,6 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
     exit 0
   fi
 done
-systemctl --user --no-pager --lines=10 status ai-space || true
-echo "ai-space is not answering on 127.0.0.1:${SPACE_PORT:-8700}; see: journalctl --user -u ai-space -n 50" >&2
+"$BUN" src/index.ts service status >&2 || true
+echo "ai-space is not answering on 127.0.0.1:${SPACE_PORT:-8700}; its log is named above (space logs space needs it running)" >&2
 exit 1

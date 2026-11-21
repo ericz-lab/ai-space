@@ -65,6 +65,8 @@ export type Noun = {
   verbs: Record<string, Verb>;
   /** The verb used when none is typed (`space logs x`). */
   defaultVerb?: string;
+  /** The noun alone runs its default verb although that verb takes flags (`space upgrade`); otherwise it prints the help. */
+  bare?: boolean;
 };
 
 /** The command line was wrong: exit 2, with the message and the usage. */

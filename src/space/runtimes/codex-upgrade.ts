@@ -125,6 +125,8 @@ export type UpgradeOptions = {
   skipUpdate?: boolean;
   /** Restart ai-space so it reads the new catalogue (it does at boot). */
   restart?: boolean;
+  /** How ai-space is restarted; default: its background service on this machine (src/space/service.ts). */
+  restartService?: () => Promise<void>;
   log: (line: string) => void;
   run?: Run;
 };
@@ -199,9 +201,18 @@ export async function codexUpgrade(opts: UpgradeOptions): Promise<UpgradeResult>
 
   if (opts.dryRun) return result;
   if (opts.restart) {
-    const r = await run(["systemctl", "--user", "restart", "ai-space"], { timeoutMs: 60_000 });
-    result.restarted = r.code === 0;
-    log(result.restarted ? "restarted ai-space; it reads the catalogue at boot" : `could not restart ai-space (${r.stderr.trim() || `exit ${r.code}`}); restart it to use the new tiers`);
+    // With an injected runner (tests), the Server's systemd unit as before; otherwise whichever
+    // service runs this workspace: systemd or launchd, the Server's unit or the AI Space app's.
+    const restart = opts.restartService ?? (opts.run ? async () => {
+      const r = await run(["systemctl", "--user", "restart", "ai-space"], { timeoutMs: 60_000 });
+      if (r.code !== 0) throw new Error(r.stderr.trim() || `exit ${r.code}`);
+    } : async () => {
+      const { realServiceDeps, serviceRestart } = await import("../service.ts");
+      await serviceRestart({ ...realServiceDeps(), env: { ...process.env, SPACE_HOME: opts.home } });
+    });
+    const failed = await restart().then(() => undefined, (e: Error) => e.message);
+    result.restarted = failed === undefined;
+    log(result.restarted ? "restarted ai-space; it reads the catalogue at boot" : `could not restart ai-space (${failed}); restart it to use the new tiers`);
   } else log("restart ai-space to use the new tiers");
   return result;
 }
