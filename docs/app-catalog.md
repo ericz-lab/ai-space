@@ -10,11 +10,11 @@ An app someone published for any Space is listed in a catalog and installs one o
 
 | | Package (the default) | Source |
 | --- | --- | --- |
-| What arrives | the release's signed `.spaceapp`, built by its publisher | the app's repository, cloned to `<workspace>/app-src/<app>` |
+| What arrives | the release's signed `.spaceapp`, built by its publisher; with it, the app's source files in `<workspace>/app-src/<app>` | the app's repository, cloned to `<workspace>/app-src/<app>` |
 | What runs on install | nothing: no clone, no dependency fetch, no script | the app's `build:` commands, in a scratch copy, then the same package install |
-| Needs | the Space | `git`, and whatever the build needs (Bun, the network for `bun install`) |
+| Needs | the Space (a rebuild after an edit needs what the build needs) | `git`, and whatever the build needs (Bun, the network for `bun install`) |
 | Version | the catalog's release | the release tag, or a branch such as `main` (a development version) |
-| Change it | install from source instead | edit `app-src/<app>`, then `space app build <app>` |
+| Change it | edit `app-src/<app>`, then `space app build <app>` | the same, in a checkout that follows the repository |
 
 Either way upgrades the other: a source install of a packaged app replaces it through the package
 lifecycle (data kept, previous version kept for a rollback), and so does the reverse. The old way,
@@ -28,8 +28,10 @@ In the panel: Add app (the `+` in the library, or long-press the background) ope
 catalog**: every listed app with its title and description in the panel's language, its release,
 its publisher, what it needs and what only works online, and whether it is installed, has an
 update, or was built from source (and from which branch). Tick several and **Install N chosen**, or
-use a row's own buttons: **Install**, **Update to X**, **From source**, and **with source** (the
-release's source package: the same app with its source files beside it, for reading).
+use a row's own buttons: **Install**, **Update to X**, **From source**, **Rebuild** (build what is
+in `app-src/<app>` and run it) and the tick **with source you can change**, on by default (the
+release's source package; unticked, the bundle alone). An installed row says where its source is
+and whether you changed it.
 
 A Space with no catalog app on it shows a first-use card on the home screen; **Choose apps** opens
 the catalog with every installable app ticked. **Not now** hides the card in that browser.
@@ -38,17 +40,43 @@ From the command line, against the running Space:
 
 ```sh
 space app catalog [--refresh]                 # catalogs, apps, release, installed, state, needs, publisher
-space app install NAME                        # the signed package
-space app install NAME --with-source          # the package that carries its source
+space app install NAME                        # the signed package, with its source in app-src/NAME
+space app install NAME --no-source            # the bundle alone, nothing to edit
 space app install NAME --source               # cloned at the release tag, built here
 space app install NAME --source --ref main    # the same, following main
 space app upgrade NAME                        # the new release, or the checkout pulled and built again
+space app upgrade NAME --replace-source       # the new release over source you changed: your copy is moved aside
 space app upgrade NAME --package              # the next release's package, also over a source build
 space app install ./notes-1.0.0.spaceapp      # a package file, as before
 ```
 
 A name that ends in `.spaceapp`, holds a `/`, or names an existing file is a package file;
 anything else is a catalog app.
+
+## The source of an installed app
+
+Every app can be changed where it is installed. A package install takes the release's source
+package when the release has one (`sourcePackage` in the catalog) and, once the app runs, copies
+its files to `<workspace>/app-src/<app>/`: the declaration with its `build:` section, the source,
+and the built output. Edit there, then `space app build <app>` (the panel's **Rebuild**): the
+directory is built in a scratch copy and replaces the running version through the package
+lifecycle, data kept, the version before kept for a rollback. The installed tree under
+`apps/<app>/` is what runs and is checked against its receipt; it is never the place to edit.
+
+The copy carries `.space-source.json`, the SHA-256 of every file put there, so the Space knows
+without git whether it was touched. Dependency and data directories (`node_modules`, `.git`,
+`.env`, `data`) and the `version:` line that a build raises do not count as changes.
+
+| `app-src/<app>` is | On a package install or upgrade |
+| --- | --- |
+| absent | the release's source is copied in |
+| the Space's copy, untouched | replaced by the new release's; `node_modules`, `.git`, `.env`, `data` beside it stay |
+| the Space's copy, changed by you | an upgrade is refused with `source-modified` and the changed paths, and nothing is touched: keep running yours (`space app build`), or repeat with `replaceSource` (`--replace-source`, the panel's **Take the update**): your copy is moved, whole, to `app-src/<app>.saved-<date>-<time>` and the release's takes its place |
+| anything else (a git checkout, an app made in the Space) | left alone; the install goes on and says so |
+
+A release without a source package, or `withSource: false`, installs the bundle and copies
+nothing. **From source** over a copy removes an untouched one for the clone and refuses a changed
+one the same way.
 
 ## Trust
 
@@ -170,15 +198,15 @@ directory when it runs from a bundle.
 
 | Route | Policy | Body / answer |
 | --- | --- | --- |
-| `GET /api/app-catalog[?refresh=1]` | owner | `{ sources, apps, trusted, git }`: each app with `latest`, `installed` (`version`, `origin` package / source / local, `ref`, `dev`), `state` (available, installed, update, unreleased, legacy) and its publisher's `trusted` |
-| `POST /api/app-catalog/:app/install` | owner | `{ from?: "package" \| "source", withSource?, ref?, trust? }` → `{ result: { app, version, action, from, ref, dir? } }` |
-| `POST /api/app-catalog/:app/upgrade` | owner | `{ from?, ref?, trust? }`, same answer |
+| `GET /api/app-catalog[?refresh=1]` | owner | `{ sources, apps, trusted, git }`: each app with `latest`, `installed` (`version`, `origin` package / source / local, `ref`, `dev`, `source` pristine / modified / own when `app-src/<app>` exists), `state` (available, installed, update, unreleased, legacy) and its publisher's `trusted` |
+| `POST /api/app-catalog/:app/install` | owner | `{ from?: "package" \| "source", withSource?, ref?, trust? }` (`withSource` defaults to true) → `{ result: { app, version, action, from, ref, dir?, source?: { dir, action: "copied" \| "updated" \| "kept" \| "replaced", saved? } } }` |
+| `POST /api/app-catalog/:app/upgrade` | owner | `{ from?, ref?, trust?, withSource?, replaceSource? }`, same answer |
 | `DELETE /api/app-catalog/publishers/:keyId` | owner | `{ removed }` |
 
 A refusal is `{ ok: false, error, code }`; `code` is one of `trust-required` (with `publisher`:
 ask, then repeat with `trust: true`), `not-found`, `legacy`, `not-installed`, `unreleased`,
 `current`, `location`, `download`, `checksum`, `invalid-package`, `signature`, `mismatch`,
-`upgrade-failed`, `install-failed`, `git-missing`, `git`, `dirty` (the checkout has changes of the
+`upgrade-failed`, `install-failed`, `source-modified` (with `changed` and `dir`: the owner changed the app's source; repeat with `replaceSource`, or build theirs), `git-missing`, `git`, `dirty` (the checkout has changes of the
 owner's: commit them, or build them as they are), `build`.
 
 ## Not yet

@@ -18,12 +18,12 @@ export type CatalogEntry = {
   online: Localized[];
   publisher: { id: string; name: string; keyId: string; url?: string; trusted: boolean };
   latest: { version: string; tag: string; sourcePackage: boolean } | null;
-  installed: { version: string; origin: "package" | "source" | "local"; ref: string | null; dev: boolean } | null;
+  installed: { version: string; origin: "package" | "source" | "local"; ref: string | null; dev: boolean; source?: "pristine" | "modified" | "own" } | null;
   state: "available" | "installed" | "update" | "unreleased" | "legacy";
 };
 export type CatalogView = { sources: { url: string; ok: boolean; stale?: boolean; error?: string; apps: number }[]; apps: CatalogEntry[]; git: boolean };
 type Answer = { ok: boolean; error?: string; code?: string; publisher?: { name: string; keyId: string; url?: string } };
-type Request = { from?: "package" | "source"; withSource?: boolean; trust?: boolean };
+type Request = { from?: "package" | "source"; withSource?: boolean; replaceSource?: boolean; trust?: boolean };
 
 const loc = (l: Localized, lang: string) => (lang === "zh" && l.zh ? l.zh : l.en);
 
@@ -90,7 +90,9 @@ export function CatalogPane({ preselect, onInstalled, onClose, busy, setBusy, in
   const [view, setView] = useState<CatalogView | null>(initial ?? null);
   const [err, setErr] = useState("");
   const [picked, setPicked] = useState<Set<string>>(() => (initial && preselect ? installable(initial) : new Set()));
-  const [withSource, setWithSource] = useState<Set<string>>(new Set());
+  // Apps come with their source unless the owner unticks it.
+  const [noSource, setNoSource] = useState<Set<string>>(new Set());
+  const [askSource, setAskSource] = useState<{ app: string; resolve: (yes: boolean) => void } | null>(null);
   // The app being changed and how, so only the button that started it says so.
   const [working, setWorking] = useState<{ app: string; how: "install" | "upgrade" | "source" } | null>(null);
   const [done, setDone] = useState<string[]>([]);
@@ -127,12 +129,32 @@ export function CatalogPane({ preselect, onInstalled, onClose, busy, setBusy, in
         if (!yes) return false;
         a = await post(`/api/app-catalog/${encodeURIComponent(app)}/${kind}`, { ...req, trust: true });
       }
+      if (!a.ok && a.code === "source-modified") {
+        // The owner changed the app's source: taking the release is theirs to decide.
+        const yes = await new Promise<boolean>((resolve) => setAskSource({ app, resolve }));
+        setAskSource(null);
+        if (!yes) return false;
+        a = await post(`/api/app-catalog/${encodeURIComponent(app)}/${kind}`, { ...req, replaceSource: true });
+      }
       if (!a.ok) {
         setErr(`${app}: ${a.error ?? "failed"}`);
         return false;
       }
       setDone((d) => [...d, app]);
       return true;
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  /** Build what is in app-src/<app> and run it in place of the installed version. */
+  const rebuild = async (app: string): Promise<boolean> => {
+    setWorking({ app, how: "source" });
+    try {
+      const a = await post(`/api/studio/apps/${encodeURIComponent(app)}/build`, {});
+      if (!a.ok) setErr(`${app}: ${a.error ?? "failed"}`);
+      else setDone((d) => [...d, app]);
+      return a.ok;
     } finally {
       setWorking(null);
     }
@@ -152,7 +174,7 @@ export function CatalogPane({ preselect, onInstalled, onClose, busy, setBusy, in
   const installPicked = () =>
     run(async () => {
       for (const name of [...picked]) {
-        if (!(await change(name, "install", { withSource: withSource.has(name) }))) break;
+        if (!(await change(name, "install", { withSource: !noSource.has(name) }))) break;
         setPicked((p) => new Set([...p].filter((n) => n !== name)));
       }
     });
@@ -224,11 +246,13 @@ export function CatalogPane({ preselect, onInstalled, onClose, busy, setBusy, in
                     <span className="cat-state">
                       {t("catalog.installed", { version: a.installed.version })}
                       {a.installed.origin === "source" && ` · ${a.installed.dev ? t("catalog.dev", { ref: a.installed.ref ?? "" }) : t("catalog.fromSource")}`}
+                      {a.installed.source === "modified" && ` · ${t("catalog.sourceModified")}`}
+                      {a.installed.source === "pristine" && ` · ${t("catalog.sourceHere", { app: a.name })}`}
                     </span>
                   )}
                   {a.state === "legacy" && <span className="cat-state">{t("catalog.legacy")}</span>}
                   {canInstall && (
-                    <button className="btn2 primary" disabled={busy} onClick={() => run(() => change(a.name, "install", { withSource: withSource.has(a.name) }))}>
+                    <button className="btn2 primary" disabled={busy} onClick={() => run(() => change(a.name, "install", { withSource: !noSource.has(a.name) }))}>
                       {doing === "install" ? t("catalog.installing") : t("catalog.install")}
                     </button>
                   )}
@@ -242,9 +266,14 @@ export function CatalogPane({ preselect, onInstalled, onClose, busy, setBusy, in
                       {doing === "source" ? t("catalog.building") : t("catalog.source")}
                     </button>
                   )}
+                  {a.installed?.source && (
+                    <button className="btn2" disabled={busy} title={t("catalog.rebuildHint", { app: a.name })} onClick={() => run(() => rebuild(a.name))}>
+                      {doing === "source" ? t("catalog.building") : t("catalog.rebuild")}
+                    </button>
+                  )}
                   {canInstall && a.latest?.sourcePackage && (
                     <label className="cat-check">
-                      <input type="checkbox" checked={withSource.has(a.name)} disabled={busy} onChange={() => setWithSource((s) => toggle(s, a.name))} />
+                      <input type="checkbox" checked={!noSource.has(a.name)} disabled={busy} onChange={() => setNoSource((s) => toggle(s, a.name))} />
                       {t("catalog.withSource")}
                     </label>
                   )}
@@ -252,6 +281,15 @@ export function CatalogPane({ preselect, onInstalled, onClose, busy, setBusy, in
                     {t("catalog.repo")}
                   </a>
                 </div>
+                {askSource?.app === a.name && (
+                  <div className="cat-trust" role="alertdialog">
+                    <div>{t("catalog.sourceAsk", { app: a.name })}</div>
+                    <div className="cat-actions">
+                      <button className="btn2 primary" onClick={() => askSource.resolve(true)}>{t("catalog.sourceReplace")}</button>
+                      <button className="btn2" onClick={() => askSource.resolve(false)}>{t("catalog.sourceKeep")}</button>
+                    </div>
+                  </div>
+                )}
                 {ask?.app === a.name && (
                   <div className="cat-trust" role="alertdialog">
                     <div>{t("catalog.trustAsk", { name: ask.publisher.name, key: ask.publisher.keyId.slice(0, 16) })}</div>

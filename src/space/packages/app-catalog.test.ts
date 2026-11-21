@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,6 +12,8 @@ import { PackageInstaller } from "./install.ts";
 import { PackageLifecycle } from "./lifecycle.ts";
 import { keyIdOf } from "./publishers.ts";
 import { buildRelease } from "./release.ts";
+import { readSourceRecord, sourceCondition } from "./source-copy.ts";
+import { buildSource } from "../studio.ts";
 import { PackageRuntime } from "./runtime.ts";
 import { PackageStore } from "./store.ts";
 
@@ -83,7 +85,7 @@ async function fixture() {
   }));
   await writeCatalog();
   const catalog = new AppCatalog({ db, sources: [pathToFileURL(catalogFile).href], studio: { ws, installer, lifecycle, store, activate }, trustedKeys: [ours.public] });
-  return { root, ws, store, installer, runtime, catalog, apps, writeCatalog, publish, ours, theirs, mirror };
+  return { root, ws, store, installer, lifecycle, runtime, catalog, apps, writeCatalog, publish, ours, theirs, mirror };
 }
 
 const state = async (c: AppCatalog) => Object.fromEntries((await c.view()).apps.map((a) => [a.name, a.state]));
@@ -106,14 +108,16 @@ describe("app catalog", () => {
     const good = latest.package.sha256;
     latest.package.sha256 = "0".repeat(64);
     await f.writeCatalog();
-    expect(await f.catalog.install("notes").catch((e: CatalogError) => e.code)).toBe("checksum");
+    expect(await f.catalog.install("notes", { withSource: false }).catch((e: CatalogError) => e.code)).toBe("checksum");
     latest.package.sha256 = good;
     await f.writeCatalog();
 
-    const r = await f.catalog.install("notes");
+    const r = await f.catalog.install("notes", { withSource: false });
     expect(r).toMatchObject({ app: "notes", version: "1.0.0", action: "installed", from: "package" });
+    expect(r.source).toBeUndefined();
     expect(await Bun.file(join(f.ws.apps, "notes", "web", "index.html")).text()).toBe("<p>notes 1.0.0</p>");
     expect(await Bun.file(join(f.ws.apps, "notes", "src", "index.html")).exists()).toBe(false);
+    expect(await Bun.file(join(f.ws.home, "app-src", "notes", "space.yaml")).exists()).toBe(false);
     expect((await f.catalog.view()).apps.find((a) => a.name === "notes")!.installed).toEqual({ version: "1.0.0", origin: "package", ref: "v1.0.0", dev: false });
     expect(await f.catalog.install("notes").catch((e: CatalogError) => e.code)).toBe("current");
 
@@ -152,6 +156,74 @@ describe("app catalog", () => {
     f.apps[1]!.publisher = "ours";
     await f.writeCatalog();
     expect(await f.catalog.install("other").catch((e: CatalogError) => e.code)).toBe("signature");
+  });
+
+  test("an app comes with source the owner can change; a release never overwrites their changes", async () => {
+    const f = await fixture();
+    const src = join(f.ws.home, "app-src", "notes");
+    const notes = async () => (await f.catalog.view()).apps.find((a) => a.name === "notes")!;
+    const release = async (version: string) => {
+      const repo = join(f.root, "repos", "notes");
+      await Bun.write(join(repo, "space.release.yaml"), releaseYaml("notes", version));
+      await Bun.write(join(repo, "src", "index.html"), `<p>notes ${version}</p>`);
+      git(repo, "commit", "-qam", version);
+      git(repo, "tag", `v${version}`);
+      f.apps[0]!.latest = await f.publish("notes", f.ours);
+      await f.writeCatalog();
+    };
+
+    // By default the release's source package is taken, and its files are put where they can be edited.
+    const r = await f.catalog.install("notes");
+    expect(r).toMatchObject({ version: "1.0.0", from: "package", dir: src, source: { dir: src, action: "copied" } });
+    expect(await Bun.file(join(src, "src", "index.html")).text()).toBe("<p>notes 1.0.0</p>");
+    expect(await Bun.file(join(src, "space.yaml")).text()).toContain("build:");
+    expect((await readSourceRecord(src))!.version).toBe("1.0.0");
+    expect(await sourceCondition(src)).toEqual({ state: "pristine", version: "1.0.0" });
+    expect((await notes()).installed).toMatchObject({ origin: "package", source: "pristine" });
+
+    // Untouched: the next release replaces the copy; what the owner's tools left beside it stays.
+    await Bun.write(join(src, "node_modules", "dep", "index.js"), "x");
+    await release("1.1.0");
+    expect((await f.catalog.upgrade("notes")).source).toEqual({ dir: src, action: "updated" });
+    expect(await Bun.file(join(src, "src", "index.html")).text()).toBe("<p>notes 1.1.0</p>");
+    expect(await Bun.file(join(src, "node_modules", "dep", "index.js")).exists()).toBe(true);
+    expect(await sourceCondition(src)).toEqual({ state: "pristine", version: "1.1.0" });
+
+    // The owner changes a file, adds one, and builds: their version runs (the version line the build raised is not a change of theirs).
+    await Bun.write(join(src, "src", "index.html"), "<p>mine</p>");
+    await Bun.write(join(src, "src", "extra.txt"), "new");
+    const built = await buildSource({ ws: f.ws, installer: f.installer, lifecycle: f.lifecycle, store: f.store, activate: async (app) => { await f.runtime.register(await f.installer.load(app)); } }, "notes");
+    expect(built).toMatchObject({ version: "1.1.1", action: "upgraded" });
+    expect(await Bun.file(join(f.ws.apps, "notes", "web", "index.html")).text()).toBe("<p>mine</p>");
+    expect(await sourceCondition(src)).toEqual({ state: "modified", version: "1.1.0", changed: ["src/extra.txt", "src/index.html"] });
+    expect((await notes()).installed).toMatchObject({ version: "1.1.1", origin: "local", source: "modified" });
+
+    // A newer release: refused until the owner decides, and nothing changed meanwhile.
+    await release("1.2.0");
+    const refused = await f.catalog.upgrade("notes").catch((e: CatalogError) => e);
+    expect(refused).toMatchObject({ code: "source-modified", status: 409, detail: { dir: src, changed: ["src/extra.txt", "src/index.html"] } });
+    expect(await Bun.file(join(f.ws.apps, "notes", "web", "index.html")).text()).toBe("<p>mine</p>");
+    expect(await f.catalog.install("notes", { from: "source" }).catch((e: CatalogError) => e.code)).toBe("source-modified");
+
+    // Taking the release moves their copy aside, whole, and puts the release's in its place.
+    const taken = await f.catalog.upgrade("notes", { replaceSource: true });
+    expect(taken).toMatchObject({ version: "1.2.0", action: "upgraded", source: { action: "replaced" } });
+    expect(taken.source!.saved).toMatch(/app-src\/notes\.saved-\d{8}-\d{6}$/);
+    expect(await Bun.file(join(taken.source!.saved!, "src", "index.html")).text()).toBe("<p>mine</p>");
+    expect(await Bun.file(join(taken.source!.saved!, "src", "extra.txt")).text()).toBe("new");
+    expect(await Bun.file(join(src, "src", "index.html")).text()).toBe("<p>notes 1.2.0</p>");
+    expect(await Bun.file(join(f.ws.apps, "notes", "web", "index.html")).text()).toBe("<p>notes 1.2.0</p>");
+    expect(await sourceCondition(src)).toEqual({ state: "pristine", version: "1.2.0" });
+  });
+
+  test("a directory in app-src the Space did not make is the owner's and is left alone", async () => {
+    const f = await fixture();
+    const src = join(f.ws.home, "app-src", "notes");
+    await Bun.write(join(src, "README.md"), "my own checkout");
+    const r = await f.catalog.install("notes");
+    expect(r.source).toEqual({ dir: src, action: "kept" });
+    expect((await readdir(src)).sort()).toEqual(["README.md"]);
+    expect((await f.catalog.view()).apps.find((a) => a.name === "notes")!.installed).toMatchObject({ source: "own" });
   });
 
   test("installs from source at the release tag, then upgrades the checkout", async () => {
