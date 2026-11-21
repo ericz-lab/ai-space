@@ -1,6 +1,9 @@
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { SHARED_SKILLS } from "../space/config.ts";
-import { cloneDefaultApps, describeInstalls, installDefaultApps, parseDefaultApps } from "../space/defaults.ts";
+import { cloneDefaultApps, describeInstalls, installDefaultApps, newPackagePort, newWorkspaceEnv, parseDefaultApps } from "../space/defaults.ts";
+import { RUNTIME_ENV, type Runtimes, findRuntimes, freePort, portFree, renderLocalRuntimes } from "../space/local.ts";
+import { RUNTIMES_FILE } from "../space/runtimes/config.ts";
 import { loadRouterConfig, renderCaddyfile } from "../space/router/index.ts";
 import { codexUpgrade } from "../space/runtimes/codex-upgrade.ts";
 import { EXTENSIONS, EXTENSION_TITLES, type Extension, SetupAborted, realDeps, runSetup, terminalIO } from "../space/setup.ts";
@@ -17,12 +20,41 @@ import { readVersion } from "../space/version.ts";
  * before the CLI, unchanged.
  */
 
+/** How `init` looks for the agent CLIs of a new workspace; tests replace it. */
+export const initDeps = { findRuntimes: (env: Record<string, string | undefined>) => findRuntimes(env, env.HOME?.trim() || homedir()) };
+
+/**
+ * A new workspace (`init` creates its `.env`) starts usable without editing anything
+ * (docs/install.md#a-new-workspace): the `.env` gets `newWorkspaceEnv`'s defaults, and
+ * `runtimes.yaml` the agent CLIs found on this machine, when the workspace has no such file and
+ * the environment names no runtime. The Local edition writes its own from the CLIs its user chose.
+ */
+async function newWorkspace(home: string, env: Record<string, string | undefined>): Promise<{ envText: string; looked: boolean; runtimes?: { text: string; found: string[] } }> {
+  let runtimes: { text: string; found: string[] } | undefined;
+  const wanted = env.SPACE_EDITION?.trim() !== "local" && !RUNTIME_ENV.some((k) => env[k]?.trim()) && !(await Bun.file(join(home, RUNTIMES_FILE)).exists());
+  if (wanted) {
+    const r: Runtimes = await initDeps.findRuntimes(env);
+    const text = renderLocalRuntimes(r, { withDefault: true, header: ["# Written by init for this new workspace: the agent CLIs found on this machine (docs/runtimes.md).", "# Edit freely; init writes this file only when it creates the workspace's .env."] });
+    if (text) runtimes = { text, found: (Object.keys(r) as (keyof Runtimes)[]).filter((k) => r[k]) };
+  }
+  // SPACE_MODEL_DEFAULT's built-in `sonnet` names a Claude model; without Claude Code the default runtime's tier stands in for it.
+  const modelDefault = runtimes && !runtimes.found.includes("claude") ? "junior" : undefined;
+  return { envText: newWorkspaceEnv(env, { packagePort: newPackagePort(env, portFree, freePort), modelDefault }), looked: wanted, runtimes };
+}
+
 const init = (installDefaults: boolean) => async (ctx: Ctx, argv: string[]) => {
   noMore(parseArgs(argv, {}).positional, 0);
   const err = ctx.io.err;
-  const { ws, created, updated } = await ensureWorkspace(resolveHome(ctx.io.env), ctx.io.env);
+  const home = resolveHome(ctx.io.env);
+  let fresh: Awaited<ReturnType<typeof newWorkspace>> | undefined;
+  const newEnv = installDefaults ? undefined : async () => (fresh = await newWorkspace(home, ctx.io.env)).envText;
+  const { ws, created, updated } = await ensureWorkspace(home, ctx.io.env, { newEnv });
   for (const p of created) err(`[space] created ${p}`);
   for (const p of updated) err(`[space] regenerated ${p}`);
+  if (fresh?.runtimes) {
+    await Bun.write(join(ws.home, RUNTIMES_FILE), fresh.runtimes.text);
+    err(`[space] runtimes: wrote ${join(ws.home, RUNTIMES_FILE)} with ${fresh.runtimes.found.join(", ")}`);
+  } else if (fresh?.looked) err("[space] runtimes: no agent CLI found (claude, codex, dsh); add one later in Settings, Models");
   // Default apps (src/space/defaults.ts): SPACE_DEFAULT_APPS from the environment or the workspace .env.
   // `init` clones them; `install-defaults` runs their installers after boot, when their space.env exists.
   const env = { ...(await readWorkspaceEnv(ws)), ...ctx.io.env };

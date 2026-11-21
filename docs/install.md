@@ -132,7 +132,19 @@ cd ~/.ai-space/core && bash deploy/install.sh
 
 The workspace is `~/.ai-space` unless `SPACE_HOME` is set for the install: `SPACE_HOME=/srv/space bash deploy/install.sh` creates the workspace there (apps then live in `/srv/space/apps/<name>`) and writes the path, made absolute, into the unit. A later run without `SPACE_HOME`, such as a git-push deploy, keeps the path the installed unit already has, so set it again only to move the workspace. The checkout may sit anywhere; the unit runs it from wherever `install.sh` was run.
 
-`init` also clones the default apps (`src/space/defaults.ts`) into `apps/<name>` when that directory is absent, and once ai-space answers, `install.sh` runs `bun src/index.ts install-defaults`, which runs each default app's own `deploy/install.sh` (a user unit, started) now that the app's `space.env` exists. Today the list is `ai-usage`, the usage dashboard; `SPACE_DEFAULT_APPS=none` in `.env` (or the environment of the `init` run) skips it, a comma-separated list of clone URLs replaces it. The default app binds loopback and its manifest names `http://127.0.0.1:<port>`; on a server with a hostname, set `SPACE_APP_URL_AI_USAGE=https://usage.<domain>` in `.env` (it keeps the manifest's `?lang={lang}&accent={accent}`) and add the hostname to the tunnel (step 5) like any other app. Its dashboard merges the peers of step 9 that run it too.
+### A new workspace
+
+When `init` creates the workspace's `.env` (the first install, or `SPACE_HOME` pointing at an empty directory), it writes a few defaults after the starter values, so the panel works without editing anything (`src/cli/lifecycle.ts`, `newWorkspaceEnv` in `src/space/defaults.ts`):
+
+- `SPACE_DEFAULT_APPS=none`: nothing is cloned with git. Apps come from the app catalog, from the panel's first-use card or Add ([app-catalog.md](app-catalog.md)), and run as packages. A value given in the environment of that first `init` (`SPACE_DEFAULT_APPS=<clone URLs> bash deploy/install.sh`) is written instead.
+- `SPACE_PACKAGE_PORT`: the loopback gateway packaged apps open through ([app-packages.md](app-packages.md#application-entry-gateway)). It is `SPACE_PORT` + 2 (8702) when that port is free, any free port otherwise, or the value in the environment; keep it stable afterwards, since an app's origin, and so its browser storage, depends on it.
+- `runtimes.yaml`: the agent CLIs found on the machine (Claude Code, Codex, DeepSeek Harness, each by its absolute path, the search the Local edition uses), with `default:` the first of them, unless the environment already names a runtime (`SPACE_MODEL_BIN`, `SPACE_CHAT_BIN`, `SPACE_MODEL_SSH_HOST`, `SPACE_MODEL_API_KEY`) or the file exists. When Claude Code is not among them, `SPACE_MODEL_DEFAULT` is set to `junior` (that runtime's junior tier), since its built-in `sonnet` is a Claude model. No CLI found: no file, and one is added later in Settings, Models.
+
+A workspace whose `.env` already exists is never rewritten: it keeps what it had, including the old defaults below (no package gateway until `SPACE_PACKAGE_PORT` is set, the built-in default apps when `SPACE_DEFAULT_APPS` is unset). The web terminal stays off on a new workspace too: with `SPACE_AUTH=external` and no access layer, anything that reaches the loopback port would get a shell ([terminal.md](terminal.md)).
+
+### Default apps
+
+With `SPACE_DEFAULT_APPS` unset (a workspace made before the defaults above), `init` clones the built-in default apps (`src/space/defaults.ts`) into `apps/<name>` when that directory is absent, and once ai-space answers, `install.sh` runs `bun src/index.ts install-defaults`, which runs each default app's own `deploy/install.sh` (a user unit, started) now that the app's `space.env` exists. Today the list is `ai-usage`, the usage dashboard; `SPACE_DEFAULT_APPS=none` in `.env` (or the environment of the `init` run) skips it, a comma-separated list of clone URLs replaces it. The default app binds loopback and its manifest names `http://127.0.0.1:<port>`; on a server with a hostname, set `SPACE_APP_URL_AI_USAGE=https://usage.<domain>` in `.env` (it keeps the manifest's `?lang={lang}&accent={accent}`) and add the hostname to the tunnel (step 5) like any other app. Its dashboard merges the peers of step 9 that run it too.
 
 **Git-push deploys, from the laptop**
 
@@ -184,7 +196,7 @@ If `systemctl --user` says the bus is not available, log out and back in once af
 
 ## 5. Cloudflare Tunnel and DNS
 
-Optional (`space setup ingress`). Without steps 5 and 6 the panel stays on loopback, and you open it from another machine through an SSH forward: `ssh -L 8700:127.0.0.1:8700 <host>`, then `http://127.0.0.1:8700`. An app with its own port needs that port forwarded the same way; a packaged app opens through the gateway port (`SPACE_PACKAGE_PORT`) when it is on. Do not bind `0.0.0.0` instead of a tunnel: `SPACE_API_TOKEN` protects the API, not the panel, and any other public entry needs an access layer in front of it ([ingress.md](ingress.md)).
+Optional (`space setup ingress`). Without steps 5 and 6 the panel stays on loopback, and you open it from another machine through an SSH forward: `ssh -L 8700:127.0.0.1:8700 <host>`, then `http://127.0.0.1:8700`. An app with its own port needs that port forwarded the same way; a packaged app opens through the gateway port (`SPACE_PACKAGE_PORT`, which a new workspace has from `init`), forwarded the same way. Do not bind `0.0.0.0` instead of a tunnel: `SPACE_API_TOKEN` protects the API, not the panel, and any other public entry needs an access layer in front of it ([ingress.md](ingress.md)).
 
 ai-space binds loopback on purpose. The tunnel publishes chosen ports on hostnames of your domain, TLS included, with nothing listening on the public IP.
 

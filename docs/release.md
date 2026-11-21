@@ -102,6 +102,12 @@ opens it on a desktop; over SSH it prints the port forward instead.
 When no agent CLI is found (`claude`, `codex`, `dsh`) it says how to get one: ai-space works through
 one signed-in CLI, and the installer never installs one. Running it again upgrades.
 
+On the first install the workspace is new, and `init` makes it usable as it is
+([install.md](install.md#a-new-workspace)): no app is cloned with git (apps come from the app
+catalog on the panel's first-use card), the package gateway gets a port (`SPACE_PACKAGE_PORT`, 8702
+next to 8700) so catalog apps open, and `runtimes.yaml` lists the agent CLIs found on the machine.
+An existing workspace's `.env` is never rewritten, so an upgrade changes none of its values.
+
 Settings, all optional, as environment variables before `bash`:
 
 | Variable | What it does |
@@ -141,7 +147,7 @@ moves it), points `current` at it, and runs `current/deploy/install.sh` with the
 the workspace (`~/.ai-space` or `SPACE_HOME`), the background service running from `current`
 ([below](#the-background-service)), the `space` command in `~/.local/bin`, `/healthz`. The machine needs no Bun, Git or developer tools; when it has
 no Bun, the release's is linked as `~/.local/bin/bun` and comes first on the unit's `PATH`, so the
-apps' services find it too. Then `space setup` as in [install.md](install.md) step 4.
+apps' services find it too. A new workspace needs nothing more ([install.md](install.md#a-new-workspace)); `space setup`, as in [install.md](install.md) step 4, is for the optional settings.
 
 The program and the data stay apart: everything under `~/.local/share/ai-space` can be deleted and
 installed again without touching apps, databases or `.env`.
@@ -228,7 +234,7 @@ What a running service needs from the machine, and what it does without it:
 | --- | --- |
 | Bun | Bundled (`runtime/bun`) |
 | A PTY for the terminal | Bundled (`runtime/space-pty`); the `/usr/bin/python3` stub is never started |
-| `git` | Missing (a stub, never started): default apps are not cloned; Local installs its apps from packages |
+| `git` | Missing (a stub, never started): default apps are not cloned (a new workspace has none); apps install from packages |
 | `claude`, `codex` | The user's; the service adds the usual tool directories (`~/.local/bin`, `/opt/homebrew/bin`, ...) to the bare PATH launchd gives it |
 | `zstd` | Missing: backups fail until it is installed (to solve before Local ships backups) |
 
