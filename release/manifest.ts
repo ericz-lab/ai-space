@@ -33,10 +33,12 @@ export function notes(m: Manifest): string {
   for (const a of m.artifacts) {
     let what = "";
     if (a.name === "install.sh") what = "The one-command installer: `curl -fsSL https://ai-space.me/install.sh | bash` sends curl here; it installs this release's Server edition for the machine it runs on (docs/release.md#one-command-install)";
+    else if (a.name === "install.ps1") what = "The one-command installer for Windows: `irm https://ai-space.me/install.ps1 | iex` fetches this; it installs this release's Server edition on Windows itself, without WSL (docs/release.md#one-command-install)";
     else if (a.name.startsWith("ai-space-linux-client-")) what = "Client edition for Linux (GNOME and other GTK desktops): unpack, then `<dir>/install.sh` (docs/linux-desktop.md)";
     else if (a.name.startsWith("ai-space-linux-local-")) what = "Local edition for Linux: the app with the service inside, run as a systemd user service; unpack, then `<dir>/install.sh` (docs/local.md)";
     else if (a.name.startsWith("ai-space-windows-client-")) what = "Client edition for Windows 10 and 11, **not signed** (SmartScreen asks once): unzip, then run `AISpace.exe` (docs/windows-desktop.md)";
     else if (a.name.startsWith("ai-space-windows-local-")) what = "Local edition for Windows: the app that sets up the service in WSL 2, **not signed**; unzip, then run `AISpace.exe` (docs/local.md)";
+    else if (a.name.startsWith("ai-space-server-") && a.name.includes("-windows-")) what = "Server edition for Windows 10 and 11 (x64), without WSL: unpack, then `powershell -ExecutionPolicy Bypass -File <dir>\install.ps1` (a Task Scheduler task; docs/release.md)";
     else if (a.name.startsWith("ai-space-server-") && a.name.includes("-macos-")) what = "Server edition for a Mac (Apple silicon): unpack, then `bash <dir>/install.sh` (a LaunchAgent; docs/release.md)";
     else if (a.name.startsWith("ai-space-server-")) what = "Server edition: unpack, then `bash <dir>/install.sh` (Linux, systemd user unit; docs/release.md)";
     else if (a.name.startsWith("ai-space-client-") && a.name.includes("-unsigned")) what = "Client edition for Mac, **not signed**: for testing only, macOS blocks it for everyone else";

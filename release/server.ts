@@ -5,8 +5,9 @@
  *   ai-space-server-<version>-<os>-<arch>.tar.gz
  *     ai-space-server-<version>-<os>-<arch>/
  *       install.sh          release/install.sh: install or upgrade from this directory
+ *                           (the windows archive: install.ps1, release/install.ps1)
  *       RELEASE.json        product, version, commit, os, arch, bun
- *       runtime/bun         the Bun that built it, so the machine needs none
+ *       runtime/bun         the Bun that built it, so the machine needs none (windows: bun.exe)
  *       node_modules/       production dependencies, installed from bun.lock
  *       src/ skills/ bin/ deploy/ docs/ ...   the committed tree, without tests
  *
@@ -28,6 +29,12 @@ export function included(path: string): boolean {
 
 export type ReleaseInfo = { product: "ai-space"; edition: "server" | "local"; version: string; commit: string; os: string; arch: string; bun: string };
 
+/** The system in an archive's name: `linux`, `macos` or `windows`. */
+export const releaseOs = (platform: string = process.platform): string => (platform === "darwin" ? "macos" : platform === "win32" ? "windows" : platform);
+
+/** The Bun inside a release tree, relative to it. */
+export const runtimeBun = (platform: string = process.platform): string => join("runtime", platform === "win32" ? "bun.exe" : "bun");
+
 export function archiveName(info: Pick<ReleaseInfo, "version" | "os" | "arch">): string {
   return `ai-space-server-${info.version}-${info.os}-${info.arch}`;
 }
@@ -46,7 +53,7 @@ export async function run(cmd: string[], cwd: string): Promise<string> {
  */
 export async function stageRelease(opts: { root?: string; stage: string; edition: ReleaseInfo["edition"] }): Promise<ReleaseInfo> {
   const root = opts.root ?? SPACE_ROOT;
-  const os = process.platform === "darwin" ? "macos" : process.platform;
+  const os = releaseOs();
   const info: ReleaseInfo = {
     product: "ai-space",
     edition: opts.edition,
@@ -69,8 +76,8 @@ export async function stageRelease(opts: { root?: string; stage: string; edition
 
   await run([process.execPath, "install", "--frozen-lockfile", "--production"], stage);
   await mkdir(join(stage, "runtime"), { recursive: true });
-  await cp(process.execPath, join(stage, "runtime", "bun"));
-  await chmod(join(stage, "runtime", "bun"), 0o755);
+  await cp(process.execPath, join(stage, runtimeBun()));
+  await chmod(join(stage, runtimeBun()), 0o755);
   await Bun.write(join(stage, "RELEASE.json"), `${JSON.stringify(info, null, 2)}\n`);
   return info;
 }
@@ -78,16 +85,20 @@ export async function stageRelease(opts: { root?: string; stage: string; edition
 export async function buildServer(opts: { root?: string; out: string }): Promise<string> {
   const root = opts.root ?? SPACE_ROOT;
   const out = resolve(opts.out);
-  const os = process.platform === "darwin" ? "macos" : process.platform;
+  const os = releaseOs();
   const name = archiveName({ version: await readVersion(root), os, arch: process.arch });
   const stage = join(out, name);
   await stageRelease({ root, stage, edition: "server" });
-  await cp(join(root, "release", "install.sh"), join(stage, "install.sh"));
-  await chmod(join(stage, "install.sh"), 0o755);
+  // Each system's archive carries the installer that system can run.
+  const installer = process.platform === "win32" ? "install.ps1" : "install.sh";
+  await cp(join(root, "release", installer), join(stage, installer));
+  await chmod(join(stage, installer), 0o755);
 
   const archive = join(out, `${name}.tar.gz`);
   await rm(archive, { force: true });
-  await run(["tar", "-czf", archive, "-C", out, name], root);
+  // Windows' own tar: a `tar` found on the search path there may be Git's, which reads `C:` as a remote host.
+  const tar = process.platform === "win32" ? join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe") : "tar";
+  await run([tar, "-czf", archive, "-C", out, name], root);
   await rm(stage, { recursive: true, force: true });
   return archive;
 }
