@@ -49,7 +49,8 @@ A spec-2 package with a Bun process and no dependencies to install:
 | `icon.svg` | the tile's icon |
 
 The host's Bun runs it (in the Local edition, the one inside the app). An app opens through the
-package gateway, so the Space needs `SPACE_PACKAGE_PORT`; the Local edition sets it at install.
+package gateway, so the Space needs `SPACE_PACKAGE_PORT`; the Local edition sets it at install, and
+`init` writes it into a new Server workspace's `.env` ([install.md](install.md#a-new-workspace)).
 
 ## API
 

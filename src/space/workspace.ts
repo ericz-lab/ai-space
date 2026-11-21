@@ -73,8 +73,11 @@ SPACE_SERVICE_STOP=
  * guide files up to date (`updated` names the regenerated ones). The guide names
  * the machine it is on: `SPACE_NAME` from `env` or the workspace `.env` (read
  * here without loading it), the hostname otherwise. Safe to call every boot.
+ * `newEnv` is asked only when the `.env` does not exist yet, and its text is written
+ * after the template's: `init` gives a new workspace its defaults that way
+ * (src/space/defaults.ts, `newWorkspaceEnv`) and never touches an existing file.
  */
-export async function ensureWorkspace(home: string, env: Record<string, string | undefined> = process.env): Promise<{ ws: Workspace; created: string[]; updated: string[] }> {
+export async function ensureWorkspace(home: string, env: Record<string, string | undefined> = process.env, opts: { newEnv?: () => string | Promise<string> } = {}): Promise<{ ws: Workspace; created: string[]; updated: string[] }> {
   const ws = workspacePaths(home);
   const created: string[] = [];
   for (const dir of [ws.home, ws.apps, ws.data, ws.logs, ws.run]) {
@@ -84,7 +87,7 @@ export async function ensureWorkspace(home: string, env: Record<string, string |
     }
   }
   if (!(await Bun.file(ws.envFile).exists())) {
-    await Bun.write(ws.envFile, ENV_TEMPLATE);
+    await Bun.write(ws.envFile, ENV_TEMPLATE + ((await opts.newEnv?.()) ?? ""));
     await chmod(ws.envFile, 0o600); // it will hold secrets; Bun.write follows the umask
     created.push(ws.envFile);
   }

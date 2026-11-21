@@ -81,9 +81,9 @@ mkdir -p ~/.ai-space && git clone https://github.com/<owner>/ai-space.git ~/.ai-
 cd ~/.ai-space/core && bash deploy/install.sh
 ```
 
-`install.sh` installs dependencies, creates the workspace with a starter `.env`, clones the default apps (`ai-usage`; `SPACE_DEFAULT_APPS=none` skips it), installs and starts the ai-space unit, waits for `/healthz`, then runs the default apps' installers (ai-usage: its own user unit on port 8880). If `systemctl --user` reports no bus, `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in again over SSH.
+`install.sh` installs dependencies, creates the workspace with a starter `.env` (on a new workspace with `SPACE_DEFAULT_APPS=none`, a `SPACE_PACKAGE_PORT` and a `runtimes.yaml` of the agent CLIs found, [install.md](install.md#a-new-workspace)), installs and starts the ai-space unit and waits for `/healthz`. A new workspace clones no app: apps come from the app catalog. To bring the old default app back, run the first install as `SPACE_DEFAULT_APPS=https://github.com/ericz-lab/ai-usage.git bash deploy/install.sh`; `install.sh` then runs its installer (its own user unit on port 8880). If `systemctl --user` reports no bus, `export XDG_RUNTIME_DIR=/run/user/$(id -u)` or log in again over SSH.
 
-`bun run setup` is interactive and made for a terminal; do not drive it. Fill `~/.ai-space/.env` yourself from `.env.example`:
+`bun run setup` is interactive and made for a terminal; do not drive it. Fill `~/.ai-space/.env` yourself from `.env.example`, keeping the lines `init` wrote:
 
 ```bash
 SPACE_HOST=127.0.0.1
@@ -99,7 +99,7 @@ With `SPACE_SUPERVISOR=operator` add `SPACE_SERVICE_STOP=systemctl --user disabl
 
 Show the values, write them, `systemctl --user restart ai-space`. `install.sh` reports the core as installed once `/healthz` answers; a default app whose installer fails is reported on its own line and retried with `bun src/index.ts install-defaults`, not a failed install.
 
-Proof: `curl -s 127.0.0.1:8700/healthz` is `{"ok":true}`; `curl -s 127.0.0.1:8700/api/apps` lists the default app (`ai-usage`) and nothing else, and `curl -s 127.0.0.1:8880/healthz` answers; `journalctl --user -u ai-space -n 20` shows `listening on` and no error. Also set up git-push deploys from the person's machine if you are in the first shape (install.md step 4, second block) and prove it with one push. Without the `ingress` extension, show the person how to open the panel: `ssh -L 8700:127.0.0.1:8700 <host>` on their machine, then `http://127.0.0.1:8700`; an app with its own port needs its port forwarded the same way. With phase 8, this is the basic install.
+Proof: `curl -s 127.0.0.1:8700/healthz` is `{"ok":true}`; `curl -s 127.0.0.1:8700/api/apps` lists the apps installed so far (none on a new workspace; `ai-usage` when it was asked for, and then `curl -s 127.0.0.1:8880/healthz` answers); `journalctl --user -u ai-space -n 20` shows `listening on` and no error. Also set up git-push deploys from the person's machine if you are in the first shape (install.md step 4, second block) and prove it with one push. Without the `ingress` extension, show the person how to open the panel: `ssh -L 8700:127.0.0.1:8700 <host>` on their machine, then `http://127.0.0.1:8700`; an app with its own port needs its port forwarded the same way. With phase 8, this is the basic install.
 
 ### Phase 6: tunnel and Access (steps 5 and 6, extension `ingress`, only with a domain)
 
@@ -142,7 +142,7 @@ Base, required on every install:
 - [ ] `curl -s 127.0.0.1:8700/healthz` is `{"ok":true}`
 - [ ] `ss -ltn` shows 8700 on 127.0.0.1 only
 - [ ] `~/.ai-space/.env` has `SPACE_API_TOKEN`, `SPACE_NAME`, `SPACE_SUPERVISOR` (and `SPACE_SERVICE_STOP` only under `operator`); mode 600; not in any git repository
-- [ ] under `space`: `space app service ai-usage` shows `space-ai-usage.service` active, and no `ai-usage.service` of its own is enabled
+- [ ] when ai-usage was installed, under `space`: `space app service ai-usage` shows `space-ai-usage.service` active, and no `ai-usage.service` of its own is enabled
 - [ ] `journalctl --user -u ai-space -n 50` has no error lines
 - [ ] The person has a copy of `.env` in their password manager (it is never in a backup)
 

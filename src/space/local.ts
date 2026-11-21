@@ -138,7 +138,7 @@ export function portFree(port: number): boolean {
   }
 }
 
-function freePort(): number {
+export function freePort(): number {
   const s = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() });
   const port = s.port!;
   s.stop(true);
@@ -259,7 +259,7 @@ export async function localModelOptions(r: Runtimes, run?: CodexRun): Promise<Mo
 }
 
 /** Variables that already describe the space's runtime (runtimes/config.ts): then no file is written. */
-const RUNTIME_ENV = ["SPACE_MODEL_BIN", "SPACE_CHAT_BIN", "SPACE_MODEL_SSH_HOST", "SPACE_MODEL_API_KEY"];
+export const RUNTIME_ENV = ["SPACE_MODEL_BIN", "SPACE_CHAT_BIN", "SPACE_MODEL_SSH_HOST", "SPACE_MODEL_API_KEY"];
 
 /**
  * `runtimes.yaml` for the agent CLIs found: Claude Code, Codex and DeepSeek Harness, each by its
@@ -268,8 +268,11 @@ const RUNTIME_ENV = ["SPACE_MODEL_BIN", "SPACE_CHAT_BIN", "SPACE_MODEL_SSH_HOST"
  * `dsh/intermediate`), and the Space's default model, set at install, covers a request that names
  * none. The desktop app's CLI is written with `provider: deepseek-account`, the login that ships
  * with it; a `dsh` installed elsewhere follows the configured route (an API key).
+ *
+ * `init` writes the same file for a new Server workspace (src/cli/lifecycle.ts), where no default model
+ * was chosen at install: it adds `default:`, the first runtime found, so a bare model name has a home.
  */
-export function renderLocalRuntimes(r: Runtimes): string | undefined {
+export function renderLocalRuntimes(r: Runtimes, opts: { header?: string[]; withDefault?: boolean } = {}): string | undefined {
   const entries: string[] = [];
   if (r.claude) entries.push(`  claude:\n    kind: claude-code\n    bin: [${JSON.stringify(r.claude)}]`);
   if (r.codex) entries.push(`  codex:\n    kind: codex-cli\n    bin: [${JSON.stringify(r.codex)}]`);
@@ -278,9 +281,10 @@ export function renderLocalRuntimes(r: Runtimes): string | undefined {
     entries.push(`  dsh:\n    kind: deepseek-harness\n    bin: [${JSON.stringify(r.dsh)}]${account}`);
   }
   if (!entries.length) return undefined;
+  const first = (["claude", "codex", "dsh"] as const).find((name) => r[name]);
   return [
-    "# Written by the AI Space app at setup: the agent CLIs found on this Mac (docs/runtimes.md).",
-    "# Edit freely; the app writes this file only when the workspace has none.",
+    ...(opts.header ?? ["# Written by the AI Space app at setup: the agent CLIs found on this Mac (docs/runtimes.md).", "# Edit freely; the app writes this file only when the workspace has none."]),
+    ...(opts.withDefault && first ? [`default: ${first}`] : []),
     "runtimes:",
     ...entries,
     "",

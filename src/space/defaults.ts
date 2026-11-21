@@ -50,6 +50,45 @@ export function parseDefaultApps(env: Record<string, string | undefined>): Defau
   return out;
 }
 
+/**
+ * What `init` writes after the template into the `.env` it creates, and only then: a workspace
+ * whose `.env` already exists is never rewritten, so an existing space keeps every default it had.
+ *
+ * - `SPACE_DEFAULT_APPS=none`: a new space clones nothing with git; its apps come from the app
+ *   catalog (the panel's first-use card), installed as packages (docs/app-catalog.md). A value
+ *   given in the environment at that first `init` is written instead, so it outlives the run.
+ * - `SPACE_PACKAGE_PORT`: the loopback gateway packaged apps open through (docs/app-packages.md),
+ *   without which every catalog app answers 503. Picked once, then kept: an app's origin, and so
+ *   its browser storage, is tied to it.
+ * - `SPACE_MODEL_DEFAULT`, when the starting `runtimes.yaml` has no Claude Code: its built-in
+ *   `sonnet` names a Claude model, so it names the default runtime's tier instead. Chat needs
+ *   nothing: a bare default there applies to Claude only (docs/runtimes.md).
+ */
+export function newWorkspaceEnv(env: Record<string, string | undefined>, opts: { packagePort: number; modelDefault?: string }): string {
+  const lines = [
+    "",
+    "# Written by init for this new workspace (docs/install.md#a-new-workspace).",
+    "# Apps come from the app catalog; none is cloned with git. A list of clone URLs here brings that back.",
+    `SPACE_DEFAULT_APPS=${env.SPACE_DEFAULT_APPS?.trim() || "none"}`,
+    "# The loopback server packaged apps open through; keep it stable, an app's browser storage belongs to its origin.",
+    `SPACE_PACKAGE_PORT=${opts.packagePort}`,
+  ];
+  if (opts.modelDefault) lines.push("# The model when a request names none: runtimes.yaml has no Claude Code runtime.", `SPACE_MODEL_DEFAULT=${opts.modelDefault}`);
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * The package gateway's port for a new workspace: `SPACE_PACKAGE_PORT` from the environment, else
+ * two above the panel's (8702 next to 8700, as the Local edition picks), else any free one.
+ */
+export function newPackagePort(env: Record<string, string | undefined>, free: (port: number) => boolean, any: () => number): number {
+  const given = Number(env.SPACE_PACKAGE_PORT?.trim());
+  if (Number.isInteger(given) && given >= 1 && given <= 65535) return given;
+  const base = Number(env.SPACE_PORT?.trim() || 8700);
+  const next = Number.isInteger(base) ? base + 2 : 8702;
+  return next >= 1 && next <= 65535 && free(next) ? next : any();
+}
+
 export type InstallReport = { name: string; status: "present" | "cloned" | "installed" | "absent" | "no-installer" | "failed"; detail?: string };
 
 export type InstallOptions = {

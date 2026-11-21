@@ -33,6 +33,19 @@ describe("workspace", () => {
     expect(await Bun.file(join(home, "AGENTS.md")).text()).toContain("space host `box-b`");
   });
 
+  test("newEnv is asked only when the .env is created, and appended to the template", async () => {
+    const home = join(await mkdtemp(join(tmpdir(), "space-ws-")), "ws");
+    let asked = 0;
+    const newEnv = () => (asked++, "SPACE_DEFAULT_APPS=none\n");
+    const { ws } = await ensureWorkspace(home, {}, { newEnv });
+    const text = await Bun.file(ws.envFile).text();
+    expect(text).toStartWith("# ai-space workspace configuration.");
+    expect(text).toEndWith("SPACE_SERVICE_STOP=\nSPACE_DEFAULT_APPS=none\n");
+    await ensureWorkspace(home, {}, { newEnv });
+    expect(asked).toBe(1);
+    expect(await Bun.file(ws.envFile).text()).toBe(text);
+  });
+
   test("discoverApps lists only app dirs that carry a manifest", async () => {
     const { ws } = await ensureWorkspace(join(await mkdtemp(join(tmpdir(), "space-ws-")), "ws"));
     await Bun.write(join(ws.apps, "b-app", "space.yaml"), "tasks: []\n");

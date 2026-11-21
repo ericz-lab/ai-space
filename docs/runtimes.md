@@ -33,7 +33,7 @@ Every operation reports what the runtime said about the model call, token counts
 
 ## Configuration
 
-`<workspace>/runtimes.yaml` names the runtimes. Keys never go in the file; `apiKeyEnv` names the environment variable that holds one (the workspace `.env` is loaded into the environment).
+`<workspace>/runtimes.yaml` names the runtimes. Keys never go in the file; `apiKeyEnv` names the environment variable that holds one (the workspace `.env` is loaded into the environment). A new workspace gets one from `init`: the agent CLIs found on the machine, by absolute path, with `default:` the first of Claude Code, Codex and DeepSeek Harness ([install.md](install.md#a-new-workspace)). Without the file, the `SPACE_MODEL_*` variables describe a single Claude Code runtime, as before the file existed.
 
 ```yaml
 default: claude                  # optional: runtime a bare model name goes to; without it every model must be runtime/model

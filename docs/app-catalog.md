@@ -112,8 +112,9 @@ A catalog is read at most every 6 hours (`--refresh` / the panel's Refresh read 
 cannot be read, the last copy is shown and marked; installs from it still check every package.
 Package URLs in a catalog are https (or relative to a local catalog file).
 
-`SPACE_DEFAULT_APPS` and the default apps of `init` are unchanged for now; they move to the catalog
-once every default app is released there.
+A new workspace clones no default app: `init` writes `SPACE_DEFAULT_APPS=none` into the `.env` it
+creates ([install.md](install.md#a-new-workspace)), and its apps come from this catalog. A workspace
+made before keeps its `SPACE_DEFAULT_APPS` (unset: `ai-usage`) until every default app is released here.
 
 ## The catalog format
 

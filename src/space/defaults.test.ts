@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_APPS, applyEnvOverrides, cloneDefaultApps, describeInstalls, installDefaultApps, parseDefaultApps, urlOverrideKey, withManifestQuery } from "./defaults.ts";
+import { DEFAULT_APPS, applyEnvOverrides, cloneDefaultApps, describeInstalls, installDefaultApps, newPackagePort, newWorkspaceEnv, parseDefaultApps, urlOverrideKey, withManifestQuery } from "./defaults.ts";
 import { loadManifest } from "./scheduler/manifest.ts";
 import { workspacePaths } from "./workspace.ts";
 
@@ -17,6 +17,28 @@ describe("parseDefaultApps", () => {
     ]);
     expect(() => parseDefaultApps({ SPACE_DEFAULT_APPS: "Bad Name=https://x/y.git" })).toThrow(/not an app name/);
     expect(() => parseDefaultApps({ SPACE_DEFAULT_APPS: "notes=ftp://x" })).toThrow(/clone URL/);
+  });
+});
+
+describe("a new workspace's .env", () => {
+  test("no default apps, a package port, and a model only when Claude Code is missing", () => {
+    const text = newWorkspaceEnv({}, { packagePort: 8702 });
+    expect(text).toContain("\nSPACE_DEFAULT_APPS=none\n");
+    expect(text).toContain("\nSPACE_PACKAGE_PORT=8702\n");
+    expect(text).not.toContain("SPACE_MODEL_DEFAULT");
+    expect(newWorkspaceEnv({ SPACE_DEFAULT_APPS: " notes=/srv/notes.git " }, { packagePort: 1 })).toContain("\nSPACE_DEFAULT_APPS=notes=/srv/notes.git\n");
+    const codex = newWorkspaceEnv({}, { packagePort: 8702, modelDefault: "junior" });
+    expect(codex).toEndWith("\nSPACE_MODEL_DEFAULT=junior\n");
+  });
+
+  test("the package port: the environment's, else two above the panel's when free, else any free one", () => {
+    const free = (taken: number[]) => (p: number) => !taken.includes(p);
+    expect(newPackagePort({}, free([]), () => 5)).toBe(8702);
+    expect(newPackagePort({ SPACE_PORT: "18811" }, free([]), () => 5)).toBe(18813);
+    expect(newPackagePort({ SPACE_PORT: "18811" }, free([18813]), () => 5)).toBe(5);
+    expect(newPackagePort({ SPACE_PORT: "65535" }, free([]), () => 5)).toBe(5);
+    expect(newPackagePort({ SPACE_PORT: "x" }, free([]), () => 5)).toBe(8702);
+    expect(newPackagePort({ SPACE_PACKAGE_PORT: "9000" }, free([9000]), () => 5)).toBe(9000);
   });
 });
 

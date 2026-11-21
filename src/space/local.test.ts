@@ -266,6 +266,13 @@ describe("agent CLIs", () => {
     expect(standalone.runtimes[0]).toMatchObject({ provider: "deepseek-official" });
     expect(renderLocalRuntimes({ claude: null, codex: null, dsh: null })).toBeUndefined();
   });
+
+  test("with a default, the first CLI found takes bare model names, under the caller's header", () => {
+    const server = renderLocalRuntimes({ claude: null, codex: "/usr/bin/codex", dsh: "/usr/bin/dsh" }, { withDefault: true, header: ["# by init"] })!;
+    expect(server).toStartWith("# by init\ndefault: codex\nruntimes:\n");
+    expect(parseRuntimesYaml(server, {}).config.default).toBe("codex");
+    expect(parseRuntimesYaml(renderLocalRuntimes({ claude: "/usr/bin/claude", codex: "/usr/bin/codex", dsh: null }, { withDefault: true })!, {}).config.default).toBe("claude");
+  });
 });
 
 describe("space local", () => {
