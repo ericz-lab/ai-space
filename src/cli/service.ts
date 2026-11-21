@@ -9,7 +9,7 @@ import { type Ctx, type Noun, UsageError } from "./types.ts";
 
 /**
  * ai-space's own installation on this machine (docs/release.md): `space service` drives its
- * background service under systemd or launchd, `space upgrade` installs the newest release over
+ * background service under systemd, launchd or the Task Scheduler, `space upgrade` installs the newest release over
  * this one, `space uninstall` removes it, `space open` opens the panel. They touch the disk and
  * the service manager directly, so they work with ai-space down.
  */
@@ -63,7 +63,7 @@ const workspace = async (ctx: Ctx, argv: string[]) => {
 
 export const serviceNoun: Noun = {
   name: "service",
-  summary: "ai-space's own background service on this machine (systemd on Linux, launchd on a Mac)",
+  summary: "ai-space's own background service on this machine (systemd on Linux, launchd on a Mac, the Task Scheduler on Windows)",
   defaultVerb: "status",
   verbs: {
     status: { usage: "", summary: "the unit, whether it runs, its workspace, where its log is", run: plain(serviceStatus) },
