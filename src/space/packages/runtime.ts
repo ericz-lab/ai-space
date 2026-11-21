@@ -4,10 +4,29 @@ import type { PackageManifest } from "./manifest.ts";
 import type { PackageIndex } from "./contract.ts";
 
 export type RuntimeApp = { manifest: PackageManifest; dir: string; index: PackageIndex };
-type Child = { exited: Promise<number>; exitCode: number | null; stop: () => Promise<void> };
+type Child = { exited: Promise<number>; exitCode: number | null; stop: () => Promise<void>; pid?: number };
+export type RuntimeMode = "on-demand" | "background";
+/**
+ * What the owner of this Space chose for one app, over what its manifest declares: `mode` replaces
+ * `launch.mode`; `stopped` keeps the process off (no visitor, task or restart starts it) until a start.
+ */
+export type RuntimeSetting = { mode?: RuntimeMode; stopped?: boolean };
+export type RuntimeAction = "start" | "stop" | "restart";
+export const RUNTIME_ACTIONS: readonly RuntimeAction[] = ["start", "stop", "restart"];
+export const RUNTIME_MODES: readonly RuntimeMode[] = ["on-demand", "background"];
+export type RuntimeStatus = {
+  app: string; state: string; leases: number; port?: number; error?: string;
+  kind: "process" | "static" | "none";
+  /** The mode in force and the manifest's; they differ when the owner chose another. Process apps only. */
+  mode?: RuntimeMode; declaredMode?: RuntimeMode;
+  pid?: number;
+  /** When the running process passed its health check, ISO 8601. */
+  startedAt?: string;
+};
 type State = {
   app: RuntimeApp; leases: number; lastUsed: number; child?: Child; starting?: Promise<void>;
   port?: number; error?: string; retryAt: number; failures: number; stopping?: Promise<void>;
+  setting: RuntimeSetting; startedAt?: number;
 };
 export type RuntimeOptions = {
   envFor: (app: string) => Promise<Record<string, string>>;
@@ -17,6 +36,8 @@ export type RuntimeOptions = {
   spawn?: (app: RuntimeApp, port: number, env: Record<string, string>) => Promise<Child>;
   probe?: (port: number, path: string) => Promise<boolean>;
   port?: () => number;
+  /** Where the owner's choices are kept; without it they live as long as this object. An empty setting forgets the app. */
+  settings?: { get: (app: string) => RuntimeSetting; set: (app: string, setting: RuntimeSetting) => void };
   /** Size at which an app's `package.log` is kept as `package.log.1` and started over; default 10 MiB. */
   maxLogBytes?: number;
 };
@@ -75,17 +96,69 @@ export class PackageRuntime {
     if (old && JSON.stringify(old.app) === JSON.stringify(app)) return;
     if (old?.leases) throw new Error(`${name} is still in use`);
     if (old) await this.stop(old);
-    const state: State = { app, leases: 0, lastUsed: this.now(), failures: 0, retryAt: 0 };
+    const state: State = { app, leases: 0, lastUsed: this.now(), failures: 0, retryAt: 0, setting: this.opts.settings?.get(name) ?? old?.setting ?? {} };
     this.apps.set(name, state);
-    if (app.manifest.status === "active" && app.manifest.launch?.kind === "process" && app.manifest.launch.mode === "background") await this.ensure(state);
+    if (app.manifest.status === "active" && this.mode(state) === "background" && !state.setting.stopped) await this.ensure(state);
+  }
+
+  /** The launch mode in force for a process app: the owner's choice, else the manifest's. */
+  private mode(s: State): RuntimeMode | undefined {
+    const launch = s.app.manifest.launch;
+    return launch?.kind === "process" ? s.setting.mode ?? launch.mode : undefined;
+  }
+
+  private save(s: State, patch: RuntimeSetting): void {
+    const next = { ...s.setting, ...patch };
+    s.setting = { ...(next.mode ? { mode: next.mode } : {}), ...(next.stopped ? { stopped: true } : {}) };
+    this.opts.settings?.set(s.app.manifest.app, s.setting);
+  }
+
+  private processApp(app: string, doing: string): State {
+    const s = this.apps.get(app);
+    if (!s) throw new Error(`unknown package application: ${app}`);
+    if (s.app.manifest.launch?.kind !== "process") throw new Error(`${app} has no process to ${doing}`);
+    return s;
+  }
+
+  /**
+   * Start, stop or restart an app's process by hand. A stop cuts requests in flight and holds: the
+   * app stays off, across restarts of the Space, until a start or restart.
+   */
+  async control(app: string, action: RuntimeAction): Promise<void> {
+    if (this.closing) throw new Error("application runtime is shutting down");
+    const s = this.processApp(app, action);
+    if (this.suspended.has(app)) throw new Error(`${app} is changing version`);
+    if (action === "stop") { this.save(s, { stopped: true }); await this.stop(s); return; }
+    if (s.app.manifest.status !== "active") throw new Error(`${app} is ${s.app.manifest.status}`);
+    if (action === "restart") await this.stop(s);
+    this.save(s, { stopped: false });
+    s.retryAt = 0;
+    await this.ensure(s);
+    s.lastUsed = this.now();
+  }
+
+  /** Choose the launch mode for this Space, or go back to the manifest's with `undefined`. */
+  async configure(app: string, mode: RuntimeMode | undefined): Promise<void> {
+    const s = this.processApp(app, "configure");
+    this.save(s, { mode });
+    s.lastUsed = this.now();
+    // A background app that cannot start is retried by the sweep; the choice itself has been kept.
+    if (this.mode(s) === "background" && s.app.manifest.status === "active" && !s.setting.stopped && !this.suspended.has(app) && !this.closing) await this.ensure(s).catch(() => {});
   }
 
   get(app: string): RuntimeApp | undefined { return this.apps.get(app)?.app; }
 
-  status(app: string) {
+  status(app: string): RuntimeStatus | undefined {
     const s = this.apps.get(app);
     if (!s) return undefined;
-    return { app, state: s.app.manifest.status !== "active" ? s.app.manifest.status : s.starting ? "starting" : s.child ? "running" : s.app.manifest.launch?.kind === "static" ? "static" : s.error ? "failed" : "idle", leases: s.leases, port: s.port, error: s.error };
+    const launch = s.app.manifest.launch;
+    const state = s.app.manifest.status !== "active" ? s.app.manifest.status : s.starting ? "starting" : s.child ? "running" : launch?.kind === "static" ? "static" : s.setting.stopped ? "stopped" : s.error ? "failed" : "idle";
+    return {
+      app, state, leases: s.leases, port: s.port, error: s.error, kind: launch?.kind ?? "none",
+      ...(launch?.kind === "process" ? { mode: this.mode(s), declaredMode: launch.mode } : {}),
+      ...(s.child?.pid ? { pid: s.child.pid } : {}),
+      ...(s.child && s.startedAt ? { startedAt: new Date(s.startedAt).toISOString() } : {}),
+    };
   }
 
   async acquire(app: string, startProcess = true): Promise<{ port?: number; release: () => void }> {
@@ -94,6 +167,7 @@ export class PackageRuntime {
     const s = this.apps.get(app);
     if (!s) throw new Error(`unknown package application: ${app}`);
     if (s.app.manifest.status !== "active") throw new Error(`${app} is ${s.app.manifest.status}`);
+    if (startProcess && s.setting.stopped && s.app.manifest.launch?.kind === "process") throw new Error(`${app} is stopped; start it in Settings or with: space app start ${app}`);
     s.leases++;
     let released = false;
     const release = () => {
@@ -114,6 +188,8 @@ export class PackageRuntime {
     if (!s || s.app.manifest.status !== "active" || s.app.manifest.launch?.kind !== "process") return;
     await this.ensure(s);
     s.lastUsed = this.now();
+    // The new version was checked; an app the owner stopped goes back to stopped.
+    if (s.setting.stopped) await this.stop(s);
   }
 
   async staticResponse(app: string, pathname: string): Promise<Response> {
@@ -142,8 +218,10 @@ export class PackageRuntime {
     for (const s of this.apps.values()) {
       const launch = s.app.manifest.launch;
       if (this.suspended.has(s.app.manifest.app) || s.app.manifest.status !== "active" || launch?.kind !== "process" || s.starting || s.stopping) continue;
-      if (launch.mode === "on-demand" && s.child && !s.leases && this.now() - s.lastUsed >= launch.idleTimeoutMs) await this.stop(s);
-      if (launch.mode === "background" && !s.child && this.now() >= s.retryAt) await this.ensure(s).catch(() => {});
+      if (s.setting.stopped) continue;
+      const mode = this.mode(s);
+      if (mode === "on-demand" && s.child && !s.leases && this.now() - s.lastUsed >= launch.idleTimeoutMs) await this.stop(s);
+      if (mode === "background" && !s.child && this.now() >= s.retryAt) await this.ensure(s).catch(() => {});
     }
   }
 
@@ -152,6 +230,8 @@ export class PackageRuntime {
     if (!s) return;
     if (s.leases) throw new Error(`${app} is still in use`);
     await this.stop(s); this.apps.delete(app);
+    // An uninstalled app leaves no choice behind: installed again, it starts as its manifest says.
+    this.opts.settings?.set(app, {});
   }
 
   async suspend(app: string): Promise<() => void> {
@@ -197,7 +277,7 @@ export class PackageRuntime {
         if (child.exitCode !== null) throw new Error(`application exited during startup (${child.exitCode})`);
         if (await this.probe(port, launch.health)) {
           if (child.exitCode !== null) throw new Error("application exited during health check");
-          s.child = child; s.port = port; s.error = undefined;
+          s.child = child; s.port = port; s.error = undefined; s.startedAt = Date.now();
           const startedAt = this.now();
           const running = child;
           void child.exited.then((code) => {
@@ -265,6 +345,7 @@ async function spawnApp(app: RuntimeApp, port: number, env: Record<string, strin
   let stopping: Promise<void> | undefined;
   const signal = (sig: NodeJS.Signals) => { try { if (setsid) process.kill(-proc.pid, sig); else proc.kill(sig); } catch { /* already exited */ } };
   return {
+    pid: proc.pid,
     exited: proc.exited,
     get exitCode() { return proc.exitCode; },
     stop: () => stopping ??= (async () => {

@@ -35,7 +35,7 @@ export function createPackagePanelRoutes(opts: Parameters<typeof createPackageRo
       const apps = opts.installer.store.installed().map((o) => {
         const installed = opts.runtime.get(o.app);
         return { app: o.app, title: installed?.manifest.title ?? o.app, version: o.version, operationId: o.id,
-          page: !!installed?.manifest.launch, state: opts.runtime.status(o.app)?.state ?? "unavailable",
+          page: !!installed?.manifest.launch, state: opts.runtime.status(o.app)?.state ?? "unavailable", runtime: opts.runtime.status(o.app),
           offline: installed?.manifest.offline, sourceIncluded: installed?.index.sourceIncluded,
           url: `/_space/apps/${encodeURIComponent(o.app)}` };
       });

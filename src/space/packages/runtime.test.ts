@@ -117,3 +117,75 @@ test("an app's package.log over its cap keeps one previous generation and starts
   expect(await runtime.rotateLogs()).toEqual([]);
   expect(await Bun.file(join(logs, "demo", "package.log.1")).text()).toBe("too long");
 });
+
+test("stop holds the app off until start; restart replaces the process", async () => {
+  const f = fake(); await f.runtime.register(app("background"));
+  expect(f.runtime.status("demo")).toMatchObject({ state: "running", kind: "process", mode: "background", declaredMode: "background" });
+  await f.runtime.control("demo", "stop");
+  expect(f.counts()).toEqual({ starts: 1, stops: 1 });
+  expect(f.runtime.status("demo")?.state).toBe("stopped");
+  f.advance(60_000); await f.runtime.sweep(); expect(f.counts().starts).toBe(1);
+  await expect(f.runtime.acquire("demo")).rejects.toThrow(/is stopped; start it/);
+  // Held without starting the process (an agent holding the app's files) is still allowed.
+  (await f.runtime.acquire("demo", false)).release();
+  // A version check starts it once and puts it back.
+  await f.runtime.verify("demo");
+  expect(f.counts()).toEqual({ starts: 2, stops: 2 });
+  expect(f.runtime.status("demo")?.state).toBe("stopped");
+  await f.runtime.control("demo", "start");
+  expect(f.runtime.status("demo")?.state).toBe("running");
+  await f.runtime.control("demo", "restart");
+  expect(f.counts()).toEqual({ starts: 4, stops: 3 });
+  await expect(f.runtime.control("nope", "start")).rejects.toThrow(/unknown package application/);
+});
+
+test("the owner's mode replaces the manifest's, is kept in the settings store and forgotten on removal", async () => {
+  const saved = new Map<string, { mode?: "on-demand" | "background"; stopped?: boolean }>();
+  let now = 0, starts = 0, stops = 0;
+  const make = () => new PackageRuntime({
+    logDir: "/unused", now: () => now, port: () => 1234, envFor: async () => ({}), probe: async () => true,
+    settings: { get: (a) => saved.get(a) ?? {}, set: (a, s) => { if (s.mode || s.stopped) saved.set(a, s); else saved.delete(a); } },
+    spawn: async () => {
+      starts++;
+      let code: number | null = null; let done: (n: number) => void = () => {};
+      const exited = new Promise<number>((resolve) => { done = resolve; });
+      return { pid: 4242, exited, get exitCode() { return code; }, stop: async () => { stops++; code = 0; done(0); } };
+    },
+  });
+  const first = make(); cleanups.push(() => first.close(0));
+  await first.register(app());
+  expect(starts).toBe(0);
+  await first.configure("demo", "background");
+  expect(starts).toBe(1);
+  expect(first.status("demo")).toMatchObject({ state: "running", mode: "background", declaredMode: "on-demand", pid: 4242 });
+  expect(first.status("demo")?.startedAt).toMatch(/^\d{4}-/);
+  now += 60_000; await first.sweep(); expect(stops).toBe(0);
+  expect(saved.get("demo")).toEqual({ mode: "background" });
+  await first.control("demo", "stop");
+  expect(saved.get("demo")).toEqual({ mode: "background", stopped: true });
+  await first.close(0);
+
+  // The next start of the Space reads the choice back: background, but stopped by the owner.
+  const second = make(); cleanups.push(() => second.close(0));
+  await second.register(app());
+  expect(starts).toBe(1);
+  expect(second.status("demo")).toMatchObject({ state: "stopped", mode: "background" });
+  await second.control("demo", "start");
+  expect(starts).toBe(2);
+  // Back to the manifest's on-demand: the idle process is stopped by the sweep.
+  await second.configure("demo", undefined);
+  expect(saved.has("demo")).toBe(false);
+  now += 1000; await second.sweep(); expect(stops).toBe(2);
+  expect(second.status("demo")).toMatchObject({ state: "idle", mode: "on-demand" });
+  await second.configure("demo", "background");
+  await second.remove("demo");
+  expect(saved.has("demo")).toBe(false);
+});
+
+test("a static app has no process to control", async () => {
+  const f = fake();
+  await f.runtime.register({ ...app(), manifest: parsePackageManifest("spec: 2\nname: demo\nversion: 1.0.0\nrequires: { spaceApi: 1 }\noffline: { features: [Read], online: [] }\nlaunch: { kind: static, root: site }") });
+  expect(f.runtime.status("demo")).toMatchObject({ state: "static", kind: "static" });
+  await expect(f.runtime.control("demo", "restart")).rejects.toThrow(/no process to restart/);
+  await expect(f.runtime.configure("demo", "background")).rejects.toThrow(/no process/);
+});
