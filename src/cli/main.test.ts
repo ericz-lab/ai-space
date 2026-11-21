@@ -232,6 +232,29 @@ describe("other nouns", () => {
     expect(noService.out[0]).toBe("a: unchanged");
   });
 
+  test("app start, stop, restart, service and mode drive a package app's process, and a spec-1 app's unit otherwise", async () => {
+    const runtime = (state: string, more: object = {}) => ({ app: "a", state, leases: 0, kind: "process", mode: "on-demand", declaredMode: "on-demand", ...more });
+    const found = { status: 200, body: { ok: true, runtime: runtime("idle") } };
+    const started = await runCli(["app", "start", "a"], (t) => t.scripted.reply(found, { status: 200, body: { ok: true, runtime: runtime("running", { pid: 7, port: 4100 }) } }));
+    expect(started.calls.map((c) => `${c.method} ${c.url}`)).toEqual(["GET http://127.0.0.1:8700/api/packages/apps/a/runtime", "POST http://127.0.0.1:8700/api/packages/apps/a/runtime"]);
+    expect(started.calls[1]!.body).toEqual({ action: "start" });
+    expect(started.code).toBe(0);
+    expect(started.out.join("\n")).toContain("running pid 7 port 4100");
+    const refused = await runCli(["app", "restart", "a"], (t) => t.scripted.reply(found, { status: 409, body: { ok: false, error: "a is changing version", runtime: runtime("idle") } }));
+    expect(refused.code).toBe(EXIT.failed);
+    expect(refused.err.join("\n")).toContain("a is changing version");
+    const shown = await runCli(["app", "service", "a"], (t) => t.scripted.reply({ status: 200, body: { ok: true, runtime: runtime("stopped", { mode: "background" }) } }));
+    expect(shown.calls).toHaveLength(1);
+    expect(shown.out.join("\n")).toMatch(/mode\s+background \(chosen here; the app declares on-demand\)/);
+    const mode = await runCli(["app", "mode", "a", "background"], (t) => t.scripted.reply({ status: 200, body: { ok: true, runtime: runtime("running", { mode: "background" }) } }));
+    expect(mode.calls[0]).toMatchObject({ method: "POST", url: "http://127.0.0.1:8700/api/packages/apps/a/runtime", body: { mode: "background" } });
+    expect((await runCli(["app", "mode", "a", "forever"])).code).toBe(EXIT.usage);
+    // Not a package: the unit of a spec-1 app, as before.
+    const unit = await runCli(["app", "stop", "a"], (t) => t.scripted.reply({ status: 404, body: { ok: false, error: "package runtime not found" } }, { status: 200, body: { ok: true, service: { app: "a", supervisor: "space", unit: "space-a.service", scope: "user", managed: true } } }));
+    expect(unit.calls[1]).toMatchObject({ method: "POST", url: "http://127.0.0.1:8700/api/apps/a/service", body: { action: "stop" } });
+    expect(unit.code).toBe(0);
+  });
+
   test("app supervise prints the steps, and a rolled-back hand-over exits 1", async () => {
     const ok = await runCli(["app", "supervise", "a"], (t) => t.scripted.reply({ status: 200, body: { ok: true, handover: { ok: true, steps: ["disabled the user unit a.service", "installed space-a.service", "healthy"] } } }));
     expect(ok.calls[0]).toMatchObject({ method: "POST", url: "http://127.0.0.1:8700/api/apps/a/service", body: { action: "supervise", to: "space" } });

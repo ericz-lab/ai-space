@@ -1,7 +1,7 @@
 import { isOperator } from "../auth.ts";
 import { DEFAULT_ARCHIVE_LIMIT } from "./archive.ts";
 import type { PackageInstaller } from "./install.ts";
-import type { PackageRuntime } from "./runtime.ts";
+import { RUNTIME_ACTIONS, RUNTIME_MODES, type PackageRuntime } from "./runtime.ts";
 import type { PackageLifecycle } from "./lifecycle.ts";
 
 type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
@@ -92,6 +92,25 @@ export function createPackageRoutes(opts: { installer: PackageInstaller; token: 
         if (denied(req)) return json({ ok: false, error: "unauthorized" }, 401);
         const runtime = opts.runtime?.status(req.params.app!);
         return runtime ? json({ ok: true, runtime }) : json({ ok: false, error: "package runtime not found" }, 404);
+      },
+      // { action: start | stop | restart } and/or { mode: on-demand | background | default }; the mode is set first.
+      POST: async (req) => {
+        if (denied(req)) return json({ ok: false, error: "unauthorized" }, 401);
+        const app = req.params.app!;
+        const current = opts.runtime?.status(app);
+        if (!opts.runtime || !current) return json({ ok: false, error: "package runtime not found" }, 404);
+        if (current.kind !== "process") return json({ ok: false, error: `${app} has no process to control` }, 400);
+        const body = await req.json().catch(() => ({})) as { action?: unknown; mode?: unknown };
+        const action = RUNTIME_ACTIONS.find((a) => a === body.action);
+        const mode = RUNTIME_MODES.find((m) => m === body.mode);
+        if (body.action !== undefined && !action) return json({ ok: false, error: `action must be one of ${RUNTIME_ACTIONS.join(", ")}` }, 400);
+        if (body.mode !== undefined && !mode && body.mode !== "default") return json({ ok: false, error: `mode must be one of ${RUNTIME_MODES.join(", ")}, default` }, 400);
+        if (!action && body.mode === undefined) return json({ ok: false, error: "action or mode is required" }, 400);
+        try {
+          if (body.mode !== undefined) await opts.runtime.configure(app, mode);
+          if (action) await opts.runtime.control(app, action);
+          return json({ ok: true, runtime: opts.runtime.status(app) });
+        } catch (e) { return json({ ok: false, error: (e as Error).message, runtime: opts.runtime.status(app) }, 409); }
       },
     },
   };

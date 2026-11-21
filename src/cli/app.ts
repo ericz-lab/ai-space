@@ -167,11 +167,59 @@ function printService(ctx: Ctx, s: ServiceStatus) {
   ]);
 }
 
+/** A package app's process, as `/api/packages/apps/:app/runtime` answers (src/space/packages/runtime.ts). */
+type PackageRuntimeStatus = { app: string; state: string; leases: number; port?: number; error?: string; kind: string; mode?: string; declaredMode?: string; pid?: number; startedAt?: string };
+type Client = Awaited<ReturnType<Ctx["client"]>>;
+
+/** The runtime of a package app, or undefined when the name is not one (a spec-1 app, or unknown). */
+async function packageRuntime(c: Client, name: string): Promise<PackageRuntimeStatus | undefined> {
+  try { return (await c.get<{ runtime: PackageRuntimeStatus }>(`/api/packages/apps/${encodeURIComponent(name)}/runtime`)).runtime; }
+  catch (e) { if (e instanceof ApiError && e.status === 404) return undefined; throw e; }
+}
+
+function printRuntime(ctx: Ctx, r: PackageRuntimeStatus) {
+  ctx.print.kv([
+    ["app", r.app],
+    ["run by", "the space (package)"],
+    ["state", `${r.state}${r.pid ? ` pid ${r.pid}` : ""}${r.port ? ` port ${r.port}` : ""}`],
+    ["since", r.startedAt ? ago(r.startedAt, Date.now()) : ""],
+    ["mode", r.mode ? `${r.mode}${r.mode !== r.declaredMode ? ` (chosen here; the app declares ${r.declaredMode})` : ""}` : r.kind === "static" ? "static files, no process" : ""],
+    ["in use", r.leases || ""],
+    ["error", r.error ?? ""],
+  ]);
+}
+
+async function packageControl(ctx: Ctx, c: Client, name: string, body: { action?: string; mode?: string }): Promise<number> {
+  type Answer = { ok: boolean; error?: string; runtime?: PackageRuntimeStatus };
+  let res: Answer;
+  try { res = await c.post<Answer>(`/api/packages/apps/${encodeURIComponent(name)}/runtime`, body, { timeoutMs: 120_000 }); }
+  catch (e) {
+    const answer = (e as ApiError).body as Answer | undefined;
+    if (!(e instanceof ApiError) || !answer?.runtime) throw e;
+    res = answer;
+  }
+  if (ctx.flags.json) return ctx.print.data(res), res.ok ? 0 : 1;
+  if (res.runtime) printRuntime(ctx, res.runtime);
+  if (!res.ok) ctx.io.err(`${name}: ${res.error}`);
+  return res.ok ? 0 : 1;
+}
+
+const mode = async (ctx: Ctx, argv: string[]) => {
+  const { positional } = parseArgs(argv, {});
+  const name = need(positional, 0, "APP");
+  const to = need(positional, 1, "on-demand|background|default");
+  noMore(positional, 2);
+  if (!["on-demand", "background", "default"].includes(to)) throw new UsageError("the mode is on-demand, background or default (what the app declares)");
+  return packageControl(ctx, await ctx.client(), name, { mode: to });
+};
+
 const service = async (ctx: Ctx, argv: string[]) => {
   const { positional } = parseArgs(argv, {});
   const name = need(positional, 0, "APP");
   noMore(positional, 1);
   const c = await ctx.client();
+  const runtime = await packageRuntime(c, name);
+  if (runtime) return ctx.flags.json ? (ctx.print.data({ ok: true, runtime }), 0) : (printRuntime(ctx, runtime), 0);
   const res = await c.get<{ service: ServiceStatus }>(`/api/apps/${name}/service`);
   if (ctx.flags.json) return ctx.print.data(res), 0;
   printService(ctx, res.service);
@@ -184,6 +232,7 @@ const control = (action: "start" | "stop" | "restart") => async (ctx: Ctx, argv:
   const name = need(positional, 0, "APP");
   noMore(positional, 1);
   const c = await ctx.client();
+  if (await packageRuntime(c, name)) return packageControl(ctx, c, name, { action });
   const res = await c.post<{ service: ServiceStatus }>(`/api/apps/${name}/service`, { action }, { timeoutMs: 120_000 });
   if (ctx.flags.json) return ctx.print.data(res), 0;
   printService(ctx, res.service);
@@ -236,7 +285,7 @@ export function shellQuote(v: string): string {
 
 export const appNoun: Noun = {
   name: "app",
-  summary: "the apps of the workspace: list, show, sync, deploy, service, start/stop/restart, supervise, hide, uninstall, env, new; the app catalog: catalog, install, upgrade",
+  summary: "the apps of the workspace: list, show, sync, deploy, service, start/stop/restart, mode, supervise, hide, uninstall, env, new; the app catalog: catalog, install, upgrade",
   verbs: {
     create: { usage: "NAME [--title T] [--description D]", summary: "make a new app inside the Space: source in app-src/NAME from the template, packed and installed (no GitHub)", run: createVerb },
     build: { usage: "NAME", summary: "pack app-src/NAME and install it, or upgrade the installed app (patch version +1)", run: buildVerb },
@@ -255,10 +304,11 @@ export const appNoun: Noun = {
     show: { usage: "APP", summary: "manifest, storage, backups and tasks of one app", run: show },
     sync: { usage: "[APP]", summary: "re-read one space.yaml, or every app directory", run: sync },
     deploy: { usage: "APP [--rev REV] [--git-dir DIR] [--no-restart]", summary: "on the host: check out, install, check and build, then sync and restart; a failure restores the previous tree", run: deployVerb() },
-    service: { usage: "APP", summary: "who runs the app's service, its unit, state, restarts, the last sync's outcome", run: service },
-    start: { usage: "APP", summary: "start the app's unit (SPACE_SUPERVISOR=space)", run: control("start") },
-    stop: { usage: "APP", summary: "stop the app's unit until its next sync (set status: paused to keep it stopped)", run: control("stop") },
-    restart: { usage: "APP", summary: "restart the app's unit (SPACE_SUPERVISOR=space)", run: control("restart") },
+    service: { usage: "APP", summary: "who runs the app's process, its state, pid, mode, since when; for a spec-1 app its unit and the last sync's outcome", run: service },
+    start: { usage: "APP", summary: "start the app's process (a package app, or the space's unit under SPACE_SUPERVISOR=space)", run: control("start") },
+    stop: { usage: "APP", summary: "stop the app's process: a package app stays off until start; a unit until its next sync", run: control("stop") },
+    restart: { usage: "APP", summary: "restart the app's process", run: control("restart") },
+    mode: { usage: "APP on-demand|background|default", summary: "how this Space runs a package app: started when used and stopped when idle, kept running, or as the app declares", run: mode },
     supervise: { usage: "APP [space|operator]", summary: "hand the app from the operator's unit to the space's (or back), rolled back unless healthy", run: supervise },
     hide: { usage: "APP", summary: "hide the app on the panel", run: hidden(true) },
     unhide: { usage: "APP", summary: "show the app on the panel again", run: hidden(false) },

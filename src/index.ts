@@ -97,7 +97,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const storage = await openStorage(ws, config);
   const packageEnvFor = async (app: string) => ({ ...await loadAppEnv(storage.appDataDir(app)), ...await storage.envFor(app) });
   const appEnvFor = (app: string) => packageStore.list().some((o) => o.app === app && o.state === "installed") ? packageEnvFor(app) : storage.envFor(app);
-  const packageRuntime = new PackageRuntime({ envFor: packageEnvFor, logDir: ws.logs });
+  const packageRuntime = new PackageRuntime({ envFor: packageEnvFor, logDir: ws.logs, settings: { get: (app) => packageStore.runtimeSetting(app), set: (app, setting) => packageStore.setRuntimeSetting(app, setting) } });
   let registerPackage: ((dir: string) => Promise<void>) | undefined;
   const activatePackage = async (app: string) => {
     const installed = await packageInstaller.load(app);
@@ -109,6 +109,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     suspend: (app) => packageRuntime.suspend(app),
     activate: activatePackage,
     verify: (app) => packageRuntime.verify(app),
+    forget: (app) => packageRuntime.forget(app),
     remove: async (app) => {
       await packageRuntime.remove(app);
       scheduler.forget(app); registry.remove(app); bus.forget(app);
