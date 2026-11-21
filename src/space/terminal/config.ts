@@ -1,3 +1,5 @@
+import { windowsShell } from "../host-tools.ts";
+
 /**
  * Terminal configuration: `SPACE_TERMINAL_*` in the workspace .env.
  *
@@ -53,10 +55,14 @@ export function isOn(raw: string | undefined): boolean {
   return /^(1|true|yes|on)$/i.test((raw ?? "").trim());
 }
 
-/** `SPACE_TERMINAL_SHELL` split on whitespace (no quoting: a path with spaces goes through $SHELL), else `$SHELL -l`, else bash or sh. */
-export function parseShell(raw: string | undefined, env: Record<string, string | undefined>): string[] {
+/**
+ * `SPACE_TERMINAL_SHELL` split on whitespace (no quoting: a path with spaces goes through $SHELL), else `$SHELL -l`, else bash or sh.
+ * On Windows, without the setting: PowerShell (`windowsShell` in host-tools.ts); a `SHELL` there is Git Bash's own and names no Windows path.
+ */
+export function parseShell(raw: string | undefined, env: Record<string, string | undefined>, platform: string = process.platform): string[] {
   const parts = (raw ?? "").trim().split(/\s+/).filter(Boolean);
   if (parts.length) return parts;
+  if (platform === "win32") return windowsShell(env);
   const sh = env.SHELL?.trim();
   if (sh) return [sh, "-l"];
   const found = Bun.which("bash") ?? Bun.which("sh") ?? "/bin/sh";
