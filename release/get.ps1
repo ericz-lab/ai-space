@@ -21,6 +21,11 @@
 # All of it in one function, so a download cut short runs nothing.
 function Install-AISpace {
   $ErrorActionPreference = 'Stop'
+  # Windows PowerShell started from PowerShell 7 inherits PSModulePath with 7's modules first, and
+  # then finds none of its own (Get-FileHash, ConvertFrom-Json): give it back the one it ships with.
+  if ($PSVersionTable.PSEdition -ne 'Core') {
+    $env:PSModulePath = @("$env:USERPROFILE\Documents\WindowsPowerShell\Modules", "$env:ProgramFiles\WindowsPowerShell\Modules", "$env:SystemRoot\System32\WindowsPowerShell\v1.0\Modules") -join ';'
+  }
   $ProgressPreference = 'SilentlyContinue' # Windows PowerShell draws a progress bar that slows a download many times over
   $repo = 'ericz-lab/ai-space'
 
@@ -72,7 +77,10 @@ function Install-AISpace {
     Write-Host "ai-space: downloading $name"
     $archive = Join-Path $tmp $name
     try { Get-ReleaseFile $base $name $archive } catch { Fail "could not download $base/$name" }
-    $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLower()
+    # .NET's own hash, so the check depends on no module being found.
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($archive)
+    try { $got = -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) } finally { $stream.Dispose(); $sha.Dispose() }
     if ($got -ne $want) { Fail "$name does not match the release's SHA256SUMS (expected $want, got $got); nothing was installed" }
 
     & $tar -xzf $archive -C $tmp

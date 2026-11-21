@@ -14,6 +14,11 @@
 # installed again. The last three releases stay for a manual rollback. It needs no elevation.
 #Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell started from PowerShell 7 inherits PSModulePath with 7's modules first, and
+# then finds none of its own (Get-FileHash, ConvertFrom-Json): give it back the one it ships with.
+if ($PSVersionTable.PSEdition -ne 'Core') {
+  $env:PSModulePath = @("$env:USERPROFILE\Documents\WindowsPowerShell\Modules", "$env:ProgramFiles\WindowsPowerShell\Modules", "$env:SystemRoot\System32\WindowsPowerShell\v1.0\Modules") -join ';'
+}
 
 function Fail([string]$Message) {
   [Console]::Error.WriteLine("ai-space install: $Message")
