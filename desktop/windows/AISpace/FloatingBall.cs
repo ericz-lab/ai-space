@@ -20,7 +20,6 @@ internal sealed class FloatingBall
 {
     private readonly AppModel _model;
     private readonly App _app;
-    private readonly Dictionary<string, ImageSource?> _icons = [];
     private Dictionary<BallSection, DialEntry> _dial = [];
     private BallWindow? _window;
     private Guid? _space;
@@ -95,7 +94,13 @@ internal sealed class FloatingBall
         if (_window is null) return;
         var c = Space;
         var live = c is not null && _model.Lives.TryGetValue(c.Id, out var l) && l.LastRefresh is not null ? l : null;
-        if (c?.Id != _space) _icons.Clear();
+        if (_space is { } before && before != c?.Id) _model.Icons(before).Arrived -= OnIcon;
+        if (c is not null)
+        {
+            // Once per store, which is made again when the Space signs out or changes address.
+            _model.Icons(c.Id).Arrived -= OnIcon;
+            _model.Icons(c.Id).Arrived += OnIcon;
+        }
         _space = c?.Id;
         _dial = FloatingBallRules.Resolve(live?.Apps, live?.Agents, c is null ? null : Slots(c.Id));
         _window.SetSections(FloatingBallRules.Sections.ToDictionary(s => s, s =>
@@ -103,8 +108,7 @@ internal sealed class FloatingBall
             var d = _dial[s];
             var title = d.Title() ?? FallbackTitle(s);
             var icon = d.Icon;
-            var emoji = icon is { Length: > 0 and <= 8 } e && !IsFetched(e) ? e : null;
-            return new DialSectionView(title, icon is not null && c is not null ? Icon(c, icon) : null, emoji, d.IsAgent, d.Agent is not null, d.Hidden);
+            return new DialSectionView(title, c is not null ? _model.Icons(c.Id).Get(icon) : null, IconStore.Emoji(icon), d.IsAgent, d.Agent is not null, d.Hidden);
         }));
     }
 
@@ -117,39 +121,8 @@ internal sealed class FloatingBall
         _ => L.T("Design Studio"),
     };
 
-    private static bool IsFetched(string icon) => icon.StartsWith('/') || icon.StartsWith("http", StringComparison.Ordinal);
-
-    /// <summary>An icon the Space serves (a path or a URL), fetched once with the Space's sign-in; the dial is drawn again when it arrives.</summary>
-    private ImageSource? Icon(Connection c, string icon)
-    {
-        if (!IsFetched(icon)) return null;
-        if (_icons.TryGetValue(icon, out var known)) return known;
-        _icons[icon] = null;
-        _ = Load(c, icon);
-        return null;
-    }
-
-    private async Task Load(Connection c, string icon)
-    {
-        try
-        {
-            var bytes = await _model.Api(c).Bytes(icon);
-            var image = new BitmapImage();
-            image.BeginInit();
-            image.CacheOption = BitmapCacheOption.OnLoad;
-            image.DecodePixelWidth = 64;
-            image.StreamSource = new MemoryStream(bytes);
-            image.EndInit();
-            image.Freeze();
-            if (_space != c.Id) return;
-            _icons[icon] = image;
-            Fill();
-        }
-        catch (Exception e) when (e is SpaceApiException or NotSupportedException or IOException or InvalidOperationException or ArgumentException or System.Runtime.InteropServices.COMException)
-        {
-            // An SVG or a broken picture: the section shows the first letter instead.
-        }
-    }
+    /// <summary>An icon the Space serves arrived (IconStore, fetched with the Space's sign-in): the dial is drawn again.</summary>
+    private void OnIcon(string icon) => Fill();
 
     /// <summary>
     /// Quick Chat beside the ball on the section's agent. When the app has no agent of its own,

@@ -26,7 +26,7 @@ public sealed class SpaceApiException(SpaceApiFailure kind, string message, int 
 /// the panel's page does, because the routes that change the Space take writes from that origin
 /// only (src/space/auth.ts).
 /// </summary>
-public sealed class SpaceApi
+public sealed partial class SpaceApi
 {
     private readonly HttpClient _http;
     private readonly Func<Uri, Task<string?>> _cookies;
@@ -56,7 +56,7 @@ public sealed class SpaceApi
         if (json is not null)
         {
             r.Headers.TryAddWithoutValidation("Origin", ConnectionRules.OriginHeader(Base));
-            r.Content = new StringContent(JsonSerializer.Serialize(json), Encoding.UTF8, "application/json");
+            r.Content = new StringContent(JsonSerializer.Serialize(json, Json), Encoding.UTF8, "application/json");
         }
         return r;
     }
@@ -113,6 +113,60 @@ public sealed class SpaceApi
         var (status, _, body) = await Answer(method, path, json, ct).ConfigureAwait(false);
         Check(status, body);
         return body;
+    }
+
+    // Generic JSON calls, for the native pages' own routes. Each area adds its methods in a file of
+    // its own (SpaceApi.Home.cs, SpaceApi.Inbox.cs, SpaceApi.Settings.cs) on top of these.
+
+    /// <summary>How the Space's JSON is read and written: camelCase names, case-insensitive on reading, nulls left out.</summary>
+    public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    /// <summary>
+    /// <c>GET</c> a route and read its answer as <typeparamref name="T"/> (with <see cref="Json"/>).
+    /// Throws <see cref="SpaceApiException"/>: <see cref="SpaceApiFailure.AuthenticationRequired"/> on a
+    /// redirect, 401 or 403, <see cref="SpaceApiFailure.Http"/> with the route's <c>error</c> text,
+    /// <see cref="SpaceApiFailure.Network"/> when nothing answered, <see cref="SpaceApiFailure.InvalidResponse"/>
+    /// when the body is not that JSON.
+    /// </summary>
+    public async Task<T> GetJson<T>(string path, CancellationToken ct = default)
+    {
+        var (status, _, body) = await Answer(HttpMethod.Get, path, null, ct).ConfigureAwait(false);
+        Check(status, body);
+        return Parse<T>(body, status);
+    }
+
+    /// <summary><c>POST</c> <paramref name="body"/> as JSON (with the Space's origin, as the panel's writes) and read the answer as <typeparamref name="T"/>.</summary>
+    public Task<T> PostJson<T>(string path, object body, CancellationToken ct = default) => SendJson<T>(HttpMethod.Post, path, body, ct);
+
+    /// <summary>Any method with a JSON body (<c>PUT</c>, <c>PATCH</c>, <c>DELETE</c>, …), its answer read as <typeparamref name="T"/>; <see cref="JsonElement"/> takes any answer.</summary>
+    public async Task<T> SendJson<T>(HttpMethod method, string path, object body, CancellationToken ct = default)
+    {
+        var (status, _, text) = await Answer(method, path, body, ct).ConfigureAwait(false);
+        Check(status, text);
+        return Parse<T>(text.Length == 0 ? "{}" : text, status);
+    }
+
+    /// <summary><c>DELETE</c> a route with no body; the answer's text, which is often empty.</summary>
+    public async Task<string> Delete(string path, CancellationToken ct = default)
+    {
+        var (status, _, body) = await Answer(HttpMethod.Delete, path, null, ct).ConfigureAwait(false);
+        Check(status, body);
+        return body;
+    }
+
+    private static T Parse<T>(string body, int status)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(body, Json) ?? throw new SpaceApiException(SpaceApiFailure.InvalidResponse, "empty JSON", status);
+        }
+        catch (JsonException)
+        {
+            throw new SpaceApiException(SpaceApiFailure.InvalidResponse, "not the expected JSON", status);
+        }
     }
 
     /// <summary>Maps an answer to an error, as the Mac's <c>SpaceAPI.check</c>.</summary>

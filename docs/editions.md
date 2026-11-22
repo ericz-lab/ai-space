@@ -134,7 +134,7 @@ behind its access layer. A connection counts only after the client has checked t
 API answer, not because a port answered ([macos-desktop.md](macos-desktop.md#connections-and-first-launch)).
 
 **Today:** the Mac, Linux, Windows and iPhone clients connect to existing Spaces. A release tag
-builds the Linux app into tarballs and the Windows app into zip files (not signed yet), for x64 and
+builds the Linux app into tarballs and the Windows app into one `.exe` per CPU (not signed yet), for x64 and
 arm64, and the Mac app into a `.dmg`, signed and notarized once the Developer ID secrets are configured
 ([release.md](release.md)). Missing: the Developer ID certificate itself, the Share extension in
 the release build, and store or test-channel distribution for the phones.

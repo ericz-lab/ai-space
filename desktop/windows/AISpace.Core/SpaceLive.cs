@@ -16,7 +16,7 @@ public enum LiveStatus
 /// routes (the Mac's <c>SpaceLive</c>). Started on the UI thread, its continuations come back there,
 /// so the UI reads its fields and receives its events without locking.
 /// </summary>
-public sealed class SpaceLive
+public sealed partial class SpaceLive
 {
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan CatalogueAge = TimeSpan.FromMinutes(5);

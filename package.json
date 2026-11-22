@@ -43,6 +43,7 @@
     "linux:install": "bun desktop/linux/build.ts && desktop/linux/build/ai-space/install.sh",
     "linux:soak": "bun desktop/linux/build.ts && bun desktop/linux/soak.ts",
     "windows:build": "bun desktop/windows/build.ts",
+    "windows:icon": "bun desktop/windows/icon.ts",
     "windows:test": "dotnet test desktop/windows/AISpace.Core.Tests && bun test desktop/windows",
     "desktop:test": "desktop/macos/scripts/test.sh",
     "desktop:share:build": "desktop/macos/scripts/build-share.sh",

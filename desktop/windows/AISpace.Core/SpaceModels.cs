@@ -67,7 +67,7 @@ public sealed record ChatRun(string Id, string Agent, string Message, string Sta
 
 public sealed record Inbox(IReadOnlyList<InboxItem> Items, InboxSummary Summary);
 
-public static class SpaceJson
+public static partial class SpaceJson
 {
     public static IReadOnlyList<AppInfo> Apps(JsonElement root) => Rows(root, "apps", r =>
     {

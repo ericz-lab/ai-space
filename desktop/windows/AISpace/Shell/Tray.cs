@@ -94,12 +94,12 @@ internal sealed class Tray : IDisposable
             LiveStatus.Offline => L.T("Offline"),
             _ => L.T("Connecting…"),
         };
-        var header = new Forms.ToolStripMenuItem(state.Length > 0 ? $"{name} — {state}" : name, null, (_, _) => _model.ShowTab(c.Id, null));
+        var header = new Forms.ToolStripMenuItem(state.Length > 0 ? $"{name} — {state}" : name, null, (_, _) => _model.ShowPage(c.Id, Views.PageKind.Home));
         header.Font = new System.Drawing.Font(header.Font, System.Drawing.FontStyle.Bold);
         _menu.Items.Add(header);
         if (live.Status == LiveStatus.SignInNeeded)
         {
-            _menu.Items.Add(new Forms.ToolStripMenuItem("    " + L.T("Sign In…"), null, (_, _) => _model.ShowTab(c.Id, null)));
+            _menu.Items.Add(new Forms.ToolStripMenuItem("    " + L.T("Sign In…"), null, (_, _) => _model.ShowPage(c.Id, Views.PageKind.Home)));
         }
         foreach (var run in live.Running.Take(3))
         {

@@ -8,7 +8,8 @@ namespace AISpace.Views;
 
 /// <summary>
 /// The app's own settings (the Mac's Settings window): General and the saved Spaces. A Space's
-/// own settings stay in its panel.
+/// own settings are the main window's Settings page (<see cref="SpaceSettingsPage"/>), which
+/// leads here with "AI Space Settings…".
 /// </summary>
 internal sealed class SettingsWindow : Window
 {
@@ -27,6 +28,7 @@ internal sealed class SettingsWindow : Window
         MinWidth = 560;
         MinHeight = 420;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        Shell.Native.KeepOnScreen(this);
         Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri("pack://application:,,,/Assets/AISpace.ico"));
         var tabs = new TabControl { Margin = new Thickness(12) };
         tabs.Items.Add(new TabItem { Header = L.T("General"), Content = Scroll(General()) });
@@ -70,6 +72,12 @@ internal sealed class SettingsWindow : Window
             _model.SavePrefs();
         });
         var login = Check(L.T("Start AI Space when I sign in to Windows"), Registration.StartsAtSignIn(), Registration.SetStartAtSignIn);
+        var pet = Check(L.T("Show the desk pet on Home"), p.DeskPet, v =>
+        {
+            p.DeskPet = v;
+            _model.SavePrefs();
+            _model.NotifyChanged();
+        });
 
         var shortcut = new ComboBox { MinWidth = 200, HorizontalAlignment = HorizontalAlignment.Left };
         foreach (var s in Enum.GetValues<QuickChatShortcut>()) shortcut.Items.Add(new ComboBoxItem { Content = s == QuickChatShortcut.Off ? L.T("Off") : Shortcuts.Label(s), Tag = s });
@@ -90,7 +98,7 @@ internal sealed class SettingsWindow : Window
         }
         else
         {
-            install.Add(Ui.Text(L.T("This copy runs from where it was unpacked. Installing copies it under your user folder, adds it to the Start menu and to Installed apps; no administrator is needed."), 13, secondary: true));
+            install.Add(Ui.Text(L.T("This copy runs from where it was downloaded. Installing copies it under your user folder, adds it to the Start menu and to Installed apps; no administrator is needed."), 13, secondary: true));
             install.Add(Ui.Button(L.T("Install for This User"), () => _app.InstallAndRestart()));
         }
 
@@ -102,7 +110,7 @@ internal sealed class SettingsWindow : Window
         });
 
         return Ui.Column(12,
-            notifications, keep, login,
+            notifications, keep, login, pet,
             Ui.Text(L.T("Quick Chat"), 14, bold: true),
             Ui.Text(L.T("A small chat window over every app, from anywhere with this shortcut, the notification area or the jump list."), 13, secondary: true),
             shortcut, _shortcutNote,
