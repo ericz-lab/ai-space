@@ -58,7 +58,7 @@ async function deps(io: SetupIO, env: Record<string, string | undefined>, over: 
     fetch: (async () => new Response(JSON.stringify({ ok: true, result: [] }))) as unknown as typeof fetch,
     randomToken: () => "tok-" + "a".repeat(60),
     hostname: () => "box",
-    findMagpie: async () => ({ url: "http://127.0.0.1:3425", from: "default", running: false, models: [] }),
+    findMagpie: async () => ({ url: "http://127.0.0.1:3425", from: "default", running: false, models: [], groups: [] }),
     service: async () => ({ installed: true, restart: async () => void ran.push(["service", "restart"]), logs: "journalctl --user -u ai-space" }),
     ...over,
   };
@@ -197,19 +197,22 @@ describe("runSetup", () => {
   });
 
   test("magpie answering here: offered as Claude Code through it, written to runtimes.yaml with the summary", async () => {
-    const io = scripted([["Add magpie as a runtime", true], ["Model for every tier", "2"], ["basic tier", "zhipu/glm-4.5-air"], ["Write them?", true], ["Restart the ai-space unit", false]]);
+    // basic answered by id, junior by number, intermediate keeps the suggested group, advanced left to Claude Code.
+    const io = scripted([["Add magpie as a runtime", true], ["basic tier", "zhipu/glm-4.5-air"], ["junior tier", "2"], ["advanced tier", ""], ["Write them?", true], ["Restart the ai-space unit", false]]);
     const d = await deps(io, { SPACE_API_TOKEN: "t" }, {
       which: async (cmd) => (cmd === "claude" ? "/opt/claude" : undefined),
-      findMagpie: async () => ({ bin: "/usr/local/bin/magpie", url: "http://127.0.0.1:3425", from: "default", running: true, models: ["zhipu/glm-4.5-air", "zhipu/glm-4.6", "moonshot/kimi-k2.5"] }),
+      findMagpie: async () => ({ bin: "/usr/local/bin/magpie", url: "http://127.0.0.1:3425", from: "default", running: true, models: ["zhipu/glm-4.5-air", "zhipu/glm-4.6", "moonshot/kimi-k2.5", "group/intermediate"], groups: ["group/intermediate"] }),
     });
     await runSetup(d);
     expect(io.remaining).toEqual([]);
     const log = io.log.join("\n");
-    expect(log).toMatch(/ok\s+magpie\s+answering at http:\/\/127\.0\.0\.1:3425, 3 models/);
+    expect(log).toMatch(/ok\s+magpie\s+answering at http:\/\/127\.0\.0\.1:3425, 4 models/);
+    expect(log).toContain("group/intermediate  (routing group)");
+    expect(log).toContain("Settings → Models");
     expect(log).toContain("runtimes.yaml: add runtime magpie (Claude Code through magpie)");
     const { parseRuntimesYaml } = await import("./runtimes/config.ts");
     const config = parseRuntimesYaml(await Bun.file(join(d.ws.home, "runtimes.yaml")).text(), {}).config;
-    expect(config.runtimes.find((r) => r.name === "magpie")).toMatchObject({ kind: "claude-code", bin: ["/opt/claude"], magpie: "http://127.0.0.1:3425", models: { basic: "zhipu/glm-4.5-air", junior: "zhipu/glm-4.6", intermediate: "zhipu/glm-4.6", advanced: "zhipu/glm-4.6" } });
+    expect(config.runtimes.find((r) => r.name === "magpie")).toMatchObject({ kind: "claude-code", bin: ["/opt/claude"], magpie: "http://127.0.0.1:3425", models: { basic: "zhipu/glm-4.5-air", junior: "zhipu/glm-4.6", intermediate: "group/intermediate" } });
 
     // Run again: magpie is a runtime now, nothing is offered.
     const again = scripted([["Write them?", false]]);

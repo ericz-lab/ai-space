@@ -96,8 +96,8 @@ export class RuntimeRegistry {
       const sshHost = "sshHost" in spec ? spec.sshHost : undefined;
       this.byName.set(spec.name, sshHost ? { ...adapter, machine: sshHost } : adapter);
       this.specs.set(spec.name, spec);
-      // Through magpie, Claude's own names mean nothing: only the pins (magpie's ids) give the tiers.
-      this.models.set(spec.name, { ...(spec.kind === "claude-code" && spec.magpie ? {} : TIER_DEFAULTS[spec.kind]), ...spec.models });
+      // Claude Code through magpie: a pinned tier is magpie's id, an unpinned one Claude Code's own alias.
+      this.models.set(spec.name, { ...TIER_DEFAULTS[spec.kind], ...spec.models });
     }
     for (const [key, list] of Object.entries(config.fallback ?? {})) this.fallback.set(key, [...list]);
     if (config.default === undefined) this.default = undefined;
@@ -112,6 +112,20 @@ export class RuntimeRegistry {
   applyCatalogTiers(name: string, tiers: TierModels): void {
     const spec = this.specs.get(name);
     if (spec) this.models.set(name, { ...TIER_DEFAULTS[spec.kind], ...tiers, ...spec.models });
+  }
+
+  /**
+   * New tier pins for a runtime, as Settings saved them to runtimes.yaml: its tiers and the spec its
+   * adapter reads per call (a magpie runtime's environment and `--settings`) change at once.
+   */
+  setTierPins(name: string, models: TierModels): boolean {
+    const spec = this.specs.get(name);
+    if (!spec) return false;
+    const pins = { ...models };
+    if (Object.keys(pins).length) spec.models = pins;
+    else delete spec.models;
+    this.models.set(name, { ...TIER_DEFAULTS[spec.kind], ...pins });
+    return true;
   }
 
   get(name: string): RuntimeAdapter | undefined {

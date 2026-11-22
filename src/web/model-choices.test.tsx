@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CliCell, MagpieRow } from "./MachineClis.tsx";
+import type { MagpieInfo, MagpiePins } from "./api.ts";
+import { CliCell, MagpieRow, MagpieTierPickers } from "./MachineClis.tsx";
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { translate } from "./messages.ts";
 
@@ -31,18 +32,39 @@ test("the inventory cell: missing, signed out, a runtime, and an add button only
   expect(renderToStaticMarkup(<CliCell c={{ ...base, installed: true, configured: true, runtimes: ["codex"] }} local busy={false} onAdd={noop} t={t} />)).toContain("Runtime: codex");
 });
 
-test("magpie: a pointer when absent, a start hint when down, a model picker and add when it answers, its runtime once used", () => {
-  const base = { url: "http://127.0.0.1:3425", running: false, models: [] as string[], configured: false, runtimes: [] as string[], adds: "claude-code" as const };
-  const row = (m: Partial<typeof base> & { bin?: string }, pending = false) => renderToStaticMarkup(<MagpieRow m={{ ...base, ...m }} pending={pending} busy={false} onAdd={noop} t={t} />);
+test("magpie: a pointer when absent, a start hint when down, tier pickers and add when it answers", () => {
+  const base: MagpieInfo = { url: "http://127.0.0.1:3425", running: false, models: [], groups: [], configured: false, runtimes: [], pins: [], suggested: {}, adds: "claude-code" };
+  const row = (m: Partial<MagpieInfo>) => renderToStaticMarkup(<MagpieRow m={{ ...base, ...m }} busy={false} onAdd={noop} onSave={noop} t={t} />);
   expect(row({})).toContain("GLM, Kimi, MiniMax");
   expect(row({ bin: "/usr/local/bin/magpie" })).toContain("does not answer at http://127.0.0.1:3425");
-  const up = row({ running: true, models: ["zhipu/glm-4.6", "moonshot/kimi-k2.5"] });
+  const up = row({ running: true, models: ["zhipu/glm-4.6", "group/basic"], groups: ["group/basic"], suggested: { basic: "group/basic" } });
   expect(up).toContain("with 2 models");
-  expect(up).toContain('<option value="moonshot/kimi-k2.5">moonshot/kimi-k2.5</option>');
+  // Four pickers, routing groups apart and marked, the suggested group picked, the rest Claude Code's default.
+  for (const tier of ["Basic", "Junior", "Intermediate", "Advanced"]) expect(up).toContain(`<span>${tier}</span>`);
+  expect(up).toContain('<optgroup label="Routing groups"><option value="group/basic" selected="">group/basic (routing group)</option></optgroup>');
+  expect(up).toContain('<optgroup label="Models"><option value="zhipu/glm-4.6">zhipu/glm-4.6</option></optgroup>');
+  expect(up.match(/<option value="" selected="">Claude Code&#x27;s default<\/option>/g)).toHaveLength(3);
   expect(up).toContain("Add as a runtime");
-  expect(up).toContain("Claude Code runs through magpie");
-  expect(row({ running: true, models: ["a/b"], adds: "anthropic-api" } as never)).toContain("answers apps&#x27; calls only");
+  expect(row({ running: true, models: ["a/b"], adds: "anthropic-api" })).toContain("answers apps&#x27; calls only");
   expect(row({ running: true })).toContain("no model yet");
-  expect(row({ running: true, models: ["a/b"] }, true)).toContain("Restart ai-space");
-  expect(row({ running: true, models: ["a/b"], configured: true, runtimes: ["magpie"] })).toContain("used by runtime magpie");
+});
+
+test("magpie tier pickers of a runtime: saved pins shown, a pin no longer listed warned, saved values kept while magpie is down", () => {
+  const pins: MagpiePins = { runtime: "magpie", kind: "claude-code", models: { basic: "zhipu/glm-4.6", advanced: "gone/model" }, loaded: true };
+  const m: MagpieInfo = { url: "http://127.0.0.1:3425", running: true, models: ["zhipu/glm-4.6", "group/fast"], groups: ["group/fast"], configured: true, runtimes: ["magpie"], pins: [pins], suggested: {}, adds: "claude-code" };
+  const up = renderToStaticMarkup(<MagpieRow m={m} busy={false} onAdd={noop} onSave={noop} t={t} />);
+  expect(up).toContain("used by runtime magpie");
+  expect(up).toContain("Runtime magpie");
+  expect(up).toContain('<option value="zhipu/glm-4.6" selected="">zhipu/glm-4.6</option>');
+  expect(up).toContain('<option value="gone/model" selected="">gone/model (no longer listed)</option>');
+  expect(up).toContain("magpie no longer lists this model");
+  expect(up).toContain("Save");
+  const pending = renderToStaticMarkup(<MagpieTierPickers m={m} pins={{ ...pins, loaded: false }} busy={false} onSave={noop} t={t} />);
+  expect(pending).toContain("Restart ai-space");
+
+  const down = renderToStaticMarkup(<MagpieRow m={{ ...m, running: false, models: [], groups: [] }} busy={false} onAdd={noop} onSave={noop} t={t} />);
+  expect(down).toContain("The saved models are shown");
+  expect(down).toContain('<option value="gone/model" selected="">gone/model</option>');
+  expect(down).not.toContain("no longer lists");
+  expect(down).toContain('disabled=""');
 });

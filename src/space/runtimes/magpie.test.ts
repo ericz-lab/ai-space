@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { probeRuntime } from "../model/health.ts";
 import { createClaudeCode } from "./claude-code.ts";
 import { parseRuntimesYaml } from "./config.ts";
-import { MAGPIE_CALLER_KEY, findMagpie, loopbackUrl, magpieAddress, magpieClaudeEnv, magpieConfigDir, readModelList, validGatewayUrl } from "./magpie.ts";
+import { MAGPIE_CALLER_KEY, findMagpie, loopbackUrl, magpieAddress, magpieClaudeEnv, magpieClaudeSettings, magpieConfigDir, readCatalog, readModelList, suggestMagpieTiers, validGatewayUrl } from "./magpie.ts";
 import { RuntimeRegistry } from "./registry.ts";
 import { fakeModelBin } from "./testing.ts";
 import type { ClaudeCodeSpec, CompleteInput } from "./types.ts";
@@ -39,8 +39,27 @@ describe("finding magpie", () => {
   test("running: its models, asked once with ai-space's caller key", async () => {
     const seen: string[] = [];
     const m = await findMagpie({ env: {}, home: "/h", readText: none, which: () => "/usr/local/bin/magpie", fetch: gateway(["zhipu/glm-4.6", "moonshot/kimi-k2.5", "zhipu/glm-4.6", "group/cheap"], seen) });
-    expect(m).toEqual({ bin: "/usr/local/bin/magpie", url: "http://127.0.0.1:3425", from: "default", running: true, models: ["zhipu/glm-4.6", "moonshot/kimi-k2.5", "group/cheap"] });
+    expect(m).toEqual({ bin: "/usr/local/bin/magpie", url: "http://127.0.0.1:3425", from: "default", running: true, models: ["zhipu/glm-4.6", "moonshot/kimi-k2.5", "group/cheap"], groups: ["group/cheap"] });
     expect(seen).toEqual([`http://127.0.0.1:3425/v1/models Bearer ${MAGPIE_CALLER_KEY}`]);
+  });
+
+  test("routing groups told apart: group/ and auto/ ids, or an entry magpie labels as one", () => {
+    const body = {
+      data: [
+        { id: "group/fast", magpie_label: "Fast · routing group" },
+        { id: "fast", magpie_by: "routing group" },
+        { id: "auto/glm-5.3" },
+        { id: "relaya/glm-5", magpie_label: "GLM-5 · Relay A" },
+        { id: "bad id" },
+      ],
+    };
+    expect(readCatalog(body)).toEqual({ models: ["group/fast", "fast", "auto/glm-5.3", "relaya/glm-5"], groups: ["group/fast", "fast", "auto/glm-5.3"] });
+    expect(readCatalog({ nope: 1 })).toBeUndefined();
+  });
+
+  test("suggested tiers: a routing group named for the tier, else none", () => {
+    expect(suggestMagpieTiers({ groups: ["group/basic", "group/AI-Space-Advanced", "group/cheap"] })).toEqual({ basic: "group/basic", advanced: "group/AI-Space-Advanced" });
+    expect(suggestMagpieTiers({ groups: ["group/cheap"] })).toEqual({});
   });
 
   test("installed but not answering, or something else on the port", async () => {
@@ -73,13 +92,19 @@ describe("Claude Code through magpie", () => {
     expect(() => parseRuntimesYaml("runtimes:\n  c:\n    kind: claude-code\n    ssh: box\n    magpie: http://127.0.0.1:3425\n", {})).toThrow("drop ssh");
   });
 
-  test("its tiers are its pins only, and it never runs on another machine", () => {
+  test("a pinned tier is magpie's id, an unpinned one Claude Code's own; it never runs on another machine", () => {
     const { config } = parseRuntimesYaml(yaml("machines:\n  bare: { ssh: bare-alias }\n"), {});
     const reg = new RuntimeRegistry(config);
     expect(reg.resolve("glm/basic").model).toBe("zhipu/glm-4.5-air");
     expect(reg.resolve("glm/moonshot/kimi-k2.5").model).toBe("moonshot/kimi-k2.5");
-    expect(() => reg.resolve("glm/junior")).toThrow("runtime glm has no model for tier junior");
-    expect(reg.tierOptions().filter((o) => o.runtime === "glm").map((o) => o.value)).toEqual(["glm/basic", "glm/intermediate"]);
+    expect(reg.resolve("glm/junior").model).toBe("sonnet");
+    expect(reg.tierOptions().filter((o) => o.runtime === "glm").map((o) => o.value)).toEqual(["glm/basic", "glm/junior", "glm/intermediate", "glm/advanced"]);
+    // Saved from Settings: the tiers and the spec the adapter reads change at once.
+    expect(reg.setTierPins("glm", { junior: "group/fast" })).toBe(true);
+    expect(reg.resolve("glm/junior").model).toBe("group/fast");
+    expect(reg.resolve("glm/basic").model).toBe("haiku");
+    expect(reg.spec("glm")?.models).toEqual({ junior: "group/fast" });
+    expect(reg.setTierPins("nope", {})).toBe(false);
     expect(() => reg.resolve("bare:glm/basic")).toThrow("cannot run on another machine");
     expect(reg.machineTierOptions().some((o) => o.runtime === "glm")).toBe(false);
     expect(reg.machineTierOptions().some((o) => o.runtime === "claude")).toBe(true);
@@ -106,6 +131,8 @@ describe("Claude Code through magpie", () => {
       if (!r.ok) throw new Error(r.error);
       expect(r.text).toContain("--model zhipu/glm-4.6");
       expect(r.text).toContain(`[gateway: http://127.0.0.1:3425 token=${MAGPIE_CALLER_KEY} haiku=zhipu/glm-4.5-air opus=zhipu/glm-4.6 apikey=unset]`);
+      // The pins also go as --settings, which outranks the user's ~/.claude/settings.json env.
+      expect(r.text).toContain(`--settings ${magpieClaudeSettings("http://127.0.0.1:3425", { basic: "zhipu/glm-4.5-air", intermediate: "zhipu/glm-4.6" })}`);
 
       // Agent runs and chat turns get the same environment.
       const run = await adapter.runAgent!({ cwd: process.cwd(), prompt: "task", model: "zhipu/glm-4.6", env: { ...process.env } } as never);
@@ -117,6 +144,12 @@ describe("Claude Code through magpie", () => {
       if (before === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = before;
     }
+  });
+
+  test("--settings carries the gateway and the pinned tiers only", () => {
+    expect(JSON.parse(magpieClaudeSettings("http://127.0.0.1:3425", { junior: "group/fast" }))).toEqual({
+      env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:3425", ANTHROPIC_AUTH_TOKEN: MAGPIE_CALLER_KEY, ANTHROPIC_DEFAULT_SONNET_MODEL: "group/fast" },
+    });
   });
 
   test("its status cell: signed in while the gateway answers with models, the CLI's own login not asked", async () => {
