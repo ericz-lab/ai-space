@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { type InboxItem, type InboxSummary, dateTime, getJson, relTime, sendJson } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
+import { PAGE } from "./panel-link.ts";
 import { pollWhileVisible } from "./poll.ts";
 
 // Inbox window (a floating panel): every app's notifications in one list (docs/notify.md#inbox).
@@ -58,7 +59,7 @@ export default function Inbox({ open, onClose, onSummary }: { open: boolean; onC
   }, [open, filter, app]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || PAGE) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

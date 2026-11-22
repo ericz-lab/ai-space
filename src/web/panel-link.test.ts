@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AgentInfo } from "./api.ts";
-import { linkedAgent, MAX_DRAFT, parsePanelLink, withDraft } from "./panel-link.ts";
+import { linkedAgent, MAX_DRAFT, pageHref, parsePanelLink, parsePanelPage, withDraft } from "./panel-link.ts";
 
 const agent = (id: string, app: string, name: string, extra: Partial<AgentInfo> = {}): AgentInfo => ({ id, app, name, title: name, avatar: "", appIcon: "", runtime: "claude", ...extra });
 
@@ -45,4 +45,12 @@ test("a draft joins what the field holds", () => {
   expect(withDraft("", "hi")).toBe("hi");
   expect(withDraft("  ", "hi")).toBe("hi");
   expect(withDraft("first", "hi")).toBe("first\n\nhi");
+});
+
+test("a page address names one built-in window, and nothing else", () => {
+  for (const name of ["inbox", "terminal", "settings", "shortcuts"] as const) expect(parsePanelPage(pageHref(name).slice(1))).toBe(name);
+  expect(parsePanelPage("?lang=zh&page=terminal")).toBe("terminal");
+  expect(parsePanelPage("")).toBeNull();
+  expect(parsePanelPage("?page=chat")).toBeNull();
+  expect(parsePanelPage("?page=")).toBeNull();
 });

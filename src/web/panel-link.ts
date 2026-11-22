@@ -14,6 +14,20 @@ export type PanelLink =
 
 const WINDOWS = ["inbox", "terminal", "settings", "shortcuts"] as const;
 
+/**
+ * A built-in tile's own page (docs/panel.md#built-in-pages): `/?page=<name>` shows that window
+ * alone, filling the tab, so a built-in tile opens in a new tab as an app's tile does. Unlike a
+ * fragment link the address is kept, and a reload shows the same page again.
+ */
+export type PanelPage = (typeof WINDOWS)[number];
+export const pageHref = (name: PanelPage) => `/?page=${name}`;
+export function parsePanelPage(search: string): PanelPage | null {
+  const name = new URLSearchParams(search).get("page");
+  return WINDOWS.find((w) => w === name) ?? null;
+}
+/** The page this tab was opened as; null in the launcher, and outside a browser. */
+export const PAGE: PanelPage | null = typeof location === "undefined" ? null : parsePanelPage(location.search);
+
 /** The same cap as an `aispace://chat` link's text in the desktop clients. */
 export const MAX_DRAFT = 20_000;
 
