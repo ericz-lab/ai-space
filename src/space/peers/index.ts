@@ -11,3 +11,5 @@ export { ConnectionPeers, type ConnectionPeerState } from "./connection-peers.ts
 export { PEER_ROUTES, PEER_SCOPES, parseScopes, peerRouteOf, type PeerScope } from "./scopes.ts";
 export { PeerStore } from "./store.ts";
 export { RenameError, checkRename, renameEnvText, renamePeer, renamePeerData, type PeerRenameOptions, type PeerRenamed, type RenameCounts } from "./rename.ts";
+export { adoptConnection, adoptHeadersEnv, adoptTokenEnv, createAdoptHandler, type AdoptOptions } from "./adopt.ts";
+export { createMigrateRoutes, migratePeer, type MigrateDeps, type MigrateRequest, type MigrateResult } from "./migrate.ts";

@@ -77,7 +77,7 @@ box:dsh/deepseek-official:deepseek-flash
                         a colon after it stays the runtime's own (DeepSeek's provider:model)
 ```
 
-- The machine is a peer name from `SPACE_PEER_<NAME>`, or a name from the [`machines:`](#machines-without-ai-space) section. No prefix means this machine.
+- The machine is a peer name: a `SPACE_PEER_<NAME>` one or a [connection peer](peers.md#adding-a-peer)'s (the same name after `space peer migrate`, so a model naming the machine keeps working), or a name from the [`machines:`](#machines-without-ai-space) section. No prefix means this machine.
 - The model service, `SPACE_MODEL_DEFAULT`, the space's default model, the manifest's `model:` section and the panel's per-app and per-tag overrides (`model_overrides`) all accept the prefix. An operator can then move one app's answers to another machine without touching the others: the busy news app on `box:codex/basic`, the rest here.
 - A chat or an agent task that names a machine prefix is refused with a 400 that names the peer agent to use instead (`box/<app>/<agent>`). Nothing switches machines silently.
 - The registry resolves the prefix before the runtime. An unknown machine is an error, like an unknown runtime today.

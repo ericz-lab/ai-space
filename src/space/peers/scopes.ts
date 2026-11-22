@@ -18,7 +18,8 @@
  *             settings and rows, and a feedback fix (which runs the Fix Engineer and deploys here)
  *
  * Every route `/api/peer/*` serves is in `PEER_ROUTES` with exactly one scope; scopes.test.ts walks the
- * route table against it, and a route missing here is refused over a connection.
+ * route table against it, and a route missing here is refused over a connection. The routes of the legacy
+ * channel alone are listed apart, in `LEGACY_ONLY_ROUTES`.
  *
  * What applies on top of a scope applies over HTTPS too (serve.ts `createPeerServeHandlers`): a route the
  * peer does not serve is 404 (`terminal` without `SPACE_TERMINAL_ENABLED`, `model/run` and `model/image`
@@ -82,7 +83,17 @@ export const PEER_ROUTES: readonly { method: PeerMethod; path: string; scope: Pe
   { method: "POST", path: "/api/peer/feedback/fix", scope: "manage" },
 ];
 
-export type PeerRouteMatch = { method: PeerMethod; path: string; scope: PeerScope; params: Record<string, string> };
+/**
+ * The `/api/peer/*` routes of the legacy channel alone: served over HTTPS behind `SPACE_HUB_TOKEN`, never over a
+ * connection, whatever it grants, full trust included. They are not in `PEER_ROUTES`, so `peerRouteOf` finds
+ * none and connection-serve.ts refuses them; scopes.test.ts checks both. `connections/adopt` is how a hub on
+ * the legacy channel moves this Space onto a connection (adopt.ts); over a connection there is nothing to move.
+ */
+export const LEGACY_ONLY_ROUTES: readonly { method: PeerMethod; path: string }[] = [
+  { method: "POST", path: "/api/peer/connections/adopt" },
+];
+
+export type PeerRouteMatch ={ method: PeerMethod; path: string; scope: PeerScope; params: Record<string, string> };
 
 const compiled = PEER_ROUTES.map((r) => ({ ...r, parts: r.path.split("/").slice(1) }));
 

@@ -28,13 +28,13 @@ const ls = async (ctx: Ctx, argv: string[]) => {
   return 0;
 };
 const create = async (ctx: Ctx, argv: string[]) => {
-  const { flags, positional } = parseArgs(argv, { endpoint: { kind: "value" }, "token-env": { kind: "value" }, apps: { kind: "value" }, scopes: { kind: "value" }, "full-trust": { kind: "bool" }, alias: { kind: "value" }, yes: { kind: "bool" } });
+  const { flags, positional } = parseArgs(argv, { endpoint: { kind: "value" }, "token-env": { kind: "value" }, "headers-env": { kind: "value" }, apps: { kind: "value" }, scopes: { kind: "value" }, "full-trust": { kind: "bool" }, alias: { kind: "value" }, yes: { kind: "bool" } });
   const direction = need(positional, 0, "incoming|outgoing"), remoteSpaceId = need(positional, 1, "REMOTE_SPACE_ID"); noMore(positional, 2);
   if (!["incoming", "outgoing"].includes(direction)) throw new Error("direction must be incoming or outgoing");
   if (flags["full-trust"] && !await confirm(ctx, !!flags.yes, FULL_TRUST_QUESTION)) return 1;
   ctx.print.data(await (await ctx.client()).post("/api/connections", {
     direction, remoteSpaceId, apps: names(flags.apps),
-    ...(flags.endpoint ? { url: flags.endpoint } : {}), ...(flags["token-env"] ? { tokenEnv: flags["token-env"] } : {}),
+    ...(flags.endpoint ? { url: flags.endpoint } : {}), ...(flags["token-env"] ? { tokenEnv: flags["token-env"] } : {}), ...(flags["headers-env"] ? { headersEnv: flags["headers-env"] } : {}),
     ...(flags.scopes !== undefined ? { scopes: names(flags.scopes) } : {}), ...(flags["full-trust"] ? { fullTrust: true } : {}), ...(flags.alias ? { alias: flags.alias } : {}),
   }));
   return 0;
@@ -80,7 +80,7 @@ function names(raw: unknown): string[] { return String(raw ?? "").split(",").map
 function scopeText(g: { scopes: string[]; fullTrust: boolean }): string { return g.fullTrust ? "full trust" : g.scopes.join(",") || "-"; }
 export const connectionNoun: Noun = { name: "connection", summary: "package Hub connections, directional local-app grants and peer scopes", verbs: {
   ls: { usage: "", summary: "identity, grants, scopes and connection state; whether each is a peer here", run: ls },
-  create: { usage: "incoming|outgoing REMOTE_SPACE_ID [--endpoint URL --token-env NAME] [--apps APP,...] [--scopes SCOPE,...] [--full-trust [--yes]] [--alias NAME]", summary: "create a connection; incoming credentials are returned once", run: create },
+  create: { usage: "incoming|outgoing REMOTE_SPACE_ID [--endpoint URL --token-env NAME [--headers-env NAME]] [--apps APP,...] [--scopes SCOPE,...] [--full-trust [--yes]] [--alias NAME]", summary: "create a connection; incoming credentials are returned once", run: create },
   grant: { usage: "CONNECTION_ID --apps APP,...", summary: "replace this machine's shared-app list: packages, or spec-1 apps with a service (API only); empty revokes all", run: grant },
   scopes: { usage: "CONNECTION_ID [--scopes panel,agents,events,model,tasks,terminal,apps,manage] [--full-trust on|off [--yes]]",summary: "replace what the other Space may do through this one's peer API; empty grants none", run: scopes },
   alias: { usage: "CONNECTION_ID NAME | CONNECTION_ID --clear", summary: "the peer name the other Space goes by here (default: its SPACE_NAME)", run: alias },

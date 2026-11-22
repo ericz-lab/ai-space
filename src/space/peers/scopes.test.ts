@@ -1,23 +1,37 @@
 import { expect, test } from "bun:test";
-import { PEER_ROUTES, PEER_SCOPES, parseScopes, peerRouteOf } from "./scopes.ts";
-import { createPeerServeHandlers } from "./serve.ts";
+import { LEGACY_ONLY_ROUTES, PEER_ROUTES, PEER_SCOPES, parseScopes, peerRouteOf } from "./scopes.ts";
+import { createPeerServeHandlers, createPeerServeRoutes, type PeerServeOptions } from "./serve.ts";
 
 /** Every optional part of the peer routes present, with handlers that are never called. */
-function allRoutes() {
+function allOptions(): Omit<PeerServeOptions, "token"> {
   const any = new Proxy({}, { get: (_t, path) => (typeof path === "string" ? { GET: () => new Response(), POST: () => new Response(), PATCH: () => new Response(), PUT: () => new Response(), DELETE: () => new Response() } : undefined) });
-  return createPeerServeHandlers({
+  return {
     name: "x", panel: any as never, agents: any as never, terminal: any as never, bus: { capabilities: () => [] } as never, events: {} as never,
     model: any as never, modelInfo: () => undefined, ledger: any as never, appModels: any as never, tasks: any as never, feedback: any as never,
-  });
+    adopt: () => new Response(),
+  };
 }
+const allRoutes = () => createPeerServeHandlers(allOptions());
+const methodsOf = (routes: ReturnType<typeof allRoutes>) => Object.entries(routes).flatMap(([path, entry]) => Object.keys(typeof entry === "function" ? { GET: entry } : entry).map((method) => `${method} ${path}`)).sort();
 
 test("every /api/peer/* route the peer serves has exactly one scope, and the table names no route that does not exist", () => {
-  const served = Object.entries(allRoutes()).flatMap(([path, entry]) => Object.keys(typeof entry === "function" ? { GET: entry } : entry).map((method) => `${method} ${path}`)).sort();
+  const served = methodsOf(allRoutes());
   const mapped = PEER_ROUTES.map((r) => `${r.method} ${r.path}`);
   expect(new Set(mapped).size).toBe(mapped.length);
   // A route added to serve.ts without a scope fails here (and is refused over a connection until it has one).
   expect(served).toEqual([...mapped].sort());
   for (const r of PEER_ROUTES) expect(PEER_SCOPES).toContain(r.scope);
+});
+
+test("over HTTPS the peer serves exactly the scoped routes and the legacy-only ones, which no scope maps", () => {
+  const https = methodsOf(createPeerServeRoutes({ ...allOptions(), token: "t" }));
+  const legacy = LEGACY_ONLY_ROUTES.map((r) => `${r.method} ${r.path}`);
+  expect(https).toEqual([...PEER_ROUTES.map((r) => `${r.method} ${r.path}`), ...legacy].sort());
+  for (const r of LEGACY_ONLY_ROUTES) {
+    // No scope finds it, so connection-serve.ts refuses it even under full trust.
+    expect(peerRouteOf(r.method, r.path)).toBeUndefined();
+    expect(PEER_ROUTES.some((p) => p.path === r.path)).toBe(false);
+  }
 });
 
 test("a request path finds its route as Bun's router would, with its parameters", () => {

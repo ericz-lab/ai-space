@@ -1,5 +1,6 @@
 import type { Server } from "bun";
 import { bearer, isOperator } from "../auth.ts";
+import { parseHeaders } from "../peers/config.ts";
 import { peerRouteOf } from "../peers/scopes.ts";
 import type { WsAttachment, WsData } from "../terminal/service.ts";
 import { CHANNEL_PROTOCOL, PackageChannel, type RequestOptions } from "./channel.ts";
@@ -12,6 +13,8 @@ export type LinkHandler = (connection: Connection, meta: unknown, body: Readable
 type Live = { channel?: PackageChannel; close: () => void };
 /** The header a dialing Space names its channel protocol in (channel.ts `CHANNEL_PROTOCOL`). */
 export const PROTOCOL_HEADER = "x-space-channel-protocol";
+/** What a dialing Space says itself; a connection's extra headers cannot replace these. */
+const OWN_HEADERS = new Set(["authorization", "x-space-id", PROTOCOL_HEADER, "host", "upgrade", "connection"]);
 
 /**
  * Who a stream belongs to, for the channel's per-kind cap and for ending the streams of a revoked grant:
@@ -120,8 +123,16 @@ export class PackageLinks {
   private connect(c: Connection): void {
     const token = c.tokenEnv ? this.options.env[c.tokenEnv] : undefined;
     if (!token) { this.errors.set(c.id, "connection credential is not configured"); return; }
+    // An access layer's credentials in front of the other Space (Cloudflare Access's service token), never ours to override.
+    let extra: Record<string, string> = {};
+    if (c.headersEnv) {
+      const raw = this.options.env[c.headersEnv];
+      if (!raw?.trim()) { this.errors.set(c.id, `connection headers ${c.headersEnv} are not configured`); return; }
+      try { extra = parseHeaders(raw); } catch (e) { this.errors.set(c.id, `connection headers ${c.headersEnv}: ${(e as Error).message}`); return; }
+      for (const name of Object.keys(extra)) if (OWN_HEADERS.has(name.toLowerCase())) delete extra[name];
+    }
     let socket: WebSocket;
-    try { socket = new WebSocket(c.url!.replace(/^http/, "ws") + "/api/connections/channel", { headers: { authorization: `Bearer ${token}`, "x-space-id": this.connections.spaceId, [PROTOCOL_HEADER]: String(CHANNEL_PROTOCOL) } } as unknown as string[]); }
+    try { socket = new WebSocket(c.url!.replace(/^http/, "ws") + "/api/connections/channel", { headers: { ...extra, authorization: `Bearer ${token}`, "x-space-id": this.connections.spaceId, [PROTOCOL_HEADER]: String(CHANNEL_PROTOCOL) } } as unknown as string[]); }
     catch { this.errors.set(c.id, "could not open connection"); return; }
     let channel: PackageChannel | undefined;
     const live: Live = { close: () => { channel?.close(); socket.close(1000, "connection changed"); } };

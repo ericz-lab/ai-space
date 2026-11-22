@@ -12,6 +12,12 @@ import { installationKey, mapping, text } from "./contract.ts";
  */
 export type Connection = {
   id: string; remoteSpaceId: string; direction: "incoming" | "outgoing"; url: string | null; tokenEnv: string | null;
+  /**
+   * An outgoing connection's extra request headers, by the name of a host environment variable holding
+   * `Name: value; Name: value` (peers/config.ts `parseHeaders`): an access layer's service credentials in front
+   * of the other Space's hostname (Cloudflare Access's `CF-Access-Client-Id` and `-Secret`). Null: none.
+   */
+  headersEnv: string | null;
   apps: string[]; enabled: boolean; scopes: PeerScope[]; fullTrust: boolean; alias: string | null; remoteName: string | null;
 };
 type Row = Omit<Connection, "apps" | "enabled" | "scopes" | "fullTrust"> & { apps: string; enabled: number; scopes: string; fullTrust: number; token_hash: string | null };
@@ -37,7 +43,7 @@ export class Connections {
     )`);
     // Added with peer scopes; a table from before gets them with nothing granted.
     const columns = new Set((db.query("PRAGMA table_info(package_connections)").all() as { name: string }[]).map((c) => c.name));
-    for (const [name, decl] of [["scopes", "TEXT NOT NULL DEFAULT '[]'"], ["fullTrust", "INTEGER NOT NULL DEFAULT 0"], ["alias", "TEXT"], ["remoteName", "TEXT"]] as const) {
+    for (const [name, decl] of [["scopes", "TEXT NOT NULL DEFAULT '[]'"], ["fullTrust", "INTEGER NOT NULL DEFAULT 0"], ["alias", "TEXT"], ["remoteName", "TEXT"], ["headersEnv", "TEXT"]] as const) {
       if (!columns.has(name)) db.exec(`ALTER TABLE package_connections ADD COLUMN ${name} ${decl}`);
     }
   }
@@ -50,7 +56,7 @@ export class Connections {
   onChange(fn: Listener): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
 
   create(raw: unknown): { connection: Connection; token?: string } {
-    const d = mapping(raw, "connection", ["remoteSpaceId", "direction", "url", "tokenEnv", "apps", "scopes", "fullTrust", "alias"]);
+    const d = mapping(raw, "connection", ["remoteSpaceId", "direction", "url", "tokenEnv", "headersEnv", "apps", "scopes", "fullTrust", "alias"]);
     const remoteSpaceId = text(d.remoteSpaceId, "remoteSpaceId", 36);
     installationKey(remoteSpaceId, "validation");
     if (remoteSpaceId === this.spaceId) throw new Error("cannot connect a Space to itself");
@@ -59,15 +65,15 @@ export class Connections {
     const scopes = parseScopes(d.scopes ?? []);
     const fullTrust = flag(d.fullTrust ?? false, "fullTrust");
     const alias = aliasOf(d.alias ?? null);
-    let url: string | null = null, tokenEnv: string | null = null;
+    let url: string | null = null, tokenEnv: string | null = null, headersEnv: string | null = null;
     if (d.direction === "outgoing") {
       url = connectionUrl(text(d.url, "url", 2048));
-      tokenEnv = text(d.tokenEnv, "tokenEnv", 120);
-      if (!/^[A-Z][A-Z0-9_]*$/.test(tokenEnv)) throw new Error("tokenEnv must name a host environment variable");
-    } else if (d.url !== undefined || d.tokenEnv !== undefined) throw new Error("incoming connections do not take url or tokenEnv");
+      tokenEnv = envName(d.tokenEnv, "tokenEnv");
+      if (d.headersEnv !== undefined && d.headersEnv !== null) headersEnv = envName(d.headersEnv, "headersEnv");
+    } else if (d.url !== undefined || d.tokenEnv !== undefined || d.headersEnv !== undefined) throw new Error("incoming connections do not take url, tokenEnv or headersEnv");
     const id = crypto.randomUUID();
     const token = d.direction === "incoming" ? randomBytes(32).toString("base64url") : undefined;
-    this.db.query("INSERT INTO package_connections(id,remoteSpaceId,direction,url,tokenEnv,token_hash,apps,scopes,fullTrust,alias) VALUES(?,?,?,?,?,?,?,?,?,?)").run(id, remoteSpaceId, d.direction, url, tokenEnv, token ? digest(token) : null, JSON.stringify(apps), JSON.stringify(scopes), fullTrust ? 1 : 0, alias);
+    this.db.query("INSERT INTO package_connections(id,remoteSpaceId,direction,url,tokenEnv,headersEnv,token_hash,apps,scopes,fullTrust,alias) VALUES(?,?,?,?,?,?,?,?,?,?,?)").run(id, remoteSpaceId, d.direction, url, tokenEnv, headersEnv, token ? digest(token) : null, JSON.stringify(apps), JSON.stringify(scopes), fullTrust ? 1 : 0, alias);
     this.changed(id);
     return { connection: this.get(id)!, ...(token ? { token } : {}) };
   }
@@ -122,6 +128,12 @@ export class Connections {
     this.changed(id); return token;
   }
 
+  /** The connection to one other Space, whichever side dialed: there is at most one (`remoteSpaceId` is unique). */
+  byRemote(remoteSpaceId: string): Connection | undefined {
+    const row = this.db.query("SELECT * FROM package_connections WHERE remoteSpaceId=?").get(remoteSpaceId) as Row | null;
+    return row ? view(row) : undefined;
+  }
+
   /** Forget a connection and its grants, for one made with a wrong endpoint, credential name or identity. */
   remove(id: string): Connection {
     const c = this.get(id);
@@ -173,7 +185,14 @@ function aliasOf(raw: unknown): string | null {
   return raw;
 }
 
-function connectionUrl(raw: string): string {
+function envName(raw: unknown, name: string): string {
+  const v = text(raw, name, 120);
+  if (!/^[A-Z][A-Z0-9_]*$/.test(v)) throw new Error(`${name} must name a host environment variable`);
+  return v;
+}
+
+/** An outgoing connection's endpoint: an origin without credentials, HTTPS except on loopback. */
+export function connectionUrl(raw: string): string {
   const u = new URL(raw);
   if (u.username || u.password || u.search || u.hash || u.pathname !== "/") throw new Error("connection URL must be an origin without credentials");
   const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
@@ -182,5 +201,5 @@ function connectionUrl(raw: string): string {
 }
 function digest(token: string): string { return createHash("sha256").update(token).digest("hex"); }
 function view({ token_hash: _secret, apps, enabled, scopes, fullTrust, ...row }: Row): Connection {
-  return { ...row, apps: JSON.parse(apps), enabled: Boolean(enabled), scopes: parseScopes(JSON.parse(scopes)), fullTrust: Boolean(fullTrust), alias: row.alias ?? null, remoteName: row.remoteName ?? null };
+  return { ...row, apps: JSON.parse(apps), enabled: Boolean(enabled), scopes: parseScopes(JSON.parse(scopes)), fullTrust: Boolean(fullTrust), alias: row.alias ?? null, remoteName: row.remoteName ?? null, headersEnv: row.headersEnv ?? null };
 }

@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { Inbox, NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
 import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes, fixerAgentView, spaceAgentView } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
-import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createConnectionPeerServe, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
+import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { availabilityOf } from "./space/model/health.ts";
@@ -257,6 +257,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const widgets = new WidgetFeed(registry, { appFetch: (app, path, init) => packageGateway.request(app, path, init) });
   const { peers: peerConfigs, errors: peerErrors } = loadPeers(env);
   for (const [name, reason] of peerErrors) console.error(`[peers] ${name}: ${reason}`);
+  // Once, at boot: the older channel still works; this names the way off it (docs/peers.md#moving-a-legacy-peer).
+  if (peerConfigs.length) console.log(`[peers] ${peerConfigs.map((p) => p.name).join(", ")} on the legacy peer channel (SPACE_PEER_*), the older way; \`space peer migrate --all\` moves them onto package connections`);
   // Peers' events are mirrored here (docs/events.md): published under the same app name, marked with the peer.
   // A peer of SPACE_PEER_* is reached over HTTPS; one of a package connection over its channel (connection-peers.ts),
   // and what the hub keeps under its name survives until its connection's catalogue is read.
@@ -713,7 +715,9 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       // A rename moves what this hub keeps under the peer's name and tells the apps (docs/peers.md#renaming-a-peer).
       ["owner", createPeerRoutes({ hub: peers, layout, registry, callerApp, agentCallers: config.agentCallers, connections: { find: (peer, app) => packageCatalogue.find(peer, app), request: (id, meta, body, signal) => packageLinks.request(id, meta, body, signal) }, rename: (from, to) => renamePeer({ hub: peers, db: store.db, envFile: ws.envFile, env, taken: (name) => Boolean(registry.get(name)), publish: (data) => scheduler.publish({ app: SPACE_APP, name: "peer.renamed", data }) }, from, to) })],
       ["owner", terminalRoutes],
-      ["self", createPeerServeRoutes({ token: config.hubToken, ...peerServe })],
+      // `space peer migrate` on a hub (docs/peers.md#moving-a-legacy-peer); the peer's side is the adopt route below.
+      ["owner", createMigrateRoutes({ token: config.apiToken, deps: { hub: peers, connections: packageConnections, links: packageLinks, connectionPeers, catalogue: packageCatalogue, envFile: ws.envFile, env, ...(config.router.panelHost ? { hubUrl: `https://${config.router.panelHost}` } : {}), ...(config.router.domain ? { domain: config.router.domain } : {}) } })],
+      ["self", createPeerServeRoutes({ token: config.hubToken, ...peerServe, adopt: createAdoptHandler({ connections: packageConnections, links: packageLinks, env, envFile: ws.envFile, isPeer: (id) => peers.names().some((n) => peers.get(n)?.config.spaceId === id || peers.get(n)?.snapshot?.id === id), log: (l) => console.log(l) }) })],
       ["public", createWebRoutes()],
       ["public", createUiKitRoutes(uiKit)],
       ["owner", createAuthRoutes({ mode: config.auth, auth })],

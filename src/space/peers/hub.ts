@@ -50,6 +50,19 @@ export class PeerHub {
     this.clients.delete(name);
   }
 
+  /**
+   * Take a `SPACE_PEER_*` peer off in the running hub (`space peer migrate`, docs/peers.md#moving-a-legacy-peer):
+   * its client stops after a refresh under way has written, and everything stored under its name stays, so
+   * a connection peer attached under that name next starts from its snapshot and event cursor.
+   */
+  async remove(name: string): Promise<void> {
+    const c = this.clients.get(name);
+    if (!c) throw new Error(`unknown peer: ${name}`);
+    if (c.config.connection) throw new Error(`peer ${name} is a package connection, not a SPACE_PEER_* peer`);
+    await c.settle();
+    this.clients.delete(name);
+  }
+
   names(): string[] {
     return [...this.clients.keys()];
   }

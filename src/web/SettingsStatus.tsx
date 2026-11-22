@@ -107,6 +107,7 @@ export default function SettingsStatus() {
             <div key={p.name} className="svcrow" title={`${p.url}\n${t("settings.peerCounts", { apps: p.apps, agents: p.agents, widgets: p.widgets, services: p.services })}${p.asOf ? `\n${t("settings.snapshot", { time: relTime(p.asOf, lang) })}` : ""}${p.error ? `\n${p.error}` : ""}`}>
               <span className="svc-ico">🛰</span>
               <span className="svc-name">{p.name}</span>
+              {p.via === "http" && <span className="svc-peer" title={t("settings.peerLegacyHint", { name: p.name })}>{t("settings.peerLegacy")}</span>}
               {p.health !== "ok" && p.asOf && <span className="svc-port">{relTime(p.asOf, lang)}</span>}
               <span className={`status ${p.health}`}>
                 <i />

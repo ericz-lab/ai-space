@@ -59,6 +59,8 @@ import type { PeerModelInfo } from "./client.ts";
  *   POST /api/peer/model/image                     │ here for `<space>/<app>` in `x-space-caller` (docs/model-machines.md);
  *                                                  │ the snapshot's `model` says which runtimes. A run with a `ref` survives
  *   POST /api/peer/model/runs/:ref/cancel          ┘ a dropped link and is attached to again; the caller cancels it here
+ *   POST /api/peer/connections/adopt               over HTTPS only (adopt.ts): the hub asks this Space to open a package
+ *                                                  connection back to it, `space peer migrate` (docs/peers.md)
  *
  * Either side of a link may serve these routes: two spaces that list each other as peers call each
  * other's runtimes both ways.
@@ -105,6 +107,11 @@ export type PeerServeOptions = {
   tasks?: Routes;
   /** The feedback routes for a hub's Settings → Feedback (feedback/api.ts `createFeedbackPeerServeRoutes`). */
   feedback?: Routes;
+  /**
+   * `POST /api/peer/connections/adopt` (adopt.ts `createAdoptHandler`): a hub moving this Space onto a package
+   * connection. HTTPS only, behind the token; never one of `createPeerServeHandlers`, so no connection reaches it.
+   */
+  adopt?: (req: Request) => Response | Promise<Response>;
 };
 
 const PROXY_TIMEOUT_MS = 60_000;
@@ -113,7 +120,9 @@ const PROXY_TIMEOUT_MS = 60_000;
 export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
   if (!opts.token) return {};
   const routes: Routes = {};
-  for (const [path, entry] of Object.entries(createPeerServeHandlers(opts))) {
+  // The legacy channel's own routes (scopes.ts `LEGACY_ONLY_ROUTES`), not handlers a connection could reach.
+  const legacyOnly: Routes = opts.adopt ? { "/api/peer/connections/adopt": { POST: (req) => opts.adopt!(req) } } : {};
+  for (const [path, entry] of Object.entries({ ...createPeerServeHandlers(opts), ...legacyOnly })) {
     const methods = typeof entry === "function" ? { GET: entry } : entry;
     routes[path] = Object.fromEntries(Object.entries(methods).map(([method, h]) => [method, (async (req, server) => (tokenEquals(bearer(req), opts.token) ? h!(req, server) : json({ ok: false, error: "unauthorized" }, 401))) as Handler]));
   }

@@ -194,3 +194,38 @@ test("a connection table from before scopes gets them with nothing granted", () 
   expect(c.get("c1")).toMatchObject({ apps: ["notes"], scopes: [], fullTrust: false, alias: null, remoteName: null });
   expect(new Connections(db, crypto.randomUUID()).list()).toHaveLength(1);
 });
+
+test("an outgoing connection sends an access layer's headers from its variable, and cannot replace its own", async () => {
+  const hubStore = store(), peerStore = store();
+  const incoming = hubStore.create({ remoteSpaceId: peerStore.spaceId, direction: "incoming" });
+  expect(() => hubStore.create({ remoteSpaceId: crypto.randomUUID(), direction: "incoming", headersEnv: "X" })).toThrow(/headersEnv/);
+  expect(() => peerStore.create({ remoteSpaceId: crypto.randomUUID(), direction: "outgoing", url: "https://hub.example", tokenEnv: "T", headersEnv: "lower" })).toThrow(/environment variable/);
+  const hub = new PackageLinks(hubStore, { env: {}, apps: () => [] });
+  cleanups.push(() => hub.close());
+  const routes = createConnectionRoutes({ links: hub, token: "operator" });
+  const seen: Record<string, string | null>[] = [];
+  // An access layer in front of the hub: the channel's upgrade only with its service token.
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, websocket: terminalWebSocket, fetch: () => new Response("missing", { status: 404 }), routes: {
+    "/api/connections/channel": (req: Request, srv: unknown) => {
+      seen.push({ id: req.headers.get("cf-access-client-id"), secret: req.headers.get("cf-access-client-secret"), space: req.headers.get("x-space-id") });
+      if (req.headers.get("cf-access-client-secret") !== "s3cret") return new Response("forbidden by the access layer", { status: 403 });
+      return (routes["/api/connections/channel"]!.GET as (r: Request, s: unknown) => Response | undefined)(req, srv);
+    },
+  } as never });
+  cleanups.push(() => server.stop(true));
+  const env: Record<string, string | undefined> = { HUB_ACCESS: incoming.token, HUB_HEADERS: "CF-Access-Client-Id: abc.access; CF-Access-Client-Secret: s3cret; X-Space-Id: forged" };
+  const outgoing = peerStore.create({ remoteSpaceId: hubStore.spaceId, direction: "outgoing", url: server.url.origin, tokenEnv: "HUB_ACCESS", headersEnv: "HUB_HEADERS" }).connection;
+  expect(outgoing.headersEnv).toBe("HUB_HEADERS");
+  const peer = new PackageLinks(peerStore, { env, apps: () => [] });
+  cleanups.push(() => peer.close());
+  for (let i = 0; i < 200 && !hub.status()[0]?.connected; i++) { peer.refresh(); await Bun.sleep(10); }
+  expect(hub.status()[0]?.connected).toBe(true);
+  expect(seen[0]).toEqual({ id: "abc.access", secret: "s3cret", space: peerStore.spaceId });
+  // Without the variable the connection says so instead of dialing.
+  const other = store();
+  const lone = other.create({ remoteSpaceId: hubStore.spaceId, direction: "outgoing", url: server.url.origin, tokenEnv: "HUB_ACCESS", headersEnv: "MISSING" }).connection;
+  const links = new PackageLinks(other, { env: { HUB_ACCESS: "x" }, apps: () => [] });
+  cleanups.push(() => links.close());
+  links.refresh();
+  expect(links.status().find((s) => s.id === lone.id)?.error).toContain("MISSING");
+});
