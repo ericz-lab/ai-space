@@ -2,9 +2,11 @@
  * `bun release/linux.ts [--out dist] [--edition client|local|both]`: the Linux desktop app as
  * tarballs, one per edition (docs/linux-desktop.md, docs/editions.md):
  *
- *   ai-space-linux-client-<version>-<arch>.tar.gz   the client (desktop/linux/build.ts)
- *   ai-space-linux-local-<version>-<arch>.tar.gz    the client with the Space's release tree in
- *                                                   space/ (runtime/bun, runtime/space-pty)
+ *   ai-space-desktop-<version>-linux-<arch>.tar.gz   the client (desktop/linux/build.ts): what a
+ *                                                    release publishes, and the default here
+ *   ai-space-local-<version>-linux-<arch>.tar.gz     the client with the Space's release tree in
+ *                                                    space/ (runtime/bun, runtime/space-pty);
+ *                                                    not published, built on request
  *
  * Each unpacks to one directory; `./install.sh` in it installs the app for the user.
  */
@@ -15,7 +17,7 @@ import { SPACE_ROOT } from "../src/space/config.ts";
 import { readVersion } from "../src/space/version.ts";
 import { run } from "./server.ts";
 
-export const linuxArchiveName = (edition: "client" | "local", version: string, arch: string = process.arch) => `ai-space-linux-${edition}-${version}-${arch}`;
+export const linuxArchiveName = (edition: "client" | "local", version: string, arch: string = process.arch) => `ai-space-${edition === "client" ? "desktop" : "local"}-${version}-linux-${arch}`;
 
 export async function releaseLinux(opts: { out: string; editions: ("client" | "local")[]; root?: string }): Promise<string[]> {
   if (process.platform !== "linux") throw new Error("the Linux app builds on Linux (its Local edition carries this machine's Bun)");
@@ -43,7 +45,7 @@ if (import.meta.main) {
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : undefined;
   };
-  const edition = value("--edition") ?? "both";
+  const edition = value("--edition") ?? "client";
   const editions = edition === "both" ? (["client", "local"] as const) : [edition as "client" | "local"];
   if (!editions.every((e) => e === "client" || e === "local")) throw new Error("--edition is client, local or both");
   for (const a of await releaseLinux({ out: value("--out") ?? join(SPACE_ROOT, "dist"), editions: [...editions] })) console.log(a);

@@ -5,6 +5,23 @@ where the lines between them run, and what has to exist before each can be publi
 itself is tracked in separate items: the release pipeline, optional GitHub and Cloudflare, the
 built-in user system, and the Mac standalone install (see [The work, in order](#the-work-in-order)).
 
+## What is published (2026-11-21)
+
+A release carries two products, and their files say which is which
+([release.md](release.md#what-a-release-contains)):
+
+| Name people see | Edition in this document | Files |
+| --- | --- | --- |
+| **AI Space** | Server: the service with its web panel, installed by one command | `ai-space-<version>-<os>-<arch>.tar.gz` |
+| **AI Space Desktop** | Client: the native app, which connects to an AI Space | `ai-space-desktop-<version>-<os>-<arch>.{dmg,tar.gz,zip}` |
+
+The Local edition is no longer published. Instead of carrying a service of its own, the desktop app
+is to look for an AI Space on the machine at first launch and, when there is none, offer to install
+the standard one (the same installer, program directory and background service as the one command)
+or to connect to another machine. Local's code and builders stay for the installations that exist
+until they are moved over. On Windows the service no longer goes into WSL 2: AI Space runs on Windows
+itself. The sections below still describe the three editions as they were built.
+
 ## Why
 
 Today ai-space is installed by someone who can run a server: a Linux machine, a domain on
@@ -60,7 +77,7 @@ What differs is how each one is packaged, installed, started and updated.
 scripts that create a workspace and register a background service.
 
 **Installs** from a release archive per system and architecture (for example
-`ai-space-server-<version>-linux-x64.tar.gz`), or from source as today (`deploy/install.sh`, the
+`ai-space-<version>-linux-x64.tar.gz`), or from source as today (`deploy/install.sh`, the
 git-push deploy of `deploy/post-receive`). The source channel stays.
 
 **Runs** under the system's service manager: a systemd user unit on Linux

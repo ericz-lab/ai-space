@@ -69,7 +69,8 @@ function Install-AISpace {
     Write-Host "ai-space: looking for the $what for $plat-$arch"
     try { Get-ReleaseFile $base 'SHA256SUMS' (Join-Path $tmp 'SHA256SUMS') } catch { Fail "could not download $base/SHA256SUMS" }
     $wanted = if ($version -eq 'latest') { '[0-9][^ ]*' } else { [regex]::Escape($version) }
-    $line = Get-Content -LiteralPath (Join-Path $tmp 'SHA256SUMS') | Where-Object { $_ -match "^([0-9a-fA-F]{64})  (ai-space-server-$wanted-$plat-$arch\.tar\.gz)$" } | Select-Object -First 1
+    # ai-space-<version>-windows-<arch>.tar.gz; releases up to 0.2.1 named it ai-space-server-<version>-...
+    $line = Get-Content -LiteralPath (Join-Path $tmp 'SHA256SUMS') | Where-Object { $_ -match "^([0-9a-fA-F]{64})  (ai-space-(?:server-)?$wanted-$plat-$arch\.tar\.gz)$" } | Select-Object -First 1
     if (-not $line) { Fail "the release has no Server archive for $plat-$arch" }
     $want = $line.Substring(0, 64).ToLower()
     $name = $line.Substring(66)

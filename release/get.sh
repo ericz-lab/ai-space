@@ -88,10 +88,11 @@ main() {
 
   say "ai-space: looking for the $( [ "$version" = latest ] && echo "latest release" || echo "release $version" ) for $plat-$arch"
   fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS" || fail "could not download $base/SHA256SUMS"
+  # ai-space-<version>-<os>-<arch>.tar.gz; releases up to 0.2.1 named it ai-space-server-<version>-...
   if [ "$version" = latest ]; then
-    line="$(grep -E "  ai-space-server-[0-9][^ ]*-$plat-$arch\.tar\.gz\$" "$tmp/SHA256SUMS" | head -n1 || true)"
+    line="$(grep -E "  ai-space-(server-)?[0-9][^ ]*-$plat-$arch\.tar\.gz\$" "$tmp/SHA256SUMS" | head -n1 || true)"
   else
-    line="$(grep -E "  ai-space-server-${version//./\\.}-$plat-$arch\.tar\.gz\$" "$tmp/SHA256SUMS" | head -n1 || true)"
+    line="$(grep -E "  ai-space-(server-)?${version//./\\.}-$plat-$arch\.tar\.gz\$" "$tmp/SHA256SUMS" | head -n1 || true)"
   fi
   [ -n "$line" ] || fail "the release has no Server archive for $plat-$arch"
   want="${line%% *}"

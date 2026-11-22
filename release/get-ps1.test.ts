@@ -36,7 +36,7 @@ describe("the release's names on Windows", () => {
     expect(releaseOs("win32")).toBe("windows");
     expect(releaseOs("darwin")).toBe("macos");
     expect(releaseOs("linux")).toBe("linux");
-    expect(archiveName({ version: "1.2.3", os: releaseOs("win32"), arch: "x64" })).toBe("ai-space-server-1.2.3-windows-x64");
+    expect(archiveName({ version: "1.2.3", os: releaseOs("win32"), arch: "x64" })).toBe("ai-space-1.2.3-windows-x64");
     expect(runtimeBun("win32")).toBe(join("runtime", "bun.exe"));
     expect(runtimeBun("linux")).toBe(join("runtime", "bun"));
   });
@@ -64,7 +64,7 @@ describe("the release's names on Windows", () => {
 describe.skipIf(!windows)("get.ps1", () => {
   test("an archive that does not match SHA256SUMS installs nothing", async () => {
     const mirror = await mkdtemp(join(root, "mirror-"));
-    const name = "ai-space-server-9.9.9-windows-x64.tar.gz";
+    const name = "ai-space-9.9.9-windows-x64.tar.gz";
     await Bun.write(join(mirror, name), "not the archive the release built");
     await Bun.write(join(mirror, "SHA256SUMS"), `${sha256(new TextEncoder().encode("the archive the release built"))}  ${name}\n`);
     const r = await install(mirror);
@@ -76,7 +76,7 @@ describe.skipIf(!windows)("get.ps1", () => {
 
   test("a release without a windows archive says so", async () => {
     const mirror = await mkdtemp(join(root, "mirror-"));
-    await Bun.write(join(mirror, "SHA256SUMS"), `${"a".repeat(64)}  ai-space-server-9.9.9-linux-x64.tar.gz\n`);
+    await Bun.write(join(mirror, "SHA256SUMS"), `${"a".repeat(64)}  ai-space-9.9.9-linux-x64.tar.gz\n`);
     const r = await install(mirror);
     expect(r.code).not.toBe(0);
     expect(r.err).toContain("the release has no Server archive for windows-x64");
@@ -85,7 +85,7 @@ describe.skipIf(!windows)("get.ps1", () => {
   test("the version asked for is the one looked for", async () => {
     const mirror = await mkdtemp(join(root, "mirror-"));
     await mkdir(mirror, { recursive: true });
-    await Bun.write(join(mirror, "SHA256SUMS"), `${"a".repeat(64)}  ai-space-server-9.9.9-windows-x64.tar.gz\n`);
+    await Bun.write(join(mirror, "SHA256SUMS"), `${"a".repeat(64)}  ai-space-9.9.9-windows-x64.tar.gz\n`);
     const r = await install(mirror, { AI_SPACE_VERSION: "v1.0.0" });
     expect(r.out).toContain("looking for the release 1.0.0 for windows-x64");
     expect(r.err).toContain("the release has no Server archive for windows-x64");

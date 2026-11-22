@@ -1,38 +1,41 @@
 # Releases
 
-Status: implemented for the Server edition (Linux x64 and arm64), the Client edition and the Local
-edition (Mac, Apple Silicon; Linux x64 and arm64; Windows x64 and arm64, not signed yet;
-[editions.md](editions.md)). Updates inside an installed app are a
-separate piece of work: a newer Local app is installed over the old one and its Settings offer the
-update ([local.md](local.md)).
+Status: implemented. A release publishes two things ([editions.md](editions.md)):
 
-One tag builds every edition from one commit and one version. Nothing is published without a
+- **AI Space**: the service with its web panel (the Server edition), for Linux x64 and arm64, a Mac
+  on Apple silicon and Windows x64. One command installs it ([below](#one-command-install)).
+- **AI Space Desktop**: the native app that connects to an AI Space (the Client edition), for a Mac
+  on Apple silicon, Linux and Windows on x64 and arm64 (Windows not signed yet).
+
+The Local edition (the app with the service inside, [local.md](local.md)) is no longer published:
+its builders stay for the installations that exist ([Local edition](#local-edition)).
+
+One tag builds both from one commit and one version. Nothing is published without a
 person: the pipeline ends in a draft GitHub Release.
 
 ## What a release contains
 
-| File | Edition | What it is |
-| --- | --- | --- |
-| `ai-space-server-<version>-linux-x64.tar.gz` | Server | The service, its production dependencies and a pinned Bun, for Linux on x64 |
-| `ai-space-server-<version>-linux-arm64.tar.gz` | Server | The same for arm64 |
-| `ai-space-server-<version>-macos-arm64.tar.gz` | Server | The same for a Mac on Apple silicon |
-| `ai-space-client-<version>-macos-arm64.dmg` | Client | The Mac app, signed with a Developer ID and notarized |
-| `ai-space-client-<version>-macos-arm64-unsigned.dmg` | Client | Built when no signing identity is configured: for testing, macOS blocks it for everyone else |
-| `ai-space-local-<version>-macos-arm64.dmg` | Local | The Mac app with the service inside ([local.md](local.md)), signed and notarized |
-| `ai-space-local-<version>-macos-arm64-unsigned.dmg` | Local | The same without a signing identity: for testing only |
-| `ai-space-linux-client-<version>-x64.tar.gz` | Client | The Linux app ([linux-desktop.md](linux-desktop.md)); `./install.sh` in it installs it for the user |
-| `ai-space-linux-local-<version>-x64.tar.gz` | Local | The Linux app with the service inside ([local.md](local.md#on-linux)) |
-| `ai-space-linux-client-…-arm64.tar.gz`, `ai-space-linux-local-…-arm64.tar.gz` | Client, Local | The same for arm64 |
-| `ai-space-windows-client-<version>-x64.zip` | Client | The Windows app ([windows-desktop.md](windows-desktop.md)), not signed; `AISpace.exe` in it runs and offers to install itself for the user |
-| `ai-space-windows-local-<version>-x64.zip` | Local | The Windows app with the Linux release it sets up in WSL 2 ([local.md](local.md#on-windows)) |
-| `ai-space-windows-client-…-arm64.zip`, `ai-space-windows-local-…-arm64.zip` | Client, Local | The same for arm64 |
-| `install.sh` | Server | The one-command installer ([below](#one-command-install)); `release/get.sh` in the repository |
-| `SHA256SUMS` | | `sha256sum -c SHA256SUMS --ignore-missing` checks a download |
-| `manifest.json` | | Version, commit, the run that built it, every file's size and SHA-256 |
+Every file is named product, version, system, CPU: `ai-space-…` is the service, `ai-space-desktop-…`
+the app. Releases up to 0.2.1 named the service `ai-space-server-<version>-…`; the installers still
+find those.
+
+| File | What it is |
+| --- | --- |
+| `ai-space-<version>-linux-x64.tar.gz` | AI Space: the service, its production dependencies and a pinned Bun, for Linux on x64 |
+| `ai-space-<version>-linux-arm64.tar.gz` | The same for arm64 |
+| `ai-space-<version>-macos-arm64.tar.gz` | The same for a Mac on Apple silicon |
+| `ai-space-<version>-windows-x64.tar.gz` | The same for Windows itself, without WSL (`bun.exe` inside) |
+| `ai-space-desktop-<version>-macos-arm64.dmg` | AI Space Desktop for Mac, signed with a Developer ID and notarized |
+| `ai-space-desktop-<version>-macos-arm64-unsigned.dmg` | Built when no signing identity is configured: for testing, macOS blocks it for everyone else |
+| `ai-space-desktop-<version>-linux-x64.tar.gz`, `…-linux-arm64.tar.gz` | AI Space Desktop for Linux ([linux-desktop.md](linux-desktop.md)); `./install.sh` in it installs it for the user |
+| `ai-space-desktop-<version>-windows-x64.zip`, `…-windows-arm64.zip` | AI Space Desktop for Windows ([windows-desktop.md](windows-desktop.md)), not signed; `AISpace.exe` in it runs and offers to install itself for the user |
+| `install.sh`, `install.ps1` | The one-command installers of AI Space ([below](#one-command-install)); `release/get.sh` and `release/get.ps1` in the repository |
+| `SHA256SUMS` | `sha256sum -c SHA256SUMS --ignore-missing` checks a download |
+| `manifest.json` | Version, commit, the run that built it, every file's size and SHA-256 |
 
 Only systems and architectures that are built and checked are published. Not yet: the Mac Share
 extension (it needs an Xcode build with a development team, `desktop:share:build`), Intel Macs,
-a signed Windows app, a Server edition for Intel Macs or for Windows (there it runs inside WSL 2).
+a signed Windows app, AI Space for Intel Macs.
 
 ## Cutting a release
 
@@ -109,7 +112,7 @@ irm https://ai-space.me/install.ps1 | iex
 ```
 
 `install.ps1` is `release/get.ps1` as the release carries it. It picks the release's
-`ai-space-server-<version>-windows-x64.tar.gz` (which also runs on Windows on Arm, emulated),
+`ai-space-<version>-windows-x64.tar.gz` (which also runs on Windows on Arm, emulated),
 checks it against `SHA256SUMS`, unpacks it with Windows' own `tar.exe` and runs the archive's
 `install.ps1` (`release/install.ps1`): the program under `%LOCALAPPDATA%\ai-space` as
 `releases\<version>` with a junction `current`, the workspace `%USERPROFILE%\.ai-space`, the `space`
@@ -159,8 +162,8 @@ On Linux with systemd, or on a Mac, as the user that will own ai-space (on Linux
 on, as in [install.md](install.md) step 1):
 
 ```bash
-tar -xzf ai-space-server-<version>-<linux|macos>-<arch>.tar.gz
-bash ai-space-server-<version>-<linux|macos>-<arch>/install.sh
+tar -xzf ai-space-<version>-<linux|macos>-<arch>.tar.gz
+bash ai-space-<version>-<linux|macos>-<arch>/install.sh
 ```
 
 `install.sh` copies the release to `~/.local/share/ai-space/releases/<version>` (`AI_SPACE_PREFIX`
@@ -238,8 +241,8 @@ that matters.
 
 ## Local edition
 
-The `local` job of the release workflow, after the checks, with the same signing secrets as the
-Client. By hand on a Mac:
+Not part of a release any more (the workflow has no `local` job); for the installations that
+exist it is built by hand on a Mac:
 
 ```bash
 bun run release:local [--app <file.spaceapp>]...       # dist/local/AI Space.app, ad-hoc unless SIGN_IDENTITY
@@ -278,11 +281,11 @@ What a running service needs from the machine, and what it does without it:
 The `linux` job of the release workflow, after the checks, on x64 and arm64. By hand on Linux:
 
 ```bash
-bun run release:linux                     # dist/ai-space-linux-{client,local}-<version>-<arch>.tar.gz
-bun release/linux.ts --edition client     # one edition
+bun run release:linux                     # dist/ai-space-desktop-<version>-linux-<arch>.tar.gz
+bun release/linux.ts --edition local      # dist/ai-space-local-<version>-linux-<arch>.tar.gz, not published
 ```
 
-`release/linux.ts` runs `desktop/linux/build.ts` for each edition: the app bundled for GJS, the
+`release/linux.ts` runs `desktop/linux/build.ts`: the app bundled for GJS, the
 terminal page, the icon, the launcher and `install.sh`; for Local also the release tree of
 `release/server.ts` (edition `local`) at `space/` with `runtime/space-pty` built from
 `src/space/terminal/pty_helper.c`. Nothing is signed: Linux has no counterpart of the Mac's
@@ -290,23 +293,17 @@ notarization, so `SHA256SUMS` is what a download is checked against.
 
 ## Windows app
 
-Two jobs after the checks. **windows-bundle** runs on Linux x64 and arm64:
-`bun desktop/windows/build.ts --bundle-only` makes the Linux release the Local edition sets up in
-WSL (the release tree of `release/server.ts`, edition `local`, with `runtime/space-pty`, as
-`bundle.tar.gz` and its `RELEASE.json`), kept on the run only. **windows** runs on Windows for x64
-and arm64, where the program file gets its icon and version: `bun release/windows.ts --arch <arch>
---bundle <dir>` publishes the app self-contained (`dotnet publish -r win-<arch> --self-contained`)
-once per edition, the Local one with that bundle in `local\`, and zips each into one folder. The
-build refuses a bundle of another version or CPU. By hand:
+The **windows** job runs on Windows for x64 and arm64, after the checks, where the program file
+gets its icon and version: `bun release/windows.ts --arch <arch>` publishes the app self-contained
+(`dotnet publish -r win-<arch> --self-contained`) and zips it into one folder. By hand:
 
 ```bash
-bun desktop/windows/build.ts --bundle-only --out bundle      # on Linux, the CPU of the Windows it is for
-bun release/windows.ts --arch x64 --bundle bundle            # dist/ai-space-windows-{client,local}-<version>-x64.zip
+bun release/windows.ts --arch x64            # dist/ai-space-desktop-<version>-windows-x64.zip
 ```
 
-On Linux `release:windows` builds the bundle itself when `--bundle` is left out, and the app
-without its icon. Nothing is signed yet; SmartScreen asks once, and `SHA256SUMS` is what a download
-is checked against.
+On Linux the app builds without its icon. Nothing is signed yet; SmartScreen asks once, and
+`SHA256SUMS` is what a download is checked against. A release no longer carries the Local zip that
+set the service up in WSL 2: AI Space runs on Windows itself ([above](#one-command-install)).
 
 ## Checks before publishing
 
@@ -317,13 +314,10 @@ is checked against.
   `gh release download v<version> --dir rel && AI_SPACE_DOWNLOAD=file://$PWD/rel bash rel/install.sh`
   on a clean Linux machine, then the panel opens and `space status` answers. After publishing,
   `curl -fsSL https://ai-space.me/install.sh | bash` on another one.
-- On a GNOME desktop (Ubuntu 24.04): unpack the Linux client, `./install.sh`, open it from the app
-  grid, connect it to a Space, send a chat message, open a terminal; with the Local tarball, set up
-  the Space on that machine and see `systemctl --user status ai-space-local` running.
-- On Windows 11 and Windows 10 (x64; arm64 when there is one): unzip the client, run `AISpace.exe`,
+- On a GNOME desktop (Ubuntu 24.04): unpack AI Space Desktop, `./install.sh`, open it from the app
+  grid, connect it to a Space, send a chat message, open a terminal.
+- On Windows 11 and Windows 10 (x64; arm64 when there is one): unzip AI Space Desktop, run `AISpace.exe`,
   install it, connect it to a Space, get an inbox notification and open it, open Quick Chat with
-  its shortcut, open an `aispace://inbox` link; with the Local zip, set up the Space in a fresh
-  WSL 2 Ubuntu, see `systemctl --user status ai-space-local` running in it, close every terminal
-  and see the Space still answer; uninstall from Installed apps.
+  its shortcut, open an `aispace://inbox` link; uninstall from Installed apps.
 - On a clean Mac: open the DMG, drag the app to Applications, open it without a Gatekeeper warning,
   connect it to a Space.

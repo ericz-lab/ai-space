@@ -1,8 +1,8 @@
 # Install or upgrade the AI Space Server edition on Windows from an unpacked release archive
 # (docs/release.md):
 #
-#   tar -xzf ai-space-server-<version>-windows-x64.tar.gz
-#   powershell -ExecutionPolicy Bypass -File ai-space-server-<version>-windows-x64\install.ps1
+#   tar -xzf ai-space-<version>-windows-x64.tar.gz
+#   powershell -ExecutionPolicy Bypass -File ai-space-<version>-windows-x64\install.ps1
 #
 # The Windows counterpart of release/install.sh and deploy/install.sh together. The program goes
 # to $env:AI_SPACE_PREFIX (default %LOCALAPPDATA%\ai-space) as releases\<version>, with the

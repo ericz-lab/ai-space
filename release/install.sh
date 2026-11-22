@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Install or upgrade the AI Space Server edition from an unpacked release archive (docs/release.md):
 #
-#   tar -xzf ai-space-server-<version>-<linux|macos>-<arch>.tar.gz
-#   bash ai-space-server-<version>-<linux|macos>-<arch>/install.sh
+#   tar -xzf ai-space-<version>-<linux|macos>-<arch>.tar.gz
+#   bash ai-space-<version>-<linux|macos>-<arch>/install.sh
 #
 # The program goes to $AI_SPACE_PREFIX (default ~/.local/share/ai-space) as releases/<version>,
 # with `current` pointing at the one that runs; the workspace (SPACE_HOME, default ~/.ai-space)

@@ -22,8 +22,8 @@ const PATH = "/usr/bin:/bin";
 async function unpack(archive: string, into: string): Promise<{ dir: string; version: string }> {
   const tar = Bun.spawn(["tar", "-xzf", resolve(archive), "-C", into], { stderr: "inherit" });
   if ((await tar.exited) !== 0) throw new Error(`tar -xzf ${archive} failed`);
-  const [name] = (await readdir(into)).filter((n) => n.startsWith("ai-space-server-"));
-  if (!name) throw new Error(`${archive}: no ai-space-server-* directory inside`);
+  const [name] = (await readdir(into)).filter((n) => /^ai-space-\d/.test(n));
+  if (!name) throw new Error(`${archive}: no ai-space-<version>-* directory inside`);
   const dir = join(into, name);
   const info = (await Bun.file(join(dir, "RELEASE.json")).json()) as { version: string };
   return { dir, version: info.version };

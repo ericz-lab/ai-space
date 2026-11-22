@@ -23,8 +23,8 @@ let root = "";
 /** get.sh and install.sh are the Linux and macOS installers; Windows has get.ps1 (get-ps1.test.ts). */
 const posixOnly = test.skipIf(WINDOWS);
 
-async function release(dir: string, opts: { version: string; badSum?: boolean; machine?: Machine }): Promise<string> {
-  const name = `ai-space-server-${opts.version}-${platOf(opts.machine ?? LINUX)}`;
+async function release(dir: string, opts: { version: string; badSum?: boolean; machine?: Machine; oldName?: boolean }): Promise<string> {
+  const name = `ai-space-${opts.oldName ? "server-" : ""}${opts.version}-${platOf(opts.machine ?? LINUX)}`;
   const stage = join(dir, "stage", name);
   await mkdir(stage, { recursive: true });
   await Bun.write(join(stage, "RELEASE.json"), JSON.stringify({ product: "ai-space", version: opts.version }));
@@ -33,7 +33,7 @@ async function release(dir: string, opts: { version: string; badSum?: boolean; m
   const bytes = await Bun.file(join(dir, `${name}.tar.gz`)).bytes();
   const sum = opts.badSum ? "0".repeat(64) : new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
   // Another system's archive of the same release sits beside it and must not be taken.
-  await Bun.write(join(dir, "SHA256SUMS"), `${"1".repeat(64)}  ai-space-linux-client-${opts.version}-x64.tar.gz\n${"2".repeat(64)}  ai-space-server-${opts.version}-linux-arm64.tar.gz\n${sum}  ${name}.tar.gz\n`);
+  await Bun.write(join(dir, "SHA256SUMS"), `${"1".repeat(64)}  ai-space-desktop-${opts.version}-linux-x64.tar.gz\n${"2".repeat(64)}  ai-space-${opts.version}-linux-arm64.tar.gz\n${sum}  ${name}.tar.gz\n`);
   return dir;
 }
 
@@ -87,9 +87,17 @@ describe("the one-command installer", () => {
     expect(r.err).toBe("");
     expect(r.code).toBe(0);
     expect(r.installed).toBe("installed 9.9.9");
-    expect(r.out).toContain("ai-space-server-9.9.9-linux-x64.tar.gz");
+    expect(r.out).toContain("ai-space-9.9.9-linux-x64.tar.gz");
     expect(r.out).toContain("Open the panel: http://127.0.0.1:8700/");
     expect(r.out).toContain("No agent CLI found yet");
+  });
+
+  posixOnly("still installs a release from before the archive lost \"server\" in its name", async () => {
+    const dir = await release(await mkdtemp(join(root, "rel-")), { version: "0.2.1", oldName: true });
+    const r = await run(dir, { AI_SPACE_VERSION: "0.2.1" });
+    expect(r.err).toBe("");
+    expect(r.installed).toBe("installed 0.2.1");
+    expect(r.out).toContain("ai-space-server-0.2.1-linux-x64.tar.gz");
   });
 
   posixOnly("names the port the workspace uses, and the SSH forward when it runs over SSH", async () => {
@@ -131,7 +139,7 @@ describe("the one-command installer", () => {
     expect(r.err).toBe("");
     expect(r.code).toBe(0);
     expect(r.installed).toBe("installed 9.9.9");
-    expect(r.out).toContain("ai-space-server-9.9.9-macos-arm64.tar.gz");
+    expect(r.out).toContain("ai-space-9.9.9-macos-arm64.tar.gz");
     expect(r.opened).toBe("http://127.0.0.1:8700/");
     expect(r.out).toContain("runs while you are logged in");
   });
