@@ -3,10 +3,10 @@ import Gdk from "gi://Gdk?version=4.0";
 import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import { canonicalItems } from "../core/agents.ts";
-import { type Entry, type Widget, allEntries, entriesByKey, entryKey, fold, opensFirst, pageUrl, panelScreens, pickText, search, widgetEntry } from "../core/catalogue.ts";
+import { type Entry, type Widget, allEntries, entriesByKey, entryKey, fold, opensFirst, pageUrl, panelScreens, pickText, search, seededScreens, widgetEntry } from "../core/catalogue.ts";
 import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
-import { type BuiltinName, HOME, type Screen, builtinArt, move, newScreen, pin, removeScreen, rename, screenTitle, unpin } from "../core/screens.ts";
+import { type BuiltinName, HOME, LIBRARY, type Screen, builtinArt, move, newScreen, openingPage, pageAfter, pagesOf, pin, removeScreen, rename, screenTitle, unpin } from "../core/screens.ts";
 import { lang, prefs, t, tw } from "./env.ts";
 import { builtinTexture, iconWidget } from "./icons.ts";
 import { collectSoon } from "./memory.ts";
@@ -51,8 +51,9 @@ const BUILTINS: { name: Builtin; icon: string; label: () => string }[] = [
   { name: "settings", icon: "emblem-system-symbolic", label: () => t("settings") },
 ];
 
-/** The library's page id; screens use their own ids. */
-const LIBRARY = "library";
+/** How often, and how many times, Home looks whether its carousel reached the page it opens on (syncPages). */
+const PLACE_MS = 100;
+const PLACE_TRIES = 30;
 
 type Tile = { entry: Entry } | { builtin: (typeof BUILTINS)[number] };
 
@@ -93,8 +94,8 @@ export class HomePage {
   private pages: Page[] = [];
   private space: Space | undefined;
   private query = "";
-  /** The page on show, by id: the window opens on the first screen. */
-  private shownId = HOME;
+  /** The page on show, by id: the window opens on the home screen (openingPage), never on the library. */
+  private shownId = openingPage([]);
   /** While the pages are first placed, the page they are headed for: the carousel's own reports of page 0 meanwhile are not a swipe. */
   private placing: string | undefined;
   /** What the dots show now. */
@@ -164,16 +165,24 @@ export class HomePage {
   }
 
   show(space: Space | undefined): void {
-    if (space !== this.space) this.query = "";
+    // Another Space, and the first one after the welcome screen, opens on its home screen.
+    const opening = space !== this.space;
+    if (opening) this.query = "";
     this.space = space;
     if (space?.catalogue) {
-      this.store.seed(space.conn.id, panelScreens(space.catalogue));
+      this.store.seed(space.conn.id, panelScreens(space.catalogue), seededScreens(space.catalogue));
       // A screen pinned with one machine's variant of an agent shows the agent's single tile (agents.ts).
       const groups = space.catalogue.agentGroups;
       const screens = this.store.screens(space.conn.id);
       if (groups.length && screens.some((sc) => canonicalItems(sc.items, groups).join("\n") !== sc.items.join("\n"))) {
         this.store.edit(space.conn.id, (all) => all.map((sc) => ({ ...sc, items: canonicalItems(sc.items, groups) })));
       }
+    }
+    if (opening && space) {
+      const first = openingPage(this.store.screens(space.conn.id));
+      // With the same pages as the Space before, syncPages moves nothing: go there by hand.
+      if (this.shownId !== first && this.pageOf(first)) this.showPage(first, false);
+      else this.shownId = first;
     }
     this.render();
   }
@@ -215,29 +224,50 @@ export class HomePage {
 
   /** One page per screen after the library; rebuilt only when the screens themselves change. */
   private syncPages(screens: Screen[]): void {
-    const ids = [LIBRARY, ...screens.map((s) => s.id)];
+    const ids = pagesOf(screens);
     if (ids.join("\n") === this.pages.map((p) => p.id).join("\n")) return;
     const keep = new Map(this.pages.map((p) => [p.id, p]));
     for (const p of this.pages) this.carousel.remove(p.widget);
     this.pages = ids.map((id) => keep.get(id) ?? this.makePage(id));
     for (const p of this.pages) this.carousel.append(p.widget);
-    if (!this.pageOf(this.shownId)) this.shownId = HOME;
-    // The carousel places its pages once it has a size, and a jump made while the pages are
-    // still filling in can be cut short: look again a moment later.
+    this.shownId = pageAfter(this.shownId, screens);
+    // The carousel's first page is the library, and it only knows where the others are once it
+    // has a size and its new pages have grown to theirs (`reveal_duration`); a jump made before
+    // that goes nowhere or is cut short. So the jump is made again until the carousel is on the
+    // page and stays there, for at most PLACE_TRIES looks: a slow first start (the first launch,
+    // with the Space still answering) would otherwise leave the window on the library.
     const target = this.shownId;
     this.placing = target;
+    let tries = 0;
+    let there = 0;
     const place = () => {
+      // The pages changed again, or the person went to a page: that one decides now.
+      if (this.placing !== target) return GLib.SOURCE_REMOVE;
       const page = this.pageOf(target);
-      if (page && this.shownId === target && Math.abs(this.carousel.position - this.pages.indexOf(page)) > 0.01) this.carousel.scroll_to(page.widget, false);
-      return GLib.SOURCE_REMOVE;
+      if (!page || this.shownId !== target) {
+        this.placing = undefined;
+        return GLib.SOURCE_REMOVE;
+      }
+      if (Math.abs(this.carousel.position - this.pages.indexOf(page)) > 0.01) {
+        there = 0;
+        this.carousel.scroll_to(page.widget, false);
+      } else there++;
+      // On the page at two looks in a row, and past the time the pages take to grow.
+      if (++tries >= PLACE_TRIES || (there >= 2 && tries * PLACE_MS >= 400)) {
+        this.placing = undefined;
+        return GLib.SOURCE_REMOVE;
+      }
+      return GLib.SOURCE_CONTINUE;
     };
     const settle = () => {
-      GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, place);
-      GLib.timeout_add(GLib.PRIORITY_DEFAULT, 400, () => {
-        place();
-        if (this.placing === target) this.placing = undefined;
+      GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+        if (this.placing === target && this.shownId === target) {
+          const page = this.pageOf(target);
+          if (page && Math.abs(this.carousel.position - this.pages.indexOf(page)) > 0.01) this.carousel.scroll_to(page.widget, false);
+        }
         return GLib.SOURCE_REMOVE;
       });
+      GLib.timeout_add(GLib.PRIORITY_DEFAULT, PLACE_MS, place);
     };
     if (this.carousel.get_mapped()) settle();
     else {

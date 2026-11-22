@@ -55,14 +55,40 @@ export const copyPanel = (panel: Screen[]) => normalize(panel.map((s) => ({ id: 
 
 export const screensOf = (file: ScreenFile, conn: string): Screen[] => file[conn]?.screens ?? [emptyHome()];
 
-/** Takes the panel's screens as this computer's first layout, once per Space; undefined when nothing changes. */
-export function seed(file: ScreenFile, conn: string, panel: Screen[]): ScreenFile | undefined {
+/**
+ * Takes the panel's screens as this computer's first layout, once per Space; undefined when nothing
+ * changes. The home screen is where the window opens, so it never starts empty: when the panel has
+ * nothing pinned there (a panel whose owner emptied it, or keeps everything on later screens), it
+ * gets what a new panel's home would (`defaults`: the panel's own tiles, then the first apps,
+ * agents and widgets).
+ */
+export function seed(file: ScreenFile, conn: string, panel: Screen[], defaults: Screen[] = []): ScreenFile | undefined {
   if (file[conn]?.seeded) return undefined;
-  const copy = copyPanel(panel);
-  // A panel with nothing pinned is not a layout yet: wait for a catalogue that has one.
+  let copy = copyPanel(panel);
+  if (!copy[0]!.items.length) {
+    const home = copyPanel(defaults)[0]!.items;
+    copy = copy.map((s) => (s.id === HOME ? { ...s, items: home } : s));
+  }
+  // Nothing to show anywhere is not a layout yet: wait for a catalogue that has something.
   if (!copy.some((s) => s.items.length)) return undefined;
   return { ...file, [conn]: { screens: copy, seeded: true } };
 }
+
+/** The library's page of Home; every other page is a screen, by its id. */
+export const LIBRARY = "library";
+
+/** Home's pages from left to right: the library, then the screens, the home screen first. */
+export const pagesOf = (screens: Screen[]): string[] => [LIBRARY, ...normalize(screens).map((s) => s.id)];
+
+/**
+ * The page the window opens on, and a Space is first shown on: the home screen (主屏幕), which is
+ * the first screen and the one the tiles are pinned to. Not the library on its left, which is the
+ * carousel's first page, and not a later screen, whatever they hold.
+ */
+export const openingPage = (_screens: Screen[]): string => HOME;
+
+/** The page to show once the screens changed: the one on show while it is still there, else the home screen. */
+export const pageAfter = (shown: string, screens: Screen[]): string => (pagesOf(screens).includes(shown) ? shown : openingPage(screens));
 
 /** Replaces this computer's layout with the panel's as it is now, when the person asks for it. */
 export const reset = (file: ScreenFile, conn: string, panel: Screen[]): ScreenFile => ({ ...file, [conn]: { screens: copyPanel(panel), seeded: true } });

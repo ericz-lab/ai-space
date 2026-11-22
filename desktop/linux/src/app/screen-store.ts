@@ -28,9 +28,9 @@ export class ScreenStore {
     return screensOf(this.file, conn);
   }
 
-  /** The panel's screens become this computer's, the first time a Space has some. */
-  seed(conn: string, panel: Screen[]): void {
-    const next = seed(this.file, conn, panel);
+  /** The panel's screens become this computer's, the first time a Space has some; `defaults` fill a home screen the panel left empty. */
+  seed(conn: string, panel: Screen[], defaults: Screen[]): void {
+    const next = seed(this.file, conn, panel, defaults);
     if (next) this.write(next, false);
   }
 

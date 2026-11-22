@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import type { GaugeBlock, TrendBlock, WidgetBlock } from "../../../../src/space/panel/blocks.ts";
 import { fmt as webFmt, isOutdated as webOutdated, txt as webTxt } from "../../../../src/web/WidgetBlocks.tsx";
-import { decodeCatalogue } from "./catalogue.ts";
+import { decodeCatalogue, panelScreens, seededScreens } from "./catalogue.ts";
 import { BUILTIN_ICONS } from "../../../../src/space/panel/icons.ts";
 import { BUILTINS } from "../../../../src/web/screens.ts";
-import { BUILTIN_ART, BUILTIN_NAMES, builtinArt, builtinPage } from "./screens.ts";
+import { BUILTIN_ART, BUILTIN_NAMES, LIBRARY, builtinArt, builtinPage, openingPage, pageAfter, pagesOf } from "./screens.ts";
 import { HOME, copyPanel, decodeScreenFile, edit, forget, move, newScreen, pin, rename, reset, screenTitle, screensOf, seed, unpin } from "./screens.ts";
 import { cardBody, deltaText, embedPath, fmt, fraction, gaugeSegments, isOutdated, itemsFor, position, rowsFor, shown, spark, tankLevel, tankValue, toneOf, txt } from "./widgets.ts";
 
@@ -120,4 +120,54 @@ test("the panel's own tiles: every one of them, with the panel's pictures and pa
   expect(BUILTIN_NAMES.map(builtinPage)).toEqual(["/?page=store", undefined, "/?page=shortcuts", undefined, "/", undefined]);
   // A screen copied from the panel keeps its App Store tile.
   expect(copyPanel([{ id: HOME, name: "", items: BUILTINS.map((b) => `builtin:${b}`) }])[0]!.items).toEqual(BUILTINS.map((b) => `builtin:${b}`));
+});
+
+/** A Space as a first look finds it: what `/api/apps`, `/api/agents` and `/api/panel/layout` answer. */
+const spaceWith = (apps: string[], screens: unknown) =>
+  decodeCatalogue({
+    apps: { apps: apps.map((name) => ({ id: name, name, title: name, url: `http://${name}.localhost` })) },
+    agents: { agents: [{ id: "space/assistant", app: "space", name: "assistant", title: "Space Assistant" }] },
+    widgets: { widgets: [] },
+    layout: { ok: true, layout: { screens } },
+  });
+
+test("first run: the window opens on the home screen, and it holds tiles", () => {
+  const builtins = BUILTINS.map((b) => `builtin:${b}`);
+  // A Space just installed: no app yet and no screens stored (`screens: null`). The home screen
+  // is what a new panel seeds, the App Store among its tiles.
+  const fresh = spaceWith([], null);
+  const f = seed({}, "c", panelScreens(fresh), seededScreens(fresh))!;
+  expect(screensOf(f, "c")).toEqual([{ id: HOME, name: "", items: [...builtins, "agent:space/assistant"] }]);
+  // Home's pages are the library, then the screens; the window opens on the home screen, the second page.
+  expect(pagesOf(screensOf(f, "c"))).toEqual([LIBRARY, HOME]);
+  expect(openingPage(screensOf(f, "c"))).toBe(HOME);
+  expect(pagesOf(screensOf(f, "c")).indexOf(openingPage(screensOf(f, "c")))).toBe(1);
+  // Before the Space has answered there are no screens of its own yet: still the home screen.
+  expect(openingPage(screensOf({}, "c"))).toBe(HOME);
+  expect(pagesOf(screensOf({}, "c"))).toEqual([LIBRARY, HOME]);
+
+  // A panel that keeps its tiles on a later screen and none on home: the window still opens on
+  // the home screen, not on that one, and home starts with the tiles a new panel would have.
+  const later = spaceWith(["todo", "notes"], [{ id: HOME, name: "", items: [] }, { id: "s1", name: "Work", items: ["app:todo"] }]);
+  const g = seed({}, "c", panelScreens(later), seededScreens(later))!;
+  expect(screensOf(g, "c")).toEqual([
+    { id: HOME, name: "", items: ["app:todo", "app:notes", ...builtins, "agent:space/assistant"] },
+    { id: "s1", name: "Work", items: ["app:todo"] },
+  ]);
+  expect(openingPage(screensOf(g, "c"))).toBe(HOME);
+  // A panel emptied altogether gets the same home screen instead of an empty one.
+  const emptied = spaceWith(["todo"], [{ id: HOME, name: "", items: [] }]);
+  expect(screensOf(seed({}, "c", panelScreens(emptied), seededScreens(emptied))!, "c")[0]!.items).toEqual(["app:todo", ...builtins, "agent:space/assistant"]);
+  // A home screen the panel filled is taken as it is, and a layout made here is never filled again.
+  const pinned = spaceWith(["todo", "notes"], [{ id: HOME, name: "", items: ["app:notes"] }]);
+  expect(screensOf(seed({}, "c", panelScreens(pinned), seededScreens(pinned))!, "c")[0]!.items).toEqual(["app:notes"]);
+  const cleared = edit(f, "c", (s) => s.map((x) => ({ ...x, items: [] })));
+  expect(seed(cleared, "c", panelScreens(fresh), seededScreens(fresh))).toBeUndefined();
+  expect(openingPage(screensOf(cleared, "c"))).toBe(HOME);
+
+  // The page on show stays while its screen is there; when it goes, the home screen, never the library.
+  const three = [{ id: HOME, name: "", items: [] }, { id: "s1", name: "", items: [] }, { id: "s2", name: "", items: [] }];
+  expect(pageAfter("s2", three)).toBe("s2");
+  expect(pageAfter(LIBRARY, three)).toBe(LIBRARY);
+  expect(pageAfter("s2", three.slice(0, 2))).toBe(HOME);
 });
