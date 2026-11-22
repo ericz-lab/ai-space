@@ -347,6 +347,27 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     };
   }, []);
 
+  // The App Store tile's badge: installed apps with a newer release, counted by the server from the
+  // catalogs it has cached (it never waits for the network); on load, every 5 minutes while visible,
+  // and after each change made in the store.
+  const [storeUpdates, setStoreUpdates] = useState(0);
+  const pullStoreUpdates = () =>
+    getJson<{ count: number }>("/api/app-catalog/updates")
+      .then((d) => setStoreUpdates(d.count))
+      .catch(() => {});
+  useEffect(() => {
+    const pull = () => {
+      if (!document.hidden) void pullStoreUpdates();
+    };
+    pull();
+    const t = setInterval(pull, 300_000);
+    document.addEventListener("visibilitychange", pull);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", pull);
+    };
+  }, []);
+
   // The last 30 days of use (docs/usage.md), for the hover line and the library's "Most used"
   // order: on load, every 5 minutes while visible, and each time the library opens.
   const [usage, setUsage] = useState<Map<string, UsageRow>>(new Map());
@@ -546,6 +567,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const storeChanged = (c: CatalogChange) => {
     if (c.action === "installed") pinEntry(entryKey("app", c.app), HOME);
     void reload();
+    void pullStoreUpdates();
   };
   const appUrl = (name: string) => {
     const p = apps.find((a) => a.name === name && !a.peer && !a.connection);
@@ -688,6 +710,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
             </span>
           </p>
           {b === "inbox" && inbox && <p className="pop-hint">{t("inbox.summary", { unread: inbox.unread, open: inbox.open })}</p>}
+          {b === "store" && storeUpdates > 0 && <p className="pop-hint">{t("store.badge", { n: storeUpdates })}</p>}
           <p className="pop-body">{text.blurb}</p>
           {usageHint(key)}
         </>
@@ -765,7 +788,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         showPop={false}
         dragProps={drag}
         className="builtin"
-        badge={b === "inbox" && inbox ? { n: inbox.unread, title: t("inbox.badge", { n: inbox.unread }) } : undefined}
+        badge={b === "inbox" && inbox ? { n: inbox.unread, title: t("inbox.badge", { n: inbox.unread }) } : b === "store" && storeUpdates ? { n: storeUpdates, title: t("store.badge", { n: storeUpdates }) } : undefined}
       />
     );
   };

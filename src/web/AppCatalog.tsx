@@ -34,6 +34,9 @@ async function send(method: "POST" | "DELETE", path: string, body?: unknown): Pr
 }
 const post = (path: string, body: unknown) => send("POST", path, body);
 
+/** Where an install or upgrade in flight is (`GET /api/app-catalog/progress`). */
+export type CatalogProgress = { app: string; kind: "install" | "upgrade"; stage: "download" | "verify" | "install" | "source" | "clone" | "pull" | "build"; received?: number; total?: number; since: string };
+
 /** What a change did, for the page around the store (a new tile, a reload). */
 export type CatalogChange = { app: string; action: "installed" | "upgraded" | "rebuilt" | "removed" };
 /** The app being changed and how, so only the button that started it says so. */
@@ -58,6 +61,27 @@ export function useCatalog({ initial, onChange }: { initial?: CatalogView; onCha
   const [askSource, setAskSource] = useState<SourceAsk | null>(null);
   const changed = useRef(onChange);
   changed.current = onChange;
+  // The step of the change in flight, read every half second while its request waits.
+  const [progress, setProgress] = useState<CatalogProgress | null>(null);
+  const workingApp = working?.how === "install" || working?.how === "upgrade" || working?.how === "source" ? working.app : null;
+  useEffect(() => {
+    setProgress(null);
+    if (!workingApp) return;
+    let live = true;
+    const pull = () =>
+      fetch("/api/app-catalog/progress")
+        .then((r) => r.json() as Promise<{ ok: boolean; progress?: CatalogProgress[] }>)
+        .then((d) => live && setProgress(d.progress?.find((p) => p.app === workingApp) ?? null))
+        .catch(() => {});
+    const timer = setInterval(pull, 500);
+    void pull();
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [workingApp]);
+  /** A refusal joins the ones before it in the same run, so "update all" reports every app that failed. */
+  const fail = (msg: string) => setErr((prev) => (prev ? `${prev}\n${msg}` : msg));
 
   const load = async (refresh = false): Promise<CatalogView | null> => {
     try {
@@ -101,13 +125,13 @@ export function useCatalog({ initial, onChange }: { initial?: CatalogView; onCha
         a = await post(path, { ...req, replaceSource: true });
       }
       if (!a.ok) {
-        setErr(`${app}: ${a.error ?? "failed"}`);
+        fail(`${app}: ${a.error ?? "failed"}`);
         return false;
       }
       report({ app, action: kind === "install" ? "installed" : "upgraded" });
       return true;
     } catch (e) {
-      setErr(`${app}: ${String((e as Error).message || e)}`);
+      fail(`${app}: ${String((e as Error).message || e)}`);
       return false;
     } finally {
       setWorking(null);
@@ -119,7 +143,7 @@ export function useCatalog({ initial, onChange }: { initial?: CatalogView; onCha
     setWorking({ app, how: "source" });
     try {
       const a = await post(`/api/studio/apps/${encodeURIComponent(app)}/build`, {});
-      if (!a.ok) setErr(`${app}: ${a.error ?? "failed"}`);
+      if (!a.ok) fail(`${app}: ${a.error ?? "failed"}`);
       else report({ app, action: "rebuilt" });
       return a.ok;
     } finally {
@@ -132,7 +156,7 @@ export function useCatalog({ initial, onChange }: { initial?: CatalogView; onCha
     setWorking({ app, how: "remove" });
     try {
       const a = await send("DELETE", `/api/panel/packages/apps/${encodeURIComponent(app)}`);
-      if (!a.ok) setErr(`${app}: ${a.error ?? "failed"}`);
+      if (!a.ok) fail(`${app}: ${a.error ?? "failed"}`);
       else report({ app, action: "removed" });
       return a.ok;
     } finally {
@@ -158,6 +182,7 @@ export function useCatalog({ initial, onChange }: { initial?: CatalogView; onCha
     setErr,
     busy,
     working,
+    progress,
     done,
     ask,
     askSource,
