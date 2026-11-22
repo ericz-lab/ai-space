@@ -12,7 +12,7 @@ namespace AISpace.Views;
 /// <see cref="SettingsRules.CollapseBelow"/> wide), the chosen one on the right; the last one chosen
 /// is remembered on this computer (<see cref="SettingsMemory"/>). Each section reads its routes when
 /// it is shown and again after a while, or on F5; a part whose route fails says so with Retry.
-/// Feedback and Appearance lead to the web panel's Settings in its tab. This Computer leads to the
+/// Appearance leads to the web panel's Settings in its tab. This Computer leads to the
 /// app's own preferences (<see cref="SettingsWindow"/>), which stays as it is, reached from the
 /// notification area, the floating ball and here.
 /// </summary>
@@ -141,6 +141,7 @@ internal sealed class SpaceSettingsPage : NativePage
             SettingsSection.Usage => new UsagePane(this),
             SettingsSection.Activity => new ActivityPane(this),
             SettingsSection.Packages => new PackagesPane(this),
+            SettingsSection.FixThis => new FixThisPane(this),
             SettingsSection.Account => new AccountPane(this),
             SettingsSection.ThisComputer => new ThisComputerPane(this),
             _ => new WebPane(this, s),
@@ -169,7 +170,7 @@ internal sealed class SpaceSettingsPage : NativePage
         SettingsSection.Usage => L.T("Model Usage"),
         SettingsSection.Activity => L.T("App Usage"),
         SettingsSection.Packages => L.T("Packages"),
-        SettingsSection.Feedback => L.T("Feedback"),
+        SettingsSection.FixThis => L.T("Fix this"),
         SettingsSection.Appearance => L.T("Appearance"),
         SettingsSection.Account => L.T("Account"),
         _ => L.T("This Computer"),
@@ -186,7 +187,7 @@ internal sealed class SpaceSettingsPage : NativePage
         SettingsSection.Usage => "",
         SettingsSection.Activity => "",
         SettingsSection.Packages => "",
-        SettingsSection.Feedback => "",
+        SettingsSection.FixThis => "",
         SettingsSection.Appearance => "",
         SettingsSection.Account => "",
         _ => Ui.Computer,

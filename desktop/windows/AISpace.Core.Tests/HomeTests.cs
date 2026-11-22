@@ -103,7 +103,7 @@ public class HomeTests
         Assert.Empty(c.Widgets);
         Assert.Null(c.Screens);
         // Without stored screens, the panel's seeded home: the first apps, its own tiles, then agents and widgets.
-        Assert.Equal(["app:a", "builtin:inbox", "builtin:shortcuts", "builtin:terminal", "builtin:settings"], c.PanelScreens()[0].Items);
+        Assert.Equal(["app:a", "builtin:store", "builtin:inbox", "builtin:shortcuts", "builtin:terminal", "builtin:settings"], c.PanelScreens()[0].Items);
         // A widget state that only changes its time draws the same card.
         var a = HomeWidget.Decode(J("""{"id":"x/y","app":"x","name":"y","title":"T","items":[{"text":"a"}],"asOf":"2026-01-01T00:00:00Z"}"""))!;
         var b = HomeWidget.Decode(J("""{"id":"x/y","app":"x","name":"y","title":"T","items":[{"text":"a"}],"asOf":"2026-01-02T00:00:00Z"}"""))!;
@@ -302,6 +302,135 @@ public class HomeTests
     }
 
     [Fact]
+    public void TheBuiltInTilesAreThePanelsWithTheAppStoreFirst()
+    {
+        Assert.Equal(["store", "inbox", "shortcuts", "terminal", "settings"], HomeScreens.Builtins);
+        // A copy of the panel's screens keeps the App Store's tile.
+        Assert.Equal(["builtin:store", "app:a"], HomeScreens.CopyPanel([new HomeScreen("home", "", ["builtin:store", "builtin:panel", "app:a"])])[0].Items);
+        // The panel's stock icon for a tile: the client draws the artwork it carries. An icon pack's picture is the Space's choice.
+        Assert.True(HomeScreens.IsStockIcon("inbox", "/inbox.svg"));
+        Assert.True(HomeScreens.IsStockIcon("store", null));
+        Assert.True(HomeScreens.IsStockIcon("store", ""));
+        Assert.False(HomeScreens.IsStockIcon("inbox", "/api/panel/icons/per-app/app?id=space%2Finbox"));
+        Assert.False(HomeScreens.IsStockIcon("inbox", "/terminal.svg"));
+    }
+
+    [Fact]
+    public void HomeOpensOnTheFirstScreenThatHoldsSomething()
+    {
+        var c = Catalogue();
+        var draws = c.Draws();
+        Assert.True(draws("builtin:store"));
+        Assert.True(draws("app:ai-todo"));
+        Assert.True(draws("widget:ai-todo/next"));
+        Assert.True(draws("agent:space/assistant"));
+        Assert.False(draws("app:uninstalled"));
+        Assert.False(draws("builtin:pet"));
+        Assert.False(draws("junk"));
+
+        // A first install: the home screen the panel seeds, copied here, is the one shown.
+        var fresh = HomeCatalogue.Decode(J("""{"apps":[]}"""), J("{}"));
+        var seeded = HomeScreens.CopyPanel(fresh.PanelScreens());
+        Assert.Equal(["builtin:store", "builtin:inbox", "builtin:shortcuts", "builtin:terminal", "builtin:settings"], seeded[0].Items);
+        Assert.Equal("home", HomeScreens.Opening(seeded, fresh.Draws()));
+        Assert.Equal("home", HomeScreens.Opening(HomeScreens.CopyPanel(c.PanelScreens()), draws));
+
+        // The home screen comes first even when later screens hold more.
+        HomeScreen[] both = [new("home", "", ["builtin:inbox"]), new("s1", "", ["app:ai-todo", "app:keep"])];
+        Assert.Equal("home", HomeScreens.Opening(both, draws));
+        // An empty home screen, or one whose entries are gone, is passed over for the first screen with tiles: never an empty one, never a later one.
+        HomeScreen[] later = [new("home", "", ["app:uninstalled", "builtin:pet"]), new("s1", "", []), new("s2", "Work", ["app:ai-todo"]), new("s3", "", ["app:keep"])];
+        Assert.Equal("s2", HomeScreens.Opening(later, draws));
+        // Nothing anywhere: the home screen (the Library is not a screen and is never chosen).
+        HomeScreen[] nothing = [new("home", "", []), new("s1", "", ["app:uninstalled"])];
+        Assert.Equal("home", HomeScreens.Opening(nothing, draws));
+        Assert.Equal("home", HomeScreens.Opening([], draws));
+    }
+
+    [Fact]
+    public void AppsInstalledFromTheStoreGoOnThisComputersHomeScreen()
+    {
+        var empty = new Dictionary<string, ScreenRecord>();
+        // A new Space: the home screen the panel would seed is copied, and its apps are remembered.
+        var seeded = HomeScreens.Seed(["a"], [], []);
+        var f1 = HomeScreens.SeedFile(empty, "c", seeded)!;
+        Assert.Equal(["app:a", "builtin:store", "builtin:inbox", "builtin:shortcuts", "builtin:terminal", "builtin:settings"], HomeScreens.ScreensOf(f1, "c")[0].Items);
+        Assert.Equal(["app:a"], f1["c"].PanelHome!);
+        // Not copied yet, or the panel as it was: nothing changes.
+        Assert.Null(HomeScreens.FollowPanel(empty, "c", seeded));
+        Assert.Null(HomeScreens.FollowPanel(f1, "c", seeded));
+
+        // The person chose two apps in the App Store: the panel pinned them to its home screen, and they go on the home screen here.
+        HomeScreen[] installed = [new("home", "", [.. seeded[0].Items, "app:notes", "app:keep"]), new("s1", "", ["app:elsewhere"])];
+        var f2 = HomeScreens.FollowPanel(f1, "c", installed)!;
+        Assert.Equal(["app:a", "builtin:store", "builtin:inbox", "builtin:shortcuts", "builtin:terminal", "builtin:settings", "app:notes", "app:keep"], HomeScreens.ScreensOf(f2, "c")[0].Items);
+        Assert.Equal(["home"], HomeScreens.ScreensOf(f2, "c").Select(s => s.Id));
+        Assert.Equal(["app:a", "app:notes", "app:keep"], f2["c"].PanelHome!);
+        Assert.Null(HomeScreens.FollowPanel(f2, "c", installed));
+
+        // What the person took off here stays off, and a change made here keeps what was remembered.
+        var f3 = HomeScreens.Edit(f2, "c", s => HomeScreens.Unpin(s, "home", "app:notes"));
+        Assert.Equal(["app:a", "app:notes", "app:keep"], f3["c"].PanelHome!);
+        Assert.Null(HomeScreens.FollowPanel(f3, "c", installed));
+        // Nothing else of the panel's layout is followed: its order, its other screens.
+        HomeScreen[] moved = [new("home", "", ["app:keep", "app:notes", "app:a"]), new("s1", "", ["app:elsewhere", "app:other"])];
+        var f4 = HomeScreens.FollowPanel(f3, "c", moved)!;
+        Assert.Equal(HomeScreens.ScreensOf(f3, "c")[0].Items, HomeScreens.ScreensOf(f4, "c")[0].Items);
+        Assert.Equal(["home"], HomeScreens.ScreensOf(f4, "c").Select(s => s.Id));
+
+        // An app taken off the panel's home screen stays here; pinned there again (installed again), it is not doubled.
+        var f5 = HomeScreens.FollowPanel(f4, "c", [new HomeScreen("home", "", ["app:a", "app:notes"])])!;
+        Assert.Contains("app:keep", HomeScreens.ScreensOf(f5, "c")[0].Items);
+        var f6 = HomeScreens.FollowPanel(f5, "c", moved)!;
+        Assert.Single(HomeScreens.ScreensOf(f6, "c")[0].Items, k => k == "app:keep");
+        // An app the person keeps on another screen here is left there.
+        var f7 = HomeScreens.Edit(f6, "c", s => HomeScreens.Pin(HomeScreens.NewScreen(s)!.Value.Screens, "s1", "app:late"));
+        var f8 = HomeScreens.FollowPanel(f7, "c", [new HomeScreen("home", "", ["app:keep", "app:notes", "app:a", "app:late", "app:new"])])!;
+        Assert.DoesNotContain("app:late", HomeScreens.ScreensOf(f8, "c")[0].Items);
+        Assert.Equal("app:new", HomeScreens.ScreensOf(f8, "c")[0].Items[^1]);
+        // Copying the panel's layout again starts from the panel as it is then.
+        Assert.Equal(["app:a", "app:notes", "app:keep"], HomeScreens.Reset(f8, "c", installed)["c"].PanelHome!);
+
+        // A file from before the panel's home screen was remembered: it is only the starting point (no app is added),
+        // and the App Store's tile, which the copy made then left out, joins the built-in tiles.
+        var old = HomeScreens.DecodeFile("""{"c":{"screens":[{"id":"home","items":["app:a","builtin:inbox","builtin:settings"]}],"seeded":true}}""");
+        Assert.Null(old["c"].PanelHome);
+        var o1 = HomeScreens.FollowPanel(old, "c", installed)!;
+        Assert.Equal(["app:a", "builtin:store", "builtin:inbox", "builtin:settings"], HomeScreens.ScreensOf(o1, "c")[0].Items);
+        Assert.Equal(["app:a", "app:notes", "app:keep"], o1["c"].PanelHome!);
+        Assert.Null(HomeScreens.FollowPanel(o1, "c", installed));
+        // The file keeps it.
+        var read = HomeScreens.DecodeFile(HomeScreens.EncodeFile(o1));
+        Assert.Equal(["app:a", "app:notes", "app:keep"], read["c"].PanelHome!);
+        Assert.True(read["c"].Seeded);
+    }
+
+    [Fact]
+    public void TheFirstUseCardShowsWhileTheSpaceHasNoStoreApp()
+    {
+        Assert.Equal(2, HomeCatalogue.CatalogOffers(J("""{"ok":true,"apps":[{"name":"a","installed":null,"state":"available"},{"name":"b","state":"available"},{"name":"c","installed":null,"state":"unreleased"},"junk"]}""")));
+        // A Space with one of the store's apps, or an old deployment of one, has chosen already.
+        Assert.Equal(0, HomeCatalogue.CatalogOffers(J("""{"ok":true,"apps":[{"name":"a","installed":{"version":"1.0.0"},"state":"installed"},{"name":"b","installed":null,"state":"available"}]}""")));
+        Assert.Equal(0, HomeCatalogue.CatalogOffers(J("""{"ok":true,"apps":[{"name":"a","installed":null,"state":"legacy"},{"name":"b","installed":null,"state":"available"}]}""")));
+        Assert.Equal(0, HomeCatalogue.CatalogOffers(J("""{"ok":false,"error":"no catalog"}""")));
+        Assert.Equal(0, HomeCatalogue.CatalogOffers(J("""{"ok":true,"apps":[]}""")));
+        Assert.Equal(0, HomeCatalogue.CatalogOffers(J("[]")));
+
+        // Not Now is kept per Space, through the first copy of the screens and every change after it.
+        var empty = new Dictionary<string, ScreenRecord>();
+        Assert.False(HomeScreens.StoreCardHidden(empty, "c"));
+        var hidden = HomeScreens.HideStoreCard(empty, "c");
+        Assert.True(HomeScreens.StoreCardHidden(hidden, "c"));
+        Assert.False(hidden["c"].Seeded);
+        var copied = HomeScreens.SeedFile(hidden, "c", HomeScreens.Seed(["a"], [], []))!;
+        Assert.True(copied["c"].Seeded);
+        Assert.True(copied["c"].StoreCardHidden);
+        var changed = HomeScreens.Edit(copied, "c", s => HomeScreens.Pin(s, "home", "app:b"));
+        Assert.True(HomeScreens.DecodeFile(HomeScreens.EncodeFile(changed))["c"].StoreCardHidden);
+        Assert.False(HomeScreens.StoreCardHidden(changed, "other"));
+    }
+
+    [Fact]
     public void TheBarShowsAFewScreensAndTheOneShown()
     {
         string[] ids = ["home", "s1", "s2", "s3", "s4", "s5"];
@@ -325,8 +454,16 @@ public class HomeTests
             Assert.True(store.Seed("c", [new HomeScreen("home", "", ["app:a"])]));
             Assert.False(store.Seed("c", [new HomeScreen("home", "", ["app:b"])]));
             store.Edit("c", s => HomeScreens.Pin(s, "home", "widget:w/x"));
+            // An app the panel's home screen gained (the App Store installed it) is added here, once.
+            Assert.False(store.Follow("c", [new HomeScreen("home", "", ["app:a"])]));
+            Assert.True(store.Follow("c", [new HomeScreen("home", "", ["app:a", "app:b"])]));
+            Assert.False(store.Follow("c", [new HomeScreen("home", "", ["app:a", "app:b"])]));
+            Assert.False(store.StoreCardHidden("c"));
+            store.HideStoreCard("c");
             var again = new ScreenStore(file);
-            Assert.Equal(["app:a", "widget:w/x"], again.Screens("c")[0].Items);
+            Assert.Equal(["app:a", "widget:w/x", "app:b"], again.Screens("c")[0].Items);
+            Assert.True(again.StoreCardHidden("c"));
+            Assert.False(again.Follow("c", [new HomeScreen("home", "", ["app:a", "app:b"])]));
             again.Forget("c");
             Assert.Equal(["home"], new ScreenStore(file).Screens("c").Select(s => s.Id));
         }

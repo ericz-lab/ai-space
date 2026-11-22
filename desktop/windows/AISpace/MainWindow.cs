@@ -450,6 +450,7 @@ internal sealed class MainWindow : Window
             WebTabKind.Terminal => Ui.Terminal,
             WebTabKind.Chat => Ui.Chat,
             WebTabKind.Panel => Ui.Web,
+            WebTabKind.Store => Ui.Store,
             _ => null,
         };
         var label = glyph is null ? Ui.Row(Ui.Text(title, wrap: false), close) : Ui.Row(Ui.Glyph(glyph, 12), Ui.Text(title, wrap: false), close);

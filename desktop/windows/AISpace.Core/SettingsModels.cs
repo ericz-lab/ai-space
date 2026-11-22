@@ -120,6 +120,30 @@ public sealed record AuthState(string Mode, bool SignedIn);
 /// <summary>One signed-in session of the Space's own sign-in (<c>GET /api/auth/sessions</c>).</summary>
 public sealed record AuthSessionRow(string Id, DateTimeOffset? CreatedAt, DateTimeOffset? LastSeenAt, string UserAgent, bool Current);
 
+/// <summary>
+/// Fix this (随手改; docs/feedback.md, whose routes and fields still say "feedback"): the button on
+/// app pages and what happens to what is sent. <see cref="Apps"/> holds only the apps with a switch
+/// of their own (<c>on</c> or <c>off</c>); <see cref="Mode"/> is <c>auto</c> (Fix now) or
+/// <c>later</c> (Fix later); <see cref="Machine"/> is empty for the Space's own machine.
+/// </summary>
+public sealed record FixThisSettings(bool Enabled, bool AppsDefault, IReadOnlyDictionary<string, string> Apps, string Mode, string Machine, string Model, string Effort, bool Errors);
+
+/// <summary>An app with a page, and whether its pages show the button now.</summary>
+public sealed record FixThisApp(string App, string Title, string? Zh, bool Enabled);
+
+/// <summary>A peer's apps, which follow the Space's settings; whether the peer answered and took them.</summary>
+public sealed record FixThisPeer(string Name, bool Ok, string Error, bool Synced, IReadOnlyList<FixThisApp> Apps);
+
+/// <summary>A machine the Fix Engineer may run on: <see cref="Value"/> empty for the Space's own.</summary>
+public sealed record FixThisMachine(string Value, string Label);
+
+/// <summary>
+/// <c>GET /api/panel/feedback/settings</c>, as the web panel's Settings reads it (src/web/FeedbackSettings.tsx):
+/// <see cref="Models"/> are the models of the machine the engineer runs on, <see cref="Later"/> how
+/// many requests wait to be fixed.
+/// </summary>
+public sealed record FixThisView(FixThisSettings Settings, IReadOnlyList<FixThisApp> Apps, IReadOnlyList<FixThisPeer> Peers, IReadOnlyList<FixThisMachine> Machines, IReadOnlyList<ModelOption> Models, int Later, string Shortcut);
+
 /// <summary>The decoders of the Settings page's routes: each takes the route's JSON as it came.</summary>
 public static class SettingsJson
 {
@@ -346,6 +370,31 @@ public static class SettingsJson
         } : null;
         return id is null ? null : new AuthSessionRow(id, Time(s, "createdAt"), Time(s, "lastSeenAt"), Str(s, "userAgent") ?? "", Bool(s, "current"));
     });
+
+    /// <summary>Fix this' settings view; a field that is missing or odd reads as the Space's default (src/space/feedback/types.ts).</summary>
+    public static FixThisView FixThis(JsonElement root)
+    {
+        var own = new Dictionary<string, string>();
+        var s = Obj(root, "settings") ?? default;
+        if (Obj(s, "apps") is { } map)
+        {
+            foreach (var p in map.EnumerateObject())
+            {
+                if (p.Value.ValueKind == JsonValueKind.String && p.Value.GetString() is "on" or "off") own[p.Name] = p.Value.GetString()!;
+            }
+        }
+        var effort = Str(s, "effort") ?? "";
+        var settings = new FixThisSettings(Bool(s, "enabled"), OptBool(s, "appsDefault") != false, own, Str(s, "mode") == "later" ? "later" : "auto", Str(s, "machine") ?? "",
+            Str(s, "model") ?? "", SettingsRules.FixThisEfforts.Contains(effort) ? effort : "xhigh", OptBool(s, "errors") != false);
+        // The machine the engineer runs on decides what it can run on: a hub's own runtimes are not a peer's.
+        var models = Obj(root, "machineModels") is { } byMachine ? Options(byMachine, settings.Machine) : Options(root, "models");
+        var peers = Rows(root, "peers", p => Str(p, "name") is { } name ? new FixThisPeer(name, Bool(p, "ok"), Str(p, "error") ?? "", Bool(p, "synced"), FixThisApps(p)) : null);
+        var machines = Rows(root, "machines", m => new FixThisMachine(Str(m, "value") ?? "", Str(m, "label") ?? ""));
+        var later = Obj(root, "counts") is { } counts ? Int(counts, "later") ?? 0 : 0;
+        return new FixThisView(settings, FixThisApps(root), peers, machines, models, Math.Max(0, later), Str(root, "shortcut") ?? "Alt+Shift+F");
+    }
+
+    private static List<FixThisApp> FixThisApps(JsonElement o) => Rows(o, "apps", a => Str(a, "app") is { } app ? new FixThisApp(app, Str(a, "title") ?? app, Str(a, "zh"), Bool(a, "enabled")) : null);
 
     // Reading helpers: a field of the wrong type reads as missing.
 

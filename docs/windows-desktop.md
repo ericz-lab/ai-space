@@ -17,9 +17,9 @@ one click away, and the app adds what a page cannot do.
 
 | Part | What it does |
 | --- | --- |
-| Window | The bar: the Space menu (each saved Space with its state, Add a Space…); Home's places, the Library and then a tab per screen, each opening Home there ([below](#the-window)); the web tabs, one per open app, the chat, the terminal and the web panel (past five, under More); while a web tab is shown, Back, Forward, Reload and Open in Browser; and the Inbox with its count, only while something is unread. The bar has no menu: the Space's Inbox, Shortcuts, Terminal and Settings are tiles on Home and in the Library and Ctrl+2 to Ctrl+5 (Ctrl+1 is Home), the web panel has no entry of its own (it shows by itself while a Space needs a sign-in, and Settings opens its Settings for what has no native copy: Feedback, Appearance, installing apps and connections, a task's model, peers' app models), an agent's chat is its tile, Quick Chat is the notification area's, its shortcut's and the floating ball's, and AI Space Settings… is in the notification area's menu and Settings › This Computer. The Space picker keeps one width, from the selected Space's name (a long one ends in an ellipsis), whether its list is open or not. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: Install AI Space on This Computer, or Connect to an AI Space on Another Machine with the address form ([below](#this-computer)). The window keeps its size and place, always wholly on one monitor's work area, so its title bar can be reached ([below](#the-window)) |
+| Window | The bar: the Space menu (each saved Space with its state, Add a Space…); Home's places, the Library and then a tab per screen, each opening Home there ([below](#the-window)); the web tabs, one per open app, the chat, the terminal and the web panel (past five, under More); while a web tab is shown, Back, Forward, Reload and Open in Browser; and the Inbox with its count, only while something is unread. The bar has no menu: the Space's App Store, Inbox, Shortcuts, Terminal and Settings are tiles on Home and in the Library, the last four also Ctrl+2 to Ctrl+5 (Ctrl+1 is Home), the web panel has no entry of its own (it shows by itself while a Space needs a sign-in, and Settings opens its Settings for what has no native copy: Appearance, Fix this' recent requests, installing apps and connections, a task's model, peers' app models), an agent's chat is its tile, Quick Chat is the notification area's, its shortcut's and the floating ball's, and AI Space Settings… is in the notification area's menu and Settings › This Computer. The Space picker keeps one width, from the selected Space's name (a long one ends in an ellipsis), whether its list is open or not. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: Install AI Space on This Computer, or Connect to an AI Space on Another Machine with the address form ([below](#this-computer)). The window keeps its size and place, always wholly on one monitor's work area, so its title bar can be reached ([below](#the-window)) |
 | Native pages | Home, Inbox, Shortcuts and Settings are the app's own (WPF, one set per Space, kept while hidden). Settings is the Space's own settings; it leads to AI Space Settings…, the app's. Not built yet: each says so and offers Open in Web Panel ([below](#the-window)) |
-| Web pages | The terminal (`/?page=terminal`), an agent's chat (`/?page=chat&agent=…`), each open app and the web panel are web pages in tabs. Each saved Space has its own WebView2 profile (cookies, storage, cache), so signing in on the panel signs in everything that Space's pages and native calls do. A link to one of the Space's own pages never leaves the app: it opens the native page, or its tab; a link to an app of the Space opens in that app's tab, a link off the Space in the default browser. A page that cannot load shows why, with Try Again, Open in Browser and Edit Space… |
+| Web pages | The terminal (`/?page=terminal`), an agent's chat (`/?page=chat&agent=…`), the App Store (`/?page=store`), each open app and the web panel are web pages in tabs. Each saved Space has its own WebView2 profile (cookies, storage, cache), so signing in on the panel signs in everything that Space's pages and native calls do. A link to one of the Space's own pages never leaves the app: it opens the native page, or its tab; a link to an app of the Space opens in that app's tab, a link off the Space in the default browser. A page that cannot load shows why, with Try Again, Open in Browser and Edit Space… |
 | Sign-in | While a Space needs a sign-in, the window shows its web panel, where the sign-in page appears, in place of the native pages, and the native page again once the panel has signed in |
 | Quick Chat | A small window over every app with one agent's chat (the panel's own, so a conversation there is the same one): Ctrl+Alt+Space by default (Ctrl+Shift+Space, Alt+Shift+Space or off in Settings), the notification area menu, the jump list, a section of the floating ball, or `aispace://chat`. 380 wide as the Mac's, with no title bar: a 40 high header to drag it by (the Space, the agent, Open in Main Window, Close), then the page's chat in its narrow layout, whose header holds the model and the permission choice. The shortcut opens it in the upper middle of the screen, the ball beside itself ([below](#the-floating-ball)). It remembers the agent last used; Escape or Close hides it, and an answer being written goes on |
 | Floating ball | A 52 px ball over every app that never takes the keyboard (off until Settings › General turns it on; the notification area menu and its own right-click menu show and hide it) ([below](#the-floating-ball)) |
@@ -69,8 +69,9 @@ sign-in, the bar has no places.
 **Where a page of the Space opens** (`AISpace.Core/SpacePages.cs`, the forms of
 `src/web/panel-link.ts`): the panel's root and `/?page=inbox|shortcuts|settings` (and the fragment
 links `#inbox`, `#shortcuts`, `#settings`) open the native Home, Inbox, Shortcuts and Settings;
-`/?page=terminal` and `#terminal` the Terminal tab; `/?page=chat&agent=…&session=…` and
-`#chat=…&text=…` the Chat tab on that agent, the text as a draft. Only the Space's own origin and
+`/?page=terminal` and `#terminal` the Terminal tab; `/?page=store` and `#store` the App Store tab
+(the web panel's own page, [app-catalog.md](app-catalog.md), shown alone in its tab);
+`/?page=chat&agent=…&session=…` and `#chat=…&text=…` the Chat tab on that agent, the text as a draft. Only the Space's own origin and
 the panel's own path count. So the panel's built-in tiles and its chat's "open in a new tab", which
 ask for a new window, stay in the app, and a native page's link goes the same way. A navigation in
 the Terminal or Chat tab to another of the Space's pages (closing the page leads to the root) goes
@@ -93,19 +94,43 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   the whole query; anything else, and Ctrl+Enter always, opens Space Assistant's chat with the text
   as a draft, never sent. Down moves into the results, Escape clears, Ctrl+F (or Ctrl+K) comes back.
 - **Places.** Each screen and the Library are tabs of the window's bar ([above](#the-window)),
-  not of the page; the page shows the one chosen. The Library shows the apps with the built-in pages (Inbox, Shortcuts, Terminal,
-  Settings; the web panel has no tile, and a screen saved with its old tile simply no longer shows it), the agents (one tile per agent on several machines) and the widgets, with a filter by
+  not of the page; the page shows the one chosen. The Library shows the apps with the built-in pages (App Store, Inbox, Shortcuts, Terminal,
+  Settings, the web panel's five in its order; the web panel has no tile, and a screen saved with its old tile simply no longer shows it), the agents (one tile per agent on several machines) and the widgets, with a filter by
   kind. A tile shows what is wrong (not answering, paused, its machine offline), an app's and the
   Inbox's unread count, and an agent at work; the library's tiles show their details under the
   pointer. A click opens an app in its tab, an agent's chat, a built-in page, a widget's page.
+- **Where it opens.** On the home screen (主屏幕): the first screen, `home`, titled Main, which
+  holds the pinned tiles. A first install copies the panel's home screen (or the one it would
+  seed: the first apps and the five built-in tiles), so that is what shows. Should the home
+  screen hold nothing the client draws while a later screen does, Home opens on the first screen
+  that has tiles (`HomeScreens.Opening`); it never opens on the Library or on an empty screen
+  while another has tiles. This is decided once, when the Space is first read after the app
+  starts; a place the person chose meanwhile is kept.
 - **Screens** are this computer's (`screens.json` beside the saved Spaces, by Space): the panel's
   screens (or the home screen the panel would seed) are copied once, then a tile's or a card's
   menu (right click, Shift+F10) puts it on a screen or takes it off and moves it, and a screen
   tab's menu in the bar makes, renames and deletes screens or copies the web panel's layout again. Nothing is written to
   the Space. A removed Space's screens go with it.
+- **Apps from the App Store.** The web panel pins an app the store installs to its home screen
+  ([app-catalog.md](app-catalog.md)); this computer keeps its own layout, so Home adds it to the
+  home screen here too. `screens.json` remembers the apps on the panel's home screen (`panelHome`),
+  and each time the Space is read an app that has appeared there since is put at the end of the
+  home screen here, unless a screen here already holds it (`HomeScreens.FollowPanel`). Nothing
+  else is followed: what was taken off or moved here stays so, an app taken off the panel's home
+  screen stays here, and the panel's other screens and its order are not copied. An app pinned
+  to the panel's home screen by hand in a browser arrives the same way. A `screens.json` from
+  before this only takes the panel's home screen as the starting point, and its home screen
+  gains the App Store's tile.
+- **First apps.** While the Space has none of the App Store's apps (`GET /api/app-catalog`, the
+  web panel's `catalogOffers`), the home screen shows the panel's first-use card: Choose Apps
+  opens the App Store tab with every installable app ticked (`/?page=store&pick=all`), Not Now
+  hides the card for this Space on this computer (`storeCardHidden` in `screens.json`). Home
+  reads the Space again when it is shown after the store was opened, so what was installed is
+  on the home screen then.
 - **Icons.** An app's icon is cut to a rounded square, an agent's avatar to a circle, as the web
-  panel, the Mac and Linux draw them; a built-in page shows the icon the Space serves for it (its
-  Fluent glyph meanwhile). Pictures come through `IconStore.cs` with the Space's sign-in: PNG,
+  panel, the Mac and Linux draw them; a built-in page's tile shows artwork the app carries
+  (`AISpace/Assets/Builtins/`, [below](#built-in-icons)), or the picture of the Space's icon pack
+  when it has one for that page. Pictures come through `IconStore.cs` with the Space's sign-in: PNG,
   JPEG and the like as bitmaps, SVG (the panel's built-in icons and agents' avatars are SVG) as
   vector drawings, sharp at any scale, read by `AISpace.Core/SvgReader.cs` and drawn by
   `SvgDrawing.cs`. The reader takes `viewBox` (else width and height), `g`, `path`, `rect`
@@ -124,6 +149,23 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
 Where it differs from the Mac: an `embed` widget's page is not drawn inside its card (a web view
 does not scroll with the page's content); the card opens it. Tiles and cards are moved with their
 menu, not dragged, and the box does not run Shortcuts' actions.
+
+### Built-in icons
+
+The five built-in tiles draw the artwork the Seoul hub shows, carried in the app
+(`AISpace/Assets/Builtins/`, WPF resources, read by `BuiltinArt` in `Views/HomeTiles.cs`), so a tile
+has its picture before the Space answers and is never a look-alike glyph:
+
+| Tile | File | From |
+| --- | --- | --- |
+| App Store | `store.svg` | `src/web/public/store.svg`, unchanged (the hub's icon pack has none for it) |
+| Inbox, Shortcuts, Terminal, Settings | `inbox.png`, `shortcuts.png`, `terminal.png`, `settings.png` | the hub's active icon pack (`per-app`, `space~<name>.webp`, 512 px full-bleed plates), scaled to 256 px with the corners cut to the tiles' rounded square (radius 21.875%), so the corners are transparent |
+
+`/api/apps` names an icon for each built-in page (`builtins`). When it is the panel's stock one
+(`/<name>.svg`, `HomeScreens.IsStockIcon`) the tile keeps the carried artwork; when it is an icon
+pack's ([panel.md](panel.md#icon-packs)) the tile shows that picture, the carried one meanwhile and
+if it cannot be drawn. A tile is drawn on no plate of its own: what is transparent in the picture
+shows the window. The bar's buttons and the tabs keep Windows' one-colour glyphs.
 
 ## The floating ball
 
@@ -269,13 +311,14 @@ the routes' shapes are in `AISpace.Core` (`SettingsModels.cs`, `SettingsRules.cs
 | Model Usage | 5h to 30d: totals, by app and purpose, by model and backend, the totals since the first call, the last 30 calls. The year's grid of days stays in the web panel |
 | App Usage | 7d to all time, by kind: opens, time in use, the most used, a row per app, agent and built-in page; each device's time in the foreground |
 | Packages | The apps installed from packages (version, state, Open), the apps of connected Spaces. Installing, rolling back, removing and sharing lead to the web panel |
-| Feedback, Appearance | Lead to the web panel's Settings in its tab (this app follows Windows' light or dark mode) |
+| Fix this | 随手改, the feature the Space's routes still call feedback ([feedback.md](feedback.md)), read from `GET /api/panel/feedback/settings` and changed by `PUT` there, one field at a time as the web panel's Settings does, so both show the same settings: the button on app pages (off until turned on), Fix now or Fix later, the machine the Fix Engineer runs on (when there is more than one), its model and effort, attaching script errors, the shortcut, the default for apps and each app's own switch (Default, On, Off), the same for apps on peers; with requests waiting, Fix them now (`POST /api/panel/feedback/fix`). A switch or a choice of two or three saves when pressed and waits for the Space's answer; the machine and the model save with their Save button. The recent requests stay in the web panel, one row away |
+| Appearance | Leads to the web panel's Settings in its tab (this app follows Windows' light or dark mode) |
 | Account | Where the Space keeps its own password and this app is signed in: change the password, the signed-in sessions (sign one out). Either way, Sign Out…, which ends the session on the Space and clears the Space's cookies and pages here, as Settings › Spaces does |
 | This Computer | AI Space Settings… (the app's own window: General) and the saved Spaces (its Spaces tab) |
 
 The only writes to the Space are the ones made on the page by the person (the default model, an
-app's model, a service's start, stop or restart, re-checking the CLIs, the password, signing a
-session out), each followed by a notice that says what it did or why it failed. A link to the web
+app's model, a service's start, stop or restart, re-checking the CLIs, Fix this' settings, the
+password, signing a session out), each followed by a notice that says what it did or why it failed. A link to the web
 panel opens its tab in the app, never the browser.
 
 ## How the app opens the Space's pages

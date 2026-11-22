@@ -6,7 +6,18 @@ namespace AISpace.Core;
 public sealed record HomeScreen(string Id, string Name, IReadOnlyList<string> Items);
 
 /// <summary>This computer's screens of one Space: copied from the panel once (<see cref="Seeded"/>), then its own.</summary>
-public sealed record ScreenRecord(IReadOnlyList<HomeScreen> Screens, bool Seeded);
+public sealed record ScreenRecord(IReadOnlyList<HomeScreen> Screens, bool Seeded)
+{
+    /// <summary>
+    /// The apps on the panel's home screen when it was last read (<see cref="HomeScreens.FollowPanel"/>):
+    /// one that appears there later was installed from the App Store, and goes on this computer's
+    /// home screen too. Null in a file written before this was kept.
+    /// </summary>
+    public IReadOnlyList<string>? PanelHome { get; init; }
+
+    /// <summary>The home screen's first-use card (Choose apps) was dismissed for this Space.</summary>
+    public bool StoreCardHidden { get; init; }
+}
 
 /// <summary>
 /// The screens of each saved Space as this computer lays them out (the Linux client's
@@ -23,7 +34,14 @@ public static class HomeScreens
     public const int Limit = 20;
 
     /// <summary>The panel's own tiles, in the order the panel's library and a seeded home screen show them.</summary>
-    public static readonly string[] PanelBuiltins = ["inbox", "shortcuts", "terminal", "settings"];
+    public static readonly string[] PanelBuiltins = ["store", "inbox", "shortcuts", "terminal", "settings"];
+
+    /// <summary>
+    /// Whether the icon the Space names for one of its own tiles (<c>builtins</c> of <c>/api/apps</c>)
+    /// is the panel's stock one (<c>/inbox.svg</c>) rather than an icon pack's: the client then draws
+    /// the artwork it carries, and an icon pack's picture otherwise.
+    /// </summary>
+    public static bool IsStockIcon(string name, string? served) => string.IsNullOrEmpty(served) || served == $"/{name}.svg";
 
     /// <summary>
     /// The <c>builtin:</c> tiles this client draws: the panel's own. The web panel is no tile (it
@@ -81,19 +99,91 @@ public static class HomeScreens
     public static Dictionary<string, ScreenRecord>? SeedFile(IReadOnlyDictionary<string, ScreenRecord> file, string space, IEnumerable<HomeScreen> panel)
     {
         if (file.TryGetValue(space, out var r) && r.Seeded) return null;
-        var copy = CopyPanel(panel);
+        var list = panel.ToList();
+        var copy = CopyPanel(list);
         // A panel with nothing pinned is not a layout yet: wait for a catalogue that has one.
         if (!copy.Any(s => s.Items.Count > 0)) return null;
-        return new Dictionary<string, ScreenRecord>(file) { [space] = new ScreenRecord(copy, true) };
+        return new Dictionary<string, ScreenRecord>(file) { [space] = new ScreenRecord(copy, true) { PanelHome = PanelHomeApps(list), StoreCardHidden = r?.StoreCardHidden ?? false } };
     }
 
     /// <summary>Replaces this computer's layout with the panel's as it is now, when the person asks for it.</summary>
-    public static Dictionary<string, ScreenRecord> Reset(IReadOnlyDictionary<string, ScreenRecord> file, string space, IEnumerable<HomeScreen> panel) =>
-        new(file) { [space] = new ScreenRecord(CopyPanel(panel), true) };
+    public static Dictionary<string, ScreenRecord> Reset(IReadOnlyDictionary<string, ScreenRecord> file, string space, IEnumerable<HomeScreen> panel)
+    {
+        var list = panel.ToList();
+        return new(file) { [space] = new ScreenRecord(CopyPanel(list), true) { PanelHome = PanelHomeApps(list), StoreCardHidden = file.TryGetValue(space, out var r) && r.StoreCardHidden } };
+    }
 
     /// <summary>A change made here; a layout made by hand is never overwritten by a later copy.</summary>
-    public static Dictionary<string, ScreenRecord> Edit(IReadOnlyDictionary<string, ScreenRecord> file, string space, Func<IReadOnlyList<HomeScreen>, IEnumerable<HomeScreen>> change) =>
-        new(file) { [space] = new ScreenRecord(Normalize(change(ScreensOf(file, space))), true) };
+    public static Dictionary<string, ScreenRecord> Edit(IReadOnlyDictionary<string, ScreenRecord> file, string space, Func<IReadOnlyList<HomeScreen>, IEnumerable<HomeScreen>> change)
+    {
+        file.TryGetValue(space, out var r);
+        return new(file) { [space] = new ScreenRecord(Normalize(change(ScreensOf(file, space))), true) { PanelHome = r?.PanelHome, StoreCardHidden = r?.StoreCardHidden ?? false } };
+    }
+
+    /// <summary>The apps pinned to the panel's home screen, in its order.</summary>
+    public static IReadOnlyList<string> PanelHomeApps(IEnumerable<HomeScreen> panel) =>
+        panel.FirstOrDefault(s => s.Id == Home)?.Items.Where(k => k.StartsWith("app:", StringComparison.Ordinal)).Distinct().ToList() ?? [];
+
+    private const string StoreKey = "builtin:store";
+
+    /// <summary>
+    /// An app installed from the App Store goes on this computer's home screen (docs/app-catalog.md):
+    /// the web panel pins it to its own home screen, so an app that appears there since the panel
+    /// was last read is added at the end of the home screen here, unless a screen here holds it
+    /// already. Nothing else of the panel's layout is followed: what was unpinned or moved here
+    /// stays so, and an app taken off the panel's home screen stays here. <paramref name="panel"/>
+    /// is the layout the Space has stored. Null when nothing changes, and for a Space whose screens
+    /// were not copied yet.
+    ///
+    /// A file written before the panel's home screen was kept only takes it as the starting point;
+    /// its home screen gains the App Store's tile when the panel's has it, since the copy made
+    /// then left that tile out.
+    /// </summary>
+    public static Dictionary<string, ScreenRecord>? FollowPanel(IReadOnlyDictionary<string, ScreenRecord> file, string space, IEnumerable<HomeScreen> panel)
+    {
+        if (!file.TryGetValue(space, out var r) || !r.Seeded) return null;
+        var list = panel.ToList();
+        var now = PanelHomeApps(list);
+        var screens = r.Screens;
+        if (r.PanelHome is not { } before)
+        {
+            var panelHasStore = list.FirstOrDefault(s => s.Id == Home)?.Items.Contains(StoreKey) == true;
+            if (panelHasStore && !screens.Any(s => s.Items.Contains(StoreKey)))
+            {
+                screens = Map(screens, Home, s =>
+                {
+                    var items = s.Items.ToList();
+                    var at = items.FindIndex(k => k.StartsWith("builtin:", StringComparison.Ordinal));
+                    items.Insert(at < 0 ? items.Count : at, StoreKey);
+                    return s with { Items = items };
+                });
+            }
+        }
+        else
+        {
+            if (now.SequenceEqual(before)) return null;
+            foreach (var key in now.Where(k => !before.Contains(k)))
+            {
+                if (!screens.Any(s => s.Items.Contains(key))) screens = Pin(screens, Home, key);
+            }
+        }
+        return new Dictionary<string, ScreenRecord>(file) { [space] = r with { Screens = Normalize(screens), PanelHome = now } };
+    }
+
+    /// <summary>Whether the home screen's first-use card was dismissed for the Space.</summary>
+    public static bool StoreCardHidden(IReadOnlyDictionary<string, ScreenRecord> file, string space) => file.TryGetValue(space, out var r) && r.StoreCardHidden;
+
+    /// <summary>Dismisses the first-use card for the Space; its screens stay as they are (and uncopied when they were).</summary>
+    public static Dictionary<string, ScreenRecord> HideStoreCard(IReadOnlyDictionary<string, ScreenRecord> file, string space) =>
+        new(file) { [space] = (file.TryGetValue(space, out var r) ? r : new ScreenRecord([EmptyHome()], false)) with { StoreCardHidden = true } };
+
+    /// <summary>
+    /// The screen Home opens on: the first one that holds something the client draws, never the
+    /// Library and never an empty screen while another has tiles; the home screen when none has.
+    /// <paramref name="draws"/> says whether a key has an entry to show (an app that is gone has none).
+    /// </summary>
+    public static string Opening(IReadOnlyList<HomeScreen> screens, Func<string, bool> draws) =>
+        screens.FirstOrDefault(s => s.Items.Any(draws))?.Id ?? Home;
 
     public static Dictionary<string, ScreenRecord> Forget(IReadOnlyDictionary<string, ScreenRecord> file, string space)
     {
@@ -187,7 +277,13 @@ public static class HomeScreens
                     if (s.ValueKind != JsonValueKind.Object || HomeJson.Str(s, "id") is not { } id || !s.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array) continue;
                     screens.Add(new HomeScreen(id, HomeJson.Str(s, "name") ?? "", items.EnumerateArray().Where(k => k.ValueKind == JsonValueKind.String).Select(k => k.GetString()!).ToList()));
                 }
-                output[space.Name] = new ScreenRecord(Normalize(screens), HomeJson.Bool(r, "seeded"));
+                output[space.Name] = new ScreenRecord(Normalize(screens), HomeJson.Bool(r, "seeded"))
+                {
+                    PanelHome = r.TryGetProperty("panelHome", out var ph) && ph.ValueKind == JsonValueKind.Array
+                        ? ph.EnumerateArray().Where(k => k.ValueKind == JsonValueKind.String).Select(k => k.GetString()!).ToList()
+                        : null,
+                    StoreCardHidden = HomeJson.Bool(r, "storeCardHidden"),
+                };
             }
         }
         catch (JsonException)
@@ -238,6 +334,18 @@ public sealed class ScreenStore
     public void Edit(string space, Func<IReadOnlyList<HomeScreen>, IEnumerable<HomeScreen>> change) => Write(HomeScreens.Edit(_screens, space, change));
 
     public void Reset(string space, IEnumerable<HomeScreen> panel) => Write(HomeScreens.Reset(_screens, space, panel));
+
+    /// <summary>The apps the panel's home screen gained go on this computer's too (<see cref="HomeScreens.FollowPanel"/>); whether that changed anything here.</summary>
+    public bool Follow(string space, IEnumerable<HomeScreen> panel)
+    {
+        if (HomeScreens.FollowPanel(_screens, space, panel) is not { } next) return false;
+        Write(next);
+        return true;
+    }
+
+    public bool StoreCardHidden(string space) => HomeScreens.StoreCardHidden(_screens, space);
+
+    public void HideStoreCard(string space) => Write(HomeScreens.HideStoreCard(_screens, space));
 
     /// <summary>A removed Space's screens go with it.</summary>
     public void Forget(string space)

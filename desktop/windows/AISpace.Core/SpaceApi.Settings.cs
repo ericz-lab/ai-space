@@ -7,7 +7,7 @@ namespace AISpace.Core;
 /// (src/web/SettingsStatus.tsx, AppModels.tsx, Tasks.tsx, Events.tsx, Usage.tsx, Activity.tsx,
 /// Packages.tsx, Auth.tsx), with this app's sign-in. The only writes are the ones the person makes
 /// on the page: the default model, an app's model, starting or stopping a service, re-checking the
-/// agent CLIs, the password and the sessions.
+/// agent CLIs, Fix this' settings, the password and the sessions.
 /// </summary>
 public sealed partial class SpaceApi
 {
@@ -112,6 +112,34 @@ public sealed partial class SpaceApi
     }
 
     public async Task<PackageCatalogue> Packages(CancellationToken ct = default) => SettingsJson.Packages(await Read("/api/panel/package-catalogue", ct).ConfigureAwait(false));
+
+    public const string FixThisPath = "/api/panel/feedback/settings";
+
+    /// <summary><c>GET /api/panel/feedback/settings</c>: Fix this' settings, as the web panel's Settings reads them.</summary>
+    public async Task<FixThisView> FixThis(CancellationToken ct = default) => SettingsJson.FixThis(await Read(FixThisPath, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// <c>PUT /api/panel/feedback/settings</c> with one field (<c>enabled</c>, <c>appsDefault</c>,
+    /// <c>errors</c>): the patch the web panel sends. Answers the settings as they now are.
+    /// </summary>
+    public Task<FixThisView> SetFixThis(string field, bool value, CancellationToken ct = default) => PatchFixThis(new JsonObject { [field] = value }, ct);
+
+    /// <summary>The same for <c>mode</c> (<c>auto</c>, <c>later</c>), <c>machine</c> ("" this machine), <c>model</c> ("" the machine's default) and <c>effort</c>.</summary>
+    public Task<FixThisView> SetFixThis(string field, string value, CancellationToken ct = default) => PatchFixThis(new JsonObject { [field] = value }, ct);
+
+    /// <summary>One app's own switch: <c>default</c>, <c>on</c> or <c>off</c>.</summary>
+    public Task<FixThisView> SetFixThisApp(string app, string value, CancellationToken ct = default) =>
+        PatchFixThis(new JsonObject { ["apps"] = new JsonObject { [app] = value } }, ct);
+
+    private async Task<FixThisView> PatchFixThis(JsonObject patch, CancellationToken ct) =>
+        SettingsJson.FixThis(SettingsJson.Ok(ParseBody(await Send(HttpMethod.Put, FixThisPath, patch, ct).ConfigureAwait(false))));
+
+    /// <summary><c>POST /api/panel/feedback/fix</c> with nothing named: hands every waiting request to the Fix Engineer; how many.</summary>
+    public async Task<int> FixWaiting(CancellationToken ct = default)
+    {
+        var answer = SettingsJson.Ok(ParseBody(await Send(HttpMethod.Post, "/api/panel/feedback/fix", new JsonObject(), ct).ConfigureAwait(false)));
+        return answer.ValueKind == System.Text.Json.JsonValueKind.Object && answer.TryGetProperty("queued", out var n) && n.ValueKind == System.Text.Json.JsonValueKind.Number && n.TryGetInt32(out var queued) ? queued : 0;
+    }
 
     public async Task<AuthState> AuthSession(CancellationToken ct = default) => SettingsJson.Auth(await Read("/api/auth/session", ct).ConfigureAwait(false));
 

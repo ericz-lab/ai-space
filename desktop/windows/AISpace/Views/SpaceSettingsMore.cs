@@ -68,16 +68,14 @@ internal sealed class PackagesPane(SpaceSettingsPage page) : SettingsPane(page)
     };
 }
 
-/// <summary>A section the app leaves to the web panel: what it is, and the way there in the app.</summary>
+/// <summary>A section the app leaves to the web panel (Appearance): what it is, and the way there in the app.</summary>
 internal sealed class WebPane(SpaceSettingsPage page, SettingsSection section) : SettingsPane(page)
 {
     public override string Title => SpaceSettingsPage.Label(section);
 
     protected override void Compose()
     {
-        var text = section == SettingsSection.Appearance
-            ? L.T("This app follows Windows' light or dark mode and accent colour. The web panel's themes, colours and backdrops are set in its own Settings, for the browsers that show it.")
-            : L.T("The feedback button on app pages: whether it shows, what happens to what is sent, where the Fix Engineer runs and on which model, and which apps show the button. It is set in the web panel's Settings.");
+        var text = L.T("This app follows Windows' light or dark mode and accent colour. The web panel's themes, colours and backdrops are set in its own Settings, for the browsers that show it.");
         var open = Ui.Button(L.T("Open Settings in the Web Panel"), Page.OpenWebSettings, accent: true);
         var state = Ui.EmptyState(SpaceSettingsPage.Glyph(section), SpaceSettingsPage.Label(section), text, open);
         state.Margin = new Thickness(0, 48, 0, 0);

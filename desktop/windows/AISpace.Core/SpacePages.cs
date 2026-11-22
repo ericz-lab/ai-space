@@ -11,6 +11,8 @@ public enum SpacePageKind
     Settings,
     /// <summary>An agent's chat.</summary>
     Chat,
+    /// <summary>The App Store (docs/app-catalog.md).</summary>
+    Store,
 }
 
 /// <summary>One of the Space's own pages, with the chat's agent, session and draft when it is a chat.</summary>
@@ -18,9 +20,9 @@ public sealed record SpacePage(SpacePageKind Kind, string? Agent = null, string?
 
 /// <summary>
 /// Which of the Space's own pages an address is (src/web/panel-link.ts): the panel's root, the
-/// built-in pages <c>/?page=inbox|shortcuts|terminal|settings</c> and the chat page
+/// built-in pages <c>/?page=inbox|shortcuts|terminal|settings|store</c> and the chat page
 /// <c>/?page=chat&amp;agent=…&amp;session=…</c>, and the fragment links <c>#inbox</c>,
-/// <c>#terminal</c>, <c>#settings</c>, <c>#shortcuts</c> and <c>#chat=&lt;agent&gt;&amp;text=…</c>.
+/// <c>#terminal</c>, <c>#settings</c>, <c>#shortcuts</c>, <c>#store</c> and <c>#chat=&lt;agent&gt;&amp;text=…</c>.
 /// Such an address never leaves the app: the window opens it natively, or as an in-app tab. Only
 /// an address of the Space's own origin and the panel's own path counts; anything else is not a
 /// page of the Space (an app's page, a file, another site) and is null.
@@ -33,6 +35,7 @@ public static class SpacePages
         ["shortcuts"] = SpacePageKind.Shortcuts,
         ["terminal"] = SpacePageKind.Terminal,
         ["settings"] = SpacePageKind.Settings,
+        ["store"] = SpacePageKind.Store,
     };
 
     public static SpacePage? Of(Uri url, Uri space)
@@ -82,6 +85,12 @@ public static class SpacePages
     public static bool LeavesTab(Uri url, Uri space, SpacePageKind tab) => Of(url, space) is { } page && page.Kind != tab;
 
     /// <summary>The built-in page's own address: <c>/?page=&lt;name&gt;</c> under the panel's path; the panel itself for Home.</summary>
+    /// <summary>
+    /// The App Store's address; with <paramref name="pick"/>, the one the first-use card opens
+    /// (<c>/?page=store&amp;pick=all</c>), where every installable app starts ticked.
+    /// </summary>
+    public static Uri StoreUrl(Uri space, bool pick = false) => new(Root(space), pick ? "?page=store&pick=all" : "?page=store");
+
     public static Uri PageUrl(Uri space, SpacePageKind kind)
     {
         var root = Root(space);
