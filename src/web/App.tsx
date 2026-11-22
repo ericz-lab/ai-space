@@ -6,7 +6,7 @@ import MachineClis from "./MachineClis.tsx";
 import ModelPreference from "./ModelPreference.tsx";
 import { AccountSettings, loadAuth } from "./Auth.tsx";
 import Chat, { type Ask, type Draft } from "./Chat.tsx";
-import { PAGE, linkedAgent, pageHref, type PanelLink, parsePanelLink } from "./panel-link.ts";
+import { PAGE, chatHref, linkedAgent, pageAgent, pageHref, type PanelLink, parsePanelLink } from "./panel-link.ts";
 import Pet, { AppPet, type AppPetInfo, BUILTIN, BuiltinPet, DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
@@ -38,8 +38,9 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 // the home screen the panel opens on, then the operator's own; each screen shows only what is
 // pinned to it. Settings, the inbox, the shortcuts and the terminal are built-in tiles: like an
 // app's, each opens in a new tab, as a page of its own (`/?page=…`, docs/panel.md#built-in-pages).
-// The chat and the tasks list open as floating panels over the page (an overlay that closes on a
-// click outside), and so do the built-in windows a panel link or the phone app asks for.
+// An agent's tile opens its chat the same way (`/?page=chat&agent=…`). A question from the home
+// screen's box opens the chat as a floating panel over the page (an overlay that closes on a click
+// outside); so do the tasks list and whatever a panel link or the phone app asks for.
 // Edit mode (long-press the background): add an app (catalog, new or link), unpin, drag to reorder, uninstall.
 // Everything comes from the apps' manifests through the panel API; the browser holds no secrets.
 // Entries from peer machines say where they run in their hover details and are muted while that peer is down.
@@ -210,6 +211,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const openChat = (a: AgentInfo) => {
     setChatAgent(a);
     setPanel("chat");
+    // A chat page's address follows the agent it shows, so a reload stays on it.
+    if (PAGE === "chat") history.replaceState(history.state, "", chatHref(a.id));
   };
   /** A tile or library entry opens the agent on the machine chosen last time, else the local one. */
   const openAgent = (a: AgentInfo) => {
@@ -233,6 +236,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     setAsk((cur) => ({ id: (cur?.id ?? 0) + 1, text, intentId: intent.id }));
     setPanel("chat");
   };
+  // A chat page (panel-link.ts `chatHref`) shows the agent its address names, once the list is read.
+  useEffect(() => {
+    const ref = PAGE === "chat" ? pageAgent(location.search) : null;
+    if (!ref || !loaded) return;
+    const target = linkedAgent(agents, ref);
+    if (target && target.peer && target.id === ref) setChatAgent(target);
+    else if (target) setChatAgent(groupOf(groups, target) ? preferredMachine(groupOf(groups, target)!) : target);
+  }, [loaded]);
   const [omniFocus, setOmniFocus] = useState(0);
   // A link into the panel (panel-link.ts, docs/panel.md#panel-links): read on load and whenever the
   // fragment changes, then cleared, so the same link opens its window again. A chat link waits for
@@ -631,7 +642,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     const e = parseKey(key);
     if (e?.kind === "agent") {
       const a = groupById(groups, e.id)?.primary;
-      if (a) openAgent(a);
+      if (a && BUILTIN_PAGES) window.open(chatHref(a.id), "_blank", "noopener,noreferrer");
+      else if (a) openAgent(a);
     } else if (e?.kind === "builtin") {
       const b = (BUILTINS as readonly string[]).includes(e.id) ? (e.id as Builtin) : "terminal";
       if (BUILTIN_PAGES) window.open(pageHref(b), "_blank", "noopener,noreferrer");
@@ -645,8 +657,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     b === "inbox" ? { title: t("inbox.title"), blurb: t("inbox.blurb"), fallback: "📥" } : b === "shortcuts" ? { title: t("sc.title"), blurb: t("sc.blurb"), fallback: "⚡" } : b === "terminal" ? { title: t("term.title"), blurb: t("term.blurb"), fallback: "⌨️" } : { title: t("settings.title"), blurb: t("settings.blurb"), fallback: "⚙️" };
   // A built-in page's tab is named after it, as an app's is.
   useEffect(() => {
-    if (PAGE) document.title = `${builtinText(PAGE).title} · ai-space`;
-  }, [lang]);
+    if (PAGE) document.title = `${PAGE === "chat" ? localized(lang, chatAgent).title : builtinText(PAGE).title} · ai-space`;
+  }, [lang, chatAgent]);
   const details = (key: string): React.ReactNode => {
     const e = parseKey(key);
     if (e?.kind === "builtin") {
@@ -766,7 +778,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       fallback="🦾"
       name={localized(lang, a).title}
       editing={editing}
-      onOpen={() => openAgent(a)}
+      href={BUILTIN_PAGES ? chatHref(a.id) : undefined}
+      onOpen={BUILTIN_PAGES ? undefined : () => openAgent(a)}
       onRemove={onRemove}
       removeTitle={t("screens.unpin")}
       showPop={false}

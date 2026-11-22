@@ -1115,7 +1115,7 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
 .page-mode .shell { display: none; }
 .page-mode .overlay, .page-mode .overlay.top { padding: 0; animation: none; }
 .page-mode .overlay::before { display: none; }
-.page-mode .overlay > :is(.panel.settings, .tasks, .term) {
+.page-mode .overlay > :is(.panel.settings, .tasks, .term, .chat) {
   width: 100%; height: 100%; max-height: none; border: none; border-radius: 0; box-shadow: none; animation: none;
 }
 .page-mode .overlay > :is(.panel.settings, .tasks) > * { width: min(100%, 1080px); align-self: center; box-sizing: border-box; }

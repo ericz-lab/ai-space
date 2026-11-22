@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { isImgIcon, recordOpen, type AgentInfo, type AppInfo, type BuiltinIcons, type UsageRow, type WidgetInfo } from "./api.ts";
 import { type Key, type Lang, localized, searchKeyText, searchText, useLang, withLang } from "./i18n.ts";
-import { pageHref } from "./panel-link.ts";
+import { chatHref, pageHref } from "./panel-link.ts";
 import { BUILTINS, type Builtin, WIDGET_SIZES, type EntryKind, type Screen, entryKey, matches, parseKey } from "./screens.ts";
 import { Icon, Tile, Widget } from "./Tiles.tsx";
 import { useAccentParam, withAccent } from "./theme.ts";
@@ -49,7 +49,7 @@ export function libraryEntries(lists: { apps: AppInfo[]; agents: AgentInfo[]; wi
   }
   for (const a of lists.agents) {
     const shown = localized(lang, a);
-    out.push({ key: entryKey("agent", a.id), kind: "agent", icon: a.avatar, fallback: "🦾", title: shown.title, names: [...titles(a), a.id], text: [searchText(a), a.id].join(" "), kindLabel: t("library.kindAgent"), peer: a.peer });
+    out.push({ key: entryKey("agent", a.id), kind: "agent", icon: a.avatar, fallback: "🦾", title: shown.title, names: [...titles(a), a.id], text: [searchText(a), a.id].join(" "), kindLabel: t("library.kindAgent"), peer: a.peer, href: lists.builtinPages ? chatHref(a.id) : undefined });
   }
   for (const w of lists.widgets) {
     const shown = localized(lang, w);
@@ -231,9 +231,9 @@ export default function Library({
           {body}
         </button>
       );
-    // Agents open in the page; apps and built-ins are links in a new tab (a built-in without a
-    // page of its own, in the phone app, opens in the page too); an app without a page opens nothing.
-    const opens = e.kind === "agent" || (e.kind === "builtin" && !e.href);
+    // Apps, agents and built-ins are links in a new tab (an agent or a built-in without a page of
+    // its own, in the phone app, opens in the page); an app without a page opens nothing.
+    const opens = (e.kind === "agent" || e.kind === "builtin") && !e.href;
     return (
       <Tile
         key={e.key}
