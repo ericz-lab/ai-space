@@ -122,8 +122,8 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   before this only takes the panel's home screen as the starting point, and its home screen
   gains the App Store's tile.
 - **First apps.** While the Space has none of the App Store's apps (`GET /api/app-catalog`, the
-  web panel's `catalogOffers`), the home screen shows the panel's first-use card: Choose Apps
-  opens the App Store tab with every installable app ticked (`/?page=store&pick=all`), Not Now
+  web panel's `catalogOffers`), the home screen shows the panel's first-use card: Open the App
+  Store opens its tab (`/?page=store`), Not Now
   hides the card for this Space on this computer (`storeCardHidden` in `screens.json`). Home
   reads the Space again when it is shown after the store was opened, so what was installed is
   on the home screen then.

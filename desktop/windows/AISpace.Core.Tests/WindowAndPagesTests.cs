@@ -141,14 +141,12 @@ public class SpacePagesTests
         Assert.Equal("http://127.0.0.1:8700/?page=settings", SpacePages.PageUrl(Space, SpacePageKind.Settings).AbsoluteUri);
         Assert.Equal("http://127.0.0.1:8700/", SpacePages.PageUrl(Space, SpacePageKind.Home).AbsoluteUri);
         Assert.Equal("http://127.0.0.1:8700/?page=chat", SpacePages.PageUrl(Space, SpacePageKind.Chat).AbsoluteUri);
-        // The App Store, and as the first-use card opens it: every installable app ticked.
+        // The App Store; an older first-use card's address (pick=all) is still the store.
         Assert.Equal("http://127.0.0.1:8700/?page=store", SpacePages.PageUrl(Space, SpacePageKind.Store).AbsoluteUri);
-        Assert.Equal("http://127.0.0.1:8700/?page=store", SpacePages.StoreUrl(Space).AbsoluteUri);
-        Assert.Equal("https://example.com/space/?page=store&pick=all", SpacePages.StoreUrl(new Uri("https://example.com/space"), pick: true).AbsoluteUri);
         Assert.Equal(new SpacePage(SpacePageKind.Store), Of("http://127.0.0.1:8700/?page=store"));
         Assert.Equal(new SpacePage(SpacePageKind.Store), Of("http://127.0.0.1:8700/?page=store&pick=all"));
         Assert.Equal(new SpacePage(SpacePageKind.Store), Of("http://127.0.0.1:8700/#store"));
-        Assert.False(SpacePages.LeavesTab(SpacePages.StoreUrl(Space, pick: true), Space, SpacePageKind.Store));
+        Assert.False(SpacePages.LeavesTab(new Uri("http://127.0.0.1:8700/?page=store&pick=all"), Space, SpacePageKind.Store));
         Assert.True(SpacePages.LeavesTab(new Uri("http://127.0.0.1:8700/"), Space, SpacePageKind.Store));
         Assert.Equal("http://127.0.0.1:8700/?page=chat&agent=space%2Fassistant", SpacePages.ChatUrl(Space, "space/assistant").AbsoluteUri);
         var draft = SpacePages.ChatUrl(Space, "space/assistant", "a b&c");

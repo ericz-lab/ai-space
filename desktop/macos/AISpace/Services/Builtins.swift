@@ -53,11 +53,3 @@ enum Builtin: String, CaseIterable, Identifiable {
         return title.lowercased().contains(q) || rawValue.contains(q)
     }
 }
-
-/// The App Store's address (docs/app-catalog.md#the-app-store): the page alone, or with every
-/// installable app ticked, as the first-use card opens it.
-enum StorePage {
-    static func path(pickAll: Bool) -> String {
-        pickAll ? "/?page=store&pick=all" : "/?page=store"
-    }
-}

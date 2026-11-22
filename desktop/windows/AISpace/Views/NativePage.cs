@@ -58,7 +58,7 @@ internal sealed class PageContext(AppModel model, Guid space)
     public void OpenTerminal() => Model.ShowTerminal(SpaceId);
 
     /// <summary>The Space's App Store (its page in an in-app tab); <paramref name="pick"/> ticks every installable app, as the first-use card asks.</summary>
-    public void OpenStore(bool pick = false) => Model.ShowStore(SpaceId, pick);
+    public void OpenStore() => Model.ShowStore(SpaceId);
 
     /// <summary>The Space's web panel in its in-app tab, at <paramref name="url"/> when given (a page of the panel the app has no native copy of).</summary>
     public void OpenWebPanel(Uri? url = null) => Model.ShowWebPanel(SpaceId, url);

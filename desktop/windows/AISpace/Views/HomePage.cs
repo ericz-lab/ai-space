@@ -320,18 +320,18 @@ internal sealed partial class HomePage : NativePage
             case "shortcuts": Context.Show(PageKind.Shortcuts); break;
             case "settings": Context.Show(PageKind.Settings); break;
             case "terminal": Context.OpenTerminal(); break;
-            case "store": OpenStore(pick: false); break;
+            case "store": OpenStore(); break;
             // A built-in the app no longer draws (builtin:panel on a screen saved before): nothing.
             default: break;
         }
     }
 
     /// <summary>The App Store in its tab. What is installed there shows on Home when it is next shown: the Space is read again then.</summary>
-    private void OpenStore(bool pick)
+    private void OpenStore()
     {
         _stale = true;
         _offersKnown = false;
-        Context.OpenStore(pick);
+        Context.OpenStore();
     }
 
     /// <summary>A widget's link (a row, a block), else its own page, else its app.</summary>
@@ -658,12 +658,13 @@ internal sealed partial class HomePage : NativePage
 
     /// <summary>
     /// The home screen's first-use card (the web panel's, src/web/AppCatalog.tsx): shown while the
-    /// Space has none of the App Store's apps. Choose Apps opens the store with every installable
-    /// app ticked; what is installed there lands on this screen. Not Now hides it for this Space.
+    /// Space has none of the App Store's apps. Open the App Store opens it, where each app is installed
+    /// (or several with Batch Install); what is installed there lands on this screen. Not Now hides it
+    /// for this Space.
     /// </summary>
     private FrameworkElement StoreCard(int offers)
     {
-        var choose = Ui.Button(L.T("Choose Apps"), () => OpenStore(pick: true), accent: true);
+        var choose = Ui.Button(L.T("Open the App Store"), OpenStore, accent: true);
         var later = Ui.Button(L.T("Not Now"), () =>
         {
             _store.HideStoreCard(SpaceKey);
@@ -673,7 +674,7 @@ internal sealed partial class HomePage : NativePage
         buttons.VerticalAlignment = VerticalAlignment.Center;
         var words = Ui.Column(4,
             Ui.Text(L.T("Add your first apps"), 15, bold: true),
-            Ui.Text(L.F("The App Store has {0} apps for this Space. All are ticked; untick what you do not want. The apps you install are added to this screen.", offers), 13, secondary: true));
+            Ui.Text(L.F("The App Store has {0} apps for this Space. Install the ones you want there; they are added to this screen.", offers), 13, secondary: true));
         var row = new DockPanel { LastChildFill = true };
         DockPanel.SetDock(buttons, Dock.Right);
         buttons.Margin = new Thickness(16, 0, 0, 0);

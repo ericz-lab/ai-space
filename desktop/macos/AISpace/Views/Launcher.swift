@@ -377,13 +377,13 @@ struct CatalogWelcome: View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Add your first apps").font(.headline).foregroundStyle(Theme.text)
-                Text("The app catalog has \(offers.count) apps for this Space. All are ticked; untick what you do not want.")
+                Text("The App Store has \(offers.count) apps for this Space. Install the ones you want there.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            Button("Choose apps") {
+            Button("Open the App Store") {
                 offers.count = 0
-                model.openStore(pickAll: true)
+                model.openStore()
             }
             .buttonStyle(.borderedProminent)
             Button("Not now") {

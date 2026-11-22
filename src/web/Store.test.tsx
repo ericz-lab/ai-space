@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { type Catalog, type CatalogEntry, type CatalogView, catalogOffers, useCatalog } from "./AppCatalog.tsx";
 import { LangContext } from "./i18n.ts";
-import Store, { Detail, ProgressLine, UpdateAll, storePreselect, tabApps } from "./Store.tsx";
+import Store, { Detail, ProgressLine, UpdateAll, tabApps } from "./Store.tsx";
 
 const publisher = { id: "acme", name: "Acme", keyId: "a".repeat(64), trusted: true };
 const entry = (name: string, over: Partial<CatalogEntry> = {}): CatalogEntry => ({
@@ -31,10 +31,10 @@ const serve = (body: unknown, status = 200) => {
   globalThis.fetch = (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
 };
 
-const render = (v: CatalogView, { preselect = false, lang = "en" as "en" | "zh", openUrl }: { preselect?: boolean; lang?: "en" | "zh"; openUrl?: (app: string) => string | undefined } = {}) =>
+const render = (v: CatalogView, { selecting = false, lang = "en" as "en" | "zh", openUrl }: { selecting?: boolean; lang?: "en" | "zh"; openUrl?: (app: string) => string | undefined } = {}) =>
   renderToStaticMarkup(
     <LangContext.Provider value={lang}>
-      <Store open initial={v} preselect={preselect} onClose={() => {}} openUrl={openUrl} />
+      <Store open initial={v} selecting={selecting} onClose={() => {}} openUrl={openUrl} />
     </LangContext.Provider>,
   );
 
@@ -50,15 +50,20 @@ const detail = (v: CatalogView, name: string, lang: "en" | "zh" = "en") =>
   );
 const card = (html: string, name: string) => html.split('<li class="store-card">').find((r) => r.includes(`<strong>${name.toUpperCase()}</strong>`))!;
 
-test("opened from the first-use card, every installable app starts ticked; otherwise none", () => {
+test("the ticks show only in Batch Install, at the top right, on the installable apps and none ticked", () => {
   const v = view([entry("one"), entry("two"), entry("three", { installed: installed("1.0.0"), state: "installed" })]);
-  const ticked = (html: string) => html.match(/class="cat-pick"[^>]*checked=""/g)?.length ?? 0;
-  expect(ticked(render(v, { preselect: true }))).toBe(2);
-  expect(ticked(render(v))).toBe(0);
-  expect(render(v, { preselect: true })).toContain("Install 2 chosen");
-  expect(render(v)).not.toContain("chosen");
-  expect(storePreselect("?page=store&pick=all")).toBe(true);
-  expect(storePreselect("?page=store")).toBe(false);
+  const boxes = (html: string) => html.match(/class="cat-pick"/g)?.length ?? 0;
+  const plain = render(v);
+  expect(boxes(plain)).toBe(0);
+  expect(plain).toContain(">Batch Install</button>");
+  const on = render(v, { selecting: true });
+  expect(boxes(on)).toBe(2);
+  expect(on).not.toMatch(/class="cat-pick"[^>]*checked=""/);
+  expect(on).toContain(">Cancel</button>");
+  expect(on).not.toContain("chosen");
+  // Nothing left to install: no Batch Install.
+  expect(render(view([entry("three", { installed: installed("1.0.0"), state: "installed" })]))).not.toContain("Batch Install");
+  expect(render(v, { lang: "zh" })).toContain(">批量安装</button>");
 });
 
 test("a card says who publishes the app, its release, what it needs and whether the publisher is trusted", () => {

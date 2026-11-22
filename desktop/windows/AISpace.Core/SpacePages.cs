@@ -85,11 +85,6 @@ public static class SpacePages
     public static bool LeavesTab(Uri url, Uri space, SpacePageKind tab) => Of(url, space) is { } page && page.Kind != tab;
 
     /// <summary>The built-in page's own address: <c>/?page=&lt;name&gt;</c> under the panel's path; the panel itself for Home.</summary>
-    /// <summary>
-    /// The App Store's address; with <paramref name="pick"/>, the one the first-use card opens
-    /// (<c>/?page=store&amp;pick=all</c>), where every installable app starts ticked.
-    /// </summary>
-    public static Uri StoreUrl(Uri space, bool pick = false) => new(Root(space), pick ? "?page=store&pick=all" : "?page=store");
 
     public static Uri PageUrl(Uri space, SpacePageKind kind)
     {
