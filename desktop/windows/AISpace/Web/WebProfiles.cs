@@ -103,43 +103,6 @@ internal sealed class WebProfiles(string folder)
         }
     }
 
-    /// <summary>Whether the profile holds a live <c>space_session</c> cookie for the Space (the Local edition's sign-in).</summary>
-    public async Task<bool> HasSession(Guid connection, Uri space)
-    {
-        var list = await (await CookieManager(connection)).GetCookiesAsync(space.AbsoluteUri);
-        var cookies = list.Select(c => (c.Name, c.Domain, c.IsSession ? (DateTimeOffset?)null : new DateTimeOffset(c.Expires.ToUniversalTime(), TimeSpan.Zero)));
-        return LocalVersions.HasSession(cookies, space.Host, DateTimeOffset.UtcNow);
-    }
-
-    /// <summary>Puts cookies from a native answer into the profile, where the pages find them.</summary>
-    public async Task SetCookies(Guid connection, IEnumerable<SetCookie> cookies)
-    {
-        var m = await CookieManager(connection);
-        foreach (var s in cookies)
-        {
-            var domain = s.HostOnly ? s.Domain : "." + s.Domain;
-            var c = m.CreateCookie(s.Name, s.Value, domain, s.Path);
-            if (s.Expires is { } at)
-            {
-                if (at <= DateTimeOffset.UtcNow)
-                {
-                    m.DeleteCookie(c);
-                    continue;
-                }
-                c.Expires = at.UtcDateTime;
-            }
-            c.IsHttpOnly = s.HttpOnly;
-            c.IsSecure = s.Secure;
-            c.SameSite = s.SameSite?.ToLowerInvariant() switch
-            {
-                "strict" => CoreWebView2CookieSameSiteKind.Strict,
-                "none" => CoreWebView2CookieSameSiteKind.None,
-                _ => CoreWebView2CookieSameSiteKind.Lax,
-            };
-            m.AddOrUpdateCookie(c);
-        }
-    }
-
     /// <summary>Signs the Space out on this computer: every cookie and every other piece of site data of its profile.</summary>
     public async Task Clear(Guid connection)
     {

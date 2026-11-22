@@ -320,7 +320,7 @@ function handle(d: ServiceDeps, kind: "server" | "local", unitDir: string, file:
 /** The service that runs this machine's workspace: the app's when `installation.json` says the workspace is its, the Server's otherwise. */
 async function current(d: ServiceDeps): Promise<{ h: Handle; p: ServicePaths }> {
   const p = await servicePaths(d);
-  // The AI Space app on Windows runs its service inside WSL: no workspace here is its.
+  // There is no Local edition on Windows: no workspace here is an app's.
   if (d.platform !== "win32" && (await readOwnership(p.workspace))) {
     const lp = localPaths({ ...d.env, SPACE_HOME: p.workspace }, d.home, d.platform);
     return { h: handle(d, "local", lp.unitDir, lp.unitFile, lp.logs), p };

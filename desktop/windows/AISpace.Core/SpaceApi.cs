@@ -1,5 +1,3 @@
-using System.Net;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
@@ -153,87 +151,10 @@ public sealed class SpaceApi
         }
     }
 
-    /// <summary>The answer's <c>Set-Cookie</c> headers as cookies for <paramref name="url"/> (a device sign-in's session).</summary>
-    public static List<SetCookie> ResponseCookies(HttpResponseHeaders headers, Uri url, DateTimeOffset? now = null) =>
-        headers.TryGetValues("Set-Cookie", out var values) ? values.Select(v => SetCookie.Parse(v, url, now ?? DateTimeOffset.UtcNow)).OfType<SetCookie>().ToList() : [];
-
     /// <summary>One <c>Cookie</c> header from a store's cookies for a URL; null when there are none.</summary>
     public static string? CookieHeader(IEnumerable<(string Name, string Value)> cookies)
     {
         var header = string.Join("; ", cookies.Select(c => $"{c.Name}={c.Value}"));
         return header.Length == 0 ? null : header;
-    }
-
-    public async Task<HttpResponseMessage> Post(Uri url, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default)
-    {
-        var r = new HttpRequestMessage(HttpMethod.Post, url);
-        foreach (var (k, v) in headers) r.Headers.TryAddWithoutValidation(k, v);
-        try
-        {
-            return await _http.SendAsync(r, ct).ConfigureAwait(false);
-        }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
-        {
-            throw new SpaceApiException(SpaceApiFailure.Network, e.Message);
-        }
-    }
-}
-
-/// <summary>
-/// One <c>Set-Cookie</c> header (RFC 6265), as far as a cookie store needs it. <c>Max-Age</c> wins
-/// over <c>Expires</c>; without either the cookie lasts until the app quits. A cookie for another
-/// domain than the answer's host is refused.
-/// </summary>
-public sealed record SetCookie(string Name, string Value, string Domain, bool HostOnly, string Path, DateTimeOffset? Expires, bool HttpOnly, bool Secure, string? SameSite)
-{
-    public static SetCookie? Parse(string header, Uri url, DateTimeOffset now)
-    {
-        var parts = header.Split(';');
-        var pair = parts[0];
-        var eq = pair.IndexOf('=');
-        if (eq <= 0) return null;
-        var name = pair[..eq].Trim();
-        var value = pair[(eq + 1)..].Trim();
-        var host = url.Host.ToLowerInvariant();
-        string domain = host, path = "/";
-        bool hostOnly = true, httpOnly = false, secure = false;
-        string? sameSite = null;
-        DateTimeOffset? expires = null, maxAge = null;
-        foreach (var raw in parts.Skip(1))
-        {
-            var a = raw.Trim();
-            var i = a.IndexOf('=');
-            var key = (i < 0 ? a : a[..i]).Trim().ToLowerInvariant();
-            var v = i < 0 ? "" : a[(i + 1)..].Trim();
-            switch (key)
-            {
-                case "expires":
-                    if (DateTimeOffset.TryParse(v, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var at)) expires = at;
-                    break;
-                case "max-age":
-                    if (long.TryParse(v, out var seconds)) maxAge = seconds <= 0 ? DateTimeOffset.MinValue : now.AddSeconds(Math.Min(seconds, 400L * 24 * 3600));
-                    break;
-                case "domain":
-                    var d = v.TrimStart('.').ToLowerInvariant();
-                    if (d.Length == 0) break;
-                    if (d != host && !host.EndsWith("." + d, StringComparison.Ordinal)) return null;
-                    domain = d;
-                    hostOnly = false;
-                    break;
-                case "path":
-                    if (v.StartsWith('/')) path = v;
-                    break;
-                case "secure":
-                    secure = true;
-                    break;
-                case "httponly":
-                    httpOnly = true;
-                    break;
-                case "samesite":
-                    sameSite = v;
-                    break;
-            }
-        }
-        return new SetCookie(name, value, domain, hostOnly, path, maxAge ?? expires, httpOnly, secure, sameSite);
     }
 }

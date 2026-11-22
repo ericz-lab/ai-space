@@ -52,7 +52,7 @@ internal sealed class PanelView : Grid
 
     /// <summary>State, title or history changed.</summary>
     public event Action<PanelView>? Changed;
-    /// <summary>The state changed: the app refreshes the native views on ready and signs the Local edition in again.</summary>
+    /// <summary>The state changed: the app refreshes the native views on ready.</summary>
     public event Action<PanelView, SpaceState>? StateChanged;
     public event Action<PanelView, bool>? FullScreenChanged;
 

@@ -6,10 +6,17 @@ namespace AISpace.Core;
 /// <summary>Where the client keeps its own files, apart from any Space workspace.</summary>
 public sealed record AppPaths(string Config, string Data)
 {
-    /// <summary><c>%APPDATA%\ai-space</c> for what is small and the person's (saved Spaces, preferences); <c>%LOCALAPPDATA%\ai-space</c> for the rest.</summary>
+    /// <summary>
+    /// <c>%APPDATA%\ai-space</c> for what is small and the person's (saved Spaces, preferences);
+    /// <c>%LOCALAPPDATA%\ai-space-desktop</c> for the rest. Not <c>%LOCALAPPDATA%\ai-space</c>: that
+    /// is AI Space's own program directory (release/install.ps1), which <c>space uninstall</c>
+    /// deletes whole, and which removing the app's data must never touch.
+    /// </summary>
     public static AppPaths ForUser() => new(
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ai-space"),
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ai-space"));
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), DataName));
+
+    public const string DataName = "ai-space-desktop";
 
     public string Connections => Path.Combine(Config, "connections.json");
     public string Preferences => Path.Combine(Config, "preferences.json");
@@ -22,11 +29,6 @@ public sealed record AppPaths(string Config, string Data)
     /// </summary>
     public static string WebProfile(Guid connection) => connection.ToString("N");
     public string Logs => Path.Combine(Data, "logs");
-    /// <summary>
-    /// The process that keeps the Local edition's WSL distribution up (WSL stops a distribution
-    /// with no Windows process attached). It outlives the app, as a Mac's launchd service does.
-    /// </summary>
-    public string KeepAlivePid => Path.Combine(Data, "wsl-keepalive.pid");
 }
 
 /// <summary>The Quick Chat shortcut: one system-wide key through <c>RegisterHotKey</c>.</summary>
@@ -73,10 +75,6 @@ public sealed class Preferences
     /// <summary>The agent Quick Chat last talked to, as <c>&lt;connection id&gt; &lt;agent id&gt;</c>.</summary>
     [JsonPropertyName("quickChatAgent")] public string? QuickChatAgent { get; set; }
     [JsonPropertyName("selected")] public Guid? Selected { get; set; }
-    /// <summary>The WSL distribution the Local edition runs in.</summary>
-    [JsonPropertyName("wslDistro")] public string? WslDistro { get; set; }
-    /// <summary>Agent CLIs the person pointed the Local edition at, by name (<c>claude</c>, <c>codex</c>, <c>dsh</c>), as paths in WSL.</summary>
-    [JsonPropertyName("chosenRuntimes")] public Dictionary<string, string> ChosenRuntimes { get; set; } = [];
     /// <summary>The note that closing the window leaves the app in the notification area was shown.</summary>
     [JsonPropertyName("trayHintShown")] public bool TrayHintShown { get; set; }
     /// <summary>The person chose to run the program from where it is rather than install it.</summary>

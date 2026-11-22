@@ -67,8 +67,8 @@ What differs is how each one is packaged, installed, started and updated.
    It never installs or upgrades an agent CLI silently.
 5. **Mac first.** Each edition is published only for the systems and CPU architectures that were
    built and tested. Mac on Apple Silicon is first. Linux x64 and arm64 follow for Server, then for
-   Client and Local (a GNOME/GTK desktop app). Windows x64 and arm64 are built for Client and
-   Local (Local through WSL 2) and go out once they pass the install checks on Windows
+   Client and Local (a GNOME/GTK desktop app). Windows x64 and arm64 are built for Client
+   and go out once they pass the install checks on Windows
    ([release.md](release.md#checks-before-publishing)). Intel Macs are accepted one by one.
 
 ## AI Space Server
@@ -140,9 +140,8 @@ templates, the PTY helper), a pinned Bun, and the bundled apps as packages ([app
 
 **Installs** as a signed, notarized `.app` in a `.dmg`. A `.pkg` is used only if a system-level
 component proves necessary. On Linux it is the Linux app's tarball with the service inside; the
-background helper is a systemd user service ([local.md](local.md#on-linux)). On Windows it is the
-Windows app's zip carrying the Linux release, which it sets up as that systemd user service inside
-WSL 2 ([local.md](local.md#on-windows)).
+background helper is a systemd user service ([local.md](local.md#on-linux)). Windows has no Local edition: AI Space runs
+on Windows itself and the app offers to install it ([windows-desktop.md](windows-desktop.md#this-computer)).
 
 **First launch** creates the workspace, starts the Space service as a background helper the app owns,
 installs the bundled apps from the packages inside the bundle (no Git, no network clone), and opens
@@ -179,10 +178,9 @@ the others. Updates inside the app are built ([local.md](local.md#updates)); sig
 installation and live launchd timing still need release acceptance testing. The Linux app has the
 same Local edition (`bun release/linux.ts`): the same `space local` commands, a systemd user
 service, the device credential in the desktop's keyring ([local.md](local.md#on-linux)); a live
-setup on a clean desktop still needs release acceptance testing. The Windows app has it through
-WSL 2 (`bun release/windows.ts`): the Linux service in a WSL distribution, systemd and lingering
-turned on there, a hidden `wsl.exe` that keeps the distribution up, the device credential in
-Credential Manager ([local.md](local.md#on-windows)); it has not yet been run on Windows.
+setup on a clean desktop still needs release acceptance testing. The Windows app no longer
+has one: it looks for AI Space on the computer at first launch and offers the one-command installer
+([windows-desktop.md](windows-desktop.md#this-computer)).
 
 ## Service identity
 

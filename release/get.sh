@@ -51,7 +51,7 @@ main() {
   case "$os" in
     Linux) plat=linux ;;
     Darwin) plat=macos ;;
-    *) fail "$os is not supported; ai-space runs on Linux with systemd and on a Mac (on Windows: inside WSL 2)" ;;
+    *) fail "$os is not supported; this installer is for Linux with systemd and for a Mac (on Windows: irm https://ai-space.me/install.ps1 | iex)" ;;
   esac
   case "$(uname -m)" in
     x86_64 | amd64) arch=x64 ;;

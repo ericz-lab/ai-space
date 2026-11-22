@@ -144,8 +144,7 @@ Settings, all optional, as environment variables before `bash`:
 
 It stops, having changed nothing, on a machine whose workspace belongs to the AI Space app (the
 Local edition, [local.md](local.md)): that app already runs ai-space there with a service of its
-own. Not yet: Intel Macs, Windows outside WSL 2 (the Local zip sets WSL up), a Linux machine
-without a systemd user manager.
+own. Not yet: Intel Macs, a Linux machine without a systemd user manager.
 
 Afterwards, on the machine:
 
