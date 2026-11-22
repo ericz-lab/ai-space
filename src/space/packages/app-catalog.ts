@@ -17,7 +17,7 @@ import { placeSource, sourceCondition, type SourceOutcome } from "./source-copy.
 /**
  * The app catalog (docs/app-catalog.md): apps someone published for any Space, listed in a
  * `catalog.json` that the Space reads from `SPACE_APP_CATALOG` (default: the ai-space-apps
- * repository). Each app installs one of two ways, and either upgrades the other:
+ * repository's, as published at ai-space.me). Each app installs one of two ways, and either upgrades the other:
  *
  * - **package** (the default): the release's `.spaceapp` is downloaded, checked against the
  *   catalog's SHA-256 and the publisher's signature, and handed to the package installer, or to the

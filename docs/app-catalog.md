@@ -136,13 +136,23 @@ any other, checked by the same installer, under the same storage and network rul
 
 | Value | Catalogs |
 | --- | --- |
-| unset | the default, `https://raw.githubusercontent.com/ericz-lab/ai-space-apps/main/catalog.json` |
+| unset | the default, `https://ai-space.me/store/index.json` |
 | `none` (or empty) | none: the App Store says so, installs from files still work |
 | a comma list | read in order; `default` stands for the default; an `https://` URL; `http://` only on loopback; a path (relative to the workspace) is a local file. The first catalog that lists an app wins. |
 
 A catalog is read at most every 6 hours (`--refresh` / the panel's Refresh read it now). When it
 cannot be read, the last copy is shown and marked; installs from it still check every package.
 Package URLs in a catalog are https (or relative to a local catalog file).
+
+The default catalog is the `catalog.json` of the
+[ai-space-apps](https://github.com/ericz-lab/ai-space-apps) repository, published unchanged as
+`index.json`: `https://ai-space.me/store/…` is served from the object store behind
+`https://bucket.ai-space.me/store/…`, which also holds the packages the catalog names
+(`store/packages/<app>/<version>/`). A Space therefore needs no route to GitHub to list or install
+apps. Where the files are hosted adds no trust: every package is still checked against the catalog's
+SHA-256 and its publisher's signature. A Space released before this default reads
+`https://raw.githubusercontent.com/ericz-lab/ai-space-apps/main/catalog.json`, the same catalog, which
+stays in place for it.
 
 A new workspace clones no default app: `init` writes `SPACE_DEFAULT_APPS=none` into the `.env` it
 creates ([install.md](install.md#a-new-workspace)), and its apps come from this catalog. A workspace
