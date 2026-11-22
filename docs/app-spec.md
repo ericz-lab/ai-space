@@ -292,7 +292,7 @@ The first rule that holds sets it:
 | `working` | agent turns are running (a background turn counts) | `roam` | the newest one's chat |
 | `done` | a turn ended well in the last minute | `roam` | that agent's chat |
 | `waiting` (`reason: inbox`) | the inbox has unread `alert` or `warn` threads, not done, that had news in the last 24 hours | `roam` | the inbox |
-| `waiting` (`reason: feedback`) | feedback waits on the person (`later` or `review`, [feedback.md](feedback.md)) | `roam` | none |
+| `waiting` (`reason: feedback`) | a Fix this request waits on the person (`later` or `review`, [feedback.md](feedback.md)) | `roam` | none |
 | `sleep` | no turn started or ended for two hours | `stay` | none |
 | `idle` | otherwise | `roam` | none |
 
@@ -644,15 +644,17 @@ A page that Bun's HTML import (or another bundler) builds must add the script at
 
 This is recommended, not required. The script keeps a random id per browser tab and sends a heartbeat to `/_space/usage/beat` on the page's own origin every 30 s, while the page is visible and had input in the last 2 minutes. The router forwards `/_space/*` to ai-space and names the app, so the page needs no token and no CORS. Only the time in use is recorded. The script sends nothing about the person, the page's content or what they do in the app. Opens from the panel are counted for every app, with or without the script. Without the router (an app reached on its port) the heartbeat has nowhere to go and fails silently. See [usage.md](usage.md).
 
-### Feedback
+<a id="feedback"></a>
 
-Every app page carries the space's feedback button, with one more line added the same way (at runtime when a bundler builds the page). The app templates have it from the first version; an older app adds it:
+### Fix this
+
+Every app page carries the space's Fix this (随手改) button, with one more line added the same way (at runtime when a bundler builds the page). The app templates have it from the first version; an older app adds it:
 
 ```html
 <script src="/_space/feedback.js" defer></script>
 ```
 
-The button shows only when the owner turned feedback on for the app (Settings → Feedback). What the person sends becomes an ai-todo task with the page's context, and the Fix Engineer fixes the app in its `app-src/<app>/` checkout and deploys it through the app's channel. An app that wants this keeps its `AGENTS.md` deploy channel and its checks current: they are what the engineer follows. On an older ai-space, or without the router, the script is a 404 and the page is unchanged. See [feedback.md](feedback.md).
+The button shows only when the owner turned it on for the app (Settings → Fix this). What the person sends becomes an ai-todo task with the page's context, and the Fix Engineer fixes the app in its `app-src/<app>/` checkout and deploys it through the app's channel. An app that wants this keeps its `AGENTS.md` deploy channel and its checks current: they are what the engineer follows. On an older ai-space, or without the router, the script is a 404 and the page is unchanged. See [feedback.md](feedback.md).
 
 ## App pages
 

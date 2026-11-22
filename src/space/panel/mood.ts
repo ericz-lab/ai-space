@@ -121,7 +121,7 @@ export function spaceMood(input: MoodInput, now: number): SpaceMoodView {
     return { ...base, state: "waiting", reason: "inbox", move: "roam", say: { en: n === 1 ? "1 unread alert in the inbox" : `${n} unread alerts in the inbox`, zh: `收件箱有 ${n} 条警报未读` }, open: { kind: "inbox" } };
   }
   if (input.feedback > 0) {
-    return { ...base, state: "waiting", reason: "feedback", move: "roam", say: { en: input.feedback === 1 ? "1 piece of feedback waits for you" : `${input.feedback} pieces of feedback wait for you`, zh: `${input.feedback} 条反馈等你处理` } };
+    return { ...base, state: "waiting", reason: "feedback", move: "roam", say: { en: input.feedback === 1 ? "1 Fix this request waits for you" : `${input.feedback} Fix this requests wait for you`, zh: `${input.feedback} 条随手改等你处理` } };
   }
   if (!ended.some((r) => now - r.finishedAt! < QUIET_MS)) return { ...base, state: "sleep", move: "stay" };
   return { ...base, state: "idle", move: "roam" };

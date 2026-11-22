@@ -37,7 +37,7 @@ describe("capture", () => {
     expect(pageLang({ documentElement: { lang: "zh-CN" } } as unknown as Document)).toBe("zh");
     expect(pageLang({ documentElement: { lang: "" } } as unknown as Document)).toBe("en");
     expect(tr("zh", "saved", { n: 312 })).toBe("已记到待办 #312");
-    expect(tr("en", "button")).toBe("Feedback (Alt+Shift+F)");
+    expect(tr("en", "button")).toBe("Fix this (Alt+Shift+F)");
     // A status from a newer space shows as itself, not a crash.
     expect(tr("zh", "status.archived" as Parameters<typeof tr>[1])).toBe("archived");
     // The model menu names the tier in the page's language; a tier it does not know shows as itself.

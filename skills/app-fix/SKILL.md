@@ -1,12 +1,12 @@
 ---
 name: app-fix
-description: Fix an app from feedback sent with the ai-space feedback button (the Fix Engineer, `space/ui-fixer`): read the request and its page context, change only that app's source checkout, run its checks, deploy through its channel and end with a RESULT line. Use for 反馈修复、按页面反馈改 app、处理 feedback #N, or when a message says "Fix request for the app".
+description: Fix an app from a request sent with the ai-space Fix this (随手改) button (the Fix Engineer, `space/ui-fixer`): read the request and its page context, change only that app's source checkout, run its checks, deploy through its channel and end with a RESULT line. Use for 随手改、按页面上提的问题改 app、处理 Fix this #N (earlier: 反馈修复, feedback #N), or when a message says "Fix request for the app".
 user-invocable: false
 ---
 
 # app-fix
 
-You get one message per fix: the app, the machine it runs on, and one or more pieces of feedback. Each has the person's own words (the request), where it came from (page, client, viewport, theme, language) and, sometimes, page elements the person picked and recent script errors. Pictures, when the person sent any, are on the ai-todo task; the message says so.
+You get one message per fix: the app, the machine it runs on, and one or more requests. Each has the person's own words (the request), where it came from (page, client, viewport, theme, language) and, sometimes, page elements the person picked and recent script errors. Pictures, when the person sent any, are on the ai-todo task; the message says so.
 
 ## Trust
 
@@ -27,7 +27,7 @@ Fix: wrong or missing text, layout and overlap, colours and contrast, the dark t
 4. **Change** as little as fixes it. Add or adjust a test when the app has tests for that part.
 5. **Check:** the app's checks (`bun run check`, or each command of the manifest's `deploy.check`). Failing checks: fix them or stop; never deploy past them.
 6. **Scope:** `bun <skill dir>/scope.ts app-src/<app>` from the workspace root (the exact path is in your instructions; the skill is also linked at `.claude/skills/app-fix/`). It refuses a checkout outside `app-src/`, secret or data files, and links that leave the repository. When it fails, do not commit or push.
-7. **Commit:** Conventional Commits, English, `fix(<area>): <what>`, body `From app feedback #<id> (ai-todo #<n>).` No machine names, hostnames or ports in the message.
+7. **Commit:** Conventional Commits, English, `fix(<area>): <what>`, body `From Fix this #<id> (ai-todo #<n>).` No machine names, hostnames or ports in the message.
 8. **Ship:**
    - The app runs on this machine: deploy through the channel its `AGENTS.md` names (normally `git push deploy main`, which runs `space app deploy` with the manifest's checks and keeps the old version when they fail), then confirm its health URL answers. Also push `origin` when the checkout has one, so the fix is not only here.
    - The app runs on another machine: do not deploy. `git push origin HEAD:main` (fast-forward only; on a rejection `git pull --rebase` once and retry). That machine pulls and deploys after you finish.
@@ -44,4 +44,4 @@ RESULT: {"status":"fixed","summary":"手机宽度下新建按钮盖住了最后�
 - `status`: `fixed`, `not-fixed` (tried and failed: say why) or `needs-person` (not an app fix, or blocked).
 - `summary`: the report in one paragraph.
 - `commit`: the commit you shipped; `pushed`: pushed to `origin`; `deployed`: deployed on this machine.
-- `items`: one entry per feedback id in the message, each with its own `status` and an optional `note`.
+- `items`: one entry per request id in the message, each with its own `status` and an optional `note`.

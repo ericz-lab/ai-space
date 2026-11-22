@@ -128,7 +128,7 @@ git push <host> main      # 检出到 ~/.ai-space/core，运行 deploy/install.s
 
 - **客户端。** 任意浏览器里的 web 面板、Mac / Linux / Windows 上的 AI Space Desktop、移动端 app、`space` CLI，以及用共享 skills 开发 app 的编程 agent。它们都通过同一个 Space API 访问 Space。
 - **AI Space Server。** 每台机器一个 Space，一条命令安装：Linux 或 macOS 上 `curl -fsSL https://ai-space.me/install.sh | bash`，Windows 上 `irm https://ai-space.me/install.ps1 | iex`。Space 服务（Bun）提供 Space API 和面板，处理登录，维护 app 注册表，为 app 分配主机名，并运行 package gateway。
-- **App。** 来自 app 目录的签名包，或在 `app-src` 和 App Studio 里构建的源码 app。每个 app 可以带一个服务、widget、agent、任务和桌宠，并调用共享服务而不是各自造轮子：调度、总线、通知、对话、语音、存储、备份、服务托管、快捷指令、模型、终端和反馈。
+- **App。** 来自 app 目录的签名包，或在 `app-src` 和 App Studio 里构建的源码 app。每个 app 可以带一个服务、widget、agent、任务和桌宠，并调用共享服务而不是各自造轮子：调度、总线、通知、对话、语音、存储、备份、服务托管、快捷指令、模型、终端和随手改。
 - **Agent 运行时。** Agent 运行和模型调用交给 Claude Code、Codex、DeepSeek Harness 或 Anthropic API，按四个能力档位选择。
 - **工作区。** Space 拥有的一切都以普通文件和 SQLite 存在 `~/.ai-space` 里。
 - **Peers。** 一个 hub Space 用一个面板管理多台机器，把调用、模型运行和终端转发给各个 peer；每个 peer 保留自己的工作区。

@@ -1,8 +1,8 @@
-/** The feedback button's words, in the page's language (docs/feedback.md#the-button). */
+/** The words of the Fix this (随手改) button, in the page's language (docs/feedback.md#the-button). */
 
 const en = {
-  title: "Feedback",
-  button: "Feedback (Alt+Shift+F)",
+  title: "Fix this",
+  button: "Fix this (Alt+Shift+F)",
   placeholder: "What's wrong? One sentence is enough.",
   pick: "Pick element",
   shot: "Screenshot",
@@ -34,9 +34,9 @@ const en = {
   remove: "Remove {name}",
   recent: "Recent",
   empty: "Write a sentence first.",
-  errOff: "Feedback is turned off for this app.",
+  errOff: "Fix this is turned off for this app.",
   errTooLarge: "The pictures are too large.",
-  errTooMany: "Too much feedback in the last hour; try again later.",
+  errTooMany: "Too many requests in the last hour; try again later.",
   errNetwork: "Could not send: the Space did not answer. Your text is kept.",
   errGeneric: "Could not send: {msg}. Your text is kept.",
   shotCancelled: "No screenshot taken.",
@@ -60,8 +60,8 @@ export type Key = keyof typeof en;
 export type Lang = "en" | "zh";
 
 const zh: Record<Key, string> = {
-  title: "反馈",
-  button: "反馈（Alt+Shift+F）",
+  title: "随手改",
+  button: "随手改（Alt+Shift+F）",
   placeholder: "哪里不对？一句话就够。",
   pick: "选元素",
   shot: "截图",
@@ -93,9 +93,9 @@ const zh: Record<Key, string> = {
   remove: "移除 {name}",
   recent: "最近",
   empty: "先写一句话。",
-  errOff: "这个 app 的反馈已关闭。",
+  errOff: "这个 app 的随手改已关闭。",
   errTooLarge: "图片太大了。",
-  errTooMany: "这一小时的反馈太多了，稍后再试。",
+  errTooMany: "这一小时提得太多了，稍后再试。",
   errNetwork: "发送失败：Space 没有回应，文字已保留。",
   errGeneric: "发送失败：{msg}。文字已保留。",
   shotCancelled: "没有截到图。",

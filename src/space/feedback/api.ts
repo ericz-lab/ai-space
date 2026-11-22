@@ -46,7 +46,7 @@ export function createFeedbackRoutes(opts: FeedbackApiOptions): Routes {
   /** The router's word for the app, or a response that refuses the request. */
   const appOf = (req: Request): string | Response => {
     const app = routerApp(req, opts.routerKey);
-    if (!app) return error(400, "no X-Space-App from the router: feedback arrives through the router");
+    if (!app) return error(400, "no X-Space-App from the router: Fix this requests arrive through the router");
     if (!APP_PATTERN.test(app)) return error(404, "unknown app");
     return app;
   };
@@ -94,9 +94,9 @@ export function createFeedbackRoutes(opts: FeedbackApiOptions): Routes {
         const app = appOf(req);
         if (app instanceof Response) return app;
         const length = Number(req.headers.get("content-length") ?? 0);
-        if (length > LIMITS.body) return error(413, "feedback is too large");
+        if (length > LIMITS.body) return error(413, "the request is too large");
         const raw = await req.text();
-        if (raw.length > LIMITS.body) return error(413, "feedback is too large");
+        if (raw.length > LIMITS.body) return error(413, "the request is too large");
         let body: unknown;
         try {
           body = JSON.parse(raw);
