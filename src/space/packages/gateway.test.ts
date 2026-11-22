@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { terminalWebSocket } from "../terminal/api.ts";
 import { Connections } from "./connections.ts";
-import { PackageGateway } from "./gateway.ts";
+import { PackageGateway, originLabel } from "./gateway.ts";
 import { PackageLinks, createConnectionRoutes } from "./links.ts";
 import { parsePackageManifest } from "./manifest.ts";
 import { PackageRuntime } from "./runtime.ts";
@@ -57,10 +57,24 @@ async function browser(gateway: PackageGateway, target: Parameters<PackageGatewa
   return { url, cookie, request: (path: string, init: RequestInit = {}) => request(path, { ...init, headers: { cookie, ...Object.fromEntries(new Headers(init.headers)) } }) };
 }
 
+test("an origin's label names the app and stays one DNS label, distinct per installation", () => {
+  const a = "11111111-1111-4111-8111-111111111111", b = "22222222-2222-4222-8222-222222222222";
+  expect(originLabel(a, "ai-todo")).toMatch(/^ai-todo-[0-9a-f]{16}$/);
+  expect(originLabel(a, "ai-todo")).toBe(originLabel(a, "ai-todo"));
+  expect(originLabel(a, "ai-todo")).not.toBe(originLabel(b, "ai-todo"));
+  // Names that read alike after cleaning still differ by their hash.
+  expect(originLabel(a, "my.app_v2")).toMatch(/^my-app-v2-[0-9a-f]{16}$/);
+  expect(originLabel(a, "my.app_v2")).not.toBe(originLabel(a, "my-app-v2"));
+  expect(originLabel(a, "xn--._--x.")).toMatch(/^xn-x-[0-9a-f]{16}$/);
+  const long = originLabel(a, "a".repeat(64));
+  expect(long.length).toBeLessThanOrEqual(63);
+  expect(long).toMatch(/^a{40}-[0-9a-f]{16}$/);
+});
+
 test("local app has an isolated authenticated origin, proxies writes and preserves redirects/cookies", async () => {
   const m = await machine("local");
   const b = await browser(m.gateway, { app: "notes", spaceId: m.connections.spaceId });
-  expect(b.url.hostname).toEndWith(".localhost");
+  expect(b.url.hostname).toMatch(/^notes-[0-9a-f]{16}\.localhost$/);
   expect(m.runtime.status("notes")?.state).toBe("idle");
   expect(await (await b.request("/api/echo", { method: "POST", headers: { origin: b.url.origin }, body: "hello" })).json()).toMatchObject({ label: "local", method: "POST", body: "hello", cookie: null });
   expect((await b.request("/api/echo", { method: "POST", headers: { origin: "https://other.example" }, body: "bad" })).status).toBe(403);
