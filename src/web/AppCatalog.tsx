@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLang } from "./i18n.ts";
 
-// The app catalog in the Add dialog (docs/app-catalog.md): what the Space's catalogs list, what is
-// installed, what has an update, and what each app needs, with install, install from source and
-// upgrade. Opened from the home screen's first-use card, every installable app starts ticked.
+// The app catalog's client side (docs/app-catalog.md): the answer's shapes, `useCatalog` (reading
+// the catalog, install, upgrade, rebuild and uninstall with the owner's yes to an untrusted
+// publisher and to taking an update over source they changed), and the home screen's first-use
+// card. The App Store page (Store.tsx) is built on it.
 
-type Localized = { en: string; zh?: string };
+export type Localized = { en: string; zh?: string };
 export type CatalogEntry = {
   name: string;
   title: Localized;
@@ -21,16 +22,156 @@ export type CatalogEntry = {
   installed: { version: string; origin: "package" | "source" | "local"; ref: string | null; dev: boolean; source?: "pristine" | "modified" | "own" } | null;
   state: "available" | "installed" | "update" | "unreleased" | "legacy";
 };
-export type CatalogView = { sources: { url: string; ok: boolean; stale?: boolean; error?: string; apps: number }[]; apps: CatalogEntry[]; git: boolean };
+export type CatalogView = { sources: { url: string; ok: boolean; stale?: boolean; error?: string; fetchedAt?: string; apps: number }[]; apps: CatalogEntry[]; git: boolean };
 type Answer = { ok: boolean; error?: string; code?: string; publisher?: { name: string; keyId: string; url?: string } };
-type Request = { from?: "package" | "source"; withSource?: boolean; replaceSource?: boolean; trust?: boolean };
+export type CatalogRequest = { from?: "package" | "source"; withSource?: boolean; replaceSource?: boolean; trust?: boolean };
 
-const loc = (l: Localized, lang: string) => (lang === "zh" && l.zh ? l.zh : l.en);
+export const loc = (l: Localized, lang: string) => (lang === "zh" && l.zh ? l.zh : l.en);
 
-async function post(path: string, body: unknown): Promise<Answer> {
-  const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+async function send(method: "POST" | "DELETE", path: string, body?: unknown): Promise<Answer> {
+  const r = await fetch(path, { method, headers: body === undefined ? {} : { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   return (await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }))) as Answer;
 }
+const post = (path: string, body: unknown) => send("POST", path, body);
+
+/** What a change did, for the page around the store (a new tile, a reload). */
+export type CatalogChange = { app: string; action: "installed" | "upgraded" | "rebuilt" | "removed" };
+/** The app being changed and how, so only the button that started it says so. */
+export type Working = { app: string; how: "install" | "upgrade" | "source" | "remove" };
+export type TrustAsk = { app: string; publisher: NonNullable<Answer["publisher"]>; resolve: (yes: boolean) => void };
+export type SourceAsk = { app: string; resolve: (yes: boolean) => void };
+
+/**
+ * The catalog and every change to it, one at a time. `initial` is a catalog already read (tests);
+ * without it the catalog is read on mount. Each change answers whether it went through; a refusal
+ * lands in `err`, and the catalog is read again after every change.
+ */
+export function useCatalog({ initial, onChange }: { initial?: CatalogView; onChange?: (c: CatalogChange) => void } = {}) {
+  const [view, setView] = useState<CatalogView | null>(initial ?? null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [working, setWorking] = useState<Working | null>(null);
+  const [done, setDone] = useState<string[]>([]);
+  // A publisher the Space does not trust yet: the owner's yes, then the same request again.
+  const [ask, setAsk] = useState<TrustAsk | null>(null);
+  // Source the owner changed: taking the release over it is theirs to decide.
+  const [askSource, setAskSource] = useState<SourceAsk | null>(null);
+  const changed = useRef(onChange);
+  changed.current = onChange;
+
+  const load = async (refresh = false): Promise<CatalogView | null> => {
+    try {
+      const r = await fetch(`/api/app-catalog${refresh ? "?refresh=1" : ""}`);
+      const v = (await r.json()) as CatalogView & { ok: boolean; error?: string };
+      if (!v.ok) throw new Error(v.error || `HTTP ${r.status}`);
+      setView(v);
+      return v;
+    } catch (e) {
+      setErr(String((e as Error).message || e));
+      return null;
+    }
+  };
+  useEffect(() => {
+    if (!initial) void load();
+  }, []);
+
+  const report = (c: CatalogChange) => {
+    setDone((d) => [...d.filter((n) => n !== c.app), c.app]);
+    changed.current?.(c);
+  };
+
+  /** One install or upgrade, asking about an untrusted publisher and changed source on the way. */
+  const change = async (app: string, kind: "install" | "upgrade", req: CatalogRequest): Promise<boolean> => {
+    setWorking({ app, how: req.from === "source" ? "source" : kind });
+    try {
+      const path = `/api/app-catalog/${encodeURIComponent(app)}/${kind}`;
+      let a = await post(path, req);
+      if (!a.ok && a.code === "trust-required" && a.publisher) {
+        const publisher = a.publisher;
+        const yes = await new Promise<boolean>((resolve) => setAsk({ app, publisher, resolve }));
+        setAsk(null);
+        if (!yes) return false;
+        req = { ...req, trust: true };
+        a = await post(path, req);
+      }
+      if (!a.ok && a.code === "source-modified") {
+        const yes = await new Promise<boolean>((resolve) => setAskSource({ app, resolve }));
+        setAskSource(null);
+        if (!yes) return false;
+        a = await post(path, { ...req, replaceSource: true });
+      }
+      if (!a.ok) {
+        setErr(`${app}: ${a.error ?? "failed"}`);
+        return false;
+      }
+      report({ app, action: kind === "install" ? "installed" : "upgraded" });
+      return true;
+    } catch (e) {
+      setErr(`${app}: ${String((e as Error).message || e)}`);
+      return false;
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  /** Build what is in app-src/<app> and run it in place of the installed version. */
+  const rebuildOne = async (app: string): Promise<boolean> => {
+    setWorking({ app, how: "source" });
+    try {
+      const a = await post(`/api/studio/apps/${encodeURIComponent(app)}/build`, {});
+      if (!a.ok) setErr(`${app}: ${a.error ?? "failed"}`);
+      else report({ app, action: "rebuilt" });
+      return a.ok;
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  /** The package lifecycle's removal: the app stops and leaves the panel; its data and app-src/<app> stay. */
+  const removeOne = async (app: string): Promise<boolean> => {
+    setWorking({ app, how: "remove" });
+    try {
+      const a = await send("DELETE", `/api/panel/packages/apps/${encodeURIComponent(app)}`);
+      if (!a.ok) setErr(`${app}: ${a.error ?? "failed"}`);
+      else report({ app, action: "removed" });
+      return a.ok;
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  /** Runs changes with the store busy, then reads the catalog again. */
+  const run = async <T,>(work: () => Promise<T>): Promise<T> => {
+    setErr("");
+    setBusy(true);
+    try {
+      return await work();
+    } finally {
+      await load();
+      setBusy(false);
+    }
+  };
+
+  return {
+    view,
+    err,
+    setErr,
+    busy,
+    working,
+    done,
+    ask,
+    askSource,
+    load,
+    install: (app: string, req: CatalogRequest = {}) => run(() => change(app, "install", req)),
+    upgrade: (app: string, req: CatalogRequest = {}) => run(() => change(app, "upgrade", req)),
+    rebuild: (app: string) => run(() => rebuildOne(app)),
+    remove: (app: string) => run(() => removeOne(app)),
+    /** Several changes in a row under one busy state; `change` is the single step. */
+    batch: run,
+    change,
+  };
+}
+export type Catalog = ReturnType<typeof useCatalog>;
 
 /**
  * How many catalog apps a Space with none of them could install: the home screen's first-use card
@@ -47,7 +188,7 @@ export async function catalogOffers(): Promise<number> {
 
 const WELCOME_KEY = "catalog-welcome-dismissed";
 
-/** The home screen's first-use card: the catalog's apps, all ticked, one click away. */
+/** The home screen's first-use card: the catalog's apps, all ticked in the App Store, one click away. */
 export function CatalogWelcome({ onOpen }: { onOpen: () => void }) {
   const { t } = useLang();
   const [count, setCount] = useState(0);
@@ -82,243 +223,3 @@ export function CatalogWelcome({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-const installable = (v: CatalogView) => new Set(v.apps.filter((a) => a.state === "available").map((a) => a.name));
-
-/** `initial` is a catalog already read (tests); without it the pane reads one when it opens. */
-export function CatalogPane({ preselect, onInstalled, onClose, busy, setBusy, initial }: { preselect: boolean; onInstalled: () => void; onClose: () => void; busy: boolean; setBusy: (b: boolean) => void; initial?: CatalogView }) {
-  const { lang, t } = useLang();
-  const [view, setView] = useState<CatalogView | null>(initial ?? null);
-  const [err, setErr] = useState("");
-  const [picked, setPicked] = useState<Set<string>>(() => (initial && preselect ? installable(initial) : new Set()));
-  // Apps come with their source unless the owner unticks it.
-  const [noSource, setNoSource] = useState<Set<string>>(new Set());
-  const [askSource, setAskSource] = useState<{ app: string; resolve: (yes: boolean) => void } | null>(null);
-  // The app being changed and how, so only the button that started it says so.
-  const [working, setWorking] = useState<{ app: string; how: "install" | "upgrade" | "source" } | null>(null);
-  const [done, setDone] = useState<string[]>([]);
-  // A publisher the Space does not trust yet: the owner's yes, then the same request again.
-  const [ask, setAsk] = useState<{ app: string; publisher: NonNullable<Answer["publisher"]>; resolve: (yes: boolean) => void } | null>(null);
-
-  const load = async (refresh = false) => {
-    try {
-      const r = await fetch(`/api/app-catalog${refresh ? "?refresh=1" : ""}`);
-      const v = (await r.json()) as CatalogView & { ok: boolean; error?: string };
-      if (!v.ok) throw new Error(v.error || `HTTP ${r.status}`);
-      setView(v);
-      return v;
-    } catch (e) {
-      setErr(String((e as Error).message || e));
-      return null;
-    }
-  };
-  useEffect(() => {
-    void load().then((v) => {
-      if (v && preselect) setPicked(installable(v));
-    });
-  }, []);
-
-  /** One install or upgrade, asking about an untrusted publisher on the way. */
-  const change = async (app: string, kind: "install" | "upgrade", req: Request): Promise<boolean> => {
-    setWorking({ app, how: req.from === "source" ? "source" : kind });
-    try {
-      let a = await post(`/api/app-catalog/${encodeURIComponent(app)}/${kind}`, req);
-      if (!a.ok && a.code === "trust-required" && a.publisher) {
-        const publisher = a.publisher;
-        const yes = await new Promise<boolean>((resolve) => setAsk({ app, publisher, resolve }));
-        setAsk(null);
-        if (!yes) return false;
-        a = await post(`/api/app-catalog/${encodeURIComponent(app)}/${kind}`, { ...req, trust: true });
-      }
-      if (!a.ok && a.code === "source-modified") {
-        // The owner changed the app's source: taking the release is theirs to decide.
-        const yes = await new Promise<boolean>((resolve) => setAskSource({ app, resolve }));
-        setAskSource(null);
-        if (!yes) return false;
-        a = await post(`/api/app-catalog/${encodeURIComponent(app)}/${kind}`, { ...req, replaceSource: true });
-      }
-      if (!a.ok) {
-        setErr(`${app}: ${a.error ?? "failed"}`);
-        return false;
-      }
-      setDone((d) => [...d, app]);
-      return true;
-    } finally {
-      setWorking(null);
-    }
-  };
-
-  /** Build what is in app-src/<app> and run it in place of the installed version. */
-  const rebuild = async (app: string): Promise<boolean> => {
-    setWorking({ app, how: "source" });
-    try {
-      const a = await post(`/api/studio/apps/${encodeURIComponent(app)}/build`, {});
-      if (!a.ok) setErr(`${app}: ${a.error ?? "failed"}`);
-      else setDone((d) => [...d, app]);
-      return a.ok;
-    } finally {
-      setWorking(null);
-    }
-  };
-
-  const run = async (work: () => Promise<unknown>) => {
-    setErr("");
-    setBusy(true);
-    try {
-      await work();
-    } finally {
-      await load();
-      setBusy(false);
-      onInstalled();
-    }
-  };
-  const installPicked = () =>
-    run(async () => {
-      for (const name of [...picked]) {
-        if (!(await change(name, "install", { withSource: !noSource.has(name) }))) break;
-        setPicked((p) => new Set([...p].filter((n) => n !== name)));
-      }
-    });
-
-  const toggle = (set: Set<string>, name: string) => {
-    const next = new Set(set);
-    if (next.has(name)) next.delete(name);
-    else next.add(name);
-    return next;
-  };
-  const needText = (n: string) => {
-    const key = `catalog.need.${n}`;
-    const text = t(key as Parameters<typeof t>[0]);
-    return text === key ? n : text;
-  };
-
-  if (!view)
-    return (
-      <>
-        <div className={err ? "form-err" : "form-hint"}>{err || t("catalog.loading")}</div>
-        <div className="actions">
-          <button className="btn2" onClick={onClose}>{t("common.close")}</button>
-        </div>
-      </>
-    );
-  const broken = view.sources.filter((s) => !s.ok);
-  return (
-    <div className="cat">
-      {!view.sources.length && <div className="form-hint">{t("catalog.none")}</div>}
-      {broken.map((s) => (
-        <div key={s.url} className="form-hint">
-          {s.stale ? t("catalog.stale") : t("catalog.unreachable")} <span className="cat-mono">{s.error}</span>
-        </div>
-      ))}
-      {view.sources.length > 0 && !view.apps.length && !broken.length && <div className="form-hint">{t("catalog.empty")}</div>}
-      <ul className="cat-list">
-        {view.apps.map((a) => {
-          const doing = working?.app === a.name ? working.how : null;
-          const canInstall = a.state === "available";
-          return (
-            <li key={a.name} className="cat-row">
-              {canInstall ? (
-                <input type="checkbox" className="cat-pick" aria-label={t("catalog.pick", { name: loc(a.title, lang) })} checked={picked.has(a.name)} disabled={busy} onChange={() => setPicked((p) => toggle(p, a.name))} />
-              ) : (
-                <span className="cat-pick" />
-              )}
-              {a.icon ? <img className="cat-icon" src={a.icon} alt="" onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")} /> : <span className="cat-icon" />}
-              <div className="cat-main">
-                <div className="cat-head">
-                  <strong>{loc(a.title, lang)}</strong>
-                  <span className="cat-meta">
-                    {a.latest ? `v${a.latest.version}` : t("catalog.unreleased")} · {a.publisher.name}
-                    {!a.publisher.trusted && ` · ${t("catalog.untrusted")}`}
-                  </span>
-                </div>
-                <div className="cat-desc">{loc(a.description, lang)}</div>
-                {(a.needs.length > 0 || a.online.length > 0) && (
-                  <div className="cat-needs">
-                    {a.needs.map((n) => (
-                      <span key={n} className="cat-need">{needText(n)}</span>
-                    ))}
-                    {a.online.map((o, i) => (
-                      <span key={i} className="cat-online">{loc(o, lang)}</span>
-                    ))}
-                  </div>
-                )}
-                <div className="cat-actions">
-                  {a.installed && (
-                    <span className="cat-state">
-                      {t("catalog.installed", { version: a.installed.version })}
-                      {a.installed.origin === "source" && ` · ${a.installed.dev ? t("catalog.dev", { ref: a.installed.ref ?? "" }) : t("catalog.fromSource")}`}
-                      {a.installed.source === "modified" && ` · ${t("catalog.sourceModified")}`}
-                      {a.installed.source === "pristine" && ` · ${t("catalog.sourceHere", { app: a.name })}`}
-                    </span>
-                  )}
-                  {a.state === "legacy" && <span className="cat-state">{t("catalog.legacy")}</span>}
-                  {canInstall && (
-                    <button className="btn2 primary" disabled={busy} onClick={() => run(() => change(a.name, "install", { withSource: !noSource.has(a.name) }))}>
-                      {doing === "install" ? t("catalog.installing") : t("catalog.install")}
-                    </button>
-                  )}
-                  {a.state === "update" && (
-                    <button className="btn2 primary" disabled={busy} onClick={() => run(() => change(a.name, "upgrade", {}))}>
-                      {doing === "upgrade" ? t("catalog.upgrading") : t("catalog.upgrade", { version: a.latest!.version })}
-                    </button>
-                  )}
-                  {view.git && (canInstall || a.state === "unreleased" || (a.installed && a.installed.origin !== "source")) && (
-                    <button className="btn2" disabled={busy} title={t("catalog.sourceHint")} onClick={() => run(() => change(a.name, "install", { from: "source" }))}>
-                      {doing === "source" ? t("catalog.building") : t("catalog.source")}
-                    </button>
-                  )}
-                  {a.installed?.source && (
-                    <button className="btn2" disabled={busy} title={t("catalog.rebuildHint", { app: a.name })} onClick={() => run(() => rebuild(a.name))}>
-                      {doing === "source" ? t("catalog.building") : t("catalog.rebuild")}
-                    </button>
-                  )}
-                  {canInstall && a.latest?.sourcePackage && (
-                    <label className="cat-check">
-                      <input type="checkbox" checked={!noSource.has(a.name)} disabled={busy} onChange={() => setNoSource((s) => toggle(s, a.name))} />
-                      {t("catalog.withSource")}
-                    </label>
-                  )}
-                  <a className="cat-link" href={a.repo} target="_blank" rel="noreferrer">
-                    {t("catalog.repo")}
-                  </a>
-                </div>
-                {askSource?.app === a.name && (
-                  <div className="cat-trust" role="alertdialog">
-                    <div>{t("catalog.sourceAsk", { app: a.name })}</div>
-                    <div className="cat-actions">
-                      <button className="btn2 primary" onClick={() => askSource.resolve(true)}>{t("catalog.sourceReplace")}</button>
-                      <button className="btn2" onClick={() => askSource.resolve(false)}>{t("catalog.sourceKeep")}</button>
-                    </div>
-                  </div>
-                )}
-                {ask?.app === a.name && (
-                  <div className="cat-trust" role="alertdialog">
-                    <div>{t("catalog.trustAsk", { name: ask.publisher.name, key: ask.publisher.keyId.slice(0, 16) })}</div>
-                    <div className="cat-actions">
-                      <button className="btn2 primary" onClick={() => ask.resolve(true)}>{t("catalog.trust")}</button>
-                      <button className="btn2" onClick={() => ask.resolve(false)}>{t("common.cancel")}</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-      {done.length > 0 && <div className="form-hint">{t("catalog.done", { names: done.join(", ") })}</div>}
-      {err && <div className="form-err">{err}</div>}
-      <div className="actions">
-        <button className="btn2" disabled={busy} onClick={() => void load(true)}>
-          {t("catalog.refresh")}
-        </button>
-        <button className="btn2" disabled={busy} onClick={onClose}>
-          {t("common.close")}
-        </button>
-        {picked.size > 0 && (
-          <button className="btn2 primary" disabled={busy} onClick={installPicked}>
-            {busy ? t("catalog.installing") : t("catalog.installPicked", { n: String(picked.size) })}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}

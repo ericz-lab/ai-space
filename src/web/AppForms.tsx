@@ -1,18 +1,17 @@
 import { useState } from "react";
 import { sendJson, type AppInfo } from "./api.ts";
-import { CatalogPane } from "./AppCatalog.tsx";
 import { localized, useLang } from "./i18n.ts";
 
-// The panel's two dialogs in edit mode: add an app (from the app catalog, make a new one inside the
-// Space, or from a link), and confirm an uninstall.
+// The panel's two dialogs in edit mode: add an app (make a new one inside the Space, or from a link;
+// the app catalog is the App Store, which the dialog opens), and confirm an uninstall.
 
 export type CreatedApp = { app: string; version: string; dir: string; description: string };
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
-export function AddForm({ onClose, onSaved, onCreated, onInstalled, preselect = false }: { onClose: () => void; onSaved: (app?: AppInfo) => void; onCreated?: (made: CreatedApp) => void; onInstalled?: () => void; preselect?: boolean }) {
+export function AddForm({ onClose, onSaved, onCreated, onOpenStore }: { onClose: () => void; onSaved: (app?: AppInfo) => void; onCreated?: (made: CreatedApp) => void; onOpenStore?: () => void }) {
   const { t } = useLang();
-  const [mode, setMode] = useState<"catalog" | "new" | "link">("catalog");
+  const [mode, setMode] = useState<"new" | "link">(onCreated ? "new" : "link");
   const [link, setLink] = useState("");
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
@@ -52,15 +51,21 @@ export function AddForm({ onClose, onSaved, onCreated, onInstalled, preselect = 
   };
   return (
     <div className="overlay" onClick={busy ? undefined : onClose}>
-      <div className={`modal${mode === "catalog" ? " wide" : ""}`} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           {t("add.title")}
-          <span className="modal-sub">{mode === "catalog" ? t("catalog.sub") : mode === "new" ? t("create.sub") : t("add.sub")}</span>
+          <span className="modal-sub">{mode === "new" ? t("create.sub") : t("add.sub")}</span>
         </h3>
-        <div role="tablist" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-          <button role="tab" aria-selected={mode === "catalog"} className={`lib-chip${mode === "catalog" ? " on" : ""}`} onClick={() => (setMode("catalog"), setErr(""))} disabled={busy}>
-            {t("catalog.tab")}
+        {onOpenStore && (
+          <button className="add-store" onClick={onOpenStore} disabled={busy}>
+            <span>
+              {t("store.openStore")}
+              <span className="form-hint">{t("store.openStoreHint")}</span>
+            </span>
+            <span aria-hidden="true">›</span>
           </button>
+        )}
+        <div role="tablist" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
           {onCreated && (
             <button role="tab" aria-selected={mode === "new"} className={`lib-chip${mode === "new" ? " on" : ""}`} onClick={() => (setMode("new"), setErr(""))} disabled={busy}>
               {t("create.tab")}
@@ -70,9 +75,7 @@ export function AddForm({ onClose, onSaved, onCreated, onInstalled, preselect = 
             {t("add.tab")}
           </button>
         </div>
-        {mode === "catalog" ? (
-          <CatalogPane preselect={preselect} busy={busy} setBusy={setBusy} onInstalled={() => onInstalled?.()} onClose={onClose} />
-        ) : mode === "new" ? (
+        {mode === "new" ? (
           <>
             <div className="field">
               <label>{t("create.title")}</label>
@@ -106,8 +109,7 @@ export function AddForm({ onClose, onSaved, onCreated, onInstalled, preselect = 
             <div className="form-hint">{t("add.hint")}</div>
           </>
         )}
-        {mode !== "catalog" && err && <div className="form-err">{err}</div>}
-        {mode !== "catalog" && (
+        {err && <div className="form-err">{err}</div>}
         <div className="actions">
           <button className="btn2" onClick={onClose} disabled={busy}>
             {t("common.cancel")}
@@ -122,7 +124,6 @@ export function AddForm({ onClose, onSaved, onCreated, onInstalled, preselect = 
             </button>
           )}
         </div>
-        )}
       </div>
     </div>
   );

@@ -35,7 +35,7 @@ export type MachineInventory = { machine: string; via: "local" | "ssh" | "peer";
 export type MagpieInfo = { bin?: string; url: string; running: boolean; version?: string; models: string[]; error?: string; configured: boolean; runtimes: string[]; adds: "claude-code" | "anthropic-api" };
 
 /** Icons of the panel's own tiles; `/api/apps` returns the active icon pack's over these. */
-export const BUILTIN_ICONS = { inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" };
+export const BUILTIN_ICONS = { store: "/store.svg", inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" };
 export type BuiltinIcons = typeof BUILTIN_ICONS;
 
 export type AppInfo = {
