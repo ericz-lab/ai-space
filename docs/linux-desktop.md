@@ -1,9 +1,12 @@
 # Linux desktop client
 
-Status: built and run on Ubuntu 24.04 (GNOME, Wayland). The Client edition connects to existing
-Spaces; the Local edition also sets up and runs a Space on this computer as a systemd user service
-([local.md](local.md#on-linux)). It follows the Mac client ([macos-desktop.md](macos-desktop.md))
-where Linux allows, and says below where it does less.
+Status: built and run on Ubuntu 24.04 (GNOME, Wayland). AI Space Desktop (the Client edition)
+connects to Spaces that exist: at its first launch it looks for an AI Space on this computer and,
+with none, offers to install one or to connect to another machine ([below](#first-launch)). It
+carries no service. The Local edition, no longer published, is the same app with a service inside,
+which it sets up and runs on this computer as a systemd user service ([local.md](local.md#on-linux)).
+The app follows the Mac client ([macos-desktop.md](macos-desktop.md)) where Linux allows, and says
+below where it does less.
 
 ## What it is
 
@@ -22,8 +25,9 @@ where Linux allows, and says below where it does less.
 The window has Home, Chat, Inbox, Terminal and Apps in the header (in a bar at the bottom on a
 narrow window), the Space menu at the start of the header, and a banner when the Space needs a
 sign-in, cannot be reached (with what was last known, kept on disk) or cannot be opened. Before any
-Space is saved it shows the welcome screen: an address to connect to, a Space already answering on
-`127.0.0.1:8700` in one click, and in the Local edition the setup.
+Space is saved it shows the welcome screen ([First launch](#first-launch)); in the Local edition
+that is the setup, an address to connect to, and a Space already answering on `127.0.0.1:8700` in
+one click.
 
 `aispace://` links work as on the Mac (`core/desktop.ts`, `parseDeepLink`): `chat?agent=&text=`,
 `open?app=`, `inbox`, `show`. A link may fill in a message but never sends it.
@@ -31,6 +35,39 @@ Space is saved it shows the welcome screen: an address to connect to, a Space al
 Shortcuts: Ctrl+1…5 for the views, Ctrl+Page Up and Ctrl+Page Down for Home's pages, Ctrl+F or Ctrl+L for the command box, Ctrl+N for a new
 conversation, Ctrl+Shift+T for a terminal, Ctrl+Shift+P for the web panel, F5 to look at the Space
 again, Ctrl+Shift+Space for Quick Chat while the app has focus, Ctrl+, for Settings, Ctrl+Q to quit.
+
+## First launch
+
+AI Space Desktop carries no service. Started with no saved Space, it looks for an AI Space on this
+computer (`core/first-launch.ts`, tested with `bun test`; `app/first-launch.ts` does the requests):
+
+1. The ports: `SPACE_PORT` from the workspace's `.env` (`$SPACE_HOME/.env`, else
+   `~/.ai-space/.env`) when it can be read, then 8700.
+2. `GET http://127.0.0.1:<port>/api/space`, giving up after 2 seconds; only JSON that says
+   `product: "ai-space"` counts ([editions.md](editions.md#service-identity)).
+3. **Found**: it is saved as "This Computer", selected and shown. Nothing is asked.
+4. **Not found**: the welcome screen offers two things, and does neither by itself:
+   - **Install AI Space on This Computer** runs the release's own one-command installer
+     ([release.md](release.md#one-command-install)), never a copy inside the app: it downloads
+     `https://github.com/ericz-lab/ai-space/releases/latest/download/install.sh` to a file in a new
+     private temporary directory (from `$AI_SPACE_DOWNLOAD/install.sh` when that variable is set,
+     which the installer reads too: a mirror, or `file://` for a test), refuses anything that is
+     not a script, and runs `bash <file>` in the app's environment with `AI_SPACE_NO_OPEN=1` and no
+     input. Its output shows line by line. Exit code 0: the app looks again each second for up to
+     30 seconds, then saves and shows the Space. Any other code: the end of the output and Try
+     Again. No answer in that time: Try Again looks once more.
+   - **Connect to an AI Space on Another Machine** opens the address form.
+
+The Space is saved without a question only on the first look of an app that started with no saved
+Space. When the person later removes the last saved Space, the welcome screen looks again but only
+offers what it finds, in one click, so removing "This Computer" does not bring it straight back.
+
+The app only ever installs. It never upgrades, stops or uninstalls the service: `space upgrade` and
+`space uninstall` do. Removing the app (`install.sh --uninstall`) leaves AI Space, its workspace
+and its background service in place. Closing the window while the installer runs does not stop it.
+
+The Local edition (the app with `space/` inside) does none of this: its welcome screen is its own
+setup ([local.md](local.md#on-linux)).
 
 ## How it is built
 
@@ -44,7 +81,8 @@ desktop/linux/
   src/core/       runtime-neutral logic, typed and tested with bun test: URLs, connections,
                   the catalogue and search, Space checks, SSE, chat turns and conversations,
                   the inbox, deep links, Markdown to Pango markup, navigation rules, Home's screens
-                  and widget cards, strings (en, zh)
+                  and widget cards, the first launch (the look for a Space here, the installer's
+                  address and command), strings (en, zh)
   src/app/        GTK glue (GJS only): window, views, HTTP (libsoup), web views (WebKit),
                   the Local manager, notifications
   src/main.ts     the entry point (`gjs -m main.js`)
@@ -91,8 +129,10 @@ with no root:
 | `~/.local/share/applications/dev.ai_space.Desktop.desktop` | the desktop entry; it also handles `aispace://` |
 | `~/.local/share/icons/hicolor/scalable/apps/`, `~/.local/share/metainfo/` | the icon and AppStream metadata |
 
-`install.sh --uninstall` removes those. Neither touches a workspace, the saved Spaces, or the
-Local edition's background service (remove that first, in Settings › This Computer).
+`install.sh --uninstall` removes those. Neither touches a workspace, the saved Spaces, an AI Space
+installed on this computer (from the welcome screen or by its one-command installer: `space
+uninstall` removes it), or the Local edition's background service (remove that first, in Settings ›
+This Computer).
 
 What the app keeps:
 
@@ -306,5 +346,5 @@ build it runs. `AISPACE_MEMSTAT=<seconds>` makes any run print its RSS and threa
 - Voice input in the message field.
 - Dragging tiles and cards into order (Edit This Screen moves them with buttons), and a card two columns wide.
 - The web panel's theme presets and colour adjustments in Settings › Appearance (the Panel page's own Settings has them), the hover-details switch and the panel's own desk-pet switch, which only the panel draws (the app's desk pet is set in General), and the panel's 30-second refresh of the Settings pages (here, Reload).
-- Updating the app itself; the Local edition updates its service from the release the app carries.
+- Updating the app itself. AI Space installed from the welcome screen is updated with `space upgrade`, not by the app; the Local edition updates its service from the release the app carries.
 - A global shortcut of its own (see Quick Chat above).

@@ -181,13 +181,19 @@ export class SpaceClient implements ChatApi {
 
 /** A request outside any Space's session (another origin's icon, the device sign-in). */
 let plain: any;
+/** The same for a look at this computer's own ports, which answer at once or not at all. */
+let quick: any;
 
-export async function plainRequest(method: string, url: string, headers: Record<string, string> = {}): Promise<{ status: number; bytes: GBytes; msg: any }> {
+/**
+ * `quick` gives up after 2 seconds instead of 15; `follow` follows redirects (a download from a
+ * release), which a request to a Space never does.
+ */
+export async function plainRequest(method: string, url: string, headers: Record<string, string> = {}, opts: { quick?: boolean; follow?: boolean } = {}): Promise<{ status: number; bytes: GBytes; msg: any }> {
   // One session for all of them: a session each would keep its connections and threads until collected.
-  const session = (plain ??= new Soup.Session({ user_agent: USER_AGENT, timeout: 15 }));
+  const session = opts.quick ? (quick ??= new Soup.Session({ user_agent: USER_AGENT, timeout: 2 })) : (plain ??= new Soup.Session({ user_agent: USER_AGENT, timeout: 15 }));
   const msg = Soup.Message.new(method, url);
   if (!msg) throw new SpaceError("invalid", `not a URL: ${url}`);
-  msg.set_flags(Soup.MessageFlags.NO_REDIRECT);
+  if (!opts.follow) msg.set_flags(Soup.MessageFlags.NO_REDIRECT);
   for (const [k, v] of Object.entries(headers)) msg.get_request_headers().replace(k, v);
   try {
     const bytes = await session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, null);
