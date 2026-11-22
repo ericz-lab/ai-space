@@ -445,7 +445,9 @@ bun src/index.ts start
 
 - **The background service.** `bun src/index.ts service install` registers a task of the Task Scheduler that starts ai-space when you log on, in your own session, where your agent CLIs are signed in ([release.md](release.md#the-background-service)); `service status`, `stop`, `start`, `restart` and `remove` as elsewhere. Its output goes to `<workspace>\logs\space.log`. A stop ends the process at once: there is no drain on Windows.
 
-Not there yet on Windows: an app run on its own (`space app mode APP standalone`) and the web terminal.
+- **The web terminal.** With `SPACE_TERMINAL_ENABLED=1` the panel's terminal opens PowerShell in a pseudoconsole ([terminal.md](terminal.md)); `SPACE_TERMINAL_SHELL` names another shell.
+
+Not there yet on Windows: an app run on its own (`space app mode APP standalone`).
 
 ## What is not covered yet
 
