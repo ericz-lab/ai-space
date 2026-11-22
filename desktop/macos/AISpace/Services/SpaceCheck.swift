@@ -61,4 +61,19 @@ enum SpaceCheck {
         if e.domain == "WebKitErrorDomain" && e.code == 102 { return nil }
         return .unreachable(e.localizedDescription)
     }
+
+    // MARK: Identity
+
+    /// `GET /api/space` (src/space/identity.ts): what answers on a port says it is ai-space,
+    /// without a session. The first launch looks for a Space on this Mac with it (LocalSpace.swift).
+    static let identityPath = "/api/space"
+    static let product = "ai-space"
+
+    /// Whether an answer to `identityPath` is ai-space's: a 200 whose JSON names the product.
+    static func isSpace(status: Int, body: Data) -> Bool {
+        guard status == 200,
+              let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        else { return false }
+        return object["product"] as? String == product
+    }
 }

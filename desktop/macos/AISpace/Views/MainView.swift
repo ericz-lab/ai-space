@@ -356,28 +356,3 @@ struct FailureView: View {
         .background(.background)
     }
 }
-
-struct FirstLaunchView: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        if model.local.available {
-            LocalSetupView(model: model, local: model.local)
-        } else {
-            connect
-        }
-    }
-
-    private var connect: some View {
-        VStack(spacing: 20) {
-            Logo(size: 96)
-            Text("Connect to a Space").font(.largeTitle)
-            Text("Open an ai-space that is already running, on this Mac or on a server. Nothing is installed or started.")
-                .foregroundStyle(.secondary).multilineTextAlignment(.center)
-            ConnectionForm(initial: nil) { name, url in model.add(name: name, url: url) }
-                .frame(width: 440)
-        }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
