@@ -178,8 +178,8 @@ export class WebTabs {
     return true;
   }
 
-  openPanel(space: Space, path = "/"): void {
-    this.open({ space, url: `${space.client.base}${path}`, title: t("panel"), key: path === "/" ? "panel" : `url:${path}` });
+  openPanel(space: Space, path = "/", title = t("panel")): void {
+    this.open({ space, url: `${space.client.base}${path}`, title, key: path === "/" ? "panel" : `url:${path}` });
   }
 
   private showFailure(tab: Tab, message: string): void {

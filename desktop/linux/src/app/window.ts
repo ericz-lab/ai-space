@@ -10,9 +10,10 @@ import type { DeepLink, InboxItem } from "../core/desktop.ts";
 import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
 import { type PetOpen, shownMood } from "../core/pet.ts";
+import { builtinPage } from "../core/screens.ts";
 import { sameOrigin } from "../core/url.ts";
 import { ChatPage } from "./chat-page.ts";
-import { lang, openExternally, prefs, savePrefs, t } from "./env.ts";
+import { lang, openExternally, prefs, savePrefs, t, tw } from "./env.ts";
 import { type Builtin, HomePage } from "./home.ts";
 import { InboxPage } from "./inbox.ts";
 import type { LocalManager } from "./local-manager.ts";
@@ -396,8 +397,8 @@ export class MainWindow {
 
   // Opening things
 
-  openPanel(space: Space, path = "/"): void {
-    this.tabs.openPanel(space, path);
+  openPanel(space: Space, path = "/", title?: string): void {
+    this.tabs.openPanel(space, path, title);
     this.show("pages");
   }
 
@@ -411,11 +412,12 @@ export class MainWindow {
 
   openBuiltin(name: Builtin): void {
     const space = this.model.current;
+    const page = builtinPage(name);
     if (name === "inbox") this.show("inbox");
     else if (name === "terminal") this.show("terminal");
     else if (name === "settings") showSettings(this.window, this.model, this.local);
-    // The web panel, and Shortcuts, which only the panel has.
-    else if (space) this.openPanel(space);
+    // The web panel, and the App Store and Shortcuts, which only the panel has: its page of that name.
+    else if (space && page) this.openPanel(space, page, name === "store" ? tw("store.title") : name === "shortcuts" ? t("shortcuts") : undefined);
   }
 
   /** A link: another app's tab, a page of the Space, or the browser. */

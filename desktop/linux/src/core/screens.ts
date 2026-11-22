@@ -15,9 +15,22 @@ export { HOME, addScreen, move, pin, removeScreen, unpin };
 /** As many as the panel allows (MAX_SCREENS in src/space/panel/layout.ts). */
 export const LIMIT = 20;
 
-/** The `builtin:` tiles this client draws: the panel's own windows, plus the web panel itself. */
-export const BUILTIN_NAMES = ["inbox", "shortcuts", "terminal", "panel", "settings"] as const;
+/** The `builtin:` tiles this client draws: the panel's own (BUILTINS in src/web/screens.ts, in its order), and the web panel itself. */
+export const BUILTIN_NAMES = ["store", "inbox", "shortcuts", "terminal", "panel", "settings"] as const;
 export type BuiltinName = (typeof BUILTIN_NAMES)[number];
+
+/**
+ * The picture of each of the panel's own tiles as the panel ships it (`BUILTIN_ICONS` in
+ * src/space/panel/icons.ts: a file of src/web/public), copied into the build as
+ * `data/builtin/<file>`. A Space names its own in `GET /api/apps` (`builtins`, an icon pack's
+ * included) and that one is drawn; this is what shows until it loads, or when the Space names
+ * none. The web panel's tile is this client's own and has no such picture.
+ */
+export const BUILTIN_ART = { store: "store.svg", inbox: "inbox.svg", shortcuts: "shortcuts.svg", terminal: "terminal.svg", settings: "settings.svg" } as const satisfies Partial<Record<BuiltinName, string>>;
+export const builtinArt = (name: BuiltinName): string | undefined => (BUILTIN_ART as Partial<Record<BuiltinName, string>>)[name];
+
+/** The page of the panel a tile opens in a tab, for the ones this client has no view of its own for (docs/panel.md#built-in-pages). */
+export const builtinPage = (name: BuiltinName): string | undefined => (name === "store" || name === "shortcuts" ? `/?page=${name}` : name === "panel" ? "/" : undefined);
 
 export type ScreenRecord = { screens: Screen[]; seeded: boolean };
 /** screens.json: one record per saved Space, by connection id. */

@@ -6,9 +6,9 @@ import { canonicalItems } from "../core/agents.ts";
 import { type Entry, type Widget, allEntries, entriesByKey, entryKey, fold, opensFirst, pageUrl, panelScreens, pickText, search, widgetEntry } from "../core/catalogue.ts";
 import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
-import { type BuiltinName, HOME, type Screen, move, newScreen, pin, removeScreen, rename, screenTitle, unpin } from "../core/screens.ts";
+import { type BuiltinName, HOME, type Screen, builtinArt, move, newScreen, pin, removeScreen, rename, screenTitle, unpin } from "../core/screens.ts";
 import { lang, prefs, t, tw } from "./env.ts";
-import { iconWidget } from "./icons.ts";
+import { builtinTexture, iconWidget } from "./icons.ts";
 import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
 import { ScreenStore } from "./screen-store.ts";
@@ -37,7 +37,13 @@ export type HomeActions = {
   openLink: (space: Space, url: string) => void;
 };
 
+/**
+ * The panel's own tiles, in its order, and the web panel's. They are drawn with the picture the
+ * Space names for them (`builtins` of `GET /api/apps`, an icon pack's included), else the panel's
+ * own, shipped with the app; `icon` is the glyph of a tile with neither.
+ */
 const BUILTINS: { name: Builtin; icon: string; label: () => string }[] = [
+  { name: "store", icon: "system-software-install-symbolic", label: () => tw("store.title") },
   { name: "inbox", icon: "mail-unread-symbolic", label: () => t("inbox") },
   { name: "shortcuts", icon: "starred-symbolic", label: () => t("shortcuts") },
   { name: "terminal", icon: "utilities-terminal-symbolic", label: () => t("terminal") },
@@ -508,16 +514,18 @@ export class HomePage {
     return button;
   }
 
-  private builtinTile(space: Space, b: (typeof BUILTINS)[number], screen: string | undefined): any {
+  /** A built-in tile's picture: the Space's own for it, the panel's until that loads or with none, else the glyph. */
+  private builtinIcon(space: Space, b: (typeof BUILTINS)[number], size: number): any {
     const icon = space.catalogue?.builtinIcons[b.name];
-    const widget = icon
-      ? iconWidget(icon, 56, space.client, b.icon)
-      : (() => {
-          const box = new Gtk.Box({ width_request: 56, height_request: 56, halign: Gtk.Align.CENTER });
-          box.append(new Gtk.Image({ icon_name: b.icon, pixel_size: 34, hexpand: true }));
-          return box;
-        })();
-    const button = this.tileButton(widget, b.label(), screen ? undefined : b.label());
+    const art = builtinTexture(builtinArt(b.name), size);
+    if (icon || art) return iconWidget(icon, size, space.client, b.icon, false, false, art);
+    const box = new Gtk.Box({ width_request: size, height_request: size, halign: Gtk.Align.CENTER });
+    box.append(new Gtk.Image({ icon_name: b.icon, pixel_size: Math.round(size * 0.6), hexpand: true }));
+    return box;
+  }
+
+  private builtinTile(space: Space, b: (typeof BUILTINS)[number], screen: string | undefined): any {
+    const button = this.tileButton(this.builtinIcon(space, b, 56), b.label(), screen ? undefined : b.label());
     button.connect("clicked", () => this.actions.openBuiltin(b.name));
     this.onRightClick(button, (anchor, x, y) => this.pinMenu(anchor, space, `builtin:${b.name}`, screen, { x, y }, () => this.actions.openBuiltin(b.name)));
     return button;
@@ -689,7 +697,7 @@ export class HomePage {
           const e = byKey.get(key);
           const b = BUILTINS.find((x) => `builtin:${x.name}` === key);
           const row = new Adw.ActionRow({ title: e ? pickText(e.title, e.i18n, "title", lang) : (b?.label() ?? key), subtitle: e?.peer ?? "", use_markup: false });
-          row.add_prefix(e ? iconWidget(e.icon, 28, space.client, e.kind === "agent" ? "avatar-default-symbolic" : "application-x-executable-symbolic", false, e.kind === "agent") : new Gtk.Image({ icon_name: b?.icon ?? "view-grid-symbolic", pixel_size: 22 }));
+          row.add_prefix(e ? iconWidget(e.icon, 28, space.client, e.kind === "agent" ? "avatar-default-symbolic" : "application-x-executable-symbolic", false, e.kind === "agent") : b ? this.builtinIcon(space, b, 28) : new Gtk.Image({ icon_name: "view-grid-symbolic", pixel_size: 22 }));
           const button = (icon: string, tip: string, sensitive: boolean, run: () => void) => {
             const btn = new Gtk.Button({ icon_name: icon, tooltip_text: tip, valign: Gtk.Align.CENTER, sensitive, css_classes: ["flat"] });
             btn.connect("clicked", run);

@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import type { GaugeBlock, TrendBlock, WidgetBlock } from "../../../../src/space/panel/blocks.ts";
 import { fmt as webFmt, isOutdated as webOutdated, txt as webTxt } from "../../../../src/web/WidgetBlocks.tsx";
 import { decodeCatalogue } from "./catalogue.ts";
+import { BUILTIN_ICONS } from "../../../../src/space/panel/icons.ts";
+import { BUILTINS } from "../../../../src/web/screens.ts";
+import { BUILTIN_ART, BUILTIN_NAMES, builtinArt, builtinPage } from "./screens.ts";
 import { HOME, copyPanel, decodeScreenFile, edit, forget, move, newScreen, pin, rename, reset, screenTitle, screensOf, seed, unpin } from "./screens.ts";
 import { cardBody, deltaText, embedPath, fmt, fraction, gaugeSegments, isOutdated, itemsFor, position, rowsFor, shown, spark, tankLevel, tankValue, toneOf, txt } from "./widgets.ts";
 
@@ -104,4 +107,17 @@ test("screens: copied from the panel once, then this computer's own", () => {
   expect(screensOf(reset(f2, "c", panel), "c")).toEqual(copyPanel(panel));
   expect(forget(f2, "c")).toEqual({});
   expect(decodeScreenFile({ c: { screens: [{ id: "x", items: ["app:a", 3] }, "bad"], seeded: true }, d: "bad" })).toEqual({ c: { screens: [{ id: HOME, name: "", items: [] }, { id: "x", name: "", items: ["app:a"] }], seeded: true } });
+});
+
+test("the panel's own tiles: every one of them, with the panel's pictures and pages", async () => {
+  // Every tile the panel has is one this client draws, in the panel's order; the web panel's is its own.
+  expect(BUILTIN_NAMES.filter((n) => n !== "panel")).toEqual([...BUILTINS]);
+  // The picture shipped for a tile is the file the Space serves for it by default.
+  expect(Object.fromEntries(Object.entries(BUILTIN_ART).map(([name, file]) => [name, `/${file}`]))).toEqual({ ...BUILTIN_ICONS });
+  for (const file of Object.values(BUILTIN_ART)) expect(await Bun.file(`${import.meta.dir}/../../../../src/web/public/${file}`).exists()).toBe(true);
+  expect(BUILTIN_NAMES.map(builtinArt)).toEqual(["store.svg", "inbox.svg", "shortcuts.svg", "terminal.svg", undefined, "settings.svg"]);
+  // Inbox, Terminal and Settings are this client's own views; the others are pages of the panel.
+  expect(BUILTIN_NAMES.map(builtinPage)).toEqual(["/?page=store", undefined, "/?page=shortcuts", undefined, "/", undefined]);
+  // A screen copied from the panel keeps its App Store tile.
+  expect(copyPanel([{ id: HOME, name: "", items: BUILTINS.map((b) => `builtin:${b}`) }])[0]!.items).toEqual(BUILTINS.map((b) => `builtin:${b}`));
 });
