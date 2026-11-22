@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { lstat, mkdir, readdir, readlink, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, normalize, resolve, sep } from "node:path";
+import { basename, dirname, join, normalize, resolve, sep } from "node:path";
 import { SPACE_ROOT } from "./config.ts";
 import { LOCAL_LABEL, LOCAL_UNIT, localPaths, readOwnership, readRelease } from "./local.ts";
 import { Launchctl } from "./services/launchd.ts";
@@ -534,7 +534,7 @@ export async function runUninstall(d: ServiceDeps, plan: UninstallPlan): Promise
   for (const s of plan.steps) {
     d.log(s.detail);
     if (s.what === "app-service") {
-      const unit = h.manager.unitName(h.manager.appOfFile(s.target.split("/").at(-1)!)!);
+      const unit = h.manager.unitName(h.manager.appOfFile(basename(s.target))!);
       await h.manager.disableNow(unit).catch((e: Error) => d.log(`  ${e.message}`));
       await rm(s.target, { force: true });
       await h.manager.resetFailed(unit).catch(() => {});
