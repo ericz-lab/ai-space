@@ -42,7 +42,7 @@ internal sealed class IconStore(Func<SpaceApi?> api)
     /// on a tinted ground. An app's icon is cut to a rounded square; <paramref name="round"/> cuts it
     /// to a circle, as every client draws an agent's avatar (the web panel's <c>.tile.agent</c>). It
     /// swaps itself when the picture arrives. <paramref name="placeholder"/>, when given, stands in for
-    /// the letter (a built-in page's glyph).
+    /// the letter (a built-in page's own artwork).
     /// </summary>
     public FrameworkElement View(string? icon, string fallback, double size = 40, bool round = false, Func<FrameworkElement>? placeholder = null)
     {
@@ -53,13 +53,7 @@ internal sealed class IconStore(Func<SpaceApi?> api)
             host.Children.Clear();
             if (Get(icon) is { } image)
             {
-                var img = new Image { Source = image, Width = size, Height = size, Stretch = Stretch.UniformToFill };
-                RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
-                // A clip, not a border's corners: a border's ClipToBounds clips to its square.
-                img.Clip = round
-                    ? new EllipseGeometry(new Point(size / 2, size / 2), size / 2, size / 2)
-                    : new RectangleGeometry(new Rect(0, 0, size, size), radius, radius);
-                host.Children.Add(img);
+                host.Children.Add(Picture(image, size, round));
                 return;
             }
             if (placeholder is not null)
@@ -89,6 +83,23 @@ internal sealed class IconStore(Func<SpaceApi?> api)
             Arrived += OnArrived;
         }
         return host;
+    }
+
+    /// <summary>
+    /// A picture as an icon of <paramref name="size"/>: cut to a rounded square, or to a circle. Its
+    /// ground is whatever lies behind it: nothing is painted under the picture, so one with
+    /// transparent parts shows the page there.
+    /// </summary>
+    public static Image Picture(ImageSource image, double size, bool round)
+    {
+        var radius = size * 0.22;
+        var img = new Image { Source = image, Width = size, Height = size, Stretch = Stretch.UniformToFill };
+        RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+        // A clip, not a border's corners: a border's ClipToBounds clips to its square.
+        img.Clip = round
+            ? new EllipseGeometry(new Point(size / 2, size / 2), size / 2, size / 2)
+            : new RectangleGeometry(new Rect(0, 0, size, size), radius, radius);
+        return img;
     }
 
     /// <summary>Forgets every picture (the Space signed out or changed address): they are fetched again when next asked.</summary>

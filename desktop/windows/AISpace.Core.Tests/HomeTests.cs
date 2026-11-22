@@ -103,7 +103,7 @@ public class HomeTests
         Assert.Empty(c.Widgets);
         Assert.Null(c.Screens);
         // Without stored screens, the panel's seeded home: the first apps, its own tiles, then agents and widgets.
-        Assert.Equal(["app:a", "builtin:inbox", "builtin:shortcuts", "builtin:terminal", "builtin:settings"], c.PanelScreens()[0].Items);
+        Assert.Equal(["app:a", "builtin:store", "builtin:inbox", "builtin:shortcuts", "builtin:terminal", "builtin:settings"], c.PanelScreens()[0].Items);
         // A widget state that only changes its time draws the same card.
         var a = HomeWidget.Decode(J("""{"id":"x/y","app":"x","name":"y","title":"T","items":[{"text":"a"}],"asOf":"2026-01-01T00:00:00Z"}"""))!;
         var b = HomeWidget.Decode(J("""{"id":"x/y","app":"x","name":"y","title":"T","items":[{"text":"a"}],"asOf":"2026-01-02T00:00:00Z"}"""))!;
@@ -299,6 +299,20 @@ public class HomeTests
         // A screen pinned with one machine's variant of an agent shows the agent once.
         var groups = AgentGroups.Group([new HomeAgent("seoul/a/b", "a", "b", "B") { Peer = "seoul" }, new HomeAgent("a/b", "a", "b", "B")]);
         Assert.Equal(["agent:a/b", "app:x"], AgentGroups.CanonicalItems(["agent:seoul/a/b", "agent:a/b", "app:x"], groups));
+    }
+
+    [Fact]
+    public void TheBuiltInTilesAreThePanelsWithTheAppStoreFirst()
+    {
+        Assert.Equal(["store", "inbox", "shortcuts", "terminal", "settings"], HomeScreens.Builtins);
+        // A copy of the panel's screens keeps the App Store's tile.
+        Assert.Equal(["builtin:store", "app:a"], HomeScreens.CopyPanel([new HomeScreen("home", "", ["builtin:store", "builtin:panel", "app:a"])])[0].Items);
+        // The panel's stock icon for a tile: the client draws the artwork it carries. An icon pack's picture is the Space's choice.
+        Assert.True(HomeScreens.IsStockIcon("inbox", "/inbox.svg"));
+        Assert.True(HomeScreens.IsStockIcon("store", null));
+        Assert.True(HomeScreens.IsStockIcon("store", ""));
+        Assert.False(HomeScreens.IsStockIcon("inbox", "/api/panel/icons/per-app/app?id=space%2Finbox"));
+        Assert.False(HomeScreens.IsStockIcon("inbox", "/terminal.svg"));
     }
 
     [Fact]

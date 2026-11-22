@@ -26,9 +26,11 @@ internal static class Ui
         Computer = "", Globe = "", Warning = "", Lock = "";
 
     // More glyphs, written as escapes: Terminal (CommandPrompt), Shortcuts (LightningBolt), Search,
-    // Apps (AllApps), Web (the web panel: Globe), Agent (Robot), Pin, Delete, Accept, Edit, Sync.
+    // Apps (AllApps), Web (the web panel: Globe), Agent (Robot), Pin, Delete, Accept, Edit, Sync,
+    // Store (Shop).
     public const string Terminal = "\uE756", Shortcuts = "\uE945", Search = "\uE721", Apps = "\uE71D",
-        Web = "\uE774", Agent = "\uE99A", Pin = "\uE718", Delete = "\uE74D", Accept = "\uE8FB", Edit = "\uE70F", Sync = "\uE895";
+        Web = "\uE774", Agent = "\uE99A", Pin = "\uE718", Delete = "\uE74D", Accept = "\uE8FB", Edit = "\uE70F", Sync = "\uE895",
+        Store = "\uE719";
 
     public static TextBlock Text(string text, double size = 14, bool secondary = false, bool bold = false, bool wrap = true)
     {

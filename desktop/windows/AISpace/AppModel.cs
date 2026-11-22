@@ -19,12 +19,14 @@ internal enum WebTabKind
     Chat,
     /// <summary>The web panel itself, for what has no native page yet and for signing in.</summary>
     Panel,
+    /// <summary>The Space's App Store page (<c>/?page=store</c>).</summary>
+    Store,
 }
 
 /// <summary>
 /// A web tab of the main window: an app of the Space, or one of the Space's own pages (terminal,
-/// chat, the web panel). <see cref="Key"/> names it among the Space's tabs: <c>app:&lt;id&gt;</c>,
-/// <c>terminal</c>, <c>chat</c>, <c>panel</c>.
+/// chat, the App Store, the web panel). <see cref="Key"/> names it among the Space's tabs: <c>app:&lt;id&gt;</c>,
+/// <c>terminal</c>, <c>chat</c>, <c>store</c>, <c>panel</c>.
 /// </summary>
 internal sealed record WebTab(string Key, WebTabKind Kind, AppInfo? App, PanelView View)
 {
@@ -35,6 +37,7 @@ internal sealed record WebTab(string Key, WebTabKind Kind, AppInfo? App, PanelVi
         WebTabKind.App => App!.DisplayTitle(),
         WebTabKind.Terminal => L.T("Terminal"),
         WebTabKind.Panel => L.T("Web Panel"),
+        WebTabKind.Store => L.T("App Store"),
         _ => View.PageTitle is { Length: > 0 } t ? t.Replace(" · ai-space", "", StringComparison.Ordinal) : L.T("Chat"),
     };
 }
@@ -279,8 +282,11 @@ internal sealed class AppModel
 
     public void ShowInbox(Guid? connection = null) => ShowPage(connection, PageKind.Inbox);
 
-    /// <summary>The web tab of one of the Space's own pages, made (at <paramref name="url"/>) or moved there.</summary>
-    private void ShowSpaceTab(Connection c, WebTabKind kind, Uri url)
+    /// <summary>
+    /// The web tab of one of the Space's own pages, made (at <paramref name="url"/>) or moved there;
+    /// with <paramref name="keepPage"/> a tab that is already open is shown as it is.
+    /// </summary>
+    private void ShowSpaceTab(Connection c, WebTabKind kind, Uri url, bool keepPage = false)
     {
         var key = kind.ToString().ToLowerInvariant();
         if (!_tabs.TryGetValue(c.Id, out var tabs)) _tabs[c.Id] = tabs = [];
@@ -291,7 +297,12 @@ internal sealed class AppModel
             var view = kind == WebTabKind.Panel ? Panel(c) : NewView(c, url, verifiesSpace: false, app: null);
             if (kind != WebTabKind.Panel)
             {
-                var own = kind == WebTabKind.Terminal ? SpacePageKind.Terminal : SpacePageKind.Chat;
+                var own = kind switch
+                {
+                    WebTabKind.Terminal => SpacePageKind.Terminal,
+                    WebTabKind.Store => SpacePageKind.Store,
+                    _ => SpacePageKind.Chat,
+                };
                 view.Leaves = u => SpacePages.LeavesTab(u, c.Uri, own);
             }
             tab = new WebTab(key, kind, null, view);
@@ -299,7 +310,7 @@ internal sealed class AppModel
             if (kind != WebTabKind.Panel) view.Load();
             else if (view.Current != url && url != c.Uri) view.Navigate(url);
         }
-        else if (tab.View.Current != url && (kind != WebTabKind.Panel || url != c.Uri))
+        else if (!keepPage && tab.View.Current != url && (kind != WebTabKind.Panel || url != c.Uri))
         {
             tab.View.Navigate(url);
         }
@@ -326,6 +337,22 @@ internal sealed class AppModel
             return;
         }
         ShowSpaceTab(c, WebTabKind.Terminal, SpacePages.PageUrl(c.Uri, SpacePageKind.Terminal));
+    }
+
+    /// <summary>
+    /// The Space's App Store in its tab; <paramref name="pick"/> opens it as the first-use card does,
+    /// with every installable app ticked. What is installed there the page pins to the panel's home
+    /// screen, and Home takes it from there (<see cref="HomeScreens.FollowPanel"/>).
+    /// </summary>
+    public void ShowStore(Guid? connection = null, bool pick = false)
+    {
+        if (Target(connection) is not { } c)
+        {
+            ShowMainWindow();
+            return;
+        }
+        // An open store keeps its page (an install may be running there) unless the card asks for its ticks.
+        ShowSpaceTab(c, WebTabKind.Store, SpacePages.StoreUrl(c.Uri, pick), keepPage: !pick);
     }
 
     /// <summary>The Space's web panel in its tab, at <paramref name="url"/> (one of its pages) when given.</summary>
@@ -359,6 +386,9 @@ internal sealed class AppModel
                 break;
             case SpacePageKind.Terminal:
                 ShowTerminal(connection);
+                break;
+            case SpacePageKind.Store:
+                ShowStore(connection);
                 break;
             default:
                 // The chat page on the linked agent and session; a fragment link's text becomes its draft.

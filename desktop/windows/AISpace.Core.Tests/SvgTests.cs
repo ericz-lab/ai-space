@@ -47,6 +47,39 @@ public class SvgTests
         </svg>
         """;
 
+    // src/web/public/store.svg, the App Store's icon the Windows client carries (Assets/Builtins/store.svg).
+    private const string Store = """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <defs>
+            <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0f766e"/>
+            </linearGradient>
+          </defs>
+          <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+          <rect x="1" y="1" width="62" height="62" rx="13" fill="none" stroke="#fff" stroke-opacity=".12"/>
+          <!-- A shopping bag: handle over a body, and a download arrow on it. -->
+          <path d="M24 24 V21 Q24 13 32 13 Q40 13 40 21 V24" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/>
+          <path d="M15 24 Q15 22 17 22 L47 22 Q49 22 49 24 L50.5 47 Q50.7 51 47 51 L17 51 Q13.3 51 13.5 47 Z" fill="#fff" fill-opacity=".95"/>
+          <path d="M32 29 V42 M26.5 36.5 L32 42 L37.5 36.5" fill="none" stroke="#0f766e" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        """;
+
+    [Fact]
+    public void ReadsTheAppStoresIcon()
+    {
+        var store = SvgReader.Read(Store)!;
+        Assert.Equal((0d, 0d, 64d, 64d), (store.X, store.Y, store.Width, store.Height));
+        var shapes = Shapes(store.Root).ToList();
+        Assert.Equal(5, shapes.Count);
+        // The plate: a rounded square, so the icon's corners stay transparent.
+        Assert.Equal([0, 0, 64, 64, 14, 14], shapes[0].Numbers);
+        Assert.Equal([new SvgStop(0, 0xFF2DD4BF), new SvgStop(1, 0xFF0F766E)], Assert.IsType<SvgLinearGradient>(shapes[0].Fill).Stops);
+        Assert.Null(shapes[2].Fill);
+        Assert.Equal("M 24 24 V 21 Q 24 13 32 13 Q 40 13 40 21 V 24", shapes[2].PathData);
+        Assert.Equal(3.5, shapes[2].StrokeWidth);
+        Assert.Equal(new SvgColor(0xFF0F766E), shapes[4].Stroke);
+    }
+
     private static IEnumerable<SvgShape> Shapes(SvgNode n) => n switch
     {
         SvgShape s => [s],

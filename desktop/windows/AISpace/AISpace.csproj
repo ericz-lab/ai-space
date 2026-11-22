@@ -33,6 +33,12 @@
     <Resource Include="Assets\AISpace.ico" />
     <Resource Include="Assets\AppMark.png" />
     <Resource Include="Assets\pet-claude.png" />
+    <!-- The built-in pages' icons (Views/HomeTiles.cs, BuiltinArt). -->
+    <Resource Include="Assets\Builtins\inbox.png" />
+    <Resource Include="Assets\Builtins\shortcuts.png" />
+    <Resource Include="Assets\Builtins\terminal.png" />
+    <Resource Include="Assets\Builtins\settings.png" />
+    <Resource Include="Assets\Builtins\store.svg" />
   </ItemGroup>
 
   <!-- WPF and WinForms both define Application, Button and the like; the app means WPF's, and

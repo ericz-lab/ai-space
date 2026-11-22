@@ -3,25 +3,79 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using AISpace.Core;
 
 namespace AISpace.Views;
 
-/// <summary>One of the panel's own pages as a Home tile: its <c>builtin:</c> name, its Fluent glyph and its label.</summary>
-internal sealed record HomeBuiltin(string Name, string Glyph, string English, Func<string> Label)
+/// <summary>
+/// One of the panel's own pages as a Home tile: its <c>builtin:</c> name, its artwork
+/// (<see cref="BuiltinArt"/>: a file of <c>Assets/Builtins</c>), the Fluent glyph that stands in only
+/// if that file cannot be read, and its label. In the order of <see cref="HomeScreens.Builtins"/>.
+/// </summary>
+internal sealed record HomeBuiltin(string Name, string Art, string Glyph, string English, Func<string> Label)
 {
     public static readonly HomeBuiltin[] All =
     [
-        new("inbox", Ui.Inbox, "Inbox", () => L.T("Inbox")),
-        new("shortcuts", Ui.Shortcuts, "Shortcuts", () => L.T("Shortcuts")),
-        new("terminal", Ui.Terminal, "Terminal", () => L.T("Terminal")),
-        new("settings", Ui.Settings, "Settings", () => L.T("Settings")),
+        new("store", "store.svg", Ui.Store, "App Store", () => L.T("App Store")),
+        new("inbox", "inbox.png", Ui.Inbox, "Inbox", () => L.T("Inbox")),
+        new("shortcuts", "shortcuts.png", Ui.Shortcuts, "Shortcuts", () => L.T("Shortcuts")),
+        new("terminal", "terminal.png", Ui.Terminal, "Terminal", () => L.T("Terminal")),
+        new("settings", "settings.png", Ui.Settings, "Settings", () => L.T("Settings")),
     ];
 
     public static HomeBuiltin? Of(string name) => All.FirstOrDefault(b => b.Name == name);
 
     /// <summary>As a catalogue entry, so the search finds it by its label in the interface's language, in English, and by its name.</summary>
     public HomeEntry Entry() => new(HomeKind.Builtin, Name, Label()) { I18n = new Dictionary<string, LocalizedText> { ["en"] = new(English, null) } };
+}
+
+/// <summary>
+/// The built-in pages' icons the app carries (<c>Assets/Builtins</c>): the pictures the Seoul hub's
+/// panel shows for them. Inbox, Shortcuts, Terminal and Settings are its icon pack's (a coloured
+/// plate each, here as PNG with the plate's corners transparent, since WPF reads WebP only where
+/// Windows has that codec); the App Store's is the panel's own <c>store.svg</c>, drawn as a vector.
+/// Read once and kept; a file that cannot be read is null, and the tile shows its glyph.
+/// </summary>
+internal static class BuiltinArt
+{
+    private static readonly Dictionary<string, ImageSource?> Loaded = [];
+
+    public static ImageSource? Of(string file)
+    {
+        if (Loaded.TryGetValue(file, out var known)) return known;
+        ImageSource? image = null;
+        try
+        {
+            var uri = new Uri("pack://application:,,,/Assets/Builtins/" + file);
+            if (file.EndsWith(".svg", StringComparison.Ordinal))
+            {
+                if (Application.GetResourceStream(uri) is { } resource)
+                {
+                    using var stream = resource.Stream;
+                    using var bytes = new MemoryStream();
+                    stream.CopyTo(bytes);
+                    image = SvgDrawing.Image(bytes.ToArray());
+                }
+            }
+            else
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.UriSource = uri;
+                bitmap.EndInit();
+                bitmap.Freeze();
+                image = bitmap;
+            }
+        }
+        catch (Exception e) when (e is IOException or NotSupportedException or InvalidOperationException or ArgumentException or System.Runtime.InteropServices.COMException)
+        {
+            Shell.Log.Write($"built-in icon {file} not read: {e.Message}");
+        }
+        Loaded[file] = image;
+        return image;
+    }
 }
 
 /// <summary>What a tile marks at its icon's corner: an unread count, an agent at work, or why it will not answer.</summary>
@@ -132,10 +186,14 @@ internal static class HomeTiles
         return b;
     }
 
-    /// <summary>A built-in page's icon: its glyph on a tinted rounded square, the size of an app's icon.</summary>
-    public static FrameworkElement BuiltinIcon(string glyph, double size = IconSize)
+    /// <summary>
+    /// A built-in page's icon, the size of an app's and cut to the same rounded square: its artwork
+    /// (<see cref="BuiltinArt"/>); its glyph on a tinted square only when the artwork cannot be read.
+    /// </summary>
+    public static FrameworkElement BuiltinIcon(HomeBuiltin? builtin, double size = IconSize)
     {
-        var g = Ui.Glyph(glyph, size * 0.46);
+        if (builtin is not null && BuiltinArt.Of(builtin.Art) is { } art) return IconStore.Picture(art, size, round: false);
+        var g = Ui.Glyph(builtin?.Glyph ?? Ui.Apps, size * 0.46);
         g.HorizontalAlignment = HorizontalAlignment.Center;
         g.SetResourceReference(TextBlock.ForegroundProperty, "AccentTextFillColorPrimaryBrush");
         var tile = new Border { Child = g, Width = size, Height = size, CornerRadius = new CornerRadius(size * 0.22) };

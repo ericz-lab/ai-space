@@ -21,6 +21,9 @@ internal static partial class L
         ["Widgets"] = "小组件",
         ["None of this kind yet"] = "还没有这一类内容",
 
+        // The App Store.
+        ["App Store"] = "应用商店",
+
         // The page's states.
         ["Loading the Space…"] = "正在读取空间…",
         ["Home could not be loaded"] = "无法加载主页",

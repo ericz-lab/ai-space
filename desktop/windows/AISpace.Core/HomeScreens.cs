@@ -23,7 +23,15 @@ public static class HomeScreens
     public const int Limit = 20;
 
     /// <summary>The panel's own tiles, in the order the panel's library and a seeded home screen show them.</summary>
-    public static readonly string[] PanelBuiltins = ["inbox", "shortcuts", "terminal", "settings"];
+    public static readonly string[] PanelBuiltins = ["store", "inbox", "shortcuts", "terminal", "settings"];
+
+    /// <summary>
+    /// Whether the icon the Space names for one of its own tiles (<c>builtins</c> of <c>/api/apps</c>)
+    /// is the panel's stock one (<c>/inbox.svg</c>) rather than an icon pack's: the client then draws
+    /// the artwork it carries, and an icon pack's picture otherwise.
+    /// </summary>
+    public static bool IsStockIcon(string name, string? served) => string.IsNullOrEmpty(served) || served == $"/{name}.svg";
+
 
     /// <summary>
     /// The <c>builtin:</c> tiles this client draws: the panel's own. The web panel is no tile (it

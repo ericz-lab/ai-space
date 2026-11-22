@@ -286,6 +286,7 @@ internal sealed partial class HomePage : NativePage
             case "shortcuts": Context.Show(PageKind.Shortcuts); break;
             case "settings": Context.Show(PageKind.Settings); break;
             case "terminal": Context.OpenTerminal(); break;
+            case "store": Context.OpenStore(); break;
             // A built-in the app no longer draws (builtin:panel on a screen saved before): nothing.
             default: break;
         }
@@ -365,6 +366,8 @@ internal sealed partial class HomePage : NativePage
         {
             foreach (var e in c.Apps.Concat(c.Agents)) s.Append(e.Key).Append('|').Append(e.Title).Append('|').Append(e.Icon).Append('|').Append(e.Reach).Append('|').Append(e.Peer).Append('\n');
             foreach (var w in c.Widgets) s.Append(w.Id).Append('|').Append(w.Title).Append('|').Append(w.State).Append('\n');
+            foreach (var (name, served) in c.BuiltinIcons) s.Append(name).Append('=').Append(served).Append(',');
+            s.Append('\n');
         }
         if (Context.Live is { } live)
         {
@@ -675,11 +678,12 @@ internal sealed partial class HomePage : NativePage
         FrameworkElement icon;
         if (e.Kind == HomeKind.Builtin)
         {
-            // The Space's own icon for the page when it serves one (the panel's, drawn from SVG), its glyph meanwhile or else.
-            var glyph = HomeBuiltin.Of(e.Ref)?.Glyph ?? Ui.Apps;
-            icon = _catalogue?.BuiltinIcons.GetValueOrDefault(e.Ref) is { } served
-                ? Context.Icons.View(served, title, HomeTiles.IconSize, placeholder: () => HomeTiles.BuiltinIcon(glyph))
-                : HomeTiles.BuiltinIcon(glyph);
+            // The artwork the app carries for the page. A Space whose icon pack has a picture of its
+            // own for it shows that one, the carried artwork meanwhile and when it cannot be drawn.
+            var builtin = HomeBuiltin.Of(e.Ref);
+            icon = _catalogue?.BuiltinIcons.GetValueOrDefault(e.Ref) is { } served && !HomeScreens.IsStockIcon(e.Ref, served)
+                ? Context.Icons.View(served, title, HomeTiles.IconSize, placeholder: () => HomeTiles.BuiltinIcon(builtin))
+                : HomeTiles.BuiltinIcon(builtin);
             if (e.Ref == "inbox" && live is { Summary.Unread: > 0 } l)
             {
                 mark = TileMark.Count;
