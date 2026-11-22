@@ -38,7 +38,17 @@ a link.
   **From source** for an app with no release yet. A search reads the name, the titles and
   descriptions in every language, and the publisher. Tick several and **Install N chosen**.
 - **Installed**: the catalog apps on this Space. **Updates**: those with a newer release; the tab
-  carries the count.
+  carries the count, and **Update all** updates them one after the other (an app that is refused,
+  or whose changed source you keep, does not stop the others; every refusal is listed).
+- The tile carries a badge with the number of apps that have an update. The Space counts it from
+  the catalogs it has cached (`GET /api/app-catalog/updates`) and never waits for the network: a
+  copy older than 6 hours is read again in the background, and the next count uses it. The panel
+  asks on load, every 5 minutes while visible, and after each change in the store.
+- While an install or upgrade runs, its card and its details show the step it is on (downloading,
+  with the bytes and a bar, checking the checksum and signature, installing and starting, copying
+  the source; for a source build cloning or bringing the checkout forward, then building). The
+  install request still answers only when everything is done; the page reads the step from
+  `GET /api/app-catalog/progress` every half second meanwhile.
 - **Details** (click a card): the full description, the release and its tag, what is installed and
   how (the signed package, built from source and from which branch, or installed another way),
   where its source is (`app-src/<app>` as released, changed by you, or your own checkout), the
@@ -224,6 +234,8 @@ directory when it runs from a bundle.
 | `GET /api/app-catalog[?refresh=1]` | owner | `{ sources, apps, trusted, git }`: each app with `latest`, `installed` (`version`, `origin` package / source / local, `ref`, `dev`, `source` pristine / modified / own when `app-src/<app>` exists), `state` (available, installed, update, unreleased, legacy) and its publisher's `trusted` |
 | `POST /api/app-catalog/:app/install` | owner | `{ from?: "package" \| "source", withSource?, ref?, trust? }` (`withSource` defaults to true) → `{ result: { app, version, action, from, ref, dir?, source?: { dir, action: "copied" \| "updated" \| "kept" \| "replaced", saved? } } }` |
 | `POST /api/app-catalog/:app/upgrade` | owner | `{ from?, ref?, trust?, withSource?, replaceSource? }`, same answer |
+| `GET /api/app-catalog/updates` | owner | `{ count, apps: [{ name, installed, latest }], fetchedAt? }`: installed apps with a newer release in the cached catalogs; never waits for the network (an old or missing copy is read again in the background) |
+| `GET /api/app-catalog/progress` | owner | `{ progress: [{ app, kind: "install" \| "upgrade", stage, received?, total?, since }] }`: changes in flight; `stage` is `download` (with bytes), `verify`, `install`, `source`, `clone`, `pull` or `build` |
 | `DELETE /api/app-catalog/publishers/:keyId` | owner | `{ removed }` |
 
 A refusal is `{ ok: false, error, code }`; `code` is one of `trust-required` (with `publisher`:

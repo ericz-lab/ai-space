@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { type CatalogEntry, type CatalogView, catalogOffers, useCatalog } from "./AppCatalog.tsx";
+import { type Catalog, type CatalogEntry, type CatalogView, catalogOffers, useCatalog } from "./AppCatalog.tsx";
 import { LangContext } from "./i18n.ts";
-import Store, { Detail, storePreselect, tabApps } from "./Store.tsx";
+import Store, { Detail, ProgressLine, UpdateAll, storePreselect, tabApps } from "./Store.tsx";
 
 const publisher = { id: "acme", name: "Acme", keyId: "a".repeat(64), trusted: true };
 const entry = (name: string, over: Partial<CatalogEntry> = {}): CatalogEntry => ({
@@ -164,4 +164,40 @@ test("the first-use card counts installable apps only on a Space without any cat
   expect(await catalogOffers()).toBe(0);
   globalThis.fetch = (async () => { throw new Error("offline"); }) as unknown as typeof fetch;
   expect(await catalogOffers()).toBe(0);
+});
+
+function UpdateAllOf({ v }: { v: CatalogView }) {
+  const cat = useCatalog({ initial: v });
+  return <UpdateAll cat={cat} apps={v.apps.filter((a) => a.state === "update")} />;
+}
+
+test("the Updates tab offers one button for every app with a newer release", () => {
+  const v = view([entry("a", { installed: installed("0.1.0"), state: "update" }), entry("b", { installed: installed("0.2.0"), state: "update" })]);
+  const html = renderToStaticMarkup(
+    <LangContext.Provider value="en">
+      <UpdateAllOf v={v} />
+    </LangContext.Provider>,
+  );
+  expect(html).toContain("2 apps have a newer release.");
+  expect(html).toContain(">Update all<");
+});
+
+test("an install in flight shows its step, and the download as a share of the package", () => {
+  const a = entry("one");
+  const line = (progress: Catalog["progress"], app = "one") =>
+    renderToStaticMarkup(
+      <LangContext.Provider value="en">
+        <ProgressLine a={a} cat={{ working: { app, how: "install" }, progress } as unknown as Catalog} />
+      </LangContext.Provider>,
+    );
+  const since = "2026-11-21T00:00:00.000Z";
+  const download = line({ app: "one", kind: "install", stage: "download", received: 1_048_576, total: 4_194_304, since });
+  expect(download).toContain("Downloading · 1.0 MB of 4.0 MB");
+  expect(download).toContain("width:25%");
+  const build = line({ app: "one", kind: "install", stage: "build", since });
+  expect(build).toContain("Building");
+  expect(build).toContain('class="busy"');
+  // Another app's change, or none, shows nothing here.
+  expect(line({ app: "two", kind: "install", stage: "build", since }, "two")).toBe("");
+  expect(line(null)).toBe("");
 });

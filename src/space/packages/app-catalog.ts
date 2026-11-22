@@ -204,6 +204,12 @@ export type CatalogView = { sources: SourceState[]; apps: CatalogEntryView[]; tr
  * a copy the owner changed is moved aside and the new release's takes its place.
  */
 export type InstallRequest = { from?: "package" | "source"; withSource?: boolean; replaceSource?: boolean; ref?: string; trust?: boolean };
+/** Where an install or upgrade in flight is: the page shows it while the request waits (it answers when everything is done). */
+export type ProgressStage = "download" | "verify" | "install" | "source" | "clone" | "pull" | "build";
+export type Progress = { app: string; kind: "install" | "upgrade"; stage: ProgressStage; received?: number; total?: number; since: string };
+/** What the panel's tile shows without reading a catalog: the apps here with a newer release in the last copy read. */
+export type UpdatesView = { count: number; apps: { name: string; installed: string; latest: string }[]; fetchedAt?: string };
+
 export type InstallResult = { app: string; version: string; action: "installed" | "upgraded"; from: "package" | "source"; dir?: string; ref?: string | null; source?: SourceOutcome };
 
 export type AppCatalogDeps = {
@@ -223,6 +229,8 @@ export class AppCatalog {
   private readonly fetchFn: (url: string, init?: RequestInit) => Promise<Response>;
   private readonly now: () => number;
   private busy: Promise<unknown> = Promise.resolve();
+  private readonly inFlight = new Map<string, Progress>();
+  private readonly refreshing = new Map<string, Promise<unknown>>();
 
   constructor(private readonly d: AppCatalogDeps) {
     this.fetchFn = d.fetch ?? ((url, init) => fetch(url, init));
@@ -273,7 +281,7 @@ export class AppCatalog {
     return join(this.cacheDir, `${createHash("sha256").update(url).digest("hex").slice(0, 32)}.json`);
   }
 
-  private async fetchText(url: URL, limit: number, timeoutMs: number): Promise<Uint8Array> {
+  private async fetchText(url: URL, limit: number, timeoutMs: number, onBytes?: (received: number, total?: number) => void): Promise<Uint8Array> {
     if (url.protocol === "file:") {
       const file = Bun.file(fileURLToPath(url));
       if (file.size > limit) throw new Error("too large");
@@ -285,6 +293,7 @@ export class AppCatalog {
     if (Number(res.headers.get("content-length") ?? 0) > limit) throw new Error("too large");
     const reader = res.body?.getReader();
     if (!reader) return new Uint8Array();
+    const declared = Number(res.headers.get("content-length") ?? 0) || undefined;
     const chunks: Uint8Array[] = [];
     let total = 0;
     for (;;) {
@@ -293,6 +302,7 @@ export class AppCatalog {
       total += value.length;
       if (total > limit) { await reader.cancel(); throw new Error("too large"); }
       chunks.push(value);
+      onBytes?.(total, declared);
     }
     return Buffer.concat(chunks, total);
   }
@@ -388,13 +398,73 @@ export class AppCatalog {
     return { sources, apps, trusted: this.confirmed().map(({ keyId, name }) => ({ keyId, name })), git: !!this.git() };
   }
 
+  /**
+   * The apps installed here that the last copy of each catalog has a newer release of. Never waits
+   * for the network: a copy older than the cache's 6 hours (or none yet) is read again in the
+   * background, and the next call counts from it. Cheap enough for a tile's badge.
+   */
+  async updates(): Promise<UpdatesView> {
+    const seen = new Set<string>();
+    const apps: UpdatesView["apps"] = [];
+    let oldest: number | undefined;
+    for (const url of this.d.sources) {
+      const l = await this.cached(url);
+      if (!l?.catalog || url.startsWith("file:") || this.now() - (l.fetchedAt ?? 0) >= CACHE_TTL_MS) this.refreshLater(url);
+      if (l?.fetchedAt !== undefined) oldest = oldest === undefined ? l.fetchedAt : Math.min(oldest, l.fetchedAt);
+      for (const a of l?.catalog?.apps ?? []) {
+        if (seen.has(a.name)) continue;
+        seen.add(a.name);
+        const op = this.d.studio.store.installed(a.name);
+        if (op && a.latest && newerVersion(a.latest.version, op.version)) apps.push({ name: a.name, installed: op.version, latest: a.latest.version });
+      }
+    }
+    return { count: apps.length, apps, ...(oldest !== undefined ? { fetchedAt: new Date(oldest).toISOString() } : {}) };
+  }
+
+  /** The copy in memory, else the one on disk; never the network. */
+  private async cached(url: string): Promise<Loaded | undefined> {
+    const mem = this.memory.get(url);
+    if (mem) return mem;
+    const file = Bun.file(this.cacheFile(url));
+    if (!(await file.exists())) return undefined;
+    try {
+      const saved = (await file.json()) as { url: string; fetchedAt: number; body: unknown };
+      if (saved.url !== url) return undefined;
+      const loaded: Loaded = { url, catalog: parseCatalog(saved.body), fetchedAt: saved.fetchedAt };
+      this.memory.set(url, loaded);
+      return loaded;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** One background read of a catalog at a time; its failure is the next view's to report. */
+  private refreshLater(url: string): void {
+    if (this.refreshing.has(url)) return;
+    const run = this.loadOne(url, false).catch(() => {}).finally(() => this.refreshing.delete(url));
+    this.refreshing.set(url, run);
+  }
+
+  /** Installs and upgrades in flight, for the page to show while their requests wait. */
+  progress(): Progress[] {
+    return [...this.inFlight.values()];
+  }
+  private stage(app: string, kind: Progress["kind"], stage: ProgressStage, bytes?: { received: number; total?: number }): void {
+    const prev = this.inFlight.get(app);
+    this.inFlight.set(app, { app, kind, stage, ...(bytes ? { received: bytes.received, ...(bytes.total ? { total: bytes.total } : {}) } : {}), since: prev?.stage === stage ? prev.since : new Date(this.now()).toISOString() });
+  }
+  /** Runs one change with its progress tracked from the first step to the answer. */
+  private tracked<T>(app: string, work: () => Promise<T>): Promise<T> {
+    return work().finally(() => this.inFlight.delete(app));
+  }
+
   // -- installing -----------------------------------------------------------------------------
 
   install(name: string, req: InstallRequest = {}): Promise<InstallResult> {
     return this.serial(async () => {
       const found = await this.find(name);
       if (await this.legacy(name)) throw new CatalogError(`${name} already runs from a source deployment here; move it to a package first (docs/package-migration.md)`, 409, "legacy");
-      return (req.from ?? "package") === "source" ? this.fromSource(found, req, false) : this.fromPackage(found, req);
+      return this.tracked(name, () => ((req.from ?? "package") === "source" ? this.fromSource(found, req, false) : this.fromPackage(found, req)));
     });
   }
 
@@ -404,7 +474,7 @@ export class AppCatalog {
       const found = await this.find(name);
       if (!this.d.studio.store.installed(name)) throw new CatalogError(`${name} is not installed`, 409, "not-installed");
       const from = req.from ?? (this.origin(name)?.origin === "source" ? "source" : "package");
-      return from === "source" ? this.fromSource(found, req, true) : this.fromPackage(found, req);
+      return this.tracked(name, () => (from === "source" ? this.fromSource(found, req, true) : this.fromPackage(found, req)));
     });
   }
 
@@ -421,6 +491,7 @@ export class AppCatalog {
     const release = entry.latest;
     if (!release) throw new CatalogError(`${entry.name} has no release yet; install it from source`, 409, "unreleased");
     const installed = this.d.studio.store.installed(entry.name);
+    const kind = installed ? "upgrade" : "install";
     if (installed && !newerVersion(release.version, installed.version)) throw new CatalogError(`${entry.name} ${installed.version} is installed; the catalog's release is ${release.version}`, 409, "current");
     this.requireTrust(publisher, req, entry.name);
     const variant = req.withSource !== false && release.sourcePackage ? "source" : "bundle";
@@ -436,11 +507,13 @@ export class AppCatalog {
     const url = new URL(chosen.url, catalog);
     if (!allowedLocation(url, catalog.startsWith("file:"))) throw new CatalogError(`the package location ${url.href} is not allowed`, 409, "location");
     let bytes: Uint8Array;
+    this.stage(entry.name, kind, "download", { received: 0 });
     try {
-      bytes = url.protocol === "file:" ? await readPackageFile(fileURLToPath(url)) : await this.fetchText(url, DEFAULT_ARCHIVE_LIMIT, 300_000);
+      bytes = url.protocol === "file:" ? await readPackageFile(fileURLToPath(url)) : await this.fetchText(url, DEFAULT_ARCHIVE_LIMIT, 300_000, (received, total) => this.stage(entry.name, kind, "download", { received, total }));
     } catch (e) {
       throw new CatalogError(`could not download ${entry.name} ${release.version}: ${(e as Error).message}`, 502, "download");
     }
+    this.stage(entry.name, kind, "verify");
     if (sha256(bytes) !== chosen.sha256) throw new CatalogError(`the downloaded package of ${entry.name} does not match the catalog's checksum`, 502, "checksum");
     const keys = [...this.d.trustedKeys, ...this.confirmed().map((c) => c.publicKey)];
     const inspected = await inspectPackage(bytes, keys).catch((e) => { throw new CatalogError(`the package of ${entry.name} is invalid: ${(e as Error).message}`, 502, "invalid-package"); });
@@ -449,6 +522,7 @@ export class AppCatalog {
     }
     if (inspected.manifest.app !== entry.name || inspected.manifest.version !== release.version) throw new CatalogError(`the package is ${inspected.manifest.app} ${inspected.manifest.version}, the catalog says ${entry.name} ${release.version}`, 502, "mismatch");
     const s = this.d.studio;
+    this.stage(entry.name, kind, "install");
     if (installed) {
       const change = await s.lifecycle.upgrade(bytes, { trustedKeys: keys });
       if (change.state !== "done") throw new CatalogError(`upgrade failed: ${change.error ?? change.state}`, 409, "upgrade-failed");
@@ -462,6 +536,7 @@ export class AppCatalog {
     let source: SourceOutcome | undefined;
     if (variant === "source") {
       // The app is installed and running; a copy that cannot be made is reported, not a failed install.
+      this.stage(entry.name, kind, "source");
       try { source = await placeSource(await s.installer.load(entry.name), editable, entry.name, release.version, { replace: req.replaceSource === true }); }
       catch (e) { s.log?.(`${entry.name}: could not put its source in ${editable}: ${(e as Error).message}`); }
     }
@@ -502,6 +577,7 @@ export class AppCatalog {
     if (req.ref !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/.test(req.ref)) throw new CatalogError("ref must be a branch or tag name", 400);
     if (!allowedLocation(new URL(entry.repo), catalog.startsWith("file:"))) throw new CatalogError(`the repository ${entry.repo} is not allowed`, 409, "location");
     const dir = sourceDir(this.ws, entry.name);
+    const kind = upgrade ? "upgrade" : "install";
     // A copy the Space made from a package is not a checkout: an untouched one gives way to the clone, a changed one is the owner's.
     const copy = await sourceCondition(dir);
     if (copy.state === "modified") throw new CatalogError(`app-src/${entry.name} holds the source you changed, not a checkout of the repository; build it with: space app build ${entry.name}, or move it away to install from the repository`, 409, "source-modified", { changed: copy.changed, dir });
@@ -513,6 +589,7 @@ export class AppCatalog {
       const parent = join(this.ws.home, "app-src");
       await mkdir(parent, { recursive: true });
       const temp = join(parent, `.${entry.name}.clone-${crypto.randomUUID().slice(0, 8)}`);
+      this.stage(entry.name, kind, "clone");
       try {
         await this.runGit(["clone", "--quiet", ...(ref ? ["--branch", ref] : []), "--", entry.repo, temp], parent);
         if (!ref) ref = await this.runGit(["rev-parse", "--abbrev-ref", "HEAD"], temp);
@@ -522,6 +599,7 @@ export class AppCatalog {
       }
     } else if (upgrade || req.ref) {
       // Bring a clean checkout forward; local changes are the owner's and are never overwritten.
+      this.stage(entry.name, kind, "pull");
       await this.undoVersionBump(dir);
       if (await this.runGit(["status", "--porcelain"], dir)) throw new CatalogError(`app-src/${entry.name} has local changes; commit or set them aside, or build them as they are with: space app build ${entry.name}`, 409, "dirty");
       const branch = await this.runGit(["symbolic-ref", "-q", "--short", "HEAD"], dir).catch(() => "");
@@ -541,6 +619,7 @@ export class AppCatalog {
       ref = this.origin(entry.name)?.ref ?? null;
     }
     let build;
+    this.stage(entry.name, kind, "build");
     try {
       build = await buildSource(this.d.studio, entry.name);
     } catch (e) {
@@ -558,6 +637,8 @@ const json = (data: unknown, status = 200) => Response.json(data, { status, head
  *   GET    /api/app-catalog[?refresh=1]                  owner: catalogs, apps with their state, confirmed publishers
  *   POST   /api/app-catalog/:app/install  {from?, withSource?, replaceSource?, ref?, trust?}   owner
  *   POST   /api/app-catalog/:app/upgrade  {from?, ref?, trust?}               owner
+ *   GET    /api/app-catalog/updates                       owner: installed apps with a newer release, from the cached catalogs (no network wait)
+ *   GET    /api/app-catalog/progress                      owner: installs and upgrades in flight, with their step and downloaded bytes
  *   DELETE /api/app-catalog/publishers/:keyId             owner: stop trusting a confirmed publisher
  */
 export function createAppCatalogRoutes(catalog: AppCatalog, token: string) {
@@ -580,6 +661,12 @@ export function createAppCatalogRoutes(catalog: AppCatalog, token: string) {
   return {
     "/api/app-catalog": {
       GET: (req: Request) => guard(req, async () => catalog.view(new URL(req.url).searchParams.get("refresh") === "1") as unknown as Record<string, unknown>),
+    },
+    "/api/app-catalog/updates": {
+      GET: (req: Request) => guard(req, async () => (await catalog.updates()) as unknown as Record<string, unknown>),
+    },
+    "/api/app-catalog/progress": {
+      GET: (req: Request) => guard(req, async () => ({ progress: catalog.progress() })),
     },
     "/api/app-catalog/:app/install": {
       POST: (req: Req) => guard(req, async () => ({ result: await catalog.install(req.params.app!, await body(req)) })),

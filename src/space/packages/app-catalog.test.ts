@@ -85,8 +85,9 @@ async function fixture() {
     apps,
   }));
   await writeCatalog();
-  const catalog = new AppCatalog({ db, sources: [pathToFileURL(catalogFile).href], studio: { ws, installer, lifecycle, store, activate }, trustedKeys: [ours.public] });
-  return { root, ws, store, installer, lifecycle, runtime, catalog, apps, writeCatalog, publish, ours, theirs, mirror };
+  const studio = { ws, installer, lifecycle, store, activate };
+  const catalog = new AppCatalog({ db, sources: [pathToFileURL(catalogFile).href], studio, trustedKeys: [ours.public] });
+  return { root, ws, store, installer, lifecycle, runtime, catalog, apps, writeCatalog, publish, ours, theirs, mirror, studio };
 }
 
 const state = async (c: AppCatalog) => Object.fromEntries((await c.view()).apps.map((a) => [a.name, a.state]));
@@ -113,7 +114,14 @@ describe("app catalog", () => {
     latest.package.sha256 = good;
     await f.writeCatalog();
 
+    // While the request waits, the step it is on can be read; once it answered, nothing is in flight.
+    const seen: unknown[] = [];
+    const activate = f.studio.activate;
+    f.studio.activate = async (app: string) => { seen.push(f.catalog.progress()); await activate(app); };
     const r = await f.catalog.install("notes", { withSource: false });
+    f.studio.activate = activate;
+    expect(seen).toEqual([[expect.objectContaining({ app: "notes", kind: "install", stage: "install" })]]);
+    expect(f.catalog.progress()).toEqual([]);
     expect(r).toMatchObject({ app: "notes", version: "1.0.0", action: "installed", from: "package" });
     expect(r.source).toBeUndefined();
     expect(await Bun.file(join(f.ws.apps, "notes", "web", "index.html")).text()).toBe("<p>notes 1.0.0</p>");
@@ -131,10 +139,12 @@ describe("app catalog", () => {
     f.apps[0]!.latest = await f.publish("notes", f.ours);
     await f.writeCatalog();
     expect((await state(f.catalog)).notes).toBe("update");
+    expect(await f.catalog.updates()).toMatchObject({ count: 1, apps: [{ name: "notes", installed: "1.0.0", latest: "1.1.0" }] });
     const up = await f.catalog.upgrade("notes", { withSource: true });
     expect(up).toMatchObject({ version: "1.1.0", action: "upgraded", from: "package" });
     expect(await Bun.file(join(f.ws.apps, "notes", "src", "index.html")).exists()).toBe(true);
     expect((await state(f.catalog)).notes).toBe("installed");
+    expect((await f.catalog.updates()).count).toBe(0);
   });
 
   test("a publisher the Space does not trust needs the owner's yes once", async () => {
@@ -284,6 +294,9 @@ describe("app catalog", () => {
     expect(await refused.json()).toMatchObject({ ok: false, code: "trust-required", publisher: { id: "theirs" } });
     const missing = await call("/api/app-catalog/:app/install", "POST", { headers: auth, body: "{}" }, { app: "nope" });
     expect(missing.status).toBe(404);
+    expect((await call("/api/app-catalog/updates", "GET")).status).toBe(401);
+    expect(await (await call("/api/app-catalog/updates", "GET", { headers: auth })).json()).toMatchObject({ ok: true, count: 0, apps: [] });
+    expect(await (await call("/api/app-catalog/progress", "GET", { headers: auth })).json()).toEqual({ ok: true, progress: [] });
   });
 });
 
@@ -355,6 +368,48 @@ describe("catalog sources and format", () => {
     expect(stale.apps).toHaveLength(1);
     expect(stale.sources[0]).toMatchObject({ ok: false, stale: true, error: "offline" });
     expect(stale.git).toBe(false);
+  });
+
+  test("the update count never waits for the network: an old copy is counted and read again in the background", async () => {
+    const root = await mkdtemp(join(tmpdir(), "space-app-catalog-updates-"));
+    cleanup.push(() => removeTemp(root));
+    const ws = workspacePaths(join(root, "ws"));
+    for (const d of [ws.home, ws.run]) await mkdir(d, { recursive: true });
+    const db = new Database(":memory:");
+    cleanup.push(() => db.close());
+    const k = keypair();
+    const release = (version: string) => ({ version, tag: `v${version}`, package: { url: "https://example.com/a.spaceapp", sha256: "0".repeat(64) }, requires: { spaceApi: 1 } });
+    let latest = "1.0.0", now = 1_000_000;
+    const body = () => ({ catalog: 1, publishers: [{ id: "p", name: "P", keyId: k.keyId, publicKey: k.public }], apps: [{ name: "a", publisher: "p", title: "A", description: "a", repo: "https://example.com/a", license: "MIT", latest: release(latest) }] });
+    let calls = 0;
+    let gate: (() => void) | null = null;
+    const fetch = async () => {
+      calls++;
+      if (gate) await new Promise<void>((resolve) => { const open = gate!; gate = () => { open(); resolve(); }; });
+      return new Response(JSON.stringify(body()));
+    };
+    const store = new PackageStore(db);
+    // "a" 1.0.0 is installed here.
+    const installed = { installed: (app: string) => (app === "a" ? { version: "1.0.0" } : undefined) } as unknown as PackageStore;
+    const c = new AppCatalog({ db, sources: ["https://example.com/catalog.json"], studio: { ws, store: installed, installer: new PackageInstaller(ws, store), lifecycle: undefined as never, activate: async () => {} }, trustedKeys: [], fetch, now: () => now, git: null });
+    // No copy yet: nothing to count, and one read starts behind the answer.
+    expect(await c.updates()).toEqual({ count: 0, apps: [] });
+    await Bun.sleep(10);
+    expect(calls).toBe(1);
+    expect((await c.updates()).count).toBe(0);
+    expect(calls).toBe(1);
+    // The publisher releases 1.1.0; the copy is fresh, so it is not read again until it is old.
+    latest = "1.1.0";
+    expect((await c.updates()).count).toBe(0);
+    now += 7 * 3600_000;
+    gate = () => {};
+    const before = Date.now();
+    expect((await c.updates()).count).toBe(0);
+    expect(Date.now() - before).toBeLessThan(1000);
+    gate!();
+    await Bun.sleep(10);
+    expect(calls).toBe(2);
+    expect(await c.updates()).toMatchObject({ count: 1, apps: [{ name: "a", installed: "1.0.0", latest: "1.1.0" }] });
   });
 });
 

@@ -125,6 +125,7 @@ export default function Store({ open, onClose, onChange, openUrl, preselect = fa
           ) : (
             v && (
               <>
+                {tab === "updates" && updates.length > 0 && <UpdateAll cat={cat} apps={updates} />}
                 {v.apps.length > 0 && !shown.length && (
                   <p className="task-note">{query.trim() ? t("store.noMatch") : tab === "installed" ? t("store.noneInstalled") : t("store.noUpdates")}</p>
                 )}
@@ -244,6 +245,7 @@ function Card({ a, cat, git, openUrl, picked, onPick, onOpen }: { a: CatalogEntr
         ) : <span />}
         <StateButton a={a} cat={cat} git={git} openUrl={openUrl} />
       </div>
+      <ProgressLine a={a} cat={cat} />
     </li>
   );
 }
@@ -323,6 +325,7 @@ export function Detail({ a, cat, git, openUrl, onBack }: { a: CatalogEntry; cat:
           </button>
         )}
       </div>
+      <ProgressLine a={a} cat={cat} />
       {confirmRemove && i && (
         <div className="cat-trust" role="alertdialog">
           <div>{t("store.removeAsk", { name: title, app: a.name })}</div>
@@ -395,6 +398,43 @@ export function Detail({ a, cat, git, openUrl, onBack }: { a: CatalogEntry; cat:
     </div>
   );
 }
+
+/** "Update all": every app with a newer release, one after the other; a refusal stops none of the others. */
+export function UpdateAll({ cat, apps }: { cat: Catalog; apps: CatalogEntry[] }) {
+  const { t } = useLang();
+  const all = () =>
+    cat.batch(async () => {
+      for (const a of apps) await cat.change(a.name, "upgrade", {});
+    });
+  return (
+    <div className="store-updateall">
+      <span className="cat-state">{t("store.updatesWaiting", { n: apps.length })}</span>
+      <button className="btn2 primary" disabled={cat.busy} onClick={() => void all()}>
+        {cat.busy && cat.working?.how === "upgrade" ? t("store.updatingOne", { name: cat.working.app }) : t("store.updateAll")}
+      </button>
+    </div>
+  );
+}
+
+/** The step an install or upgrade is on, with the bytes downloaded so far. */
+export function ProgressLine({ a, cat }: { a: CatalogEntry; cat: Catalog }) {
+  const { t } = useLang();
+  const p = cat.working?.app === a.name ? cat.progress : null;
+  if (!p || p.app !== a.name) return null;
+  const pct = p.stage === "download" && p.total ? Math.min(100, Math.round(((p.received ?? 0) / p.total) * 100)) : null;
+  return (
+    <div className="store-progress" role="status">
+      <span>
+        {t(`store.stage.${p.stage}` as Key)}
+        {p.stage === "download" && p.received ? ` · ${p.total ? t("store.bytes", { received: mb(p.received), total: mb(p.total) }) : mb(p.received)}` : ""}
+      </span>
+      <span className="store-bar-track" aria-hidden="true">
+        <i className={pct === null ? "busy" : ""} style={pct === null ? undefined : { width: `${pct}%` }} />
+      </span>
+    </div>
+  );
+}
+const mb = (n: number) => `${(n / 1_048_576).toFixed(n < 10_485_760 ? 1 : 0)} MB`;
 
 /** The owner's yes, asked over the page: a publisher this Space does not trust yet, or source they changed. */
 function Asks({ cat }: { cat: Catalog }) {
