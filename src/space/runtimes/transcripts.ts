@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TranscriptMessage, TranscriptStep } from "./types.ts";
-import { monitorInput, taskNotice, toolErrorText } from "./tool-text.ts";
+import { clipOutput, monitorInput, taskNotice, toolErrorText } from "./tool-text.ts";
 
 /**
  * Past chat sessions, read back from each runtime's own records so restoring
@@ -86,9 +86,9 @@ export function parseClaudeTranscript(jsonl: string): TranscriptMessage[] {
         for (const b of content) {
           const step = b?.type === "tool_result" ? calls.get(String(b.tool_use_id)) : undefined;
           if (step) {
-            step.output = clip(resultText(b.content));
+            step.output = clipOutput(resultText(b.content), STEP_MAX);
             step.failed = b.is_error === true;
-            if (step.failed) step.output = clip(toolErrorText(resultText(b.content)));
+            if (step.failed) step.output = clipOutput(toolErrorText(resultText(b.content)), STEP_MAX);
           }
         }
       }
@@ -223,7 +223,7 @@ function addNotices(msgs: TranscriptMessage[], text: string): boolean {
 function addTool(msgs: TranscriptMessage[], name: string, input: unknown, output = "", failed = false): ToolStep {
   const last = lastAi(msgs);
   last.tools.push({ name, hint: toolHint(input) });
-  const step: ToolStep = { kind: "tool", name, input: clip(monitorInput(name, input) ?? stepInput(input)), output: clip(output), failed };
+  const step: ToolStep = { kind: "tool", name, input: clip(monitorInput(name, input) ?? stepInput(input)), output: clipOutput(output, STEP_MAX), failed };
   (last.steps ??= []).push(step);
   return step;
 }
@@ -334,7 +334,7 @@ export function parseCodexTranscript(jsonl: string, cwd: string, sid: string): T
     }
     if ((data.type === "function_call_output" || data.type === "custom_tool_call_output") && typeof data.call_id === "string") {
       const step = calls.get(data.call_id);
-      if (step) step.output = clip(step.name === "AskUserQuestion" ? codexAnswers(data.output) : codexOutput(data.output));
+      if (step) step.output = clipOutput(step.name === "AskUserQuestion" ? codexAnswers(data.output) : codexOutput(data.output), STEP_MAX);
     }
   }
   return matches ? messages : null;

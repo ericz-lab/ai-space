@@ -975,6 +975,12 @@ a.chat-hbtn { box-sizing: border-box; text-decoration: none; }
 .chat-question-own:focus { outline: none; border-color: var(--link); }
 .chat-question-answer { color: var(--link); font-weight: 600; }
 /* A message the person added to the running turn. */
+/* Chat cards (docs/chat-cards.md): the Shortcuts result rows in a frame under the reply. */
+.chat-cards { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.chat-card.sc-result { border: 1px solid var(--hairline); border-radius: 12px; padding: 10px 12px; }
+.chat-card-title { font-size: 13px; }
+.chat-card-actions { display: flex; gap: 8px; }
+.chat-card .sc-item.removed > a, .chat-card .sc-item.removed > span:first-child { text-decoration: line-through; color: var(--muted); }
 .chat-steer { font-size: 12px; padding: 6px 10px; border-left: 2px solid var(--link); color: var(--text); white-space: pre-wrap; }
 .chat-steer b { color: var(--link); font-weight: 600; margin-right: 4px; }
 .chat-steer.pending { opacity: 0.6; border-left-style: dashed; }

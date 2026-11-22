@@ -58,7 +58,15 @@ export type StartRun = {
   turn: ChatTurn;
   model?: string;
   onSession?: (sid: string) => void;
+  /** What the run records as the person's message, when the turn's carries more (agents/cards.ts `changesNote`). */
+  message?: string;
 };
+
+/**
+ * What every event line of a run passes through before it is kept and sent: the lines to keep in
+ * its place, or null to keep it as is (agents/cards.ts takes the card lines out of tool results).
+ */
+export type LineTransform = (run: RunInfo, line: string) => string[] | null;
 
 export type RunRegistryOptions = {
   /** A turn still going after this long is stopped (SPACE_CHAT_TIMEOUT_MINUTES; default 60 minutes). */
@@ -151,6 +159,7 @@ export class RunRegistry {
   /** Each conversation's background jobs, by `agent \n session`: the runtime's last whole list. */
   private readonly jobLists = new Map<string, BackgroundJob[]>();
   private readonly watchers = new Set<(news: RunNews) => void>();
+  private transformLine: LineTransform | null = null;
 
   constructor(
     private readonly db: Database,
@@ -187,7 +196,7 @@ export class RunRegistry {
         }
       }
     }
-    const run = this.open({ agent: spec.agent, sessionId, message: spec.turn.message, runtime: spec.runtime.name, model: spec.model ?? null, trigger: "user" });
+    const run = this.open({ agent: spec.agent, sessionId, message: spec.message ?? spec.turn.message, runtime: spec.runtime.name, model: spec.model ?? null, trigger: "user" });
     try {
       run.handle = spec.runtime.chat(spec.turn, {
         ...this.callbacks(run, spec.onSession),
@@ -198,6 +207,11 @@ export class RunRegistry {
       this.finish(run, (e as Error).message);
     }
     return { ...run.info };
+  }
+
+  /** Set the function every event line passes through (one per registry; the last one set wins). */
+  transform(fn: LineTransform | null): void {
+    this.transformLine = fn;
   }
 
   /**
@@ -388,8 +402,18 @@ export class RunRegistry {
     }
   }
 
-  private push(run: Live, line: string): void {
+  private push(run: Live, raw: string): void {
     if (run.info.status !== "running" || run.ending) return;
+    let lines: string[] | null = null;
+    try {
+      lines = this.transformLine?.({ ...run.info }, raw) ?? null;
+    } catch (e) {
+      console.error(`[agents] line transform failed: ${(e as Error).message}`);
+    }
+    for (const line of lines ?? [raw]) this.keep(run, line);
+  }
+
+  private keep(run: Live, line: string): void {
     const ev = { seq: ++run.info.lastSeq, line, kind: kindOf(line) };
     if (ev.kind === "approval_request" || ev.kind === "approval_resolved") track(run.asking, ev.kind, line);
     run.events.push(ev);
@@ -430,7 +454,7 @@ export class RunRegistry {
     run.bytes = run.events.reduce((n, e) => n + e.line.length, 0);
     this.db
       .query("UPDATE agent_runs SET status = ?, error = ?, finished_at = ?, last_seq = ?, sid = COALESCE(?, sid), events = ? WHERE id = ?")
-      .run(info.status, info.error, info.finishedAt, info.lastSeq, info.sid, JSON.stringify(run.events.map((e) => [e.seq, e.line])), info.id);
+      .run(info.status, info.error, info.finishedAt, info.lastSeq, info.sid, JSON.stringify(run.events.map((e) => [e.seq, e.kind === "cards" ? withoutToken(e.line) : e.line])), info.id);
     this.db.query("DELETE FROM agent_runs WHERE status != 'running' AND id NOT IN (SELECT id FROM agent_runs ORDER BY started_at DESC LIMIT ?)").run(this.opts.keepRows);
     for (const l of run.listeners) l.onEnd({ ...info });
     run.listeners.clear();
@@ -484,6 +508,16 @@ function dropRepeatedDeltas<T extends { kind: string }>(events: T[]): T[] {
   }
   if (lastAssistant < 0) return events;
   return events.filter((e, i) => i > lastAssistant || e.kind !== "stream_event");
+}
+
+/** A cards event as the run's row keeps it: the token is for whoever followed the turn live (agents/cards.ts). */
+function withoutToken(line: string): string {
+  try {
+    const { token: _token, ...rest } = JSON.parse(line) as Record<string, unknown>;
+    return JSON.stringify(rest);
+  } catch {
+    return line;
+  }
 }
 
 function parseEvents(text: string | null): RunEvent[] {

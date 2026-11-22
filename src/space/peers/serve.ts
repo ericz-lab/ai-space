@@ -41,6 +41,8 @@ import type { PeerModelInfo } from "./client.ts";
  *   POST /api/peer/agents/:app/:agent/runs/:id/steer = /api/agents/:app/:agent/runs/:id/steer
  *   POST /api/peer/agents/:app/:agent/runs/:id/approvals/:rid = /api/agents/:app/:agent/runs/:id/approvals/:rid
  *   GET  /api/peer/agents/:app/:agent/watch        = /api/agents/:app/:agent/watch
+ *   POST /api/peer/agents/cards/state              = /api/agents/cards/state
+ *   POST /api/peer/agents/cards/action             = /api/agents/cards/action
  *   GET  /api/peer/terminal                       = /api/terminal            ┐ only when the terminal is
  *   POST /api/peer/terminal/sessions               = /api/terminal/sessions   │ enabled here; the snapshot
  *   DELETE /api/peer/terminal/sessions/:id         = /api/terminal/sessions/:id │ says so with `terminal: true`
@@ -308,6 +310,23 @@ export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
         }
       : {}),
     "/api/peer/agents/:app/:agent/chat": { POST: guard(mirror(opts.agents, "/api/agents/:app/:agent/chat", "POST")) },
+    // A card's state names its agent in the body; an action's token was only ever sent to a chat the guard let through.
+    "/api/peer/agents/cards/state": {
+      POST: guard(async (req, server) => {
+        const text = await req.text();
+        let agent: unknown;
+        try {
+          agent = (JSON.parse(text) as { agent?: unknown }).agent;
+        } catch {
+          /* the route answers a bad body */
+        }
+        if (typeof agent === "string" && opts.allowApp?.(agent.split("/")[0] ?? "") === false) return json({ ok: false, error: "application is not shared through legacy peers" }, 403);
+        const copy = Object.assign(new Request(req.url, { method: "POST", headers: req.headers, body: text }), { params: req.params });
+        return mirror(opts.agents, "/api/agents/cards/state", "POST")(copy, server);
+      }),
+    },
+    // Looked up per request: a space whose agent routes have no cards (tests' stubs) still builds its peer routes.
+    "/api/peer/agents/cards/action": { POST: guard((req, server) => mirror(opts.agents, "/api/agents/cards/action", "POST")(req, server)) },
     "/api/peer/agents/:app/:agent/sessions": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions", "GET")) },
     "/api/peer/agents/:app/:agent/sessions/:sid": { GET: guard(mirror(opts.agents, "/api/agents/:app/:agent/sessions/:sid", "GET")) },
     "/api/peer/agents/runs": { GET: guard(async (req, server) => {

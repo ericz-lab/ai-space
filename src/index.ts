@@ -546,7 +546,12 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   });
   const callerApp = (req: Request) => callerAppOf(req, { operatorToken: config.apiToken, hubToken: config.hubToken, isDevice: (t) => Boolean(auth.verifyDevice(t)), appForToken: (t) => storage.appForToken(t) });
   const agentRoutes = createAgentRoutes({ actionCatalogue: () => shortcuts.catalogue(), shortcuts: shortcutStore, holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()], sharedSkills: SHARED_SKILLS,
-    callerApp, agentCallers: config.agentCallers });
+    callerApp, agentCallers: config.agentCallers,
+    // Chat cards read and act on their app as the operator (docs/chat-cards.md).
+    cardCall: async (app, capability, body) => {
+      const r = await bus.call(SPACE_APP, app, capability, { body, contentType: "application/json", accept: "application/json" });
+      return { status: r.status, body: new TextDecoder().decode(r.body) };
+    } });
   // Feedback from app pages, and the Fix Engineer (`space/ui-fixer`) it hands the fixes to (docs/feedback.md).
   const chatRoute = (agentRoutes["/api/agents/:app/:agent/chat"] as { POST: Parameters<typeof localFixer>[0] }).POST;
   const todoPlaces = {

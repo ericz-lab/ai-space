@@ -392,6 +392,11 @@ describe("hub", () => {
     expect((await get(hub, `/api/peers/david/agents/media/helper/runs/${runId}/stop`, { method: "POST" })).body).toMatchObject({ ok: true, stopped: false });
     expect((await get(hub, "/api/peers/david/agents/media/helper/sessions")).body.sessions).toMatchObject([{ sid: "cafe0001-0000-4000-8000-000000000000", title: "hello" }]);
     expect((await get(hub, "/api/peers/david/agents/media/nobody/sessions")).status).toBe(404);
+    // A peer agent's chat cards go to the peer's card routes; an app legacy peers do not share is refused there.
+    const card = { v: 1, kind: "receipt", items: [{ id: "1", title: "Clip" }], state: "card-state" };
+    expect((await get(hub, "/api/peers/david/agents/cards/state", jsonInit("POST", { agent: "media/helper", card }))).body).toEqual({ ok: false, error: "cards cannot reach apps on this space" });
+    expect((await get(hub, "/api/peers/david/agents/cards/state", jsonInit("POST", { agent: "secret/x", card }))).status).toBe(403);
+    expect((await get(hub, "/api/peers/david/agents/cards/action", jsonInit("POST", { token: "gone", card: 0, action: "undo" }))).body).toMatchObject({ readOnly: true });
 
     // A peer app's own API, read by an app on the hub: only GET, only /api/, only apps with a service.
     const proxied = await get(hub, "/api/peers/david/apps/media/proxy/api/latest?since=1");

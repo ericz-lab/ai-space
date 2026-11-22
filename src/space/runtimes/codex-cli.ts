@@ -11,6 +11,7 @@ import { readCodexTranscript, SESSION_ID_RE } from "./transcripts.ts";
 import { ustar } from "./tar.ts";
 import { assertCompletionMode, SSH_HOST_PATTERN, type AgentRun, type ChatTurn, type ChatCallbacks, type Backend, type CodexCliSpec, type CompleteInput, type GeneratedImage, type ImageInput, type RuntimeAdapter, type Usage } from "./types.ts";
 import { hostShell } from "../host-tools.ts";
+import { clipOutput } from "./tool-text.ts";
 
 /** Codex completions, agent runs and persistent local chat. Authentication stays in the CLI home. */
 export function createCodexCli(spec: CodexCliSpec, deps: Partial<{
@@ -382,7 +383,7 @@ function codexChat(bin: string[], turn: ChatTurn, cb: ChatCallbacks): { kill: ()
             if (event.type === "item.completed") {
               const failed = item.status === "failed" || (typeof item.exit_code === "number" && item.exit_code !== 0) || Boolean(item.error);
               const output = item.aggregated_output ?? item.error?.message ?? item.result ?? item.changes ?? "";
-              const content = (typeof output === "string" ? output : JSON.stringify(output)).slice(0, 12000);
+              const content = clipOutput(typeof output === "string" ? output : JSON.stringify(output), 12000);
               emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: item.id, is_error: failed, content }] } });
             }
           }

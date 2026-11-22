@@ -129,6 +129,8 @@ Making a pack is the `space:app-icons` skill's job: the operator describes a sty
 
 Every client (the panel, the Mac, the iPhone and Android) sends `interactive: true`: on Claude Code, Codex and DeepSeek Harness the turn then runs in a process kept for the conversation ([runtimes.md](runtimes.md#live-chat)), and two things change. An action the tier does not cover is no longer refused: the reply shows an approval card (what the agent wants to run or edit, and why), and the agent waits for Allow or Deny; the default tier reads "ask before changes". And a message sent while the reply is being written goes into that turn where the runtime takes one (Claude Code and Codex): it shows under the reply as waiting, then as the person's line once the agent has read it (after its current step). When the turn cannot take it (a runtime without live chat or without steering, or the turn just ended), the client queues it as the next message, as before.
 
+What an app agent's tools did this turn shows under the reply as cards (an app's CLI prints `::space-card` lines; ai-space takes them out of the tool output and checks them), with an Undo while the reply is the conversation's latest: [chat-cards.md](chat-cards.md).
+
 ### Built-in pages
 
 The five built-in tiles (App Store, Inbox, Shortcuts, Terminal, Settings) open the way an app's
@@ -276,6 +278,7 @@ The panel probes `GET 127.0.0.1:<port><service.health>` (two-second timeout), ca
 | `POST /api/agents/:app/:agent/chat` | one chat turn as a background run, SSE |
 | `GET /api/agents/runs`, `GET /api/agents/:app/:agent/runs[/:id[/events]]`, `POST /api/agents/:app/:agent/runs/:id/stop`, `…/steer`, `…/approvals/:rid` | chat runs: list, one, replay and follow, stop, add a message, answer an approval ([Background runs](#background-runs)) |
 | `GET /api/agents/:app/:agent/sessions[/:sid]` | recent sessions, restored transcript |
+| `POST /api/agents/cards/state`, `POST /api/agents/cards/action` | a chat card's current items and its Undo ([chat-cards.md](chat-cards.md)) |
 | `GET /api/inbox`, `POST /api/inbox/mark`, `POST /api/inbox/read-all` | the inbox: threads with read and done state, and changing it ([notify.md](notify.md#inbox)) |
 | `GET /api/peers`, `PATCH`/`DELETE /api/peers/:peer/apps/:app`, `/api/peers/:peer/…` | peer machines, hub-side hide, forwarded uninstall/icon/embed/chat/sessions ([peers.md](peers.md)) |
 | `GET /api/terminal`, `POST /api/terminal/sessions`, `DELETE /api/terminal/sessions/:id`, `GET /api/terminal/ws`, `/api/peers/:peer/terminal/…` | the web terminal: status and machines, open a session (one-time ticket), end one, the session socket; the same on a peer, forwarded and bridged ([terminal.md](terminal.md)) |

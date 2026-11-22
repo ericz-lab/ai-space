@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { liveFingerprint, LIVE_STOP_GRACE_MS, agentQuestions, PendingApprovals, questionAnswers, readLines, tail, type LiveProcess } from "./live.ts";
 import type { AgentQuestion, ApprovalDecision, ChatCallbacks, ChatHandle, ChatTurn, QuestionAnswers, SteerInput } from "./types.ts";
+import { clipOutput } from "./tool-text.ts";
 
 /**
  * Codex live chat (docs/runtimes.md#live-chat): one `codex app-server` process per conversation,
@@ -289,7 +290,7 @@ export class CodexLive implements LiveProcess {
     if (method === "item/completed") {
       const failed = item.status === "failed" || item.status === "declined" || (typeof item.exitCode === "number" && item.exitCode !== 0) || Boolean(item.error);
       const output = item.aggregatedOutput ?? item.error?.message ?? item.result ?? item.changes?.map((c) => c.diff ?? c.path).join("\n") ?? "";
-      const content = (typeof output === "string" ? output : JSON.stringify(output)).slice(0, 12000);
+      const content = clipOutput(typeof output === "string" ? output : JSON.stringify(output), 12000);
       emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: item.id, is_error: failed, content }] } });
     }
   }
