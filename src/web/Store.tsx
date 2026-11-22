@@ -9,8 +9,8 @@ import { matches } from "./screens.ts";
 // catalog, a page of its own like the inbox. Discover lists every catalog app, recommended first,
 // with a search; Installed the catalog apps on this Space; Updates those with a newer release. A
 // card opens the app's details, where every change is: install (with or without its source), from
-// source, rebuild, update, update over changed source, uninstall. Opened from the home screen's
-// first-use card (`/?page=store&pick=all`), every installable app starts ticked.
+// source, rebuild, update, update over changed source, uninstall. Batch Install, at the top right
+// of Discover, puts a tick on every installable card and a button that installs the ticked ones.
 
 export type Tab = "discover" | "installed" | "updates";
 const TABS: { id: Tab; key: Key }[] = [
@@ -18,11 +18,6 @@ const TABS: { id: Tab; key: Key }[] = [
   { id: "installed", key: "store.installedTab" },
   { id: "updates", key: "store.updates" },
 ];
-
-/** The first-use card's address asks for every installable app ticked. */
-export const storePreselect = (search: string) => new URLSearchParams(search).get("pick") === "all";
-
-const installable = (v: CatalogView) => v.apps.filter((a) => a.state === "available").map((a) => a.name);
 
 /** Recommended apps first, otherwise the catalog's order. */
 export const discoverOrder = (apps: CatalogEntry[]) => apps.map((a, i) => ({ a, i })).sort((x, y) => Number(y.a.recommended) - Number(x.a.recommended) || x.i - y.i).map((x) => x.a);
@@ -33,14 +28,15 @@ export function tabApps(apps: CatalogEntry[], tab: Tab, query = ""): CatalogEntr
   return query.trim() ? list.filter((a) => matches(query, a.name, a.title.en, a.title.zh, a.description.en, a.description.zh, a.publisher.name)) : list;
 }
 
-export default function Store({ open, onClose, onChange, openUrl, preselect = false, initial }: {
+export default function Store({ open, onClose, onChange, openUrl, selecting: startSelecting = false, initial }: {
   open: boolean;
   onClose: () => void;
   /** Called after each change that went through: the launcher pins a new app and reloads its lists. */
   onChange?: (c: CatalogChange) => void;
   /** The address an installed app opens at, when the panel lists it. */
   openUrl?: (app: string) => string | undefined;
-  preselect?: boolean;
+  /** Opens in Batch Install, with the ticks shown (tests). */
+  selecting?: boolean;
   /** A catalog already read (tests). */
   initial?: CatalogView;
 }) {
@@ -49,13 +45,13 @@ export default function Store({ open, onClose, onChange, openUrl, preselect = fa
   const [tab, setTab] = useState<Tab>("discover");
   const [query, setQuery] = useState("");
   const [detail, setDetail] = useState<string | null>(null);
-  const [picked, setPicked] = useState<Set<string>>(() => new Set(initial && preselect ? installable(initial) : []));
-  const [picksSeeded, setPicksSeeded] = useState(!!initial);
-  useEffect(() => {
-    if (picksSeeded || !cat.view) return;
-    setPicksSeeded(true);
-    if (preselect) setPicked(new Set(installable(cat.view)));
-  }, [cat.view]);
+  // Batch Install: the ticks show only while it is on, and leaving it forgets them.
+  const [selecting, setSelecting] = useState(startSelecting);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const select = (on: boolean) => {
+    setSelecting(on);
+    setPicked(new Set());
+  };
 
   useEffect(() => {
     if (!open || PAGE) return;
@@ -68,6 +64,8 @@ export default function Store({ open, onClose, onChange, openUrl, preselect = fa
   const updates = v?.apps.filter((a) => a.state === "update") ?? [];
   const shown = useMemo(() => (v ? tabApps(v.apps, tab, query) : []), [v, tab, query]);
   const current = detail ? v?.apps.find((a) => a.name === detail) : undefined;
+  const canSelect = !current && tab === "discover" && !!v?.apps.some((a) => a.state === "available");
+  const ticking = selecting && canSelect;
 
   const installPicked = () =>
     cat.batch(async () => {
@@ -75,6 +73,7 @@ export default function Store({ open, onClose, onChange, openUrl, preselect = fa
         if (!(await cat.change(name, "install", { withSource: true }))) break;
         setPicked((p) => new Set([...p].filter((n) => n !== name)));
       }
+      setSelecting(false);
     });
 
   const broken = v?.sources.filter((s) => !s.ok) ?? [];
@@ -86,6 +85,11 @@ export default function Store({ open, onClose, onChange, openUrl, preselect = fa
         <div className="task-head">
           <b>{t("store.title")}</b>
           <span className="chat-sub">{readAt ? t("store.asOf", { time: relTime(readAt, lang) }) : ""}</span>
+          {canSelect && (
+            <button className={`inbox-pill${ticking ? " on" : ""}`} disabled={cat.busy} aria-pressed={ticking} onClick={() => select(!ticking)}>
+              {ticking ? t("common.cancel") : t("store.batch")}
+            </button>
+          )}
           <button className="inbox-pill" disabled={cat.busy || !v} onClick={() => void cat.load(true)}>
             {t("catalog.refresh")}
           </button>
@@ -131,10 +135,10 @@ export default function Store({ open, onClose, onChange, openUrl, preselect = fa
                 )}
                 <ul className="store-grid">
                   {shown.map((a) => (
-                    <Card key={a.name} a={a} cat={cat} git={v.git} openUrl={openUrl} picked={picked.has(a.name)} onPick={() => setPicked((p) => toggle(p, a.name))} onOpen={() => setDetail(a.name)} />
+                    <Card key={a.name} a={a} cat={cat} git={v.git} openUrl={openUrl} ticking={ticking} picked={picked.has(a.name)} onPick={() => setPicked((p) => toggle(p, a.name))} onOpen={() => setDetail(a.name)} />
                   ))}
                 </ul>
-                {tab === "discover" && picked.size > 0 && (
+                {ticking && picked.size > 0 && (
                   <div className="store-picked">
                     <button className="btn2 primary" disabled={cat.busy} onClick={() => void installPicked()}>
                       {cat.busy ? t("catalog.installing") : t("catalog.installPicked", { n: String(picked.size) })}
@@ -208,7 +212,7 @@ function StateButton({ a, cat, git, openUrl }: { a: CatalogEntry; cat: Catalog; 
   return <span className="cat-state">{a.state === "legacy" ? t("store.legacyShort") : t("catalog.unreleased")}</span>;
 }
 
-function Card({ a, cat, git, openUrl, picked, onPick, onOpen }: { a: CatalogEntry; cat: Catalog; git: boolean; openUrl?: (app: string) => string | undefined; picked: boolean; onPick: () => void; onOpen: () => void }) {
+function Card({ a, cat, git, openUrl, ticking, picked, onPick, onOpen }: { a: CatalogEntry; cat: Catalog; git: boolean; openUrl?: (app: string) => string | undefined; ticking: boolean; picked: boolean; onPick: () => void; onOpen: () => void }) {
   const { lang, t } = useLang();
   const needText = useNeedText();
   const title = loc(a.title, lang);
@@ -237,7 +241,7 @@ function Card({ a, cat, git, openUrl, picked, onPick, onOpen }: { a: CatalogEntr
         </span>
       </button>
       <div className="store-card-foot">
-        {a.installed ? <span className="cat-state">{t("catalog.installed", { version: a.installed.version })}</span> : a.state === "available" ? (
+        {a.installed ? <span className="cat-state">{t("catalog.installed", { version: a.installed.version })}</span> : ticking && a.state === "available" ? (
           <label className="cat-check">
             <input type="checkbox" className="cat-pick" aria-label={t("catalog.pick", { name: title })} checked={picked} disabled={cat.busy} onChange={onPick} />
             {t("store.pick")}

@@ -340,19 +340,18 @@ internal sealed class AppModel
     }
 
     /// <summary>
-    /// The Space's App Store in its tab; <paramref name="pick"/> opens it as the first-use card does,
-    /// with every installable app ticked. What is installed there the page pins to the panel's home
+    /// The Space's App Store in its tab. What is installed there the page pins to the panel's home
     /// screen, and Home takes it from there (<see cref="HomeScreens.FollowPanel"/>).
     /// </summary>
-    public void ShowStore(Guid? connection = null, bool pick = false)
+    public void ShowStore(Guid? connection = null)
     {
         if (Target(connection) is not { } c)
         {
             ShowMainWindow();
             return;
         }
-        // An open store keeps its page (an install may be running there) unless the card asks for its ticks.
-        ShowSpaceTab(c, WebTabKind.Store, SpacePages.StoreUrl(c.Uri, pick), keepPage: !pick);
+        // An open store keeps its page: an install may be running there.
+        ShowSpaceTab(c, WebTabKind.Store, SpacePages.PageUrl(c.Uri, SpacePageKind.Store), keepPage: true);
     }
 
     /// <summary>The Space's web panel in its tab, at <paramref name="url"/> (one of its pages) when given.</summary>

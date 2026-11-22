@@ -19,7 +19,7 @@ import Inbox from "./Inbox.tsx";
 import Library, { libraryEntries } from "./Library.tsx";
 import Omnibox from "./Omnibox.tsx";
 import Shortcuts from "./Shortcuts.tsx";
-import Store, { storePreselect } from "./Store.tsx";
+import Store from "./Store.tsx";
 import ScreenNav, { PhoneNav } from "./ScreenNav.tsx";
 import { BUILTINS, type Builtin, HOME, type Screen, addScreen, entryKey, move, parseKey, pin, removeScreen, seedScreens, unpin } from "./screens.ts";
 import { canonicalItems, groupAgents, groupById, groupOf, preferredMachine } from "./agent-groups.ts";
@@ -113,8 +113,6 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const [editing, setEditing] = useState(false);
   // The screen an app added from a link is pinned to; `null` when added from the library.
   const [adding, setAdding] = useState<{ pinTo: string | null } | null>(null);
-  // The App Store opened from the first-use card: every installable app starts ticked.
-  const [storePick, setStorePick] = useState(() => PAGE === "store" && typeof location !== "undefined" && storePreselect(location.search));
   // The app dropped on the uninstall zone, awaiting confirmation; `zoneHot` while a tile hovers the zone.
   const [uninstalling, setUninstalling] = useState<AppInfo | null>(null);
   const [zoneHot, setZoneHot] = useState(false);
@@ -184,13 +182,10 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const openShortcuts = () => setPanel("shortcuts");
   const openStore = () => setPanel("store");
   /** The App Store as a tile opens it: a page in a new tab, over the page in the phone app. */
-  const showStore = (pick = false) => {
+  const showStore = () => {
     recordOpen("builtin", "store", "panel");
-    if (BUILTIN_PAGES) window.open(pick ? "/?page=store&pick=all" : pageHref("store"), "_blank", "noopener,noreferrer");
-    else {
-      setStorePick(pick);
-      setPanel("store");
-    }
+    if (BUILTIN_PAGES) window.open(pageHref("store"), "_blank", "noopener,noreferrer");
+    else setPanel("store");
   };
   const openTasks = () => setPanel("tasks");
   const openChat = (a: AgentInfo) => {
@@ -978,7 +973,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               </div>
             )}
             {screen.id === HOME && !editing && <Omnibox entries={entries} onOpen={openEntry} onAsk={askAssistant} focusSignal={omniFocus} onOpenShortcuts={openShortcuts} onOpenTasks={openTasks} onAgentIntent={askSkillAgent} />}
-            {screen.id === HOME && !editing && <CatalogWelcome onOpen={() => showStore(true)} />}
+            {screen.id === HOME && !editing && <CatalogWelcome onOpen={showStore} />}
             {renderScreen(screen)}
           </section>
         ) : null}
@@ -1142,7 +1137,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
       <Shortcuts open={panel === "shortcuts"} onClose={close} onOpenTasks={openTasks} />
       {/* Mounted only while open: it reads the catalog when it mounts. */}
-      {panel === "store" && <Store open onClose={close} preselect={storePick} onChange={storeChanged} openUrl={appUrl} />}
+      {panel === "store" && <Store open onClose={close} onChange={storeChanged} openUrl={appUrl} />}
       <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} newTab={BUILTIN_PAGES && PAGE !== "chat"} session={pageSessionId ?? undefined} ask={ask} draft={draft} onTurnSettled={() => { void reload(); }} />
     </>
   );

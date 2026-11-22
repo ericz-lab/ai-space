@@ -776,6 +776,6 @@
 "App Store" = "应用商店";
 "Shortcuts" = "快捷指令";
 "Add your first apps" = "添加第一批应用";
-"The app catalog has %lld apps for this Space. All are ticked; untick what you do not want." = "应用目录里有 %lld 个应用可以装到这个 Space。已全部勾选，不要的取消勾选即可。";
-"Choose apps" = "选择应用";
+"The App Store has %lld apps for this Space. Install the ones you want there." = "应用商店里有 %lld 个应用可以装到这个 Space，去那里挑想要的安装。";
+"Open the App Store" = "打开应用商店";
 "Not now" = "以后再说";

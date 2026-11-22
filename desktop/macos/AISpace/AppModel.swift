@@ -669,21 +669,20 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// The App Store (docs/app-catalog.md#the-app-store); `pickAll` ticks every installable app,
-    /// as the first-use card asks. What is installed there is pinned to this Mac's home screen
-    /// when the launcher comes back and reads the catalogue (`adoptInstalled`).
-    func openStore(pickAll: Bool = false) {
-        openPage(of: .store, at: StorePage.path(pickAll: pickAll))
+    /// The App Store (docs/app-catalog.md#the-app-store). What is installed there is pinned to this
+    /// Mac's home screen when the launcher comes back and reads the catalogue (`adoptInstalled`).
+    func openStore() {
+        openPage(of: .store)
     }
 
     /// A built-in tile's page of the web panel (docs/panel.md#built-in-pages) as a tab of the main
     /// window, beside the open apps.
-    private func openPage(of builtin: Builtin, at path: String? = nil) {
-        guard let c = selected, let page = path ?? builtin.page, let url = URL(string: page, relativeTo: c.url)?.absoluteURL else { return }
+    private func openPage(of builtin: Builtin) {
+        guard let c = selected, let page = builtin.page, let url = URL(string: page, relativeTo: c.url)?.absoluteURL else { return }
         let tile = AppInfo(id: builtin.key, name: builtin.rawValue, peer: nil, stale: nil, title: builtin.title, description: nil, i18n: nil,
                            icon: icon(builtin, in: c), url: builtin.page, status: nil, hidden: nil)
-        // The tab's address is asked for only when it differs from the page it is on (pick=all).
-        openApp(tile, connection: c, url: path == nil && tab(tile.id, connection: c.id) != nil ? nil : url)
+        // An open tab keeps the page it is on.
+        openApp(tile, connection: c, url: tab(tile.id, connection: c.id) != nil ? nil : url)
     }
 
     /// The screens, at the one last shown.

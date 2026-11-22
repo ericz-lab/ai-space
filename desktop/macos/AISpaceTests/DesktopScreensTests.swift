@@ -37,8 +37,6 @@ struct DesktopScreensTests {
         #expect(Builtin.store.page == "/?page=store")
         #expect(Builtin.shortcuts.page == "/?page=shortcuts")
         #expect(Builtin.inbox.page == nil && Builtin.terminal.page == nil && Builtin.settings.page == nil)
-        #expect(StorePage.path(pickAll: true) == "/?page=store&pick=all")
-        #expect(StorePage.path(pickAll: false) == "/?page=store")
         #expect(Builtin.isTab("builtin:store") && !Builtin.isTab("store") && !Builtin.isTab("david/notes"))
     }
 

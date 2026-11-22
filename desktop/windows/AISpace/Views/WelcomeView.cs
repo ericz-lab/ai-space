@@ -14,7 +14,10 @@ internal static class WelcomeView
 {
     public static FrameworkElement Create(AppModel model)
     {
-        var logo = new System.Windows.Controls.Image { Source = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/AISpace.ico")), Width = 64, Height = 64, HorizontalAlignment = HorizontalAlignment.Left };
+        // BitmapFrame.Create of an .ico is its first frame, the 16 px one; the largest stays sharp at any scale.
+        var icon = BitmapDecoder.Create(new Uri("pack://application:,,,/Assets/AISpace.ico"), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+        var logo = new System.Windows.Controls.Image { Source = icon.Frames.MaxBy(f => f.PixelWidth), Width = 64, Height = 64, HorizontalAlignment = HorizontalAlignment.Left };
+        System.Windows.Media.RenderOptions.SetBitmapScalingMode(logo, System.Windows.Media.BitmapScalingMode.HighQuality);
         var connect = Ui.Card(ConnectForm(model));
         connect.Visibility = Visibility.Collapsed;
         Button elsewhere = null!;

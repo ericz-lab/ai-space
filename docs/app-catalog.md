@@ -36,7 +36,8 @@ a link.
   the panel's language, publisher (and whether the Space trusts them yet), release, what it needs,
   and one button for its state: **Install**, **Update to X**, **Open** for an installed app, or
   **From source** for an app with no release yet. A search reads the name, the titles and
-  descriptions in every language, and the publisher. Tick several and **Install N chosen**.
+  descriptions in every language, and the publisher. **Batch Install**, at the top right, puts a
+  tick on every installable card, none ticked; tick several and **Install N chosen**, or **Cancel**.
 - **Installed**: the catalog apps on this Space. **Updates**: those with a newer release; the tab
   carries the count, and **Update all** updates them one after the other (an app that is refused,
   or whose changed source you keep, does not stop the others; every refusal is listed).
@@ -64,9 +65,9 @@ a link.
   changed. **Refresh** reads the catalog now; the header says when it was read, and a catalog that
   could not be read shows its last copy, marked.
 
-A Space with no catalog app on it shows a first-use card on the home screen; **Choose apps** opens
-the App Store (`/?page=store&pick=all`) with every installable app ticked. **Not now** hides the
-card in that browser.
+A Space with no catalog app on it shows a first-use card on the home screen; **Open the App Store**
+opens it, where the apps are installed one by one or with Batch Install. **Not now** hides the card
+in that browser.
 
 From the command line, against the running Space:
 

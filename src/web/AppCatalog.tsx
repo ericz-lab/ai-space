@@ -213,7 +213,7 @@ export async function catalogOffers(): Promise<number> {
 
 const WELCOME_KEY = "catalog-welcome-dismissed";
 
-/** The home screen's first-use card: the catalog's apps, all ticked in the App Store, one click away. */
+/** The home screen's first-use card: the App Store, one click away. */
 export function CatalogWelcome({ onOpen }: { onOpen: () => void }) {
   const { t } = useLang();
   const [count, setCount] = useState(0);
