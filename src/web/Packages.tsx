@@ -5,8 +5,17 @@ import { pollWhileVisible } from "./poll.ts";
 
 type Runtime = { state: string; kind: string; mode?: string; declaredMode?: string; unit?: string; pid?: number; startedAt?: string; error?: string };
 type App = { app: string; title: string; version: string; url: string; page?: boolean; state?: string; runtime?: Runtime; offline?: { features: string[]; online: string[] }; sourceIncluded?: boolean };
-type Catalogue = { spaceId: string; apps: App[]; remotes: { connectionId: string; spaceId: string; available: boolean; apps: App[] }[] };
-type Connection = { id: string; remoteSpaceId: string; direction: string; apps: string[]; enabled: boolean; connected: boolean };
+/** `shareable`: what a grant can name here, installed packages and spec-1 apps with a service (`page: false`, API only). */
+type Catalogue = { spaceId: string; apps: App[]; shareable?: { app: string; title: string; page: boolean }[]; remotes: { connectionId: string; spaceId: string; available: boolean; apps: App[] }[] };
+/** What this Space lets the other do through its peer API (docs/app-packages.md#peer-scopes); kept in this order, as the server does. */
+const SCOPES = ["panel", "agents", "events", "model", "tasks", "terminal", "apps", "manage"] as const;
+type PeerState = "peer" | "no-panel" | "shadowed" | "reserved" | "invalid-name";
+type Connection = {
+  id: string; remoteSpaceId: string; direction: string; apps: string[]; enabled: boolean; connected: boolean;
+  scopes?: string[]; fullTrust?: boolean; alias?: string | null; remoteName?: string | null;
+  /** Whether the other Space shows here as a peer, from the connections list. */
+  peer?: { name: string; state: PeerState };
+};
 type Operation = { id: string; app: string; version: string; state: string };
 
 export default function Packages({ onChange }: { onChange?: () => void }) {
@@ -129,7 +138,30 @@ export default function Packages({ onChange }: { onChange?: () => void }) {
       {connections.map((c) => <div className="package-card" key={c.id}>
         <p className="setnote">{c.remoteSpaceId} · {t(c.connected ? "status.up" : "status.down")}</p>
         <label><input type="checkbox" checked={c.enabled} disabled={busy} onChange={(e) => void act(() => sendJson("PATCH", `/api/panel/connections/${c.id}`, { enabled: e.target.checked }))} />{t("packages.connected")}</label>
-        {data?.apps.map((a) => <label key={a.app}><input type="checkbox" disabled={busy} checked={c.apps.includes(a.app)} onChange={(e) => void act(() => sendJson("PATCH", `/api/panel/connections/${c.id}`, { apps: e.target.checked ? [...c.apps, a.app] : c.apps.filter((v) => v !== a.app) }))} />{a.title}</label>)}
+        {(data?.shareable ?? data?.apps.map((a) => ({ app: a.app, title: a.title, page: a.page !== false })))?.map((a) => <label key={a.app}><input type="checkbox" disabled={busy} checked={c.apps.includes(a.app)} onChange={(e) => void act(() => sendJson("PATCH", `/api/panel/connections/${c.id}`, { apps: e.target.checked ? [...c.apps, a.app] : c.apps.filter((v) => v !== a.app) }))} />{a.title}{!a.page && <> · {t("packages.apiOnly")}</>}</label>)}
+        {c.peer && <p className="setnote">{t(`packages.peer.${c.peer.state}`, { name: c.peer.name })}</p>}
+        <form className="package-line" onSubmit={(e) => {
+          e.preventDefault();
+          const value = String(new FormData(e.currentTarget).get("alias") ?? "").trim();
+          void act(() => sendJson("PATCH", `/api/panel/connections/${c.id}`, { alias: value || null }));
+        }}>
+          <label>{t("packages.alias")}<input name="alias" key={c.alias ?? ""} defaultValue={c.alias ?? ""} placeholder={c.remoteName ?? c.remoteSpaceId.slice(0, 8)} disabled={busy} /></label>
+          <button type="submit" disabled={busy}>{t("common.save")}</button>
+        </form>
+        <p className="setnote">{t("packages.aliasHint")}</p>
+        <p className="setnote"><b>{t("packages.peerAccess")}</b><br />{t("packages.peerAccessHint")}</p>
+        <label><input type="checkbox" disabled={busy} checked={!!c.fullTrust} onChange={(e) => {
+          const on = e.target.checked;
+          if (on && !window.confirm(t("packages.fullTrustConfirm"))) return;
+          void act(() => sendJson("PATCH", `/api/panel/connections/${c.id}`, { fullTrust: on }));
+        }} />{t("packages.fullTrust")}</label>
+        <p className="setnote" role="note">{t("packages.fullTrustWarning")}</p>
+        {/* Under full trust every scope is granted; the ticks below are kept for when it is turned off. */}
+        {SCOPES.map((s) => <label key={s}><input type="checkbox" disabled={busy || !!c.fullTrust} checked={!!c.fullTrust || (c.scopes ?? []).includes(s)} onChange={(e) => {
+          const now = c.scopes ?? [];
+          const next = e.target.checked ? SCOPES.filter((x) => x === s || now.includes(x)) : now.filter((x) => x !== s);
+          void act(() => sendJson("PATCH", `/api/panel/connections/${c.id}`, { scopes: next }));
+        }} />{t(`packages.scope.${s}`)}</label>)}
         <button disabled={busy} onClick={() => { if (window.confirm(t("packages.removeConnectionConfirm"))) void act(() => sendJson("DELETE", `/api/panel/connections/${c.id}`)); }}>{t("packages.removeConnection")}</button>
       </div>)}
       <form onSubmit={(e) => { e.preventDefault(); void act(async () => {

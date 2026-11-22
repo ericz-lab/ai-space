@@ -20,7 +20,7 @@ const ls = async (ctx: Ctx, argv: string[]) => {
     { title: "apps", get: (p) => p.apps, align: "right" },
     { title: "agents", get: (p) => p.agents, align: "right" },
     { title: "error", get: (p) => p.error ?? "" },
-  ], "no peers (SPACE_PEER_<NAME> in the workspace .env)");
+  ], "no peers (a connection whose other Space grants the panel scope, see `space connection ls`, or SPACE_PEER_<NAME> in the workspace .env)");
   return 0;
 };
 

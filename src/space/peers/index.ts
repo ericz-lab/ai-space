@@ -5,6 +5,9 @@ export { DEFAULT_REFRESH_MS, MIN_REFRESH_MS, PEER_NAME_RE, loadPeers, parseHeade
 export { PeerHub } from "./hub.ts";
 export { LEDGER_TIMEOUT_MS, PeerLedgers } from "./ledgers.ts";
 export { mergeAgent, mergeAgents, mergeApps, mergeServices, mergeWidgets, peerId, peerRoute } from "./merge.ts";
-export { createPeerServeRoutes, type PeerServeOptions } from "./serve.ts";
+export { createPeerServeHandlers, createPeerServeRoutes, type PeerRoutes, type PeerServeOptions } from "./serve.ts";
+export { createConnectionPeerServe } from "./connection-serve.ts";
+export { ConnectionPeers, type ConnectionPeerState } from "./connection-peers.ts";
+export { PEER_ROUTES, PEER_SCOPES, parseScopes, peerRouteOf, type PeerScope } from "./scopes.ts";
 export { PeerStore } from "./store.ts";
 export { RenameError, checkRename, renameEnvText, renamePeer, renamePeerData, type PeerRenameOptions, type PeerRenamed, type RenameCounts } from "./rename.ts";

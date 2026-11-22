@@ -31,6 +31,12 @@ export class PackageGateway {
   feedback?: (app: string, req: Request) => Response | Promise<Response>;
   /** Answers `/_space/ui.css`, the built-in apps' stylesheet (docs/ui-kit.md): static, so a remote app gets this Space's too; unset, it is 404. */
   uiKit?: (req: Request) => Response | Promise<Response>;
+  /**
+   * The loopback port of a local spec-1 app's service (`service.port`), for a connection that shares it;
+   * unset or undefined, the app is not served. Only its `/api/` paths: a spec-1 page is not built to run
+   * on an isolated origin (docs/app-packages.md#source-apps-over-a-connection).
+   */
+  servicePort?: (app: string) => number | undefined;
   constructor(readonly runtime: PackageRuntime, readonly links: PackageLinks, readonly spaceId: string) {}
 
   start(port: number, publicBase?: string): number {
@@ -54,8 +60,10 @@ export class PackageGateway {
       const c = target.connectionId ? this.links.connections.get(target.connectionId) : undefined;
       if (!c || c.remoteSpaceId !== target.spaceId) throw new Error("application connection does not match Space identity");
       const response = await this.links.request(c.id, { operation: "catalogue" });
-      const catalogue = await response.json() as { spaceId: string; apps: { app: string }[] };
-      if (catalogue.spaceId !== target.spaceId || !catalogue.apps.some((a) => a.app === target.app)) throw new Error("remote application is not shared");
+      const catalogue = await response.json() as { spaceId: string; apps: { app: string; page?: boolean }[] };
+      const shared = catalogue.spaceId === target.spaceId ? catalogue.apps.find((a) => a.app === target.app) : undefined;
+      if (!shared) throw new Error("remote application is not shared");
+      if (shared.page === false) throw new Error("remote application has no page");
     }
     this.prune();
     if (this.tickets.size + this.sessions.size >= 1024) throw new Error("application session limit reached");
@@ -75,16 +83,19 @@ export class PackageGateway {
     const path = requestPath(m.path);
     const method = text(m.method ?? "GET", "method", 10);
     if (!METHODS.includes(method)) return new Response("Method not allowed", { status: 405 });
-    if (m.operation === "socket") return this.localSocket(app, path, m.headers, body, signal);
+    const service = this.sourceService(app, path);
+    if (service instanceof Response) return service;
+    if (m.operation === "socket") return this.localSocket(app, path, m.headers, body, signal, service);
     if (m.operation !== "fetch") return new Response("Unknown operation", { status: 400 });
     const installed = this.runtime.get(app);
-    if (!installed?.manifest.launch) return new Response("Application not found", { status: 404 });
-    if (installed.manifest.launch.kind === "static") {
+    if (!installed?.manifest.launch && !service) return new Response("Application not found", { status: 404 });
+    if (installed?.manifest.launch?.kind === "static") {
       if (method !== "GET" && method !== "HEAD") return new Response("Method not allowed", { status: 405 });
       const response = await this.runtime.staticResponse(app, new URL(path, "http://local").pathname);
       return method === "HEAD" ? new Response(null, { status: response.status, headers: response.headers }) : response;
     }
-    const lease = await this.runtime.acquire(app);
+    // A spec-1 app's service runs on its own (or under the supervisor): no lease, no activation.
+    const lease = service ?? await this.runtime.acquire(app);
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
@@ -113,9 +124,21 @@ export class PackageGateway {
     return this.local({ operation: "fetch", app, path, method: req.method, headers: [...req.headers] }, req.body, req.signal, true);
   }
 
-  private async localSocket(app: string, path: string, rawHeaders: unknown, body: ReadableStream<Uint8Array> | null, signal: AbortSignal): Promise<Response> {
-    if (this.runtime.get(app)?.manifest.launch?.kind !== "process") return new Response("Application has no socket service", { status: 404 });
-    const lease = await this.runtime.acquire(app);
+  /**
+   * A spec-1 app served through `servicePort`: its port with a no-op release, a 404 for a path outside
+   * its `/api/`, or undefined for an installed package (or an app with no service), which keeps its own path.
+   */
+  private sourceService(app: string, path: string): { port: number; release: () => void } | Response | undefined {
+    if (this.runtime.get(app)) return undefined;
+    const port = this.servicePort?.(app);
+    if (!port) return undefined;
+    if (!new URL(path, "http://local").pathname.startsWith("/api/")) return new Response("Only the application's /api/ paths are shared", { status: 404 });
+    return { port, release: () => {} };
+  }
+
+  private async localSocket(app: string, path: string, rawHeaders: unknown, body: ReadableStream<Uint8Array> | null, signal: AbortSignal, service?: { port: number; release: () => void }): Promise<Response> {
+    if (!service && this.runtime.get(app)?.manifest.launch?.kind !== "process") return new Response("Application has no socket service", { status: 404 });
+    const lease = service ?? await this.runtime.acquire(app);
     const headers = appHeaders(rawHeaders); headers.set("origin", `http://127.0.0.1:${lease.port}`);
     return processSocket(`ws://127.0.0.1:${lease.port}${path}`, headers, body, signal, lease.release);
   }
@@ -169,41 +192,9 @@ export class PackageGateway {
     } catch { return new Response("Application is unavailable", { status: 502 }); }
   }
 
-  private async browserSocket(req: Request, server: Server<WsData>, entry: Entry, meta: unknown): Promise<Response | undefined> {
-    if (req.headers.get("origin") !== entry.origin) return new Response("Socket origin refused", { status: 403 });
-    const input = socketQueue();
-    const controller = new AbortController();
-    const abort = () => { input.end(); controller.abort(); };
-    req.signal.addEventListener("abort", abort, { once: true });
-    let response: Response;
-    try { response = await this.dispatch(entry, meta, input.stream, controller.signal); }
-    catch (e) { abort(); req.signal.removeEventListener("abort", abort); throw e; }
-    if (!response.ok || !response.body) { abort(); req.signal.removeEventListener("abort", abort); return response; }
-    const stream = response.body;
-    const protocol = response.headers.get("x-space-socket-protocol");
-    // Bun negotiates from the request; an explicit response header duplicates its automatic header.
-    if (protocol) req.headers.set("sec-websocket-protocol", protocol);
-    else req.headers.delete("sec-websocket-protocol");
-    const upgraded = server.upgrade(req, { data: { attachment: {
-      open(ws) {
-        req.signal.removeEventListener("abort", abort);
-        void (async () => {
-          try {
-            for await (const frame of socketFrames(stream)) {
-              if (frame.kind === "close") { ws.close(safeCloseCode(frame.code), frame.reason.slice(0, 30)); return; }
-              if (ws.getBufferedAmount() > 1024 * 1024) throw new Error("socket backpressure limit");
-              const bytes = Buffer.from(frame.data, "base64"); ws.send(frame.binary ? bytes : new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-            }
-            ws.close(1000, "application socket ended");
-          } catch { ws.close(4002, "application socket failed"); }
-          finally { abort(); }
-        })();
-      },
-      message(ws, message) { try { input.push(socketMessage(message)); } catch { abort(); ws.close(4002, "socket input limit"); } },
-      close() { abort(); },
-    } } });
-    if (!upgraded) { abort(); req.signal.removeEventListener("abort", abort); return new Response("Socket upgrade failed", { status: 400 }); }
-    return undefined;
+  private browserSocket(req: Request, server: Server<WsData>, entry: Entry, meta: unknown): Promise<Response | undefined> {
+    if (req.headers.get("origin") !== entry.origin) return Promise.resolve(new Response("Socket origin refused", { status: 403 }));
+    return upgradeToChannelSocket(req, server, (input, signal) => this.dispatch(entry, meta, input, signal));
   }
 
   /**
@@ -246,6 +237,47 @@ export function originLabel(spaceId: string, app: string): string {
   const hash = sha256(new TextEncoder().encode(installationKey(spaceId, app))).slice(0, 16);
   const name = app.replace(/[._-]+/g, "-").slice(0, 40).replace(/^-+|-+$/g, "");
   return `${name}-${hash}`;
+}
+
+/**
+ * Upgrade `req` to a WebSocket whose frames travel as a `socket` operation's framed duplex stream
+ * (socket.ts): `dispatch` sends the operation and returns the owning side's answer. An answer that is
+ * not a stream (a refusal, a 404) is returned as it is and nothing is upgraded. A dispatch failure throws.
+ */
+export async function upgradeToChannelSocket(req: Request, server: Server<WsData>, dispatch: (input: ReadableStream<Uint8Array>, signal: AbortSignal) => Promise<Response>): Promise<Response | undefined> {
+  const input = socketQueue();
+  const controller = new AbortController();
+  const abort = () => { input.end(); controller.abort(); };
+  req.signal.addEventListener("abort", abort, { once: true });
+  let response: Response;
+  try { response = await dispatch(input.stream, controller.signal); }
+  catch (e) { abort(); req.signal.removeEventListener("abort", abort); throw e; }
+  if (!response.ok || !response.body) { abort(); req.signal.removeEventListener("abort", abort); return response; }
+  const stream = response.body;
+  const protocol = response.headers.get("x-space-socket-protocol");
+  // Bun negotiates from the request; an explicit response header duplicates its automatic header.
+  if (protocol) req.headers.set("sec-websocket-protocol", protocol);
+  else req.headers.delete("sec-websocket-protocol");
+  const upgraded = server.upgrade(req, { data: { attachment: {
+    open(ws) {
+      req.signal.removeEventListener("abort", abort);
+      void (async () => {
+        try {
+          for await (const frame of socketFrames(stream)) {
+            if (frame.kind === "close") { ws.close(safeCloseCode(frame.code), frame.reason.slice(0, 30)); return; }
+            if (ws.getBufferedAmount() > 1024 * 1024) throw new Error("socket backpressure limit");
+            const bytes = Buffer.from(frame.data, "base64"); ws.send(frame.binary ? bytes : new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+          }
+          ws.close(1000, "application socket ended");
+        } catch { ws.close(4002, "application socket failed"); }
+        finally { abort(); }
+      })();
+    },
+    message(ws, message) { try { input.push(socketMessage(message)); } catch { abort(); ws.close(4002, "socket input limit"); } },
+    close() { abort(); },
+  } } });
+  if (!upgraded) { abort(); req.signal.removeEventListener("abort", abort); return new Response("Socket upgrade failed", { status: 400 }); }
+  return undefined;
 }
 
 function appHeaders(raw: unknown): Headers {

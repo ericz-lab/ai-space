@@ -194,6 +194,10 @@ space connection create incoming PEER_UUID --apps notes
 space connection create outgoing HUB_UUID --endpoint https://hub.example.com --token-env MY_HUB_TOKEN
 space connection grant CONNECTION_UUID --apps notes
 space connection grant CONNECTION_UUID --apps ''
+space connection scopes CONNECTION_UUID --scopes panel,agents,events
+space connection scopes CONNECTION_UUID --full-trust on --yes
+space connection alias CONNECTION_UUID office
+space connection alias CONNECTION_UUID --clear
 space connection disable CONNECTION_UUID
 space connection enable CONNECTION_UUID
 space connection rm CONNECTION_UUID
@@ -201,4 +205,6 @@ space connection rm CONNECTION_UUID
 
 `--allow-unsigned` is an explicit trust decision for a package without a signature. Signed packages use the host's configured publisher keys. Install/upgrade/change commands print an operation UUID before writing; reuse it with `--operation-id UUID` if the response is interrupted. `app open` prints a one-use URL rather than launching a browser on the server. A use-only peer connection cannot install or manage remote apps; `--url` requires a separate operator credential for that Space.
 
-Creating an incoming connection returns its token once. Store it in the outgoing peer's host environment under the selected name; restart that Space to load a new environment variable. The `--apps` list always names apps **owned by the machine where the command runs**. On a peer's outgoing connection it controls Hub-to-peer access and starts empty. Existing `space peer ls` continues to describe legacy peer snapshots.
+Creating an incoming connection returns its token once. Store it in the outgoing peer's host environment under the selected name; restart that Space to load a new environment variable. The `--apps` list always names apps **owned by the machine where the command runs**: installed packages, or spec-1 apps with a `service.port`, which are shared API-only ([app-packages.md](app-packages.md#source-apps-over-a-connection)). On a peer's outgoing connection it controls Hub-to-peer access and starts empty. `grant` replaces the list; an app left off it loses its in-flight requests and sockets, the connection and the other apps' streams stay up.
+
+`scopes` sets what the other Space may do through this machine's peer API ([app-packages.md](app-packages.md#peer-scopes)): `--scopes` replaces the ticked list (`panel`, `agents`, `events`, `model`, `tasks`, `terminal`, `apps`, `manage`; empty grants none), `--full-trust on|off` the switch that grants every scope, present and future. Turning full trust on asks first, or needs `--yes` without a terminal; `create` takes `--scopes`, `--full-trust` and `--alias` too. A removed scope ends only the streams that needed it. `alias` names the other Space here as a peer (default: the name it gives itself); give it a legacy peer's old name to keep that peer's stored state ([peers.md](peers.md#adding-a-peer)). `ls` shows for each connection what this machine grants (`apps here`, `scopes here`) and, under `peer`, whether the other Space is a peer here with what it grants, or why it is not. `space peer ls` lists every peer, legacy and connection ones; a connection peer's `url` reads `connection:<id>`.

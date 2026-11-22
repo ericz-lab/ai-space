@@ -18,6 +18,8 @@ export type StudioPeer = {
   health(): "ok" | "down";
   provides(app: string, capability?: string): boolean;
   authHeaders(): Record<string, string>;
+  /** A socket to the peer's `/api/peer/...` path, over HTTPS or its package connection (peers/client.ts). */
+  socket?(path: string): WebSocket;
   forward(req: Request, path: string, opts?: { timeoutMs?: number; headers?: Record<string, string> }): Promise<Response>;
   snapshot?: { asOf: string };
 };
@@ -162,7 +164,9 @@ export class VoiceStudioAdapter implements SpeechAdapter {
       return { url: `ws://127.0.0.1:${port}/api/asr/realtime`, headers: {}, machine: "" };
     }
     if (at.peer.knownDown()) throw failure(`${this.name}: HTTP 503: peer ${at.peer.name} is down`, 503, "transport");
-    return { url: `${at.peer.config.url.replace(/^http/, "ws")}/api/peer/apps/${encodeURIComponent(this.spec.app)}/proxy/api/asr/realtime`, headers: at.peer.authHeaders(), machine: at.peer.name };
+    const path = `/api/peer/apps/${encodeURIComponent(this.spec.app)}/proxy/api/asr/realtime`;
+    const peer = at.peer;
+    return { url: `${peer.config.url.replace(/^http/, "ws")}${path}`, headers: peer.authHeaders(), machine: peer.name, ...(peer.socket ? { open: () => peer.socket!(path) } : {}) };
   }
 
   /** Self-hosted: no price. */

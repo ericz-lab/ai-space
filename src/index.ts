@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { Inbox, NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
 import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes, fixerAgentView, spaceAgentView } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
-import { PeerHub, PeerLedgers, PeerStore, createPeerRoutes, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
+import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createConnectionPeerServe, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { availabilityOf } from "./space/model/health.ts";
@@ -48,9 +48,9 @@ import { PackageStore } from "./space/packages/store.ts";
 import { PackageInstaller } from "./space/packages/install.ts";
 import { StandaloneServices } from "./space/packages/standalone.ts";
 import { PackageRuntime } from "./space/packages/runtime.ts";
-import { Connections } from "./space/packages/connections.ts";
+import { Connections, peerLabel } from "./space/packages/connections.ts";
 import { PackageLinks, createConnectionRoutes } from "./space/packages/links.ts";
-import { RemoteCatalogue, sharedIcon, sharedIconResponse } from "./space/packages/catalogue.ts";
+import { RemoteCatalogue, sharedIcon, sharedIconResponse, sourceSharedApps } from "./space/packages/catalogue.ts";
 import { PackageGateway, createPackageOpenRoutes } from "./space/packages/gateway.ts";
 import { runPackageTask } from "./space/packages/tasks.ts";
 import { loadAppEnv } from "./space/scheduler/targets.ts";
@@ -139,19 +139,27 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const studioDeps = { ws, installer: packageInstaller, lifecycle: packageLifecycle, store: packageStore, activate: activatePackage, log: (l: string) => console.error(`[studio] ${l}`) };
   const appCatalog = new AppCatalog({ db: store.db, sources: config.appCatalogs, studio: studioDeps, trustedKeys: packageTrustKeys });
   const packageConnections = new Connections(store.db, packageStore.spaceId);
+  // Before the links: what a connection may share includes the registered spec-1 apps.
+  const registry = new AppRegistry();
+  const isPackage = (app: string) => packageStore.list().some((o) => o.app === app && o.state === "installed");
   let packageGateway: PackageGateway;
   const packageLinks = new PackageLinks(packageConnections, {
     env,
     name: config.name,
     handle: (_connection, meta, body, signal) => packageGateway.local(meta, body, signal),
-    apps: () => packageStore.installed().filter((o) => packageRuntime.get(o.app)).map((o) => {
+    // Installed packages, then spec-1 apps with a service port, API-only (docs/app-packages.md#source-apps-over-a-connection).
+    apps: () => [...packageStore.installed().filter((o) => packageRuntime.get(o.app)).map((o) => {
       const app = packageRuntime.get(o.app)!;
       const icon = sharedIcon(app);
       return { app: o.app, title: app.manifest.title ?? o.app, version: o.version, page: !!app.manifest.launch, ...(icon.text ? { icon: icon.text } : {}), ...(icon.file ? { iconFile: true } : {}) };
-    }),
+    }), ...sourceSharedApps(registry.list().map((e) => e.manifest), isPackage)],
     icon: (app) => sharedIconResponse(packageRuntime.get(app)),
   });
   packageGateway = new PackageGateway(packageRuntime, packageLinks, packageStore.spaceId);
+  packageGateway.servicePort = (app) => {
+    const m = registry.get(app)?.manifest;
+    return m && m.spec !== 2 && !isPackage(app) ? m.service?.port : undefined;
+  };
   if (config.packagePort !== undefined) packageGateway.start(config.packagePort, config.packageBaseUrl);
   packageLinks.refresh();
   const packageCatalogue = new RemoteCatalogue(packageLinks);
@@ -173,7 +181,6 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const runtimes = new RuntimeRegistry(loaded.config);
   // Codex tiers from the installed CLI's catalogue, in the background: the built-in names serve until it answers.
   void refreshCodexTiers(runtimes, loaded.config.runtimes, (l) => console.log(`[runtimes] ${l}`), undefined, (loaded.config.machines ?? []).map((m) => m.ssh));
-  const registry = new AppRegistry();
   // The bus (docs/events.md): http and stream deliveries of every stored event, and calls between apps.
   const busStore = new BusStore(config.dbPath);
   const bus = new Bus({
@@ -251,8 +258,11 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const { peers: peerConfigs, errors: peerErrors } = loadPeers(env);
   for (const [name, reason] of peerErrors) console.error(`[peers] ${name}: ${reason}`);
   // Peers' events are mirrored here (docs/events.md): published under the same app name, marked with the peer.
+  // A peer of SPACE_PEER_* is reached over HTTPS; one of a package connection over its channel (connection-peers.ts),
+  // and what the hub keeps under its name survives until its connection's catalogue is read.
   const peers = new PeerHub(peerConfigs, {
     store: new PeerStore(store.db),
+    channel: (id, meta, body, signal, opts) => packageLinks.request(id, meta, body, signal, opts),
     onEvents: (peer, list) => {
       for (const e of list) {
         try {
@@ -262,7 +272,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         }
       }
     },
-  });
+  }, packageConnections.list().map(peerLabel));
+  // A connection whose other Space grants this one its panel scope is a peer here, under the connection's label.
+  const connectionPeers = new ConnectionPeers({ hub: peers, catalogue: packageCatalogue, connections: packageConnections, reserved: (name) => Boolean(registry.get(name)) });
+  packageLinks.peerState = (id) => connectionPeers.status().find((s) => s.connection === id);
   // A model may name a peer (`box:codex/basic`): its answers go through the peer link (docs/model-machines.md).
   runtimes.attachRemote(peerRuntimes(peers, config.name));
   for (const r of config.peerModel) {
@@ -625,6 +638,11 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   if (config.terminal.enabled && !terminal.backend) console.error("[terminal] enabled, but this runtime has no Bun.Terminal and no python3 on PATH; sessions cannot open");
   const terminalRoutes = createTerminalRoutes({ service: terminal, name: config.name, hub: peers });
 
+  // This Space as a peer (docs/peers.md): the same /api/peer/* handlers behind SPACE_HUB_TOKEN over HTTPS and behind a
+  // connection's scopes over its channel. Packages stay out of both: a connection shares them by its own app grant.
+  const peerServe = { name: config.name, id: packageStore.spaceId, panel: panelRoutes, agents: agentRoutes, allowApp: (app: string) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app: string) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), tasks: createPeerTaskRoutes({ scheduler, store, runtimes }), feedback: createFeedbackPeerServeRoutes(feedbackLists), inventory: () => peerRow(runtimeHealth, runtimes), ledger: createPeerUsageRoutes({ service: model, name: config.name, skipApps: () => packageStore.list().filter((o) => o.state === "installed").map((o) => o.app) }), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) };
+  packageLinks.peer = createConnectionPeerServe({ routes: createPeerServeHandlers(peerServe), allows: (id, scope) => packageConnections.allowsScope(id, scope) });
+
   // Every route table with the callers it serves under SPACE_AUTH=builtin (docs/auth.md#access-policy); later tables win a shared key.
   const { routes, policies } = composeRoutes(
     [
@@ -693,9 +711,9 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest })],
       ["owner", agentRoutes],
       // A rename moves what this hub keeps under the peer's name and tells the apps (docs/peers.md#renaming-a-peer).
-      ["owner", createPeerRoutes({ hub: peers, layout, registry, callerApp, agentCallers: config.agentCallers, rename: (from, to) => renamePeer({ hub: peers, db: store.db, envFile: ws.envFile, env, taken: (name) => Boolean(registry.get(name)), publish: (data) => scheduler.publish({ app: SPACE_APP, name: "peer.renamed", data }) }, from, to) })],
+      ["owner", createPeerRoutes({ hub: peers, layout, registry, callerApp, agentCallers: config.agentCallers, connections: { find: (peer, app) => packageCatalogue.find(peer, app), request: (id, meta, body, signal) => packageLinks.request(id, meta, body, signal) }, rename: (from, to) => renamePeer({ hub: peers, db: store.db, envFile: ws.envFile, env, taken: (name) => Boolean(registry.get(name)), publish: (data) => scheduler.publish({ app: SPACE_APP, name: "peer.renamed", data }) }, from, to) })],
       ["owner", terminalRoutes],
-      ["self", createPeerServeRoutes({ token: config.hubToken, name: config.name, id: packageStore.spaceId, panel: panelRoutes, agents: agentRoutes, allowApp: (app) => !packageStore.list().some((o) => o.app === app && o.state === "installed"), servicePort: (app) => registry.get(app)?.manifest.service?.port, appModels: createPeerAppModelRoutes(appModelRouteOpts), tasks: createPeerTaskRoutes({ scheduler, store, runtimes }), feedback: createFeedbackPeerServeRoutes(feedbackLists), inventory: () => peerRow(runtimeHealth, runtimes), ledger: createPeerUsageRoutes({ service: model, name: config.name, skipApps: () => packageStore.list().filter((o) => o.state === "installed").map((o) => o.app) }), bus, events: store, ...(terminal.enabled ? { terminal: terminalRoutes } : {}), ...(config.peerModel.length ? { model: createPeerModelRoutes({ service: model, allow: config.peerModel }), modelInfo: peerModelInfo } : {}) })],
+      ["self", createPeerServeRoutes({ token: config.hubToken, ...peerServe })],
       ["public", createWebRoutes()],
       ["public", createUiKitRoutes(uiKit)],
       ["owner", createAuthRoutes({ mode: config.auth, auth })],
@@ -751,7 +769,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       "/api/peers/:peer/agents/:app/:agent/sessions/:sid": "app",
       "/api/checks": "app-read",
       "/api/panel/packages/apps/:app/checks/:check": "app-read",
-      // An app's /api/ paths on a peer, as an app on this machine reaches another app's port directly (space-ops, ai-usage, asset-center).
+      // An app's /api/ paths on a peer, as an app on this machine reaches another app's port directly (space-ops, ai-usage, asset-center);
+      // over a package connection only the owner or the app of the same name (peers/api.ts).
       "/api/peers/:peer/apps/:app/proxy/*": "app",
     },
   );
@@ -797,6 +816,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     peers.stop();
     terminal.stop();
     router.stop();
+    connectionPeers.close();
     packageCatalogue.close();
     packageLinks.close();
     packageGateway.close();

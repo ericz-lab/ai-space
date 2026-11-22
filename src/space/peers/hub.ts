@@ -7,18 +7,47 @@ import { mergeAgents, mergeApps, mergeServices, mergeWidgets } from "./merge.ts"
 
 /**
  * Every configured peer, in name order, and the merged views the panel lists
- * append after its local entries. Reads never wait on a peer.
+ * append after its local entries. Reads never wait on a peer. The peers of
+ * `SPACE_PEER_*` are given at construction; peers reached over a package
+ * connection come and go with their connections (connection-peers.ts `attach`, `detach`).
  */
 export class PeerHub {
   private clients = new Map<string, PeerClient>();
   private started = false;
 
+  /**
+   * `keep`: more names whose stored snapshot and cursor survive the start-up prune, those of the peers
+   * package connections will add once their catalogue is read (connections.ts `peerLabel`).
+   */
   constructor(
     configs: PeerConfig[],
     private readonly opts: PeerClientOptions = {},
+    keep: string[] = [],
   ) {
     for (const c of configs) this.clients.set(c.name, new PeerClient(c, opts));
-    opts.store?.prune(configs.map((c) => c.name));
+    opts.store?.prune([...configs.map((c) => c.name), ...keep]);
+  }
+
+  /**
+   * Add a peer reached over a package connection under `config.name`. Its client starts from what is
+   * stored under that name, so a machine that moves from `SPACE_PEER_*` to a connection under the same name
+   * keeps its snapshot, event cursor and everything else the hub keeps by name.
+   */
+  attach(config: PeerConfig): PeerClient {
+    if (!config.connection) throw new Error("only a connection peer is attached");
+    if (this.clients.has(config.name)) throw new Error(`peer ${config.name} already exists`);
+    const client = new PeerClient(config, this.opts);
+    this.clients = new Map([...this.clients, [config.name, client] as [string, PeerClient]].sort(([a], [b]) => a.localeCompare(b)));
+    if (this.started) client.start();
+    return client;
+  }
+
+  /** Take a connection peer off (its connection was removed, disabled or no longer grants the panel). What is stored under its name stays. */
+  detach(name: string): void {
+    const c = this.clients.get(name);
+    if (!c?.config.connection) return;
+    c.stop();
+    this.clients.delete(name);
   }
 
   names(): string[] {
@@ -47,6 +76,7 @@ export class PeerHub {
   async rename(from: string, to: string, move: () => void): Promise<PeerClient> {
     const old = this.clients.get(from);
     if (!old) throw new Error(`unknown peer: ${from}`);
+    if (old.config.connection) throw new Error(`peer ${from} is a package connection: set the connection's alias instead`);
     if (this.clients.has(to)) throw new Error(`peer ${to} already exists`);
     await old.settle();
     try {

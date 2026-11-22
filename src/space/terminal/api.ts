@@ -141,8 +141,8 @@ export function createTerminalRoutes(opts: TerminalApiOptions): Routes {
       if (!client) return error(404, `unknown peer: ${req.params.peer}`);
       const ticket = new URL(req.url).searchParams.get("ticket") ?? "";
       if (!ticket) return error(401, "ticket is required");
-      const url = `${client.config.url.replace(/^http/, "ws")}/api/peer/terminal/ws?ticket=${encodeURIComponent(ticket)}`;
-      const attachment = bridge(url, client.authHeaders(), `peer ${client.name}`);
+      // Over HTTPS with the hub's token, or over the peer's package connection (peers/client.ts `socket`).
+      const attachment = bridgeTo(() => client.socket(`/api/peer/terminal/ws?ticket=${encodeURIComponent(ticket)}`), `peer ${client.name}`);
       if (server.upgrade(req, { data: { attachment } })) return undefined;
       return error(400, "expected a websocket upgrade");
     }),
@@ -183,13 +183,18 @@ export const terminalWebSocket: WebSocketHandler<WsData> = {
  * `target` names the far end in the close reason ("peer david", "app media").
  */
 export function bridge(url: string, headers: Record<string, string>, target: string): WsAttachment {
+  return bridgeTo(() => new WebSocket(url, { headers } as unknown as string[]), target);
+}
+
+/** `bridge` to a socket `open` makes: a WebSocket, or a peer's socket over a package connection (peers/client.ts `socket`). */
+export function bridgeTo(open: () => WebSocket, target: string): WsAttachment {
   let up: WebSocket | undefined;
   let queue: (string | Uint8Array)[] = [];
   return {
     open(ws) {
       let opened = false;
       try {
-        up = new WebSocket(url, { headers } as unknown as string[]);
+        up = open();
       } catch (e) {
         ws.close(4002, `${target} unreachable: ${(e as Error).message}`.slice(0, 120));
         return;

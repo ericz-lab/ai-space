@@ -33,9 +33,27 @@ Names are per machine, so `media` on one machine and `media` on another are diff
 
 The prefix is a display and layout key, not a route parameter: app names cannot contain `/` and the panel routes are shaped `/api/apps/:app`, so peer routes get their own prefix (below) and views carry a `peer` field next to the bare `name`. Every app view now has an `id` (the name, or `<peer>/<name>`), which is what the layout order and the hidden set hold. The web UI names the peer in the tile's hover card and uses `peer` to pick the route base.
 
+## Adding a peer
+
+A peer is added over a [package connection](app-packages.md#connected-space-api): the peer opens an outbound authenticated WebSocket to the hub, and every request the hub makes to it (snapshot, events, chat, sockets, model calls) travels over that one channel. The peer needs no public port, no tunnel hostname and no `SPACE_HUB_TOKEN`, and the hub no `SPACE_PEER_*` line. The older way, below under [Configuration](#configuration), keeps working side by side.
+
+1. On the hub: `space connection create incoming <peer's Space ID>`. The token is printed once.
+2. On the peer: put the token in its `.env` under a name of your choice (`HUB_ACCESS=…`), restart it, then `space connection create outgoing <hub's Space ID> --endpoint https://<hub> --token-env HUB_ACCESS`.
+3. On the peer, grant the hub what it may do there: `space connection scopes <id> --scopes panel,agents,events,model,tasks,terminal`, or `--full-trust on` for everything, those a later version adds included ([scopes](app-packages.md#peer-scopes)). The Space IDs are in `space connection ls` on each side, or Settings → Application packages.
+
+Within one catalogue round (30 s at most) the peer shows on the hub under its `SPACE_NAME`, lowercased, exactly as a legacy peer does: `GET /api/peers` lists it with `via: "connection"`, its apps, agents, widgets and services are merged under `<name>/`, and every `/api/peers/<name>/…` route, the model adapters, the ledgers, the event mirror, bus calls, the terminal bridge, speech and feedback reach it through its client (`client.ts`), which sends each request as a [`peer` operation](app-packages.md#the-peer-operation) on the channel instead of HTTPS. A scope the peer does not grant answers 403 on the hub as the peer's own words: the panel scope alone lists the machine without letting the hub chat, call or open a shell there; without `events` the mirror simply has nothing to pull.
+
+Scopes are directional, like app grants: each Space grants what the **other** may do on it, whichever side dialed. Two machines that should each see the other grant `panel` both ways, on their own connection rows.
+
+**Naming.** On the hub the peer's name is the connection's label (`connections.ts` `peerLabel`): its `alias` when the hub's operator set one (`space connection alias <id> <name>`), else the name the peer gives itself (`SPACE_NAME`, from its catalogue, kept on the row so a restart keeps it), else the first eight characters of its Space ID. The hub keeps everything under that name as it does for `SPACE_PEER_<NAME>` (`peer_snapshots`, `peer_cursors`, hidden apps, tile order, model ledger rows), and the stable id where a snapshot's `id` is used is the peer's Space ID, which the connection is bound to, whatever the snapshot says. A connection peer is renamed by changing its alias, not with `space peer rename`.
+
+**One machine, one entry.** A legacy peer wins over a connection peer of the same name, and over a connection to the Space whose id its snapshot carries; two connections with one label: the first by connection id wins. A name a local app has is not taken. The connection that loses is listed in `GET /api/connections` with `peer.state` `shadowed` or `reserved` and the reason, and its machine is not shown twice. An app shared both in the snapshot and by an app grant has the same `<name>/<app>` id from both and is listed once.
+
+**Moving a legacy peer onto a connection.** Create the connection, set its alias to the legacy peer's name, grant the scopes on the peer, then remove the `SPACE_PEER_<NAME>` lines and restart the hub. The hub keeps the rows of every connection's label at start-up, so the stored snapshot shows (muted) until the first refresh over the channel, and the cursor, hidden apps, tile order and ledger rows carry over. While both exist, the legacy peer is the one shown.
+
 ## Configuration
 
-Hub side, in `<workspace>/.env`, the same pattern as notify channels (`SPACE_NOTIFY_<NAME>`):
+The older way to add a peer, still supported: the hub reaches the peer over HTTPS with the peer's `SPACE_HUB_TOKEN`. Hub side, in `<workspace>/.env`, the same pattern as notify channels (`SPACE_NOTIFY_<NAME>`):
 
 ```
 # Peers: other ai-space machines whose panel this one merges. NAME lowercased is the peer name.
@@ -62,7 +80,7 @@ A malformed peer line is reported at boot and skipped; the others load. A peer n
 
 ## Peer side: `/api/peer/*`
 
-Present only when `SPACE_HUB_TOKEN` is set; every route requires `Authorization: Bearer <token>`, and a wrong or missing token is a bare 401. The routes mirror the panel and agent routes the browser already uses, with the same handlers behind a token check, plus one snapshot:
+Over HTTPS present only when `SPACE_HUB_TOKEN` is set; every route requires `Authorization: Bearer <token>`, and a wrong or missing token is a bare 401. Over a package connection the same handlers answer a [`peer` operation](app-packages.md#the-peer-operation), each route under the scope `PEER_ROUTES` (`scopes.ts`) gives it, with no token. The routes mirror the panel and agent routes the browser already uses, with the same handlers behind a token check, plus one snapshot:
 
 | Route | Mirrors | Notes |
 | --- | --- | --- |
@@ -95,15 +113,18 @@ Module `src/space/peers/`:
 
 | File | Holds |
 | --- | --- |
-| `config.ts` | `SPACE_PEER_*` parsing: name, URL, token, extra headers, refresh. |
-| `client.ts` | One client per peer: `refresh()` on its own timer with the last good snapshot kept, `health()`, `knownDown()` (down and the last two refreshes failed), `forward(req, path)` for the proxied routes. Timeouts: 8 s for a snapshot, none for a chat stream (it stays open as long as the peer's does; the browser leaving detaches it, the turn goes on on the peer), 8 s for the other forwards. |
+| `config.ts` | `SPACE_PEER_*` parsing: name, URL, token, extra headers, refresh. A connection peer's config names its `connection` and the other Space's id instead. |
+| `connection-peers.ts` | The connection peers: every enabled connection whose other Space grants the panel scope, attached to the hub under the connection's label, or listed with the reason it is not (a legacy peer of the same name or Space, another connection of that label, a local app's name). |
+| `connection-serve.ts` | The peer side over a connection: a `peer` operation into the `/api/peer/*` handlers, checked against the connection's scopes, with only the headers the routes read and a hub uses. |
+| `scopes.ts` | `PEER_SCOPES` and `PEER_ROUTES`: every `/api/peer/*` route with its one scope. |
+| `client.ts` | One client per peer: `refresh()` on its own timer with the last good snapshot kept, `health()`, `knownDown()` (down and the last two refreshes failed), `forward(req, path)` for the proxied routes, `request(path)` and `socket(path)`; every one goes over HTTPS with the token, or as a `peer` operation on the peer's connection. Timeouts: 8 s for a snapshot, none for a chat stream (it stays open as long as the peer's does; the browser leaving detaches it, the turn goes on on the peer), 8 s for the other forwards. |
 | `store.ts` | The last good snapshot per peer in `space.db` (`peer_snapshots`), so a hub restart while a peer is down still lists its apps, muted. A peer dropped from `.env` loses its row at boot. |
 | `rename.ts` | `space peer rename`: the checks, the `.env` rewrite and the move of every row kept under the peer's name, in one transaction ([Renaming a peer](#renaming-a-peer)). |
 | `merge.ts` | Turns a snapshot into hub views: prefixes ids, sets `peer`, rewrites icon, avatar and embed routes to the hub's proxy, applies the hub's hidden set, marks stale entries. |
-| `hub.ts` | Every configured peer and the merged lists the panel appends. |
-| `serve.ts` | The peer side (`/api/peer/*`). |
+| `hub.ts` | Every configured peer and the merged lists the panel appends; connection peers are attached and detached as their connections change. |
+| `serve.ts` | The peer side (`/api/peer/*`): `createPeerServeHandlers`, and the HTTPS routes that put them behind the token. |
 | `ledgers.ts` | The peers' model ledgers for the hub's usage page: every peer at once, 4 s at most, the last answer when one is late. |
-| `api.ts` | `GET /api/peers`, the hub-side hide, the forwarded uninstall, the forwarded app-model list and override change (`GET /api/peers/:peer/model/apps`, `PATCH /api/peers/:peer/apps/:app/model`, same-origin browser requests only, like the local route), the forwarded task list, runs, task models and task model change (`GET /api/peers/:peer/tasks`, `GET /api/peers/:peer/tasks/:id/runs`, `GET /api/peers/:peer/tasks/models`, `PATCH /api/peers/:peer/tasks/:id/model`, the last under the same rule), and the `/api/peers/:peer/*` proxy routes, including `GET /api/peers/:peer/apps/:app/proxy/api/*` for an app on the hub that reads its counterpart's API on the peer (65 s limit, the peer's own 60 s inside it); the same path as a WebSocket is bridged to the peer's (`bridge` in `terminal/api.ts`, the one the terminal uses). |
+| `api.ts` | `GET /api/peers`, the hub-side hide, the forwarded uninstall, the forwarded app-model list and override change (`GET /api/peers/:peer/model/apps`, `PATCH /api/peers/:peer/apps/:app/model`, same-origin browser requests only, like the local route), the forwarded task list, runs, task models and task model change (`GET /api/peers/:peer/tasks`, `GET /api/peers/:peer/tasks/:id/runs`, `GET /api/peers/:peer/tasks/models`, `PATCH /api/peers/:peer/tasks/:id/model`, the last under the same rule), and the `/api/peers/:peer/*` proxy routes, including `GET /api/peers/:peer/apps/:app/proxy/api/*` for an app on the hub that reads its counterpart's API on the peer (65 s limit, the peer's own 60 s inside it); the same path as a WebSocket is bridged to the peer's (`bridge` in `terminal/api.ts`, the one the terminal uses); a name that is no legacy peer may resolve to a package connection instead ([An app's own API](#an-apps-own-api)). |
 
 What changed in the existing modules:
 
@@ -116,6 +137,12 @@ What changed in the existing modules:
 - **Create and delete**: unchanged and local. A peer app cannot be created or deleted from the hub.
 
 Proxy routes on the hub, all under `/api/peers/:peer/`, forward to the peer's `/api/peer/` with the bearer and extra headers added and the response streamed back as is (status, `content-type`, body). They accept only the paths in the table above; anything else under `/api/peers/` is 404 on the hub without a call to the peer.
+
+### An app's own API
+
+`GET /api/peers/:peer/apps/:app/proxy/api/*` resolves `:peer` in three steps. A legacy peer of that name (`SPACE_PEER_<NAME>`) wins and is forwarded as above. Otherwise the hub looks for an enabled [package connection](app-packages.md#connection-and-directional-grants) whose Space carries that label, its `SPACE_NAME` or, when it sends none, the first eight characters of its UUID (the `peer` field of its tiles in `GET /api/apps`), and whose last catalogue shares `:app`; the call then travels over that connection's channel as a `fetch` operation, and the owning Space checks its own grant. Otherwise a connection peer of that name ([Adding a peer](#adding-a-peer)) is forwarded like a legacy one, as a `peer` operation that needs the other Space's `apps` scope. This is how ai-usage on a hub pulls a machine that opened a connection to it: it reads `GET /api/apps?all=1`, takes every `ai-usage` entry with a `peer`, and calls this path with its `SPACE_APP_TOKEN`, the same for both kinds of peer.
+
+Over a connection the route keeps the legacy limits (GET only, only the app's `/api/`, 65 s at most, a WebSocket on the same path from the panel's own origin only, bridged over the channel's `socket` operation) and adds a caller rule: the owner may call it, and an app with its own token may reach only the app of the same name on the other side (`ai-usage` to `ai-usage`); any other app's token is 403. The legacy route's caller rule is unchanged. Nothing of the caller's credentials travels: the owning side receives the path, `accept` and a socket's subprotocol, never the caller's `Authorization` or the Space's cookies, and the hub passes back the status, `content-type` and body. A connection that is down or stale answers 502 `{ ok: false, error: "peer <label> unreachable: …" }`; an app the other side no longer grants answers its 403.
 
 ## Renaming a peer
 
@@ -159,11 +186,13 @@ A snapshot is refreshed in the background on its own timer, never on a browser r
 
 ## Trust boundary
 
+A connection peer does not hold that credential. The peer grants the hub [scopes](app-packages.md#peer-scopes) on its own connection row, each `/api/peer/*` route needs exactly one, and the hub's requests carry no credential of the hub's callers (no `Authorization`, no cookie) and bring back no cookie of the peer's. Full trust is the equivalent of handing the hub `SPACE_HUB_TOKEN`; the panel scope alone is a read-only listing. What follows describes the token, and full trust.
+
 The hub's panel routes carry no token (see [panel.md](panel.md)); the peer routes are the first bearer-guarded read surface, because they are meant to cross machines. What the token grants is exactly what the peer's own panel grants through its tunnel: read the app list, load pages and icons, and open a chat, including with `bypassPermissions`, which is a shell on the peer as the peer's user. The hub therefore holds, in its `.env`, a credential worth a shell on every peer; treat the hub's workspace accordingly. A peer that wants to limit this sets no `SPACE_HUB_TOKEN` and is listed on the hub as a link app instead.
 
 Chat forwarding passes the request body through unchanged, so the hub's access layer decides who may chat, and the peer's token check decides which machine may ask. Neither side logs message text.
 
-The app proxy reaches a peer app's `/api/` paths without the app's own login, GET and WebSocket only. On the hub it carries no token, like the panel routes: an app's server calls it over loopback, and a WebSocket from a browser is accepted from the panel's own origin only (a socket is not covered by the cross-site write guard, and a page on another site could otherwise open one through the operator's browser). What an app exposes under `/api/` to GET and to sockets is therefore readable by every app on the hub; an app that needs more than that checks a credential of its own.
+The app proxy reaches a peer app's `/api/` paths without the app's own login, GET and WebSocket only. On the hub it carries no token, like the panel routes: an app's server calls it over loopback, and a WebSocket from a browser is accepted from the panel's own origin only (a socket is not covered by the cross-site write guard, and a page on another site could otherwise open one through the operator's browser). What an app exposes under `/api/` to GET and to sockets is therefore readable by every app on the hub; an app that needs more than that checks a credential of its own. Over a package connection it is readable only by the owner and the hub's app of the same name, and only while the other Space grants the app ([An app's own API](#an-apps-own-api)).
 
 A peer that enables its terminal ([terminal.md](terminal.md)) offers it to the hub under the same token: the hub's browser opens a session with two forwarded requests and the hub bridges the socket. The peer keeps every rule of its own terminal (same-origin is satisfied by the hub's forward, the ticket is the peer's, the passphrase is the peer's and is typed on the hub's page, the idle limit and cap are the peer's, the audit row is written on the peer). A peer that wants a hub to list it but not to open a shell leaves the terminal off; the hub then shows the machine as off in the picker and nothing else changes.
 
@@ -187,6 +216,8 @@ A peer app whose `url` is already on the panel (a local app's, or an earlier pee
 
 ## Deploying a peer
 
+Over a connection, the steps are those of [Adding a peer](#adding-a-peer), after step 1 below; steps 3 and 4 are not needed. The legacy way:
+
 1. Install ai-space on the second machine as a user unit (`deploy/install.sh`), workspace `~/.ai-space`, apps under `apps/` as on any machine.
 2. In its `.env`: `SPACE_HUB_TOKEN` (random) and `SPACE_NAME`.
 3. Publish its port on a hostname of the machine's tunnel; exempt `/api/peer/*` from the access layer or note the layer's service credentials. A machine with no tunnel can keep an SSH reverse tunnel to the hub's machine instead (`ssh -N -R 127.0.0.1:8711:127.0.0.1:8700 hub`), and the hub uses `http://127.0.0.1:8711`; the Linux app sets this up, with steps 2 and 4, in Settings › Peer ([linux-desktop.md](linux-desktop.md#peer)). A Mac runs `cloudflared` from a LaunchAgent that restarts it, and sleeps unless told not to: [install.md](install.md#5-cloudflare-tunnel-and-dns), *On a Mac*.
@@ -200,7 +231,7 @@ A peer app whose `url` is already on the panel (a local app's, or an earlier pee
 - **Peer storage inventory** in the settings, read-only.
 - **Peer deliveries**: a peer's http or stream subscription to an event that only reaches the hub. Today each machine subscribes to what reaches its own bus; events flow peer → hub only.
 - **Peer notifications**: none needed; each machine notifies through its own channels. Backups likewise: each machine snapshots its own data under its own prefix; the hub's Backups list shows local apps only.
-- **A peer behind no tunnel** (a laptop): a reverse connection the peer opens to the hub, built into the service. Until then, an SSH reverse tunnel (step 3 above) does the job where the peer can log in to the hub's machine.
+- **Retiring `SPACE_PEER_*`**: a peer behind no tunnel is now a [connection peer](#adding-a-peer). What is left is a `space peer migrate` that moves a legacy peer onto a connection in one step (create the connection, set its alias, drop the `.env` lines), and, once every machine has moved, removing the HTTPS peer routes and `SPACE_HUB_TOKEN`.
 
 ## Without a peer
 

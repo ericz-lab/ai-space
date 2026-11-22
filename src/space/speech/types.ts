@@ -105,7 +105,8 @@ export type SpeakInput = {
 export type SpeakResult = { audio: ArrayBuffer; contentType: string };
 
 /** Where a live session's provider socket is, speaking the Space's live protocol (docs/speech.md#live-protocol). */
-export type LiveTarget = { url: string; headers: Record<string, string>; machine: string };
+/** Where a live session's socket goes; `open`, when given, makes it (a peer's socket over a package connection) instead of `url` with `headers`. */
+export type LiveTarget = { url: string; headers: Record<string, string>; machine: string; open?: () => WebSocket };
 
 /** What a provider's cell shows before any call: whether it can be reached at all. */
 export type ProviderState = {

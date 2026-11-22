@@ -100,7 +100,9 @@ The peer runs the call with its own registry: its own runtimes, its own tier cat
 - Tiers resolve where the CLI is installed. The hub no longer needs to read another machine's catalogue at boot.
 - Usage is recorded on the machine that paid for it (see [Ledger](#ledger)).
 
-The peer serves answers only when its operator turns it on: `SPACE_PEER_MODEL=codex,dsh` lists the runtimes a hub may use, and the default is none. The peer token can already open a chat with `bypassPermissions`, so the route gives no new power over the machine. It does spend the machine's accounts, though, and that should be a choice the operator makes on purpose. A runtime whose answers run on yet another machine (one with its own `ssh:`) is never offered: a forwarded call stays on the machine it was sent to.
+A peer reached over a package connection ([peers.md](peers.md#adding-a-peer)) serves the same routes over its channel, with no token: the hub needs the `model` scope there, which covers `model/run`, `model/image`, their cancel, the ledger and the app-model list ([app-packages.md](app-packages.md#peer-scopes)). Resuming works the same: a channel that drops and comes back is a dropped link like any other.
+
+The peer serves answers only when its operator turns it on: `SPACE_PEER_MODEL=codex,dsh` lists the runtimes a hub may use, and the default is none, whatever scope or trust a connection has. The peer token can already open a chat with `bypassPermissions`, so the route gives no new power over the machine. It does spend the machine's accounts, though, and that should be a choice the operator makes on purpose. A runtime whose answers run on yet another machine (one with its own `ssh:`) is never offered: a forwarded call stays on the machine it was sent to.
 
 ### Resuming
 

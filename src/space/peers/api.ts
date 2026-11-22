@@ -4,8 +4,10 @@ import type { PeerHub } from "./hub.ts";
 import { peerId } from "./merge.ts";
 import { RenameError, type PeerRenamed, type RenameCounts } from "./rename.ts";
 import { sameOrigin } from "../auth.ts";
-import { bridge, wantsWebSocket } from "../terminal/api.ts";
+import { bridgeTo, wantsWebSocket } from "../terminal/api.ts";
 import { EMBED_HEADERS } from "../panel/widgets.ts";
+import { upgradeToChannelSocket } from "../packages/gateway.ts";
+import type { WsData } from "../terminal/service.ts";
 
 /**
  * The hub side of peers, shaped as a Bun.serve `routes` table.
@@ -43,6 +45,12 @@ import { EMBED_HEADERS } from "../panel/widgets.ts";
  * by frame, for an app on the hub that relays a live stream of its counterpart; a browser may
  * open it from the panel's own origin only.
  *
+ * A peer is a `SPACE_PEER_<NAME>` one reached over HTTPS, or one reached over a package connection
+ * (connection-peers.ts); every route above works the same for both, through the peer's client. The app
+ * proxy resolves in this order: a legacy peer of that name; else a package connection whose Space has that
+ * label and shares `:app` by an app grant (`connections` below); else a connection peer of that name, whose
+ * `apps` scope the other Space must grant.
+ *
  * Only these paths are forwarded; anything else under /api/peers/ is 404 on
  * the hub without a call to the peer. Like the panel routes they carry no
  * bearer token; see docs/peers.md.
@@ -61,6 +69,15 @@ export type PeerApiOptions = {
   callerApp?: (req: Request) => Promise<string | null>;
   /** Apps the operator lets reach every app's agents with their own token (SPACE_AGENT_CALLERS), on the peers too. */
   agentCallers?: readonly string[];
+  /**
+   * Package connections (packages/catalogue.ts, links.ts), the app proxy's second resolution: `find` names
+   * the connection whose Space is labelled `peer` and whose last catalogue shares `app`; `request` sends one
+   * operation over its channel. Absent: the proxy reaches legacy peers only.
+   */
+  connections?: {
+    find: (peer: string, app: string) => string | undefined;
+    request: (connection: string, meta: unknown, body: ReadableStream<Uint8Array> | null, signal: AbortSignal) => Promise<Response>;
+  };
 };
 
 // The server argument only matters to the app proxy, which may upgrade the request to a socket.
@@ -94,7 +111,7 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
       const u = new URL(req.url);
       const path = u.pathname.replace(/^\/api\/peers\/[^/]+/, "/api/peer") + u.search;
       try {
-        return await client.forward(req, path, timeoutMs ? { timeoutMs } : {});
+        return relayed(await client.forward(req, path, timeoutMs ? { timeoutMs } : {}));
       } catch (e) {
         return error(502, `peer ${client.name} unreachable: ${String((e as Error).message ?? e).slice(0, 200)}`);
       }
@@ -116,6 +133,41 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
       return proxy(timeoutMs)(req, server);
     };
 
+  /**
+   * The app proxy over a package connection (docs/peers.md#an-apps-own-api): the same limits as a legacy
+   * peer's (the app's `/api/` paths, GET, a bounded wait, a socket from the panel's origin only), and the
+   * caller is the owner or the app of the same name. Nothing of the caller's credentials travels: the owning
+   * side gets the path, `accept` and a socket's subprotocol, and grants or refuses by its own connection grant.
+   */
+  const connectionProxy = async (req: Request & { params: Record<string, string> }, server: Bun.Server<unknown>, connection: string): Promise<Response | undefined> => {
+    const peer = req.params.peer ?? "", app = req.params.app ?? "";
+    if (opts.callerApp) {
+      const caller = await opts.callerApp(req);
+      if (caller !== null && caller !== app) return error(403, "an app may reach only the app of its own name on a connected Space");
+    }
+    const u = new URL(req.url);
+    const rest = u.pathname.replace(/^\/api\/peers\/[^/]+\/apps\/[^/]+\/proxy/, "");
+    if (!rest.startsWith("/api/")) return error(404, "only the app's /api/ paths are proxied");
+    const unreachable = (e: unknown) => error(502, `peer ${peer} unreachable: ${String((e as Error).message ?? e).slice(0, 200)}`);
+    if (wantsWebSocket(req)) {
+      if (!sameOrigin(req)) return error(403, "cross-origin request refused");
+      const protocol = req.headers.get("sec-websocket-protocol");
+      const meta = { operation: "socket", app, path: rest + u.search, method: "GET", headers: protocol ? [["sec-websocket-protocol", protocol]] : [] };
+      try {
+        return await upgradeToChannelSocket(req, server as Bun.Server<WsData>, (input, signal) => opts.connections!.request(connection, meta, input, signal));
+      } catch (e) {
+        return unreachable(e);
+      }
+    }
+    const meta = { operation: "fetch", app, path: rest + u.search, method: "GET", headers: [["accept", req.headers.get("accept") ?? "application/json"]] };
+    try {
+      const up = await opts.connections!.request(connection, meta, null, AbortSignal.any([req.signal, AbortSignal.timeout(PROXY_TIMEOUT_MS)]));
+      return relayed(new Response(up.body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store" } }));
+    } catch (e) {
+      return unreachable(e);
+    }
+  };
+
   return {
     "/api/peers": {
       GET: () => {
@@ -129,6 +181,7 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
         if (!opts.rename) return error(404, "renaming peers is not available here");
         const from = req.params.peer ?? "";
         if (!hub.get(from)) return error(404, `unknown peer: ${from}`);
+        if (hub.get(from)!.config.connection) return error(400, `peer ${from} is a package connection: give the connection another alias instead`);
         const body = (await req.json().catch(() => ({}))) as { to?: unknown };
         if (typeof body.to !== "string" || !body.to.trim()) return error(400, "to must be the new peer name");
         try {
@@ -221,8 +274,13 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
     "/api/peers/:peer/agents/:app/:agent/sessions": { GET: agentProxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/sessions/:sid": { GET: agentProxy(FORWARD_TIMEOUT_MS) },
     // An app on this hub reading a peer app's API; the peer bounds the call with its own timeout.
+    // A legacy peer of that name wins; otherwise a connection whose Space has that label and shares the app.
     "/api/peers/:peer/apps/:app/proxy/*": {
       GET: (req, server) => {
+        const named = hub.get(req.params.peer ?? "");
+        const legacy = named && !named.config?.connection;
+        const connection = !legacy ? opts.connections?.find(req.params.peer ?? "", req.params.app ?? "") : undefined;
+        if (connection) return connectionProxy(req, server, connection);
         if (!wantsWebSocket(req)) return proxy(PROXY_TIMEOUT_MS)(req, server);
         // A socket carries no token here, like the panel routes; an app's server sends no Origin,
         // and a page on another site must not reach a peer app through the operator's browser.
@@ -232,8 +290,8 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
         const u = new URL(req.url);
         const rest = u.pathname.replace(/^\/api\/peers\/[^/]+\/apps\/[^/]+\/proxy/, "");
         if (!rest.startsWith("/api/")) return error(404, "only the app's /api/ paths are proxied");
-        const url = `${client.config.url.replace(/^http/, "ws")}${u.pathname.replace(/^\/api\/peers\/[^/]+/, "/api/peer")}${u.search}`;
-        if (server.upgrade(req, { data: { attachment: bridge(url, client.authHeaders(), `peer ${client.name}`) } })) return undefined;
+        const path = `${u.pathname.replace(/^\/api\/peers\/[^/]+/, "/api/peer")}${u.search}`;
+        if (server.upgrade(req, { data: { attachment: bridgeTo(() => client.socket(path), `peer ${client.name}`) } })) return undefined;
         return error(400, "websocket upgrade failed");
       },
     },
@@ -252,6 +310,32 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
 }
 
 class NotFound extends Error {}
+
+/**
+ * A peer's answer as this route's own: a body the peer, the link or the channel cuts short (a revoked scope,
+ * a dropped connection, a stopped run) ends the response here. Bun.serve ends it the same way when its body
+ * stream errors, but prints the error as if it were uncaught; the browser sees no difference, the log a
+ * stack trace for every revocation.
+ */
+function relayed(res: Response): Response {
+  if (!res.body) return res;
+  const reader = res.body.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) c.close();
+        else c.enqueue(value);
+      } catch {
+        c.close();
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason).catch(() => {});
+    },
+  });
+  return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
