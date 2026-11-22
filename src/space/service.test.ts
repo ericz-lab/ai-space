@@ -23,7 +23,7 @@ import {
 } from "./service.ts";
 import { PLIST_HEAD, plistString } from "./services/plist.ts";
 import type { RunResult } from "./services/manager.ts";
-import { CAN_SYMLINK } from "./testing.ts";
+import { CAN_SYMLINK, WINDOWS } from "./testing.ts";
 
 /**
  * ai-space's own background service: what is written for systemd and for launchd, and the
@@ -240,7 +240,7 @@ describe("uninstall", () => {
     await mkdir(bin, { recursive: true });
     await symlink(join(prefix, "current", "bin", "space"), join(bin, "space"));
     await symlink(join(prefix, "current", "runtime", "bun"), join(bin, "bun"));
-    await symlink("/usr/bin/true", join(bin, "other"));
+    await symlink(WINDOWS ? process.execPath : "/usr/bin/true", join(bin, "other")); // someone else's link, to a program that exists on this host
     const d: ServiceDeps = { ...t.d, root: join(prefix, "current"), bun: join(prefix, "current", "runtime", "bun") };
     await mkdir(join(t.ws, "run", "env"), { recursive: true });
     await Bun.write(join(t.ws, ".env"), "SPACE_PORT=8700\n");
