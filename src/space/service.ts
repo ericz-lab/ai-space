@@ -55,7 +55,19 @@ export type ServiceDeps = {
   log: (line: string) => void;
   /** Windows: how long a start or a stop is waited for, read from the workspace's lock. Tests pass 0. */
   settleMs?: number;
+  /** Windows: start a command that outlives this process, for what cannot be done while it runs. */
+  later?: (cmd: string[]) => void;
 };
+
+/**
+ * The one-command installer a release publishes for this system (`install.sh`, on Windows
+ * `install.ps1`), and the command that runs a downloaded copy of it: what `space upgrade` uses.
+ */
+export function releaseInstaller(platform: ServicePlatform, env: Record<string, string | undefined>): { asset: string; argv(script: string): string[] } {
+  if (platform !== "win32") return { asset: "install.sh", argv: (script) => ["bash", script] };
+  const powershell = join(system32Of({ env }), "WindowsPowerShell", "v1.0", "powershell.exe");
+  return { asset: "install.ps1", argv: (script) => [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script] };
+}
 
 /**
  * `BUN` names the Bun when the installer passes it: `process.execPath` is the resolved file, and
@@ -71,6 +83,7 @@ export function realServiceDeps(log: (line: string) => void = () => {}, over: { 
     uid: process.getuid?.() ?? 0,
     platform: servicePlatform(),
     log,
+    later: (cmd) => Bun.spawn(cmd, { stdio: ["ignore", "ignore", "ignore"], detached: true, windowsVerbatimArguments: true }).unref(),
   };
 }
 
@@ -442,6 +455,29 @@ async function exists(path: string): Promise<boolean> {
 
 // ---------------------------------------------------------------- uninstall
 
+/**
+ * PowerShell that adds a directory to the user's own Path or takes it off, the way
+ * release/install.ps1 does. The value is read and written in the registry as it stands, with its
+ * kind and its `%VAR%` references, and only when the directory is really to be added or removed:
+ * a Path that needs no change is not rewritten. The last two statements tell running programs
+ * that the environment changed, which a registry write alone does not.
+ */
+export function userPathScript(change: "add" | "remove", dir: string): string {
+  const quoted = `'${dir.replace(/'/g, "''")}'`;
+  return [
+    `$dir = ${quoted}`,
+    "$key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)",
+    "$raw = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')",
+    "$kind = if ($raw) { $key.GetValueKind('Path') } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }",
+    "$parts = @($raw.Split(';'))",
+    "$has = $parts -contains $dir",
+    change === "add"
+      ? "if (-not $has) { $key.SetValue('Path', ((@($parts | Where-Object { $_ }) + $dir) -join ';'), $kind) }"
+      : "if ($has) { $key.SetValue('Path', (@($parts | Where-Object { $_ -ne $dir }) -join ';'), $kind) }",
+    `if (${change === "add" ? "-not $has" : "$has"}) { [Environment]::SetEnvironmentVariable('AI_SPACE_PATH_CHANGED', '1', 'User'); [Environment]::SetEnvironmentVariable('AI_SPACE_PATH_CHANGED', $null, 'User') }`,
+  ].join("; ");
+}
+
 export type UninstallStep = { what: "app-service" | "service" | "link" | "program" | "workspace"; target: string; detail: string };
 
 export type UninstallPlan = { workspace: string; steps: UninstallStep[]; kept: string[] };
@@ -476,7 +512,9 @@ export async function planUninstall(d: ServiceDeps, opts: { workspace?: boolean 
   if (await exists(h.file)) steps.push({ what: "service", target: h.file, detail: `stop ai-space and remove ${h.name}` });
   const prefix = await releasePrefix(d.root);
   const program = prefix ?? (await realpath(d.root).catch(() => d.root));
-  for (const name of ["space", "bun"]) {
+  // On Windows the command is `<prefix>\bin\space.cmd`, on the user's Path; it goes with the program.
+  if (prefix && d.platform === "win32") steps.push({ what: "link", target: join(prefix, "bin"), detail: `take the space command (${join(prefix, "bin")}) off your Path` });
+  for (const name of d.platform === "win32" ? [] : ["space", "bun"]) {
     const link = join(d.home, ".local", "bin", name);
     const to = await readlink(link).catch(() => undefined);
     if (to === undefined) continue;
@@ -504,8 +542,18 @@ export async function runUninstall(d: ServiceDeps, plan: UninstallPlan): Promise
       await rm(s.target, { force: true });
       await h.unregister?.();
       await h.manager.daemonReload().catch(() => {});
+    } else if (s.what === "link" && d.platform === "win32") {
+      const script = userPathScript("remove", s.target);
+      const r = await d.run([join(system32Of(d), "WindowsPowerShell", "v1.0", "powershell.exe"), "-NoProfile", "-Command", script]);
+      if (r.code !== 0) d.log(`  ${r.stderr.trim() || "could not change the Path"}`);
     } else if (s.what === "link") {
       await rm(s.target, { force: true });
+    } else if (s.what === "program" && d.platform === "win32") {
+      // Windows keeps a running program's file: this command runs from the program it deletes, so
+      // the deletion is handed to a command that starts once this one has ended.
+      const cmd = join(system32Of(d), "cmd.exe");
+      (d.later ?? (() => {}))([cmd, "/d", "/s", "/c", `"ping -n 4 127.0.0.1 >nul & rmdir /s /q "${s.target}""`]);
+      d.log("  (in a few seconds, once this command has ended)");
     } else {
       await rm(s.target, { recursive: true, force: true });
     }

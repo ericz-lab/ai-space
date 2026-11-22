@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SPACE_ROOT } from "../space/config.ts";
 import { readOwnership, readRelease } from "../space/local.ts";
-import { ServiceError, type ServiceStatus, planUninstall, realServiceDeps, releasePrefix, runUninstall, serviceInstall, serviceRemove, serviceRestart, serviceStart, serviceStatus, serviceStop, serviceWorkspace } from "../space/service.ts";
+import { ServiceError, type ServiceStatus, planUninstall, realServiceDeps, releasePrefix, runUninstall, releaseInstaller, serviceInstall, serviceRemove, serviceRestart, serviceStart, serviceStatus, serviceStop, serviceWorkspace } from "../space/service.ts";
 import { noMore, parseArgs } from "./args.ts";
 import { type Ctx, type Noun, UsageError } from "./types.ts";
 
@@ -114,7 +114,7 @@ const upgrade = async (ctx: Ctx, argv: string[]) => {
   const here = await readRelease(await realpath(SPACE_ROOT).catch(() => SPACE_ROOT));
   const prefix = await releasePrefix(SPACE_ROOT);
   if (here?.edition === "local" || (await readOwnership(await serviceWorkspace(d)))) throw new UsageError("this ai-space was installed by the AI Space app (the Local edition): update it from the app");
-  if (!here || !prefix) throw new UsageError(`${SPACE_ROOT} is a checkout, not a release: update it with git pull, then bash deploy/install.sh`);
+  if (!here || !prefix) throw new UsageError(`${SPACE_ROOT} is a checkout, not a release: update it with git pull, then ${d.platform === "win32" ? "space service install" : "bash deploy/install.sh"}`);
   const want = typeof flags.version === "string" ? flags.version.replace(/^v/, "") : undefined;
   const base = downloadBase(ctx.io.env, want);
   const latest = (await (await download(ctx, `${base}/manifest.json`)).json()) as ReleaseManifest;
@@ -127,10 +127,11 @@ const upgrade = async (ctx: Ctx, argv: string[]) => {
   }
   const tmp = await mkdtemp(join(tmpdir(), "ai-space-upgrade-"));
   try {
-    const script = join(tmp, "install.sh");
-    await Bun.write(script, await (await download(ctx, `${base}/install.sh`)).text());
+    const installer = releaseInstaller(d.platform, ctx.io.env);
+    const script = join(tmp, installer.asset);
+    await Bun.write(script, await (await download(ctx, `${base}/${installer.asset}`)).text());
     ctx.io.err(`[upgrade] ai-space ${here.version} → ${target}`);
-    const proc = Bun.spawn(["bash", script], {
+    const proc = Bun.spawn(installer.argv(script), {
       env: { ...ctx.io.env, AI_SPACE_VERSION: target, AI_SPACE_PREFIX: prefix, SPACE_HOME: await serviceWorkspace(d), AI_SPACE_NO_OPEN: "1" },
       stdin: "ignore",
       stdout: ctx.flags.json ? "ignore" : "inherit",

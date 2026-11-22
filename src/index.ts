@@ -62,6 +62,10 @@ import { bearer, guardBrowserWrites, tokenEquals } from "./space/auth.ts";
 import { guardHosts, hostRules } from "./space/hosts.ts";
 import { AUTH_PUBLIC, AUTH_SELF, AuthService, AuthStore, composeRoutes, createAuthRoutes, ensureOperatorToken, gateRoutes } from "./space/auth/index.ts";
 import { ShortcutStore, Shortcuts, createShortcutRoutes } from "./space/shortcuts/index.ts";
+import { settleWorkingDirectory } from "./space/host-fs.ts";
+
+// Before anything is served: the panel's asset addresses depend on it (host-fs.ts).
+settleWorkingDirectory();
 
 /**
  * ai-space entry point.
