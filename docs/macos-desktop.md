@@ -20,7 +20,7 @@ Proposed initial target: macOS 14 or later, Apple Silicon, distributed directly 
 | Backend | Use the operator's existing installation | Signed Bun runtime and packaged Space resources |
 | Updates | Manual replacement of the signed desktop app | Coordinated application and managed backend updates |
 
-The first release does not install agent CLIs, change service supervision, migrate an existing workspace, or change a server's configuration. Remote-only use must work without Bun or a local Space installation. Remote Hub and Peer configuration is an explicit follow-on milestone in this proposal, independent of the managed local installation.
+The first release does not install agent CLIs, change service supervision, migrate an existing workspace, or change a server's configuration. (Since then the desktop app offers, at first launch on a Mac without an AI Space, to run AI Space's own installer: [Connections and first launch](#connections-and-first-launch).) Remote-only use must work without Bun or a local Space installation. Remote Hub and Peer configuration is an explicit follow-on milestone in this proposal, independent of the managed local installation.
 
 ## Architecture and ownership
 
@@ -52,9 +52,22 @@ Apple's [WKWebView](https://developer.apple.com/documentation/webkit/wkwebview) 
 
 ## Connections and first launch
 
-First launch presents Add Connection with Local Space and Remote Space choices. A connection stores a stable client identifier, display name and panel URL. Desktop preferences belong under the application's own Application Support directory, separate from the Space workspace.
+A connection stores a stable client identifier, display name and panel URL. Desktop preferences belong under the application's own Application Support directory, separate from the Space workspace.
 
-For local use, suggest `http://127.0.0.1:8700`, matching the current default in `src/space/config.ts`, but let the operator change it. A reachable port alone is not proof that the service is ai-space: validate the panel and a known API response before reporting Connected. A missing service leads to retry and setup guidance, not an automatic second backend.
+**First launch** (the desktop app, which carries no service; the Local edition's first run is in [local.md](local.md)). With no saved Space the app looks for an AI Space on this Mac before it asks anything (`Services/LocalSpace.swift`, `Services/FirstLaunch.swift`):
+
+1. The candidate ports are `SPACE_PORT` from the workspace's `.env` (`$SPACE_HOME/.env`, else `~/.ai-space/.env`) when that file can be read, then 8700, the default in `src/space/config.ts`.
+2. Each gets `GET http://127.0.0.1:<port>/api/space` with a 2-second timeout. A reachable port alone is not proof that the service is ai-space: only an answer whose JSON has `product: "ai-space"` counts (`SpaceCheck.isSpace`).
+3. **Found:** the Space is saved as "This Mac", selected, and the window opens on it. Nothing is asked.
+4. **Not found:** the welcome view offers two choices and takes neither by itself:
+   - **Install AI Space on This Mac** (primary) runs the release's own one-command installer ([release.md](release.md#one-command-install)), never a copy inside the app (`Services/SpaceInstaller.swift`). The app downloads `https://github.com/ericz-lab/ai-space/releases/latest/download/install.sh` to a temporary file (`<AI_SPACE_DOWNLOAD>/install.sh` when that variable is set, which the installer honours too: mirrors and tests use it) and runs `/bin/bash <file>` with `AI_SPACE_NO_OPEN=1` and `/usr/bin:/bin:/usr/sbin:/sbin` at the front of `PATH`, since a GUI app's `PATH` is bare and the script needs curl, tar and launchctl. Its output is shown line by line. On exit code 0 the app looks again, once a second for up to 30 seconds, then saves and selects the Space. On any other exit code it shows the last lines of the output and Retry; when the installer went through but nothing answers yet, Retry only looks again. A click on Install looks once more first, and a Space that has come up meanwhile is used as it is rather than installed over.
+   - **Connect to an AI Space on Another Machine…** (secondary) is the address form below.
+
+The look happens once, at launch: removing every saved Space later shows the two choices without adding one back.
+
+What the app installs this way is the standard AI Space, the same as the command in a terminal gives: a LaunchAgent `ai.space.server` of the user's own, on `127.0.0.1:8700`, with the workspace `~/.ai-space`. It is an external installation in the terms of [Managed local installation](#managed-local-installation): the desktop app never bundles, upgrades, stops or uninstalls it, and removing the app leaves AI Space in place (`space uninstall` removes it; running the one-command installer again upgrades it).
+
+A Space on this Mac can also be added by hand: the form suggests `http://127.0.0.1:8700` and lets the operator change it. A missing service leads to retry and setup guidance, not an automatic second backend.
 
 For remote use, require HTTPS and keep the existing tunnel and access layer. The desktop connection picker switches complete Space panels. Existing hub and peer aggregation stays inside each server; the client does not recreate the peer catalogue or claim that a hub can manage every peer setting. See [peers.md](peers.md).
 
@@ -189,7 +202,7 @@ Retain `$SPACE_HOME` or `~/.ai-space` as the workspace contract. Keep the instal
 
 Define two explicit ownership modes:
 
-- **External:** the operator installed the service. The desktop app connects to it and does not stop, upgrade or replace it.
+- **External:** the operator installed the service, in a terminal or through the desktop app's first-launch offer ([Connections and first launch](#connections-and-first-launch)), which runs the same installer. The desktop app connects to it and does not stop, upgrade or replace it.
 - **Managed:** the desktop installation owns a registered helper and its backend release. It may start, repair and upgrade that installation through explicit lifecycle operations.
 
 Never infer ownership from a PID or an occupied port. Before managed mode ships, add a versioned service identity and readiness contract, installation ownership metadata and a per-workspace exclusion mechanism. Concurrent launches must not start two schedulers against the same workspace. If an external installation already uses that workspace, require an explicit handover instead of silently adopting it.
@@ -206,7 +219,7 @@ Distribute directly with Developer ID signing, Hardened Runtime and notarization
 
 Validate signing and the minimum necessary entitlements for bundled Bun and helper executables in the packaging prototype. Downloaded runtime and app updates need integrity verification. A successful debug launch is not the release acceptance test.
 
-The client-only release uses manual updates and never updates a connected service. Later managed updates must coordinate the helper, Bun runtime and server resources, defer disruptive restarts while work is active, and preserve workspace data. Back up before a database migration. Binary rollback alone is insufficient after an incompatible schema change; recovery must use a compatible migration path or an explicit backup restore.
+The client-only release uses manual updates and never updates a connected service, including one installed from its first launch. Later managed updates must coordinate the helper, Bun runtime and server resources, defer disruptive restarts while work is active, and preserve workspace data. Back up before a database migration. Binary rollback alone is insufficient after an incompatible schema change; recovery must use a compatible migration path or an explicit backup restore.
 
 Uninstalling the desktop UI preserves workspace data. Managed mode needs a Remove Background Service action before deleting the application bundle. Deleting apps, databases or credentials is a separate, explicit operation.
 
@@ -234,8 +247,9 @@ desktop/macos/
   AISpace/
     AISpaceApp.swift     app, main window (close hides it), menu bar, menus, Services, aispace:// links
     AppModel.swift       connections, catalogue, screens, web sessions, conversations, link routing
-    Services/            Foundation only: connection rules and store, SpaceCheck, SpaceAPI and
-                         cookies, the run stream parser and reply builder, inbox and link rules
+    Services/            Foundation only: connection rules and store, SpaceCheck, the first launch
+                         (LocalSpace, SpaceInstaller, FirstLaunch), SpaceAPI and cookies, the run
+                         stream parser and reply builder, inbox and link rules
     Desktop/             SpaceLive (polled data), ChatController, QuickChat, AppWindows (moved-out tabs),
                          IconStore, Notifier, HotKey, Preferences
     Web/                 PanelSession (WKWebView and its delegates), NavigationPolicy, the cookie
@@ -270,7 +284,7 @@ Use swift-testing (which runs from the Command Line Tools as well as Xcode) for 
 
 Measure cold launch to usable panel, idle memory across the app and WebKit processes, and behavior under a long chat and terminal session. Record the machine, OS and whether the independent Bun service is included. Compare against the same workload in Safari; native packaging alone is not evidence of lower resource use.
 
-The first release is complete when an operator can reliably open an existing Space as a Mac application, perform the current web workflows, and close or quit the UI without disrupting server work. An installer that provisions a new Space is the managed-service milestone, not an implicit part of the first release.
+The first release is complete when an operator can reliably open an existing Space as a Mac application, perform the current web workflows, and close or quit the UI without disrupting server work. An installer that provisions a new Space is the managed-service milestone, not an implicit part of the first release. (The first-launch offer added later runs AI Space's own installer and manages nothing afterwards.)
 
 ## Build and run
 
