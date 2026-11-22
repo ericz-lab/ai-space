@@ -391,6 +391,65 @@ public class SettingsRulesTests
     }
 
     [Fact]
+    public void FixThisDecodesAsTheWebPanelsSettings()
+    {
+        var v = SettingsJson.FixThis(J("""
+            {"ok":true,
+             "settings":{"enabled":true,"appsDefault":false,"apps":{"keep":"off","notes":"on","odd":"maybe","n":1},"mode":"later","machine":"david","model":"claude/advanced","effort":"max","errors":false},
+             "apps":[{"app":"keep","title":"Keep","zh":"随手记","status":"active","enabled":false},{"app":"notes","title":"Notes","status":"active","enabled":true},{"title":"no id"}],
+             "machines":[{"value":"","label":"seoul"},{"value":"david","label":"david"}],
+             "models":[{"value":"codex/basic","runtime":"codex","tier":"basic","model":"gpt"}],
+             "machineModels":{"":[{"value":"codex/basic","runtime":"codex","tier":"basic","model":"gpt"}],
+                              "david":[{"value":"claude/advanced","runtime":"claude","tier":"advanced","model":"opus"},{"value":"claude/basic","runtime":"claude","tier":"basic","model":"haiku"}]},
+             "counts":{"later":3,"review":1},"shortcut":"Alt+Shift+F",
+             "peers":[{"name":"david","ok":true,"error":"","synced":true,"apps":[{"app":"media","title":"Media","enabled":true}]},{"name":"mac","ok":false,"error":"timeout","synced":false,"apps":[]},{"ok":true}]}
+            """));
+        Assert.True(v.Settings.Enabled);
+        Assert.False(v.Settings.AppsDefault);
+        Assert.Equal(new Dictionary<string, string> { ["keep"] = "off", ["notes"] = "on" }, v.Settings.Apps);
+        Assert.Equal(("later", "david", "claude/advanced", "max", false), (v.Settings.Mode, v.Settings.Machine, v.Settings.Model, v.Settings.Effort, v.Settings.Errors));
+        Assert.Equal(["keep", "notes"], v.Apps.Select(a => a.App));
+        Assert.Equal(("随手记", false), (v.Apps[0].Zh, v.Apps[0].Enabled));
+        Assert.Equal([new FixThisMachine("", "seoul"), new FixThisMachine("david", "david")], v.Machines);
+        // The models are those of the machine the engineer runs on, not the Space's own.
+        Assert.Equal(["claude/advanced", "claude/basic"], v.Models.Select(m => m.Value));
+        Assert.Null(v.Models[0].Unavailable);
+        Assert.Equal(3, v.Later);
+        Assert.Equal("Alt+Shift+F", v.Shortcut);
+        Assert.Equal(["david", "mac"], v.Peers.Select(p => p.Name));
+        Assert.Equal("media", Assert.Single(v.Peers[0].Apps).App);
+        Assert.Equal((false, "timeout", false), (v.Peers[1].Ok, v.Peers[1].Error, v.Peers[1].Synced));
+
+        // What is missing or odd reads as the Space's defaults: off, Fix now, this machine, extra high.
+        var bare = SettingsJson.FixThis(J("""{"ok":true}"""));
+        Assert.Equal((false, true, "auto", "", "", "xhigh", true), (bare.Settings.Enabled, bare.Settings.AppsDefault, bare.Settings.Mode, bare.Settings.Machine, bare.Settings.Model, bare.Settings.Effort, bare.Settings.Errors));
+        Assert.Empty(bare.Settings.Apps);
+        Assert.Empty(bare.Apps);
+        Assert.Empty(bare.Models);
+        Assert.Equal(0, bare.Later);
+        Assert.Equal("Alt+Shift+F", bare.Shortcut);
+        // An older Space lists this machine's models only.
+        var older = SettingsJson.FixThis(J("""{"ok":true,"settings":{"mode":"soon","effort":"extreme"},"models":[{"value":"claude/basic","runtime":"claude","tier":"basic","model":"haiku"}]}"""));
+        Assert.Equal(("auto", "xhigh"), (older.Settings.Mode, older.Settings.Effort));
+        Assert.Equal("claude/basic", Assert.Single(older.Models).Value);
+    }
+
+    [Fact]
+    public void AnAppShowsTheFixThisButtonByItsSwitchOrTheDefault()
+    {
+        var s = new FixThisSettings(true, false, new Dictionary<string, string> { ["keep"] = "on", ["notes"] = "off" }, "auto", "", "", "xhigh", true);
+        Assert.Equal(["default", "on", "off"], SettingsRules.FixThisSwitches);
+        Assert.Equal(["auto", "later"], SettingsRules.FixThisModes);
+        Assert.Equal(("on", "off", "default"), (SettingsRules.FixThisSwitch(s, "keep"), SettingsRules.FixThisSwitch(s, "notes"), SettingsRules.FixThisSwitch(s, "todo")));
+        Assert.True(SettingsRules.FixThisShows(s, "keep"));
+        Assert.False(SettingsRules.FixThisShows(s, "notes"));
+        Assert.False(SettingsRules.FixThisShows(s, "todo"));
+        Assert.True(SettingsRules.FixThisShows(s with { AppsDefault = true }, "todo"));
+        // The main switch off: no app shows it, whatever its own switch says.
+        Assert.False(SettingsRules.FixThisShows(s with { Enabled = false }, "keep"));
+    }
+
+    [Fact]
     public void SectionsAreKeptByName()
     {
         Assert.Equal(SettingsSection.Overview, SettingsRules.Sections[0]);
@@ -398,7 +457,10 @@ public class SettingsRulesTests
         foreach (var s in SettingsRules.Sections) Assert.Equal(s, SettingsRules.Parse(SettingsRules.Key(s)));
         Assert.Equal(SettingsSection.Overview, SettingsRules.Parse("general"));
         Assert.Equal(SettingsSection.Overview, SettingsRules.Parse(null));
-        Assert.False(SettingsRules.IsNative(SettingsSection.Feedback));
+        // Fix this is drawn here; the name it had when a section was last remembered still finds it.
+        Assert.True(SettingsRules.IsNative(SettingsSection.FixThis));
+        Assert.Equal(SettingsSection.FixThis, SettingsRules.Parse("feedback"));
+        Assert.Equal("fixthis", SettingsRules.Key(SettingsSection.FixThis));
         Assert.False(SettingsRules.IsNative(SettingsSection.Appearance));
         Assert.True(SettingsRules.IsNative(SettingsSection.Models));
         Assert.True(SettingsRules.NavCollapsed(640));
@@ -483,6 +545,42 @@ public class SettingsApiTests
         Assert.Equal("/api/panel/apps/ai%20todo/model", handler.Requests[1].RequestUri!.AbsolutePath);
         Assert.Equal("""{"tag":"chat","model":null}""", handler.Bodies[1]);
         Assert.Equal("override-app", Assert.Single(rows!.Rows).Source);
+    }
+
+    [Fact]
+    public async Task FixThisIsReadAndChangedThroughTheWebPanelsRoutes()
+    {
+        var handler = new ScriptedHandler(_ => Json("""{"ok":true,"settings":{"enabled":true,"mode":"later"},"counts":{"later":2},"queued":2}"""));
+        var api = new SpaceApi(Base, _ => Task.FromResult<string?>(null), handler);
+        var view = await api.SetFixThis("enabled", true);
+        await api.SetFixThis("mode", "later");
+        await api.SetFixThis("machine", "");
+        await api.SetFixThisApp("keep", "off");
+        var read = await api.FixThis();
+        Assert.Equal(2, await api.FixWaiting());
+
+        Assert.Equal(HttpMethod.Put, handler.Requests[0].Method);
+        Assert.Equal("https://space.example.com/api/panel/feedback/settings", handler.Requests[0].RequestUri!.AbsoluteUri);
+        Assert.Equal("https://space.example.com", string.Join("", handler.Requests[0].Headers.GetValues("Origin")));
+        // One field at a time, as the web panel's Settings sends it.
+        Assert.Equal("""{"enabled":true}""", handler.Bodies[0]);
+        Assert.Equal("""{"mode":"later"}""", handler.Bodies[1]);
+        Assert.Equal("""{"machine":""}""", handler.Bodies[2]);
+        Assert.Equal("""{"apps":{"keep":"off"}}""", handler.Bodies[3]);
+        Assert.Equal(HttpMethod.Get, handler.Requests[4].Method);
+        Assert.Equal("/api/panel/feedback/settings", handler.Requests[4].RequestUri!.AbsolutePath);
+        Assert.Equal(HttpMethod.Post, handler.Requests[5].Method);
+        Assert.Equal("/api/panel/feedback/fix", handler.Requests[5].RequestUri!.AbsolutePath);
+        Assert.Equal("{}", handler.Bodies[5]);
+        // The answer to a change is the settings as they now are.
+        Assert.True(view.Settings.Enabled);
+        Assert.Equal("later", view.Settings.Mode);
+        Assert.Equal(2, read.Later);
+
+        // A refused change says why.
+        var refusing = new SpaceApi(Base, _ => Task.FromResult<string?>(null), new ScriptedHandler(_ => Json("""{"ok":false,"error":"mode must be one of auto, later"}""", HttpStatusCode.BadRequest)));
+        var e = await Assert.ThrowsAsync<SpaceApiException>(() => refusing.SetFixThis("mode", "soon"));
+        Assert.Equal("mode must be one of auto, later", e.Message);
     }
 
     [Fact]

@@ -17,7 +17,8 @@ public enum SettingsSection
     Usage,
     Activity,
     Packages,
-    Feedback,
+    /// <summary>Fix this (随手改), the feature the Space's routes call feedback (docs/feedback.md).</summary>
+    FixThis,
     Appearance,
     Account,
     ThisComputer,
@@ -131,7 +132,7 @@ public static class SettingsRules
     public static readonly IReadOnlyList<SettingsSection> Sections = Enum.GetValues<SettingsSection>();
 
     /// <summary>The sections the app draws itself; the others lead to the web panel's Settings.</summary>
-    public static bool IsNative(SettingsSection s) => s is not (SettingsSection.Feedback or SettingsSection.Appearance);
+    public static bool IsNative(SettingsSection s) => s is not SettingsSection.Appearance;
 
     /// <summary>Below this width (device-independent pixels) the section list shows its icons only.</summary>
     public const double CollapseBelow = 900;
@@ -142,7 +143,30 @@ public static class SettingsRules
     public static string Key(SettingsSection s) => s.ToString().ToLowerInvariant();
 
     public static SettingsSection Parse(string? key) =>
-        Sections.FirstOrDefault(s => string.Equals(Key(s), key?.Trim(), StringComparison.Ordinal), SettingsSection.Overview);
+        // "feedback" is what Fix this was called when the section was last remembered.
+        key?.Trim() == "feedback" ? SettingsSection.FixThis
+        : Sections.FirstOrDefault(s => string.Equals(Key(s), key?.Trim(), StringComparison.Ordinal), SettingsSection.Overview);
+
+    // ------------------------------------------------------------------ Fix this
+
+    /// <summary>What happens to a request: <c>auto</c> is Fix now, <c>later</c> is Fix later (MODES in src/space/feedback/types.ts).</summary>
+    public static readonly IReadOnlyList<string> FixThisModes = ["auto", "later"];
+
+    /// <summary>The Fix Engineer's effort levels (EFFORTS).</summary>
+    public static readonly IReadOnlyList<string> FixThisEfforts = ["high", "xhigh", "max"];
+
+    /// <summary>An app's own switch: <c>default</c> (it follows "Show on apps by default"), <c>on</c> or <c>off</c>.</summary>
+    public static readonly IReadOnlyList<string> FixThisSwitches = ["default", "on", "off"];
+
+    public static string FixThisSwitch(FixThisSettings s, string app) => s.Apps.TryGetValue(app, out var v) && v is "on" or "off" ? v : "default";
+
+    /// <summary>Whether an app's pages show the button under these settings (<c>enabledFor</c> in src/space/feedback/service.ts).</summary>
+    public static bool FixThisShows(FixThisSettings s, string app) => s.Enabled && FixThisSwitch(s, app) switch
+    {
+        "on" => true,
+        "off" => false,
+        _ => s.AppsDefault,
+    };
 
     // ------------------------------------------------------------------ status
 
