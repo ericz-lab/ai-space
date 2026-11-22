@@ -64,3 +64,24 @@ test("a copied Windows environment keeps its search path under one name", async 
   expect(withPath(copied, "C:\\tools", "win32")).toEqual({ PATH: "C:\\tools", HOME: "C:\\Users\\me" });
   expect(withPath({ PATH: "/bin", Path: "kept" }, "/usr/bin", "linux")).toEqual({ PATH: "/usr/bin", Path: "kept" });
 });
+
+test("the command shell is the caller's own name off Windows, and Git for Windows' shell on it", async () => {
+  const { hostShell } = await import("./host-tools.ts");
+  const none = { which: () => null, exists: () => false };
+  expect(hostShell("/bin/sh", {}, "linux", none)).toBe("/bin/sh");
+  expect(hostShell("bash", {}, "darwin", none)).toBe("bash");
+
+  const git = String.raw`C:\Program Files\Git`;
+  const installed = { which: (name: string) => (name === "git" ? String.raw`${git}\cmd\git.exe` : null), exists: (p: string) => p.startsWith(String.raw`${git}\bin`) };
+  expect(hostShell("sh", {}, "win32", installed)).toBe(String.raw`${git}\bin\sh.exe`);
+  expect(hostShell("/bin/sh", {}, "win32", installed)).toBe(String.raw`${git}\bin\sh.exe`);
+  expect(hostShell("bash", {}, "win32", installed)).toBe(String.raw`${git}\bin\bash.exe`);
+
+  // Git off the search path, in its usual place; and the operator's own choice first.
+  const usual = { which: () => null, exists: (p: string) => p === String.raw`D:\Apps\Git\bin\sh.exe` };
+  expect(hostShell("sh", { ProgramFiles: String.raw`D:\Apps` }, "win32", usual)).toBe(String.raw`D:\Apps\Git\bin\sh.exe`);
+  expect(hostShell("sh", { SPACE_SHELL: String.raw`D:\msys\sh.exe` }, "win32", none)).toBe(String.raw`D:\msys\sh.exe`);
+
+  // System32's bash.exe starts WSL: it is never looked for, and no shell is an error that says what to do.
+  expect(() => hostShell("bash", {}, "win32", none)).toThrow("install Git for Windows");
+});

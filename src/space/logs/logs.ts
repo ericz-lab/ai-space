@@ -9,6 +9,8 @@
  * template stays the operator's and the request cannot smuggle a shell word.
  */
 
+import { hostShell } from "../host-tools.ts";
+
 export const SPACE_UNIT = "ai-space";
 export const APP_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export const MAX_LINES = 10_000;
@@ -42,7 +44,7 @@ export type LogsProcess = {
 
 /** Start the template's command; the caller reads `lines` and kills it when the reader is gone. */
 export function spawnLogs(template: string, req: LogsRequest, spawn: typeof Bun.spawn = Bun.spawn): LogsProcess {
-  const proc = spawn(["sh", "-c", wrap(renderLogsCommand(template, req))], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+  const proc = spawn([hostShell("sh"), "-c", wrap(renderLogsCommand(template, req))], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
   return {
     lines: readLines(proc.stdout as ReadableStream<Uint8Array>),
     exited: proc.exited,

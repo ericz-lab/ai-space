@@ -3,6 +3,7 @@ import type { RuntimeRegistry } from "../runtimes/registry.ts";
 import { spawnCollect } from "../runtimes/process.ts";
 import { eventEnv, eventPayload, eventPromptSection } from "./events.ts";
 import type { RunStatus, RunTrigger, SpaceEvent, Target } from "./types.ts";
+import { hostShell } from "../host-tools.ts";
 
 /**
  * Target runners: turn a task's target into one execution with a timeout.
@@ -132,7 +133,7 @@ async function runCommand(target: Extract<Target, { kind: "command" }>, ctx: Run
   const env = { ...(await placeholderEnv(cwd, ctx)), ...(target.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []), ...(target.model ? { SPACE_TASK_MODEL: target.model } : {}) };
   // ${VAR} placeholders resolve from the same environment as http targets,
   // so machine-specific paths (a venv python, a token) stay out of the manifest.
-  const r = await spawnCollect(["sh", "-c", interpolate(target.command, env)], { cwd, env, signal: ctx.signal });
+  const r = await spawnCollect([hostShell("sh"), "-c", interpolate(target.command, env)], { cwd, env, signal: ctx.signal });
   const output = truncate(joinOutput(r.stdout, r.stderr));
   if (r.aborted || r.timedOut) return { status: "error", error: "timed out", output };
   if (r.code !== 0) return { status: "error", error: `exit code ${r.code}`, output };
@@ -165,7 +166,7 @@ async function runAgent(target: Extract<Target, { kind: "agent" }>, ctx: RunCont
   if (!r.ok) return { status: "error", error: r.error ?? "failed", output: truncate(r.output), ...base };
   const answer = r.text ?? r.output;
   if (target.verify) {
-    const checked = await spawnCollect(["sh", "-c", target.verify], { cwd, env, stdin: answer, signal: ctx.signal });
+    const checked = await spawnCollect([hostShell("sh"), "-c", target.verify], { cwd, env, stdin: answer, signal: ctx.signal });
     const output = truncate(joinOutput(answer, joinOutput(checked.stdout, checked.stderr)));
     if (checked.aborted || checked.timedOut) return { status: "error", error: "verification timed out", output, ...base };
     if (checked.code !== 0) return { status: "error", error: `verification failed (exit ${checked.code}): ${truncate(checked.stderr || checked.stdout, 500)}`, output, ...base };

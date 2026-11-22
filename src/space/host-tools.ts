@@ -107,3 +107,30 @@ export function withPath(env: Env, PATH: string, platform: string = process.plat
   copy.PATH = PATH;
   return copy;
 }
+
+/**
+ * The POSIX shell that runs a command string: a manifest's `build:` and `deploy:` commands, a
+ * command task, the operator's log and stop templates are all written for `sh`. On Linux and
+ * macOS this is the name the caller asked for, unchanged. Windows has none of its own, but Git for
+ * Windows ships one, and an agent CLI there needs Git for Windows already; `SPACE_SHELL` names
+ * another. `C:\Windows\System32\bash.exe` is not one: it starts WSL.
+ */
+export function hostShell(name: "sh" | "bash" | "/bin/sh", env: Env = process.env, platform: string = process.platform, probe: ShellProbe = { which: (n, PATH) => Bun.which(n, PATH === undefined ? {} : { PATH }), exists: existsSync }): string {
+  if (platform !== "win32") return name;
+  const exe = name === "bash" ? "bash.exe" : "sh.exe";
+  const chosen = env.SPACE_SHELL?.trim();
+  if (chosen) return chosen;
+  const roots: string[] = [];
+  const claude = env.CLAUDE_CODE_GIT_BASH_PATH?.trim(); // <Git>\bin\bash.exe, as Claude Code is told
+  if (claude) roots.push(win32.dirname(win32.dirname(claude)));
+  const git = probe.which("git", pathOf(env, platform)); // <Git>\cmd\git.exe or <Git>\mingw64\bin\git.exe
+  if (git) roots.push(win32.dirname(win32.dirname(git)), win32.dirname(win32.dirname(win32.dirname(git))));
+  for (const base of [env.ProgramFiles, env["ProgramFiles(x86)"], env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, "Programs")]) if (base) roots.push(win32.join(base, "Git"));
+  for (const root of roots) {
+    const path = win32.join(root, "bin", exe);
+    if (probe.exists(path)) return path;
+  }
+  throw new Error(`no POSIX shell on this machine: install Git for Windows, or set SPACE_SHELL to a ${exe}`);
+}
+
+export type ShellProbe = { which(name: string, PATH: string | undefined): string | null; exists(path: string): boolean };
