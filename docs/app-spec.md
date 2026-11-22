@@ -240,7 +240,9 @@ Contract for `kind: embed`. `source` is a page the app serves; the panel loads i
 
 ### `pets`
 
-A desk pet walks along the bottom of the panel's page, on every screen. The panel has one of its own (a capybara, or any pet from petdex.dev); an app can offer more, and through a mood it can make the pet show how the app sees the world: lie down when all is well, sit up when something is off. The operator picks one pet in Settings → General. The panel draws and moves the pet with its own code: the app supplies a picture and a few words of state, and nothing from the app runs in the page.
+**Not shown at present.** The web panel's pet menu lists only the pets bundled with it (Claude at present), not the ones apps offer; the `pets:` section is still read and `/api/pets` still lists what apps declare, so a manifest with it stays valid.
+
+A desk pet walks along the bottom of the panel's page, on every screen. The panel has one of its own (Claude); an app can offer more, and through a mood it can make the pet show how the app sees the world: lie down when all is well, sit up when something is off. The operator picks one pet in Settings → General. The panel draws and moves the pet with its own code: the app supplies a picture and a few words of state, and nothing from the app runs in the page.
 
 ```yaml
 pets:
