@@ -117,7 +117,7 @@ export function createWebView(o: WebViewOptions): any {
     enable_smooth_scrolling: true,
   });
   // `AISpaceLinux/<version>` after WebKit's own user agent, as the Mac (`AISpaceDesktop/`) and phone
-  // (`AISpaceMobile/`) clients add theirs: pages such as the feedback button tell this client from a browser.
+  // (`AISpaceMobile/`) clients add theirs: pages such as the Fix this button tell this client from a browser.
   settings.set_user_agent_with_application_details("AISpaceLinux", clientVersion());
   const view = new WebKit.WebView({ network_session: networkSession(o.connectionId), settings, hexpand: true, vexpand: true, ...(o.contentManager ? { user_content_manager: o.contentManager } : {}) });
   /** The origin the view counts as its own: where its first page loaded. */

@@ -274,7 +274,7 @@ figures and the history grid) are in `src/core/settings.ts`, tested against the 
 | Appearance | Follow system, Light or Dark, for the app and the pages in it. The web panel's themes and colours stay in its own Settings, on the Panel page |
 | Models | The default model of app requests and new Space Assistant chats; AI CLIs by machine (each machine's agent CLIs with version, sign-in and runtime, Check Again, and Add to runtimes.yaml for one found here); App models, a page with each app's and purpose's model and the layer that chose it, changed in place, then each peer's apps under its name, saved on the peer with its own choices. In every model picker a choice that is not signed in or on an offline peer is greyed with the reason, and a saved choice no longer offered stays shown, marked |
 | Automation | Scheduled tasks (schedule, triggers, last and next run; a task unfolds to its model and its last 20 runs) and Events and calls (the catalogue of what apps provide, publish and consume; the last 100 events, each unfolding to its deliveries) |
-| Feedback | The feedback button on app pages ([feedback.md](feedback.md)): on or off, fix right away or later, the machine, model and effort of the Fix Engineer, script errors, the shortcut, and each app's switch. The recent feedback stays in the web panel |
+| Fix this (随手改) | The feature called Feedback before ([feedback.md](feedback.md)), off until it is turned on here or in the panel: the button on app pages on or off, what happens to a request (fix right away, or record it and fix later), the machine, model and effort of the Fix Engineer, script errors, the shortcut, and each app's switch, with the apps of each peer under its name. It reads and saves what the panel's page does (`GET` and `PUT /api/panel/feedback/settings`), so a change in either shows in the other. The section's name and every word in it are the panel's (`settings.section.feedback` and `feedback.*` in `src/web/messages.ts`), so they are the panel's in both languages. The recent requests, with Fix now and Fix again, stay in the web panel |
 | Usage | Model usage (the Space whose ledger it is, a note per peer whose figures are missing or old; 5h, 24h, 7d or 30d: totals, by app and purpose, by model, a year of days and twelve weeks of bars, the last calls) and App usage (7d to all: devices, opens, time in use, a trend per app) |
 | Status | Peers, services (start, stop and restart where the Space runs them) and backups, with the problems counted |
 | Packages | Installing a `.spaceapp` (upgrade, unsigned), the apps installed and their rollback and removal, the apps of connected Spaces, connections with the apps each may use, adding one |
@@ -308,7 +308,7 @@ needs https; plain http is accepted for loopback only. A page whose web process 
 again after 1, 2 and then 4 seconds; a fourth crash within a minute stops there and shows the page
 as failed, with Try Again on an app's tab (`crashReload`).
 Every web view adds `AISpaceLinux/<version>` to WebKit's user agent, as the Mac client adds
-`AISpaceDesktop/` and the phones `AISpaceMobile/`, so a page (the feedback button,
+`AISpaceDesktop/` and the phones `AISpaceMobile/`, so a page (the Fix this button,
 [feedback.md](feedback.md#context)) can tell this client from a browser.
 
 WebKitGTK runs each page in a sandboxed web process (bubblewrap). Ubuntu 23.10 and later restrict
