@@ -8,7 +8,7 @@ namespace AISpace.Core.Tests;
 /// <summary>The Space's Settings page: its routes' shapes (real answers of an AI Space 0.2.1) and the rules behind its rows.</summary>
 public class SettingsDecodingTests
 {
-    private static JsonElement J(string json)
+    internal static JsonElement J(string json)
     {
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.Clone();
@@ -393,7 +393,7 @@ public class SettingsRulesTests
     [Fact]
     public void FixThisDecodesAsTheWebPanelsSettings()
     {
-        var v = SettingsJson.FixThis(J("""
+        var v = SettingsJson.FixThis(SettingsDecodingTests.J("""
             {"ok":true,
              "settings":{"enabled":true,"appsDefault":false,"apps":{"keep":"off","notes":"on","odd":"maybe","n":1},"mode":"later","machine":"david","model":"claude/advanced","effort":"max","errors":false},
              "apps":[{"app":"keep","title":"Keep","zh":"随手记","status":"active","enabled":false},{"app":"notes","title":"Notes","status":"active","enabled":true},{"title":"no id"}],
@@ -421,7 +421,7 @@ public class SettingsRulesTests
         Assert.Equal((false, "timeout", false), (v.Peers[1].Ok, v.Peers[1].Error, v.Peers[1].Synced));
 
         // What is missing or odd reads as the Space's defaults: off, Fix now, this machine, extra high.
-        var bare = SettingsJson.FixThis(J("""{"ok":true}"""));
+        var bare = SettingsJson.FixThis(SettingsDecodingTests.J("""{"ok":true}"""));
         Assert.Equal((false, true, "auto", "", "", "xhigh", true), (bare.Settings.Enabled, bare.Settings.AppsDefault, bare.Settings.Mode, bare.Settings.Machine, bare.Settings.Model, bare.Settings.Effort, bare.Settings.Errors));
         Assert.Empty(bare.Settings.Apps);
         Assert.Empty(bare.Apps);
@@ -429,7 +429,7 @@ public class SettingsRulesTests
         Assert.Equal(0, bare.Later);
         Assert.Equal("Alt+Shift+F", bare.Shortcut);
         // An older Space lists this machine's models only.
-        var older = SettingsJson.FixThis(J("""{"ok":true,"settings":{"mode":"soon","effort":"extreme"},"models":[{"value":"claude/basic","runtime":"claude","tier":"basic","model":"haiku"}]}"""));
+        var older = SettingsJson.FixThis(SettingsDecodingTests.J("""{"ok":true,"settings":{"mode":"soon","effort":"extreme"},"models":[{"value":"claude/basic","runtime":"claude","tier":"basic","model":"haiku"}]}"""));
         Assert.Equal(("auto", "xhigh"), (older.Settings.Mode, older.Settings.Effort));
         Assert.Equal("claude/basic", Assert.Single(older.Models).Value);
     }
