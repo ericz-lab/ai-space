@@ -91,6 +91,8 @@ final class AppModel: ObservableObject {
     let firstLaunch = FirstLaunch()
     let updater = AppUpdater(current: LocalBundle.find()?.version ?? "0.0.0")
     private let cache = CatalogueCache(directory: DesktopPaths.caches)
+    /// The apps each Space had when this Mac last looked, to tell a new install (InstallRules).
+    private let installs = InstallWatchStore()
 
     @Published private(set) var selectedID: UUID? {
         didSet {
@@ -107,7 +109,8 @@ final class AppModel: ObservableObject {
     /// Where the launcher stands, observed by the pager and its indicator (PagerPosition).
     let pager = PagerPosition()
     /// The page on show: `Pager.home`, a screen's id, or `Pager.settings`. The window opens on the
-    /// first screen; the library is one page to its left.
+    /// home screen, the first screen of pinned tiles (`DesktopScreens.opening`); the library is one
+    /// page to its left.
     var pagerID: String {
         get { pager.id }
         set {
@@ -172,6 +175,7 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async { self?.deviceUsage.refresh() }
         }.store(in: &watchers)
         selectedID = store.defaultConnection?.id
+        openOnHomeScreen()
         screens.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
         // A swipe moves the pager without the model; the screen it lands on is the one last shown.
         pager.$id.sink { [weak self] id in
@@ -226,12 +230,13 @@ final class AppModel: ObservableObject {
         usageActive = active
         deviceUsage.setActive(active) { [weak self] in
             guard let self else { return nil }
+            // A built-in tile's page is the panel's own, not an app whose use is counted.
             if let front = self.appWindows.foregroundApp {
-                return (self.loader(for: front.connection).api, front.app)
+                return (self.loader(for: front.connection).api, Builtin.isTab(front.app) ? nil : front.app)
             }
             guard let connection = self.selected else { return nil }
             let app: String?
-            if NSApp.keyWindow?.identifier?.rawValue == "SpaceMain", case .app(let id) = self.destination { app = id }
+            if NSApp.keyWindow?.identifier?.rawValue == "SpaceMain", case .app(let id) = self.destination, !Builtin.isTab(id) { app = id }
             else { app = nil }
             return (self.loader(for: connection).api, app)
         }
@@ -263,14 +268,45 @@ final class AppModel: ObservableObject {
         let l = CatalogueLoader(connection: connection, cache: cache) { await cookies.cookies() }
         l.onCatalogue = { [weak self] catalogue in
             guard let self else { return }
-            screens.seed(connection.id, from: catalogue.panelScreens)
+            let panel = DesktopScreens.panel(catalogue)
+            let copied = screens.records[connection.id.uuidString]?.seeded == true
+            screens.seed(connection.id, from: panel)
+            if !copied, screens.records[connection.id.uuidString]?.seeded == true {
+                // This Mac's first layout for the Space: the panel's, with every built-in tile it has.
+                screens.edit(connection.id) { DesktopScreens.keepingBuiltins($0, from: panel) }
+                // A window still where it opened goes to the screen that holds the tiles.
+                if selectedID == connection.id, pagerID == Screens.home { openOnHomeScreen() }
+            }
             screens.merge(connection.id, groups: catalogue.agentGroups)
+            adoptInstalled(connection.id, catalogue, panel: panel)
             iconStores[connection.id]?.retryFailed()
         }
         loaders[connection.id] = l
         iconStores[connection.id] = IconStore(api: l.api, directory: DesktopPaths.icons(connection.id))
         DispatchQueue.main.async { Task { await l.refresh() } }
         return l
+    }
+
+    /// Pins the apps installed since the last look to this Mac's home screen, as the App Store
+    /// pinned them to the panel's (InstallRules).
+    private func adoptInstalled(_ id: UUID, _ catalogue: Catalogue, panel: [PanelScreen]) {
+        let before = installs.watch(id)
+        let (watch, pins) = InstallRules.adopt(before, apps: catalogue.apps.map(\.key), panelHome: panel.first?.items ?? [])
+        if watch != before { installs.save(watch, id) }
+        if !pins.isEmpty { screens.edit(id) { InstallRules.pinning($0, pins) } }
+    }
+
+    /// Puts the launcher on the selected Space's home screen: the first screen of pinned tiles,
+    /// not the library to its left and not an empty screen while another holds the tiles.
+    private func openOnHomeScreen() {
+        let page = selectedID.map { DesktopScreens.opening(screens.screens($0)) } ?? Screens.home
+        homePage = page
+        pagerID = page
+    }
+
+    /// The icon the Space serves for a built-in tile: its icon pack's, else the panel's own artwork.
+    func icon(_ builtin: Builtin, in connection: Connection) -> String {
+        builtin.icon(in: loaders[connection.id]?.catalogue?.builtinIcons ?? [:])
     }
 
     func icons(for connection: Connection) -> IconStore {
@@ -338,16 +374,14 @@ final class AppModel: ObservableObject {
         selectedID = id
         query = ""
         editingScreen = nil
-        homePage = Screens.home
-        pagerID = Screens.home
+        openOnHomeScreen()
         destination = .launcher
     }
 
     func add(name: String, url: URL) {
         let c = store.add(name: name, url: url)
         selectedID = c.id
-        homePage = Screens.home
-        pagerID = Screens.home
+        openOnHomeScreen()
         destination = .launcher
     }
 
@@ -387,6 +421,8 @@ final class AppModel: ObservableObject {
         }
         store.setDefault(c.id)
         selectedID = c.id
+        // A first install opens on the home screen, wherever the launcher stood before it.
+        openOnHomeScreen()
         destination = .launcher
         Task { await signInLocal(c, force: true) }
     }
@@ -434,6 +470,7 @@ final class AppModel: ObservableObject {
         settingsLoaders[id] = nil
         cookieSessions[id] = nil
         screens.forget(id)
+        installs.forget(id)
         SpaceLive.forget(id)
         store.remove(id)
         if selectedID == id { selectedID = store.defaultConnection?.id }
@@ -620,13 +657,33 @@ final class AppModel: ObservableObject {
         destination = .hub(.settings)
     }
 
-    /// One of the panel's own windows (src/web/screens.ts `BUILTINS`), from its tile.
+    /// One of the panel's own windows (src/web/screens.ts `BUILTINS`), from its tile: the ones the
+    /// app draws itself, and the App Store and Shortcuts as the panel's own pages in a tab.
     func openBuiltin(_ builtin: Builtin) {
         switch builtin {
         case .settings: openSettings()
         case .inbox: destination = .hub(.inbox)
         case .terminal: destination = .hub(.terminal)
+        case .store: openStore()
+        case .shortcuts: openPage(of: .shortcuts)
         }
+    }
+
+    /// The App Store (docs/app-catalog.md#the-app-store); `pickAll` ticks every installable app,
+    /// as the first-use card asks. What is installed there is pinned to this Mac's home screen
+    /// when the launcher comes back and reads the catalogue (`adoptInstalled`).
+    func openStore(pickAll: Bool = false) {
+        openPage(of: .store, at: StorePage.path(pickAll: pickAll))
+    }
+
+    /// A built-in tile's page of the web panel (docs/panel.md#built-in-pages) as a tab of the main
+    /// window, beside the open apps.
+    private func openPage(of builtin: Builtin, at path: String? = nil) {
+        guard let c = selected, let page = path ?? builtin.page, let url = URL(string: page, relativeTo: c.url)?.absoluteURL else { return }
+        let tile = AppInfo(id: builtin.key, name: builtin.rawValue, peer: nil, stale: nil, title: builtin.title, description: nil, i18n: nil,
+                           icon: icon(builtin, in: c), url: builtin.page, status: nil, hidden: nil)
+        // The tab's address is asked for only when it differs from the page it is on (pick=all).
+        openApp(tile, connection: c, url: path == nil && tab(tile.id, connection: c.id) != nil ? nil : url)
     }
 
     /// The screens, at the one last shown.
@@ -666,7 +723,9 @@ final class AppModel: ObservableObject {
         homePage = Screens.home
         if pagerID != Pager.home, pagerID != Pager.settings { pagerID = Screens.home }
         editingScreen = nil
-        screens.reset(connection.id, from: catalogue.panelScreens)
+        let panel = DesktopScreens.panel(catalogue)
+        screens.reset(connection.id, from: panel)
+        screens.edit(connection.id) { DesktopScreens.keepingBuiltins($0, from: panel) }
     }
 
     /// The screen the screen actions are about: the one on show, else the one last shown.

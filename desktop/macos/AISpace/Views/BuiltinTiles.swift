@@ -1,44 +1,5 @@
 import SwiftUI
 
-/// The panel's own windows as tiles (src/web/screens.ts `BUILTINS`): in the library's Apps section
-/// after the apps, and pinned to a screen as `builtin:<name>` like any other tile, so a layout
-/// copied from the panel keeps them. The Mac has no Shortcuts window, so it has no such tile.
-enum Builtin: String, CaseIterable, Identifiable {
-    case inbox, terminal, settings
-
-    var id: String { rawValue }
-    var key: String { "builtin:\(rawValue)" }
-
-    init?(key: String) {
-        guard key.hasPrefix("builtin:") else { return nil }
-        self.init(rawValue: String(key.dropFirst("builtin:".count)))
-    }
-
-    var title: String {
-        switch self {
-        case .inbox: return String(localized: "Inbox")
-        case .terminal: return String(localized: "Terminal")
-        case .settings: return String(localized: "Settings")
-        }
-    }
-
-    /// The icon the Space serves for it (`/api/apps` `builtins`, the defaults of src/web/api.ts).
-    var icon: String { "/\(rawValue).svg" }
-
-    var symbol: String {
-        switch self {
-        case .inbox: return "tray.fill"
-        case .terminal: return "terminal.fill"
-        case .settings: return "gearshape.fill"
-        }
-    }
-
-    func matches(_ query: String) -> Bool {
-        let q = query.lowercased()
-        return title.lowercased().contains(q) || rawValue.contains(q)
-    }
-}
-
 /// A tile of a launcher grid: an app or agent of the catalogue, or one of the panel's own windows.
 enum LauncherTile: Identifiable {
     case entry(CatalogueEntry)
@@ -52,9 +13,25 @@ enum LauncherTile: Identifiable {
     }
 }
 
+/// The panel's own artwork for a built-in tile, as the app carries it: what the tile shows until
+/// the Space's icon has loaded, and when it cannot be read. AppKit draws the SVG itself.
+@MainActor
+enum BuiltinArtwork {
+    private static var images: [Builtin: NSImage] = [:]
+
+    static func image(_ builtin: Builtin) -> NSImage? {
+        if let image = images[builtin] { return image }
+        guard let url = Bundle.main.url(forResource: builtin.rawValue, withExtension: "svg"), let image = NSImage(contentsOf: url) else { return nil }
+        images[builtin] = image
+        return image
+    }
+}
+
 /// A built-in window's tile, drawn as an app's.
 struct BuiltinTile: View {
     let builtin: Builtin
+    /// The icon the Space serves for it (`Builtin.icon(in:)`).
+    let icon: String
     let icons: IconStore
     let action: () -> Void
     @Environment(\.colorScheme) private var scheme
@@ -63,7 +40,7 @@ struct BuiltinTile: View {
         let overArtwork = Theme.current.backdrop != nil
         Button(action: action) {
             VStack(spacing: 7) {
-                EntryIcon(icon: builtin.icon, fallback: builtin.symbol, icons: icons, size: 64)
+                EntryIcon(icon: icon, fallback: "app", artwork: BuiltinArtwork.image(builtin), icons: icons, size: 64)
                 Text(verbatim: builtin.title)
                     .font(.callout.weight(overArtwork ? .semibold : .medium))
                     .foregroundStyle(overArtwork && scheme == .dark ? Color.white : Theme.text)

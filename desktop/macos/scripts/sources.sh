@@ -21,3 +21,7 @@ SHARED="$SHARED ShareExtension/MacSharedPicture.swift"
 SHARED="$SHARED $IOS_DIR/Views/PetView.swift"
 # The desk pet's sheet, the panel's own (src/web/public), copied into the app by build.sh.
 PET_SHEET=../../src/web/public/pet-claude.webp
+# The built-in tiles' artwork, the panel's own (src/web/public), copied into the app by build.sh:
+# what a tile shows until the Space's icon for it has loaded (Services/Builtins.swift).
+BUILTIN_ICONS="../../src/web/public/store.svg ../../src/web/public/inbox.svg ../../src/web/public/shortcuts.svg \
+../../src/web/public/terminal.svg ../../src/web/public/settings.svg"
