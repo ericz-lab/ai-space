@@ -87,6 +87,8 @@ final class AppModel: ObservableObject {
     let notifier = Notifier()
     /// The Local edition's service on this Mac; `available` is false in the Client edition.
     let local = LocalManager()
+    /// The desktop app's first launch: finding or installing an AI Space on this Mac.
+    let firstLaunch = FirstLaunch()
     let updater = AppUpdater(current: LocalBundle.find()?.version ?? "0.0.0")
     private let cache = CatalogueCache(directory: DesktopPaths.caches)
 
@@ -187,6 +189,12 @@ final class AppModel: ObservableObject {
         store.$connections.sink { [weak self] list in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.syncLives(list) } }
         }.store(in: &watchers)
+        firstLaunch.found = { [weak self] url in self?.adoptFound(url) }
+        // The desktop app with no saved Space looks for one on this Mac; the Local edition asks
+        // its own service instead (LocalViews.swift).
+        if !local.available && store.connections.isEmpty {
+            Task { [weak self] in await self?.firstLaunch.look() }
+        }
         if local.available {
             updater.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
             Task { [weak self] in await self?.updater.check() }
@@ -341,6 +349,16 @@ final class AppModel: ObservableObject {
         homePage = Screens.home
         pagerID = Screens.home
         destination = .launcher
+    }
+
+    /// An AI Space found on this Mac at first launch, or just installed from it: saved under the
+    /// local name and selected. One already saved at that address is selected instead.
+    func adoptFound(_ url: URL) {
+        if let existing = store.connections.first(where: { ConnectionRules.sameOrigin($0.url, url) }) {
+            select(existing.id)
+        } else {
+            add(name: LocalSpaceRules.name, url: url)
+        }
     }
 
     /// A changed URL starts a fresh page; the old one's unsent drafts are gone, which the form says.

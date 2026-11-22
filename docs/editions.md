@@ -40,7 +40,7 @@ gets a Mac app that does everything for them.
 | Edition | What it contains | How it is used | Who it is for |
 | --- | --- | --- | --- |
 | **AI Space Server** | The Space service, the web panel, the app runtime | Installed on a server or an always-on machine; reached from a browser or a client | People who need it running all day and reachable from elsewhere |
-| **AI Space Client** | The native client only | Installed, then connected to an existing Space; no Space service runs on this machine | People who already have a Space, or only use Spaces on other machines |
+| **AI Space Client** | The native client only | Installed, then connected to a Space: the one it finds on this computer (or offers to install there), or one on another machine | People who already have a Space, or only use Spaces on other machines |
 | **AI Space Local** (working name) | The native client, the Space service, its runtime (Bun) and the bundled apps | Installed, it creates a Space on this machine on first launch; it can also connect to remote Spaces | People who want it to work out of the box |
 
 All three are one product: the same source tree, the same version number, the same Space API.
@@ -119,9 +119,15 @@ the Space service, its scheduler and the apps' processes running in the backgrou
 Local are for computers (Local starts on the Mac); a phone always connects to a Space on another
 machine.
 
-**Never** installs, starts, stops or upgrades a Space service, on this machine or another. With no
-reachable Space it shows how to reach one, and does not start one itself. Remote use needs no Bun, no
-Git and no developer tools on the client machine.
+**At first launch** with no saved Space, the desktop apps look for an AI Space on the computer (the
+workspace's `SPACE_PORT`, then 8700; `GET /api/space` must say `product: "ai-space"`) and save the one
+they find without a question. With none they offer two choices: run the release's one-command
+installer on this computer (the same `install.sh` or `install.ps1`, with `AI_SPACE_NO_OPEN=1`), or
+connect to another machine ([macos-desktop.md](macos-desktop.md#connections-and-first-launch),
+[linux-desktop.md](linux-desktop.md), [windows-desktop.md](windows-desktop.md)). That is all the app does to
+a service: it **never** carries, starts, stops, upgrades or removes one. `space upgrade` and
+`space uninstall` do that, and removing the app leaves AI Space in place. Remote use needs no Bun,
+no Git and no developer tools on the client machine.
 
 **Connects** to a Space by URL: a local one on `http://127.0.0.1:8700`, a remote one over HTTPS
 behind its access layer. A connection counts only after the client has checked the panel and a known

@@ -107,10 +107,11 @@ final class FormState: ObservableObject {
     @Published var address: String
     @Published var problem: LocalizedStringKey?
 
-    init(_ initial: Connection?) {
-        kind = initial?.isLocal ?? true ? .local : .remote
+    init(_ initial: Connection?, kind preferred: ConnectionForm.Kind? = nil) {
+        let kind = preferred ?? (initial?.isLocal ?? true ? .local : .remote)
+        self.kind = kind
         name = initial?.name ?? ""
-        address = initial?.url.absoluteString ?? ConnectionRules.localDefault
+        address = initial?.url.absoluteString ?? (kind == .local ? ConnectionRules.localDefault : "")
     }
 }
 
@@ -123,11 +124,12 @@ struct ConnectionForm: View {
     var cancel: (() -> Void)?
     @StateObject private var form: FormState
 
-    init(initial: Connection?, save: @escaping (String, URL) -> Void, cancel: (() -> Void)? = nil) {
+    /// `kind` is where a new connection's form starts; by default on this Mac.
+    init(initial: Connection?, kind: Kind? = nil, save: @escaping (String, URL) -> Void, cancel: (() -> Void)? = nil) {
         self.initial = initial
         self.save = save
         self.cancel = cancel
-        _form = StateObject(wrappedValue: FormState(initial))
+        _form = StateObject(wrappedValue: FormState(initial, kind: kind))
     }
 
     var body: some View {
