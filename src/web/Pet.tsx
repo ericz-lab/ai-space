@@ -2,44 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { useLang } from "./i18n.ts";
 import type { Key } from "./messages.ts";
 
-// Desk pet: a sprite sheet the panel walks along the bottom edge. Two kinds of sheet:
-// - the Codex format from petdex.dev (8 columns; v1 9 rows and v2 11 rows mean the same, cells 12:13).
-//   The bundled default is a capybara at /pet.webp, stored at half size; any other petdex sheet can be
-//   shown by name (see petdex.ts). These are loaded without a Referer, which petdex's hotlink
-//   protection insists on.
-// - a pet bundled with the panel in its own layout (BUILTIN): Claude, a 3D model rendered into a sheet
-//   by pets/claude.ts. It shows the Space's mood (/api/pets/mood, docs/app-spec.md#space-mood) as the
-//   native clients' pets do (desktop/macos/AISpace/Services/PetRules.swift holds the same table).
-// - an app's pet (docs/app-spec.md#pets): its own grid and animations, its sheet proxied by ai-space,
-//   and a mood the app answers: which animation it rests in, whether it roams, a line to say.
-// The sheet is an <img> moved inside a clipping box rather than a CSS background: an image needs no CORS.
-export const DEFAULT_SHEET = "/pet.webp";
+// Desk pet: a sprite sheet the panel walks along the bottom edge. The pets bundled with the panel are
+// in BUILTIN; at present that is Claude alone, a 3D model rendered into a sheet by pets/claude.ts. It shows the Space's mood (/api/pets/mood, docs/app-spec.md#space-mood) as
+// the native clients' pets do (desktop/macos/AISpace/Services/PetRules.swift holds the same table).
+// The sheet is an <img> moved inside a clipping box rather than a CSS background.
 
-/** `pause`: the first cell is held this much longer after each loop (a bark in bursts). */
+/** `pause`: the first cell is held this much longer after each loop (a hop in bursts). */
 export type PetAnimation = { row: number; frames: number; ms: number; pause?: number };
 
-/** A desk pet declared by an app, as GET /api/pets lists it. */
-export type AppPetInfo = {
-  /** `<app>/<name>`. */
-  id: string;
-  app: string;
-  name: string;
-  title: string;
-  i18n?: Record<string, { title?: string }>;
-  sheet: string;
-  columns: number;
-  rows: number;
-  width: number;
-  pixelated: boolean;
-  animations: Record<string, PetAnimation>;
-  rest: string;
-  hasMood: boolean;
-  refreshMs: number;
-};
-
-export type PetMood = { animation: string; move: "roam" | "stay"; say?: Record<string, string>; link?: string };
-/** A mood as the page draws it: besides an app's fields, an animation played once as it begins and what a click does. */
-type ShownMood = PetMood & { once?: string; open?: () => void };
+/** A mood as the page draws it: the animation to rest in, one played once as it begins, and what a click does. */
+type ShownMood = { animation: string; move: "roam" | "stay"; say?: Record<string, string>; once?: string; open?: () => void };
 
 /** The Space's mood as GET /api/pets/mood answers it. */
 export type SpaceMood = {
@@ -51,20 +23,18 @@ export type SpaceMood = {
   open?: { kind: "chat"; agent: string } | { kind: "inbox" };
 };
 
-/** How to draw and move one sheet. `rows` undefined = derived from the image (Codex cells are 12:13). */
+/** How to draw and move the sheet. */
 type Sprite = {
   src: string;
   columns: number;
-  rows?: number;
+  rows: number;
   width: number;
-  pixelated?: boolean;
   anims: Record<string, PetAnimation>;
-  /** Walking right and left; without `left` the right one is mirrored, and so is the rest after it. */
+  /** Walking right; walking left is this mirrored, and so is the rest after it. */
   right: string;
-  left?: string;
   /** Rest animations to pick from when there is no mood, with their weights. */
   rests: [string, number][];
-  /** Played once on a click when the mood has no link. */
+  /** Played once on a click when the mood opens nothing. */
   click?: string;
   /**
    * How the Space's mood shows: the animation the pet rests in for each state (`<state>/stay` when it
@@ -73,22 +43,6 @@ type Sprite = {
   moods?: { rest: Record<string, string>; once?: Record<string, string> };
 };
 
-const CODEX: Omit<Sprite, "src"> = {
-  columns: 8,
-  width: 70,
-  anims: {
-    idle: { row: 0, frames: 6, ms: 1100 },
-    right: { row: 1, frames: 8, ms: 1060 },
-    left: { row: 2, frames: 8, ms: 1060 },
-    wave: { row: 3, frames: 4, ms: 700 },
-    jump: { row: 4, frames: 5, ms: 840 },
-    wait: { row: 6, frames: 6, ms: 1010 },
-  },
-  right: "right",
-  left: "left",
-  rests: [["idle", 0.55], ["wait", 0.27], ["wave", 0.18]],
-  click: "jump",
-};
 /**
  * Claude: the 3D mascot rendered by pets/claude.py, whose ANIMS this repeats (pet-claude.test.ts compares them).
  * Its scuttle is drawn for this width and SPEED, so its feet stay planted; change them together with
@@ -111,8 +65,10 @@ const CLAUDE: Sprite = {
   click: "jump",
   moods: { rest: { working: "look", waiting: "look", "waiting/stay": "hop", error: "look", done: "look", sleep: "sleep" }, once: { done: "jump" } },
 };
-/** Pets bundled with the panel besides the default, by the name kept in the preferences (`petBuiltin`). */
+/** Pets bundled with the panel, by the name kept in the preferences (`petBuiltin`). A new one is a sheet and an entry here. */
 export const BUILTIN: Record<string, { title: Key; sprite: Sprite }> = { claude: { title: "pet.builtin.claude", sprite: CLAUDE } };
+/** The pet shown when none is chosen, or the chosen one is gone. */
+export const DEFAULT_PET = "claude";
 const SPEED = 55; // px/s
 // The bubble comes and goes: shown this long, then hidden this long, again while the line stays.
 const SAY_SHOW_MS = 6_000;
@@ -120,16 +76,8 @@ const SAY_HIDE_MS = 14_000;
 
 type Cell = { w: number; h: number };
 
-/**
- * A petdex or bundled pet. `sheet` is the sprite sheet URL; when it fails to load the bundled default is
- * shown instead and `onError` fires once so the owner can re-resolve or forget the choice.
- */
-export default function Pet({ sheet = DEFAULT_SHEET, onError }: { sheet?: string; onError?: (sheet: string) => void }) {
-  return <SpritePet sprite={{ ...CODEX, src: sheet }} fallback={DEFAULT_SHEET} onError={onError} />;
-}
-
 /** A pet bundled with the panel, by its name in BUILTIN; one with `moods` shows the Space's mood. */
-export function BuiltinPet({ name }: { name: string }) {
+export default function Pet({ name }: { name: string }) {
   const sprite = BUILTIN[name]?.sprite;
   const space = useSpaceMood(!!sprite?.moods);
   return sprite ? <SpritePet sprite={sprite} mood={sprite.moods && space ? shownMood(sprite.moods, space) : null} /> : null;
@@ -180,58 +128,13 @@ function shownMood(moods: NonNullable<Sprite["moods"]>, m: SpaceMood): ShownMood
   };
 }
 
-/** An app's pet: its mood is read through ai-space on the pet's refresh while the page is visible. */
-export function AppPet({ pet }: { pet: AppPetInfo }) {
-  const [mood, setMood] = useState<PetMood | null>(null);
-  useEffect(() => {
-    setMood(null);
-    if (!pet.hasMood) return;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const read = () => {
-      clearTimeout(timer);
-      if (document.visibilityState === "visible")
-        fetch(`/api/pets/${encodeURIComponent(pet.app)}/${encodeURIComponent(pet.name)}/mood`)
-          .then((r) => r.json())
-          .then((j: { ok?: boolean } & PetMood) => {
-            // A mood that cannot be read lets the pet rest; it is never guessed.
-            if (live) setMood(j.ok ? { animation: j.animation, move: j.move, say: j.say, link: j.link } : null);
-          })
-          .catch(() => live && setMood(null));
-      timer = setTimeout(read, pet.refreshMs);
-    };
-    const onVisible = () => document.visibilityState === "visible" && read();
-    read();
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      live = false;
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [pet.app, pet.name, pet.hasMood, pet.refreshMs]);
-  const sprite: Sprite = {
-    src: pet.sheet,
-    columns: pet.columns,
-    rows: pet.rows,
-    width: pet.width,
-    pixelated: pet.pixelated,
-    anims: pet.animations,
-    right: "walk",
-    rests: [[pet.rest, 1]],
-    ...(pet.animations.jump ? { click: "jump" } : {}),
-  };
-  return <SpritePet sprite={sprite} mood={mood} />;
-}
-
-function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite; mood?: ShownMood | null; fallback?: string; onError?: (sheet: string) => void }) {
+function SpritePet({ sprite, mood = null }: { sprite: Sprite; mood?: ShownMood | null }) {
   const { t, lang } = useLang();
   const [loaded, setLoaded] = useState<{ src: string; cell: Cell } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const clip = useRef<HTMLElement>(null);
   const spr = useRef<HTMLImageElement>(null);
   const sayEl = useRef<HTMLSpanElement>(null);
-  const fail = useRef(onError);
-  fail.current = onError;
   // The walker reads these through refs, so a new mood or a new sprite object never resets its position.
   const spriteRef = useRef(sprite);
   spriteRef.current = sprite;
@@ -263,32 +166,18 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
     return () => clearTimeout(timer);
   }, [say]);
 
-  // Load the sheet off-screen to learn its cell size; the previous pet stays until the new one is ready.
+  // Load the sheet off-screen to learn its cell size; nothing shows when it cannot be loaded.
   const { src, columns, rows } = sprite;
   useEffect(() => {
     let live = true;
-    const load = (url: string, isFallback: boolean) => {
-      const img = new Image();
-      img.referrerPolicy = "no-referrer";
-      img.onload = () => {
-        if (!live) return;
-        const w = img.naturalWidth / columns;
-        const n = rows ?? Math.max(1, Math.round(img.naturalHeight / ((w * 13) / 12)));
-        setLoaded({ src: url, cell: { w, h: img.naturalHeight / n } });
-      };
-      img.onerror = () => {
-        if (!live) return;
-        if (isFallback || !fallback) return setLoaded(null);
-        fail.current?.(url);
-        load(fallback, true);
-      };
-      img.src = url;
-    };
-    load(src, src === fallback);
+    const img = new Image();
+    img.onload = () => live && setLoaded({ src, cell: { w: img.naturalWidth / columns, h: img.naturalHeight / rows } });
+    img.onerror = () => live && setLoaded(null);
+    img.src = src;
     return () => {
       live = false;
     };
-  }, [src, columns, rows, fallback]);
+  }, [src, columns, rows]);
 
   const ok = loaded !== null;
   const CW = loaded?.cell.w ?? 1;
@@ -307,15 +196,14 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
     let frameTimer: ReturnType<typeof setTimeout> | undefined;
     let run = 0; // which setState call the frame timer belongs to
     let behaveTimer: ReturnType<typeof setTimeout> | undefined;
-    const walking = () => state === sp().right || (!!sp().left && state === sp().left);
+    const walking = () => state === sp().right;
 
     const draw = () => {
       if (!spr.current || !box.current || !clip.current) return;
       const a = sp().anims[state];
       if (!a) return;
       spr.current.style.transform = `translate(${-frame * CW}px, ${-a.row * CH}px)`;
-      const mirror = !sp().left && facing === "left";
-      clip.current.style.transform = mirror ? `translateX(${W}px) scale(${-scale}, ${scale})` : `scale(${scale})`;
+      clip.current.style.transform = facing === "left" ? `translateX(${W}px) scale(${-scale}, ${scale})` : `scale(${scale})`;
       box.current.style.transform = `translate3d(${x}px,0,0)`;
       // The bubble opens towards the middle of the page, so it never runs off an edge.
       box.current.dataset.side = x + W / 2 > innerWidth / 2 ? "right" : "left";
@@ -364,7 +252,7 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
     const walkTo = (to: number) => {
       target = to;
       facing = target > x ? "right" : "left";
-      setState(facing === "right" || !sp().left ? sp().right : sp().left!);
+      setState(sp().right);
     };
     // Walk somewhere, or rest; a mood that says "stay" sends the pet to its corner and keeps it there,
     // facing into the page.
@@ -405,13 +293,11 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
       }
       draw();
     }, 40);
-    // Click: open what the mood points at, follow its link, or play the click animation once.
+    // Click: open what the mood points at, or play the click animation once.
     const el = box.current;
     const click = () => {
       const open = moodRef.current?.open;
       if (open) return open();
-      const link = moodRef.current?.link;
-      if (link) return void window.open(link, "_blank", "noopener");
       playOnce(sp().click);
     };
     el.addEventListener("click", click);
@@ -434,14 +320,14 @@ function SpritePet({ sprite, mood = null, fallback, onError }: { sprite: Sprite;
 
   if (!loaded) return null;
   return (
-    <div className="pet" ref={box} title={say || mood?.link || mood?.open ? undefined : t("pet.clickMe")} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ width: W, height: Math.round(CH * scale) }}>
+    <div className="pet" ref={box} title={say || mood?.open ? undefined : t("pet.clickMe")} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ width: W, height: Math.round(CH * scale) }}>
       {say && (
         <span ref={sayEl} className={`pet-say${bubble || hover ? " on" : ""}`} role="status">
           {say}
         </span>
       )}
       <i ref={clip} style={{ width: CW, height: CH, transform: `scale(${scale})` }}>
-        <img ref={spr} src={loaded.src} alt="" referrerPolicy="no-referrer" draggable={false} style={sprite.pixelated ? { imageRendering: "pixelated" } : undefined} />
+        <img ref={spr} src={loaded.src} alt="" draggable={false} />
       </i>
     </div>
   );

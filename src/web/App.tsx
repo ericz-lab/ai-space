@@ -7,7 +7,8 @@ import ModelPreference from "./ModelPreference.tsx";
 import { AccountSettings, loadAuth } from "./Auth.tsx";
 import Chat, { type Ask, type Draft } from "./Chat.tsx";
 import { PAGE, chatHref, linkedAgent, pageAgent, pageHref, pageSession, type PanelLink, parsePanelLink } from "./panel-link.ts";
-import Pet, { AppPet, type AppPetInfo, BUILTIN, BuiltinPet, DEFAULT_SHEET } from "./Pet.tsx";
+import Pet, { BUILTIN, DEFAULT_PET } from "./Pet.tsx";
+import PetField from "./PetField.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
 import Usage from "./Usage.tsx";
@@ -23,8 +24,6 @@ import { BUILTINS, type Builtin, HOME, type Screen, addScreen, entryKey, move, p
 import { canonicalItems, groupAgents, groupById, groupOf, preferredMachine } from "./agent-groups.ts";
 import { BUILTIN_ICONS, fmtDuration, getJson, recordOpen, relTime, repoUrl, sendJson, type AgentInfo, type AppInfo, type BuiltinIcons, type InboxSummary, type UsageKind, type UsageRow, type WidgetInfo } from "./api.ts";
 import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
-import PetField from "./PetField.tsx";
-import { type PetChoice, resolvePet } from "./petdex.ts";
 import SettingsStatus from "./SettingsStatus.tsx";
 import { SECTION_LABEL, type SettingsSection, SettingsNav, saveSection, savedSection } from "./SettingsNav.tsx";
 import Packages from "./Packages.tsx";
@@ -46,8 +45,8 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 // Entries from peer machines say where they run in their hover details and are muted while that peer is down.
 // Every string the panel owns goes through `t` (i18n.ts); manifest text is picked with `localized`.
 
-/** `petApp` is an app's pet as `<app>/<name>` (docs/app-spec.md#pets); it wins over `pet` while that app offers it. */
-type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; pet?: PetChoice; petApp?: string; petBuiltin?: string };
+/** `petBuiltin` is the chosen pet, a name in Pet.tsx `BUILTIN`. */
+type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; petBuiltin?: string };
 
 /** Floating panels over the page; one at a time. */
 type Panel = "settings" | "chat" | "tasks" | "terminal" | "inbox" | "shortcuts";
@@ -139,36 +138,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     return n;
   };
   const togglePref = (k: "noPop" | "noPet" | "noWidget") => setPrefs((p) => savePrefs({ ...p, [k]: !p[k] }));
-  const setPet = (pet: PetChoice | undefined) => setPrefs((p) => savePrefs({ ...p, pet }));
-  // The pet menu's choice: a bundled pet (`builtin:<name>`), an app's pet (`<app>/<name>`), or neither.
-  const setPetKind = (kind: string | undefined) =>
-    setPrefs((p) => savePrefs({ ...p, petApp: kind && !kind.startsWith("builtin:") ? kind : undefined, petBuiltin: kind?.startsWith("builtin:") ? kind.slice(8) : undefined }));
-  // The pets apps declare; read on load and again when the settings open, so a new app's pet shows up.
-  const [appPets, setAppPets] = useState<AppPetInfo[] | null>(null);
-  // A chosen sheet that no longer loads (the pet was re-uploaded, or petdex is down): look the name up
-  // again and keep the new URL; until then the default pet stands in. The choice itself is kept.
-  const [petBroken, setPetBroken] = useState<string | null>(null);
-  const petSheet = prefs.pet && prefs.pet.url !== petBroken ? prefs.pet.url : DEFAULT_SHEET;
-  const onPetError = (url: string) => {
-    setPetBroken(url);
-    const slug = prefs.pet?.slug;
-    if (!slug) return;
-    resolvePet(slug)
-      .then((p) => {
-        if (p && p.url !== url) setPet(p);
-      })
-      .catch(() => {});
-  };
+  const pet = prefs.petBuiltin && BUILTIN[prefs.petBuiltin] ? prefs.petBuiltin : DEFAULT_PET;
+  const setPet = (name: string) => setPrefs((p) => savePrefs({ ...p, petBuiltin: name }));
   const setsOpen = panel === "settings";
-  useEffect(() => {
-    getJson<{ pets?: AppPetInfo[] }>("/api/pets")
-      .then((j) => setAppPets(j.pets ?? []))
-      .catch(() => setAppPets((p) => p ?? []));
-  }, [setsOpen]);
-  const appPet = prefs.petApp ? appPets?.find((p) => p.id === prefs.petApp) : undefined;
-  const builtinPet = prefs.petBuiltin && BUILTIN[prefs.petBuiltin] ? prefs.petBuiltin : undefined;
-  // Until the list is read, a chosen app pet is not replaced by the default for a moment.
-  const petPending = !!prefs.petApp && appPets === null;
   useEffect(() => {
     if (!setsOpen || PAGE) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPanel(null);
@@ -949,7 +921,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         ) : null}
       </div>
       {screens && !IN_PHONE_APP && !PAGE && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={searchLibrary} />}
-      {!prefs.noPet && !petPending && !PAGE && (appPet ? <AppPet pet={appPet} /> : builtinPet ? <BuiltinPet name={builtinPet} /> : <Pet sheet={petSheet} onError={onPetError} />)}
+      {!prefs.noPet && !PAGE && <Pet name={pet} />}
       {uninstalling && (
         <UninstallForm
           app={uninstalling}
@@ -1012,7 +984,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                       {t("settings.pet")}
                       <input type="checkbox" role="switch" checked={!prefs.noPet} onChange={() => togglePref("noPet")} />
                     </label>
-                    {!prefs.noPet && <PetField pet={prefs.pet} onChange={setPet} appPets={appPets ?? []} kind={appPet?.id ?? (builtinPet && `builtin:${builtinPet}`)} onKind={setPetKind} />}
+                    {!prefs.noPet && <PetField pet={pet} onPet={setPet} />}
                     <label className="setrow">
                       {t("settings.widgets")}
                       <input type="checkbox" role="switch" checked={!prefs.noWidget} onChange={() => togglePref("noWidget")} />
