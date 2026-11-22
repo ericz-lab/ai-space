@@ -27,6 +27,8 @@ import { splitMachine } from "../runtimes/registry.ts";
 import { RunBusyError, RunClosedError, RunRegistry, RunStateError } from "./runs.ts";
 import type { SessionStore } from "./sessions.ts";
 import { readTranscript } from "./transcript.ts";
+import { CardBook, parseCard, parseItemStates, transcriptCards, withoutChangesNote } from "./cards.ts";
+import { resolveLink } from "../panel/view.ts";
 import { fixerSystemPrompt } from "../feedback/prompt.ts";
 
 /**
@@ -44,7 +46,9 @@ import { fixerSystemPrompt } from "../feedback/prompt.ts";
  *   GET  /api/agents/watch                         SSE: the same as below, for every agent on this space
  *   GET  /api/agents/:app/:agent/watch             SSE: the agent's runs starting and ending (also those it starts by itself) and its conversations' background jobs
  *   GET  /api/agents/:app/:agent/sessions         recent sessions
- *   GET  /api/agents/:app/:agent/sessions/:sid    restored transcript
+ *   GET  /api/agents/:app/:agent/sessions/:sid    restored transcript; an `ai` message carries the `cards` of its tool outputs
+ *   POST /api/agents/cards/state                   { agent, card } → the card's items as its app answers them now (docs/chat-cards.md)
+ *   POST /api/agents/cards/action                  { token, card, action, items? } → run a card's action, while its turn is the conversation's latest
  *
  * Like the panel routes these carry no bearer token; see docs/panel.md.
  */
@@ -93,6 +97,11 @@ export type AgentsApiOptions = {
   runs?: RunRegistry;
   /** SSE keepalive interval (tests). */
   heartbeatMs?: number;
+  /**
+   * Call an app's capability as `space` (the bus), for the chat cards' state and actions
+   * (docs/chat-cards.md); absent: cards are shown as they were printed and have no actions.
+   */
+  cardCall?: (app: string, capability: string, body: string) => Promise<{ status: number; body: string }>;
 };
 
 /** The space's own agent: the default chat identity, working in the workspace root. */
@@ -213,6 +222,38 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     return run;
   };
   const baseDefault = () => opts.baseDefaultModel?.() ?? opts.defaultModel;
+  /** The app an agent's cards belong to: an app on this space, never Space Assistant's. */
+  const cardApp = (agent: string): string | null => {
+    const app = agent.split("/")[0] ?? "";
+    return app && app !== SPACE_APP && registry.get(app) ? app : null;
+  };
+  const cardLink = (app: string) => (url: string) => {
+    const m = registry.get(app)?.manifest;
+    return m ? resolveLink(m, url) : "";
+  };
+  const cards = new CardBook(runs, { appOf: cardApp, resolve: (app, url) => cardLink(app)(url) });
+  /** One card call through the bus: the app's JSON answer, or an error response. */
+  const callCard = async (app: string, capability: string, body: unknown): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; res: Response }> => {
+    if (!opts.cardCall) return { ok: false, res: error(501, "cards cannot reach apps on this space") };
+    let r: { status: number; body: string };
+    try {
+      r = await opts.cardCall(app, capability, JSON.stringify(body));
+    } catch (e) {
+      const status = typeof (e as { status?: unknown }).status === "number" ? (e as { status: number }).status : 502;
+      return { ok: false, res: error(status, (e as Error).message) };
+    }
+    let data: Record<string, unknown> | null = null;
+    try {
+      const parsed = JSON.parse(r.body) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) data = parsed as Record<string, unknown>;
+    } catch {
+      /* not JSON */
+    }
+    if (r.status < 200 || r.status >= 300 || !data || data.ok === false) {
+      return { ok: false, res: error(r.status >= 400 ? r.status : 502, typeof data?.error === "string" ? data.error : `${app}/${capability} answered ${r.status}`) };
+    }
+    return { ok: true, data };
+  };
 
   /** `runtime/model` for a value: a bare tier on `tierRuntime`, another bare model on `runtime` (else the space's default runtime). */
   const qualify = (value: string | undefined, tierRuntime: string, runtime?: string): string | undefined => {
@@ -423,6 +464,8 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         if (body.effort !== undefined && !(CHAT_EFFORTS as readonly unknown[]).includes(body.effort)) return error(400, `effort must be one of ${CHAT_EFFORTS.join(", ")}`);
         const effort = body.effort as ChatEffort | undefined;
         const env: Record<string, string | undefined> = { ...process.env, ...(await loadAppEnv(agent.cwd)), ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}) };
+        // What the person changed through the last turn's cards goes before the message (docs/chat-cards.md).
+        const changes = cards.changesNote(agent.id, sessionId);
         let run;
         const release = await opts.holdApp?.(agent.app);
         try {
@@ -430,8 +473,9 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
             agent: agent.id,
             runtime,
             model,
+            ...(changes ? { message } : {}),
             // The manifest's tool list is Claude Code's syntax; other runtimes bound the agent by the permission mode's sandbox.
-            turn: { message, images, sessionId, model, permissionMode, ...(effort ? { effort } : {}), interactive, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
+            turn: { message: changes ? `${changes}\n\n${message}` : message, images, sessionId, model, permissionMode, ...(effort ? { effort } : {}), interactive, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
             onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model, skillIntent ?? undefined),
           });
           if (release) runs.subscribe(run.id, run.lastSeq, { onEvent() {}, onEnd: release });
@@ -442,6 +486,40 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
           throw e;
         }
         return runResponse(runs, run.id, 0, { heartbeatMs: opts.heartbeatMs })!;
+      }),
+    },
+
+    "/api/agents/cards/state": {
+      POST: wrap(async (req) => {
+        const body = (await req.json().catch(() => null)) as { agent?: unknown; card?: unknown } | null;
+        const app = typeof body?.agent === "string" ? cardApp(body.agent) : null;
+        if (!app) return error(400, "agent must be an app agent of this space");
+        const card = parseCard(body?.card);
+        if (!card) return error(400, "card is not a valid card");
+        if (!card.state) return error(400, "this card has no state capability");
+        const r = await callCard(app, card.state, { ids: card.items.map((i) => i.id) });
+        if (!r.ok) return r.res;
+        return json({ ok: true, items: parseItemStates(r.data.items, cardLink(app)) });
+      }),
+    },
+
+    "/api/agents/cards/action": {
+      POST: wrap(async (req) => {
+        const body = (await req.json().catch(() => null)) as { token?: unknown; card?: unknown; action?: unknown; items?: unknown } | null;
+        const grant = typeof body?.token === "string" ? cards.grant(body.token) : undefined;
+        if (!grant) return json({ ok: false, error: "this card is read-only now: the conversation has moved on", readOnly: true }, 409);
+        const card = typeof body?.card === "number" ? grant.cards[body.card] : undefined;
+        if (!card) return error(400, "card must be the index of a card of this token");
+        const capability = typeof body?.action === "string" ? card.actions?.[body.action as keyof NonNullable<typeof card.actions>] : undefined;
+        if (!capability) return error(400, "this card has no such action");
+        if (body?.items !== undefined && (!Array.isArray(body.items) || !body.items.every((x) => typeof x === "string"))) return error(400, "items must be a list of item ids");
+        const chosen = body?.items === undefined ? card.items : card.items.filter((i) => (body.items as string[]).includes(i.id));
+        if (!chosen.length) return error(400, "no item of this card was chosen");
+        const r = await callCard(grant.app, capability, { items: chosen.map((i) => ({ id: i.id, ...(i.version !== undefined ? { version: i.version } : {}) })) });
+        if (!r.ok) return r.res;
+        const items = parseItemStates(r.data.items, cardLink(grant.app));
+        cards.removed(body!.token as string, items.filter((i) => i.status === "removed" && chosen.some((c) => c.id === i.id)).map((i) => i.id));
+        return json({ ok: true, items });
       }),
     },
 
@@ -535,7 +613,9 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const runtime = opts.runtimes.get(previous?.runtime ?? (isBase ? (previous ? "claude" : agent.runtime!) : agent.runtime ?? "claude"));
         const messages = opts.home && runtime?.kind === "claude-code" ? await readTranscript(agent.cwd, sid, opts.home) : runtime?.transcript ? await runtime.transcript(agent.cwd, sid) : null;
         if (!messages) return error(404, "transcript not found");
-        return json({ ok: true, messages });
+        const app = cardApp(agent.id);
+        const shown = messages.map((m) => (m.role === "user" ? { ...m, text: withoutChangesNote(m.text) } : m));
+        return json({ ok: true, messages: transcriptCards(shown, app ? cardLink(app) : null) });
       }),
     },
   };

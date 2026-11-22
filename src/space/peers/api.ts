@@ -34,6 +34,8 @@ import { EMBED_HEADERS } from "../panel/widgets.ts";
  *   POST  /api/peers/:peer/agents/:app/:agent/runs/:id/stop │
  *   POST  /api/peers/:peer/agents/:app/:agent/runs/:id/steer │
  *   POST  /api/peers/:peer/agents/:app/:agent/runs/:id/approvals/:rid │
+ *   POST  /api/peers/:peer/agents/cards/state       │
+ *   POST  /api/peers/:peer/agents/cards/action      │
  *   GET   /api/peers/:peer/agents/:app/:agent/watch     │
  *   GET   /api/peers/:peer/apps/:app/proxy/api/*        ┘ (the peer app's own API; docs/peers.md)
  *
@@ -67,6 +69,8 @@ type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "PATCH" |
 
 const FORWARD_TIMEOUT_MS = 8_000;
 const PROXY_TIMEOUT_MS = 65_000;
+/** A card's state or action is a bus call on the peer, bounded there by the capability's timeout. */
+const CARD_TIMEOUT_MS = 35_000;
 
 export function createPeerRoutes(opts: PeerApiOptions): Routes {
   const { hub, layout, registry } = opts;
@@ -211,6 +215,9 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
     "/api/peers/:peer/agents/:app/:agent/runs/:id/steer": { POST: agentProxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/runs/:id/approvals/:rid": { POST: agentProxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/watch": { GET: agentProxy() },
+    // A peer agent's chat cards (docs/chat-cards.md): the owner's only, like the chat they come from.
+    "/api/peers/:peer/agents/cards/state": { POST: agentProxy(CARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/cards/action": { POST: agentProxy(CARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/sessions": { GET: agentProxy(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/agents/:app/:agent/sessions/:sid": { GET: agentProxy(FORWARD_TIMEOUT_MS) },
     // An app on this hub reading a peer app's API; the peer bounds the call with its own timeout.

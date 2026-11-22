@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approvalTitle, liveFingerprint, LIVE_STOP_GRACE_MS, PendingApprovals, readLines, tail, type LiveProcess } from "./live.ts";
 import type { ApprovalDecision, ChatCallbacks, ChatHandle, ChatTurn } from "./types.ts";
+import { clipOutput } from "./tool-text.ts";
 
 /**
  * DeepSeek Harness live chat (docs/runtimes.md#live-chat): one `dsh --profile acp`
@@ -372,7 +373,7 @@ export class DshLive implements LiveProcess {
       const seen = this.tools.get(u.toolCallId);
       if (seen && typeof u.title === "string" && u.title) seen.title = u.title;
       const output = contentText(u.content) || (typeof u.rawOutput === "string" ? u.rawOutput : "");
-      emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: u.toolCallId, is_error: u.status === "failed", content: output.slice(0, 12_000) }] } });
+      emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: u.toolCallId, is_error: u.status === "failed", content: clipOutput(output, 12_000) }] } });
     }
   }
 

@@ -48,3 +48,28 @@ export function taskNotice(text: string): TaskNotice | null {
   const detail = [summary, event, status && `status: ${status}`].filter(Boolean).join("\n");
   return { taskId, ...(toolUseId ? { toolUseId } : {}), ...(status ? { status } : {}), summary, ...(event ? { event } : {}), line: line.slice(0, 300), detail: detail.slice(0, 12000) };
 }
+
+/**
+ * A chat card line an app's CLI prints (docs/chat-cards.md): `::space-card {json}` on a line of its
+ * own. Shared with the card extraction (agents/cards.ts) so a clipped tool output keeps it.
+ */
+export const CARD_LINE_PREFIX = "::space-card ";
+/** The longest card line kept, and how many a reply may carry (docs/chat-cards.md). */
+export const CARD_LINE_MAX = 16 * 1024;
+export const CARDS_PER_REPLY = 4;
+
+/**
+ * A tool's output cut to `max` characters, its card lines kept whole after the cut: the cards of a
+ * long output (a batch add that printed a page first) still reach the chat.
+ */
+export function clipOutput(text: string, max: number): string {
+  if (text.length <= max) return text;
+  if (!text.includes(CARD_LINE_PREFIX)) return text.slice(0, max);
+  const cards: string[] = [];
+  const rest: string[] = [];
+  for (const line of text.split("\n")) {
+    if (line.startsWith(CARD_LINE_PREFIX) && line.length <= CARD_LINE_MAX && cards.length < CARDS_PER_REPLY) cards.push(line);
+    else rest.push(line);
+  }
+  return [rest.join("\n").slice(0, max), ...cards].join("\n");
+}

@@ -2,6 +2,8 @@ import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
 import { applyJobs, ChatSteps, historySteps, stepGroups, submitsChat, type ChatJob, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
 import { Glyph, JobsBadge, NoticeStep, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
+import { ChatCards, type ShownCard } from "./ChatCards.tsx";
+import type { Card } from "../space/agents/cards.ts";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type AgentGroup, conversationTabs, groupAgents, groupKeyOf, groupOf, preferredMachine, rememberMachine } from "./agent-groups.ts";
@@ -52,14 +54,15 @@ const toolHint = (input: Record<string, unknown> = {}) => {
 
 const Ava = ({ icon, fallback = "✨" }: { icon?: string; fallback?: string }) => (isImgIcon(icon) ? <img src={icon} alt="" /> : <>{icon || fallback}</>);
 
-type Msg = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean; pending?: string[]; historic?: boolean; background?: boolean };
+type Msg = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; denied: string[]; steps?: ChatStep[]; note?: string; status?: string | null; live?: boolean; pending?: string[]; historic?: boolean; background?: boolean; cards?: ShownCard[] };
 type Conv = { agent: AgentInfo | null; msgs: Msg[]; sid: string | null; busy: boolean; queued: number; jobs?: ChatJob[] };
 /** A message of a restored transcript; `steps` keeps the assistant's text and tool calls in order. */
-type HistoryMessage = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; steps?: HistoryStep[] };
+type HistoryMessage = { role: "user"; text: string; images?: ChatImage[] } | { role: "ai"; text: string; tools: Tool[]; steps?: HistoryStep[]; cards?: Card[] };
 const fromHistory = (m: HistoryMessage): Msg => {
   if (m.role === "user") return m;
-  const { steps, ...rest } = m;
-  return { ...rest, denied: [], historic: true, ...(steps?.length ? { steps: historySteps(steps) } : {}) };
+  const { steps, cards, ...rest } = m;
+  // A restored card has no token: it shows its items' state, read-only (docs/chat-cards.md).
+  return { ...rest, denied: [], historic: true, ...(steps?.length ? { steps: historySteps(steps) } : {}), ...(cards?.length ? { cards: cards.map((card, index) => ({ card, index })) } : {}) };
 };
 const EMPTY_CONV: Conv = { agent: null, msgs: [], sid: null, busy: false, queued: 0 };
 /** The turn a conversation is following: its run (once the server named it) and the stream's abort. */
@@ -278,7 +281,11 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, newT
       steps.apply(ev);
       const snapshot = steps.snapshot();
       upd((x) => ({ ...x, steps: snapshot }));
-      if (ev.type === "steer") {
+      if (ev.type === "cards" && Array.isArray(ev.cards)) {
+        // What a tool did, checked by ai-space (docs/chat-cards.md); the token lets this reply's cards act.
+        const shown: ShownCard[] = ev.cards.map((card: Card, index: number) => ({ card, index, ...(typeof ev.token === "string" ? { token: ev.token } : {}) }));
+        upd((x) => ({ ...x, cards: [...(x.cards ?? []), ...shown] }));
+      } else if (ev.type === "steer") {
         // The agent read a message added to the turn: it is a step now, no longer waiting.
         upd((x) => {
           const pending = x.pending ?? [];
@@ -872,6 +879,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, newT
                   {m.tools.length > 0 && <div className="chat-tools">{m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}</div>}
                   <div className={`md ${m.live ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(m.text) }} />
                 </>}
+                {m.cards?.length ? <ChatCards cards={m.cards} apiBase={agent.peer ? `/api/peers/${encodeURIComponent(agent.peer)}` : "/api"} agent={`${agent.app}/${agent.name}`} actionable={!conv.msgs.slice(i + 1).some((x) => x.role === "user")} /> : null}
                 {m.pending?.map((p, j) => <div key={`pending:${j}`} className="chat-steer pending"><b>↳ {t("chat.steerYou")}</b> {linkNodes(p)} <small>· {t("chat.steerPending")}</small></div>)}
                 {m.note && <div className="msg-note" role="status">{m.note}</div>}
               </> : <><div className="chat-images">{m.images?.map((image, i) => <a key={i} href={imageURL(image)} download={image.name}><img src={imageURL(image)} alt={image.name} /></a>)}</div>{linkNodes(m.text)}</>}
