@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { join, relative, isAbsolute } from "node:path";
+import { join, relative, isAbsolute, sep } from "node:path";
 
 /** Resolve skills only inside the selected app, and load their canonical contents for this turn. */
 export async function skillContext(appDir: string, names: string[]): Promise<string> {
@@ -11,7 +11,7 @@ export async function skillContext(appDir: string, names: string[]): Promise<str
     if (!/^[a-z][a-z0-9-]{0,63}$/.test(name)) throw new Error("Invalid skill name");
     const path = await realpath(join(root, "skills", name, "SKILL.md")).catch(() => { throw new Error(`Missing skill: ${name}`); });
     const rel = relative(root, path);
-    if (rel === ".." || rel.startsWith("../") || isAbsolute(rel)) throw new Error(`Skill is outside the app: ${name}`);
+    if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error(`Skill is outside the app: ${name}`);
     const file = Bun.file(path);
     bytes += file.size;
     if (file.size > 65_536 || bytes > 131_072) throw new Error("Skill content exceeds the context limit");

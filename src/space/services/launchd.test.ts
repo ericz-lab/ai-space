@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { renderLogsCommand } from "../logs/logs.ts";
 import type { Manifest } from "../scheduler/manifest.ts";
 import { Launchctl, parseLstart, parsePrint } from "./launchd.ts";
 import type { RunResult } from "./manager.ts";
 import { LAUNCH_SCRIPT, PLIST_HEAD, renderPlist, renderShellEnv } from "./plist.ts";
 import { Supervisor } from "./supervisor.ts";
+import { WINDOWS } from "../testing.ts";
 
 const UID = 501;
 
@@ -45,7 +46,8 @@ describe("plist", () => {
     expect(p.exitCode).toBe(0);
   });
 
-  test("the environment file is sourced by sh exactly as written, nothing expanded", async () => {
+  // The wrapper and the environment file are for the /bin/sh launchd starts on a Mac; Windows has neither.
+  test.skipIf(WINDOWS)("the environment file is sourced by sh exactly as written, nothing expanded", async () => {
     const vars = { A: `it's $HOME "q" \\ \`x\``, MULTI: "a\nb", EMPTY: "", "BAD-NAME": "x" };
     const env = renderShellEnv(vars);
     expect(env.skipped).toEqual(["BAD-NAME"]);
@@ -55,7 +57,7 @@ describe("plist", () => {
     expect(p.stdout.toString()).toBe(`${vars.A}|a\nb|`);
   });
 
-  test("the wrapper: the environment reaches the command, its exit status is the job's", async () => {
+  test.skipIf(WINDOWS)("the wrapper: the environment reaches the command, its exit status is the job's", async () => {
     const dir = await mkdtemp(join(tmpdir(), "space-wrap-"));
     await Bun.write(join(dir, "e.env"), renderShellEnv({ GREETING: "hello there" }).text);
     const p = Bun.spawnSync(["/bin/sh", "-c", LAUNCH_SCRIPT, "space-demo", join(dir, "e.env"), `echo "$GREETING" && exit 3`]);
@@ -64,7 +66,7 @@ describe("plist", () => {
     expect(Bun.spawnSync(["/bin/sh", "-c", LAUNCH_SCRIPT, "space-demo", join(dir, "missing.env"), "true"]).exitCode).toBe(78);
   });
 
-  test("the wrapper passes SIGTERM to the whole process group, as launchd signals only the shell", async () => {
+  test.skipIf(WINDOWS)("the wrapper passes SIGTERM to the whole process group, as launchd signals only the shell", async () => {
     const dir = await mkdtemp(join(tmpdir(), "space-term-"));
     await Bun.write(join(dir, "e.env"), "");
     await Bun.write(join(dir, "app.sh"), `trap 'echo app got TERM; exit 0' TERM\necho ready\nwhile :; do sleep 0.1; done\n`);
@@ -121,11 +123,11 @@ function fakeLaunchd() {
       return ok(`${target} = {\n\tstate = ${j.state}\n\truns = ${j.runs}\n${j.pid ? `\tpid = ${j.pid}\n` : ""}\tlast exit code = ${j.exit}\n}\n`);
     }
     if (verb === "print-disabled") return ok(`disabled services = {\n${[...disabled].filter((t) => t.startsWith(`${target}/`)).map((t) => `\t\t"${t.slice(target.length + 1)}" => disabled\n`).join("")}\t}\n`);
-    calls.push(`${sudo ? "sudo " : ""}${verb} ${target}${path ? ` ${path.split("/").at(-1)}` : ""}`);
+    calls.push(`${sudo ? "sudo " : ""}${verb} ${target}${path ? ` ${basename(path)}` : ""}`);
     if (verb === "enable") disabled.delete(target);
     if (verb === "disable") disabled.add(target);
     if (verb === "bootstrap") {
-      const label = path!.split("/").at(-1)!.replace(/\.plist$/, "");
+      const label = basename(path!).replace(/\.plist$/, "");
       const key = `${target}/${label}`;
       if (disabled.has(key) || jobs.get(key)?.loaded || !(await Bun.file(path!).exists())) return { code: 5, stdout: "", stderr: "Bootstrap failed: 5: Input/output error" };
       jobs.set(key, crashing.has(label) ? { loaded: true, state: "spawn scheduled", pid: 0, runs: 2, exit: "1" } : { loaded: true, state: "running", pid: nextPid++, runs: 1, exit: "(never exited)" });
@@ -170,7 +172,8 @@ describe("supervisor on launchd", () => {
     const env = await Bun.file(t.envPath).text();
     expect(env).toContain("export SPACE_APP_TOKEN='sat_x'");
     expect(env).toContain("export NODE_ENV='production'");
-    expect((await stat(t.envPath)).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX file modes.
+    if (!WINDOWS) expect((await stat(t.envPath)).mode & 0o777).toBe(0o600);
     expect((await stat(join(t.root, "logs", "demo"))).isDirectory()).toBe(true);
     expect((await t.sup.status("demo")).state).toMatchObject({ activeState: "active", restarts: 0, since: new Date(2026, 9, 7, 0, 53, 12).toISOString() });
   });
@@ -271,7 +274,7 @@ describe("supervisor on launchd", () => {
     t.ld.jobs.set(`gui/${UID}/demo`, { loaded: true, state: "running", pid: 7, runs: 1, exit: "(never exited)" });
     t.ld.crashing.add("space.demo");
     const r = await t.sup.handover(mf("demo", { service: { command: "x", port: 8710, health: "/healthz" } }), "space");
-    expect(r).toMatchObject({ ok: false, rolledBack: true, error: expect.stringMatching(/space.demo keeps exiting; see .*logs\/demo\/service.log/) });
+    expect(r).toMatchObject({ ok: false, rolledBack: true, error: expect.stringMatching(WINDOWS ? /space.demo keeps exiting; see .*logs\\demo\\service.log/ : /space.demo keeps exiting; see .*logs\/demo\/service.log/) });
     expect(await Bun.file(t.plist).exists()).toBe(false);
     expect(t.ld.jobs.get(`gui/${UID}/demo`)).toMatchObject({ loaded: true, state: "running" });
     expect(t.ld.disabled.has(`gui/${UID}/demo`)).toBe(false);
@@ -325,7 +328,7 @@ describe("Launchctl", () => {
     const m = new Launchctl({ uid: UID, unitDir: "/U/LaunchAgents", logDir: "/ws/logs" });
     expect(m.command("disable", "demo", "system")).toBe("sudo launchctl bootout system/demo && sudo launchctl disable system/demo");
     expect(m.command("restart", "demo")).toBe(`launchctl kickstart -k gui/${UID}/demo`);
-    expect(m.command("start", "demo", "user")).toBe(`launchctl bootstrap gui/${UID} /U/LaunchAgents/demo.plist`);
+    expect(m.command("start", "demo", "user")).toBe(`launchctl bootstrap gui/${UID} ${join("/U/LaunchAgents", "demo.plist")}`);
   });
 
   test("logs: the app's file through tail; rotation copies and truncates", async () => {

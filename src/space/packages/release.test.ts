@@ -1,13 +1,14 @@
 import { afterAll, expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import { inspectPackage, readPackageFile } from "./pack.ts";
 import { buildEnv, buildRelease, readSourceManifest, ReleaseError } from "./release.ts";
+import { removeTemp } from "../testing.ts";
 
 const roots: string[] = [];
-afterAll(async () => { for (const r of roots) await rm(r, { recursive: true, force: true }); });
+afterAll(async () => { for (const r of roots) await removeTemp(r); });
 async function scratch(): Promise<string> {
   const r = await mkdtemp(join(tmpdir(), "space-release-"));
   roots.push(r);
@@ -50,7 +51,7 @@ test("a build runs in a scratch copy and makes a bundle and a source package", a
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   const r = await buildRelease({ dir, outDir: out, variants: ["bundle", "source"], signingKey: privateKey.export({ type: "pkcs8", format: "pem" }).toString() });
   expect(r).toMatchObject({ app: "shelf", version: "1.2.3" });
-  expect(r.packages.map((p) => [p.variant, p.path.split("/").pop(), p.sourceIncluded])).toEqual([["bundle", "shelf-1.2.3.spaceapp", false], ["source", "shelf-1.2.3-source.spaceapp", true]]);
+  expect(r.packages.map((p) => [p.variant, basename(p.path), p.sourceIncluded])).toEqual([["bundle", "shelf-1.2.3.spaceapp", false], ["source", "shelf-1.2.3-source.spaceapp", true]]);
   expect(r.log).toContain("$ mkdir -p dist");
   // The checkout is untouched: nothing was built in it.
   expect((await readdir(dir)).includes("dist")).toBe(false);
@@ -90,10 +91,10 @@ test("without a build section the checkout is the package, source included", asy
   await Bun.write(join(dir, "server.ts"), "");
   await Bun.write(join(dir, "public", "index.html"), "<p>hi</p>");
   const r = await buildRelease({ dir, outDir: join(await scratch(), "out"), variants: ["bundle", "source"] });
-  expect(r.packages.map((p) => [p.variant, p.path.split("/").pop(), p.sourceIncluded])).toEqual([["source", "notes-1.2.3.spaceapp", true]]);
+  expect(r.packages.map((p) => [p.variant, basename(p.path), p.sourceIncluded])).toEqual([["source", "notes-1.2.3.spaceapp", true]]);
 });
 
 test("a build script sees none of the Space's credentials", () => {
   const env = buildEnv({ PATH: "/usr/bin", HOME: "/home/x", SPACE_API_TOKEN: "t", AWS_SECRET_ACCESS_KEY: "s", SPACE_APP_TOKEN: "a" }, "/opt/bun/bin/bun");
-  expect(env).toEqual({ PATH: "/opt/bun/bin:/usr/bin", HOME: "/home/x", CI: "1" });
+  expect(env).toEqual({ PATH: ["/opt/bun/bin", "/usr/bin"].join(delimiter), HOME: "/home/x", CI: "1" });
 });

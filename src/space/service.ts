@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { lstat, mkdir, readdir, readlink, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, normalize, resolve, sep } from "node:path";
 import { SPACE_ROOT } from "./config.ts";
 import { LOCAL_LABEL, LOCAL_UNIT, localPaths, readOwnership, readRelease } from "./local.ts";
 import { Launchctl } from "./services/launchd.ts";
@@ -149,7 +149,8 @@ export type UnitInput = { root: string; bun: string; workspace: string; home: st
  */
 export function renderServerUnit(template: string, u: UnitInput): string {
   const binDir = dirname(u.bun);
-  const pathFix = binDir !== join(u.home, ".bun", "bin");
+  // Normalized: a POSIX-spelled Bun path on Windows differs from `join`'s only in the separator.
+  const pathFix = normalize(binDir) !== join(u.home, ".bun", "bin");
   return template
     .split("\n")
     .map((line) => {
@@ -519,7 +520,7 @@ export async function planUninstall(d: ServiceDeps, opts: { workspace?: boolean 
     const to = await readlink(link).catch(() => undefined);
     if (to === undefined) continue;
     const real = await realpath(link).catch(() => resolve(dirname(link), to));
-    if (real === program || real.startsWith(`${program}/`)) steps.push({ what: "link", target: link, detail: `remove the ${name} command (${link})` });
+    if (real === program || real.startsWith(program + sep)) steps.push({ what: "link", target: link, detail: `remove the ${name} command (${link})` });
   }
   if (prefix) steps.push({ what: "program", target: prefix, detail: `delete the program (${prefix})` });
   else kept.push(`${d.root}: a checkout, not a release; delete it yourself`);
@@ -533,7 +534,7 @@ export async function runUninstall(d: ServiceDeps, plan: UninstallPlan): Promise
   for (const s of plan.steps) {
     d.log(s.detail);
     if (s.what === "app-service") {
-      const unit = h.manager.unitName(h.manager.appOfFile(s.target.split("/").at(-1)!)!);
+      const unit = h.manager.unitName(h.manager.appOfFile(basename(s.target))!);
       await h.manager.disableNow(unit).catch((e: Error) => d.log(`  ${e.message}`));
       await rm(s.target, { force: true });
       await h.manager.resetFailed(unit).catch(() => {});

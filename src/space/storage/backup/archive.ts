@@ -17,14 +17,20 @@ export function requireArchiveTools(): void {
   if (missing.length) throw new Error(`backup needs ${missing.join(" and ")} on PATH (apt-get install ${missing.join(" ")})`);
 }
 
+/**
+ * A directory as `tar -C` takes it. GNU tar reads backslash escapes in a name given on its command
+ * line, so `C:\Temp\backups` loses its `\b`; with forward slashes Windows opens the same directory.
+ */
+const tarDir = (dir: string) => (process.platform === "win32" ? dir.replaceAll("\\", "/") : dir);
+
 export async function createArchive(stageDir: string, outPath: string): Promise<{ bytes: number; sha256: string }> {
-  await pipe(["tar", "-cf", "-", "-C", stageDir, "."], ["zstd", "-q", "-T0", "-o", outPath]);
+  await pipe(["tar", "-cf", "-", "-C", tarDir(stageDir), "."], ["zstd", "-q", "-T0", "-o", outPath]);
   return hashFile(outPath);
 }
 
 export async function extractArchive(archivePath: string, toDir: string): Promise<void> {
   await mkdir(toDir, { recursive: true });
-  await pipe(["zstd", "-dc", archivePath], ["tar", "-xf", "-", "-C", toDir]);
+  await pipe(["zstd", "-dc", archivePath], ["tar", "-xf", "-", "-C", tarDir(toDir)]);
 }
 
 /** File paths inside the archive, relative, directories left out. */

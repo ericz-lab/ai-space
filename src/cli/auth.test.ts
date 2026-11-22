@@ -1,18 +1,19 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthService } from "../space/auth/service.ts";
 import { AuthStore } from "../space/auth/store.ts";
 import { runCli } from "./testing.ts";
+import { removeTemp } from "../space/testing.ts";
 
 let home: string;
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "space-cli-auth-"));
 });
 afterEach(async () => {
-  await rm(home, { recursive: true, force: true });
+  await removeTemp(home);
 });
 
 const env = () => ({ SPACE_HOME: home, SPACE_AUTH: "builtin" });

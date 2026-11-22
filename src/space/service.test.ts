@@ -23,6 +23,7 @@ import {
 } from "./service.ts";
 import { PLIST_HEAD, plistString } from "./services/plist.ts";
 import type { RunResult } from "./services/manager.ts";
+import { CAN_SYMLINK, WINDOWS } from "./testing.ts";
 
 /**
  * ai-space's own background service: what is written for systemd and for launchd, and the
@@ -105,10 +106,10 @@ describe("the LaunchAgent", () => {
     const text = renderServerPlist(u);
     expect(text.startsWith(SERVER_PLIST_HEAD)).toBe(true);
     expect(text).toContain(`<key>Label</key>${plistString(SERVER_LABEL)}`);
-    expect(text).toContain(`    ${plistString(u.bun)}\n    ${plistString(`${u.root}/src/index.ts`)}\n  </array>`);
+    expect(text).toContain(`    ${plistString(u.bun)}\n    ${plistString(join(u.root, "src", "index.ts"))}\n  </array>`);
     expect(text).toContain("<key>SPACE_HOME</key><string>/Users/u/My Space &amp; co</string>");
-    expect(text).toContain(`<key>PATH</key><string>${u.root}/runtime:/Users/u/.bun/bin:/Users/u/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>`);
-    expect(text).toContain("<key>StandardOutPath</key><string>/Users/u/My Space &amp; co/logs/space.log</string>");
+    expect(text).toContain(`<key>PATH</key><string>${u.root}/runtime:${join("/Users/u", ".bun", "bin")}:${join("/Users/u", ".local", "bin")}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>`);
+    expect(text).toContain(`<key>StandardOutPath</key><string>${join("/Users/u/My Space &amp; co", "logs", "space.log")}</string>`);
     expect(text).toContain("<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>");
     // Not one of the apps' LaunchAgents: the supervisor's sweep never takes it for its own.
     expect(text.startsWith(PLIST_HEAD)).toBe(false);
@@ -139,7 +140,7 @@ describe("install", () => {
     const text = await Bun.file(join(units, SERVER_UNIT)).text();
     expect(text).toContain(`WorkingDirectory=${code}\n`);
     expect(text).toContain(`Environment=SPACE_HOME=${ws}\n`);
-    expect(text).toContain(`ExecStart=${home}/.bun/bin/bun src/index.ts\n`);
+    expect(text).toContain(`ExecStart=${join(home, ".bun", "bin", "bun")} src/index.ts\n`);
     expect(ran.filter((c) => !c.includes(" show "))).toEqual([
       "systemctl --user is-system-running",
       "loginctl enable-linger tester",
@@ -239,14 +240,14 @@ describe("uninstall", () => {
     await mkdir(bin, { recursive: true });
     await symlink(join(prefix, "current", "bin", "space"), join(bin, "space"));
     await symlink(join(prefix, "current", "runtime", "bun"), join(bin, "bun"));
-    await symlink("/usr/bin/true", join(bin, "other"));
+    await symlink(WINDOWS ? process.execPath : "/usr/bin/true", join(bin, "other")); // someone else's link, to a program that exists on this host
     const d: ServiceDeps = { ...t.d, root: join(prefix, "current"), bun: join(prefix, "current", "runtime", "bun") };
     await mkdir(join(t.ws, "run", "env"), { recursive: true });
     await Bun.write(join(t.ws, ".env"), "SPACE_PORT=8700\n");
     return { ...t, d, prefix, bin };
   }
 
-  test("plans the apps' units of this workspace, the service, the links and the program; keeps the workspace", async () => {
+  test.skipIf(!CAN_SYMLINK)("plans the apps' units of this workspace, the service, the links and the program; keeps the workspace", async () => {
     const t = await installed("linux");
     await serviceInstall(t.d);
     // One app unit this workspace's supervisor wrote, one of another workspace, one of an operator.

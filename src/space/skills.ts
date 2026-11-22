@@ -209,7 +209,7 @@ export async function resolveAgentSkills(refs: string[], ctx: AgentSkillContext)
     if (ref.startsWith(".") || ref.startsWith("/") || colon < 0) {
       const root = resolve(ctx.appDir);
       const dir = resolve(root, ref);
-      if (dir !== root && !dir.startsWith(root + "/")) { missing.push(ref); continue; }
+      if (dir !== root && !dir.startsWith(root + sep)) { missing.push(ref); continue; }
       if (await Bun.file(join(dir, SKILL_FILE)).exists()) await add(dir, ctx.app);
       else for (const d of await listSkills(dir)) await add(d, ctx.app);
     } else {

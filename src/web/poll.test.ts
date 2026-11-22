@@ -11,7 +11,7 @@ test("polls while visible, pauses while hidden and refreshes on becoming visible
   const doc = page();
   let n = 0;
   const stop = pollWhileVisible(() => n++, 10, doc as unknown as Document);
-  await Bun.sleep(35);
+  await Bun.sleep(80); // room for two periods where timers are coarse (about 16 ms on Windows)
   const visible = n;
   expect(visible).toBeGreaterThanOrEqual(2);
   flip(doc, true);

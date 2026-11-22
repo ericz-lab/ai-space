@@ -71,7 +71,7 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
   const server = Bun.serve({
     port: 0, hostname: "127.0.0.1",
     routes: createAgentRoutes({
-      ws: f.ws, registry, layout: new LayoutStore(db), sessions: new SessionStore(db), runs: new RunRegistry(db), runtimes: claudeOnly(["bun", cli]), sharedSkills: f.shared,
+      ws: f.ws, registry, layout: new LayoutStore(db), sessions: new SessionStore(db), runs: new RunRegistry(db), runtimes: claudeOnly([process.execPath, cli]), sharedSkills: f.shared,
       callerApp: async (req) => {
         const t = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
         return t ? tokens[t] ?? "" : null;
@@ -112,7 +112,7 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
   const server = Bun.serve({
     port: 0, hostname: "127.0.0.1",
     routes: createAgentRoutes({
-      ws: f.ws, registry, layout: new LayoutStore(db), sessions: new SessionStore(db), runs: new RunRegistry(db), runtimes: claudeOnly(["bun", cli]), sharedSkills: f.shared,
+      ws: f.ws, registry, layout: new LayoutStore(db), sessions: new SessionStore(db), runs: new RunRegistry(db), runtimes: claudeOnly([process.execPath, cli]), sharedSkills: f.shared,
       agentCallers: ["hive"],
       callerApp: async (req) => {
         const t = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";

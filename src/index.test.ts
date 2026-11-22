@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { loadConfig, parseNotifyArgs } from "./index.ts";
 import { workspacePaths } from "./space/workspace.ts";
 
@@ -9,7 +10,7 @@ test("loadConfig applies defaults relative to the workspace", () => {
   const c = loadConfig(ws, {});
   expect(c.host).toBe("127.0.0.1");
   expect(c.port).toBe(8700);
-  expect(c.dbPath).toBe(join("/ws", "data", "space.db"));
+  expect(c.dbPath).toBe(resolve("/ws", "data", "space.db"));
   expect(c.extraAppDirs).toEqual([]);
   expect(c.apiToken).toBe("");
   expect(c.maxConcurrency).toBe(2);
@@ -41,8 +42,8 @@ test("loadConfig reads the environment and expands ~ in extra app dirs", () => {
   });
   expect(c.host).toBe("0.0.0.0");
   expect(c.port).toBe(9000);
-  expect(c.dbPath).toBe("/tmp/x.db");
-  expect(c.extraAppDirs).toEqual([resolve(`${process.env.HOME}/apps/a`), "/abs/b"]);
+  expect(c.dbPath).toBe(resolve("/tmp/x.db")); // resolve: Windows puts the drive in front
+  expect(c.extraAppDirs).toEqual([resolve(`${process.env.HOME ?? homedir()}/apps/a`), resolve("/abs/b")]);
   expect(c.apiToken).toBe("tok");
   expect(c.maxConcurrency).toBe(4);
 });

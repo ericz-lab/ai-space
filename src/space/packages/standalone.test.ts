@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, readdir, realpath, rm, stat } from "node:fs/promises";
+import { mkdtemp, readdir, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Launchctl } from "../services/launchd.ts";
@@ -8,6 +8,11 @@ import { Systemctl } from "../services/systemd.ts";
 import { parsePackageManifest } from "./manifest.ts";
 import type { RuntimeApp } from "./runtime.ts";
 import { StandaloneServices } from "./standalone.ts";
+import { WINDOWS, removeTemp } from "../testing.ts";
+
+// systemd units and LaunchAgents exist only on Linux and macOS hosts; the paths they hold are built with
+// the host's path.join, so on Windows they could not hold the POSIX paths these tests expect.
+const serviceTest = test.skipIf(WINDOWS);
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const f of cleanups.splice(0).reverse()) await f(); });
@@ -19,12 +24,12 @@ const app = (dir: string, version = "1.0.0"): RuntimeApp => ({
 });
 async function scratch() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "standalone-")));
-  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  cleanups.push(() => removeTemp(root));
   return { root, units: join(root, "units"), envDir: join(root, "ws", "run", "env"), logDir: join(root, "ws", "logs") };
 }
 const ok = (stdout = ""): RunResult => ({ code: 0, stdout, stderr: "" });
 
-test("systemd: the unit is named after the app and the Space, written once, and an unchanged running one is left alone", async () => {
+serviceTest("systemd: the unit is named after the app and the Space, written once, and an unchanged running one is left alone", async () => {
   const d = await scratch();
   const calls: string[] = [];
   let active = false;
@@ -83,7 +88,7 @@ test("systemd: the unit is named after the app and the Space, written once, and 
   expect(calls).toEqual([]);
 });
 
-test("launchd: the LaunchAgent carries the Space's identity in its label and logs to the app's package.log", async () => {
+serviceTest("launchd: the LaunchAgent carries the Space's identity in its label and logs to the app's package.log", async () => {
   const d = await scratch();
   const calls: string[] = [];
   let loaded = false;

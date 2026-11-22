@@ -6,10 +6,14 @@ import { PASSPHRASE_HEADER, createTerminalRoutes, sameOrigin, terminalWebSocket 
 import { type TerminalConfig, loadTerminalConfig, parseIdle, parseShell, sessionEnv } from "./config.ts";
 import { PASSPHRASE_TRIES, TerminalService } from "./service.ts";
 import { TerminalStore } from "./store.ts";
+import { hostShell, windowsShell } from "../host-tools.ts";
+import { WINDOWS } from "../testing.ts";
 
 // Real shells in real pseudo-terminals, through the routes a browser uses, then through a hub.
 
-const CONFIG: TerminalConfig = { enabled: true, shell: ["/bin/sh"], passphrase: "", idleMs: 0, maxSessions: 2 };
+// Windows has no /bin/sh: the POSIX shell there is Git for Windows', run under ConPTY.
+const SHELL = WINDOWS ? hostShell("sh") : "/bin/sh";
+const CONFIG: TerminalConfig = { enabled: true, shell: [SHELL], passphrase: "", idleMs: 0, maxSessions: 2 };
 const quiet = () => {};
 
 type Client = {
@@ -62,7 +66,8 @@ describe("config", () => {
   test("off by default; every value has a safe default", () => {
     const { config, warnings } = loadTerminalConfig({ SHELL: "/bin/zsh" });
     expect(config.enabled).toBe(false);
-    expect(config.shell).toEqual(["/bin/zsh", "-l"]);
+    // A Windows default is PowerShell, whatever SHELL says.
+    expect(config.shell).toEqual(WINDOWS ? windowsShell({ SHELL: "/bin/zsh" }) : ["/bin/zsh", "-l"]);
     expect(config.idleMs).toBe(30 * 60_000);
     expect(config.maxSessions).toBe(4);
     expect(config.passphrase).toBe("");
@@ -82,7 +87,8 @@ describe("config", () => {
     expect(parseIdle("5s")).toBe(10_000); // floor
     expect(parseIdle("45m")).toBe(2_700_000);
     expect(() => parseIdle("soon")).toThrow(/not a duration/);
-    expect(parseShell("", {})[0]).toMatch(/\/(bash|sh)$/);
+    if (WINDOWS) expect(parseShell("", {})).toEqual(windowsShell({}));
+    else expect(parseShell("", {})[0]).toMatch(/\/(bash|sh)$/);
   });
 
   test("session environment drops credentials and sets the terminal type", () => {
@@ -125,8 +131,8 @@ describe("local sessions", () => {
 
   test("status names the machine and the backend", async () => {
     const s = await j(await fetch(`${base}/api/terminal`));
-    expect(s).toMatchObject({ ok: true, enabled: true, shell: "/bin/sh", passphrase: false, idleMs: 60_000, maxSessions: 2, active: 0, machines: [{ name: "box", enabled: true, health: "ok" }], sessions: [], recent: [] });
-    expect(["bun", "python"]).toContain(String(s.backend));
+    expect(s).toMatchObject({ ok: true, enabled: true, shell: SHELL, passphrase: false, idleMs: 60_000, maxSessions: 2, active: 0, machines: [{ name: "box", enabled: true, health: "ok" }], sessions: [], recent: [] });
+    expect(WINDOWS ? ["conpty"] : ["bun", "python"]).toContain(String(s.backend));
   });
 
   test("a cross-origin page cannot open or end a session", async () => {
@@ -143,7 +149,7 @@ describe("local sessions", () => {
 
     const c = connect(wsUrl(base, "/api/terminal/ws", t.ticket!));
     const ready = await c.waitControl("ready");
-    expect(ready).toMatchObject({ id: t.id, shell: "/bin/sh", idleMs: 60_000 });
+    expect(ready).toMatchObject({ id: t.id, shell: SHELL, idleMs: 60_000 });
     expect(service.list()).toMatchObject([{ id: t.id, state: "open" }]);
 
     c.send("stty size; echo marco-$((20+22))\n");

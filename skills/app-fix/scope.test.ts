@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CAN_SYMLINK, removeTemp } from "../../src/space/testing.ts";
 import { checkScope, forbiddenPath } from "./scope.ts";
 
 let ws = "";
@@ -29,7 +30,7 @@ async function app(name: string): Promise<string> {
 beforeAll(async () => {
   ws = await realpath(await mkdtemp(join(tmpdir(), "space-scope-")));
 });
-afterAll(() => rm(ws, { recursive: true, force: true }));
+afterAll(() => removeTemp(ws));
 
 describe("forbiddenPath", () => {
   test("secret, data and dependency files", () => {
@@ -54,12 +55,13 @@ describe("checkScope", () => {
     await writeFile(join(dir, ".env"), "X=1\n");
     await mkdir(join(dir, "data"));
     await writeFile(join(dir, "data", "todo.db"), "x");
-    await symlink(join(ws, "secrets.txt"), join(dir, "link"));
+    // Windows without Developer Mode refuses to make a link, so there is none to find there.
+    if (CAN_SYMLINK) await symlink(join(ws, "secrets.txt"), join(dir, "link"));
     await writeFile(join(dir, "config.ts"), `export const key = "ghp_${"a".repeat(30)}";\n`);
     const r = await checkScope(dir, ws);
     expect(r.problems.join("\n")).toContain(".env: secret, data or dependency files");
     expect(r.problems.join("\n")).toContain("data/todo.db: secret");
-    expect(r.problems.join("\n")).toContain("link: a link that leaves the repository");
+    if (CAN_SYMLINK) expect(r.problems.join("\n")).toContain("link: a link that leaves the repository");
     expect(r.problems.join("\n")).toContain("an added line looks like a credential");
   });
 

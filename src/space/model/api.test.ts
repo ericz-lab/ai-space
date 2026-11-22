@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeOnly, RuntimeRegistry } from "../runtimes/registry.ts";
@@ -9,6 +9,7 @@ import { createModelRoutes } from "./api.ts";
 import { ModelService } from "./service.ts";
 import { ModelStore } from "./store.ts";
 import { DEFAULT_SYSTEM } from "./types.ts";
+import { removeTemp } from "../testing.ts";
 
 let dir: string;
 let store: ModelStore;
@@ -34,7 +35,7 @@ afterEach(async () => {
   server.stop(true);
   store.close();
   delete process.env.FAKE_MODEL_MODE;
-  await rm(dir, { recursive: true, force: true });
+  await removeTemp(dir);
 });
 
 const post = (path: string, body: unknown, token?: string) =>
@@ -123,7 +124,7 @@ describe("POST /api/model/run", () => {
       codexServer.stop(true);
       if (saved === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = saved;
-      await rm(home, { recursive: true, force: true });
+      await removeTemp(home);
     }
   });
 

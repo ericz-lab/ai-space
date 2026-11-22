@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeTemp, WINDOWS } from "./space/testing.ts";
 
 // The whole boot, as the service unit runs it: `bun src/index.ts` on an empty workspace, then a
 // few requests that show the route table is wired with its guards, then SIGTERM and a clean exit.
@@ -60,7 +61,7 @@ afterEach(async () => {
   for (const b of started.splice(0)) {
     if (b.proc.exitCode === null) b.proc.kill("SIGKILL");
     await b.proc.exited;
-    await rm(b.home, { recursive: true, force: true });
+    await removeTemp(b.home);
   }
 });
 
@@ -80,9 +81,13 @@ describe("boot, external sign-in (the default)", () => {
     const cross = await fetch(`${b.base}/api/auth/logout`, { method: "POST", headers: { origin: "http://elsewhere.test" } });
     expect(cross.status).toBe(403);
 
-    expect(await stop(b)).toBe(0);
-    expect(b.output()).toContain("[space] shutting down");
-    expect(b.output()).toMatch(/\[space\] drained in \d+ms/);
+    // Windows has no SIGTERM to handle: the kill ends the process at once, with no drain and no exit code of its own.
+    const code = await stop(b);
+    if (!WINDOWS) {
+      expect(code).toBe(0);
+      expect(b.output()).toContain("[space] shutting down");
+      expect(b.output()).toMatch(/\[space\] drained in \d+ms/);
+    }
   });
 });
 
@@ -90,7 +95,8 @@ describe("boot, built-in sign-in", () => {
   test("writes an operator token, gates owner routes, and keeps public ones open", async () => {
     const b = await boot({ SPACE_AUTH: "builtin" });
     const tokenFile = join(b.home, "ws", "run", "operator-token");
-    expect((await stat(tokenFile)).mode & 0o777).toBe(0o600);
+    // Windows has no permission bits: the file is private through its directory's access list.
+    if (!WINDOWS) expect((await stat(tokenFile)).mode & 0o777).toBe(0o600);
     const token = (await Bun.file(tokenFile).text()).trim();
     expect(token.length).toBeGreaterThanOrEqual(40);
 
@@ -102,6 +108,8 @@ describe("boot, built-in sign-in", () => {
     expect((await fetch(`${b.base}/api/services`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(200);
     expect(b.output()).toContain("no owner yet");
 
-    expect(await stop(b)).toBe(0);
+    // As above: only a POSIX process gets to exit 0 on SIGTERM.
+    const code = await stop(b);
+    if (!WINDOWS) expect(code).toBe(0);
   });
 });

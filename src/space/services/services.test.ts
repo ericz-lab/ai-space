@@ -9,6 +9,7 @@ import { createServiceRoutes } from "./api.ts";
 import { Supervisor } from "./supervisor.ts";
 import { parseTimestamp, type RunResult, Systemctl } from "./systemd.ts";
 import { UNIT_MARKER, execArg, renderEnvFile, renderUnit, serviceEnv, unitName } from "./unit.ts";
+import { WINDOWS } from "../testing.ts";
 
 const mf = (app: string, extra: Partial<Manifest> = {}): Manifest => ({
   app,
@@ -148,7 +149,8 @@ describe("supervisor", () => {
     expect(env).toContain('TOKEN="s3cret"');
     expect(env).toContain('PORT="8710"');
     expect(env).toContain('SPACE_APP_TOKEN="sat_x"');
-    expect((await stat(t.envPath)).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX file modes.
+    if (!WINDOWS) expect((await stat(t.envPath)).mode & 0o777).toBe(0o600);
   });
 
   test("regression: a sync that changes nothing never restarts the app", async () => {

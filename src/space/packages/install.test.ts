@@ -1,21 +1,23 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { guardBrowserWrites } from "../auth.ts";
+import { linkDirectory } from "../links.ts";
 import { workspacePaths } from "../workspace.ts";
 import { createPackageRoutes } from "./api.ts";
 import { PackageInstaller } from "./install.ts";
 import { packApplication, readPackageFile } from "./pack.ts";
 import { PackageStore } from "./store.ts";
+import { removeTemp } from "../testing.ts";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const f of cleanup.splice(0).reverse()) await f(); });
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), "space-install-"));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  cleanup.push(() => removeTemp(root));
   const ws = workspacePaths(join(root, "workspace"));
   await mkdir(ws.home); await mkdir(ws.data);
   const db = new Database(join(ws.data, "space.db"));
@@ -52,7 +54,7 @@ test("never overwrites an existing checkout or symlink", async () => {
   expect(failed.state).toBe("failed");
   expect(await Bun.file(join(s.ws.apps, "demo/owned.txt")).text()).toBe("existing checkout");
   await rm(join(s.ws.apps, "demo"), { recursive: true });
-  await symlink(s.options.dir, join(s.ws.apps, "demo"));
+  await linkDirectory(s.options.dir, join(s.ws.apps, "demo")); // a junction on Windows, as the deployment layout makes it
   expect((await s.installer.install(s.bytes, { allowUnsigned: true })).state).toBe("failed");
   expect(await Bun.file(join(s.options.dir, "space.yaml")).exists()).toBe(true);
 });

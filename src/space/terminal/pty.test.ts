@@ -11,7 +11,8 @@ import { detectPtyBackend, ptyHelper, spawnPty } from "./pty.ts";
 // (A hook's own timeout argument needs a newer Bun than .bun-version.)
 setDefaultTimeout(60_000);
 
-const cc = Bun.which("cc");
+// Not on Windows, whatever compiler is there: forkpty is POSIX, and the pseudoconsole has conpty.test.ts.
+const cc = process.platform === "win32" ? null : Bun.which("cc");
 let dir = "";
 let helper = "";
 

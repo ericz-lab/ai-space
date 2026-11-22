@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtempSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelService } from "../model/service.ts";
@@ -11,6 +11,7 @@ import { fakeModelBin } from "../runtimes/testing.ts";
 import { createChatRoutes } from "./api.ts";
 import { ChatService } from "./service.ts";
 import { ChatStore } from "./store.ts";
+import { removeTemp, removeTempSync } from "../testing.ts";
 
 let dir: string;
 let modelStore: ModelStore;
@@ -42,7 +43,7 @@ afterEach(async () => {
   store.close();
   modelStore.close();
   delete process.env.FAKE_MODEL_MODE;
-  await rm(dir, { recursive: true, force: true });
+  await removeTemp(dir);
 });
 
 const call = (method: string, path: string, body?: unknown, token = "sat_notes") =>
@@ -390,7 +391,7 @@ describe("model choice", () => {
     chat.setModelChoice("notes", there.value);
     expect(chat.effectiveModel("notes")).toMatchObject({ value: "bare:codex/basic", source: "choice", runtime: "codex", machine: "bare", model: there.model });
     expect(chat.effectiveModel("cal")).not.toHaveProperty("machine");
-    rmSync(d, { recursive: true, force: true });
+    removeTempSync(d);
   });
   test("the picker lists runtime/tier options with concrete models; the choice is stored per app and validated", async () => {
     const view = (await (await call("GET", "/api/chat/models")).json()) as any;

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { WINDOWS } from "../space/testing.ts";
 import { runCli } from "./testing.ts";
 
 test("pack and inspect work without a running Space or network calls", async () => {
@@ -83,7 +84,8 @@ test("release builds packages from a checkout without a Space", async () => {
     expect(keys.code).toBe(0);
     const key = JSON.parse(keys.out.join("\n")) as { keyId: string; publicKey: string };
     expect(key.keyId).toMatch(/^[a-f0-9]{64}$/);
-    expect((await Bun.file(join(dir, "signing.pem")).stat()).mode & 0o777).toBe(0o600);
+    // Windows has no permission bits to set or read back.
+    if (!WINDOWS) expect((await Bun.file(join(dir, "signing.pem")).stat()).mode & 0o777).toBe(0o600);
     const r = await runCli(["app", "release", "app", "--output-dir", "out", "--sign-key", "signing.pem", "--json"], undefined, { cwd: dir });
     expect(r.code).toBe(0);
     expect(r.calls).toHaveLength(0);

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { claudeOnly, RuntimeRegistry } from "../runtimes/registry.ts";
 import { fakeModelBin } from "../runtimes/testing.ts";
 import { interpolate, loadAppEnv, runTarget } from "./targets.ts";
+import { WINDOWS } from "../testing.ts";
 
 let server: ReturnType<typeof Bun.serve>;
 let base = "";
@@ -155,7 +156,8 @@ describe("command target", () => {
     const r = await runTarget({ kind: "command", command: 'echo "$GREETING $OTHER" && pwd' }, ctx());
     expect(r.status).toBe("ok");
     expect(r.output).toContain("from dotenv 1");
-    expect(r.output).toContain(appDir);
+    // Git Bash prints its own spelling of the directory (`/tmp/...`) on Windows.
+    expect(r.output).toContain(WINDOWS ? Bun.spawnSync(["cygpath", "-u", appDir]).stdout.toString().trim() : appDir);
   });
 
   test("command strings get ${VAR} interpolation from the scheduler env", async () => {
@@ -227,12 +229,14 @@ printf '{"type":"result","result":"done: %s","total_cost_usd":0.25,"usage":{"inp
 `,
       { mode: 0o755 },
     );
+    // Windows does not start a script by its shebang: there it runs through the shell.
+    const bin = WINDOWS ? ["sh", fake] : [fake];
     // A generous abort: the first run of a newly written script can take a second on macOS.
     try {
-      const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "haiku" }, ctx(4000, [fake]));
+      const r = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md", model: "haiku" }, ctx(4000, bin));
       expect(r).toEqual({ status: "ok", output: "done: hello agent", usage: { inputTokens: 1, cacheWriteTokens: 3, cacheReadTokens: 4, outputTokens: 2 }, costUsd: 0.25, promptChars: 11, backend: "local", runtime: "claude", model: "haiku" });
       process.env.FAKE_AGENT_MODE = "error";
-      const bad = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx(4000, [fake]));
+      const bad = await runTarget({ kind: "agent", runtime: "claude", prompt: "prompt.md" }, ctx(4000, bin));
       expect(bad).toMatchObject({ status: "error", error: "boom" });
     } finally {
       delete process.env.FAKE_AGENT_MODE;

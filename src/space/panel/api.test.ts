@@ -1,8 +1,9 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { linkDirectory } from "../links.ts";
 import { loadManifest } from "../scheduler/manifest.ts";
 import { workspacePaths } from "../workspace.ts";
 import { createPanelRoutes } from "./api.ts";
@@ -273,10 +274,10 @@ describe("panel api", () => {
     await writeFile(join(apps, "leaving", "space.yaml"), "name: leaving\ntitle: Leaving\nurl: https://l.example.com\nservice: { command: bun x.ts, port: 8790 }\n");
     await writeFile(join(apps, "leaving", "keep-me.txt"), "code");
     await registry.set(await loadManifest(join(apps, "leaving")));
-    // A symlinked checkout (the deployment layout): the link goes, the target stays.
+    // A symlinked checkout (the deployment layout; a junction on Windows): the link goes, the target stays.
     await mkdir(join(home, "checkouts", "linked", ".git"), { recursive: true });
     await writeFile(join(home, "checkouts", "linked", "space.yaml"), "name: linked\ntitle: Linked\nurl: https://k.example.com\n");
-    await symlink(join(home, "checkouts", "linked"), join(apps, "linked"));
+    await linkDirectory(join(home, "checkouts", "linked"), join(apps, "linked"));
     await registry.set(await loadManifest(join(apps, "linked")));
     // A service whose stop command fails: nothing changes.
     await mkdir(join(apps, "stubborn", ".git"), { recursive: true });

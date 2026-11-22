@@ -4,11 +4,13 @@
  * just a shell wrapper: where `setsid` exists (Linux) the child starts in its
  * own process group and the group is killed; without it (macOS) the child
  * stays in the service's group, so stopping the service still reaches it, and
- * a kill takes the child and every descendant `ps` shows. After a kill we stop
+ * a kill takes the child and every descendant `ps` shows; on Windows `taskkill /T`
+ * takes the tree. After a kill we stop
  * waiting on the pipes: an orphaned grandchild could otherwise hold stdout open.
  */
 
 import { access, constants, stat } from "node:fs/promises";
+import { win32 } from "node:path";
 
 export type SpawnOptions = {
   cwd?: string;
@@ -64,6 +66,7 @@ export async function spawnCollect(cmd: string[], opts: SpawnOptions = {}): Prom
   let timedOut = false;
   let aborted = false;
   const kill = () => {
+    if (process.platform === "win32") return killWindowsTree(proc.pid);
     // The tree is listed before anything dies: a killed parent's children move to init.
     for (const pid of setsid ? [-proc.pid] : [proc.pid, ...descendants(proc.pid)]) {
       try {
@@ -88,6 +91,28 @@ export async function spawnCollect(cmd: string[], opts: SpawnOptions = {}): Prom
     return { code: null, stdout: partial[0], stderr: partial[1], timedOut, aborted };
   }
   return { code, stdout: await stdout, stderr: await stderr, timedOut: false, aborted: false };
+}
+
+/**
+ * Windows has no process groups, and the `ps` a Git for Windows PATH offers lists its own pids,
+ * not the system's: `taskkill /T` ends the process and every descendant Windows knows of. It runs
+ * before the process itself is killed (it finds the children through their parent) and is not
+ * waited on synchronously: it takes a few hundred milliseconds.
+ */
+function killWindowsTree(pid: number): void {
+  const self = () => {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  };
+  try {
+    const taskkill = win32.join(process.env.SystemRoot?.trim() || String.raw`C:\Windows`, "System32", "taskkill.exe");
+    Bun.spawn([taskkill, "/PID", String(pid), "/T", "/F"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }).exited.then(self, self);
+  } catch {
+    self(); // no taskkill: at least the process itself
+  }
 }
 
 /** Every process below `root`, from one `ps` listing; none when it cannot be read. */

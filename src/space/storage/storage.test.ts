@@ -7,6 +7,7 @@ import { ensureWorkspace, type Workspace } from "../workspace.ts";
 import { createStorageRoutes } from "./api.ts";
 import { type Db, openDatabase, sqliteUrl } from "./db.ts";
 import { type S3Target, StorageService } from "./storage.ts";
+import { WINDOWS } from "../testing.ts";
 
 let home: string;
 let ws: Workspace;
@@ -52,7 +53,8 @@ describe("StorageService.syncApp", () => {
       DATABASE_URL: `sqlite://${join(dir, "main.db")}`,
       DATABASE_URL_CACHE: `sqlite://${join(dir, "cache.db")}`,
     });
-    expect((await stat(storage.envFile("my-app"))).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX file modes.
+    if (!WINDOWS) expect((await stat(storage.envFile("my-app"))).mode & 0o777).toBe(0o600);
     // The files are real SQLite databases an app can open right away.
     const d = new Database(join(dir, "main.db"));
     expect(d.query("PRAGMA schema_version").get()).toBeDefined();

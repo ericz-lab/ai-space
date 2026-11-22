@@ -1,7 +1,10 @@
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { S3Client } from "bun";
 import type { S3Config } from "../types.ts";
+
+const WINDOWS = process.platform === "win32";
 
 /**
  * Where snapshots go. Two backends behind one small interface: a directory
@@ -29,7 +32,11 @@ export interface BackupTarget {
 export function parseTargetUrl(url: string): { kind: "file"; dir: string } | { kind: "s3"; bucket: string; prefix: string } {
   const u = url.trim();
   const file = /^file:\/\/(.+)$/.exec(u);
-  if (file) return { kind: "file", dir: resolve(file[1]!.replace(/^~(?=$|\/)/, process.env.HOME ?? "~")) };
+  if (file) {
+    // On Windows the path of file:///C:/backups/ is C:/backups/, without the slash before the drive.
+    const path = WINDOWS ? file[1]!.replace(/^\/(?=[A-Za-z]:)/, "") : file[1]!;
+    return { kind: "file", dir: resolve(path.replace(/^~(?=$|\/)/, process.env.HOME ?? homedir())) };
+  }
   const s3 = /^s3:\/\/([^/]+)\/?(.*)$/.exec(u);
   if (s3) {
     let prefix = s3[2] ?? "";
@@ -50,11 +57,12 @@ export class FileTarget implements BackupTarget {
   readonly kind = "file" as const;
   readonly url: string;
   constructor(readonly dir: string) {
-    this.url = `file://${dir}/`;
+    // A Windows directory is spelled the way a file URL spells it: file:///C:/backups/.
+    this.url = WINDOWS ? `file:///${dir.replaceAll("\\", "/")}/` : `file://${dir}/`;
   }
   private path(key: string): string {
     const p = resolve(this.dir, key);
-    if (!p.startsWith(`${this.dir}/`)) throw new Error(`key escapes the target: ${key}`);
+    if (!p.startsWith(this.dir + sep)) throw new Error(`key escapes the target: ${key}`);
     return p;
   }
   async put(key: string, localPath: string): Promise<void> {
@@ -91,7 +99,7 @@ export class FileTarget implements BackupTarget {
         const s = await stat(p);
         if (s.isDirectory()) await walk(p);
         else {
-          const key = relative(this.dir, p);
+          const key = relative(this.dir, p).split(sep).join("/"); // keys use / on every host
           if (key.startsWith(prefix)) out.push({ key, size: s.size });
         }
       }

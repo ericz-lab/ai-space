@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BusStore } from "../bus/store.ts";
@@ -17,10 +17,11 @@ import { loadPeers } from "./config.ts";
 import { PeerHub } from "./hub.ts";
 import { checkRename, renameEnvText, renamePeer, renamePeerData, RenameError, type PeerRenamed } from "./rename.ts";
 import { PeerStore } from "./store.ts";
+import { removeTemp } from "../testing.ts";
 
 const dirs: string[] = [];
 afterAll(async () => {
-  for (const d of dirs) await rm(d, { recursive: true, force: true });
+  for (const d of dirs) await removeTemp(d);
 });
 const tempDir = async () => {
   const d = await mkdtemp(join(tmpdir(), "peer-rename-"));

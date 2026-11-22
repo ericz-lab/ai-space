@@ -1,4 +1,4 @@
-import { lstat, mkdir, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, rename, rm, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { Workspace } from "../workspace.ts";
 import { hostShell } from "../host-tools.ts";
@@ -19,7 +19,7 @@ export async function retireAppDir(ws: Workspace, name: string, dir: string, man
   if (!inApps) return { kind: "kept", reason: "outside the workspace apps directory" };
   const st = await lstat(dir);
   if (st.isSymbolicLink()) {
-    await rm(dir);
+    await unlink(dir); // not rm: Bun's fails with EFAULT on a Windows junction
     return { kind: "unlinked" };
   }
   if (manifestOnly) {

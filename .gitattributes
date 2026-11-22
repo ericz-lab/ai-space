@@ -1,0 +1,8 @@
+# Text files are LF in the repository and in every checkout, Windows included: templates,
+# manifests and fixtures are read as they are, and Git for Windows otherwise checks them out
+# with CRLF (core.autocrlf), which changes what a test or a generated file contains.
+* text=auto eol=lf
+
+# Windows batch files keep the line endings they were committed with.
+*.bat -text
+*.cmd -text

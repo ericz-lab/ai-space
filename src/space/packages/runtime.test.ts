@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parsePackageManifest } from "./manifest.ts";
 import { PackageRuntime, rotateLog, type RuntimeApp, type RuntimeSetting, type StandaloneHost } from "./runtime.ts";
+import { CAN_SYMLINK } from "../testing.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const f of cleanups.splice(0).reverse()) await f(); });
@@ -69,7 +70,7 @@ test("failed health checks stop children, release leases and permit a later retr
 test("static resources have no process, refuse unindexed files and links", async () => {
   const dir = await mkdtemp(join(tmpdir(), "space-static-")); cleanups.push(() => rm(dir, { recursive: true, force: true }));
   await Bun.write(join(dir, "web/index.html"), "hello"); await Bun.write(join(dir, "web/private"), "not indexed");
-  await symlink("private", join(dir, "web/link"));
+  if (CAN_SYMLINK) await symlink("private", join(dir, "web/link")); // Windows makes one only in Developer Mode
   const f = fake(); const a = app();
   a.dir = dir;
   a.manifest.launch = { kind: "static", root: "web", index: "index.html" };
@@ -77,7 +78,7 @@ test("static resources have no process, refuse unindexed files and links", async
   await f.runtime.register(a);
   expect(await (await f.runtime.staticResponse("demo", "/")).text()).toBe("hello");
   expect((await f.runtime.staticResponse("demo", "/private")).status).toBe(404);
-  expect((await f.runtime.staticResponse("demo", "/link")).status).toBe(404);
+  if (CAN_SYMLINK) expect((await f.runtime.staticResponse("demo", "/link")).status).toBe(404);
   expect((await f.runtime.staticResponse("demo", "/%2e%2e/space.yaml")).status).toBe(404);
   expect(f.counts().starts).toBe(0);
 });

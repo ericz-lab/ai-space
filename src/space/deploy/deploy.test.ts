@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { cleanEnv, commandEnv, prepareDeploy } from "./deploy.ts";
 
 // Real git in temporary repositories; the manifest's commands run in real shells.
@@ -116,6 +116,6 @@ test("cleanEnv drops the hook's repository variables", () => {
 });
 
 test("commandEnv puts the running Bun's directory first on PATH, once", () => {
-  expect(commandEnv({ PATH: "/usr/bin:/home/u/.bun/bin", GIT_DIR: "." }, "/home/u/.bun/bin/bun")).toEqual({ PATH: "/home/u/.bun/bin:/usr/bin" });
+  expect(commandEnv({ PATH: ["/usr/bin", "/home/u/.bun/bin"].join(delimiter), GIT_DIR: "." }, "/home/u/.bun/bin/bun")).toEqual({ PATH: ["/home/u/.bun/bin", "/usr/bin"].join(delimiter) });
   expect(commandEnv({}, "/opt/bun/bin/bun").PATH).toBe("/opt/bun/bin");
 });

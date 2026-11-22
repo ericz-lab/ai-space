@@ -15,6 +15,7 @@ import { RunRegistry } from "./runs.ts";
 import { SessionStore } from "./sessions.ts";
 import { parseTranscript, transcriptPath } from "./transcript.ts";
 import { claudeProjectDir } from "../runtimes/transcripts.ts";
+import { CAN_SYMLINK } from "../testing.ts";
 
 // A stand-in for the claude CLI: prints the message (on stdin) and its arguments back as stream-json events.
 const FAKE_CLI = `
@@ -51,7 +52,7 @@ beforeAll(async () => {
   await writeFile(join(appDir, "agents", "librarian.md"), "You are the librarian.");
   await writeFile(join(appDir, "AGENTS.md"), "# Notes\nRead this first.");
   await writeFile(join(home, "fake-claude.js"), FAKE_CLI);
-  runtimes = claudeOnly(["bun", join(home, "fake-claude.js")], { chatArgs: ["--extra"] });
+  runtimes = claudeOnly([process.execPath, join(home, "fake-claude.js")], { chatArgs: ["--extra"] });
   const registry = new AppRegistry();
   await registry.set(await loadManifest(appDir));
   server = Bun.serve({
@@ -201,7 +202,7 @@ describe("agents api", () => {
 
   test("a transcript is looked for where Claude Code files it: every other character a dash, long names hashed", async () => {
     const sid = "cafe0002-0000-4000-8000-000000000000";
-    expect(transcriptPath("/nowhere/my_app dir/v1.2", sid, "/h")).toBe(`/h/.claude/projects/-nowhere-my-app-dir-v1-2/${sid}.jsonl`);
+    expect(transcriptPath("/nowhere/my_app dir/v1.2", sid, "/h")).toBe(join("/h", ".claude", "projects", "-nowhere-my-app-dir-v1-2", `${sid}.jsonl`));
     expect(claudeProjectDir("/srv/Café+x")).toBe("-srv-Caf--x");
     // Pinned from the CLI's own function: cut at 200 characters, then the path's hash.
     const long = "/home/me/apps/" + "long_app name/".repeat(15) + "x";
@@ -209,10 +210,13 @@ describe("agents api", () => {
     expect(dir).toHaveLength(207);
     expect(dir.slice(195)).toBe("-long-s4t7bn");
     // The real directory, as the CLI resolves its working directory.
-    const real = await realpath(home);
-    const link = join(home, "link_to home");
-    await symlink(real, link);
-    expect(transcriptPath(link, sid, "/h")).toBe(transcriptPath(real, sid, "/h"));
+    // Windows without Developer Mode refuses to make the link to resolve.
+    if (CAN_SYMLINK) {
+      const real = await realpath(home);
+      const link = join(home, "link_to home");
+      await symlink(real, link);
+      expect(transcriptPath(link, sid, "/h")).toBe(transcriptPath(real, sid, "/h"));
+    }
   });
 });
 
@@ -249,7 +253,7 @@ describe("Space Assistant runtime selection", () => {
     const { RuntimeRegistry } = await import("../runtimes/registry.ts");
     const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
     const configured = new RuntimeRegistry({ default: "claude", runtimes: [
-      { name: "claude", kind: "claude-code", bin: ["bun", join(home, "fake-claude.js")], chatArgs: [] },
+      { name: "claude", kind: "claude-code", bin: [process.execPath, join(home, "fake-claude.js")], chatArgs: [] },
       { name: "codex", kind: "codex-cli", bin: fakeCodexBin() },
     ] });
     const store = new SessionStore(new Database(":memory:"));
@@ -320,7 +324,7 @@ test("Space Assistant reads the live default for new chats but retains a resumed
   const { RuntimeRegistry } = await import("../runtimes/registry.ts");
   const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
   const configured = new RuntimeRegistry({ default: "claude", runtimes: [
-    { name: "claude", kind: "claude-code", bin: ["bun", join(home, "fake-claude.js")], chatArgs: [] },
+    { name: "claude", kind: "claude-code", bin: [process.execPath, join(home, "fake-claude.js")], chatArgs: [] },
     { name: "codex", kind: "codex-cli", bin: fakeCodexBin() },
   ] });
   const db = new Database(":memory:");
@@ -352,7 +356,7 @@ test("app agents pick a chat runtime through the app's model layers and the spac
   const { fakeCodexBin } = await import("../runtimes/testing-codex.ts");
   // As on a machine whose Claude is configured but whose chats should run on Codex.
   const configured = new RuntimeRegistry({ default: "claude", runtimes: [
-    { name: "claude", kind: "claude-code", bin: ["bun", join(home, "fake-claude.js")], chatArgs: [] },
+    { name: "claude", kind: "claude-code", bin: [process.execPath, join(home, "fake-claude.js")], chatArgs: [] },
     { name: "codex", kind: "codex-cli", bin: fakeCodexBin() },
   ] });
   const dir = join(home, "apps", "todo");

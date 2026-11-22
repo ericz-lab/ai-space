@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm, stat, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { WINDOWS } from "../testing.ts";
 import { ensureOperatorToken, operatorTokenPath, readOperatorToken } from "./operator-token.ts";
 
 async function withHome(fn: (home: string) => Promise<void>) {
@@ -24,7 +25,8 @@ test("with none, a new token is written with mode 0600 and kept across calls", (
     expect(await readOperatorToken(home)).toBe("");
     const token = await ensureOperatorToken(home, "");
     expect(token.length).toBeGreaterThanOrEqual(40);
-    expect((await stat(operatorTokenPath(home))).mode & 0o777).toBe(0o600);
+    // Windows has no permission bits to set or read back.
+    if (!WINDOWS) expect((await stat(operatorTokenPath(home))).mode & 0o777).toBe(0o600);
     expect(await readOperatorToken(home)).toBe(token);
     expect(await ensureOperatorToken(home, "")).toBe(token);
   }));

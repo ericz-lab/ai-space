@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { Database } from "bun:sqlite";
 import { type Workspace, ensureWorkspace } from "../../workspace.ts";
 import { type Db, openDatabase, sqliteUrl } from "../db.ts";
@@ -18,6 +18,10 @@ import { BackupStore } from "./store.ts";
 import { FileTarget, openBackupTarget, parseTargetUrl } from "./target.ts";
 import { DEFAULT_SPEC, SPACE_APP, archiveKey, parseKey, sidecarKey, stamp } from "./types.ts";
 import { verifyApp } from "./verify.ts";
+import { WINDOWS, removeTemp } from "../../testing.ts";
+
+/** Tests that make or read an archive need tar and zstd. A Windows machine often lacks zstd; anywhere else its absence must fail. */
+const NO_ARCHIVE = WINDOWS && !Bun.which("zstd");
 
 let home: string;
 let ws: Workspace;
@@ -25,6 +29,12 @@ let db: Db;
 let deps: BackupDeps;
 let targetDir: string;
 let clock: Date;
+/** The databases `seedApp` leaves open: the running app. `stopApps` is the app stopping. */
+const running: Database[] = [];
+const stopApps = () => {
+  for (const d of running.splice(0)) d.close();
+  Bun.gc(true); // Windows keeps a closed database's file open until its statements are collected
+};
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "space-backup-"));
@@ -36,8 +46,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  stopApps();
   await db.close();
-  await rm(home, { recursive: true, force: true });
+  await removeTemp(home);
 });
 
 /** An app data dir the way storage leaves it: a live WAL database, state files, things that must not be copied. */
@@ -51,6 +62,7 @@ async function seedApp(app: string): Promise<string> {
   live.run("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)");
   live.run("INSERT INTO notes (body) VALUES ('one'), ('two')");
   // Left open on purpose: the app is running while the snapshot is taken, and the WAL is not checkpointed.
+  running.push(live);
   await Bun.write(join(dir, "watchlist.json"), '{"a":1}');
   await Bun.write(join(dir, "sessions", "tg.session"), "binary");
   await Bun.write(join(dir, "blobs", "img", "x.png"), "png");
@@ -71,7 +83,7 @@ async function tree(dir: string, rel = ""): Promise<string[]> {
   return out;
 }
 
-describe("runBackup", () => {
+describe.skipIf(NO_ARCHIVE)("runBackup", () => {
   test("snapshots databases and state files, skips the rest, records and uploads with a sidecar", async () => {
     const dataDir = await seedApp("keep");
     await Bun.write(join(ws.apps, "keep", "space.yaml"), "name: keep\n");
@@ -181,7 +193,7 @@ describe("runBackup", () => {
 });
 
 describe("archive", () => {
-  test("a failure on either side of the pipe fails the step", async () => {
+  test.skipIf(NO_ARCHIVE)("a failure on either side of the pipe fails the step", async () => {
     const dir = await mkdtemp(join(tmpdir(), "archive-"));
     try {
       await expect(createArchive(join(dir, "missing"), join(dir, "a.tar.zst"))).rejects.toThrow(/tar exited/);
@@ -192,7 +204,7 @@ describe("archive", () => {
       await createArchive(join(dir, "stage"), join(dir, "ok.tar.zst"));
       expect(await listArchive(join(dir, "ok.tar.zst"))).toEqual(["x.txt"]);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await removeTemp(dir);
     }
   });
 
@@ -202,7 +214,7 @@ describe("archive", () => {
   });
 });
 
-describe("retention in the target", () => {
+describe.skipIf(NO_ARCHIVE)("retention in the target", () => {
   test("prune keeps by count and only touches snapshots with a sidecar", async () => {
     const dataDir = await seedApp("keep");
     const spec = parseBackupSpec({ keep: { daily: 2, weekly: 0, monthly: 0 } });
@@ -246,7 +258,7 @@ describe("retention in the target", () => {
   });
 });
 
-describe("verify", () => {
+describe.skipIf(NO_ARCHIVE)("verify", () => {
   test("passes on a sound snapshot and records it in the index and the sidecar", async () => {
     const dataDir = await seedApp("keep");
     const r = await runBackup(deps, { app: "keep", dataDir, spec: parseBackupSpec(undefined) });
@@ -286,7 +298,7 @@ describe("verify", () => {
   });
 });
 
-describe("restore", () => {
+describe.skipIf(NO_ARCHIVE)("restore", () => {
   test("--to unpacks into the data-dir layout and needs nothing but the target", async () => {
     const dataDir = await seedApp("keep");
     await Bun.write(join(ws.apps, "keep", "space.yaml"), "name: keep\n");
@@ -304,7 +316,7 @@ describe("restore", () => {
       expect(await Bun.file(join(out, "watchlist.json")).text()).toBe('{"a":1}');
     } finally {
       await otherDb.close();
-      await rm(other, { recursive: true, force: true });
+      await removeTemp(other);
     }
   });
 
@@ -328,6 +340,7 @@ describe("restore", () => {
     await runBackup(deps, { app: "keep", dataDir, spec: parseBackupSpec({ include: ["databases", "files", "blobs"] }) });
     await Bun.write(join(dataDir, "blobs", "img", "x.png"), "changed");
     await Bun.write(join(dataDir, "blobs", "new.png"), "new");
+    stopApps(); // what `stopped: true` says happened; Windows will not move a directory with an open file
     const r = await restoreSnapshot(deps, { app: "keep", inPlace: true, stopped: true });
     expect(await Bun.file(join(dataDir, "blobs", "img", "x.png")).text()).toBe("png");
     expect(await Bun.file(join(dataDir, "blobs", "new.png")).exists()).toBe(false);
@@ -341,7 +354,7 @@ describe("restore", () => {
     await expect(restoreSnapshot(deps, { app: "keep", inPlace: true })).rejects.toThrow(/stop the app first/);
     const stopped: string[] = [];
     clock = new Date("2026-09-06T10:00:00Z");
-    const r = await restoreSnapshot(deps, { app: "keep", inPlace: true, stopService: async (a) => void stopped.push(a), now: () => clock });
+    const r = await restoreSnapshot(deps, { app: "keep", inPlace: true, stopService: async (a) => { stopApps(); stopped.push(a); }, now: () => clock });
     expect(stopped).toEqual(["keep"]);
     expect(r.dir).toBe(dataDir);
     expect(r.asideDir).toBe(`${dataDir}.pre-restore-2026-09-06T10-00-00Z`);
@@ -355,7 +368,7 @@ describe("restore", () => {
   });
 });
 
-describe("api", () => {
+describe.skipIf(NO_ARCHIVE)("api", () => {
   test("overview marks apps without a fresh snapshot stale, retired ones not, and runs a backup on POST", async () => {
     const dataDir = await seedApp("keep");
     await runBackup(deps, { app: "keep", dataDir, spec: parseBackupSpec(undefined) });
@@ -410,7 +423,7 @@ describe("helpers", () => {
   test("target urls", () => {
     expect(parseTargetUrl("s3://bucket/backups")).toEqual({ kind: "s3", bucket: "bucket", prefix: "backups/" });
     expect(parseTargetUrl("s3://bucket")).toEqual({ kind: "s3", bucket: "bucket", prefix: "" });
-    expect(parseTargetUrl("file:///tmp/x/")).toEqual({ kind: "file", dir: "/tmp/x" });
+    expect(parseTargetUrl("file:///tmp/x/")).toEqual({ kind: "file", dir: resolve("/tmp/x") });
     expect(() => parseTargetUrl("ftp://x")).toThrow(/SPACE_BACKUP_URL/);
     expect(() => openBackupTarget("s3://b/p/")).toThrow(/SPACE_S3_ACCESS_KEY_ID/);
     expect(openBackupTarget("s3://b/p/", { accessKeyId: "a", secretAccessKey: "s" }).url).toBe("s3://b/p/");
