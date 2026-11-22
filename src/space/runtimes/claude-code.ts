@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { ClaudeLive, claudeLiveFingerprint } from "./claude-live.ts";
 import { LivePool } from "./live.ts";
-import { magpieClaudeEnv } from "./magpie.ts";
+import { magpieClaudeEnv, magpieClaudeSettings } from "./magpie.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
@@ -54,7 +54,10 @@ export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels })
   // Through magpie (docs/runtimes.md#magpie): every process this runtime starts gets the gateway in its environment.
   const envOf = (base: Record<string, string | undefined> | undefined) => (spec.magpie ? magpieClaudeEnv(spec.magpie, spec.models, base ?? process.env) : base);
   const withEnv = (turn: ChatTurn): ChatTurn => (spec.magpie ? { ...turn, env: envOf(turn.env) } : turn);
-  const bin = spec.bin.length ? spec.bin : ["claude"];
+  const cli = spec.bin.length ? spec.bin : ["claude"];
+  // Through magpie the pins also go as `--settings`, which outranks the user's ~/.claude/settings.json
+  // (where magpie's Agents page writes its own picks); read per call, so a pin saved in Settings applies.
+  const binOf = () => (spec.magpie ? [...cli, "--settings", magpieClaudeSettings(spec.magpie, spec.models)] : cli);
   const backend: Backend = sshHost ? `ssh:${sshHost}` : "local";
   const live = new LivePool({ fingerprint: claudeLiveFingerprint });
 
@@ -76,16 +79,16 @@ export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels })
         } catch (e) {
           return { ok: false, error: `could not read a file: ${(e as Error).message}`, backend };
         }
-        const remote = remoteCommand(bin, input, stream, blobs);
+        const remote = remoteCommand(cli, input, stream, blobs);
         if ("bad" in remote) return { ok: false, error: `argument not allowed over ssh: ${remote.bad}`, backend };
         const stdin = remote.spool ? remote.spool.archive : input.prompt;
         return runCompletion(["ssh", "-o", "BatchMode=yes", sshHost, `bash -lc '${remote.command}'`], input, stdin, backend, signal, onDelta);
       }
-      return runCompletion(cliArgs(bin, input, stream), input, input.prompt + filesNote(input.files ?? [], (f) => f.path), "local", signal, onDelta, envOf(process.env));
+      return runCompletion(cliArgs(binOf(), input, stream), input, input.prompt + filesNote(input.files ?? [], (f) => f.path), "local", signal, onDelta, envOf(process.env));
     },
 
     async runAgent(run) {
-      const cmd = [...bin, ...agentArgs(run)];
+      const cmd = [...binOf(), ...agentArgs(run)];
       const r = await spawnCollect(cmd, { cwd: run.cwd, env: envOf(run.env), stdin: run.prompt, signal: run.signal });
       const output = joinOutput(r.stdout, r.stderr);
       if (r.timedOut || r.aborted) return { ok: false, error: "timed out", output, timedOut: true, backend: "local" };
@@ -98,8 +101,8 @@ export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels })
 
     chat(original, cb) {
       const turn = withEnv(original);
-      if (turn.interactive) return live.run(turn, cb, () => new ClaudeLive(bin, turn, spec.chatArgs));
-      return chatStream([...bin, ...chatArgs(turn, spec.chatArgs)], turn, cb);
+      if (turn.interactive) return live.run(turn, cb, () => new ClaudeLive(binOf(), turn, spec.chatArgs));
+      return chatStream([...binOf(), ...chatArgs(turn, spec.chatArgs)], turn, cb);
     },
 
     closeLive: () => live.closeAll(),

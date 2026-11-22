@@ -36,6 +36,8 @@ export type MagpieInfo = {
   version?: string;
   /** Its model ids (`provider/model`, and routing groups as `group/<id>`), in its own order. */
   models: string[];
+  /** Those of `models` that are routing groups (magpie picks a member per request). */
+  groups: string[];
   /** Why it did not answer. */
   error?: string;
 };
@@ -92,10 +94,27 @@ export function magpieAddress(deps: MagpieDeps = {}): { url: string; from: Magpi
 
 /** The ids of an OpenAI-style model list (`{ object: "list", data: [{ id }] }`), as magpie's `/v1/models` answers. */
 export function readModelList(body: unknown): string[] | undefined {
+  return readCatalog(body)?.models;
+}
+
+/**
+ * magpie's model list, with its routing groups told apart: an id under `group/` (or `auto/`, a group
+ * magpie made itself), or an entry magpie labels as one (`magpie_by` or `magpie_label` saying
+ * "routing group", as a group listed by its bare id is).
+ */
+export function readCatalog(body: unknown): { models: string[]; groups: string[] } | undefined {
   const data = (body as { data?: unknown } | null)?.data;
   if (!Array.isArray(data)) return undefined;
-  const ids = data.map((m) => (m as { id?: unknown } | null)?.id).filter((id): id is string => typeof id === "string" && MAGPIE_MODEL_PATTERN.test(id));
-  return [...new Set(ids)];
+  const models: string[] = [];
+  const groups: string[] = [];
+  for (const raw of data) {
+    const m = (raw ?? {}) as { id?: unknown; magpie_by?: unknown; magpie_label?: unknown };
+    if (typeof m.id !== "string" || !MAGPIE_MODEL_PATTERN.test(m.id) || models.includes(m.id)) continue;
+    models.push(m.id);
+    const said = [m.magpie_by, m.magpie_label].some((x) => typeof x === "string" && /routing group/i.test(x));
+    if (said || /^(group|auto)\//.test(m.id)) groups.push(m.id);
+  }
+  return { models, groups };
 }
 
 /** A model id ai-space passes on to magpie: its `provider/model` ids and group names. */
@@ -108,14 +127,14 @@ export async function findMagpie(deps: MagpieDeps = {}): Promise<MagpieInfo> {
   const which = deps.which ?? ((name: string) => whichUsable(name, { PATH: withUserToolDirs(pathOf(env) ?? "/usr/bin:/bin", home) }) ?? appBinary());
   const bin = which("magpie");
   const where: ReturnType<typeof magpieAddress> = deps.url ? { url: deps.url.replace(/\/+$/, ""), from: "env" } : magpieAddress({ ...deps, env, home });
-  const base: MagpieInfo = { ...(bin ? { bin } : {}), url: where.url, from: where.from, ...(where.version ? { version: where.version } : {}), running: false, models: [] };
+  const base: MagpieInfo = { ...(bin ? { bin } : {}), url: where.url, from: where.from, ...(where.version ? { version: where.version } : {}), running: false, models: [], groups: [] };
   const f = deps.fetch ?? fetch;
   try {
     const res = await f(`${where.url}/v1/models`, { headers: { authorization: `Bearer ${MAGPIE_CALLER_KEY}` }, signal: AbortSignal.timeout(deps.timeoutMs ?? 3000) });
     if (!res.ok) return { ...base, error: `${where.url}/v1/models answered ${res.status}` };
-    const models = readModelList(await res.json().catch(() => null));
-    if (!models) return { ...base, error: `${where.url}/v1/models is not a model list` };
-    return { ...base, running: true, models };
+    const catalog = readCatalog(await res.json().catch(() => null));
+    if (!catalog) return { ...base, error: `${where.url}/v1/models is not a model list` };
+    return { ...base, running: true, ...catalog };
   } catch (e) {
     const err = e as Error;
     return { ...base, error: err.name === "TimeoutError" ? `no answer from ${where.url}` : `nothing answers at ${where.url}` };
@@ -164,6 +183,36 @@ export function magpieClaudeEnv(url: string, models: TierModels | undefined, bas
   }
   if (models?.basic) env.ANTHROPIC_SMALL_FAST_MODEL = models.basic;
   return env;
+}
+
+/**
+ * The same gateway and pins as a `--settings` JSON for the CLI. Claude Code lets an `env` block in
+ * the user's `~/.claude/settings.json` (what magpie's Agents page writes when it wires Claude Code)
+ * win over the process environment, and `--settings` win over that file, so the pins go both ways:
+ * a tier ai-space pins answers with that model whatever the user's file says, and a tier left
+ * unpinned is the CLI's own (its alias, or what that file maps the alias to).
+ */
+export function magpieClaudeSettings(url: string, models: TierModels | undefined): string {
+  const env = magpieClaudeEnv(url, models, {});
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) if (v !== undefined) out[k] = v;
+  return JSON.stringify({ env: out });
+}
+
+/**
+ * Tier pins to suggest when magpie is added: a routing group named for the tier (`basic`,
+ * `group/basic`, `ai-space-basic`, any case), else nothing, which leaves the tier to Claude Code.
+ */
+export function suggestMagpieTiers(info: Pick<MagpieInfo, "groups">): TierModels {
+  const out: TierModels = {};
+  for (const tier of MODEL_TIERS) {
+    const hit = info.groups.find((g) => {
+      const bare = g.replace(/^(group|auto)\//, "").toLowerCase();
+      return bare === tier || bare === `ai-space-${tier}`;
+    });
+    if (hit) out[tier] = hit;
+  }
+  return out;
 }
 
 /** Is `url` a gateway address runtimes.yaml may name: http(s), a host, no path beyond `/`. */

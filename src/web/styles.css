@@ -345,6 +345,11 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .magpie-row > b { font-weight: 500; }
 .magpie-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
 .magpie-add .setselect { max-width: 100%; min-width: 0; }
+.magpie-tiers { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 6px 0 4px; max-width: 520px; }
+.magpie-runtime { font-weight: 500; }
+.magpie-tier { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 2px 8px; align-items: center; }
+.magpie-tier .setselect { max-width: 100%; min-width: 0; }
+.magpie-tier small { grid-column: 2; }
 @media (max-width: 640px) {
   .setlayout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
   .setnav { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 0 12px 8px; border-bottom: 1px solid var(--hairline); scrollbar-width: none; }

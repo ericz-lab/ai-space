@@ -8,7 +8,8 @@ import type { Channel, ChannelKind } from "./notify/types.ts";
 import { PEER_NAME_RE } from "./peers/config.ts";
 import { addMagpieRuntimeText, usesGateway } from "./model/inventory.ts";
 import { RUNTIMES_FILE, parseRuntimesYaml } from "./runtimes/config.ts";
-import { type MagpieInfo, findMagpie } from "./runtimes/magpie.ts";
+import { type MagpieInfo, findMagpie, suggestMagpieTiers } from "./runtimes/magpie.ts";
+import { MODEL_TIERS, type ModelTier, type TierModels } from "./runtimes/types.ts";
 import type { Workspace } from "./workspace.ts";
 
 /**
@@ -613,19 +614,33 @@ async function sectionMagpie({ d, set, merged }: Section): Promise<RuntimesAdd |
   const what = claude ? "Claude Code through magpie: chat, agent tasks and answers" : "magpie's Messages API: answers only (install Claude Code for chat and agent tasks)";
   if (!(await io.confirm(`  Add magpie as a runtime (${what})?`, true))) return undefined;
   const shown = info.models.slice(0, 30);
-  shown.forEach((m, i) => io.say(`    ${String(i + 1).padStart(2)}. ${m}`));
+  const isGroup = (m: string) => info.groups.includes(m);
+  shown.forEach((m, i) => io.say(`    ${String(i + 1).padStart(2)}. ${m}${isGroup(m) ? "  (routing group)" : ""}`));
   if (info.models.length > shown.length) io.say(`    … and ${info.models.length - shown.length} more; any id magpie lists works`);
-  const pick = async (q: string, def: string) => {
+  // One model per tier; a routing group named for the tier is offered first. Claude Code's tier may
+  // stay empty (its own model); the API form needs at least one. Settings → Models changes them later.
+  const suggested = suggestMagpieTiers(info);
+  const pick = async (q: string, def: string, allowEmpty: boolean): Promise<string> => {
     for (;;) {
       const a = (await io.ask(q, { default: def })).trim();
+      if (!a && allowEmpty) return "";
       const n = Number(a);
       const model = Number.isInteger(n) && n >= 1 && n <= shown.length ? shown[n - 1]! : a;
       if (info.models.includes(model)) return model;
-      io.say("  a number from the list, or one of magpie's model ids");
+      io.say(allowEmpty ? "  a number from the list, one of magpie's model ids, or nothing for Claude Code's own" : "  a number from the list, or one of magpie's model ids");
     }
   };
-  const main = await pick("  Model for every tier (number or id)", shown[0]!);
-  const models = { basic: await pick("  basic tier (quick, cheap calls)", main), junior: main, intermediate: main, advanced: main };
+  const blurb: Record<ModelTier, string> = { basic: "quick, cheap calls", junior: "everyday work", intermediate: "harder work", advanced: "the hardest work" };
+  io.say(claude ? "  A model for each tier (number or id); leave one empty to keep Claude Code's own model for it." : "  A model for each tier (number or id).");
+  const models: TierModels = {};
+  let last = "";
+  for (const tier of MODEL_TIERS) {
+    // The API form has no model of its own: an unanswered tier takes the one before it.
+    const def = suggested[tier] ?? (claude ? "" : last || shown[0]!);
+    const m = await pick(`  ${tier} tier (${blurb[tier]})`, def, Boolean(claude));
+    if (m) models[tier] = last = m;
+  }
+  io.say("  These can be changed later in Settings → Models.");
   const next = addMagpieRuntimeText(current, { url: info.url, models, ...(claude ? { claude } : {}) }, merged());
   for (const [k, v] of Object.entries(next.envUpdates)) set(k, v);
   return { file, text: next.text, name: next.name, what: claude ? "Claude Code through magpie" : "magpie's Messages API" };
