@@ -4,6 +4,7 @@
   <name>AI Space</name>
   <summary>Your Space's apps, agents, chat and inbox</summary>
   <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary=https://github.com/ericz-lab/ai-space/blob/main/LICENSE</project_license>
   <description>
     <p>The native Linux client of ai-space: the Space's library under a command box, native chat with its agents, the inbox with desktop notifications, terminals, and the Space's pages in tabs. The Local edition also sets up and runs the Space on this computer as a systemd user service.</p>
   </description>

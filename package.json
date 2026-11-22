@@ -4,6 +4,7 @@
   "type": "module",
   "version": "0.2.1",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "bin": {
     "space": "bin/space"
   },

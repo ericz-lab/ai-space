@@ -228,3 +228,7 @@ bun run hooks          # once per clone: run the checks before every push
 ```
 
 Local configuration goes in `~/.ai-space/.env` (see `.env.example`); process environment variables win over it. Read [AGENTS.md](AGENTS.md) before contributing (work style, repository map, commit format) and [CLAUDE.md](CLAUDE.md) for Bun conventions.
+
+## 📄 License
+
+ai-space is source-available under the [Sustainable Use License 1.0](LICENSE), copyright Nexia Global Limited. You may run and change it for personal or non-commercial use and for your own internal business purposes; selling it, or offering it to others as a paid product or service, needs a commercial license ([COMMERCIAL.md](COMMERCIAL.md)). The app templates and the UI kit are MIT, and third-party code keeps its own license ([NOTICE.md](NOTICE.md)). Contributions follow [CONTRIBUTING.md](CONTRIBUTING.md).

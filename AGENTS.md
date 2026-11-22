@@ -112,6 +112,7 @@ An app is read and changed in its source checkout, never in a deployed copy. Thi
 - `.githooks/` - `pre-push` runs `bun run check`; enable it once per clone with `bun run hooks`.
 - `deploy/` - `ai-space.service` (user-level systemd unit), `install.sh` (installs the unit on a machine), `post-receive` (bare-repo hook for git-push deploys).
 - `deploy/feishu-oidc/` - Cloudflare Access's Feishu authorization-code bridge, isolated from the Space runtime: Worker, Bun tests, and deployment/rollback script. Setup and boundaries in `docs/cloudflare.md#feishu-login`.
+- `LICENSE` - the Sustainable Use License 1.0, its terms verbatim. `LICENSE-MIT` covers the files `NOTICE.md` lists (the app templates, the UI kit); `NOTICE.md` also holds the copyright line and the third-party licenses: add a line there with any third-party code. `COMMERCIAL.md` says what needs a commercial license, `CONTRIBUTING.md` the terms of a contribution. The Server archive carries the first four (`release/server.ts`).
 - `.env.example` - configuration template for `~/.ai-space/.env`.
 - `.gitignore` - global ignore rules.
 

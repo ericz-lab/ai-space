@@ -19,7 +19,7 @@ import { SPACE_ROOT } from "../src/space/config.ts";
 import { readVersion } from "../src/space/version.ts";
 
 /** Top-level paths of the tree that go into the archive. */
-export const INCLUDE = ["src/", "skills/", "bin/", "deploy/", "docs/", "package.json", "bun.lock", "tsconfig.json", ".env.example", "AGENTS.md", "CLAUDE.md", "README.md", "README.zh-CN.md"];
+export const INCLUDE = ["src/", "skills/", "bin/", "deploy/", "docs/", "package.json", "bun.lock", "tsconfig.json", ".env.example", "AGENTS.md", "CLAUDE.md", "README.md", "README.zh-CN.md", "LICENSE", "LICENSE-MIT", "NOTICE.md", "COMMERCIAL.md"];
 
 /** Whether a committed path goes into the archive. */
 export function included(path: string): boolean {
