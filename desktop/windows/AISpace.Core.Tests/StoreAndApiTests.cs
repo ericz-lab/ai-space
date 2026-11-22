@@ -48,15 +48,15 @@ public class ConnectionStoreTests
     }
 
     [Fact]
-    public void MovingTheAddressDropsTheLocalMark()
+    public void AnUpdateSaysWhetherTheAddressMoved()
     {
         using var dir = new TempDir();
         var store = new ConnectionStore(dir.File("connections.json"));
-        var c = store.Add("This computer", new Uri("http://127.0.0.1:8700/"), managed: true);
+        var c = store.Add("This computer", new Uri("http://127.0.0.1:8700/"));
+        Assert.True(c.IsLocal);
         Assert.False(store.Update(c.Id, "Renamed", new Uri("http://127.0.0.1:8700/")));
-        Assert.True(store.Get(c.Id)!.Managed);
         Assert.True(store.Update(c.Id, "Elsewhere", new Uri("https://space.example.com/")));
-        Assert.False(store.Get(c.Id)!.Managed);
+        Assert.False(store.Get(c.Id)!.IsLocal);
     }
 
     [Fact]
@@ -71,22 +71,12 @@ public class ConnectionStoreTests
     }
 
     [Fact]
-    public void AConnectionSavedBeforeTheLocalEditionIsNotManaged()
+    public void ASpaceTheLocalEditionSavedIsStillRead()
     {
-        var list = ConnectionStore.Decode("""[{"id":"6F1C1B7E-3C39-4D55-9D1E-0C5C2A6B8F10","name":"Home","url":"http://127.0.0.1:8700/","isDefault":true}]""");
-        Assert.False(list[0].Managed);
+        // The retired Local edition marked its own Space "managed"; the file is read without it.
+        var list = ConnectionStore.Decode("""[{"id":"6F1C1B7E-3C39-4D55-9D1E-0C5C2A6B8F10","name":"This Computer","url":"http://127.0.0.1:8700/","isDefault":true,"managed":true}]""");
+        Assert.Equal("This Computer", Assert.Single(list).Name);
         Assert.Throws<System.Text.Json.JsonException>(() => ConnectionStore.Decode("""[{"name":"x"}]"""));
-    }
-
-    [Fact]
-    public void TheLocalEditionClaimsTheSpaceSavedAtItsAddress()
-    {
-        var mine = new Connection { Name = "Here", Url = "http://127.0.0.1:8700/" };
-        var hub = new Connection { Name = "Hub", Url = "https://space.example.com/" };
-        Assert.Equal(mine.Id, ConnectionStore.LocalToClaim([hub, mine], "managed", "http://127.0.0.1:8700/"));
-        Assert.Null(ConnectionStore.LocalToClaim([hub, mine], "foreign", "http://127.0.0.1:8700/"));
-        mine.Managed = true;
-        Assert.Null(ConnectionStore.LocalToClaim([hub, mine], "managed", "http://127.0.0.1:8700/"));
     }
 }
 
@@ -166,24 +156,8 @@ public class SpaceApiTests
     }
 
     [Fact]
-    public void TheDeviceSessionsCookieIsRead()
+    public void TheCookieHeaderJoinsTheProfilesCookies()
     {
-        var url = new Uri("http://127.0.0.1:8700/");
-        var response = new HttpResponseMessage(HttpStatusCode.OK);
-        response.Headers.TryAddWithoutValidation("Set-Cookie", "space_session=t0k; Path=/; Max-Age=60; HttpOnly; SameSite=Lax");
-        var now = DateTimeOffset.UtcNow;
-        var cookie = Assert.Single(SpaceApi.ResponseCookies(response.Headers, url, now));
-        Assert.Equal(("space_session", "t0k", "/", "127.0.0.1", true, true, "Lax"), (cookie.Name, cookie.Value, cookie.Path, cookie.Domain, cookie.HostOnly, cookie.HttpOnly, cookie.SameSite));
-        Assert.Equal(now.AddSeconds(60), cookie.Expires);
-        var space = new Uri("https://space.example.com/");
-        var wide = SetCookie.Parse("CF_Authorization=x; Domain=.example.com; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Secure", space, now)!;
-        Assert.Equal(("example.com", false, true), (wide.Domain, wide.HostOnly, wide.Secure));
-        Assert.Equal(new DateTimeOffset(2037, 10, 21, 7, 28, 0, TimeSpan.Zero), wide.Expires);
-        Assert.Null(SetCookie.Parse("x=1; Domain=evil.com", space, now));
-        Assert.Null(SetCookie.Parse("garbage", space, now));
-        Assert.Null(SetCookie.Parse("s=1", space, now)!.Expires);
-        Assert.Equal("Bearer spd_abc", DeviceSession.Headers(url, "spd_abc")["Authorization"]);
-        Assert.Equal("http://127.0.0.1:8700", DeviceSession.Headers(url, "spd_abc")["Origin"]);
         Assert.Null(SpaceApi.CookieHeader([]));
         Assert.Equal("a=1; b=2", SpaceApi.CookieHeader([("a", "1"), ("b", "2")]));
     }

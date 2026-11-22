@@ -14,11 +14,6 @@ public sealed class Connection
     /// <summary>The panel URL, normalized (<see cref="ConnectionRules.Normalize"/>).</summary>
     [JsonPropertyName("url")] public string Url { get; set; } = "";
     [JsonPropertyName("isDefault")] public bool IsDefault { get; set; }
-    /// <summary>
-    /// The Space the Local edition installed on this computer (docs/local.md): the app signs in to
-    /// it with its device credential and manages its background service. False for every other.
-    /// </summary>
-    [JsonPropertyName("managed")] public bool Managed { get; set; }
 
     [JsonIgnore] public Uri Uri => new(Url);
     [JsonIgnore] public bool IsLocal => ConnectionRules.IsLoopback(Uri.Host);
@@ -52,25 +47,18 @@ public sealed class ConnectionStore
 
     public Connection? Default => _connections.FirstOrDefault(c => c.IsDefault) ?? _connections.FirstOrDefault();
 
-    /// <summary>The Local edition's own Space, if one is saved.</summary>
-    public Connection? ManagedConnection => _connections.FirstOrDefault(c => c.Managed);
-
     public Connection? Get(Guid id) => _connections.FirstOrDefault(c => c.Id == id);
 
-    public Connection Add(string name, Uri url, bool makeDefault = false, bool managed = false)
+    public Connection Add(string name, Uri url, bool makeDefault = false)
     {
-        var c = new Connection { Name = Connection.DisplayName(name, url), Url = url.AbsoluteUri, IsDefault = makeDefault || _connections.Count == 0, Managed = managed };
+        var c = new Connection { Name = Connection.DisplayName(name, url), Url = url.AbsoluteUri, IsDefault = makeDefault || _connections.Count == 0 };
         if (c.IsDefault) foreach (var o in _connections) o.IsDefault = false;
         _connections.Add(c);
         Save();
         return c;
     }
 
-    /// <summary>
-    /// A new name or address. Returns whether the address now names another origin: the device
-    /// credential belongs to the Local edition's own address, so such a Space is no longer the
-    /// app's own (<see cref="LocalToClaim"/> marks it again when it points back there).
-    /// </summary>
+    /// <summary>A new name or address. Returns whether the address now names another origin.</summary>
     public bool Update(Guid id, string name, Uri url)
     {
         var c = Get(id);
@@ -78,19 +66,8 @@ public sealed class ConnectionStore
         var moved = !ConnectionRules.SameOrigin(c.Uri, url);
         c.Name = Connection.DisplayName(name, url);
         c.Url = url.AbsoluteUri;
-        if (moved) c.Managed = false;
         Save();
         return moved;
-    }
-
-    /// <summary>Marks a saved Space as the Local edition's (or not), and points it at <paramref name="url"/>.</summary>
-    public void SetManaged(Guid id, Uri url, bool managed = true)
-    {
-        var c = Get(id);
-        if (c is null) return;
-        c.Managed = managed;
-        c.Url = url.AbsoluteUri;
-        Save();
     }
 
     public void SetDefault(Guid id)
@@ -105,19 +82,6 @@ public sealed class ConnectionStore
         _connections.RemoveAll(c => c.Id == id);
         if (_connections.Count > 0 && !_connections.Any(c => c.IsDefault)) _connections[0].IsDefault = true;
         Save();
-    }
-
-    /// <summary>
-    /// The saved Space that is the Local edition's own but not marked so: the Local edition runs
-    /// this computer's Space (<c>managed</c>) and no saved Space is marked, but one points at its
-    /// address, as when it was added by hand or before the setup. The app then signs in to it with
-    /// the device credential instead of asking for an owner password the Local edition never sets.
-    /// </summary>
-    public static Guid? LocalToClaim(IReadOnlyList<Connection> connections, string? localState, string? localUrl)
-    {
-        if (localState != "managed" || localUrl is null || connections.Any(c => c.Managed)) return null;
-        if (!Uri.TryCreate(localUrl, UriKind.Absolute, out var url)) return null;
-        return connections.FirstOrDefault(c => ConnectionRules.SameOrigin(c.Uri, url))?.Id;
     }
 
     public static List<Connection> Decode(string text)

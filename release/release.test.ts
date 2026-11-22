@@ -25,8 +25,8 @@ describe("the server archive", () => {
     expect(archiveName({ version: "1.2.3", os: "linux", arch: "arm64" })).toBe("ai-space-1.2.3-linux-arm64");
     expect(linuxArchiveName("client", "1.2.3", "x64")).toBe("ai-space-desktop-1.2.3-linux-x64");
     expect(linuxArchiveName("local", "1.2.3", "arm64")).toBe("ai-space-local-1.2.3-linux-arm64");
-    expect(windowsArchiveName("client", "1.2.3", "x64")).toBe("ai-space-desktop-1.2.3-windows-x64");
-    expect(windowsArchiveName("local", "1.2.3-dev.abc1234", "arm64")).toBe("ai-space-local-1.2.3-dev.abc1234-windows-arm64");
+    expect(windowsArchiveName("1.2.3", "x64")).toBe("ai-space-desktop-1.2.3-windows-x64");
+    expect(windowsArchiveName("1.2.3-dev.abc1234", "arm64")).toBe("ai-space-desktop-1.2.3-dev.abc1234-windows-arm64");
   });
 
   test("leaves the Linux and Windows apps out too", () => {

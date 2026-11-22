@@ -13,8 +13,8 @@ import { WINDOWS, removeTemp } from "./testing.ts";
 // runs the plist's program the way launchd would: real service processes on a temporary workspace.
 
 const REPO = resolve(import.meta.dir, "..", "..");
-// The Local edition runs on a Mac or on Linux; on Windows it runs inside WSL 2 (docs/local.md#on-windows), never on
-// the Windows host, whose paths, shell scripts and links these tests cannot stand in for.
+// The Local edition runs on a Mac or on Linux, never on Windows (docs/local.md), whose paths, shell scripts and
+// links these tests cannot stand in for.
 const localOnly = test.skipIf(WINDOWS);
 const roots: string[] = [];
 // The services these tests start get a home of their own: with the developer's HOME a service under

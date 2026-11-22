@@ -225,7 +225,7 @@ public partial class App
     /// </summary>
     private bool OfferUpdate()
     {
-        if (Registration.IsInstalled || Registration.InstalledVersion() is not { } installed || !LocalVersions.Newer(AppModel.Version, installed)) return false;
+        if (Registration.IsInstalled || Registration.InstalledVersion() is not { } installed || !Versions.Newer(AppModel.Version, installed)) return false;
         var answer = MessageBox.Show(L.F("Update the installed AI Space from {0} to {1}? It closes and starts again; Spaces and their agents keep running.", installed, AppModel.Version), L.T("Update AI Space"), MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (answer != MessageBoxResult.Yes) return false;
         SingleInstance.Send(["--quit"]);
@@ -267,7 +267,10 @@ public partial class App
         return true;
     }
 
-    /// <summary>From Installed apps: the running copy quits, then everything the installation added goes.</summary>
+    /// <summary>
+    /// From Installed apps: the running copy quits, then everything the installation added goes.
+    /// An AI Space on this computer is not the app's: it stays, and <c>space uninstall</c> removes it.
+    /// </summary>
     private void Uninstall(bool quiet)
     {
         var removeData = false;
@@ -283,20 +286,6 @@ public partial class App
         }
         SingleInstance.Send(["--quit"]);
         Thread.Sleep(1500);
-        // The Local edition's distribution may stop once nothing keeps it up; its workspace stays.
-        try
-        {
-            var pidFile = AppPaths.ForUser().KeepAlivePid;
-            if (File.Exists(pidFile) && int.TryParse(File.ReadAllText(pidFile).Trim(), out var pid))
-            {
-                var p = Process.GetProcessById(pid);
-                if (p.ProcessName.Equals("wsl", StringComparison.OrdinalIgnoreCase)) p.Kill();
-            }
-        }
-        catch (Exception e) when (e is ArgumentException or InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-        {
-            Log.Write($"uninstall: {e.Message}");
-        }
         Notifier.ClearAll();
         Registration.Uninstall(removeData);
         if (!quiet) MessageBox.Show(L.T("AI Space was uninstalled."), L.T("Uninstall AI Space"), MessageBoxButton.OK, MessageBoxImage.Information);

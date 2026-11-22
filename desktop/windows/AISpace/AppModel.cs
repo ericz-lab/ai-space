@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
 using AISpace.Core;
-using AISpace.Local;
 using AISpace.Shell;
 using AISpace.Web;
 using Microsoft.Win32;
@@ -35,7 +34,7 @@ internal sealed class AppModel
         Prefs = Preferences.Load(paths.Preferences);
         Web = new WebProfiles(paths.WebData);
         _seen = new FileSeenStore(paths.InboxSeen);
-        Local = new LocalManager(this);
+        ThisComputer = new ThisComputerSetup(this);
         Selected = Prefs.Selected is { } s && Store.Get(s) is not null ? s : Store.Default?.Id;
         Store.Changed += SyncLives;
         SystemEvents.PowerModeChanged += (_, e) =>
@@ -48,7 +47,7 @@ internal sealed class AppModel
     public ConnectionStore Store { get; }
     public Preferences Prefs { get; }
     public WebProfiles Web { get; }
-    public LocalManager Local { get; }
+    public ThisComputerSetup ThisComputer { get; }
     public Dictionary<Guid, SpaceLive> Lives { get; } = [];
 
     /// <summary>Set by the app: posts new inbox threads as Windows notifications.</summary>
@@ -71,7 +70,7 @@ internal sealed class AppModel
     public void Start()
     {
         SyncLives();
-        Local.Start();
+        ThisComputer.Start();
     }
 
     public void SavePrefs() => Prefs.Save(Paths.Preferences);
@@ -133,21 +132,10 @@ internal sealed class AppModel
     private void OnViewState(PanelView view, SpaceState state)
     {
         if (Store.Get(view.Connection.Id) is not { } c) return;
-        // The Local edition's own Space: sign in again with the device credential, then reload.
-        if (state.Kind == SpaceStateKind.AuthenticationRequired && c.Managed)
-        {
-            _ = SignInAgain(c, view);
-            return;
-        }
         if (state.Kind == SpaceStateKind.Ready && view.VerifiesSpace && Lives.TryGetValue(c.Id, out var live) && live.Status != LiveStatus.Ok)
         {
             _ = live.Refresh(catalogue: true);
         }
-    }
-
-    private async Task SignInAgain(Connection c, PanelView view)
-    {
-        if (await Local.SignIn(c)) view.Load();
     }
 
     // The main window's place
@@ -332,32 +320,12 @@ internal sealed class AppModel
 
     public void SetDefault(Guid id) => Store.SetDefault(id);
 
-    /// <summary>Saves (or re-points) the Local edition's own Space after an install, selects it and signs in to it.</summary>
-    public Connection AdoptLocal(Uri url)
+    /// <summary>The AI Space found on this computer: saved as This Computer unless a saved Space already has its address, and shown.</summary>
+    public Connection AdoptThisComputer(Uri url)
     {
-        var existing = Store.ManagedConnection ?? Store.Connections.FirstOrDefault(c => ConnectionRules.SameOrigin(c.Uri, url));
-        Connection c;
-        if (existing is not null)
-        {
-            Store.SetManaged(existing.Id, url);
-            c = Store.Get(existing.Id)!;
-        }
-        else
-        {
-            c = Store.Add(L.T("This Computer"), url, makeDefault: true, managed: true);
-        }
-        Store.SetDefault(c.Id);
-        Selected = c.Id;
-        SelectedApp = null;
-        Changed?.Invoke();
+        var c = Store.Connections.FirstOrDefault(s => ConnectionRules.SameOrigin(s.Uri, url)) ?? Store.Add(L.T("This Computer"), url, makeDefault: true);
+        Select(c.Id);
         return c;
-    }
-
-    /// <summary>Reloads every page of a Space after its sign-in changed underneath them.</summary>
-    public void ReloadPages(Guid id)
-    {
-        if (_panels.TryGetValue(id, out var p) && !p.IsDisposed) p.Load();
-        foreach (var t in Tabs(id)) t.View.Reload();
     }
 
     private void Discard(Guid id, bool keepLive = false)
@@ -392,7 +360,6 @@ internal sealed class AppModel
     {
         foreach (var v in Views()) v.RecoverIfFailed();
         foreach (var live in Lives.Values) _ = live.Refresh();
-        _ = Local.Refresh();
     }
 
     /// <summary>Stops the background refresh before the app quits; pages and Spaces keep running elsewhere.</summary>

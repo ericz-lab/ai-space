@@ -1,10 +1,12 @@
 # Windows desktop client
 
 Status: written and built; its core library is tested (`dotnet test`) and the app compiles on
-every check, but it has not yet been run on a Windows machine. The Client edition connects to
-existing Spaces; the Local edition also sets up and runs a Space on this computer, inside WSL 2
-([below](#this-computer)). It follows the Mac client ([macos-desktop.md](macos-desktop.md)): the
-same parts, the same rules, the same names, and says below where it does less.
+every check, but it has not yet been run on a Windows machine. It is a client: it opens Spaces
+that run on this computer or elsewhere and carries no AI Space of its own. At its first launch it
+looks for an AI Space on this computer and, when there is none, offers to run AI Space's own
+installer ([below](#this-computer)). It follows the Mac client
+([macos-desktop.md](macos-desktop.md)): the same parts, the same rules, the same names, and says
+below where it does less.
 
 ## What it is
 
@@ -13,14 +15,14 @@ terminal and settings, is the Space's own page; the app adds what a page cannot 
 
 | Part | What it does |
 | --- | --- |
-| Window | The Space menu (each saved Space with its state, Add a Space…), Back, Forward and Reload, a tab per open app page next to Home (the panel), then Open in Browser, Inbox with the unread count, Chat and Settings. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: an address to connect to, the address of a Space on this computer in one click, and in the Local edition the setup ([below](#this-computer)). The window keeps its size and place |
+| Window | The Space menu (each saved Space with its state, Add a Space…), Back, Forward and Reload, a tab per open app page next to Home (the panel), then Open in Browser, Inbox with the unread count, Chat and Settings. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: Install AI Space on This Computer, or Connect to an AI Space on Another Machine with the address form ([below](#this-computer)). The window keeps its size and place |
 | Pages | Each saved Space has its own WebView2 profile (cookies, storage, cache), so signing in on the panel signs in everything that Space's pages and native calls do. A link to an app of the Space opens in that app's tab, a link off the Space in the default browser. A page that cannot load shows why, with Try Again, Open in Browser and Edit Space… |
 | Quick Chat | A small window over every app with one agent's chat (the panel's own, so a conversation there is the same one): Ctrl+Alt+Space by default (Ctrl+Shift+Space, Alt+Shift+Space or off in Settings), the notification area menu, the jump list, a section of the floating ball, or `aispace://chat`. 380 wide as the Mac's, with no title bar: a 40 high header to drag it by (the Space, the agent, Open in Main Window, Close), then the page's chat in its narrow layout, whose header holds the model and the permission choice. The shortcut opens it in the upper middle of the screen, the ball beside itself ([below](#the-floating-ball)). It remembers the agent last used; Escape or Close hides it, and an answer being written goes on |
 | Floating ball | A 52 px ball over every app that never takes the keyboard (off until Settings › General turns it on; the notification area menu and its own right-click menu show and hide it) ([below](#the-floating-ball)) |
 | Notification area | The icon (the Mac's menu bar extra): a click opens the window; the menu has each Space with its state, a sign-in when it needs one, who is working, the unread threads and its apps, then Quick Chat, Show the Floating Ball, Settings… and Quit AI Space. Its tooltip counts what is unread and who is working |
 | Notifications | New unread inbox threads of every saved Space as Windows notifications, with Mark as Read and Done; a click opens the thread. The taskbar button carries a badge while something is unread |
 | Links | `aispace://` links as on the Mac (`DeepLink` in `AISpace.Core`): `chat?agent=&text=`, `open?app=`, `inbox`, `show`. A link may fill in a message but never sends it. The jump list has Quick Chat and Inbox |
-| Settings | General (notifications, keep running when the window is closed, start at sign-in, the Quick Chat shortcut, the floating ball and its sections, installing, the log), Spaces (add, edit, make default, sign out, remove) and This Computer (the Local edition) |
+| Settings | General (notifications, keep running when the window is closed, start at sign-in, the Quick Chat shortcut, the floating ball and its sections, installing, the log), and Spaces (add, edit, make default, sign out, remove) |
 
 The app is one copy per Windows session: starting it again (the Start menu, a link, the jump
 list) hands what it was started with to the running copy. Closing the window leaves it in the
@@ -81,15 +83,16 @@ desktop/windows/
   AISpace.Core/        what does not need Windows: connections and preferences, address rules,
                        the floating ball's rules (FloatingBallRules.cs),
                        the Space check, the API and live state (catalogue, inbox, runs), deep
-                       links, navigation and permission rules, installation strings, WSL commands
-                       and the Local edition's answers
+                       links, navigation and permission rules, installation strings, the search
+                       for an AI Space on this computer and its installer's command (ThisComputer.cs)
   AISpace.Core.Tests/  its tests (xUnit), run on any system
   AISpace/             the app (Windows only): App.xaml.cs (the Mac's AppDelegate), AppModel.cs,
-                       MainWindow.cs, FloatingBall.cs, Web/ (WebView2 profiles and PanelView, the
-                       Mac's PanelSession), Views/ (welcome, connection, Settings, Quick Chat, the
-                       floating ball's window and dial, This Computer), Shell/ (single instance, notification area, notifications, the
-                       shortcut, registration, Win32 calls, the log), Local/ (wsl.exe and the
-                       Local manager), Strings*.cs (English and Chinese)
+                       MainWindow.cs, FloatingBall.cs, ThisComputerSetup.cs (the first launch),
+                       Web/ (WebView2 profiles and PanelView, the Mac's PanelSession), Views/
+                       (welcome, connection, Settings, Quick Chat, the floating ball's window and
+                       dial), Shell/ (single instance, notification area, notifications, the
+                       shortcut, registration, Win32 calls, the log), Strings*.cs (English and
+                       Chinese)
   Directory.Build.props  shared settings and the version (`bun run set-version` rewrites it)
   build.ts             the build (below)
   strings.test.ts      every interface string has its Chinese (inside `bun run check`)
@@ -104,9 +107,7 @@ so releases are built on Windows.
 | `bun run windows:test` | the core library's tests (`dotnet test`) and the strings check |
 | `bun run windows:build` | `desktop/windows/build/ai-space`: `dotnet publish` for this machine's CPU, self-contained (no .NET needed on the computer), and `VERSION.json` |
 | `bun desktop/windows/build.ts --arch arm64 --out <dir>` | the same for the other CPU |
-| `bun desktop/windows/build.ts --bundle-only --out <dir>` | the Local edition's Linux release for WSL: `bundle.tar.gz` (release/server.ts `stageRelease`, `runtime/bun`, `runtime/space-pty`) and `RELEASE.json`. On Linux only, of the same CPU as the Windows it is for: it carries the Bun that builds it |
-| `bun desktop/windows/build.ts --local [--bundle <dir>]` | the Local edition: the app with that release in `local/`, taken from `--bundle` or built here on Linux |
-| `bun release/windows.ts --arch x64 --bundle <dir>` (`bun run release:windows`) | both editions as zip files in `dist/` ([release.md](release.md#windows-app)) |
+| `bun release/windows.ts --arch x64` (`bun run release:windows`) | the app as `ai-space-desktop-<version>-windows-x64.zip` in `dist/` ([release.md](release.md)) |
 
 ## Installing
 
@@ -126,8 +127,9 @@ install itself for this user, with no administrator:
 
 Running a newer copy while the installed one runs offers to update it: the running copy quits,
 the new one installs itself and starts. Uninstalling from Installed apps removes all of the above,
-and on request the saved Spaces, their sign-ins and settings; it never touches a Space's workspace
-or the Local edition's service (remove that first, in Settings › This Computer).
+and on request the saved Spaces, their sign-ins and settings. It never touches a Space: an AI
+Space on this computer keeps running with its program, its background service and its workspace,
+also one this app had installed ([below](#this-computer)); `space uninstall` removes that.
 
 The release is not signed yet: SmartScreen asks once (More info › Run anyway).
 
@@ -136,52 +138,55 @@ What the app keeps:
 | Path | What |
 | --- | --- |
 | `%APPDATA%\ai-space\connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
-| `%APPDATA%\ai-space\preferences.json` | keep running, notifications, the shortcut, the window's place, the Quick Chat agent, the floating ball (shown, its place, each Space's sections), the Local edition's distribution |
-| `%LOCALAPPDATA%\ai-space\web\` | WebView2's data, one profile per saved Space: cookies (its sign-in), storage, cache |
-| `%LOCALAPPDATA%\ai-space\inbox-seen\` | which inbox threads were already notified, per Space |
-| `%LOCALAPPDATA%\ai-space\logs\windows.log` | the app's log (Settings › General › Open Log Folder) |
-| Credential Manager › `ai-space/local-device/…` | the Local edition's device credential |
+| `%APPDATA%\ai-space\preferences.json` | keep running, notifications, the shortcut, the window's place, the Quick Chat agent, the floating ball (shown, its place, each Space's sections) |
+| `%LOCALAPPDATA%\ai-space-desktop\web\` | WebView2's data, one profile per saved Space: cookies (its sign-in), storage, cache |
+| `%LOCALAPPDATA%\ai-space-desktop\inbox-seen\` | which inbox threads were already notified, per Space |
+| `%LOCALAPPDATA%\ai-space-desktop\logs\windows.log` | the app's log (Settings › General › Open Log Folder) |
+
+None of it is under `%LOCALAPPDATA%\ai-space`: that directory is AI Space's own program
+(`release/install.ps1`), which `space uninstall` deletes whole and the app's uninstaller must
+never delete.
 
 ## This Computer
 
-The Local edition runs the Space on this computer the way the Linux app does
-([local.md](local.md#on-windows)): inside a WSL 2 distribution, as a systemd user service that
-`space local` installs, starts, stops and updates. The app carries the Linux release in
-`local\bundle.tar.gz` and drives it with `wsl.exe`. Settings › This Computer, and the welcome page
-before any Space is saved, go through it in order:
+AI Space (the service and its web panel) is installed by itself, with one command
+([release.md](release.md#one-command-install)); on Windows it runs as a Task Scheduler task of
+the user on `127.0.0.1:8700`, without WSL. The app is a client of it and treats it as it treats a
+Space on any other machine. What it adds is the first launch (`AISpace.Core/ThisComputer.cs`,
+`AISpace/ThisComputerSetup.cs`; the Mac and Linux apps follow the same contract):
 
-1. **WSL.** Without WSL 2 or a WSL 2 distribution it offers Install WSL, which opens Windows' own
-   `wsl --install -d Ubuntu-24.04` in a console (it asks for an administrator, and Windows may
-   need a restart), then Check Again. A WSL 1 distribution is named with the command that converts
-   it. With several distributions it asks which one; distributions that Docker or Rancher Desktop
-   run for themselves are left out.
-2. **The distribution.** systemd on in `/etc/wsl.conf` (kept as it was otherwise; the
-   distribution restarts once) and `loginctl enable-linger`, so the service runs with no terminal
-   open.
-3. **Set Up.** The release is unpacked in the distribution under
-   `~/.local/share/ai-space/windows/bundle/`, once per version, and `space local install
-   --device <computer name> --default-model <model>` runs with its own Bun. The agent CLIs
-   (`claude`, `codex`) are the ones installed inside the distribution; the card lists what it
-   found. A Space already there that the app did not make is offered as Connect to It or Take It
-   Over….
-4. **Afterwards.** The Space is saved as This Computer at the address the service reports
-   (`http://127.0.0.1:8700` by default; WSL forwards it to Windows) and signed in with the device
-   credential. Settings shows its version,
-   workspace and state, with Start, Stop, Restart, Repair, Open Log, Update When Idle or Update
-   Now… while an update waits on work in progress, and Remove Background Service….
+1. **Looking.** Started with no saved Space, the app asks this computer: `GET
+   http://127.0.0.1:<port>/api/space`, two seconds at most per port, first the `SPACE_PORT` of the
+   workspace's `.env` (`%SPACE_HOME%\.env`, else `%USERPROFILE%\.ai-space\.env`) when that is set,
+   then 8700. Only an answer that says `"product": "ai-space"`
+   ([editions.md](editions.md#service-identity)) counts.
+2. **Found.** It is saved as This Computer, selected and shown. Nothing is asked.
+3. **Not found.** The welcome page offers two choices and takes neither by itself:
+   - **Install AI Space on This Computer** runs the release's own installer, never a copy inside
+     the app: it downloads
+     `https://github.com/ericz-lab/ai-space/releases/latest/download/install.ps1` to a temporary
+     file (`<base>/install.ps1` when `AI_SPACE_DOWNLOAD` names a mirror or a directory, the
+     variable the installer itself honours) and runs it with
+     `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy
+     Bypass -File <file>`, hidden, with `AI_SPACE_NO_OPEN=1` so no browser opens. The page shows
+     what it prints, line by line. When it ends with code 0 the app looks again, for up to about
+     30 seconds, and saves and shows the Space. Otherwise the page shows the end of the output
+     and Retry. If an AI Space answers by the time the button is pressed, it is taken as it is and
+     nothing is installed.
+   - **Connect to an AI Space on Another Machine** opens the address form.
 
-WSL stops a distribution a few seconds after its last Windows process leaves, and the service with
-it. The app keeps one hidden `wsl.exe` sleeping in the distribution, started at sign-in and left
-running when the app quits, as the Mac's LaunchAgent outlives its app. When the app carries a
-newer release than the one installed, it updates the service once the Space has no work in
-progress, as on the Mac ([local.md](local.md#updates)); a service the person stopped is left
-stopped.
+The app never carries, updates, stops or uninstalls AI Space. Quitting or uninstalling the app
+leaves it running, with its program (`%LOCALAPPDATA%\ai-space`), its task and its workspace
+(`%USERPROFILE%\.ai-space`); `space uninstall` removes it, and `space upgrade` updates it
+([release.md](release.md#one-command-install)). A Space saved at this computer's address is marked "this
+computer" in Settings › Spaces and is otherwise like any other: removing it there forgets it and
+changes nothing in the service.
 
 ## Trust boundary
 
 The same as the Mac client's ([macos-desktop.md](macos-desktop.md#authentication-and-the-web-boundary)):
-each saved Space has its own WebView2 profile, and the native calls (live state, inbox actions,
-the device sign-in) carry that profile's cookies. No operator token is used. A redirect, 401 or
+each saved Space has its own WebView2 profile, and the native calls (live state, inbox actions)
+carry that profile's cookies. No operator token is used. A redirect, 401 or
 403 means "sign in". The pages follow the Mac's navigation rules (`NavigationPolicy`): links that
 leave the Space open in the browser, new windows never open inside the app, only the microphone is
 granted (never the camera, location or notifications), to pages of the view's own origin or the

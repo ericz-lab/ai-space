@@ -7,8 +7,8 @@ using AISpace.Shell;
 namespace AISpace.Views;
 
 /// <summary>
-/// The app's own settings (the Mac's Settings window): General, the saved Spaces and AI Space on
-/// this computer. A Space's own settings stay in its panel.
+/// The app's own settings (the Mac's Settings window): General and the saved Spaces. A Space's
+/// own settings stay in its panel.
 /// </summary>
 internal sealed class SettingsWindow : Window
 {
@@ -31,12 +31,7 @@ internal sealed class SettingsWindow : Window
         var tabs = new TabControl { Margin = new Thickness(12) };
         tabs.Items.Add(new TabItem { Header = L.T("General"), Content = Scroll(General()) });
         tabs.Items.Add(new TabItem { Header = L.T("Spaces"), Content = Scroll(Spaces()) });
-        tabs.Items.Add(new TabItem { Header = L.T("This Computer"), Content = Scroll(new LocalView(model)) });
         tabs.SelectedIndex = tab;
-        tabs.SelectionChanged += (_, e) =>
-        {
-            if (e.Source == tabs && tabs.SelectedIndex == 2) _ = _model.Local.Refresh();
-        };
         Content = tabs;
         Ui.Background(tabs);
         _model.Changed += FillSpaces;
@@ -241,7 +236,7 @@ internal sealed class SettingsWindow : Window
         {
             var notes = new List<string>();
             if (c.IsDefault) notes.Add(L.T("default"));
-            if (c.Managed) notes.Add(L.T("this computer"));
+            if (c.IsLocal) notes.Add(L.T("this computer"));
             var status = _model.Lives.TryGetValue(c.Id, out var l) ? l.Status : LiveStatus.Unknown;
             notes.Add(MainWindow.StatusText(status));
             var item = new ListBoxItem

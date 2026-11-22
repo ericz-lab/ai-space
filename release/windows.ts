@@ -1,15 +1,11 @@
 /**
- * `bun release/windows.ts [--out dist] [--arch x64|arm64] [--edition client|local|both] [--bundle <dir>]`:
- * the Windows app as zip files, one per edition (docs/windows-desktop.md, docs/editions.md):
+ * `bun release/windows.ts [--out dist] [--arch x64|arm64]`: AI Space Desktop for Windows as a zip
+ * file (docs/windows-desktop.md, docs/editions.md):
  *
- *   ai-space-desktop-<version>-windows-<arch>.zip   the client (desktop/windows/build.ts): what a
- *                                                   release publishes, and the default here
- *   ai-space-local-<version>-windows-<arch>.zip     the client with local/, the Linux release it
- *                                                   sets up in WSL 2; not published
+ *   ai-space-desktop-<version>-windows-<arch>.zip   the client (desktop/windows/build.ts)
  *
- * Each unpacks to one folder; AISpace.exe in it runs from there and offers to install itself for
- * the user. The Local edition takes its bundle from --bundle (made on Linux by
- * `bun desktop/windows/build.ts --bundle-only`), or builds it when this machine is Linux.
+ * It unpacks to one folder; AISpace.exe in it runs from there and offers to install itself for
+ * the user. It carries no AI Space: that is the release's own archive and installer.
  */
 import { mkdir, rm } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
@@ -18,7 +14,7 @@ import { SPACE_ROOT } from "../src/space/config.ts";
 import { readVersion } from "../src/space/version.ts";
 import { run } from "./server.ts";
 
-export const windowsArchiveName = (edition: "client" | "local", version: string, arch: WindowsArch) => `ai-space-${edition === "client" ? "desktop" : "local"}-${version}-windows-${arch}`;
+export const windowsArchiveName = (version: string, arch: WindowsArch) => `ai-space-desktop-${version}-windows-${arch}`;
 
 /** Zips `dir` into `archive` with the folder itself at the top. */
 async function zip(dir: string, archive: string): Promise<void> {
@@ -32,23 +28,18 @@ async function zip(dir: string, archive: string): Promise<void> {
   }
 }
 
-export async function releaseWindows(opts: { out: string; editions: ("client" | "local")[]; arch?: WindowsArch; bundle?: string; root?: string }): Promise<string[]> {
+export async function releaseWindows(opts: { out: string; arch?: WindowsArch; root?: string }): Promise<string> {
   const root = opts.root ?? SPACE_ROOT;
   const arch = opts.arch ?? hostArch();
   const out = resolve(opts.out);
   await mkdir(out, { recursive: true });
-  const version = await readVersion(root);
-  const archives: string[] = [];
-  for (const edition of opts.editions) {
-    const name = windowsArchiveName(edition, version, arch);
-    const dir = join(out, name);
-    await buildWindows({ out: dir, arch, local: edition === "local", ...(opts.bundle ? { bundle: opts.bundle } : {}), root });
-    const archive = join(out, `${name}.zip`);
-    await zip(dir, archive);
-    await rm(dir, { recursive: true, force: true });
-    archives.push(archive);
-  }
-  return archives;
+  const name = windowsArchiveName(await readVersion(root), arch);
+  const dir = join(out, name);
+  await buildWindows({ out: dir, arch, root });
+  const archive = join(out, `${name}.zip`);
+  await zip(dir, archive);
+  await rm(dir, { recursive: true, force: true });
+  return archive;
 }
 
 if (import.meta.main) {
@@ -57,11 +48,7 @@ if (import.meta.main) {
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : undefined;
   };
-  const edition = value("--edition") ?? "client";
-  const editions = edition === "both" ? (["client", "local"] as const) : [edition as "client" | "local"];
-  if (!editions.every((e) => e === "client" || e === "local")) throw new Error("--edition is client, local or both");
   const arch = value("--arch");
   if (arch !== undefined && arch !== "x64" && arch !== "arm64") throw new Error("--arch is x64 or arm64");
-  const bundle = value("--bundle");
-  for (const a of await releaseWindows({ out: value("--out") ?? join(SPACE_ROOT, "dist"), editions: [...editions], ...(arch ? { arch } : {}), ...(bundle ? { bundle } : {}) })) console.log(a);
+  console.log(await releaseWindows({ out: value("--out") ?? join(SPACE_ROOT, "dist"), ...(arch ? { arch } : {}) }));
 }
