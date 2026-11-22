@@ -121,12 +121,20 @@ git push <host> main      # 检出到 ~/.ai-space/core，运行 deploy/install.s
 
 ## 🏗️ 架构
 
-![ai-space 架构](docs/architecture.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture.dark.svg">
+  <img alt="ai-space 架构：客户端、AI Space Server（app、共享服务、agent 运行时与工作区）、peers 和可选扩展" src="docs/images/architecture.light.svg">
+</picture>
 
-- **应用层。** 统一的 web UI 是唯一入口：已安装的 app、与任意 agent 对话、app 的 widget、通知和设置。每个 app 拥有一个或多个 agent，可以贡献 widget。
-- **空间层（ai-space 核心）。** 每个 app 和 agent 都通过同一个 Space API 调用的共享服务，不必各自造轮子。核心还维护 app 注册表，把请求路由到正确的 agent，并处理鉴权。
-- **运行时层。** Agent 以 Claude Code 或 Codex 会话运行；skills、MCP 工具、记忆和模型访问来自运行时，agent 把 Space API 当作工具调用。
-- **基础设施层。** 一台专用 Linux 服务器，上面是 Bun、SQLite 和文件系统，外加一个公开域名。
+- **客户端。** 任意浏览器里的 web 面板、Mac / Linux / Windows 上的 AI Space Desktop、移动端 app、`space` CLI，以及用共享 skills 开发 app 的编程 agent。它们都通过同一个 Space API 访问 Space。
+- **AI Space Server。** 每台机器一个 Space，一条命令安装：Linux 或 macOS 上 `curl -fsSL https://ai-space.me/install.sh | bash`，Windows 上 `irm https://ai-space.me/install.ps1 | iex`。Space 服务（Bun）提供 Space API 和面板，处理登录，维护 app 注册表，为 app 分配主机名，并运行 package gateway。
+- **App。** 来自 app 目录的签名包，或在 `app-src` 和 App Studio 里构建的源码 app。每个 app 可以带一个服务、widget、agent、任务和桌宠，并调用共享服务而不是各自造轮子：调度、总线、通知、对话、语音、存储、备份、服务托管、快捷指令、模型、终端和反馈。
+- **Agent 运行时。** Agent 运行和模型调用交给 Claude Code、Codex、DeepSeek Harness 或 Anthropic API，按四个能力档位选择。
+- **工作区。** Space 拥有的一切都以普通文件和 SQLite 存在 `~/.ai-space` 里。
+- **Peers。** 一个 hub Space 用一个面板管理多台机器，把调用、模型运行和终端转发给各个 peer；每个 peer 保留自己的工作区。
+- **可选扩展。** `space setup ingress`、`backup`、`notifications`、`github` 按需加上带登录的主机名、存储桶快照、聊天通知和代码仓库。
+
+这张图用白板 app（一个 ai-space app）绘制并导出为 SVG；要修改，先改白板再重新导出。
 
 ## 📁 你的数据
 

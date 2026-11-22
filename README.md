@@ -121,12 +121,20 @@ With only these, the basic install is complete: the panel is on loopback, opened
 
 ## 🏗️ Architecture
 
-![ai-space architecture](docs/architecture.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture.dark.svg">
+  <img alt="ai-space architecture: clients, the AI Space Server with its apps, shared services, agent runtimes and workspace, peers, and optional extensions" src="docs/images/architecture.light.svg">
+</picture>
 
-- **Application layer.** One web UI is the only entry: installed apps, chat with any agent, app widgets, notifications and settings. Each app owns one or more agents and may contribute widgets.
-- **Space layer (ai-space core).** Shared services every app and agent calls through one Space API instead of building their own. The core also keeps the app registry, routes requests to the right agent, and handles auth.
-- **Runtime layer.** Agents run as Claude Code or Codex sessions; skills, MCP tools, memory and LLM access come from the runtime, and agents reach the Space API as tools.
-- **Infrastructure layer.** One dedicated Linux server with Bun, SQLite and the filesystem, and a public domain.
+- **Clients.** The web panel in any browser, AI Space Desktop on Mac, Linux and Windows, the mobile apps, the `space` CLI, and the coding agents that build apps with the shared skills. All of them talk to a Space through the one Space API.
+- **AI Space Server.** One Space per machine, installed with one command: `curl -fsSL https://ai-space.me/install.sh | bash` on Linux or macOS, `irm https://ai-space.me/install.ps1 | iex` on Windows. The Space service (Bun) serves the Space API and the panel, handles sign-in, keeps the app registry, routes app hostnames and runs the package gateway.
+- **Apps.** Signed packages from the app catalog, or source apps built in `app-src` and App Studio. Each app may bring a service, widgets, agents, tasks and a pet, and calls the shared services instead of building its own: scheduler, bus, notify, chat, speech, storage, backup, supervision, shortcuts, models, terminal and feedback.
+- **Agent runtimes.** Agent runs and model calls go to Claude Code, Codex, DeepSeek Harness or the Anthropic API, picked by four capability tiers.
+- **Workspace.** Everything a Space owns lives in `~/.ai-space` as plain files and SQLite.
+- **Peers.** A hub Space shows one panel over several machines and forwards calls, model runs and terminals to its peers; each peer keeps its own workspace.
+- **Optional extensions.** `space setup ingress`, `backup`, `notifications` and `github` add a hostname behind a login, bucket snapshots, chat messages and repositories when you need them.
+
+The diagram is drawn on the whiteboard app (an ai-space app) and exported from it as SVG; edit the board and export again to change it.
 
 ## 📁 Your data
 
