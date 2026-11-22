@@ -302,6 +302,7 @@ describe("app catalog", () => {
 
 describe("catalog sources and format", () => {
   test("SPACE_APP_CATALOG", () => {
+    expect(DEFAULT_CATALOG_URL).toBe("https://ai-space.me/store/index.json");
     expect(catalogSources(undefined, "/ws")).toEqual([DEFAULT_CATALOG_URL]);
     expect(catalogSources("none", "/ws")).toEqual([]);
     expect(catalogSources("", "/ws")).toEqual([]);

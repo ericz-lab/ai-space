@@ -1,8 +1,12 @@
 import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-/** The catalog every Space reads unless `SPACE_APP_CATALOG` says otherwise (docs/app-catalog.md). */
-export const DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/ericz-lab/ai-space-apps/main/catalog.json";
+/**
+ * The catalog every Space reads unless `SPACE_APP_CATALOG` says otherwise (docs/app-catalog.md): the
+ * ai-space-apps repository's `catalog.json`, published under ai-space.me so that a Space needs no
+ * route to GitHub to list or install apps.
+ */
+export const DEFAULT_CATALOG_URL = "https://ai-space.me/store/index.json";
 
 /**
  * `SPACE_APP_CATALOG`: unset, the default catalog; `none` or empty, no catalog; otherwise a comma
