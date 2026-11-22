@@ -69,6 +69,8 @@ public partial class App
         };
         _notifier.SetUp(Dispatcher);
         model.PostNotifications = _notifier.Post;
+        model.OpenAppSettings = tab => OpenSettings(tab);
+        model.OpenQuickChat = (space, agent, text) => Chat().Present(agent, text, space);
 
         _main = new MainWindow(model, () => Quitting, () => OpenSettings(), () => SettingsWindow.AddSpace(_main, model), () => WelcomeView.Create(model));
         _main.HiddenByClose += OnMainHidden;

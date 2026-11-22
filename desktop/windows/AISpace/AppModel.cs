@@ -1,20 +1,53 @@
 using System.Diagnostics;
-using System.Windows;
 using System.Windows.Threading;
 using AISpace.Core;
 using AISpace.Shell;
+using AISpace.Views;
 using AISpace.Web;
 using Microsoft.Win32;
 
 namespace AISpace;
 
-/// <summary>An app of a Space open as a tab of the main window.</summary>
-internal sealed record AppTab(AppInfo App, PanelView View);
+/// <summary>What a web tab of the main window shows.</summary>
+internal enum WebTabKind
+{
+    /// <summary>An app of the Space, at its own page.</summary>
+    App,
+    /// <summary>The Space's terminal page (<c>/?page=terminal</c>).</summary>
+    Terminal,
+    /// <summary>The Space's chat page (<c>/?page=chat&amp;agent=…</c>).</summary>
+    Chat,
+    /// <summary>The web panel itself, for what has no native page yet and for signing in.</summary>
+    Panel,
+}
+
+/// <summary>
+/// A web tab of the main window: an app of the Space, or one of the Space's own pages (terminal,
+/// chat, the web panel). <see cref="Key"/> names it among the Space's tabs: <c>app:&lt;id&gt;</c>,
+/// <c>terminal</c>, <c>chat</c>, <c>panel</c>.
+/// </summary>
+internal sealed record WebTab(string Key, WebTabKind Kind, AppInfo? App, PanelView View)
+{
+    public static string AppKey(string app) => "app:" + app;
+
+    public string Title => Kind switch
+    {
+        WebTabKind.App => App!.DisplayTitle(),
+        WebTabKind.Terminal => L.T("Terminal"),
+        WebTabKind.Panel => L.T("Web Panel"),
+        _ => View.PageTitle is { Length: > 0 } t ? t.Replace(" · ai-space", "", StringComparison.Ordinal) : L.T("Chat"),
+    };
+}
 
 /// <summary>
 /// What the windows show and do, apart from how they draw it (the Mac's <c>AppModel</c>): the saved
-/// Spaces, the one selected, each Space's panel page and app tabs, the background refresh of every
-/// Space for the inbox and the notification area, and where links go. Runs on the UI thread.
+/// Spaces, the one selected, each Space's native pages and web tabs, the background refresh of
+/// every Space for the inbox and the notification area, and where links go. Runs on the UI thread.
+///
+/// The main window shows, for the selected Space, either one of its native pages
+/// (<see cref="SelectedPage"/>: Home, Inbox, Shortcuts, Settings) or one of its web tabs
+/// (<see cref="SelectedTab"/>). While the Space needs a sign-in, its web panel (where the sign-in
+/// page appears) stands in for every native page, until the panel has signed in.
 /// </summary>
 internal sealed class AppModel
 {
@@ -23,8 +56,10 @@ internal sealed class AppModel
     private readonly Dispatcher _ui;
     private readonly FileSeenStore _seen;
     private readonly Dictionary<Guid, PanelView> _panels = [];
-    private readonly Dictionary<Guid, List<AppTab>> _tabs = [];
+    private readonly Dictionary<Guid, List<WebTab>> _tabs = [];
+    private readonly Dictionary<Guid, Dictionary<PageKind, NativePage>> _pages = [];
     private readonly Dictionary<Guid, SpaceApi> _apis = [];
+    private readonly Dictionary<Guid, IconStore> _icons = [];
 
     public AppModel(Dispatcher ui, AppPaths paths)
     {
@@ -53,9 +88,17 @@ internal sealed class AppModel
     /// <summary>Set by the app: posts new inbox threads as Windows notifications.</summary>
     public Action<IReadOnlyList<InboxItem>, Connection, bool>? PostNotifications { get; set; }
 
+    /// <summary>Set by the app: opens its own settings window on a tab (0 General, 1 Spaces).</summary>
+    public Action<int>? OpenAppSettings { get; set; }
+
+    /// <summary>Set by the app: Quick Chat on a Space's agent, with a draft.</summary>
+    public Action<Guid?, string?, string?>? OpenQuickChat { get; set; }
+
     public Guid? Selected { get; private set; }
-    /// <summary>The app tab shown in the main window; null for the panel.</summary>
-    public string? SelectedApp { get; private set; }
+    /// <summary>The native page the main window shows while no web tab is selected.</summary>
+    public PageKind SelectedPage { get; private set; } = PageKind.Home;
+    /// <summary>The web tab the main window shows (<see cref="WebTab.Key"/>); null for the native page.</summary>
+    public string? SelectedTab { get; private set; }
     public Connection? SelectedConnection => Selected is { } id ? Store.Get(id) : null;
     public SpaceLive? SelectedLive => Selected is { } id && Lives.TryGetValue(id, out var l) ? l : null;
     public int Unread => Lives.Values.Sum(l => l.Summary.Unread);
@@ -89,7 +132,47 @@ internal sealed class AppModel
         return api;
     }
 
-    // Pages
+    /// <summary>The Space's icons, fetched with its sign-in, kept for the app's run.</summary>
+    public IconStore Icons(Guid connection)
+    {
+        if (_icons.TryGetValue(connection, out var store)) return store;
+        store = new IconStore(() => Store.Get(connection) is { } c ? Api(c) : null);
+        _icons[connection] = store;
+        return store;
+    }
+
+    // Native pages
+
+    /// <summary>The Space's native page, made on first use and kept until the Space is discarded.</summary>
+    public NativePage Page(Connection c, PageKind kind)
+    {
+        if (!_pages.TryGetValue(c.Id, out var pages)) _pages[c.Id] = pages = [];
+        if (pages.TryGetValue(kind, out var page)) return page;
+        var context = new PageContext(this, c.Id);
+        page = kind switch
+        {
+            PageKind.Home => new HomePage(context),
+            PageKind.Inbox => new InboxPage(context),
+            PageKind.Shortcuts => new ShortcutsPage(context),
+            _ => new SpaceSettingsPage(context),
+        };
+        pages[kind] = page;
+        return page;
+    }
+
+    /// <summary>Every native page made so far, of every Space.</summary>
+    public IEnumerable<NativePage> Pages() => _pages.Values.SelectMany(p => p.Values);
+
+    /// <summary>
+    /// The native page the main window shows now; null when a web tab is shown, when the Space
+    /// needs a sign-in (its panel is shown instead) or without a Space.
+    /// </summary>
+    public NativePage? ShownPage() => SelectedConnection is { } c && ShownView() is null ? Page(c, SelectedPage) : null;
+
+    /// <summary>Whether the Space's native pages wait for a sign-in on its web panel.</summary>
+    public bool NeedsSignIn(Guid connection) => Lives.TryGetValue(connection, out var l) && l.Status == LiveStatus.SignInNeeded;
+
+    // Web pages
 
     public PanelView NewView(Connection c, Uri home, bool verifiesSpace, string? app)
     {
@@ -105,7 +188,7 @@ internal sealed class AppModel
         return view;
     }
 
-    /// <summary>The Space's panel page, made and loaded on first use.</summary>
+    /// <summary>The Space's web panel, made and loaded on first use: the Web Panel tab, and the sign-in page while one is needed.</summary>
     public PanelView Panel(Connection c)
     {
         if (_panels.TryGetValue(c.Id, out var p) && !p.IsDisposed && ConnectionRules.SameOrigin(p.Home, c.Uri)) return p;
@@ -116,35 +199,42 @@ internal sealed class AppModel
         return p;
     }
 
-    public IReadOnlyList<AppTab> Tabs(Guid connection) => _tabs.TryGetValue(connection, out var t) ? t : [];
+    public IReadOnlyList<WebTab> Tabs(Guid connection) => _tabs.TryGetValue(connection, out var t) ? t : [];
 
-    /// <summary>Every page the main window holds, of every Space.</summary>
-    public IEnumerable<PanelView> Views() => _panels.Values.Concat(_tabs.Values.SelectMany(t => t.Select(x => x.View))).Where(v => !v.IsDisposed);
+    /// <summary>Every web page the main window holds, of every Space.</summary>
+    public IEnumerable<PanelView> Views() => _panels.Values.Concat(_tabs.Values.SelectMany(t => t.Select(x => x.View))).Distinct().Where(v => !v.IsDisposed);
 
-    /// <summary>The page the main window shows now; null without a Space.</summary>
+    /// <summary>The web page the main window shows now: the selected tab, or the panel while the Space needs a sign-in; null for a native page.</summary>
     public PanelView? ShownView()
     {
         if (SelectedConnection is not { } c) return null;
-        if (SelectedApp is { } app && Tabs(c.Id).FirstOrDefault(t => t.App.Id == app) is { } tab) return tab.View;
-        return Panel(c);
+        if (SelectedTab is { } key && Tabs(c.Id).FirstOrDefault(t => t.Key == key) is { } tab) return tab.View;
+        return NeedsSignIn(c.Id) ? Panel(c) : null;
     }
+
+    /// <summary>The selected web tab; null when a native page (or the sign-in) is shown.</summary>
+    public WebTab? ShownTab() => SelectedConnection is { } c && SelectedTab is { } key ? Tabs(c.Id).FirstOrDefault(t => t.Key == key) : null;
 
     private void OnViewState(PanelView view, SpaceState state)
     {
         if (Store.Get(view.Connection.Id) is not { } c) return;
+        // Signed in on the panel (or it answers again): the native pages come back once the live state agrees.
         if (state.Kind == SpaceStateKind.Ready && view.VerifiesSpace && Lives.TryGetValue(c.Id, out var live) && live.Status != LiveStatus.Ok)
         {
+            _icons.GetValueOrDefault(c.Id)?.Clear();
             _ = live.Refresh(catalogue: true);
         }
     }
 
     // The main window's place
 
+    /// <summary>Shows another Space, on its Home.</summary>
     public void Select(Guid id)
     {
         if (Store.Get(id) is null) return;
         Selected = id;
-        SelectedApp = null;
+        SelectedTab = null;
+        SelectedPage = PageKind.Home;
         Prefs.Selected = id;
         SavePrefs();
         Changed?.Invoke();
@@ -162,30 +252,120 @@ internal sealed class AppModel
         ShowWindowRequested?.Invoke();
     }
 
-    public void ShowTab(Guid connection, string? app)
-    {
-        Selected = connection;
-        SelectedApp = app;
-        ShowMainWindow(connection);
-    }
+    /// <summary>The Space to act on: the one named, else the one shown, else the default.</summary>
+    private Connection? Target(Guid? connection) => (connection is { } id ? Store.Get(id) : null) ?? SelectedConnection ?? Store.Default;
 
-    /// <summary>The panel, opening one of its windows when a link is given (src/web/panel-link.ts).</summary>
-    public void ShowPanel(Guid? connection, Func<Uri, Uri>? link = null)
+    /// <summary>A native page of a Space (the one shown when null).</summary>
+    public void ShowPage(Guid? connection, PageKind page)
     {
-        var c = (connection is { } id ? Store.Get(id) : null) ?? SelectedConnection ?? Store.Default;
-        if (c is null)
+        if (Target(connection) is not { } c)
         {
             ShowMainWindow();
             return;
         }
-        var panel = Panel(c);
-        if (link is not null) panel.Navigate(link(c.Uri));
-        ShowTab(c.Id, null);
+        Selected = c.Id;
+        SelectedTab = null;
+        SelectedPage = page;
+        ShowMainWindow(c.Id);
     }
 
-    public void ShowInbox(Guid? connection = null) => ShowPanel(connection, PanelLink.Inbox);
+    /// <summary>A web tab of a Space by its key.</summary>
+    public void ShowTab(Guid connection, string key)
+    {
+        Selected = connection;
+        SelectedTab = key;
+        ShowMainWindow(connection);
+    }
 
-    public void ShowChat(Guid? connection = null, string? agent = null, string? text = null) => ShowPanel(connection, u => PanelLink.Chat(u, agent, text));
+    public void ShowInbox(Guid? connection = null) => ShowPage(connection, PageKind.Inbox);
+
+    /// <summary>The web tab of one of the Space's own pages, made (at <paramref name="url"/>) or moved there.</summary>
+    private void ShowSpaceTab(Connection c, WebTabKind kind, Uri url)
+    {
+        var key = kind.ToString().ToLowerInvariant();
+        if (!_tabs.TryGetValue(c.Id, out var tabs)) _tabs[c.Id] = tabs = [];
+        var tab = tabs.FirstOrDefault(t => t.Key == key);
+        if (tab is null || tab.View.IsDisposed)
+        {
+            if (tab is not null) tabs.Remove(tab);
+            var view = kind == WebTabKind.Panel ? Panel(c) : NewView(c, url, verifiesSpace: false, app: null);
+            if (kind != WebTabKind.Panel)
+            {
+                var own = kind == WebTabKind.Terminal ? SpacePageKind.Terminal : SpacePageKind.Chat;
+                view.Leaves = u => SpacePages.LeavesTab(u, c.Uri, own);
+            }
+            tab = new WebTab(key, kind, null, view);
+            tabs.Add(tab);
+            if (kind != WebTabKind.Panel) view.Load();
+            else if (view.Current != url && url != c.Uri) view.Navigate(url);
+        }
+        else if (tab.View.Current != url && (kind != WebTabKind.Panel || url != c.Uri))
+        {
+            tab.View.Navigate(url);
+        }
+        ShowTab(c.Id, key);
+    }
+
+    /// <summary>An agent's chat in the Space's chat tab (its chat page); the text fills the message field and is never sent.</summary>
+    public void ShowChat(Guid? connection = null, string? agent = null, string? text = null)
+    {
+        if (Target(connection) is not { } c)
+        {
+            ShowMainWindow();
+            return;
+        }
+        ShowSpaceTab(c, WebTabKind.Chat, SpacePages.ChatUrl(c.Uri, agent, text));
+    }
+
+    /// <summary>The Space's terminal in its tab.</summary>
+    public void ShowTerminal(Guid? connection = null)
+    {
+        if (Target(connection) is not { } c)
+        {
+            ShowMainWindow();
+            return;
+        }
+        ShowSpaceTab(c, WebTabKind.Terminal, SpacePages.PageUrl(c.Uri, SpacePageKind.Terminal));
+    }
+
+    /// <summary>The Space's web panel in its tab, at <paramref name="url"/> (one of its pages) when given.</summary>
+    public void ShowWebPanel(Guid? connection = null, Uri? url = null)
+    {
+        if (Target(connection) is not { } c)
+        {
+            ShowMainWindow();
+            return;
+        }
+        ShowSpaceTab(c, WebTabKind.Panel, url ?? c.Uri);
+    }
+
+    /// <summary>One of the Space's own pages (<see cref="SpacePages"/>): natively where the app has the page, else in its tab.</summary>
+    public void ShowSpacePage(Guid connection, SpacePage page)
+    {
+        if (Store.Get(connection) is not { } c) return;
+        switch (page.Kind)
+        {
+            case SpacePageKind.Home:
+                ShowPage(connection, PageKind.Home);
+                break;
+            case SpacePageKind.Inbox:
+                ShowPage(connection, PageKind.Inbox);
+                break;
+            case SpacePageKind.Shortcuts:
+                ShowPage(connection, PageKind.Shortcuts);
+                break;
+            case SpacePageKind.Settings:
+                ShowPage(connection, PageKind.Settings);
+                break;
+            case SpacePageKind.Terminal:
+                ShowTerminal(connection);
+                break;
+            default:
+                // The chat page on the linked agent and session; a fragment link's text becomes its draft.
+                ShowSpaceTab(c, WebTabKind.Chat, SpacePages.ChatUrl(c.Uri, page.Agent, page.Text, page.Session));
+                break;
+        }
+    }
 
     // Apps and links
 
@@ -194,12 +374,13 @@ internal sealed class AppModel
     {
         if (Store.Get(connection) is not { } c) return;
         if (!_tabs.TryGetValue(connection, out var tabs)) _tabs[connection] = tabs = [];
-        var tab = tabs.FirstOrDefault(t => t.App.Id == app.Id);
+        var key = WebTab.AppKey(app.Id);
+        var tab = tabs.FirstOrDefault(t => t.Key == key);
         if (tab is null)
         {
             var home = url ?? app.PageUrl(c.Uri);
             if (home is null) return;
-            tab = new AppTab(app, NewView(c, home, verifiesSpace: false, app.Id));
+            tab = new WebTab(key, WebTabKind.App, app, NewView(c, home, verifiesSpace: false, app.Id));
             tabs.Add(tab);
             tab.View.Load();
         }
@@ -207,27 +388,40 @@ internal sealed class AppModel
         {
             tab.View.Navigate(url);
         }
-        ShowTab(connection, app.Id);
+        ShowTab(connection, key);
     }
 
-    public void CloseTab(Guid connection, string app)
+    public void CloseTab(Guid connection, string key)
     {
         if (!_tabs.TryGetValue(connection, out var tabs)) return;
-        var i = tabs.FindIndex(t => t.App.Id == app);
+        var i = tabs.FindIndex(t => t.Key == key);
         if (i < 0) return;
-        tabs[i].View.Close();
+        // The panel stays loaded: it is also where the Space signs in.
+        if (tabs[i].Kind != WebTabKind.Panel) tabs[i].View.Close();
         tabs.RemoveAt(i);
-        if (Selected == connection && SelectedApp == app) SelectedApp = tabs.Count == 0 ? null : tabs[Math.Min(i, tabs.Count - 1)].App.Id;
+        if (Selected == connection && SelectedTab == key) SelectedTab = tabs.Count == 0 ? null : tabs[Math.Min(i, tabs.Count - 1)].Key;
         Changed?.Invoke();
     }
 
-    /// <summary>A link leaving a page: an app of the Space opens as its tab, anything else in the browser.</summary>
+    /// <summary>
+    /// A link leaving a page (or opening a new window), or one a native page follows: a page of the
+    /// Space never leaves the app (<see cref="SpacePages"/>), an app's opens as its tab, anything
+    /// else in the browser.
+    /// </summary>
     public void OpenLink(Uri url, Guid connection)
     {
-        if (Store.Get(connection) is { } c && Lives.TryGetValue(connection, out var live) && AppRoutes.AppFor(url, live.Apps, c.Uri) is { } app)
+        if (Store.Get(connection) is { } c)
         {
-            OpenApp(app, connection, url);
-            return;
+            if (SpacePages.Of(url, c.Uri) is { } page)
+            {
+                ShowSpacePage(connection, page);
+                return;
+            }
+            if (Lives.TryGetValue(connection, out var live) && AppRoutes.AppFor(url, live.Apps, c.Uri) is { } app)
+            {
+                OpenApp(app, connection, url);
+                return;
+            }
         }
         OpenOutside(url);
     }
@@ -285,7 +479,7 @@ internal sealed class AppModel
     public Connection Add(string name, Uri url)
     {
         var c = Store.Add(name, url);
-        ShowTab(c.Id, null);
+        ShowPage(c.Id, PageKind.Home);
         return c;
     }
 
@@ -312,7 +506,11 @@ internal sealed class AppModel
     public async Task SignOut(Guid id)
     {
         Discard(id, keepLive: true);
-        if (Selected == id) SelectedApp = null;
+        if (Selected == id)
+        {
+            SelectedTab = null;
+            SelectedPage = PageKind.Home;
+        }
         Changed?.Invoke();
         await Web.Clear(id);
         if (Lives.TryGetValue(id, out var live)) await live.Refresh(catalogue: true);
@@ -332,6 +530,11 @@ internal sealed class AppModel
     {
         if (_panels.Remove(id, out var p)) p.Close();
         if (_tabs.Remove(id, out var tabs)) tabs.ForEach(t => t.View.Close());
+        if (_pages.Remove(id, out var pages))
+        {
+            foreach (var page in pages.Values) page.Close();
+        }
+        if (_icons.Remove(id, out var icons)) icons.Clear();
         if (!keepLive && Lives.Remove(id, out var live)) live.Stop();
     }
 
@@ -348,11 +551,20 @@ internal sealed class AppModel
         {
             var live = new SpaceLive(c, Api(c), _seen);
             live.NewInbox += (l, items) => PostNotifications?.Invoke(items, l.Connection, Store.Connections.Count > 1);
-            live.Refreshed += _ => Changed?.Invoke();
+            live.Refreshed += OnRefreshed;
             Lives[c.Id] = live;
             live.Start();
         }
         if (Selected is not { } s || !current.ContainsKey(s)) Selected = Store.Default?.Id;
+        Changed?.Invoke();
+    }
+
+    private void OnRefreshed(SpaceLive live)
+    {
+        if (_pages.TryGetValue(live.Connection.Id, out var pages))
+        {
+            foreach (var page in pages.Values.ToList()) page.LiveChanged();
+        }
         Changed?.Invoke();
     }
 
@@ -366,6 +578,7 @@ internal sealed class AppModel
     public void Stop()
     {
         foreach (var live in Lives.Values) live.Stop();
+        foreach (var page in Pages().ToList()) page.Close();
         foreach (var v in Views().ToList()) v.Close();
     }
 }

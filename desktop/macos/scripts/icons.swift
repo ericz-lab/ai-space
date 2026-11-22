@@ -1,8 +1,8 @@
 // Draws the app icon and the in-app mark from the ai-space logo (docs/logo.svg), as the iPhone
 // client does (mobile/ios/scripts/icons.swift). Run with `swift scripts/icons.swift` from
 // desktop/macos after the mark changes; AppKit reads SVG, iconutil makes the .icns. The same run
-// redraws the web panel's icons (src/web/public) and the Windows client's .ico, which have no
-// drawing tools of their own.
+// redraws the web panel's icons (src/web/public), which has no drawing tools of its own. The
+// Windows client draws its .ico itself, the mark on a transparent ground (desktop/windows/icon.ts).
 import AppKit
 
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
@@ -58,27 +58,3 @@ try mark.write(to: web.appendingPathComponent("favicon.svg"), atomically: true, 
 let square = mark.replacingOccurrences(of: "</title>", with: "</title><rect width=\"512\" height=\"512\" fill=\"#FFFFFF\"/>")
 try png(square, side: 512, to: web.appendingPathComponent("icon-512.png"))
 try png(square, side: 180, to: web.appendingPathComponent("apple-touch-icon.png"))
-
-// Windows draws an icon to its edges: the white rounded square without the Mac grid's margin and
-// the mark larger in it, so it still reads at 16 pixels, as
-// PNG images of every size the shell asks for in one .ico (a 256 entry is written as 0).
-let tile = """
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" rx="230" fill="#FFFFFF"/>
-  <g transform="translate(51 51) scale(1.8)">\(body)</g>
-</svg>
-"""
-let sides = [16, 24, 32, 48, 64, 128, 256]
-let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("AISpace-ico-\(ProcessInfo.processInfo.processIdentifier).png")
-var images: [Data] = []
-for side in sides { try png(tile, side: side, to: scratch); images.append(try Data(contentsOf: scratch)) }
-try? FileManager.default.removeItem(at: scratch)
-func le<T: FixedWidthInteger>(_ value: T) -> Data { withUnsafeBytes(of: value.littleEndian) { Data($0) } }
-var ico = le(UInt16(0)) + le(UInt16(1)) + le(UInt16(sides.count))
-var offset = 6 + 16 * sides.count
-for (side, image) in zip(sides, images) {
-    ico += Data([UInt8(side % 256), UInt8(side % 256), 0, 0]) + le(UInt16(1)) + le(UInt16(32)) + le(UInt32(image.count)) + le(UInt32(offset))
-    offset += image.count
-}
-for image in images { ico += image }
-try ico.write(to: root.appendingPathComponent("../windows/AISpace/Assets/AISpace.ico"))

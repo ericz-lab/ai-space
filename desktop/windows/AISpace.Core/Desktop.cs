@@ -86,6 +86,8 @@ public sealed class Preferences
     [JsonPropertyName("floatingBallSlots")] public Dictionary<string, List<string>> BallSlots { get; set; } = [];
     /// <summary>Where the ball last stood (its top-left corner, in device-independent pixels); unset until it was moved.</summary>
     [JsonPropertyName("floatingBallOrigin")] public double[]? FloatingBallOrigin { get; set; }
+    /// <summary>The Claude desk pet walking along the bottom of Home; on until hidden from its menu or Settings › General.</summary>
+    [JsonPropertyName("deskPet")] public bool DeskPet { get; set; } = true;
 
     [JsonIgnore]
     public ScreenPoint? BallOrigin

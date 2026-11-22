@@ -102,6 +102,44 @@ internal static partial class Native
         return new Core.ScreenRect(r.Left / scale.DpiScaleX, r.Top / scale.DpiScaleY, (r.Right - r.Left) / scale.DpiScaleX, (r.Bottom - r.Top) / scale.DpiScaleY);
     }
 
+    /// <summary>
+    /// Every monitor's work area, the primary first, in the device-independent pixels of
+    /// <paramref name="visual"/> (a window not yet shown has the system's scale).
+    /// </summary>
+    public static IReadOnlyList<Core.ScreenRect> WorkAreas(System.Windows.Media.Visual visual)
+    {
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(visual);
+        var areas = Forms.Screen.AllScreens.OrderByDescending(s => s.Primary)
+            .Select(s => s.WorkingArea)
+            .Select(r => new Core.ScreenRect(r.Left / scale.DpiScaleX, r.Top / scale.DpiScaleY, r.Width / scale.DpiScaleX, r.Height / scale.DpiScaleY))
+            .ToList();
+        if (areas.Count > 0) return areas;
+        var w = System.Windows.SystemParameters.WorkArea;
+        return [new Core.ScreenRect(w.X, w.Y, w.Width, w.Height)];
+    }
+
+    /// <summary>
+    /// Keeps a window wholly on one monitor's work area, so its title bar can be reached: a
+    /// window whose size or place (centred on its owner, or saved) would put part of it off the
+    /// screen is moved and, when it must be, shrunk once it has its size (<see cref="Core.WindowPlacement"/>).
+    /// </summary>
+    public static void KeepOnScreen(System.Windows.Window window)
+    {
+        void Fit()
+        {
+            if (window.WindowState != System.Windows.WindowState.Normal) return;
+            var areas = WorkAreas(window);
+            var r = new Core.ScreenRect(window.Left, window.Top, window.ActualWidth, window.ActualHeight);
+            if (double.IsNaN(r.X) || double.IsNaN(r.Y) || Core.WindowPlacement.IsOnScreen(r, areas)) return;
+            var fit = Core.WindowPlacement.Fit(r, areas, window.MinWidth, window.MinHeight);
+            window.Left = fit.X;
+            window.Top = fit.Y;
+            if (fit.Width < r.Width) window.Width = fit.Width;
+            if (fit.Height < r.Height) window.Height = fit.Height;
+        }
+        window.Loaded += (_, _) => Fit();
+    }
+
     /// <summary>Tells Explorer that file associations changed, so a new link handler is used at once.</summary>
     public static void AssociationsChanged() => SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero);
 

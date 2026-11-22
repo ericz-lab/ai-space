@@ -17,6 +17,7 @@ internal sealed class ConnectionDialog : Window
         SizeToContent = SizeToContent.WidthAndHeight;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        Shell.Native.KeepOnScreen(this);
         ShowInTaskbar = false;
         _name.Text = existing?.Name ?? "";
         _url.Text = existing?.Url ?? "";

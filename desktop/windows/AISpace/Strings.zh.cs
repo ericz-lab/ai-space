@@ -1,9 +1,9 @@
 namespace AISpace;
 
-/// <summary>The Chinese of every string in the interface, keyed by its English.</summary>
+/// <summary>The Chinese of the shell's strings, keyed by their English (Strings.cs says which table holds what).</summary>
 internal static partial class L
 {
-    private static readonly Dictionary<string, string> Zh = new()
+    private static readonly Dictionary<string, string> ZhCore = new()
     {
         ["AI Space was installed, but it does not answer on this computer yet."] = "AI Space 已安装，但这台电脑上的服务还没有响应。",
         ["Connect to an AI Space on Another Machine"] = "连接另一台机器上的 AI Space",
@@ -136,5 +136,14 @@ internal static partial class L
         ["Right"] = "右",
         ["Bottom"] = "下",
         ["Left"] = "左",
+        // The main window's bar and the native pages' frame.
+        ["Terminal"] = "终端",
+        ["Shortcuts"] = "快捷指令",
+        ["Web Panel"] = "网页面板",
+        ["Open Web Panel"] = "打开网页面板",
+        ["Open in Web Panel"] = "在网页面板中打开",
+        ["More"] = "更多",
+        ["AI Space Settings…"] = "AI Space 设置…",
+        ["This page is not built into the app yet. The web panel has it."] = "应用里还没有这个页面，网页面板里有。",
     };
 }

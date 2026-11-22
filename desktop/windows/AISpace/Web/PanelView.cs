@@ -60,6 +60,13 @@ internal sealed class PanelView : Grid
     public Action<Uri> OpenLink { get; set; } = _ => { };
     /// <summary>The native check of the Space behind the page (<see cref="SpaceApi.CheckSpace"/>).</summary>
     public Func<CancellationToken, Task<SpaceState>> CheckSpace { get; set; } = _ => Task.FromResult(SpaceState.Ready);
+    /// <summary>
+    /// Set on the tab of one of the Space's own pages (terminal, chat): a main-frame navigation it
+    /// says yes to leaves this view through <see cref="OpenLink"/>, so the window opens that page
+    /// in its own place (<see cref="SpacePages.LeavesTab"/>).
+    /// </summary>
+    public Func<Uri, bool>? Leaves { get; set; }
+
     /// <summary>The overlay's "Edit Space" action.</summary>
     public Action? EditConnection { get; set; }
 
@@ -238,6 +245,12 @@ internal sealed class PanelView : Grid
         if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var url))
         {
             e.Cancel = true;
+            return;
+        }
+        if (isMainFrame && Leaves is { } leaves && leaves(url))
+        {
+            e.Cancel = true;
+            OpenLink(url);
             return;
         }
         var request = new NavigationRequest(url, isMainFrame, IsLinkActivation: e.IsUserInitiated && !e.IsRedirected, OpensNewWindow: false, FromHomePage: ShowsHomeOrigin);

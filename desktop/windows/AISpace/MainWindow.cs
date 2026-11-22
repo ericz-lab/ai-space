@@ -7,24 +7,42 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shell;
 using AISpace.Core;
+using AISpace.Views;
 using AISpace.Web;
 
 namespace AISpace;
 
 /// <summary>
-/// The main window: the selected Space's panel, its apps as tabs beside it, and a bar with the
-/// Spaces, the inbox, chat and settings. Every page stays loaded while another is shown, so
+/// The main window. Its bar holds the Space picker, the Space's native pages (Home, Inbox with
+/// the unread count, Shortcuts, Settings) and its Terminal, then the web tabs (the apps opened, the
+/// chat, the terminal, the web panel), then, while a web tab is shown, Back, Forward, Reload and
+/// Open in Browser, and a menu with the web panel, Quick Chat and the app's settings. Below, the
+/// selected native page or web tab; while the Space needs a sign-in, its web panel's sign-in page
+/// in place of the native pages. Every page and tab stays loaded while another is shown, so
 /// switching keeps its state; closing the window only hides it while the app keeps running.
 /// </summary>
 internal sealed class MainWindow : Window
 {
+    /// <summary>The size a first window asks for; it never exceeds the work area of its monitor.</summary>
+    private const double FirstWidth = 1280, FirstHeight = 820;
+    /// <summary>Under this width the bar's entries show their icons only.</summary>
+    private const double LabelsFrom = 1100;
+
     private readonly AppModel _model;
     private readonly Func<bool> _quitting;
-    private readonly ComboBox _spaces = new() { MinWidth = 170, MaxWidth = 260, VerticalAlignment = VerticalAlignment.Center };
+    private readonly ComboBox _spaces = new() { MinWidth = 150, MaxWidth = 240, VerticalAlignment = VerticalAlignment.Center };
+    private readonly StackPanel _entries = new() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 4, 0) };
     private readonly StackPanel _tabs = new() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-    private readonly Button _back, _forward, _reload, _browser, _inbox, _chat, _settings;
-    private readonly TextBlock _inboxCount = new() { FontSize = 12, Margin = new Thickness(4, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+    private readonly Dictionary<string, (ToggleButton Button, TextBlock Label)> _entryButtons = [];
+    private readonly Border _inboxBadge = Ui.Badge(0);
+    private readonly Button _back, _forward, _reload, _browser, _menu;
+    private readonly StackPanel _webActions;
     private readonly Grid _pages = new();
+    private readonly DockPanel _nativeHost = new();
+    private readonly Grid _native = new();
+    private readonly Border _banner = new() { Visibility = Visibility.Collapsed };
+    /// <summary>Above the native Home page, for the desk pet (<see cref="PetView"/>): no background, so it takes the pointer only where its elements are.</summary>
+    private readonly Grid _homeOverlay = new() { Background = null, Visibility = Visibility.Collapsed };
     private readonly Border _bar = new() { BorderThickness = new Thickness(0, 0, 0, 1), Padding = new Thickness(8, 6, 8, 6) };
     private readonly ContentControl _welcome = new() { Visibility = Visibility.Collapsed };
     private bool _filling;
@@ -38,13 +56,13 @@ internal sealed class MainWindow : Window
         _model = model;
         _quitting = quitting;
         Title = "AI Space";
-        Width = 1280;
-        Height = 820;
         MinWidth = 640;
         MinHeight = 420;
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/AISpace.ico"));
         TaskbarItemInfo = new TaskbarItemInfo();
         Restore(model.Prefs.Window);
+        // Again once shown: the system may still move a new window by its frame or a change of scale.
+        Shell.Native.KeepOnScreen(this);
 
         _back = Ui.IconButton(Ui.Back, L.T("Back"), () => _model.ShownView()?.GoBack());
         _forward = Ui.IconButton(Ui.Forward, L.T("Forward"), () => _model.ShownView()?.GoForward());
@@ -53,12 +71,21 @@ internal sealed class MainWindow : Window
         {
             if (_model.ShownView() is { } v) AppModel.OpenOutside(v.BrowserUrl);
         });
-        _inbox = new Button { Padding = new Thickness(8, 6, 8, 6), Background = Brushes.Transparent, BorderThickness = new Thickness(0), ToolTip = L.T("Inbox") };
-        _inbox.Content = Ui.Row(Ui.Glyph(Ui.Inbox), _inboxCount);
-        System.Windows.Automation.AutomationProperties.SetName(_inbox, L.T("Inbox"));
-        _inbox.Click += (_, _) => _model.ShowInbox();
-        _chat = Ui.IconButton(Ui.Chat, L.T("Chat"), () => _model.ShowChat());
-        _settings = Ui.IconButton(Ui.Settings, L.T("Settings"), openSettings);
+        _webActions = Ui.Row(_back, _forward, _reload, _browser);
+        _menu = Ui.IconButton(Ui.More, L.T("More"), () => { });
+        _menu.ContextMenu = Menu(openSettings);
+        _menu.Click += (_, _) =>
+        {
+            _menu.ContextMenu.PlacementTarget = _menu;
+            _menu.ContextMenu.Placement = PlacementMode.Bottom;
+            _menu.ContextMenu.IsOpen = true;
+        };
+
+        Entry("home", Ui.Home, L.T("Home"), () => _model.ShowPage(null, PageKind.Home));
+        Entry("inbox", Ui.Inbox, L.T("Inbox"), () => _model.ShowPage(null, PageKind.Inbox), _inboxBadge);
+        Entry("shortcuts", Ui.Shortcuts, L.T("Shortcuts"), () => _model.ShowPage(null, PageKind.Shortcuts));
+        Entry("terminal", Ui.Terminal, L.T("Terminal"), () => _model.ShowTerminal());
+        Entry("settings", Ui.Settings, L.T("Settings"), () => _model.ShowPage(null, PageKind.Settings));
 
         _spaces.SelectionChanged += (_, _) =>
         {
@@ -76,26 +103,40 @@ internal sealed class MainWindow : Window
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var nav = Ui.Row(_back, _forward, _reload);
-        nav.Margin = new Thickness(8, 0, 8, 0);
+        var divider = new Border { Width = 1, Margin = new Thickness(4, 6, 8, 6) };
+        divider.SetResourceReference(Border.BackgroundProperty, "DividerStrokeColorDefaultBrush");
         var tabsScroll = new ScrollViewer { Content = _tabs, HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        var actions = Ui.Row(_browser, _inbox, _chat, _settings);
+        var tabsRow = new DockPanel();
+        DockPanel.SetDock(divider, Dock.Left);
+        tabsRow.Children.Add(divider);
+        tabsRow.Children.Add(tabsScroll);
+        var actions = Ui.Row(_webActions, _menu);
         Grid.SetColumn(_spaces, 0);
-        Grid.SetColumn(nav, 1);
-        Grid.SetColumn(tabsScroll, 2);
+        Grid.SetColumn(_entries, 1);
+        Grid.SetColumn(tabsRow, 2);
         Grid.SetColumn(actions, 3);
         bar.Children.Add(_spaces);
-        bar.Children.Add(nav);
-        bar.Children.Add(tabsScroll);
+        bar.Children.Add(_entries);
+        bar.Children.Add(tabsRow);
         bar.Children.Add(actions);
         _bar.Child = bar;
         _bar.SetResourceReference(Border.BorderBrushProperty, "DividerStrokeColorDefaultBrush");
+
+        // The native pages, with the overlay for the desk pet over Home and a banner while the Space cannot be reached.
+        var nativeBody = new Grid();
+        nativeBody.Children.Add(_native);
+        nativeBody.Children.Add(_homeOverlay);
+        DockPanel.SetDock(_banner, Dock.Top);
+        _nativeHost.Children.Add(_banner);
+        _nativeHost.Children.Add(nativeBody);
+        PetView.Attach(_homeOverlay, model);
 
         var root = new DockPanel();
         DockPanel.SetDock(_bar, Dock.Top);
         root.Children.Add(_bar);
         var body = new Grid();
         body.Children.Add(_pages);
+        body.Children.Add(_nativeHost);
         body.Children.Add(_welcome);
         root.Children.Add(body);
         Content = root;
@@ -104,12 +145,59 @@ internal sealed class MainWindow : Window
         _welcome.Content = welcome();
         _model.Changed += Refresh;
         Loaded += (_, _) => Refresh();
+        SizeChanged += (_, _) => Labels();
         PreviewKeyDown += OnKey;
+    }
+
+    /// <summary>An entry of the bar for a native page (or the terminal): its icon, its name when the window is wide enough, and an optional badge.</summary>
+    private void Entry(string key, string glyph, string label, Action click, UIElement? badge = null)
+    {
+        var text = Ui.Text(label, wrap: false);
+        text.Margin = new Thickness(8, 0, 0, 0);
+        var content = new StackPanel { Orientation = Orientation.Horizontal };
+        content.Children.Add(Ui.Glyph(glyph, 14));
+        content.Children.Add(text);
+        if (badge is FrameworkElement b)
+        {
+            b.Margin = new Thickness(6, 0, 0, 0);
+            content.Children.Add(b);
+        }
+        var button = new ToggleButton { Content = content, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 4, 0), ToolTip = label, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
+        System.Windows.Automation.AutomationProperties.SetName(button, label);
+        button.Click += (_, _) => click();
+        _entries.Children.Add(button);
+        _entryButtons[key] = (button, text);
+    }
+
+    private void Labels()
+    {
+        var wide = ActualWidth >= LabelsFrom;
+        foreach (var (_, (_, label)) in _entryButtons) label.Visibility = wide ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private ContextMenu Menu(Action openSettings)
+    {
+        var menu = new ContextMenu();
+        MenuItem Item(string header, string glyph, Action click)
+        {
+            var item = new MenuItem { Header = header, Icon = Ui.Glyph(glyph, 14) };
+            item.Click += (_, _) => click();
+            menu.Items.Add(item);
+            return item;
+        }
+        var panel = Item(L.T("Open Web Panel"), Ui.Web, () => _model.ShowWebPanel());
+        var chat = Item(L.T("Chat"), Ui.Chat, () => _model.ShowChat());
+        Item(L.T("Quick Chat"), Ui.Chat, () => _model.OpenQuickChat?.Invoke(_model.Selected, null, null));
+        menu.Items.Add(new Separator());
+        Item(L.T("AI Space Settings…"), Ui.Settings, openSettings);
+        menu.Opened += (_, _) => panel.IsEnabled = chat.IsEnabled = _model.SelectedConnection is not null;
+        return menu;
     }
 
     private void Reload()
     {
-        _model.ShownView()?.Reload();
+        if (_model.ShownView() is { } v) v.Reload();
+        else _model.ShownPage()?.Refresh();
         if (_model.SelectedLive is { } live) _ = live.Refresh(catalogue: true);
     }
 
@@ -131,10 +219,12 @@ internal sealed class MainWindow : Window
         Fill();
         var hasSpaces = _model.Store.Connections.Count > 0;
         _welcome.Visibility = hasSpaces ? Visibility.Collapsed : Visibility.Visible;
-        _pages.Visibility = hasSpaces ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var b in new[] { _back, _forward, _reload, _browser, _inbox, _chat }) b.Visibility = hasSpaces ? Visibility.Visible : Visibility.Collapsed;
+        _entries.Visibility = _menu.Visibility = hasSpaces ? Visibility.Visible : Visibility.Collapsed;
 
         var shown = hasSpaces ? _model.ShownView() : null;
+        var page = hasSpaces ? _model.ShownPage() : null;
+
+        // The web pages: every one stays a child (hidden) so it keeps its page.
         var views = _model.Views().ToHashSet();
         foreach (var child in _pages.Children.OfType<PanelView>().ToList())
         {
@@ -149,17 +239,60 @@ internal sealed class MainWindow : Window
             }
             v.Visibility = v == shown ? Visibility.Visible : Visibility.Collapsed;
         }
+        _pages.Visibility = shown is null ? Visibility.Collapsed : Visibility.Visible;
 
+        // The native pages, likewise.
+        var pages = _model.Pages().ToHashSet();
+        foreach (var child in _native.Children.OfType<NativePage>().ToList())
+        {
+            if (pages.Contains(child)) continue;
+            child.SetShown(false);
+            _native.Children.Remove(child);
+        }
+        if (page is not null && !_native.Children.Contains(page)) _native.Children.Add(page);
+        foreach (var p in _native.Children.OfType<NativePage>().ToList())
+        {
+            p.Visibility = p == page ? Visibility.Visible : Visibility.Collapsed;
+            p.SetShown(p == page && IsVisible);
+        }
+        _nativeHost.Visibility = page is null ? Visibility.Collapsed : Visibility.Visible;
+        _homeOverlay.Visibility = page is HomePage ? Visibility.Visible : Visibility.Collapsed;
+        Banner(page is not null ? _model.SelectedLive : null);
+
+        var tab = _model.ShownTab();
+        _webActions.Visibility = shown is not null ? Visibility.Visible : Visibility.Collapsed;
         _back.IsEnabled = shown?.CanGoBack == true;
         _forward.IsEnabled = shown?.CanGoForward == true;
-        var live = _model.SelectedLive;
-        var unread = live?.Summary.Unread ?? 0;
-        _inboxCount.Text = unread > 0 ? (unread > 99 ? "99+" : unread.ToString(System.Globalization.CultureInfo.CurrentCulture)) : "";
-        _inboxCount.Visibility = unread > 0 ? Visibility.Visible : Visibility.Collapsed;
-        FillTabs(shown);
+        var selected = tab is not null ? (tab.Kind == WebTabKind.Terminal ? "terminal" : null) : _model.SelectedPage.ToString().ToLowerInvariant();
+        foreach (var (key, (button, _)) in _entryButtons)
+        {
+            // The theme's checked look is the accent fill; the bar marks the page shown with a subtle one.
+            button.IsChecked = key == selected;
+            if (key == selected) button.SetResourceReference(BackgroundProperty, "SubtleFillColorSecondaryBrush");
+            else button.Background = Brushes.Transparent;
+        }
+        var unread = _model.SelectedLive?.Summary.Unread ?? 0;
+        if (_inboxBadge.Child is TextBlock count) count.Text = unread > 99 ? "99+" : unread.ToString(System.Globalization.CultureInfo.CurrentCulture);
+        _inboxBadge.Visibility = unread > 0 ? Visibility.Visible : Visibility.Collapsed;
+        FillTabs();
         var c = _model.SelectedConnection;
-        Title = c is null ? "AI Space" : shown?.App is not null && shown.PageTitle.Length > 0 ? $"{shown.PageTitle} — {c.DisplayNameOr()}" : $"{c.DisplayNameOr()} — AI Space";
+        var what = tab is not null ? tab.Title : page?.Title ?? "";
+        Title = c is null ? "AI Space" : what.Length > 0 ? $"{what} — {c.DisplayNameOr()}" : $"{c.DisplayNameOr()} — AI Space";
         Badge(_model.Unread);
+        Labels();
+    }
+
+    /// <summary>A Space the native pages cannot reach: say so above them, with Try Again.</summary>
+    private void Banner(SpaceLive? live)
+    {
+        if (live is not { Status: LiveStatus.Offline })
+        {
+            _banner.Visibility = Visibility.Collapsed;
+            return;
+        }
+        var name = live.Connection.DisplayNameOr();
+        _banner.Child = Ui.Banner(live.StatusDetail.Length > 0 ? $"{L.F("Cannot reach {0}", name)}: {live.StatusDetail}" : L.F("Cannot reach {0}", name), L.T("Try Again"), () => _ = live.Refresh(catalogue: true));
+        _banner.Visibility = Visibility.Visible;
     }
 
     /// <summary>The Space picker: each saved Space with where it stands, then Add a Space.</summary>
@@ -204,26 +337,22 @@ internal sealed class MainWindow : Window
         _ => L.T("Connecting…"),
     };
 
-    /// <summary>Home, then the app tabs in the order they opened; past five, the rest under More.</summary>
-    private void FillTabs(PanelView? shown)
+    /// <summary>The web tabs in the order they opened; past five, the rest under More.</summary>
+    private void FillTabs()
     {
         _tabs.Children.Clear();
         if (_model.SelectedConnection is not { } c) return;
-        var home = new ToggleButton { Content = Ui.Row(Ui.Glyph(Ui.Home, 14), Ui.Text(L.T("Home"), wrap: false)), IsChecked = _model.SelectedApp is null, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 4, 0) };
-        home.Click += (_, _) => _model.ShowTab(c.Id, null);
-        _tabs.Children.Add(home);
         var tabs = _model.Tabs(c.Id);
-        var ids = tabs.Select(t => t.App.Id).ToList();
-        var visible = OpenTabLayout.Visible(ids, _model.SelectedApp);
-        foreach (var tab in tabs.Where(t => visible.Contains(t.App.Id))) _tabs.Children.Add(Tab(c, tab));
-        var hidden = tabs.Where(t => !visible.Contains(t.App.Id)).ToList();
+        var visible = OpenTabLayout.Visible(tabs.Select(t => t.Key).ToList(), _model.SelectedTab);
+        foreach (var tab in tabs.Where(t => visible.Contains(t.Key))) _tabs.Children.Add(Tab(c, tab));
+        var hidden = tabs.Where(t => !visible.Contains(t.Key)).ToList();
         if (hidden.Count == 0) return;
         var more = Ui.IconButton(Ui.More, L.T("More tabs"), () => { });
         var menu = new ContextMenu();
         foreach (var tab in hidden)
         {
-            var item = new MenuItem { Header = tab.App.DisplayTitle() };
-            item.Click += (_, _) => _model.ShowTab(c.Id, tab.App.Id);
+            var item = new MenuItem { Header = tab.Title };
+            item.Click += (_, _) => _model.ShowTab(c.Id, tab.Key);
             menu.Items.Add(item);
         }
         more.ContextMenu = menu;
@@ -235,43 +364,64 @@ internal sealed class MainWindow : Window
         _tabs.Children.Add(more);
     }
 
-    private ToggleButton Tab(Connection c, AppTab tab)
+    private ToggleButton Tab(Connection c, WebTab tab)
     {
         var close = new Button { Content = Ui.Glyph(Ui.Close, 10), Padding = new Thickness(4), Margin = new Thickness(6, 0, 0, 0), Background = Brushes.Transparent, BorderThickness = new Thickness(0), ToolTip = L.T("Close Tab") };
         close.Click += (_, e) =>
         {
             e.Handled = true;
-            _model.CloseTab(c.Id, tab.App.Id);
+            _model.CloseTab(c.Id, tab.Key);
         };
-        var title = tab.View.State.Kind == SpaceStateKind.Unreachable ? $"{tab.App.DisplayTitle()} ⚠" : tab.App.DisplayTitle();
+        var title = tab.View.State.Kind == SpaceStateKind.Unreachable ? $"{tab.Title} ⚠" : tab.Title;
+        var glyph = tab.Kind switch
+        {
+            WebTabKind.Terminal => Ui.Terminal,
+            WebTabKind.Chat => Ui.Chat,
+            WebTabKind.Panel => Ui.Web,
+            _ => null,
+        };
+        var label = glyph is null ? Ui.Row(Ui.Text(title, wrap: false), close) : Ui.Row(Ui.Glyph(glyph, 12), Ui.Text(title, wrap: false), close);
         var t = new ToggleButton
         {
-            Content = Ui.Row(Ui.Text(title, wrap: false), close),
-            IsChecked = _model.SelectedApp == tab.App.Id,
+            Content = label,
+            IsChecked = _model.SelectedTab == tab.Key,
             Padding = new Thickness(10, 4, 4, 4),
             Margin = new Thickness(0, 0, 4, 0),
             MaxWidth = 220,
             ToolTip = tab.View.Current?.ToString(),
         };
-        t.Click += (_, _) => _model.ShowTab(c.Id, tab.App.Id);
+        t.Click += (_, _) => _model.ShowTab(c.Id, tab.Key);
         t.MouseUp += (_, e) =>
         {
-            if (e.ChangedButton == MouseButton.Middle) _model.CloseTab(c.Id, tab.App.Id);
+            if (e.ChangedButton == MouseButton.Middle) _model.CloseTab(c.Id, tab.Key);
         };
         return t;
     }
 
     private void OnKey(object sender, KeyEventArgs e)
     {
-        // Only while the bar has focus; a page that has it handles its own keys.
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.W && _model.SelectedConnection is { } c && _model.SelectedApp is { } app)
+        // Only while the bar or a native page has focus; a web page that has it handles its own keys.
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.W && _model.SelectedConnection is { } c && _model.SelectedTab is { } tab)
         {
-            _model.CloseTab(c.Id, app);
+            _model.CloseTab(c.Id, tab);
             e.Handled = true;
         }
         else if (e.Key == Key.F5)
         {
             Reload();
+            e.Handled = true;
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is >= Key.D1 and <= Key.D5 && _model.SelectedConnection is not null)
+        {
+            // Ctrl+1 … Ctrl+5: the bar's entries in their order.
+            switch (e.Key)
+            {
+                case Key.D1: _model.ShowPage(null, PageKind.Home); break;
+                case Key.D2: _model.ShowPage(null, PageKind.Inbox); break;
+                case Key.D3: _model.ShowPage(null, PageKind.Shortcuts); break;
+                case Key.D4: _model.ShowTerminal(); break;
+                default: _model.ShowPage(null, PageKind.Settings); break;
+            }
             e.Handled = true;
         }
     }
@@ -325,27 +475,29 @@ internal sealed class MainWindow : Window
         if (WindowState != WindowState.Minimized) _shownState = WindowState;
     }
 
+    protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        // A hidden window hides its native page too (Shown/Hidden follow what can be seen).
+        if (e.Property == IsVisibleProperty && IsLoaded) Refresh();
+    }
+
+    /// <summary>
+    /// The saved place, else the first size centred on the primary monitor; either way wholly on
+    /// one monitor's work area (<see cref="WindowPlacement"/>), so the title bar can be reached.
+    /// </summary>
     private void Restore(Preferences.WindowPlace? place)
     {
-        if (place is null || place.Width < MinWidth || place.Height < MinHeight)
-        {
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            return;
-        }
-        // Only where a screen still is: a monitor may have been unplugged since.
-        var area = new Rect(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop, SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
-        if (!area.IntersectsWith(new Rect(place.Left, place.Top, place.Width, place.Height)))
-        {
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            Width = place.Width;
-            Height = place.Height;
-            return;
-        }
-        Left = place.Left;
-        Top = place.Top;
-        Width = place.Width;
-        Height = place.Height;
-        if (place.Maximized) WindowState = _shownState = WindowState.Maximized;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        var areas = Shell.Native.WorkAreas(this);
+        var r = place is null || place.Width <= 0 || place.Height <= 0
+            ? WindowPlacement.Centered(FirstWidth, FirstHeight, areas[0])
+            : WindowPlacement.Fit(new ScreenRect(place.Left, place.Top, place.Width, place.Height), areas, MinWidth, MinHeight);
+        Left = r.X;
+        Top = r.Y;
+        Width = r.Width;
+        Height = r.Height;
+        if (place?.Maximized == true) WindowState = _shownState = WindowState.Maximized;
     }
 
     private void SavePlace()
