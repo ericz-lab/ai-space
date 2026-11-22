@@ -125,7 +125,7 @@ Two ways to give a Rust app a page:
 For the second, `web/index.html` is a thin shell: the page-rule `<head>` script (theme from `?theme` or `localStorage`, language from `?lang`, the saved choice or the browser, `?accent=` saved as `space.accent`), the two `/_space/*.js` scripts added at runtime, a full-window `<canvas>`, and a module script that loads the wasm and calls `start("board")`. The Rust side then:
 
 - reads `<html lang>` at start and keeps it, `localStorage` and the title in step with its 中 / EN switch; every string goes through one function, `t(en, zh)`, so a string without a translation does not compile;
-- maps the theme button to `ctx.set_theme(ThemePreference::System | Light | Dark)` and writes `data-theme` on `<html>`, so the page behind the canvas and the feedback button follow;
+- maps the theme button to `ctx.set_theme(ThemePreference::System | Light | Dark)` and writes `data-theme` on `<html>`, so the page behind the canvas and the Fix this button follow;
 - takes the accent from `space.accent` (`<light>.<dark>`) for selection and active states;
 - styles egui flat: panel fill, 1 px rules, accent only for what is selected.
 

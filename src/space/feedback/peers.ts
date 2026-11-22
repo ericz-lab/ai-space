@@ -132,7 +132,7 @@ export class PeerFeedbackSync {
       throw new PeerError(502, `unreachable: ${String((e as Error).message ?? e).slice(0, 200)}`);
     }
     // A peer on an ai-space without these routes answers 404: say so plainly.
-    if (res.status === 404) throw new PeerError(502, "its ai-space has no feedback for a hub yet (upgrade it)");
+    if (res.status === 404) throw new PeerError(502, "its ai-space has no Fix this for a hub yet (upgrade it)");
     const j = (await res.json().catch(() => null)) as (T & { ok?: boolean; error?: string }) | null;
     if (!res.ok || !j || j.ok === false) throw new PeerError(res.status >= 400 && res.status < 500 ? res.status : 502, j?.error ?? `HTTP ${res.status}`);
     return j;

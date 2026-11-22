@@ -129,7 +129,7 @@ describe("submit", () => {
     // Chinese feedback names the app in Chinese.
     expect(todo.calls[0]!.body).toMatchObject({ drafts: [{ title: "[AI 待办] 暗色下标题看不清 token=[redacted]", tags: ["feedback", "ai-todo"] }], source: "ai" });
     expect(String((todo.calls[1]!.body as { content: string }).content)).toContain("- Pictures: 1");
-    expect(todo.calls[2]!.body).toMatchObject({ todoId: "301", content: "反馈附带的截图。", images: "file:s.png" });
+    expect(todo.calls[2]!.body).toMatchObject({ todoId: "301", content: "随手改附带的截图。", images: "file:s.png" });
     expect(fixer.starts).toHaveLength(0);
     expect(store.get(1)!.text).not.toContain("abc123");
     expect(service.counts().later).toBe(1);
@@ -184,7 +184,7 @@ describe("fixing", () => {
     for (let i = 0; i < 50 && fixer.starts.length < 2; i++) await Bun.sleep(1);
     expect(store.get(1)!.status).toBe("failed");
     expect(fixer.starts).toHaveLength(2);
-    expect(fixer.starts[1]!.body.message).toContain("are 2 pieces");
+    expect(fixer.starts[1]!.body.message).toContain("are 2 requests");
     await fixer.end("run-2", { text: 'RESULT: {"status":"fixed","items":[{"id":2,"status":"fixed"},{"id":3,"status":"needs-person","note":"product call"}]}' });
     await service.idle();
     expect([store.get(2)!.status, store.get(3)!.status]).toEqual(["review", "skipped"]);
@@ -253,7 +253,7 @@ describe("fixing", () => {
     expect(service.fix({ app: "ai-todo" })).toEqual({ queued: 3 });
     expect(fixer.starts).toHaveLength(1);
     expect(fixer.starts[0]!.machine).toBe("hub");
-    expect(fixer.starts[0]!.body.message).toContain("are 2 pieces");
+    expect(fixer.starts[0]!.body.message).toContain("are 2 requests");
     expect(store.get(2)!.status).toBe("queued");
     await fixer.end("run-1", { text: RESULT("not-fixed") });
     for (let i = 0; i < 50 && fixer.starts.length < 2; i++) await Bun.sleep(1);
@@ -328,7 +328,7 @@ describe("fixing", () => {
     await until(() => fixer.starts.length === 2);
     // Settings' model and the same one picked on the page are one run.
     expect(fixer.starts[1]!.body).toMatchObject({ model: "claude/intermediate" });
-    expect(fixer.starts[1]!.body.message).toContain("are 2 pieces");
+    expect(fixer.starts[1]!.body.message).toContain("are 2 requests");
     await fixer.end("run-2", { text: RESULT("not-fixed") });
     await service.idle();
   });

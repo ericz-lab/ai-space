@@ -21,7 +21,7 @@ async function refresh(): Promise<{ status: "ok" | "error" | "skipped"; error?: 
 
 /**
  * The app's page. The heartbeat script lets the space count the time the page is in use
- * (ai-space docs/usage.md), and the feedback script adds the space's feedback button
+ * (ai-space docs/usage.md), and the feedback script adds the space's Fix this button
  * (docs/feedback.md); keep both lines in every page the app serves.
  */
 const page = `<!doctype html>

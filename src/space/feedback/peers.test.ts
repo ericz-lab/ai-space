@@ -137,7 +137,7 @@ describe("a hub's settings reach the apps on its peers", () => {
     expect(r.json.settings.enabled).toBe(true);
     expect(r.json.peers.map((p: { name: string; ok: boolean; error: string }) => [p.name, p.ok, p.error])).toEqual([
       ["far", false, "unreachable: connect refused"],
-      ["old", false, "its ai-space has no feedback for a hub yet (upgrade it)"],
+      ["old", false, "its ai-space has no Fix this for a hub yet (upgrade it)"],
     ]);
   });
 

@@ -90,7 +90,7 @@ describe("space mood", () => {
     // Plain unread news does not wait on the person.
     expect(spaceMood({ ...quiet, unread: 4050, ended: [run("a/b", "done", 30 * 60_000, 20 * 60_000)] }, NOW)).toMatchObject({ state: "idle", counts: { unread: 4050, alerts: 0 } });
     const fb = spaceMood({ ...quiet, feedback: 1 }, NOW);
-    expect(fb).toMatchObject({ state: "waiting", reason: "feedback", move: "roam", say: { en: "1 piece of feedback waits for you", zh: "1 条反馈等你处理" } });
+    expect(fb).toMatchObject({ state: "waiting", reason: "feedback", move: "roam", say: { en: "1 Fix this request waits for you", zh: "1 条随手改等你处理" } });
     expect(fb.open).toBeUndefined();
     // Work in progress outranks the inbox.
     expect(spaceMood({ ...quiet, alerts: 2, running: [run("a/b", "running", 1_000)] }, NOW).state).toBe("working");

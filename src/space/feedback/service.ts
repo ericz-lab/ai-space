@@ -66,7 +66,7 @@ const WORDS = {
   deployed: { en: "Deployed on {machine} from origin.", zh: "已在 {machine} 从 origin 拉取并部署。" },
   deployFailed: { en: "Not deployed on {machine}: {why}", zh: "没能在 {machine} 部署：{why}" },
   commit: { en: "Commit {commit}", zh: "提交 {commit}" },
-  screenshot: { en: "Picture sent with the feedback.", zh: "反馈附带的截图。" },
+  screenshot: { en: "Picture sent with the request.", zh: "随手改附带的截图。" },
 } as const;
 
 function say(lang: Lang, key: keyof typeof WORDS, vars: Record<string, string> = {}): string {
@@ -246,7 +246,7 @@ export class FeedbackService {
     const info = this.opts.app(app);
     if (!info) throw new FeedbackError(404, "unknown app");
     const s = this.settings();
-    if (!this.enabledFor(app, s)) throw new FeedbackError(403, "feedback is turned off for this app");
+    if (!this.enabledFor(app, s)) throw new FeedbackError(403, "Fix this is turned off for this app");
     const b = (body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
     const text = typeof b.text === "string" ? redact(b.text.replace(/\r\n/g, "\n").trim()) : "";
     if (!text) throw new FeedbackError(400, "text is required");
@@ -276,7 +276,7 @@ export class FeedbackService {
     if (!s.errors) context.errors = [];
     const repeated = this.store.duplicate(app, text, context.path);
     if (repeated) return { id: repeated.id, status: repeated.status, todoId: repeated.todoId, todoUrl: repeated.todoUrl, repeated: true };
-    if (this.store.countSince(app, this.now() - 3600_000) >= LIMITS.perHour) throw new FeedbackError(429, `at most ${LIMITS.perHour} pieces of feedback per app in an hour`);
+    if (this.store.countSince(app, this.now() - 3600_000) >= LIMITS.perHour) throw new FeedbackError(429, `at most ${LIMITS.perHour} requests per app in an hour`);
 
     let row = this.store.add({ app, text, context, client: clientOf(ua), status: mode === "later" ? "later" : "queued", fixMachine, fixModel });
     // The task goes where the engineer will work, so the task and its fix are on one machine's list;
