@@ -177,7 +177,8 @@ internal sealed class HomeRenameDialog : Window
         body.Margin = new Thickness(24);
         body.MaxWidth = 420;
         Content = body;
-        Ui.Background(body);
+        // The window, not the panel: else the margin around the panel shows the window's own colour.
+        Ui.Background(this);
         Loaded += (_, _) =>
         {
             _name.Focus();

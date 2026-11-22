@@ -50,6 +50,8 @@ internal sealed partial class HomePage : NativePage
     private string _shownId = HomeScreens.Home;
     private LibraryFilter _filter = LibraryFilter.All;
     private string? _drawn, _tabsDrawn;
+    /// <summary>While the page itself sets the tabs' and chips' state: their Checked and Unchecked are not the person's.</summary>
+    private bool _syncing;
     private FrameworkElement? _first;
 
     public HomePage(PageContext context) : base(context)
@@ -203,6 +205,8 @@ internal sealed partial class HomePage : NativePage
     private void OnQuery(string text)
     {
         if (text == _query) return;
+        // A new search shows every kind: the Library's filter would hide the match Enter opens.
+        if (_query.Trim().Length == 0 && text.Trim().Length > 0) _filter = LibraryFilter.All;
         _query = text;
         Draw();
     }
@@ -400,20 +404,80 @@ internal sealed partial class HomePage : NativePage
         {
             _tabsDrawn = sig;
             _tabs.Children.Clear();
-            for (var i = 0; i < screens.Count; i++) _tabs.Children.Add(Tab(screens[i].Id, Ui.Text(ScreenTitle(screens, i), 13, wrap: false), ScreenTitle(screens, i)));
-            var lib = Ui.Row(Ui.Glyph(Ui.Apps, 13), Ui.Text(L.T("Library"), 13, wrap: false));
-            _tabs.Children.Add(Tab(LibraryId, lib, L.T("Library")));
+            for (var i = 0; i < screens.Count; i++)
+            {
+                var id = screens[i].Id;
+                _tabs.Children.Add(Choice(OnAccent(Ui.Text(ScreenTitle(screens, i), 13, wrap: false)), ScreenTitle(screens, i), id, false, () => ShowTab(id)));
+            }
+            var lib = Ui.Row(OnAccent(Ui.Glyph(Ui.Apps, 13)), OnAccent(Ui.Text(L.T("Library"), 13, wrap: false)));
+            _tabs.Children.Add(Choice(lib, L.T("Library"), LibraryId, false, () => ShowTab(LibraryId)));
         }
-        foreach (var t in _tabs.Children.OfType<ToggleButton>()) t.IsChecked = (string)t.Tag == _shownId && _query.Trim().Length == 0;
+        _syncing = true;
+        try
+        {
+            foreach (var t in _tabs.Children.OfType<ToggleButton>()) t.IsChecked = (string)t.Tag == _shownId && _query.Trim().Length == 0;
+        }
+        finally
+        {
+            _syncing = false;
+        }
         _screenActions.Visibility = _shownId == LibraryId ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private ToggleButton Tab(string id, UIElement content, string name)
+    /// <summary>
+    /// A tab or a filter chip: one of a set, the one shown checked. It acts on Checked, not Click,
+    /// because UI Automation's Toggle (screen readers, accessibility tools) checks a ToggleButton
+    /// without a Click; unchecking the one shown (a second click) only puts its check back.
+    /// </summary>
+    private ToggleButton Choice(UIElement content, string name, string tag, bool on, Action select)
     {
-        var t = new ToggleButton { Content = content, Tag = id, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 6, 6), MinWidth = 64 };
+        var t = new ToggleButton { Content = content, Tag = tag, IsChecked = on, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 6, 6), MinWidth = 64 };
         AutomationProperties.SetName(t, name);
-        t.Click += (_, _) => ShowTab(id);
+        PaintLabels(t);
+        t.Checked += (_, _) =>
+        {
+            PaintLabels(t);
+            if (!_syncing) select();
+        };
+        t.Unchecked += (_, _) =>
+        {
+            PaintLabels(t);
+            if (_syncing) return;
+            _syncing = true;
+            try
+            {
+                t.IsChecked = true;
+            }
+            finally
+            {
+                _syncing = false;
+            }
+        };
         return t;
+    }
+
+    /// <summary>A label that takes its colour from its button, so it stays readable on the accent fill of a checked tab.</summary>
+    private static TextBlock OnAccent(TextBlock t)
+    {
+        t.Tag = OnAccentTag;
+        return t;
+    }
+
+    private const string OnAccentTag = "on-accent";
+
+    /// <summary>The labels of a tab or chip in the theme's text colour for its state: on the accent fill when checked.</summary>
+    private static void PaintLabels(ToggleButton t)
+    {
+        var key = t.IsChecked == true ? "TextOnAccentFillColorPrimaryBrush" : "TextFillColorPrimaryBrush";
+        void Walk(object node)
+        {
+            if (node is TextBlock { Tag: OnAccentTag } label) label.SetResourceReference(TextBlock.ForegroundProperty, key);
+            if (node is DependencyObject d)
+            {
+                foreach (var child in LogicalTreeHelper.GetChildren(d)) Walk(child);
+            }
+        }
+        Walk(t.Content);
     }
 
     private void ShowTab(string id)
@@ -560,15 +624,16 @@ internal sealed partial class HomePage : NativePage
         foreach (var (filter, label) in new[] { (LibraryFilter.All, L.T("All")), (LibraryFilter.Apps, L.T("Apps")), (LibraryFilter.Agents, L.T("Agents")), (LibraryFilter.Widgets, L.T("Widgets")) })
         {
             var n = counts.GetValueOrDefault(filter);
-            var count = Ui.Text(n.ToString(System.Globalization.CultureInfo.CurrentCulture), 12, secondary: true, wrap: false);
+            var count = OnAccent(Ui.Text(n.ToString(System.Globalization.CultureInfo.CurrentCulture), 12, wrap: false));
+            count.Opacity = 0.7;
             count.VerticalAlignment = VerticalAlignment.Center;
-            var t = new ToggleButton { Content = Ui.Row(Ui.Text(label, 13, wrap: false), count), IsChecked = _filter == filter, Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 6, 6), Tag = "filter:" + filter };
-            AutomationProperties.SetName(t, $"{label} ({n})");
-            t.Click += (_, _) =>
+            var t = Choice(Ui.Row(OnAccent(Ui.Text(label, 13, wrap: false)), count), $"{label} ({n})", "filter:" + filter, _filter == filter, () =>
             {
                 _filter = filter;
                 Draw();
-            };
+            });
+            t.Padding = new Thickness(12, 4, 12, 4);
+            t.MinWidth = 0;
             row.Children.Add(t);
         }
         return row;

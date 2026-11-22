@@ -43,7 +43,16 @@ internal sealed class HomeChart(Action<DrawingContext, Size, HomeChart> draw) : 
 {
     protected override void OnRender(DrawingContext dc)
     {
-        if (ActualWidth > 0 && ActualHeight > 0) draw(dc, new Size(ActualWidth, ActualHeight), this);
+        if (ActualWidth <= 0 || ActualHeight <= 0) return;
+        try
+        {
+            draw(dc, new Size(ActualWidth, ActualHeight), this);
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException)
+        {
+            // A throw here would stop every layout pass of the window: the drawing is left out instead.
+            Shell.Log.Write($"Home chart not drawn: {e.Message}");
+        }
     }
 
     public Brush Find(string key, Color fallback) => TryFindResource(key) as Brush ?? new SolidColorBrush(fallback);
@@ -60,12 +69,16 @@ internal sealed class HomeChart(Action<DrawingContext, Size, HomeChart> draw) : 
         _ => Accent,
     };
 
+    /// <summary>
+    /// The brush's colour at <paramref name="opacity"/>, as a new frozen brush. Not a clone: the
+    /// theme's brushes take their colour from a resource, a clone keeps that binding, and a brush
+    /// bound so cannot be frozen; a throw while rendering stops every layout pass of the window.
+    /// </summary>
     public static Brush Faded(Brush b, double opacity)
     {
-        var c = b.Clone();
-        c.Opacity = opacity;
-        c.Freeze();
-        return c;
+        var faded = new SolidColorBrush(b is SolidColorBrush s ? s.Color : Colors.Gray) { Opacity = opacity };
+        faded.Freeze();
+        return faded;
     }
 }
 
@@ -495,7 +508,7 @@ internal sealed class HomeCards(PageContext context, Action<HomeWidget, string?>
         var color = k.Tone is null or Tone.Neutral ? c.Accent : c.Tone(k.Tone);
         if (k.Value is not null && level > 0.002)
         {
-            var fill = Math.Min(1, level) * (body.Height - 2);
+            var fill = Math.Max(0, Math.Min(1, level) * (body.Height - 2));
             dc.PushClip(new RectangleGeometry(body, radius, radius));
             dc.DrawRectangle(color, null, new Rect(body.Left, body.Bottom - 1 - fill, body.Width, fill));
             dc.Pop();
