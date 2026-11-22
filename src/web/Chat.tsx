@@ -9,7 +9,7 @@ import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTim
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
 import { localized, useLang } from "./i18n.ts";
-import { withDraft } from "./panel-link.ts";
+import { chatHref, withDraft } from "./panel-link.ts";
 
 // Chat window (a floating panel). The server streams the runtime's stream-json events over SSE.
 // - Every turn is a background run on the server (docs/panel.md#chat): closing or refreshing the page
@@ -88,7 +88,7 @@ export type Ask = { id: number; text: string; intentId?: string };
 /** Text from a link into the panel (panel-link.ts); a new `id` adds it to the message field, unsent. */
 export type Draft = { id: number; text: string };
 
-export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask, draft, onTurnSettled }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void; ask?: Ask | null; draft?: Draft | null; onTurnSettled?: () => void }) {
+export default function Chat({ open, agent, agents = [], onClose, onSwitch, newTab, session, ask, draft, onTurnSettled }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void; /** Shows the button that opens this chat as a page in a new tab. */ newTab?: boolean; /** A session of the agent to resume once shown (a chat page opened from a conversation). */ session?: string; ask?: Ask | null; draft?: Draft | null; onTurnSettled?: () => void }) {
   const { lang, t } = useLang();
   // Status lines are written into the message state while a turn streams, so they read `t` through a
   // ref: a language change mid-turn applies from the next status on.
@@ -691,6 +691,16 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
     inputRef.current?.focus();
   };
 
+  // A chat page opened from a conversation (panel-link.ts `chatHref`) resumes it, once.
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!session || resumed.current) return;
+    resumed.current = true;
+    getJson<{ sessions: ChatSession[] }>(`${base}/sessions`)
+      .then((j) => { const s = j.sessions.find((x) => x.sid === session); if (s) void pickSession(s); })
+      .catch(() => {});
+  }, [session]);
+
   const tabs = Object.entries(convs);
   // Every agent the sidebar can switch to, once whatever the machines: the catalogue, plus any open
   // conversation's agent outside it.
@@ -776,6 +786,12 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, ask,
             <button className="chat-hbtn chat-narrow" title={t("chat.newConversation")} aria-label={t("chat.newConversation")} onClick={reset}>
               <Glyph name="compose" size={16} weight={1.3} />
             </button>
+            {newTab && (
+              // The chat as a page of its own (docs/panel.md#built-in-pages), on this conversation; the floating one closes.
+              <a className="chat-hbtn" href={chatHref(agent.id, conv.sid)} target="_blank" rel="noopener noreferrer" title={t("chat.openTab")} aria-label={t("chat.openTab")} onClick={onClose}>
+                <Glyph name="popout" size={15} weight={1.3} />
+              </a>
+            )}
             <button className="chat-hbtn" title={t("common.close")} onClick={onClose}>
               ✕
             </button>

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AgentInfo } from "./api.ts";
-import { linkedAgent, MAX_DRAFT, parsePanelLink, withDraft } from "./panel-link.ts";
+import { linkedAgent, MAX_DRAFT, chatHref, pageAgent, pageHref, pageSession, parsePanelLink, parsePanelPage, withDraft } from "./panel-link.ts";
 
 const agent = (id: string, app: string, name: string, extra: Partial<AgentInfo> = {}): AgentInfo => ({ id, app, name, title: name, avatar: "", appIcon: "", runtime: "claude", ...extra });
 
@@ -45,4 +45,24 @@ test("a draft joins what the field holds", () => {
   expect(withDraft("", "hi")).toBe("hi");
   expect(withDraft("  ", "hi")).toBe("hi");
   expect(withDraft("first", "hi")).toBe("first\n\nhi");
+});
+
+test("a page address names one built-in window, and nothing else", () => {
+  for (const name of ["inbox", "terminal", "settings", "shortcuts"] as const) expect(parsePanelPage(pageHref(name).slice(1))).toBe(name);
+  expect(parsePanelPage("?lang=zh&page=terminal")).toBe("terminal");
+  expect(parsePanelPage("")).toBeNull();
+  expect(parsePanelPage("?page=tasks")).toBeNull();
+  expect(parsePanelPage("?page=")).toBeNull();
+});
+
+test("a chat page names its agent", () => {
+  const search = chatHref("david/notes/writer").slice(1);
+  expect(parsePanelPage(search)).toBe("chat");
+  expect(pageAgent(search)).toBe("david/notes/writer");
+  expect(pageAgent("?page=chat")).toBeNull();
+  expect(pageAgent("?page=inbox&agent=space/assistant")).toBeNull();
+  expect(pageSession(search)).toBeNull();
+  const resumed = chatHref("notes/writer", "s 1&x").slice(1);
+  expect(pageAgent(resumed)).toBe("notes/writer");
+  expect(pageSession(resumed)).toBe("s 1&x");
 });

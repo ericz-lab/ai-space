@@ -6,7 +6,7 @@ import MachineClis from "./MachineClis.tsx";
 import ModelPreference from "./ModelPreference.tsx";
 import { AccountSettings, loadAuth } from "./Auth.tsx";
 import Chat, { type Ask, type Draft } from "./Chat.tsx";
-import { linkedAgent, type PanelLink, parsePanelLink } from "./panel-link.ts";
+import { PAGE, chatHref, linkedAgent, pageAgent, pageHref, pageSession, type PanelLink, parsePanelLink } from "./panel-link.ts";
 import Pet, { AppPet, type AppPetInfo, BUILTIN, BuiltinPet, DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
@@ -36,8 +36,11 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 // Launcher-style panel: App and Agent tiles with hover details, widget cards, a chat window.
 // The page is a row of screens (docs/panel.md#screens): the library with everything on the left,
 // the home screen the panel opens on, then the operator's own; each screen shows only what is
-// pinned to it. Settings, the inbox and the terminal are built-in tiles; they, the chat and the
-// tasks list open as floating panels over the page (an overlay that closes on a click outside).
+// pinned to it. Settings, the inbox, the shortcuts and the terminal are built-in tiles: like an
+// app's, each opens in a new tab, as a page of its own (`/?page=…`, docs/panel.md#built-in-pages).
+// The chat and the tasks list open as floating panels over the page (an overlay that closes on a
+// click outside), and so do the built-in windows a panel link or the phone app asks for. The
+// floating chat has a button that moves it to a tab of its own (`/?page=chat&agent=…`).
 // Edit mode (long-press the background): add an app (catalog, new or link), unpin, drag to reorder, uninstall.
 // Everything comes from the apps' manifests through the panel API; the browser holds no secrets.
 // Entries from peer machines say where they run in their hover details and are muted while that peer is down.
@@ -86,6 +89,10 @@ function Backdrop() {
  * screen and leaves the ways between screens out: no dock, no edges, no swipe and no hint.
  */
 const IN_PHONE_APP = typeof navigator !== "undefined" && /\bAISpaceMobile\//.test(navigator.userAgent);
+/** A built-in tile opens its page in a new tab, as an app's does; the phone app has no tabs, so there it opens over the page. */
+const BUILTIN_PAGES = !IN_PHONE_APP;
+// A built-in page fills its tab (styles.css `.page-mode`).
+if (PAGE && typeof document !== "undefined") document.documentElement.classList.add("page-mode");
 
 export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const { lang, t } = useLang();
@@ -110,8 +117,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const [uninstalling, setUninstalling] = useState<AppInfo | null>(null);
   const [zoneHot, setZoneHot] = useState(false);
   // One floating panel at a time: opening one closes the others.
-  const [panel, setPanel] = useState<Panel | null>(null);
-  const close = () => { if (panel === "chat") void reload(); setPanel(null); };
+  const [panel, setPanel] = useState<Panel | null>(PAGE);
+  const close = () => {
+    // A built-in page has no launcher behind it: closing a window there goes back to the page
+    // itself, and closing the page goes to the launcher.
+    if (PAGE) return panel === PAGE ? location.assign("/") : setPanel(PAGE);
+    if (panel === "chat") void reload();
+    setPanel(null);
+  };
   // The chat opens on the space agent by default; an agent tile switches to that agent.
   const [chatAgent, setChatAgent] = useState<AgentInfo>({ id: "space/assistant", app: "space", name: "assistant", title: "Space Assistant", i18n: { zh: { title: "空间助手" } }, avatar: "/assistant.svg", appIcon: "✨", runtime: "claude" });
   const [prefs, setPrefs] = useState<Prefs>(() => {
@@ -157,7 +170,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // Until the list is read, a chosen app pet is not replaced by the default for a moment.
   const petPending = !!prefs.petApp && appPets === null;
   useEffect(() => {
-    if (!setsOpen) return;
+    if (!setsOpen || PAGE) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPanel(null);
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -198,6 +211,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const openChat = (a: AgentInfo) => {
     setChatAgent(a);
     setPanel("chat");
+    // A chat page's address follows the agent it shows, so a reload stays on it.
+    if (PAGE === "chat") history.replaceState(history.state, "", chatHref(a.id));
   };
   /** A tile or library entry opens the agent on the machine chosen last time, else the local one. */
   const openAgent = (a: AgentInfo) => {
@@ -221,6 +236,17 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     setAsk((cur) => ({ id: (cur?.id ?? 0) + 1, text, intentId: intent.id }));
     setPanel("chat");
   };
+  // A chat page (panel-link.ts `chatHref`) shows the agent its address names, once the list is read.
+  useEffect(() => {
+    const ref = PAGE === "chat" ? pageAgent(location.search) : null;
+    if (!ref || !loaded) return;
+    const target = linkedAgent(agents, ref);
+    if (target && target.peer && target.id === ref) setChatAgent(target);
+    else if (target) setChatAgent(groupOf(groups, target) ? preferredMachine(groupOf(groups, target)!) : target);
+    // The conversation the page was opened from, resumed once the chat shows its agent.
+    if (target) setPageSession(pageSession(location.search));
+  }, [loaded]);
+  const [pageSessionId, setPageSession] = useState<string | null>(null);
   const [omniFocus, setOmniFocus] = useState(0);
   // A link into the panel (panel-link.ts, docs/panel.md#panel-links): read on load and whenever the
   // fragment changes, then cleared, so the same link opens its window again. A chat link waits for
@@ -612,7 +638,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         }
       : undefined;
 
-  const entries = useMemo(() => libraryEntries({ apps, agents: shownAgents, widgets: prefs.noWidget ? [] : widgets, builtins }, lang, t, accent), [apps, shownAgents, widgets, builtins, prefs.noWidget, lang, t, accent]);
+  const entries = useMemo(() => libraryEntries({ apps, agents: shownAgents, widgets: prefs.noWidget ? [] : widgets, builtins, builtinPages: BUILTIN_PAGES }, lang, t, accent), [apps, shownAgents, widgets, builtins, prefs.noWidget, lang, t, accent]);
 
   /** Opens an agent's chat or one of the panel's own windows, from the library. */
   const openEntry = (key: string) => {
@@ -620,13 +646,21 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     if (e?.kind === "agent") {
       const a = groupById(groups, e.id)?.primary;
       if (a) openAgent(a);
-    } else if (e?.kind === "builtin") setPanel(e.id === "settings" ? "settings" : e.id === "inbox" ? "inbox" : e.id === "shortcuts" ? "shortcuts" : "terminal");
+    } else if (e?.kind === "builtin") {
+      const b = (BUILTINS as readonly string[]).includes(e.id) ? (e.id as Builtin) : "terminal";
+      if (BUILTIN_PAGES) window.open(pageHref(b), "_blank", "noopener,noreferrer");
+      else setPanel(b);
+    }
   };
 
   // The details under the pointer: shown on the library's tiles (Home, left of the screens), not on
   // the screens' own tiles, and not in add mode.
   const builtinText = (b: Builtin) =>
     b === "inbox" ? { title: t("inbox.title"), blurb: t("inbox.blurb"), fallback: "📥" } : b === "shortcuts" ? { title: t("sc.title"), blurb: t("sc.blurb"), fallback: "⚡" } : b === "terminal" ? { title: t("term.title"), blurb: t("term.blurb"), fallback: "⌨️" } : { title: t("settings.title"), blurb: t("settings.blurb"), fallback: "⚙️" };
+  // A built-in page's tab is named after it, as an app's is.
+  useEffect(() => {
+    if (PAGE) document.title = `${PAGE === "chat" ? localized(lang, chatAgent).title : builtinText(PAGE).title} · ai-space`;
+  }, [lang, chatAgent]);
   const details = (key: string): React.ReactNode => {
     const e = parseKey(key);
     if (e?.kind === "builtin") {
@@ -711,7 +745,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         fallback={text.fallback}
         name={text.title}
         editing={editing}
-        onOpen={open}
+        href={BUILTIN_PAGES ? pageHref(b) : undefined}
+        onOpen={BUILTIN_PAGES ? undefined : open}
         onUse={() => recordOpen("builtin", b, "panel")}
         onRemove={onRemove}
         removeTitle={t("screens.unpin")}
@@ -869,7 +904,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Backdrop />
       <div className={`shell${pos === -1 ? " wide" : ""}`}>
         {/* A phone has no dock: its buttons head the page instead (ScreenNav.tsx). */}
-        {screens && !IN_PHONE_APP && <PhoneNav pos={pos} names={rows.map(screenName)} onGo={go} onSearch={searchLibrary} />}
+        {screens && !IN_PHONE_APP && !PAGE && <PhoneNav pos={pos} names={rows.map(screenName)} onGo={go} onSearch={searchLibrary} />}
         {pos === -1 ? (
           <section className={`screen ${dir}`} key="library">
             <h2>{t("screens.library")}</h2>
@@ -878,6 +913,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               agents={shownAgents}
               widgets={widgets}
               builtins={builtins}
+              builtinPages={BUILTIN_PAGES}
               screens={rows}
               screenName={screenName}
               target={libTarget}
@@ -912,8 +948,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
           </section>
         ) : null}
       </div>
-      {screens && !IN_PHONE_APP && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={searchLibrary} />}
-      {!prefs.noPet && !petPending && (appPet ? <AppPet pet={appPet} /> : builtinPet ? <BuiltinPet name={builtinPet} /> : <Pet sheet={petSheet} onError={onPetError} />)}
+      {screens && !IN_PHONE_APP && !PAGE && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={searchLibrary} />}
+      {!prefs.noPet && !petPending && !PAGE && (appPet ? <AppPet pet={appPet} /> : builtinPet ? <BuiltinPet name={builtinPet} /> : <Pet sheet={petSheet} onError={onPetError} />)}
       {uninstalling && (
         <UninstallForm
           app={uninstalling}
@@ -1068,7 +1104,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Terminal open={panel === "terminal"} onClose={close} />
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
       <Shortcuts open={panel === "shortcuts"} onClose={close} onOpenTasks={openTasks} />
-      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} ask={ask} draft={draft} onTurnSettled={() => { void reload(); }} />
+      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} newTab={BUILTIN_PAGES && PAGE !== "chat"} session={pageSessionId ?? undefined} ask={ask} draft={draft} onTurnSettled={() => { void reload(); }} />
     </>
   );
 }

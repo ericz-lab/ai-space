@@ -3,6 +3,7 @@ import ActionRunner, { RunCard } from "./ActionRunner.tsx";
 import { getJson, relTime } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
 import { type Action, type RunView, actionKey, actionText } from "./shortcuts.ts";
+import { PAGE } from "./panel-link.ts";
 import { pollWhileVisible } from "./poll.ts";
 
 // Shortcuts window (docs/shortcuts.md#user-experience): the action catalogue with a search, one
@@ -41,7 +42,7 @@ export default function Shortcuts({ open, onClose, onOpenTasks }: { open: boolea
   }, [open, running]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || PAGE) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

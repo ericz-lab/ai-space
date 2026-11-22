@@ -14,6 +14,27 @@ export type PanelLink =
 
 const WINDOWS = ["inbox", "terminal", "settings", "shortcuts"] as const;
 
+/**
+ * A built-in tile's own page (docs/panel.md#built-in-pages): `/?page=<name>` shows that window
+ * alone, filling the tab, so a built-in tile opens in a new tab as an app's tile does. Unlike a
+ * fragment link the address is kept, and a reload shows the same page again. The floating chat's
+ * "open in a new tab" button leads to `/?page=chat&agent=<id>&session=<sid>`: the chat as a page,
+ * on that agent (found as a chat link's is) and, when a session is named, resuming it.
+ */
+export type PanelPage = (typeof WINDOWS)[number];
+export const pageHref = (name: PanelPage) => `/?page=${name}`;
+export const chatHref = (agent: string, session?: string | null) => `/?page=chat&agent=${encodeURIComponent(agent)}${session ? `&session=${encodeURIComponent(session)}` : ""}`;
+export function parsePanelPage(search: string): PanelPage | "chat" | null {
+  const name = new URLSearchParams(search).get("page");
+  return name === "chat" ? "chat" : (WINDOWS.find((w) => w === name) ?? null);
+}
+/** The agent a chat page names; null for any other page, and for a chat page that names none. */
+export const pageAgent = (search: string) => (parsePanelPage(search) === "chat" ? new URLSearchParams(search).get("agent")?.trim() || null : null);
+/** The session a chat page resumes; null when it names none. */
+export const pageSession = (search: string) => (parsePanelPage(search) === "chat" ? new URLSearchParams(search).get("session")?.trim() || null : null);
+/** The page this tab was opened as; null in the launcher, and outside a browser. */
+export const PAGE: PanelPage | "chat" | null = typeof location === "undefined" ? null : parsePanelPage(location.search);
+
 /** The same cap as an `aispace://chat` link's text in the desktop clients. */
 export const MAX_DRAFT = 20_000;
 

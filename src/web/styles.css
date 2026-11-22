@@ -816,6 +816,7 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
   background: var(--glass); color: var(--muted); font-size: 13px; cursor: pointer;
   display: flex; align-items: center; justify-content: center; transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
+a.chat-hbtn { box-sizing: border-box; text-decoration: none; }
 .chat-hbtn:hover { color: var(--text); background: color-mix(in srgb, var(--text) 8%, var(--glass)); }
 .chat-hbtn.on { color: var(--link); border-color: color-mix(in srgb, var(--link) 45%, transparent); background: color-mix(in srgb, var(--link) 14%, var(--glass)); }
 .chat-hbtn svg, .chat-send svg, .chat-down svg, .chat-attach svg { display: block; flex: none; }
@@ -1108,6 +1109,17 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
   content: ""; position: absolute; inset: 0; z-index: -1; background: var(--scrim);
   -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
 }
+/* A built-in tile's own tab (/?page=…, docs/panel.md#built-in-pages): the window is the page. It
+   fills the tab with no launcher behind it and no scrim; its rows keep a readable width, and the
+   terminal takes all of it. A window opened from the page (the tasks list from Shortcuts) fills
+   the tab the same way. */
+.page-mode .shell { display: none; }
+.page-mode .overlay, .page-mode .overlay.top { padding: 0; animation: none; }
+.page-mode .overlay::before { display: none; }
+.page-mode .overlay > :is(.panel.settings, .tasks, .term, .chat) {
+  width: 100%; height: 100%; max-height: none; border: none; border-radius: 0; box-shadow: none; animation: none;
+}
+.page-mode .overlay > :is(.panel.settings, .tasks) > * { width: min(100%, 1080px); align-self: center; box-sizing: border-box; }
 /* A mounted panel that is closed (the chat keeps its conversations). */
 .overlay.off { display: none; }
 /* A page under an open panel stays put. The lock goes on html, not body: html already has a

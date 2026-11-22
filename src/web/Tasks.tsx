@@ -3,6 +3,7 @@ import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type AppInfo, type RunInfo, type TaskInfo, dateTime, fmtDuration, getJson, isImgIcon, relTime, scheduleText, sendJson, untilTime } from "./api.ts";
 import { type Key, type Lang, localized, useLang } from "./i18n.ts";
+import { PAGE } from "./panel-link.ts";
 import { pollWhileVisible } from "./poll.ts";
 
 // Tasks window: scheduler state and per-task model selection, by machine and app.
@@ -310,7 +311,7 @@ export default function Tasks({ open, onClose, onBack, embedded = false, selecte
   }, [open]);
 
   useEffect(() => {
-    if (!open || embedded) return;
+    if (!open || embedded || PAGE) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
