@@ -104,6 +104,22 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   menu (right click, Shift+F10) puts it on a screen or takes it off and moves it, and a screen
   tab's menu in the bar makes, renames and deletes screens or copies the web panel's layout again. Nothing is written to
   the Space. A removed Space's screens go with it.
+- **Apps from the App Store.** The web panel pins an app the store installs to its home screen
+  ([app-catalog.md](app-catalog.md)); this computer keeps its own layout, so Home adds it to the
+  home screen here too. `screens.json` remembers the apps on the panel's home screen (`panelHome`),
+  and each time the Space is read an app that has appeared there since is put at the end of the
+  home screen here, unless a screen here already holds it (`HomeScreens.FollowPanel`). Nothing
+  else is followed: what was taken off or moved here stays so, an app taken off the panel's home
+  screen stays here, and the panel's other screens and its order are not copied. An app pinned
+  to the panel's home screen by hand in a browser arrives the same way. A `screens.json` from
+  before this only takes the panel's home screen as the starting point, and its home screen
+  gains the App Store's tile.
+- **First apps.** While the Space has none of the App Store's apps (`GET /api/app-catalog`, the
+  web panel's `catalogOffers`), the home screen shows the panel's first-use card: Choose Apps
+  opens the App Store tab with every installable app ticked (`/?page=store&pick=all`), Not Now
+  hides the card for this Space on this computer (`storeCardHidden` in `screens.json`). Home
+  reads the Space again when it is shown after the store was opened, so what was installed is
+  on the home screen then.
 - **Icons.** An app's icon is cut to a rounded square, an agent's avatar to a circle, as the web
   panel, the Mac and Linux draw them; a built-in page's tile shows artwork the app carries
   (`AISpace/Assets/Builtins/`, [below](#built-in-icons)), or the picture of the Space's icon pack

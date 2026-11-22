@@ -301,6 +301,25 @@ public sealed class HomeCatalogue
 
     public HomeWidget? Widget(string id) => Widgets.FirstOrDefault(w => w.Id == id);
 
+    /// <summary>
+    /// How many apps the App Store offers a Space that has none of its apps yet (<c>GET /api/app-catalog</c>,
+    /// <c>catalogOffers</c> in src/web/AppCatalog.tsx): the home screen's first-use card shows while
+    /// there are some. A Space with any catalog app, or an old deployment of one, has chosen already: 0.
+    /// </summary>
+    public static int CatalogOffers(JsonElement catalog)
+    {
+        if (!HomeJson.Bool(catalog, "ok")) return 0;
+        var offers = 0;
+        foreach (var a in HomeJson.Rows(catalog, "apps"))
+        {
+            var state = HomeJson.Str(a, "state");
+            var installed = a.TryGetProperty("installed", out var i) && i.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined or JsonValueKind.False);
+            if (installed || state == "legacy") return 0;
+            if (state == "available") offers++;
+        }
+        return offers;
+    }
+
     /// <summary>The panel's screens as a browser shows them: the stored ones, or the home screen it would seed.</summary>
     public IReadOnlyList<HomeScreen> PanelScreens() => Screens ?? HomeScreens.Seed(Apps.Select(a => a.Ref), Agents.Select(a => a.Ref), Widgets.Select(w => w.Id));
 

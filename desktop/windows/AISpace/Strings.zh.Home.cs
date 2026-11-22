@@ -21,8 +21,12 @@ internal static partial class L
         ["Widgets"] = "小组件",
         ["None of this kind yet"] = "还没有这一类内容",
 
-        // The App Store.
+        // The App Store and the first-use card.
         ["App Store"] = "应用商店",
+        ["Add your first apps"] = "添加第一批应用",
+        ["The App Store has {0} apps for this Space. All are ticked; untick what you do not want. The apps you install are added to this screen."] = "应用商店里有 {0} 个应用可以装到这个空间。已全部勾选，不要的取消勾选即可。装好的应用会加到这个屏幕上。",
+        ["Choose Apps"] = "选择应用",
+        ["Not Now"] = "以后再说",
 
         // The page's states.
         ["Loading the Space…"] = "正在读取空间…",

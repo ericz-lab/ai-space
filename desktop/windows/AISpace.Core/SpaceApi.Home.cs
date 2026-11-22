@@ -23,6 +23,15 @@ public sealed partial class SpaceApi
         return HomeCatalogue.Decode(await apps.ConfigureAwait(false), await agents.ConfigureAwait(false), await widgets.ConfigureAwait(false), await peers.ConfigureAwait(false), await layout.ConfigureAwait(false));
     }
 
+    public const string CatalogPath = "/api/app-catalog";
+
+    /// <summary>
+    /// How many apps the App Store offers a Space that has none of them yet
+    /// (<see cref="HomeCatalogue.CatalogOffers"/>); 0 from a Space without the route.
+    /// </summary>
+    public async Task<int> CatalogOffers(CancellationToken ct = default) =>
+        await Optional(CatalogPath, ct).ConfigureAwait(false) is { } catalog ? HomeCatalogue.CatalogOffers(catalog) : 0;
+
     private async Task<JsonElement?> Optional(string path, CancellationToken ct)
     {
         try

@@ -44,6 +44,9 @@ internal sealed partial class HomePage : NativePage
     private DateTimeOffset? _catalogueAt;
     private string? _error;
     private bool _loading, _again, _stale = true, _closed;
+    /// <summary>How many apps the App Store offers a Space that has none of them (the first-use card), once asked.</summary>
+    private int _offers;
+    private bool _offersKnown;
     private string _query = "";
     private string _shownId = HomeScreens.Home;
     private LibraryFilter _filter = LibraryFilter.All;
@@ -146,6 +149,12 @@ internal sealed partial class HomePage : NativePage
             _catalogueAt = DateTimeOffset.Now;
             _error = null;
             Seed(c);
+            if (!_offersKnown && !_store.StoreCardHidden(SpaceKey))
+            {
+                _offers = await Offers(api);
+                _offersKnown = true;
+                if (_closed) return;
+            }
         }
         catch (SpaceApiException e)
         {
@@ -179,10 +188,29 @@ internal sealed partial class HomePage : NativePage
         }
     }
 
-    /// <summary>The panel's screens become this computer's the first time; a screen pinned with one machine's variant of an agent shows the agent once.</summary>
+    /// <summary>The first-use card's count; a Space that cannot say offers nothing.</summary>
+    private static async Task<int> Offers(SpaceApi api)
+    {
+        try
+        {
+            return await api.CatalogOffers();
+        }
+        catch (SpaceApiException)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// The panel's screens become this computer's the first time; after that only the apps the panel's
+    /// home screen gains (what the App Store installed) are added to the home screen here. A screen
+    /// pinned with one machine's variant of an agent shows the agent once.
+    /// </summary>
     private void Seed(HomeCatalogue c)
     {
         _store.Seed(SpaceKey, c.PanelScreens());
+        // Only a layout the Space has stored: the one the panel would seed lists every new app.
+        if (c.Screens is { } stored) _store.Follow(SpaceKey, stored);
         if (c.AgentGroups.Count == 0) return;
         if (_store.Screens(SpaceKey).Any(s => !AgentGroups.CanonicalItems(s.Items, c.AgentGroups).SequenceEqual(s.Items)))
         {
@@ -286,10 +314,18 @@ internal sealed partial class HomePage : NativePage
             case "shortcuts": Context.Show(PageKind.Shortcuts); break;
             case "settings": Context.Show(PageKind.Settings); break;
             case "terminal": Context.OpenTerminal(); break;
-            case "store": Context.OpenStore(); break;
+            case "store": OpenStore(pick: false); break;
             // A built-in the app no longer draws (builtin:panel on a screen saved before): nothing.
             default: break;
         }
+    }
+
+    /// <summary>The App Store in its tab. What is installed there shows on Home when it is next shown: the Space is read again then.</summary>
+    private void OpenStore(bool pick)
+    {
+        _stale = true;
+        _offersKnown = false;
+        Context.OpenStore(pick);
     }
 
     /// <summary>A widget's link (a row, a block), else its own page, else its app.</summary>
@@ -367,7 +403,7 @@ internal sealed partial class HomePage : NativePage
             foreach (var e in c.Apps.Concat(c.Agents)) s.Append(e.Key).Append('|').Append(e.Title).Append('|').Append(e.Icon).Append('|').Append(e.Reach).Append('|').Append(e.Peer).Append('\n');
             foreach (var w in c.Widgets) s.Append(w.Id).Append('|').Append(w.Title).Append('|').Append(w.State).Append('\n');
             foreach (var (name, served) in c.BuiltinIcons) s.Append(name).Append('=').Append(served).Append(',');
-            s.Append('\n');
+            s.Append("offers=").Append(_offers).Append(_store.StoreCardHidden(SpaceKey)).Append('\n');
         }
         if (Context.Live is { } live)
         {
@@ -589,6 +625,7 @@ internal sealed partial class HomePage : NativePage
                 }
             }
         }
+        if (screen.Id == HomeScreens.Home && _offers > 0 && !_store.StoreCardHidden(SpaceKey)) _body.Children.Add(StoreCard(_offers));
         if (tiles.Count == 0 && widgets.Count == 0)
         {
             var open = Ui.Button(L.T("Open Library"), () => ShowTab(LibraryId), accent: true);
@@ -610,6 +647,36 @@ internal sealed partial class HomePage : NativePage
             cards.Margin = new Thickness(0, 16, 0, 0);
             _body.Children.Add(cards);
         }
+    }
+
+    /// <summary>
+    /// The home screen's first-use card (the web panel's, src/web/AppCatalog.tsx): shown while the
+    /// Space has none of the App Store's apps. Choose Apps opens the store with every installable
+    /// app ticked; what is installed there lands on this screen. Not Now hides it for this Space.
+    /// </summary>
+    private FrameworkElement StoreCard(int offers)
+    {
+        var choose = Ui.Button(L.T("Choose Apps"), () => OpenStore(pick: true), accent: true);
+        var later = Ui.Button(L.T("Not Now"), () =>
+        {
+            _store.HideStoreCard(SpaceKey);
+            Draw();
+        });
+        var buttons = Ui.Row(choose, later);
+        buttons.VerticalAlignment = VerticalAlignment.Center;
+        var words = Ui.Column(4,
+            Ui.Text(L.T("Add your first apps"), 15, bold: true),
+            Ui.Text(L.F("The App Store has {0} apps for this Space. All are ticked; untick what you do not want. The apps you install are added to this screen.", offers), 13, secondary: true));
+        var row = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(buttons, Dock.Right);
+        buttons.Margin = new Thickness(16, 0, 0, 0);
+        row.Children.Add(buttons);
+        row.Children.Add(words);
+        var card = Ui.Card(row, 16);
+        card.Margin = new Thickness(0, 8, 0, 8);
+        AutomationProperties.SetName(card, L.T("Add your first apps"));
+        _first ??= choose;
+        return card;
     }
 
     private FrameworkElement FilterRow(IReadOnlyDictionary<LibraryFilter, int> counts)
