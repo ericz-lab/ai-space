@@ -77,7 +77,12 @@ private struct PagerScroll<Pages: View>: View {
                 }))
                 .onAppear {
                     pager.scrollTo(position.id, anchor: .leading)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { settle.settled = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        // Once more before its reports count: a pager laid out late (a first launch
+                        // still under its sheet) would otherwise report the library as a swipe.
+                        pager.scrollTo(position.id, anchor: .leading)
+                        DispatchQueue.main.async { settle.settled = true }
+                    }
                 }
                 // A resized window keeps the page it shows.
                 .onChange(of: width) { _, _ in pager.scrollTo(position.id, anchor: .leading) }

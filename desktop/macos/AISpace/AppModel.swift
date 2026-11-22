@@ -107,7 +107,8 @@ final class AppModel: ObservableObject {
     /// Where the launcher stands, observed by the pager and its indicator (PagerPosition).
     let pager = PagerPosition()
     /// The page on show: `Pager.home`, a screen's id, or `Pager.settings`. The window opens on the
-    /// first screen; the library is one page to its left.
+    /// home screen, the first screen of pinned tiles (`DesktopScreens.opening`); the library is one
+    /// page to its left.
     var pagerID: String {
         get { pager.id }
         set {
@@ -172,6 +173,7 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async { self?.deviceUsage.refresh() }
         }.store(in: &watchers)
         selectedID = store.defaultConnection?.id
+        openOnHomeScreen()
         screens.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &watchers)
         // A swipe moves the pager without the model; the screen it lands on is the one last shown.
         pager.$id.sink { [weak self] id in
@@ -270,6 +272,8 @@ final class AppModel: ObservableObject {
             if !copied, screens.records[connection.id.uuidString]?.seeded == true {
                 // This Mac's first layout for the Space: the panel's, with every built-in tile it has.
                 screens.edit(connection.id) { DesktopScreens.keepingBuiltins($0, from: panel) }
+                // A window still where it opened goes to the screen that holds the tiles.
+                if selectedID == connection.id, pagerID == Screens.home { openOnHomeScreen() }
             }
             screens.merge(connection.id, groups: catalogue.agentGroups)
             iconStores[connection.id]?.retryFailed()
@@ -278,6 +282,14 @@ final class AppModel: ObservableObject {
         iconStores[connection.id] = IconStore(api: l.api, directory: DesktopPaths.icons(connection.id))
         DispatchQueue.main.async { Task { await l.refresh() } }
         return l
+    }
+
+    /// Puts the launcher on the selected Space's home screen: the first screen of pinned tiles,
+    /// not the library to its left and not an empty screen while another holds the tiles.
+    private func openOnHomeScreen() {
+        let page = selectedID.map { DesktopScreens.opening(screens.screens($0)) } ?? Screens.home
+        homePage = page
+        pagerID = page
     }
 
     /// The icon the Space serves for a built-in tile: its icon pack's, else the panel's own artwork.
@@ -350,16 +362,14 @@ final class AppModel: ObservableObject {
         selectedID = id
         query = ""
         editingScreen = nil
-        homePage = Screens.home
-        pagerID = Screens.home
+        openOnHomeScreen()
         destination = .launcher
     }
 
     func add(name: String, url: URL) {
         let c = store.add(name: name, url: url)
         selectedID = c.id
-        homePage = Screens.home
-        pagerID = Screens.home
+        openOnHomeScreen()
         destination = .launcher
     }
 
@@ -399,6 +409,8 @@ final class AppModel: ObservableObject {
         }
         store.setDefault(c.id)
         selectedID = c.id
+        // A first install opens on the home screen, wherever the launcher stood before it.
+        openOnHomeScreen()
         destination = .launcher
         Task { await signInLocal(c, force: true) }
     }

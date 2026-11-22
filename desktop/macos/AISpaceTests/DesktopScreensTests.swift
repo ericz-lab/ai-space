@@ -4,7 +4,7 @@ import Testing
 @testable import AISpace
 #endif
 
-/// The built-in tiles on this Mac: their icons, their pages, and what a copied layout keeps of them.
+/// The home screen on this Mac: where the window opens and which built-in tiles a copied layout keeps.
 @MainActor
 struct DesktopScreensTests {
     let file = FileManager.default.temporaryDirectory
@@ -62,5 +62,27 @@ struct DesktopScreensTests {
             ["builtin:store", "app:notes", "builtin:inbox", "builtin:settings", "agent:space/assistant"],
             ["builtin:terminal", "widget:notes/recent"],
         ])
+    }
+
+    // MARK: Where the window opens
+
+    @Test func aFirstInstallOpensOnTheHomeScreen() {
+        // Nothing copied yet: the home screen, never the library.
+        #expect(DesktopScreens.opening([PanelScreen(id: Screens.home)]) == Screens.home)
+        #expect(DesktopScreens.opening([]) == Screens.home)
+        // The seeded layout of a new Space: its home screen holds the tiles.
+        let seeded = DesktopScreens.seed(apps: [], agents: ["space/assistant"], widgets: [])
+        #expect(DesktopScreens.opening(seeded) == Screens.home)
+        // The library's page id (`Pager.home`) is no screen's.
+        #expect(DesktopScreens.opening(seeded) != "#home")
+    }
+
+    @Test func itOpensOnTheFirstScreenThatHoldsTiles() {
+        let screens = [PanelScreen(id: Screens.home), PanelScreen(id: "s1"), PanelScreen(id: "s2", items: ["app:notes"]), PanelScreen(id: "s3", items: ["app:todo"])]
+        #expect(DesktopScreens.opening(screens) == "s2")
+        // The home screen wins whenever it holds anything.
+        #expect(DesktopScreens.opening([PanelScreen(id: Screens.home, items: ["builtin:settings"]), PanelScreen(id: "s1", items: ["app:notes"])]) == Screens.home)
+        // Every screen empty: the home screen, not a later empty one.
+        #expect(DesktopScreens.opening([PanelScreen(id: Screens.home), PanelScreen(id: "s1")]) == Screens.home)
     }
 }

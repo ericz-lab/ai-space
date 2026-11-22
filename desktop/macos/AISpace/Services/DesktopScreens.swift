@@ -1,7 +1,8 @@
 import Foundation
 
 /// What the Mac adds to the screens it shares with the iPhone (mobile/ios/AISpace/Core/Screens.swift,
-/// ScreenStore.swift): it draws every built-in tile, so a layout copied from the panel keeps them.
+/// ScreenStore.swift): it draws every built-in tile, so a layout copied from the panel keeps them;
+/// and the window opens on the home screen.
 ///
 /// Names, as the code has them: the *library* is the leftmost page (`Pager.home`, "Home" in the
 /// menus); the *home screen* (主屏幕) is the first screen of pinned tiles (`Screens.home`, "Main").
@@ -34,5 +35,12 @@ enum DesktopScreens {
             // Whatever the copy holds that the panel's screen does not (nothing, today) stays at the end.
             return PanelScreen(id: screen.id, name: screen.name, items: items + screen.items.filter { !seen.contains($0) })
         }
+    }
+
+    /// The screen the window opens on for a Space: the home screen, which is the first screen and
+    /// holds the pinned tiles. When that one is empty and a later screen is not, the first screen
+    /// that holds something; never the library, and never an empty screen while another has tiles.
+    static func opening(_ screens: [PanelScreen]) -> String {
+        screens.first { !$0.items.isEmpty }?.id ?? Screens.home
     }
 }
