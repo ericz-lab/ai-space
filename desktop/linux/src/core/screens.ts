@@ -32,7 +32,12 @@ export const builtinArt = (name: BuiltinName): string | undefined => (BUILTIN_AR
 /** The page of the panel a tile opens in a tab, for the ones this client has no view of its own for (docs/panel.md#built-in-pages). */
 export const builtinPage = (name: BuiltinName): string | undefined => (name === "store" || name === "shortcuts" ? `/?page=${name}` : name === "panel" ? "/" : undefined);
 
-export type ScreenRecord = { screens: Screen[]; seeded: boolean };
+/**
+ * `apps`: every app (`app:<id>`) the Space has had since this record first looked, so an app is
+ * new to this computer once; `awaiting`: new ones the panel has not put on its home screen yet
+ * (`adopt`). Both are missing in a record written before the client kept them.
+ */
+export type ScreenRecord = { screens: Screen[]; seeded: boolean; apps?: string[]; awaiting?: string[] };
 /** screens.json: one record per saved Space, by connection id. */
 export type ScreenFile = Record<string, ScreenRecord>;
 
@@ -91,10 +96,39 @@ export const openingPage = (_screens: Screen[]): string => HOME;
 export const pageAfter = (shown: string, screens: Screen[]): string => (pagesOf(screens).includes(shown) ? shown : openingPage(screens));
 
 /** Replaces this computer's layout with the panel's as it is now, when the person asks for it. */
-export const reset = (file: ScreenFile, conn: string, panel: Screen[]): ScreenFile => ({ ...file, [conn]: { screens: copyPanel(panel), seeded: true } });
+export const reset = (file: ScreenFile, conn: string, panel: Screen[]): ScreenFile => ({ ...file, [conn]: { ...file[conn], screens: copyPanel(panel), seeded: true } });
 
 /** A change made here; a layout made by hand is never overwritten by a later copy. */
-export const edit = (file: ScreenFile, conn: string, change: (s: Screen[]) => Screen[]): ScreenFile => ({ ...file, [conn]: { screens: normalize(change(screensOf(file, conn))), seeded: true } });
+export const edit = (file: ScreenFile, conn: string, change: (s: Screen[]) => Screen[]): ScreenFile => ({ ...file, [conn]: { ...file[conn], screens: normalize(change(screensOf(file, conn))), seeded: true } });
+
+/**
+ * An app installed after this computer's layout was made goes on its home screen when the panel
+ * put it on its own: the App Store pins what it installs to the panel's home screen
+ * (docs/app-catalog.md), the first-use choice of apps included, and a layout kept here would
+ * otherwise never show it. `apps` are the Space's apps now, as keys (`app:<id>`), `panel` its
+ * screens now. Only an app this record has not seen before counts, and once: one taken off the
+ * home screen here stays off, and what the panel's owner pins or moves there later changes
+ * nothing here. A new app the panel has not pinned yet (installed another way, or the page has
+ * still to save its layout) waits, and lands when it is. Undefined when nothing changes.
+ */
+export function adopt(file: ScreenFile, conn: string, apps: string[], panel: Screen[]): ScreenFile | undefined {
+  const rec = file[conn];
+  if (!rec?.seeded) return undefined;
+  // The first look of this record: the apps there are the ones its layout was made with.
+  if (!rec.apps) return { ...file, [conn]: { ...rec, apps: [...new Set(apps)] } };
+  const known = new Set(rec.apps);
+  const here = new Set(apps);
+  const fresh = [...here].filter((k) => !known.has(k));
+  const panelHome = panel.find((s) => s.id === HOME)?.items ?? [];
+  const candidates = new Set([...(rec.awaiting ?? []).filter((k) => here.has(k)), ...fresh]);
+  const awaiting = [...candidates].filter((k) => !panelHome.includes(k));
+  let screens = rec.screens;
+  // In the panel's order; one on a screen here already (pinned by hand meanwhile) stays where it was put.
+  for (const key of panelHome) if (candidates.has(key) && !screens.some((s) => s.items.includes(key))) screens = normalize(pin(screens, HOME, key));
+  if (!fresh.length && screens === rec.screens && awaiting.join("\n") === (rec.awaiting ?? []).join("\n")) return undefined;
+  const { awaiting: _, ...rest } = rec;
+  return { ...file, [conn]: { ...rest, screens, apps: [...rec.apps, ...fresh], ...(awaiting.length ? { awaiting } : {}) } };
+}
 
 export function forget(file: ScreenFile, conn: string): ScreenFile {
   const { [conn]: _, ...rest } = file;
@@ -110,7 +144,9 @@ export function decodeScreenFile(raw: unknown): ScreenFile {
     const screens = (r as ScreenRecord).screens
       .filter((s) => typeof s === "object" && s !== null && typeof s.id === "string" && Array.isArray(s.items))
       .map((s) => ({ id: s.id, name: typeof s.name === "string" ? s.name : "", items: s.items.filter((k): k is string => typeof k === "string") }));
-    out[conn] = { screens: normalize(screens), seeded: (r as ScreenRecord).seeded === true };
+    const keys = (v: unknown) => (Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : undefined);
+    const [apps, awaiting] = [keys((r as ScreenRecord).apps), keys((r as ScreenRecord).awaiting)];
+    out[conn] = { screens: normalize(screens), seeded: (r as ScreenRecord).seeded === true, ...(apps ? { apps } : {}), ...(awaiting?.length ? { awaiting } : {}) };
   }
   return out;
 }

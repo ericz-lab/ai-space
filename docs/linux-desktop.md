@@ -12,7 +12,7 @@ below where it does less.
 
 | Part | What it does |
 | --- | --- |
-| Home | Pages side by side, as on the Mac ([macos-desktop.md](macos-desktop.md)): a sideways swipe on the touchpad, the dots above them, or Ctrl+Page Up and Ctrl+Page Down. The first page is the **Library**: every app (with the panel's own tiles, `builtin:<name>`: App Store, Inbox, Shortcuts, Terminal and Settings, and this client's Panel tile; [below](#built-in-tiles)), agent and widget under the command box ([panel.md](panel.md#omnibox)). Then the **screens**, one page each; the window opens on the first, the **home screen** (主屏幕, "Main" in the app), which carries the command box too ([below](#the-home-screen-at-first)). Typing filters every app, agent and widget, best names first (the web panel's ranking, `src/space/shortcuts/ranking.ts`), and while the box holds a query that page shows the matches. Return opens the best match when its name holds the whole query, otherwise asks Space Assistant in a new conversation; Ctrl+Return always asks. An agent the Space lists once per machine (the same `app/name` on this machine and on peers) is one tile, standing for the local variant, else the first peer that answers; a screen pinned with one machine's variant shows that tile (`core/agents.ts`, the web's `agent-groups.ts`). A screen shows its tiles, then its **widget cards**, drawn as the panel draws them (`core/widgets.ts`, from `src/web/WidgetBlocks.tsx`): the first block large (value, change, line or bar chart, progress bar, gauge), the next ones as rows, as many as the card's size holds; a list widget its items with their age; an `embed` widget the app's own page in a web view. The screens are this computer's (`~/.config/ai-space/screens.json`, `core/screens.ts`): copied from the panel's once, then changed here and never written to the Space. Right-click a tile or a card for Open, the screens it is on, Remove from This Screen, Open in Browser and Copy Link; the ⋯ button, or a right-click on a screen's empty part, for New Screen, Rename, Edit (reorder and remove), Copy the Panel's Layout and Delete |
+| Home | Pages side by side, as on the Mac ([macos-desktop.md](macos-desktop.md)): a sideways swipe on the touchpad, the dots above them, or Ctrl+Page Up and Ctrl+Page Down. The first page is the **Library**: every app (with the panel's own tiles, `builtin:<name>`: App Store, Inbox, Shortcuts, Terminal and Settings, and this client's Panel tile; [below](#built-in-tiles)), agent and widget under the command box ([panel.md](panel.md#omnibox)). Then the **screens**, one page each; the window opens on the first, the **home screen** (主屏幕, "Main" in the app), which carries the command box too ([below](#the-home-screen-at-first)). Typing filters every app, agent and widget, best names first (the web panel's ranking, `src/space/shortcuts/ranking.ts`), and while the box holds a query that page shows the matches. Return opens the best match when its name holds the whole query, otherwise asks Space Assistant in a new conversation; Ctrl+Return always asks. An agent the Space lists once per machine (the same `app/name` on this machine and on peers) is one tile, standing for the local variant, else the first peer that answers; a screen pinned with one machine's variant shows that tile (`core/agents.ts`, the web's `agent-groups.ts`). A screen shows its tiles, then its **widget cards**, drawn as the panel draws them (`core/widgets.ts`, from `src/web/WidgetBlocks.tsx`): the first block large (value, change, line or bar chart, progress bar, gauge), the next ones as rows, as many as the card's size holds; a list widget its items with their age; an `embed` widget the app's own page in a web view. The screens are this computer's (`~/.config/ai-space/screens.json`, `core/screens.ts`): copied from the panel's once, then changed here and never written to the Space; the one thing that still follows the panel is an app installed from the App Store, which lands on the home screen here as it does there ([below](#apps-installed-from-the-app-store)). Right-click a tile or a card for Open, the screens it is on, Remove from This Screen, Open in Browser and Copy Link; the ⋯ button, or a right-click on a screen's empty part, for New Screen, Rename, Edit (reorder and remove), Copy the Panel's Layout and Delete |
 | Chat | Native conversations with the Space's agents: the agents and recent conversations in a sidebar, messages drawn natively (Markdown, one quiet row per tool call that opens to its input and output, approval and question cards, a failed turn with its reason and Try Again, Grant and retry after a refusal for lack of permission), the permission picker, and, for an agent on several machines, a machine menu naming each machine's agent CLIs (`GET /api/model/inventory`): each machine keeps its own conversations, an offline one is listed but cannot be picked or sent to, and the choice is remembered per agent and opened next time from its tile; pictures attached by button, paste or drop, Stop. A message sent while a turn runs joins it (steering) or waits its turn. A turn survives a dropped connection (it reattaches from the last event) and an app restart (running turns are picked up again). The logic is the Mac's `ChatController`, ported to `core/conversation.ts` |
 | Inbox | The Space's open threads; opening one marks it read and goes to its page; Mark as Read, Done, Mark All as Read. New unread threads arrive as desktop notifications with Mark as Read and Done, from every saved Space |
 | Terminal | Shells on the Space's machine and its peers, one tab each: xterm.js in a web view whose page counts as the Space's origin, speaking the panel's protocol ([terminal.md](terminal.md)); a passphrase is asked natively and kept in memory |
@@ -108,6 +108,28 @@ size and its pages have theirs. Home asks again every 100 ms until the carousel 
 screen and stays there, for at most 3 seconds, so a slow first start does not leave the window on
 the library.
 
+### Apps installed from the App Store
+
+The App Store tile opens the panel's store in a tab (`/?page=store`), and that page pins every app
+it installs to the panel's home screen ([app-catalog.md](app-catalog.md#the-app-store)): the apps
+ticked in the first-use choice after an install, and any app installed there later. This computer
+keeps its own layout, so the app follows that pin (`adopt` in `core/screens.ts`): at each look at
+the Space, an app the Space did not have before and that is on the panel's home screen is added to
+the end of this computer's home screen, in the panel's order. Coming back to Home from the Space's
+pages looks at once, so the tiles are there when Home shows.
+
+- An app is new once. `screens.json` keeps, per Space, the apps seen since the layout was made
+  (`apps`); one taken off the home screen here stays off, also after it is uninstalled and
+  installed again.
+- A new app the panel has not pinned (installed with `space app install`, or deployed) stays in
+  the library; it waits (`awaiting`) and lands if the panel pins it to its home screen later.
+- Nothing else follows the panel: what its owner pins, moves or removes there of apps this
+  computer already knew changes nothing here. Copy the Panel's Layout still takes all of it.
+- A layout made by an earlier version has no list of apps: the first look notes them and adds
+  nothing.
+- A Space whose panel has no screens stored yet (no browser has opened it) counts the home screen
+  the panel would seed, so the first eight apps land here as they would there.
+
 ## How it is built
 
 TypeScript, bundled by Bun for [GJS](https://gjs.guide/) (GNOME's JavaScript runtime), on GTK 4,
@@ -178,7 +200,7 @@ What the app keeps:
 | Path | What |
 | --- | --- |
 | `~/.config/ai-space/connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
-| `~/.config/ai-space/screens.json` | Home's screens, per saved Space |
+| `~/.config/ai-space/screens.json` | Home's screens, per saved Space, with the apps each Space has had (to tell a newly installed one) |
 | `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand, the machine chosen for each agent on several machines, appearance, language, widgets on screens, the Settings section shown last, the floating ball (on or off, its place, each Space's sections), the desk pet (on or off, where, its size, its place on the desktop) |
 | `~/.local/share/ai-space/desktop/<connection>/` | each Space's web data: cookies (its sign-in), storage, cache |
 | `~/.cache/ai-space/catalogue-<connection>.json` | the last catalogue, shown marked as such while the Space cannot be reached |

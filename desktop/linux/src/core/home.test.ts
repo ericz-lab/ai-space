@@ -5,6 +5,7 @@ import { decodeCatalogue, panelScreens, seededScreens } from "./catalogue.ts";
 import { BUILTIN_ICONS } from "../../../../src/space/panel/icons.ts";
 import { BUILTINS } from "../../../../src/web/screens.ts";
 import { BUILTIN_ART, BUILTIN_NAMES, LIBRARY, builtinArt, builtinPage, openingPage, pageAfter, pagesOf } from "./screens.ts";
+import { adopt } from "./screens.ts";
 import { HOME, copyPanel, decodeScreenFile, edit, forget, move, newScreen, pin, rename, reset, screenTitle, screensOf, seed, unpin } from "./screens.ts";
 import { cardBody, deltaText, embedPath, fmt, fraction, gaugeSegments, isOutdated, itemsFor, position, rowsFor, shown, spark, tankLevel, tankValue, toneOf, txt } from "./widgets.ts";
 
@@ -170,4 +171,81 @@ test("first run: the window opens on the home screen, and it holds tiles", () =>
   expect(pageAfter("s2", three)).toBe("s2");
   expect(pageAfter(LIBRARY, three)).toBe(LIBRARY);
   expect(pageAfter("s2", three.slice(0, 2))).toBe(HOME);
+});
+
+test("apps installed from the App Store land on this computer's home screen", () => {
+  const keys = (c: ReturnType<typeof spaceWith>) => c.apps.map((a) => `app:${a.ref}`);
+  const look = (file: Parameters<typeof adopt>[0], c: ReturnType<typeof spaceWith>) => adopt(file, "c", keys(c), panelScreens(c));
+  const home = (file: Parameters<typeof adopt>[0]) => screensOf(file, "c")[0]!.items;
+  const builtins = BUILTINS.map((b) => `builtin:${b}`);
+
+  // First install: no app yet. The layout is made, and the first look notes the apps it was made with.
+  const fresh = spaceWith([], null);
+  expect(look({}, fresh)).toBeUndefined();
+  let f = seed({}, "c", panelScreens(fresh), seededScreens(fresh))!;
+  f = look(f, fresh)!;
+  expect(f.c).toEqual({ screens: [{ id: HOME, name: "", items: [...builtins, "agent:space/assistant"] }], seeded: true, apps: [] });
+  expect(look(f, fresh)).toBeUndefined();
+
+  // The first-use choice: the App Store installs todo and notes and pins both to the panel's home
+  // screen (the page stores the screens it seeded, then each pin). They follow here, in that order.
+  const panelHome = [...builtins, "agent:space/assistant", "app:todo", "app:notes"];
+  const chosen = spaceWith(["notes", "todo"], [{ id: HOME, name: "", items: panelHome }]);
+  f = look(f, chosen)!;
+  expect(home(f)).toEqual(panelHome);
+  expect(f.c!.apps).toEqual(["app:notes", "app:todo"]);
+  expect(f.c!.awaiting).toBeUndefined();
+  expect(look(f, chosen)).toBeUndefined();
+
+  // One at a time, and a look that falls between the install and the page saving its pin: the app
+  // waits, and lands with the pin.
+  const installed = spaceWith(["notes", "todo", "keep"], [{ id: HOME, name: "", items: panelHome }]);
+  f = look(f, installed)!;
+  expect(home(f)).toEqual(panelHome);
+  expect(f.c!.awaiting).toEqual(["app:keep"]);
+  expect(look(f, installed)).toBeUndefined();
+  const pinnedKeep = spaceWith(["notes", "todo", "keep"], [{ id: HOME, name: "", items: [...panelHome, "app:keep"] }]);
+  f = look(f, pinnedKeep)!;
+  expect(home(f)).toEqual([...panelHome, "app:keep"]);
+  expect(f.c!.awaiting).toBeUndefined();
+
+  // Taken off the home screen here, it stays off: an app is new once, even after it left and came back.
+  f = edit(f, "c", (s) => unpin(s, HOME, "app:keep"));
+  expect(f.c!.apps).toEqual(["app:notes", "app:todo", "app:keep"]);
+  expect(look(f, pinnedKeep)).toBeUndefined();
+  expect(look(f, chosen)).toBeUndefined();
+  expect(look(f, pinnedKeep)).toBeUndefined();
+  expect(home(f)).toEqual(panelHome);
+
+  // An app installed another way, which the panel does not pin, stays in the library; so does one
+  // that left the Space while it waited.
+  const viaCli = spaceWith(["notes", "todo", "keep", "cli"], [{ id: HOME, name: "", items: [...panelHome, "app:keep"] }]);
+  f = look(f, viaCli)!;
+  expect(home(f)).toEqual(panelHome);
+  expect(f.c!.awaiting).toEqual(["app:cli"]);
+  f = look(f, pinnedKeep)!;
+  expect(f.c!.awaiting).toBeUndefined();
+  expect(home(look(f, spaceWith(["notes", "todo", "keep", "cli"], [{ id: HOME, name: "", items: [...panelHome, "app:cli"] }])) ?? f)).toEqual(panelHome);
+
+  // What the panel's owner pins there later of apps this computer already knew changes nothing here.
+  const repinned = edit(f, "c", (s) => unpin(s, HOME, "app:todo"));
+  expect(look(repinned, pinnedKeep)).toBeUndefined();
+  // A new app already put on another screen here stays where it was put.
+  const placed = edit(f, "c", (s) => pin(newScreen(s)!.screens, "s1", "app:late"));
+  const late = look(placed, spaceWith(["notes", "todo", "keep", "late"], [{ id: HOME, name: "", items: [...panelHome, "app:late"] }]))!;
+  expect(screensOf(late, "c").map((s) => s.items.includes("app:late"))).toEqual([false, true]);
+
+  // A panel with no screens stored shows a new app on the home screen it would seed: here too.
+  let g = seed({}, "c", panelScreens(fresh), seededScreens(fresh))!;
+  g = look(g, fresh)!;
+  g = look(g, spaceWith(["todo"], null))!;
+  expect(home(g)).toEqual([...builtins, "agent:space/assistant", "app:todo"]);
+
+  // A layout from before the client kept the apps: the first look notes them and pins nothing.
+  const old = { c: { screens: [{ id: HOME, name: "", items: ["builtin:inbox"] }], seeded: true } };
+  const noted = look(old, pinnedKeep)!;
+  expect(noted.c).toEqual({ ...old.c, apps: ["app:notes", "app:todo", "app:keep"] });
+  // The file keeps what was noted, and Copy the Panel's Layout does not forget it.
+  expect(decodeScreenFile(JSON.parse(JSON.stringify({ c: { ...f.c, awaiting: ["app:x"] } }))).c).toEqual({ ...f.c!, awaiting: ["app:x"] });
+  expect(reset(f, "c", panelScreens(pinnedKeep)).c!.apps).toEqual(f.c!.apps);
 });

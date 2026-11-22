@@ -171,6 +171,9 @@ export class HomePage {
     this.space = space;
     if (space?.catalogue) {
       this.store.seed(space.conn.id, panelScreens(space.catalogue), seededScreens(space.catalogue));
+      // What the App Store installed since, and pinned to the panel's home screen, lands on this one
+      // too; a catalogue from disk, of an earlier day, says nothing new.
+      if (!space.stale) this.store.adopt(space.conn.id, space.catalogue.apps.map(entryKey), panelScreens(space.catalogue));
       // A screen pinned with one machine's variant of an agent shows the agent's single tile (agents.ts).
       const groups = space.catalogue.agentGroups;
       const screens = this.store.screens(space.conn.id);

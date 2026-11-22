@@ -1,4 +1,4 @@
-import { type Screen, type ScreenFile, decodeScreenFile, edit, forget, reset, screensOf, seed } from "../core/screens.ts";
+import { type Screen, type ScreenFile, adopt, decodeScreenFile, edit, forget, reset, screensOf, seed } from "../core/screens.ts";
 import { dirs, logError, path, readTextSync, writeText } from "./env.ts";
 
 /**
@@ -32,6 +32,12 @@ export class ScreenStore {
   seed(conn: string, panel: Screen[], defaults: Screen[]): void {
     const next = seed(this.file, conn, panel, defaults);
     if (next) this.write(next, false);
+  }
+
+  /** Apps new to the Space that its panel pinned to its home screen (the App Store's installs) go on this computer's. */
+  adopt(conn: string, apps: string[], panel: Screen[]): void {
+    const next = adopt(this.file, conn, apps, panel);
+    if (next) this.write(next, next[conn]?.screens !== this.file[conn]?.screens);
   }
 
   edit(conn: string, change: (s: Screen[]) => Screen[]): void {

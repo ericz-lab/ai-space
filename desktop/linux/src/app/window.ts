@@ -260,10 +260,17 @@ export class MainWindow {
     this.stack.set_visible_child_name(view);
   }
 
+  /** The view on show before this one. */
+  private lastView: View = "home";
+
   private onView(): void {
     const view = this.stack.get_visible_child_name() as View;
     this.sidebarButton.set_visible(view === "chat");
     const space = this.model.current;
+    // Back from the Space's pages, where the App Store installs apps: look now, not at the next
+    // turn of the clock, so what was installed is on the home screen when it shows.
+    if (view === "home" && this.lastView === "pages" && space) void this.model.refresh(space);
+    this.lastView = view;
     if (view === "inbox") this.inbox.show(space);
     if (view === "terminal") this.terminal.show(space);
     if (view === "chat") this.chat.view.focus();
