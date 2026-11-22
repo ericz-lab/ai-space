@@ -257,7 +257,7 @@ struct LauncherPage: View {
                         .modifier(Arrangeable(active: arranging && screen != nil, remove: { unpin(entry.key, from: screen) }))
                         .simultaneousGesture(hold(on: screen))
                 case .builtin(let builtin):
-                    BuiltinTile(builtin: builtin, icons: icons) { if !arranging { model.openBuiltin(builtin) } }
+                    BuiltinTile(builtin: builtin, icon: builtin.icon(in: loader.catalogue?.builtinIcons ?? [:]), icons: icons) { if !arranging { model.openBuiltin(builtin) } }
                         .contextMenu { PinMenu(model: model, connection: connection, store: store, key: builtin.key, screen: screen) { model.openBuiltin(builtin) } }
                         .modifier(Arrangeable(active: arranging && screen != nil, remove: { unpin(builtin.key, from: screen) }))
                         .simultaneousGesture(hold(on: screen))

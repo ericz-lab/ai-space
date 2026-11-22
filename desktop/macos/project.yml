@@ -85,6 +85,22 @@ targets:
       - path: ../../src/web/public/pet-claude.webp
         group: Shared
         buildPhase: resources
+      # The built-in tiles' artwork, the panel's own (scripts/sources.sh BUILTIN_ICONS).
+      - path: ../../src/web/public/store.svg
+        group: Shared
+        buildPhase: resources
+      - path: ../../src/web/public/inbox.svg
+        group: Shared
+        buildPhase: resources
+      - path: ../../src/web/public/shortcuts.svg
+        group: Shared
+        buildPhase: resources
+      - path: ../../src/web/public/terminal.svg
+        group: Shared
+        buildPhase: resources
+      - path: ../../src/web/public/settings.svg
+        group: Shared
+        buildPhase: resources
     dependencies:
       - target: ShareExtension
         embed: true

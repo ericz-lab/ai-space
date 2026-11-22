@@ -771,3 +771,7 @@
 "The installer stopped with exit code %lld. Its last lines are below." = "安装脚本已停止，退出码为 %lld。下面是它最后输出的几行。";
 "The installer finished, but AI Space is not answering on this Mac yet. Retry looks for it again." = "安装脚本已完成，但这台 Mac 上的 AI Space 还没有响应。点“重试”会再查找一次。";
 "Installer output" = "安装脚本输出";
+
+/* Built-in tiles */
+"App Store" = "应用商店";
+"Shortcuts" = "快捷指令";

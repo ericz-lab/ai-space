@@ -27,6 +27,9 @@ final class IconImage: ObservableObject {
 struct EntryIcon: View {
     let icon: String?
     let fallback: String
+    /// A drawing the app carries for this icon, shown in place of the symbol while the Space's
+    /// icon loads or cannot be read (the built-in tiles' own artwork).
+    var artwork: NSImage?
     let icons: IconStore
     var size: CGFloat = 60
     var isRound = false
@@ -39,7 +42,7 @@ struct EntryIcon: View {
                 Text(verbatim: emoji).font(.system(size: size * 0.52))
                     .frame(width: size, height: size)
                     .background(.regularMaterial, in: shape)
-            } else if let image = loaded.image {
+            } else if let image = loaded.image ?? artwork {
                 Image(nsImage: image).resizable().interpolation(.high).scaledToFill().frame(width: size, height: size)
                     .clipShape(shape)
             } else {

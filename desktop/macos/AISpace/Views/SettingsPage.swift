@@ -317,13 +317,30 @@ struct SettingsPage: View {
     /// The pages General leads to; the others sit under their own sections.
     private static let spacePages: Set<HubPage> = [.inbox, .chat(agent: nil), .terminal]
 
+    /// The built-in tile a row of the Space's pages stands for, if any.
+    private static func builtin(_ page: HubPage) -> Builtin? {
+        switch page {
+        case .inbox: return .inbox
+        case .terminal: return .terminal
+        default: return nil
+        }
+    }
+
     /// The Space's own pages, drawn by the app from the Space's routes.
     private var more: some View {
         Section {
             ForEach(HubPage.rows.filter { Self.spacePages.contains($0.page) }, id: \.page) { row in
                 Button { model.destination = .hub(row.page) } label: {
                     HStack {
-                        Label(row.title, systemImage: row.symbol).foregroundStyle(Theme.text)
+                        if let builtin = Self.builtin(row.page) {
+                            // The tile's own artwork, as the launcher shows it.
+                            Label { Text(row.title) } icon: {
+                                EntryIcon(icon: model.icon(builtin, in: connection), fallback: row.symbol, artwork: BuiltinArtwork.image(builtin), icons: icons, size: 20)
+                            }
+                            .foregroundStyle(Theme.text)
+                        } else {
+                            Label(row.title, systemImage: row.symbol).foregroundStyle(Theme.text)
+                        }
                         Spacer()
                         if row.page == .inbox, let n = model.lives[connection.id]?.summary.unread, n > 0 {
                             Text(verbatim: "\(n)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
