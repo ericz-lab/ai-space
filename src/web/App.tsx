@@ -1,6 +1,6 @@
 import type { AgentIntentView } from "../space/shortcuts/agent-intents.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CatalogWelcome } from "./AppCatalog.tsx";
+import { type CatalogChange, CatalogWelcome } from "./AppCatalog.tsx";
 import { AddForm, UninstallForm } from "./AppForms.tsx";
 import MachineClis from "./MachineClis.tsx";
 import ModelPreference from "./ModelPreference.tsx";
@@ -19,6 +19,7 @@ import Inbox from "./Inbox.tsx";
 import Library, { libraryEntries } from "./Library.tsx";
 import Omnibox from "./Omnibox.tsx";
 import Shortcuts from "./Shortcuts.tsx";
+import Store, { storePreselect } from "./Store.tsx";
 import ScreenNav, { PhoneNav } from "./ScreenNav.tsx";
 import { BUILTINS, type Builtin, HOME, type Screen, addScreen, entryKey, move, parseKey, pin, removeScreen, seedScreens, unpin } from "./screens.ts";
 import { canonicalItems, groupAgents, groupById, groupOf, preferredMachine } from "./agent-groups.ts";
@@ -35,12 +36,12 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 // Launcher-style panel: App and Agent tiles with hover details, widget cards, a chat window.
 // The page is a row of screens (docs/panel.md#screens): the library with everything on the left,
 // the home screen the panel opens on, then the operator's own; each screen shows only what is
-// pinned to it. Settings, the inbox, the shortcuts and the terminal are built-in tiles: like an
+// pinned to it. Settings, the App Store, the inbox, the shortcuts and the terminal are built-in tiles: like an
 // app's, each opens in a new tab, as a page of its own (`/?page=…`, docs/panel.md#built-in-pages).
 // The chat and the tasks list open as floating panels over the page (an overlay that closes on a
 // click outside), and so do the built-in windows a panel link or the phone app asks for. The
 // floating chat has a button that moves it to a tab of its own (`/?page=chat&agent=…`).
-// Edit mode (long-press the background): add an app (catalog, new or link), unpin, drag to reorder, uninstall.
+// Edit mode (long-press the background): add an app (new or link; the App Store for the catalog), unpin, drag to reorder, uninstall.
 // Everything comes from the apps' manifests through the panel API; the browser holds no secrets.
 // Entries from peer machines say where they run in their hover details and are muted while that peer is down.
 // Every string the panel owns goes through `t` (i18n.ts); manifest text is picked with `localized`.
@@ -49,7 +50,7 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; petBuiltin?: string };
 
 /** Floating panels over the page; one at a time. */
-type Panel = "settings" | "chat" | "tasks" | "terminal" | "inbox" | "shortcuts";
+type Panel = "settings" | "chat" | "tasks" | "terminal" | "inbox" | "shortcuts" | "store";
 
 /**
  * What is behind the page: the three glow blobs, or the preset's backdrop (theme.ts) framed from
@@ -111,7 +112,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const accent = useAccentParam();
   const [editing, setEditing] = useState(false);
   // The screen an app added from a link is pinned to; `null` when added from the library.
-  const [adding, setAdding] = useState<{ pinTo: string | null; preselect?: boolean } | null>(null);
+  const [adding, setAdding] = useState<{ pinTo: string | null } | null>(null);
+  // The App Store opened from the first-use card: every installable app starts ticked.
+  const [storePick, setStorePick] = useState(() => PAGE === "store" && typeof location !== "undefined" && storePreselect(location.search));
   // The app dropped on the uninstall zone, awaiting confirmation; `zoneHot` while a tile hovers the zone.
   const [uninstalling, setUninstalling] = useState<AppInfo | null>(null);
   const [zoneHot, setZoneHot] = useState(false);
@@ -179,6 +182,16 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const openTerminal = () => setPanel("terminal");
   const openInbox = () => setPanel("inbox");
   const openShortcuts = () => setPanel("shortcuts");
+  const openStore = () => setPanel("store");
+  /** The App Store as a tile opens it: a page in a new tab, over the page in the phone app. */
+  const showStore = (pick = false) => {
+    recordOpen("builtin", "store", "panel");
+    if (BUILTIN_PAGES) window.open(pick ? "/?page=store&pick=all" : pageHref("store"), "_blank", "noopener,noreferrer");
+    else {
+      setStorePick(pick);
+      setPanel("store");
+    }
+  };
   const openTasks = () => setPanel("tasks");
   const openChat = (a: AgentInfo) => {
     setChatAgent(a);
@@ -420,6 +433,21 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         setLayoutState("ok");
       })
       .catch(() => setLayoutState("failed"));
+    // Another tab may have changed the screens (an app the App Store pinned): read them again when
+    // this one comes back, so its next save does not put the old ones back. Not while editing.
+    const visible = () => {
+      if (document.visibilityState !== "visible" || editingRef.current || !screensRef.current) return;
+      getJson<{ layout: { screens: Screen[] | null } }>("/api/panel/layout")
+        .then((d) => {
+          if (d.layout.screens && !editingRef.current) {
+            screensRef.current = d.layout.screens;
+            setScreens(d.layout.screens);
+          }
+        })
+        .catch(() => {});
+    };
+    document.addEventListener("visibilitychange", visible);
+    return () => document.removeEventListener("visibilitychange", visible);
   }, []);
   // The new order or size stays on screen either way; a failed save only shows after a reload, so say it in the console.
   const layoutNotSaved = (e: unknown) => console.warn("panel layout not saved:", e);
@@ -512,6 +540,16 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   };
   const unpinEntry = (key: string) => {
     if (screen) updateScreens((cur) => unpin(cur, screen.id, key));
+  };
+  // An app installed from the App Store lands on the home screen, where it can be found again; an
+  // update, a rebuild or an uninstall only refreshes the lists.
+  const storeChanged = (c: CatalogChange) => {
+    if (c.action === "installed") pinEntry(entryKey("app", c.app), HOME);
+    void reload();
+  };
+  const appUrl = (name: string) => {
+    const p = apps.find((a) => a.name === name && !a.peer && !a.connection);
+    return p?.url ? withAccent(withLang(p.url, lang), accent) : undefined;
   };
 
   // Keys: ⌘K / Ctrl+K goes home and focuses the box there; ← and → move between screens and
@@ -619,7 +657,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       const a = groupById(groups, e.id)?.primary;
       if (a) openAgent(a);
     } else if (e?.kind === "builtin") {
-      const b = (BUILTINS as readonly string[]).includes(e.id) ? (e.id as Builtin) : "terminal";
+      // A built-in this panel does not know (a newer client's) opens nothing rather than another one.
+      if (!(BUILTINS as readonly string[]).includes(e.id)) return;
+      const b = e.id as Builtin;
       if (BUILTIN_PAGES) window.open(pageHref(b), "_blank", "noopener,noreferrer");
       else setPanel(b);
     }
@@ -628,7 +668,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // The details under the pointer: shown on the library's tiles (Home, left of the screens), not on
   // the screens' own tiles, and not in add mode.
   const builtinText = (b: Builtin) =>
-    b === "inbox" ? { title: t("inbox.title"), blurb: t("inbox.blurb"), fallback: "📥" } : b === "shortcuts" ? { title: t("sc.title"), blurb: t("sc.blurb"), fallback: "⚡" } : b === "terminal" ? { title: t("term.title"), blurb: t("term.blurb"), fallback: "⌨️" } : { title: t("settings.title"), blurb: t("settings.blurb"), fallback: "⚙️" };
+    b === "store" ? { title: t("store.title"), blurb: t("store.blurb"), fallback: "🛍️" } : b === "inbox" ? { title: t("inbox.title"), blurb: t("inbox.blurb"), fallback: "📥" } : b === "shortcuts" ? { title: t("sc.title"), blurb: t("sc.blurb"), fallback: "⚡" } : b === "terminal" ? { title: t("term.title"), blurb: t("term.blurb"), fallback: "⌨️" } : { title: t("settings.title"), blurb: t("settings.blurb"), fallback: "⚙️" };
   // A built-in page's tab is named after it, as an app's is.
   useEffect(() => {
     if (PAGE) document.title = `${PAGE === "chat" ? localized(lang, chatAgent).title : builtinText(PAGE).title} · ai-space`;
@@ -708,7 +748,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // One screen: its tiles (apps, agents, the panel's own) in a grid, then its widget cards. A key
   // whose entry is gone (uninstalled, a peer that left) is skipped and stays in the layout.
   const builtinTile = (b: Builtin, key: string, onRemove: () => void, drag: DragProps) => {
-    const open = b === "inbox" ? openInbox : b === "shortcuts" ? openShortcuts : b === "terminal" ? openTerminal : openSettings;
+    const open = b === "store" ? openStore : b === "inbox" ? openInbox : b === "shortcuts" ? openShortcuts : b === "terminal" ? openTerminal : openSettings;
     const text = builtinText(b);
     return (
       <Tile
@@ -860,7 +900,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
 
   /** An entry's title for the App usage window; a key whose entry is gone shows as itself. */
   const nameOf = (kind: UsageKind, key: string) => {
-    if (kind === "builtin") return key === "inbox" ? t("inbox.title") : key === "shortcuts" ? t("sc.title") : key === "terminal" ? t("term.title") : key === "settings" ? t("settings.title") : key;
+    if (kind === "builtin") return key === "store" ? t("store.title") : key === "inbox" ? t("inbox.title") : key === "shortcuts" ? t("sc.title") : key === "terminal" ? t("term.title") : key === "settings" ? t("settings.title") : key;
     const found = kind === "app" ? apps.find((a) => a.id === key) : agents.find((a) => a.id === key);
     return found ? localized(lang, found).title : key;
   };
@@ -915,7 +955,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
               </div>
             )}
             {screen.id === HOME && !editing && <Omnibox entries={entries} onOpen={openEntry} onAsk={askAssistant} focusSignal={omniFocus} onOpenShortcuts={openShortcuts} onOpenTasks={openTasks} onAgentIntent={askSkillAgent} />}
-            {screen.id === HOME && !editing && <CatalogWelcome onOpen={() => setAdding({ pinTo: null, preselect: true })} />}
+            {screen.id === HOME && !editing && <CatalogWelcome onOpen={() => showStore(true)} />}
             {renderScreen(screen)}
           </section>
         ) : null}
@@ -934,9 +974,11 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       )}
       {adding && (
         <AddForm
-          preselect={adding.preselect}
           onClose={() => setAdding(null)}
-          onInstalled={reload}
+          onOpenStore={() => {
+            setAdding(null);
+            showStore();
+          }}
           onSaved={(app) => {
             if (app && adding.pinTo) pinEntry(entryKey("app", app.id), adding.pinTo);
             setAdding(null);
@@ -1076,6 +1118,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Terminal open={panel === "terminal"} onClose={close} />
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
       <Shortcuts open={panel === "shortcuts"} onClose={close} onOpenTasks={openTasks} />
+      {/* Mounted only while open: it reads the catalog when it mounts. */}
+      {panel === "store" && <Store open onClose={close} preselect={storePick} onChange={storeChanged} openUrl={appUrl} />}
       <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} newTab={BUILTIN_PAGES && PAGE !== "chat"} session={pageSessionId ?? undefined} ask={ask} draft={draft} onTurnSettled={() => { void reload(); }} />
     </>
   );

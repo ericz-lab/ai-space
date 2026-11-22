@@ -2,7 +2,7 @@
 
 Status: implemented in the Space (`src/space/packages/app-catalog.ts`, `release.ts`,
 `publishers.ts`, `catalog-sources.ts`; `space app catalog|install|upgrade|release|keygen`; the
-panel's Add app → App catalog and the home screen's first-use card). The catalog itself is the
+panel's App Store tile and the home screen's first-use card). The catalog itself is the
 [ai-space-apps](https://github.com/ericz-lab/ai-space-apps) repository. Which ai-space apps are in it
 and released is tracked there, not here.
 
@@ -24,17 +24,39 @@ moves one to a package).
 
 ## Using it
 
-In the panel: Add app (the `+` in the library, or long-press the background) opens on **App
-catalog**: every listed app with its title and description in the panel's language, its release,
-its publisher, what it needs and what only works online, and whether it is installed, has an
-update, or was built from source (and from which branch). Tick several and **Install N chosen**, or
-use a row's own buttons: **Install**, **Update to X**, **From source**, **Rebuild** (build what is
-in `app-src/<app>` and run it) and the tick **with source you can change**, on by default (the
-release's source package; unticked, the bundle alone). An installed row says where its source is
-and whether you changed it.
+### The App Store
+
+In the panel the catalog is the **App Store**, a built-in tile like Inbox and Settings: always in
+the library, pinned to a new workspace's home screen, never uninstalled. It opens in a new tab as a
+page of its own, `/?page=store` ([panel.md](panel.md#built-in-pages)); the Add app dialog (the `+`
+in the library, or long-press the background) has a way to it at the top, beside New app and From
+a link.
+
+- **Discover**: every listed app, recommended ones first, as cards: icon, title and description in
+  the panel's language, publisher (and whether the Space trusts them yet), release, what it needs,
+  and one button for its state: **Install**, **Update to X**, **Open** for an installed app, or
+  **From source** for an app with no release yet. A search reads the name, the titles and
+  descriptions in every language, and the publisher. Tick several and **Install N chosen**.
+- **Installed**: the catalog apps on this Space. **Updates**: those with a newer release; the tab
+  carries the count.
+- **Details** (click a card): the full description, the release and its tag, what is installed and
+  how (the signed package, built from source and from which branch, or installed another way),
+  where its source is (`app-src/<app>` as released, changed by you, or your own checkout), the
+  publisher with its key, what it needs, what only works online, the licence and the repository.
+  Every change is here: **Install** with the tick **with source you can change** (on by default:
+  the release's source package; unticked, the bundle alone), **From source**, **Rebuild** (build
+  what is in `app-src/<app>` and run it), **Update to X**, **Update over my changes** (the
+  `replaceSource` upgrade, offered when you changed the source) and **Uninstall**.
+- An app installed from the store is pinned to the home screen. **Uninstall** goes through the
+  package lifecycle (`DELETE /api/panel/packages/apps/:app`, [app-packages.md](app-packages.md)):
+  the app stops and leaves the panel; its data and `app-src/<app>` are kept.
+- An untrusted publisher is asked about once, over the page; so is taking an update over source you
+  changed. **Refresh** reads the catalog now; the header says when it was read, and a catalog that
+  could not be read shows its last copy, marked.
 
 A Space with no catalog app on it shows a first-use card on the home screen; **Choose apps** opens
-the catalog with every installable app ticked. **Not now** hides the card in that browser.
+the App Store (`/?page=store&pick=all`) with every installable app ticked. **Not now** hides the
+card in that browser.
 
 From the command line, against the running Space:
 
@@ -105,7 +127,7 @@ any other, checked by the same installer, under the same storage and network rul
 | Value | Catalogs |
 | --- | --- |
 | unset | the default, `https://raw.githubusercontent.com/ericz-lab/ai-space-apps/main/catalog.json` |
-| `none` (or empty) | none: the panel's catalog tab says so, installs from files still work |
+| `none` (or empty) | none: the App Store says so, installs from files still work |
 | a comma list | read in order; `default` stands for the default; an `https://` URL; `http://` only on loopback; a path (relative to the workspace) is a local file. The first catalog that lists an app wins. |
 
 A catalog is read at most every 6 hours (`--refresh` / the panel's Refresh read it now). When it

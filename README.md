@@ -143,7 +143,7 @@ Everything ai-space owns on a machine lives in one directory, `~/.ai-space` by d
 
 `bun run init` creates it. A new workspace starts ready to use: its `.env` turns on the package gateway that catalog apps open through, `runtimes.yaml` lists the agent CLIs found on the machine, and no app is cloned ([docs/install.md](docs/install.md#a-new-workspace)). A workspace made before keeps its default apps, each a public repository cloned into `apps/` and started by its own installer (today [ai-usage](https://github.com/ericz-lab/ai-usage)); `SPACE_DEFAULT_APPS=none` in `.env` skips them, a list of clone URLs replaces them.
 
-More apps come from the **app catalog** ([ai-space-apps](https://github.com/ericz-lab/ai-space-apps)): the panel's Add app → App catalog, or `space app install <name>`. By default an app arrives as a signed package and nothing is cloned, fetched or run; `--source` clones it into `app-src/<name>` and builds it on your machine, so you can change it. Details in [docs/app-catalog.md](docs/app-catalog.md).
+More apps come from the **app catalog** ([ai-space-apps](https://github.com/ericz-lab/ai-space-apps)): the panel's App Store, or `space app install <name>`. By default an app arrives as a signed package and nothing is cloned, fetched or run; `--source` clones it into `app-src/<name>` and builds it on your machine, so you can change it. Details in [docs/app-catalog.md](docs/app-catalog.md).
 
 ## ⌨️ Usage
 

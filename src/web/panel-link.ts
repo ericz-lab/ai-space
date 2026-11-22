@@ -3,16 +3,16 @@ import { groupKeyOf } from "./agent-groups.ts";
 
 /**
  * Links into the panel (docs/panel.md#panel-links): the address's fragment names a window to open
- * once the page is up, so a desktop client can show the Inbox, the Terminal, Settings or a chat
+ * once the page is up, so a desktop client can show the Inbox, the Terminal, Settings, the App Store or a chat
  * without a native copy of them. `#chat=<app>/<agent>&text=…` opens that agent's chat with the
  * text in its message field. The text is a draft: it is never sent, so a link from anywhere cannot
  * make an agent act. The panel clears the fragment once it is read.
  */
 export type PanelLink =
   | { open: "chat"; agent: string | null; text: string }
-  | { open: "inbox" | "terminal" | "settings" | "shortcuts" };
+  | { open: "inbox" | "terminal" | "settings" | "shortcuts" | "store" };
 
-const WINDOWS = ["inbox", "terminal", "settings", "shortcuts"] as const;
+const WINDOWS = ["inbox", "terminal", "settings", "shortcuts", "store"] as const;
 
 /**
  * A built-in tile's own page (docs/panel.md#built-in-pages): `/?page=<name>` shows that window

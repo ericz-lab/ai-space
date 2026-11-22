@@ -143,7 +143,7 @@ ai-space 在一台机器上拥有的一切都放在一个目录里，默认 `~/.
 
 `bun run init` 创建这个目录。新工作区装好即可用：它的 `.env` 打开目录应用所用的安装包网关，`runtimes.yaml` 列出本机找到的智能体 CLI，不克隆任何应用（[docs/install.md](docs/install.md#a-new-workspace)）。之前建的工作区保留它的默认应用：每个都是一个公开仓库，克隆到 `apps/` 后由它自己的安装脚本启动（目前是 [ai-usage](https://github.com/ericz-lab/ai-usage)）；在 `.env` 里设 `SPACE_DEFAULT_APPS=none` 跳过，给一串克隆地址则替换这个列表。
 
-更多应用来自**应用目录**（[ai-space-apps](https://github.com/ericz-lab/ai-space-apps)）：面板里「添加应用 → 应用目录」，或 `space app install <名字>`。默认装的是签名的安装包，不克隆、不下载依赖、不运行脚本；加 `--source` 则把源码克隆到 `app-src/<名字>`，在本机构建，之后可以自己改。详见 [docs/app-catalog.md](docs/app-catalog.md)。
+更多应用来自**应用目录**（[ai-space-apps](https://github.com/ericz-lab/ai-space-apps)）：面板里的「应用商店」，或 `space app install <名字>`。默认装的是签名的安装包，不克隆、不下载依赖、不运行脚本；加 `--source` 则把源码克隆到 `app-src/<名字>`，在本机构建，之后可以自己改。详见 [docs/app-catalog.md](docs/app-catalog.md)。
 
 ## ⌨️ 使用
 

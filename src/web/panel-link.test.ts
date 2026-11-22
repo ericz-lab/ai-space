@@ -48,7 +48,7 @@ test("a draft joins what the field holds", () => {
 });
 
 test("a page address names one built-in window, and nothing else", () => {
-  for (const name of ["inbox", "terminal", "settings", "shortcuts"] as const) expect(parsePanelPage(pageHref(name).slice(1))).toBe(name);
+  for (const name of ["inbox", "terminal", "settings", "shortcuts", "store"] as const) expect(parsePanelPage(pageHref(name).slice(1))).toBe(name);
   expect(parsePanelPage("?lang=zh&page=terminal")).toBe("terminal");
   expect(parsePanelPage("")).toBeNull();
   expect(parsePanelPage("?page=tasks")).toBeNull();
