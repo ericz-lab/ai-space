@@ -286,7 +286,10 @@ export class MainWindow {
         box.add_top_bar(new Adw.HeaderBar());
         this.root.add_named(box, "welcome");
       }
-      this.root.set_visible_child_name("welcome");
+      if (this.root.get_visible_child_name() !== "welcome") {
+        this.root.set_visible_child_name("welcome");
+        this.welcome.enter();
+      }
       return;
     }
     this.root.set_visible_child_name("main");

@@ -19,6 +19,7 @@ export const DEBUG = GLib.getenv("AISPACE_DEBUG") === "1";
 Gio._promisify(Gio.File.prototype, "load_contents_async", "load_contents_finish");
 Gio._promisify(Gio.File.prototype, "replace_contents_bytes_async", "replace_contents_finish");
 Gio._promisify(Gio.Subprocess.prototype, "communicate_utf8_async", "communicate_utf8_finish");
+Gio._promisify(Gio.Subprocess.prototype, "wait_async", "wait_finish");
 Gio._promisify(Gio.InputStream.prototype, "close_async", "close_finish");
 Gio._promisify(Gio.DataInputStream.prototype, "read_line_async", "read_line_finish");
 Gio._promisify(Soup.Session.prototype, "send_and_read_async", "send_and_read_finish");
