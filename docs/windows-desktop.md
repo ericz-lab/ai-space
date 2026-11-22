@@ -99,6 +99,13 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   kind. A tile shows what is wrong (not answering, paused, its machine offline), an app's and the
   Inbox's unread count, and an agent at work; the library's tiles show their details under the
   pointer. A click opens an app in its tab, an agent's chat, a built-in page, a widget's page.
+- **Where it opens.** On the home screen (主屏幕): the first screen, `home`, titled Main, which
+  holds the pinned tiles. A first install copies the panel's home screen (or the one it would
+  seed: the first apps and the five built-in tiles), so that is what shows. Should the home
+  screen hold nothing the client draws while a later screen does, Home opens on the first screen
+  that has tiles (`HomeScreens.Opening`); it never opens on the Library or on an empty screen
+  while another has tiles. This is decided once, when the Space is first read after the app
+  starts; a place the person chose meanwhile is kept.
 - **Screens** are this computer's (`screens.json` beside the saved Spaces, by Space): the panel's
   screens (or the home screen the panel would seed) are copied once, then a tile's or a card's
   menu (right click, Shift+F10) puts it on a screen or takes it off and moves it, and a screen

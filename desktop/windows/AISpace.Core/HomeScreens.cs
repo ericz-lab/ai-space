@@ -177,6 +177,14 @@ public static class HomeScreens
     public static Dictionary<string, ScreenRecord> HideStoreCard(IReadOnlyDictionary<string, ScreenRecord> file, string space) =>
         new(file) { [space] = (file.TryGetValue(space, out var r) ? r : new ScreenRecord([EmptyHome()], false)) with { StoreCardHidden = true } };
 
+    /// <summary>
+    /// The screen Home opens on: the first one that holds something the client draws, never the
+    /// Library and never an empty screen while another has tiles; the home screen when none has.
+    /// <paramref name="draws"/> says whether a key has an entry to show (an app that is gone has none).
+    /// </summary>
+    public static string Opening(IReadOnlyList<HomeScreen> screens, Func<string, bool> draws) =>
+        screens.FirstOrDefault(s => s.Items.Any(draws))?.Id ?? Home;
+
     public static Dictionary<string, ScreenRecord> Forget(IReadOnlyDictionary<string, ScreenRecord> file, string space)
     {
         var next = new Dictionary<string, ScreenRecord>(file);

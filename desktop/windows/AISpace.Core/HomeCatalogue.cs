@@ -302,6 +302,17 @@ public sealed class HomeCatalogue
     public HomeWidget? Widget(string id) => Widgets.FirstOrDefault(w => w.Id == id);
 
     /// <summary>
+    /// Whether a screen's key has something to show now: one of the built-in tiles this client
+    /// draws, or an app, agent or widget the Space has. A key whose entry is gone keeps its place
+    /// on the screen and shows nothing.
+    /// </summary>
+    public Func<string, bool> Draws()
+    {
+        var byKey = ByKey();
+        return key => key.StartsWith("builtin:", StringComparison.Ordinal) ? Array.IndexOf(HomeScreens.Builtins, key["builtin:".Length..]) >= 0 : byKey.ContainsKey(key);
+    }
+
+    /// <summary>
     /// How many apps the App Store offers a Space that has none of its apps yet (<c>GET /api/app-catalog</c>,
     /// <c>catalogOffers</c> in src/web/AppCatalog.tsx): the home screen's first-use card shows while
     /// there are some. A Space with any catalog app, or an old deployment of one, has chosen already: 0.

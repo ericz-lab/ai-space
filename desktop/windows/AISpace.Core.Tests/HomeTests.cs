@@ -316,6 +316,38 @@ public class HomeTests
     }
 
     [Fact]
+    public void HomeOpensOnTheFirstScreenThatHoldsSomething()
+    {
+        var c = Catalogue();
+        var draws = c.Draws();
+        Assert.True(draws("builtin:store"));
+        Assert.True(draws("app:ai-todo"));
+        Assert.True(draws("widget:ai-todo/next"));
+        Assert.True(draws("agent:space/assistant"));
+        Assert.False(draws("app:uninstalled"));
+        Assert.False(draws("builtin:pet"));
+        Assert.False(draws("junk"));
+
+        // A first install: the home screen the panel seeds, copied here, is the one shown.
+        var fresh = HomeCatalogue.Decode(J("""{"apps":[]}"""), J("{}"));
+        var seeded = HomeScreens.CopyPanel(fresh.PanelScreens());
+        Assert.Equal(["builtin:store", "builtin:inbox", "builtin:shortcuts", "builtin:terminal", "builtin:settings"], seeded[0].Items);
+        Assert.Equal("home", HomeScreens.Opening(seeded, fresh.Draws()));
+        Assert.Equal("home", HomeScreens.Opening(HomeScreens.CopyPanel(c.PanelScreens()), draws));
+
+        // The home screen comes first even when later screens hold more.
+        HomeScreen[] both = [new("home", "", ["builtin:inbox"]), new("s1", "", ["app:ai-todo", "app:keep"])];
+        Assert.Equal("home", HomeScreens.Opening(both, draws));
+        // An empty home screen, or one whose entries are gone, is passed over for the first screen with tiles: never an empty one, never a later one.
+        HomeScreen[] later = [new("home", "", ["app:uninstalled", "builtin:pet"]), new("s1", "", []), new("s2", "Work", ["app:ai-todo"]), new("s3", "", ["app:keep"])];
+        Assert.Equal("s2", HomeScreens.Opening(later, draws));
+        // Nothing anywhere: the home screen (the Library is not a screen and is never chosen).
+        HomeScreen[] nothing = [new("home", "", []), new("s1", "", ["app:uninstalled"])];
+        Assert.Equal("home", HomeScreens.Opening(nothing, draws));
+        Assert.Equal("home", HomeScreens.Opening([], draws));
+    }
+
+    [Fact]
     public void AppsInstalledFromTheStoreGoOnThisComputersHomeScreen()
     {
         var empty = new Dictionary<string, ScreenRecord>();

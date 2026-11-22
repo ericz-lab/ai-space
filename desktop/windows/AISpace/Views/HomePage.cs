@@ -44,6 +44,8 @@ internal sealed partial class HomePage : NativePage
     private DateTimeOffset? _catalogueAt;
     private string? _error;
     private bool _loading, _again, _stale = true, _closed;
+    /// <summary>The person chose a place (a screen or the Library): Home no longer chooses the one it opens on.</summary>
+    private bool _placeChosen;
     /// <summary>How many apps the App Store offers a Space that has none of them (the first-use card), once asked.</summary>
     private int _offers;
     private bool _offersKnown;
@@ -145,10 +147,14 @@ internal sealed partial class HomePage : NativePage
         {
             var c = await api.GetHome();
             if (_closed) return;
+            var first = _catalogue is null;
             _catalogue = c;
             _catalogueAt = DateTimeOffset.Now;
             _error = null;
             Seed(c);
+            // Home opens on the first screen that holds something (the Main screen, unless it is empty
+            // and a later one is not); once the person chose a place, it stays where they left it.
+            if (first && !_placeChosen) _shownId = HomeScreens.Opening(Screens(), c.Draws());
             if (!_offersKnown && !_store.StoreCardHidden(SpaceKey))
             {
                 _offers = await Offers(api);
@@ -514,6 +520,7 @@ internal sealed partial class HomePage : NativePage
 
     private void ShowTab(string id)
     {
+        _placeChosen = true;
         _shownId = id;
         if (_query.Length > 0) ClearQuery();
         else Draw();
