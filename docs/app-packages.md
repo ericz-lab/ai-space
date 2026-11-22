@@ -181,7 +181,7 @@ Like an app grant, a scope is granted by the Space that serves: it says what **t
 | Scope | What it allows |
 | --- | --- |
 | `panel` | The snapshot (apps, services, widgets, agents, capabilities, model info, agent CLIs), app icons and colours, agent avatars, widget embeds: what a hub's lists show, nothing that runs. With it this Space appears on the other one as a peer ([peers.md](peers.md#adding-a-peer)). |
-| `agents` | Chat turns, runs (list, events, stop, steer, approvals), sessions, watch streams. |
+| `agents` | Chat turns, runs (list, events, stop, steer, approvals), sessions, watch streams, chat cards (state and action). |
 | `events` | The event mirror and bus calls into this Space's apps (`x-space-caller` names the caller). |
 | `model` | Answers and pictures from the runtimes `SPACE_PEER_MODEL` offers, cancelling them, the model ledger (usage and calls), the app-model list. |
 | `tasks` | Scheduled tasks, their runs, the models a task can run on, a task's model. |

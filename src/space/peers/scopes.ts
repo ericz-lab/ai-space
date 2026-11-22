@@ -39,6 +39,8 @@ export const PEER_ROUTES: readonly { method: PeerMethod; path: string; scope: Pe
   { method: "GET", path: "/api/peer/widgets/:app/:name/embed", scope: "panel" },
 
   { method: "GET", path: "/api/peer/agents/runs", scope: "agents" },
+  { method: "POST", path: "/api/peer/agents/cards/state", scope: "agents" },
+  { method: "POST", path: "/api/peer/agents/cards/action", scope: "agents" },
   { method: "POST", path: "/api/peer/agents/:app/:agent/chat", scope: "agents" },
   { method: "GET", path: "/api/peer/agents/:app/:agent/sessions", scope: "agents" },
   { method: "GET", path: "/api/peer/agents/:app/:agent/sessions/:sid", scope: "agents" },
