@@ -286,7 +286,8 @@ internal sealed partial class HomePage : NativePage
             case "shortcuts": Context.Show(PageKind.Shortcuts); break;
             case "settings": Context.Show(PageKind.Settings); break;
             case "terminal": Context.OpenTerminal(); break;
-            default: Context.OpenWebPanel(); break;
+            // A built-in the app no longer draws (builtin:panel on a screen saved before): nothing.
+            default: break;
         }
     }
 
@@ -674,7 +675,11 @@ internal sealed partial class HomePage : NativePage
         FrameworkElement icon;
         if (e.Kind == HomeKind.Builtin)
         {
-            icon = HomeTiles.BuiltinIcon(HomeBuiltin.Of(e.Ref)?.Glyph ?? Ui.Apps);
+            // The Space's own icon for the page when it serves one (the panel's, drawn from SVG), its glyph meanwhile or else.
+            var glyph = HomeBuiltin.Of(e.Ref)?.Glyph ?? Ui.Apps;
+            icon = _catalogue?.BuiltinIcons.GetValueOrDefault(e.Ref) is { } served
+                ? Context.Icons.View(served, title, HomeTiles.IconSize, placeholder: () => HomeTiles.BuiltinIcon(glyph))
+                : HomeTiles.BuiltinIcon(glyph);
             if (e.Ref == "inbox" && live is { Summary.Unread: > 0 } l)
             {
                 mark = TileMark.Count;
@@ -683,7 +688,8 @@ internal sealed partial class HomePage : NativePage
         }
         else
         {
-            icon = Context.Icons.View(e.Icon, title, HomeTiles.IconSize);
+            // An agent's avatar is round, as on the web panel, the Mac and Linux; an app's a rounded square.
+            icon = Context.Icons.View(e.Icon, title, HomeTiles.IconSize, round: e.Kind == HomeKind.Agent);
             if (e.Kind == HomeKind.Agent && live is not null && live.Running.Any(r => live.AgentId(r) == e.Ref))
             {
                 mark = TileMark.Working;

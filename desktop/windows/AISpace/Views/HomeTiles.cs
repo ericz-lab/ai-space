@@ -16,7 +16,6 @@ internal sealed record HomeBuiltin(string Name, string Glyph, string English, Fu
         new("shortcuts", Ui.Shortcuts, "Shortcuts", () => L.T("Shortcuts")),
         new("terminal", Ui.Terminal, "Terminal", () => L.T("Terminal")),
         new("settings", Ui.Settings, "Settings", () => L.T("Settings")),
-        new("panel", Ui.Web, "Web Panel", () => L.T("Web Panel")),
     ];
 
     public static HomeBuiltin? Of(string name) => All.FirstOrDefault(b => b.Name == name);

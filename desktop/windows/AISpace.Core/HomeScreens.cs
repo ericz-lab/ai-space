@@ -25,8 +25,13 @@ public static class HomeScreens
     /// <summary>The panel's own tiles, in the order the panel's library and a seeded home screen show them.</summary>
     public static readonly string[] PanelBuiltins = ["inbox", "shortcuts", "terminal", "settings"];
 
-    /// <summary>The <c>builtin:</c> tiles this client draws: the panel's own, plus the web panel itself.</summary>
-    public static readonly string[] Builtins = [.. PanelBuiltins, "panel"];
+    /// <summary>
+    /// The <c>builtin:</c> tiles this client draws: the panel's own. The web panel is no tile (it
+    /// shows by itself for a sign-in, and Settings opens it for what has no native copy): a copy of
+    /// the panel's screens leaves <c>builtin:panel</c> out, and a screen saved before that keeps the
+    /// key in screens.json but no longer draws it.
+    /// </summary>
+    public static readonly string[] Builtins = PanelBuiltins;
 
     /// <summary>How many entries of each kind a first home screen takes (src/web/screens.ts <c>SEED</c>).</summary>
     private const int SeedApps = 8, SeedAgents = 4, SeedWidgets = 4;

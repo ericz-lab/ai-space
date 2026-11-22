@@ -17,7 +17,7 @@ one click away, and the app adds what a page cannot do.
 
 | Part | What it does |
 | --- | --- |
-| Window | The bar: the Space menu (each saved Space with its state, Add a Space…); Home's places, the Library and then a tab per screen, each opening Home there ([below](#the-window)); the web tabs, one per open app, the chat, the terminal and the web panel (past five, under More); while a web tab is shown, Back, Forward, Reload and Open in Browser; and the Inbox with its count, only while something is unread. The bar has no menu: the Space's Inbox, Shortcuts, Terminal and Settings are tiles on Home and in the Library and Ctrl+2 to Ctrl+5 (Ctrl+1 is Home), the web panel is the Library's Web Panel tile, an agent's chat is its tile, Quick Chat is the notification area's, its shortcut's and the floating ball's, and AI Space Settings… is in the notification area's menu and Settings › This Computer. The Space picker keeps one width, from the selected Space's name (a long one ends in an ellipsis), whether its list is open or not. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: Install AI Space on This Computer, or Connect to an AI Space on Another Machine with the address form ([below](#this-computer)). The window keeps its size and place, always wholly on one monitor's work area, so its title bar can be reached ([below](#the-window)) |
+| Window | The bar: the Space menu (each saved Space with its state, Add a Space…); Home's places, the Library and then a tab per screen, each opening Home there ([below](#the-window)); the web tabs, one per open app, the chat, the terminal and the web panel (past five, under More); while a web tab is shown, Back, Forward, Reload and Open in Browser; and the Inbox with its count, only while something is unread. The bar has no menu: the Space's Inbox, Shortcuts, Terminal and Settings are tiles on Home and in the Library and Ctrl+2 to Ctrl+5 (Ctrl+1 is Home), the web panel has no entry of its own (it shows by itself while a Space needs a sign-in, and Settings opens its Settings for what has no native copy: Feedback, Appearance, installing apps and connections, a task's model, peers' app models), an agent's chat is its tile, Quick Chat is the notification area's, its shortcut's and the floating ball's, and AI Space Settings… is in the notification area's menu and Settings › This Computer. The Space picker keeps one width, from the selected Space's name (a long one ends in an ellipsis), whether its list is open or not. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: Install AI Space on This Computer, or Connect to an AI Space on Another Machine with the address form ([below](#this-computer)). The window keeps its size and place, always wholly on one monitor's work area, so its title bar can be reached ([below](#the-window)) |
 | Native pages | Home, Inbox, Shortcuts and Settings are the app's own (WPF, one set per Space, kept while hidden). Settings is the Space's own settings; it leads to AI Space Settings…, the app's. Not built yet: each says so and offers Open in Web Panel ([below](#the-window)) |
 | Web pages | The terminal (`/?page=terminal`), an agent's chat (`/?page=chat&agent=…`), each open app and the web panel are web pages in tabs. Each saved Space has its own WebView2 profile (cookies, storage, cache), so signing in on the panel signs in everything that Space's pages and native calls do. A link to one of the Space's own pages never leaves the app: it opens the native page, or its tab; a link to an app of the Space opens in that app's tab, a link off the Space in the default browser. A page that cannot load shows why, with Try Again, Open in Browser and Edit Space… |
 | Sign-in | While a Space needs a sign-in, the window shows its web panel, where the sign-in page appears, in place of the native pages, and the native page again once the panel has signed in |
@@ -93,8 +93,8 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   the whole query; anything else, and Ctrl+Enter always, opens Space Assistant's chat with the text
   as a draft, never sent. Down moves into the results, Escape clears, Ctrl+F (or Ctrl+K) comes back.
 - **Places.** Each screen and the Library are tabs of the window's bar ([above](#the-window)),
-  not of the page; the page shows the one chosen. The Library shows the apps with the built-in pages (Inbox, Shortcuts, Terminal, Settings, Web
-  Panel), the agents (one tile per agent on several machines) and the widgets, with a filter by
+  not of the page; the page shows the one chosen. The Library shows the apps with the built-in pages (Inbox, Shortcuts, Terminal,
+  Settings; the web panel has no tile, and a screen saved with its old tile simply no longer shows it), the agents (one tile per agent on several machines) and the widgets, with a filter by
   kind. A tile shows what is wrong (not answering, paused, its machine offline), an app's and the
   Inbox's unread count, and an agent at work; the library's tiles show their details under the
   pointer. A click opens an app in its tab, an agent's chat, a built-in page, a widget's page.
@@ -103,6 +103,19 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   menu (right click, Shift+F10) puts it on a screen or takes it off and moves it, and a screen
   tab's menu in the bar makes, renames and deletes screens or copies the web panel's layout again. Nothing is written to
   the Space. A removed Space's screens go with it.
+- **Icons.** An app's icon is cut to a rounded square, an agent's avatar to a circle, as the web
+  panel, the Mac and Linux draw them; a built-in page shows the icon the Space serves for it (its
+  Fluent glyph meanwhile). Pictures come through `IconStore.cs` with the Space's sign-in: PNG,
+  JPEG and the like as bitmaps, SVG (the panel's built-in icons and agents' avatars are SVG) as
+  vector drawings, sharp at any scale, read by `AISpace.Core/SvgReader.cs` and drawn by
+  `SvgDrawing.cs`. The reader takes `viewBox` (else width and height), `g`, `path`, `rect`
+  with `rx`/`ry`, `circle`, `ellipse`, `line`, `polygon`, `polyline`; `fill`, `stroke`,
+  `stroke-width`, `stroke-linecap`, `stroke-linejoin`, `fill-rule`, `opacity`, `fill-opacity`
+  and `stroke-opacity` as attributes or in `style`, inherited as in SVG; `transform`; linear and
+  radial gradients (stops, units, `gradientTransform`, `href`); colours as hex, `rgb()`/`rgba()`
+  and common names. Filters (shadows, glows) are left out. An icon with text, an embedded image,
+  `use`, a mask, a clip path or a style sheet is not drawn at all, so the tile keeps its letter
+  rather than half an icon. The reader refuses DTDs and external references and caps the size.
 - **Widget cards** follow the blocks contract ([panel.md](panel.md#widgets)): the first block is
   drawn large (metric with its change, trend as a line or bars, progress, gauge with its zones,
   status, tanks), the next ones as rows, as many as the card's size holds; a card without blocks

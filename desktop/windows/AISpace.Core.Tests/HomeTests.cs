@@ -259,7 +259,7 @@ public class HomeTests
     {
         var panel = new[]
         {
-            new HomeScreen("s1", "Work", ["app:x", "builtin:pet", "app:x", "widget:a/w"]),
+            new HomeScreen("s1", "Work", ["app:x", "builtin:pet", "app:x", "builtin:panel", "widget:a/w"]),
             new HomeScreen("home", "", ["app:a", "builtin:inbox", "agent:a/b"]),
         };
         var copy = HomeScreens.CopyPanel(panel);
@@ -293,6 +293,8 @@ public class HomeTests
         Assert.Equal(["home", "x"], decoded["c"].Screens.Select(s => s.Id));
         Assert.Equal(["app:a"], decoded["c"].Screens[1].Items);
         Assert.Empty(HomeScreens.DecodeFile("not json"));
+        // A screen saved with the web panel's old tile keeps the key; Home no longer draws it.
+        Assert.Equal(["builtin:panel", "app:a"], HomeScreens.DecodeFile("""{"c":{"screens":[{"id":"home","items":["builtin:panel","app:a"]}],"seeded":true}}""")["c"].Screens[0].Items);
 
         // A screen pinned with one machine's variant of an agent shows the agent once.
         var groups = AgentGroups.Group([new HomeAgent("seoul/a/b", "a", "b", "B") { Peer = "seoul" }, new HomeAgent("a/b", "a", "b", "B")]);

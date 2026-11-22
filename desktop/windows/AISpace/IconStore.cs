@@ -9,8 +9,9 @@ namespace AISpace;
 /// <summary>
 /// One Space's icons (apps' <c>icon</c>, agents' <c>avatar</c>, widgets'), as the catalogue names
 /// them: a path or URL the Space serves, fetched once with the Space's sign-in and kept for the
-/// app's run, or an emoji drawn as text. A picture WPF cannot decode (an SVG, such as the panel's
-/// built-in icons) stays null, and the caller draws its fallback. Runs on the UI thread.
+/// app's run, or an emoji drawn as text. An SVG (the panel's built-in icons, agents' avatars) is
+/// drawn by <see cref="SvgDrawing"/> as a vector image; one it cannot read whole, or a broken
+/// picture, stays null and the caller draws its fallback. Runs on the UI thread.
 /// </summary>
 internal sealed class IconStore(Func<SpaceApi?> api)
 {
@@ -37,20 +38,33 @@ internal sealed class IconStore(Func<SpaceApi?> api)
 
     /// <summary>
     /// A square of <paramref name="size"/> showing the icon: the picture once fetched, until then
-    /// (and for an SVG or a broken one) the emoji, else the first letter of <paramref name="fallback"/>
-    /// on a tinted round square. It swaps itself when the picture arrives.
+    /// (and for one that cannot be drawn) the emoji, else the first letter of <paramref name="fallback"/>
+    /// on a tinted ground. An app's icon is cut to a rounded square; <paramref name="round"/> cuts it
+    /// to a circle, as every client draws an agent's avatar (the web panel's <c>.tile.agent</c>). It
+    /// swaps itself when the picture arrives. <paramref name="placeholder"/>, when given, stands in for
+    /// the letter (a built-in page's glyph).
     /// </summary>
-    public FrameworkElement View(string? icon, string fallback, double size = 40)
+    public FrameworkElement View(string? icon, string fallback, double size = 40, bool round = false, Func<FrameworkElement>? placeholder = null)
     {
         var host = new Grid { Width = size, Height = size };
+        var radius = round ? size / 2 : size * 0.22;
         void Draw()
         {
             host.Children.Clear();
             if (Get(icon) is { } image)
             {
-                var img = new Image { Source = image, Width = size, Height = size, Stretch = Stretch.Uniform };
+                var img = new Image { Source = image, Width = size, Height = size, Stretch = Stretch.UniformToFill };
                 RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
-                host.Children.Add(new Border { Child = img, CornerRadius = new CornerRadius(size * 0.22), ClipToBounds = true });
+                // A clip, not a border's corners: a border's ClipToBounds clips to its square.
+                img.Clip = round
+                    ? new EllipseGeometry(new Point(size / 2, size / 2), size / 2, size / 2)
+                    : new RectangleGeometry(new Rect(0, 0, size, size), radius, radius);
+                host.Children.Add(img);
+                return;
+            }
+            if (placeholder is not null)
+            {
+                host.Children.Add(placeholder());
                 return;
             }
             var emoji = Emoji(icon);
@@ -59,7 +73,7 @@ internal sealed class IconStore(Func<SpaceApi?> api)
             text.HorizontalAlignment = HorizontalAlignment.Center;
             text.VerticalAlignment = VerticalAlignment.Center;
             if (emoji is not null) text.FontFamily = new FontFamily("Segoe UI Emoji");
-            var tile = new Border { CornerRadius = new CornerRadius(size * 0.22), Child = text };
+            var tile = new Border { CornerRadius = new CornerRadius(radius), Child = text };
             if (emoji is null) tile.SetResourceReference(Border.BackgroundProperty, "SubtleFillColorSecondaryBrush");
             host.Children.Add(tile);
         }
@@ -92,14 +106,14 @@ internal sealed class IconStore(Func<SpaceApi?> api)
             if (api() is { } a)
             {
                 var bytes = await a.Bytes(icon);
-                var bmp = new BitmapImage();
-                bmp.BeginInit();
-                bmp.CacheOption = BitmapCacheOption.OnLoad;
-                bmp.DecodePixelWidth = 128;
-                bmp.StreamSource = new MemoryStream(bytes);
-                bmp.EndInit();
-                bmp.Freeze();
-                image = bmp;
+                if (SvgReader.LooksLikeSvg(bytes))
+                {
+                    image = SvgDrawing.Image(bytes);
+                }
+                else
+                {
+                    image = Bitmap(bytes);
+                }
             }
         }
         catch (SpaceApiException e) when (e.Kind is SpaceApiFailure.Network or SpaceApiFailure.AuthenticationRequired)
@@ -110,10 +124,22 @@ internal sealed class IconStore(Func<SpaceApi?> api)
         }
         catch (Exception e) when (e is SpaceApiException or NotSupportedException or IOException or InvalidOperationException or ArgumentException or System.Runtime.InteropServices.COMException or FileFormatException)
         {
-            // An SVG or a broken picture: the fallback stays.
+            // A broken picture: the fallback stays.
         }
         if (!_loading.Remove(icon)) return;
         _images[icon] = image;
         Arrived?.Invoke(icon);
+    }
+
+    private static BitmapImage Bitmap(byte[] bytes)
+    {
+        var bmp = new BitmapImage();
+        bmp.BeginInit();
+        bmp.CacheOption = BitmapCacheOption.OnLoad;
+        bmp.DecodePixelWidth = 128;
+        bmp.StreamSource = new MemoryStream(bytes);
+        bmp.EndInit();
+        bmp.Freeze();
+        return bmp;
     }
 }
