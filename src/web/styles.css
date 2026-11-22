@@ -816,6 +816,7 @@ select option, select optgroup { background-color: var(--bg); color: var(--text)
   background: var(--glass); color: var(--muted); font-size: 13px; cursor: pointer;
   display: flex; align-items: center; justify-content: center; transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
+a.chat-hbtn { box-sizing: border-box; text-decoration: none; }
 .chat-hbtn:hover { color: var(--text); background: color-mix(in srgb, var(--text) 8%, var(--glass)); }
 .chat-hbtn.on { color: var(--link); border-color: color-mix(in srgb, var(--link) 45%, transparent); background: color-mix(in srgb, var(--link) 14%, var(--glass)); }
 .chat-hbtn svg, .chat-send svg, .chat-down svg, .chat-attach svg { display: block; flex: none; }

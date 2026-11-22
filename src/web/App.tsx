@@ -6,7 +6,7 @@ import MachineClis from "./MachineClis.tsx";
 import ModelPreference from "./ModelPreference.tsx";
 import { AccountSettings, loadAuth } from "./Auth.tsx";
 import Chat, { type Ask, type Draft } from "./Chat.tsx";
-import { PAGE, chatHref, linkedAgent, pageAgent, pageHref, type PanelLink, parsePanelLink } from "./panel-link.ts";
+import { PAGE, chatHref, linkedAgent, pageAgent, pageHref, pageSession, type PanelLink, parsePanelLink } from "./panel-link.ts";
 import Pet, { AppPet, type AppPetInfo, BUILTIN, BuiltinPet, DEFAULT_SHEET } from "./Pet.tsx";
 import Tasks from "./Tasks.tsx";
 import Terminal from "./Terminal.tsx";
@@ -38,9 +38,9 @@ import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 // the home screen the panel opens on, then the operator's own; each screen shows only what is
 // pinned to it. Settings, the inbox, the shortcuts and the terminal are built-in tiles: like an
 // app's, each opens in a new tab, as a page of its own (`/?page=…`, docs/panel.md#built-in-pages).
-// An agent's tile opens its chat the same way (`/?page=chat&agent=…`). A question from the home
-// screen's box opens the chat as a floating panel over the page (an overlay that closes on a click
-// outside); so do the tasks list and whatever a panel link or the phone app asks for.
+// The chat and the tasks list open as floating panels over the page (an overlay that closes on a
+// click outside), and so do the built-in windows a panel link or the phone app asks for. The
+// floating chat has a button that moves it to a tab of its own (`/?page=chat&agent=…`).
 // Edit mode (long-press the background): add an app (catalog, new or link), unpin, drag to reorder, uninstall.
 // Everything comes from the apps' manifests through the panel API; the browser holds no secrets.
 // Entries from peer machines say where they run in their hover details and are muted while that peer is down.
@@ -243,7 +243,10 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     const target = linkedAgent(agents, ref);
     if (target && target.peer && target.id === ref) setChatAgent(target);
     else if (target) setChatAgent(groupOf(groups, target) ? preferredMachine(groupOf(groups, target)!) : target);
+    // The conversation the page was opened from, resumed once the chat shows its agent.
+    if (target) setPageSession(pageSession(location.search));
   }, [loaded]);
+  const [pageSessionId, setPageSession] = useState<string | null>(null);
   const [omniFocus, setOmniFocus] = useState(0);
   // A link into the panel (panel-link.ts, docs/panel.md#panel-links): read on load and whenever the
   // fragment changes, then cleared, so the same link opens its window again. A chat link waits for
@@ -642,8 +645,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     const e = parseKey(key);
     if (e?.kind === "agent") {
       const a = groupById(groups, e.id)?.primary;
-      if (a && BUILTIN_PAGES) window.open(chatHref(a.id), "_blank", "noopener,noreferrer");
-      else if (a) openAgent(a);
+      if (a) openAgent(a);
     } else if (e?.kind === "builtin") {
       const b = (BUILTINS as readonly string[]).includes(e.id) ? (e.id as Builtin) : "terminal";
       if (BUILTIN_PAGES) window.open(pageHref(b), "_blank", "noopener,noreferrer");
@@ -778,8 +780,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       fallback="🦾"
       name={localized(lang, a).title}
       editing={editing}
-      href={BUILTIN_PAGES ? chatHref(a.id) : undefined}
-      onOpen={BUILTIN_PAGES ? undefined : () => openAgent(a)}
+      onOpen={() => openAgent(a)}
       onRemove={onRemove}
       removeTitle={t("screens.unpin")}
       showPop={false}
@@ -1103,7 +1104,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Terminal open={panel === "terminal"} onClose={close} />
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
       <Shortcuts open={panel === "shortcuts"} onClose={close} onOpenTasks={openTasks} />
-      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} ask={ask} draft={draft} onTurnSettled={() => { void reload(); }} />
+      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} newTab={BUILTIN_PAGES && PAGE !== "chat"} session={pageSessionId ?? undefined} ask={ask} draft={draft} onTurnSettled={() => { void reload(); }} />
     </>
   );
 }

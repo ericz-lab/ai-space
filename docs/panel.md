@@ -23,7 +23,7 @@ The tables below list what the panel knows about. It does not lay all of it out 
 | Section | Source | Notes |
 | --- | --- | --- |
 | Apps | every registered manifest that has a `url`, with `status` other than `archived`, minus the hidden set; peer apps follow, minus those whose `url` is already listed ([peers.md](peers.md)) | Tile: `icon` and `title`, nothing else on the icon. Click opens `url`. Hover shows the description, the status (health when the app declares `service.health`) and the repository. |
-| Agents | `agents:` of every visible app, plus the space agent | The section is left out when the list is empty (the agents could not be loaded). Tile shows the avatar and title, with the owning app's icon in the corner when it differs from the avatar; click opens the chat in a new tab, as a [page of its own](#built-in-pages) (a floating panel over the page when the home screen's box, a panel link or the phone app opens it), on that agent. The same agent on several machines (a peer's app declaring the same `app/name`) is one tile; the chat picks the machine ([peers.md](peers.md#agents-on-several-machines)). |
+| Agents | `agents:` of every visible app, plus the space agent | The section is left out when the list is empty (the agents could not be loaded). Tile shows the avatar and title, with the owning app's icon in the corner when it differs from the avatar; click opens the chat in a floating panel over the page, whose header has a button that moves it to a [page of its own](#built-in-pages) in a new tab, on that agent. The same agent on several machines (a peer's app declaring the same `app/name`) is one tile; the chat picks the machine ([peers.md](peers.md#agents-on-several-machines)). |
 | Widgets | `widgets:` of every visible app | `items` cards render the list in the house style; `embed` cards load the app's page in a sandboxed iframe through ai-space. |
 | Settings | built in | A built-in tile like Inbox and Terminal: pinned, moved and unpinned like any other, never uninstalled, and always in the library. It opens in a new tab as a [page of its own](#built-in-pages), with its sections listed on the left (on a phone, a scrolling row above) and the chosen one's rows in bordered cards; the last section shown is remembered in the browser. An app's model page, scheduled tasks (and under them one app's tasks, whose back button returns to the list of apps), events, model usage and app usage open inside the same Settings content area, keeping the section navigation and a back button to the parent section. Their cards and tables use the Settings surfaces; only the content area scrolls. General holds the browser preferences (hover details, desk pet, widgets, language); then Appearance ([Appearance](#appearance)), Models (the default model, the agent CLIs on each machine with a Check again button and an Add to runtimes.yaml button for one found here that no runtime uses ([model-machines.md](model-machines.md#inventory)), then every app's model with a page per app; on a hub each peer's apps follow under its name, saved on that peer; every model picker leaves out a CLI that is missing and greys one that is not signed in), Automation (scheduled tasks, events), Feedback (the feedback button on app pages, the Fix Engineer's machine, model and effort, the apps' switches and the recent feedback, [feedback.md](feedback.md)), Usage (model and app usage), Status (the peers, the runtimes by machine, the speech providers ([speech.md](speech.md#status)), services and backups, a summary with a problem tally over their rows: a service or peer down, a runtime or speech provider in use that cannot answer, a speech configuration that does not load, a stale backup), Packages, and Account under built-in sign-in. |
 
@@ -139,13 +139,16 @@ a page (the tasks list from Shortcuts) fills the tab too, and closing it goes ba
 Opening a built-in tile by name from the home screen's box or the library's search opens the same
 page.
 
-An agent's tile opens its chat the same way, at `/?page=chat&agent=<id>`: the agent is found as a
-[panel link](#panel-links)'s is, the tab is named after it, and picking another agent in the chat
-moves the address to that one, so a reload stays on it.
+The chat opens as a floating panel over the launcher, as before. Its header has an "Open in a new
+tab" button: the chat as a page, at `/?page=chat&agent=<id>&session=<sid>`, and the floating one
+closes. The agent is found as a [panel link](#panel-links)'s is and the tab is named after it; the
+session, when the conversation has one, is resumed with its transcript. Picking another agent on
+the page moves the address to that one, so a reload stays on the agent (a reload starts on a new
+conversation; the earlier one is under Recent sessions). The button is not shown on the page
+itself, nor in the phone app.
 
-What still opens as a floating panel over the launcher: a question sent from the home screen's box
-(the chat opens with it), the tasks list, a window asked for by a [panel link](#panel-links), and
-every window in the phone app, which has no tabs.
+What else still opens as a floating panel over the launcher: the tasks list, a window asked for by
+a [panel link](#panel-links), and every window in the phone app, which has no tabs.
 
 ### Panel links
 

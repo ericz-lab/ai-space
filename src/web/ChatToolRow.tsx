@@ -3,7 +3,7 @@ import { allCommands, toolSummary, toolVariant, type ChatJob, type ChatStep, typ
 import { useLang } from "./i18n.ts";
 
 /** Line glyphs on a 16px grid, drawn in the row's text color (after DeepSeek Harness's tool rows). */
-const GLYPHS: Record<ToolVariant | "chevron" | "shield" | "question" | "history" | "compose" | "stop" | "send" | "down" | "attach" | "notice", ReactNode> = {
+const GLYPHS: Record<ToolVariant | "chevron" | "shield" | "question" | "history" | "compose" | "popout" | "stop" | "send" | "down" | "attach" | "notice", ReactNode> = {
   notice: <><circle cx="8" cy="8" r="1.8" /><path d="M5 5A4.2 4.2 0 0 0 5 11" /><path d="M11 5A4.2 4.2 0 0 1 11 11" /><path d="M2.8 2.8A7.3 7.3 0 0 0 2.8 13.2" /><path d="M13.2 2.8A7.3 7.3 0 0 1 13.2 13.2" /></>,
   bash: <><path d="M3 4L7 8L3 12" /><path d="M9 12H13" /></>,
   read: <><path d="M4.9 5.9H11.1" /><path d="M4.9 9H8.3" /><rect x="2.5" y="1.8" width="11" height="12.4" rx="1.2" /></>,
@@ -19,6 +19,7 @@ const GLYPHS: Record<ToolVariant | "chevron" | "shield" | "question" | "history"
   chevron: <path d="M4 6L7.3 9.3C7.7 9.7 8.3 9.7 8.7 9.3L12 6" />,
   history: <><path d="M2.6 8A5.4 5.4 0 1 0 4.2 4.2" /><path d="M2.4 2.4V4.6H4.6" /><path d="M8 5V8L10.2 9.4" /></>,
   compose: <><path d="M7.4 2.6H4.4C3.4 2.6 2.6 3.4 2.6 4.4V11.6C2.6 12.6 3.4 13.4 4.4 13.4H11.6C12.6 13.4 13.4 12.6 13.4 11.6V8.6" /><path d="M11.6 1.9L14.1 4.4L8.4 10.1L5.6 10.4L5.9 7.6Z" /></>,
+  popout: <><path d="M9.6 2.6H13.4V6.4" /><path d="M13.4 2.6L7.8 8.2" /><path d="M11.4 9.6V11.6C11.4 12.6 10.6 13.4 9.6 13.4H4.4C3.4 13.4 2.6 12.6 2.6 11.6V6.4C2.6 5.4 3.4 4.6 4.4 4.6H6.4" /></>,
   stop: <rect x="4" y="4" width="8" height="8" rx="1.6" fill="currentColor" />,
   send: <><path d="M8 13.2V3.2" /><path d="M3.6 7.4L8 3L12.4 7.4" /></>,
   down: <><path d="M8 2.8V12.8" /><path d="M3.6 8.6L8 13L12.4 8.6" /></>,
