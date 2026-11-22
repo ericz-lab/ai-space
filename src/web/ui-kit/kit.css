@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT. Copyright (c) 2026 Nexia Global Limited. Free to copy into an app. */
 /* Space Tiles: the look of ai-space's built-in apps (docs/ui-kit.md). Served at /_space/ui.css on
    every app's origin; an app also carries a copy so its page is styled when reached on its own port.
    Tokens are unprefixed custom properties on :root; component classes start with `sp-`. */

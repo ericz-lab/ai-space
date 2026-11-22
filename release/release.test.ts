@@ -14,6 +14,8 @@ describe("the server archive", () => {
     expect(included("skills/space-app/SKILL.md")).toBe(true);
     expect(included("bin/space")).toBe(true);
     expect(included("package.json")).toBe(true);
+    expect(included("LICENSE")).toBe(true);
+    expect(included("NOTICE.md")).toBe(true);
     expect(included("src/space/identity.test.ts")).toBe(false);
     expect(included("desktop/macos/AISpace/Info.plist")).toBe(false);
     expect(included("mobile/ios/project.yml")).toBe(false);

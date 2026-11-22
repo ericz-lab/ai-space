@@ -228,3 +228,7 @@ bun run hooks          # 每个 clone 一次：push 前自动运行检查
 ```
 
 本地配置放在 `~/.ai-space/.env`（见 `.env.example`）；进程环境变量优先于它。贡献之前先读 [AGENTS.md](AGENTS.md)（工作方式、仓库地图、提交格式），Bun 约定见 [CLAUDE.md](CLAUDE.md)。
+
+## 📄 许可
+
+ai-space 以 [Sustainable Use License 1.0](LICENSE) 公开源码，版权属于 Nexia Global Limited。个人或非商业用途、以及公司自己内部的业务，可以免费运行和修改；出售它，或把它作为收费的产品或服务提供给别人，需要商业授权（[COMMERCIAL.md](COMMERCIAL.md)）。应用模板和 UI kit 是 MIT，第三方代码沿用各自的许可（[NOTICE.md](NOTICE.md)）。贡献代码见 [CONTRIBUTING.md](CONTRIBUTING.md)。
