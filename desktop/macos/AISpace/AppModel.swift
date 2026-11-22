@@ -91,6 +91,8 @@ final class AppModel: ObservableObject {
     let firstLaunch = FirstLaunch()
     let updater = AppUpdater(current: LocalBundle.find()?.version ?? "0.0.0")
     private let cache = CatalogueCache(directory: DesktopPaths.caches)
+    /// The apps each Space had when this Mac last looked, to tell a new install (InstallRules).
+    private let installs = InstallWatchStore()
 
     @Published private(set) var selectedID: UUID? {
         didSet {
@@ -276,12 +278,22 @@ final class AppModel: ObservableObject {
                 if selectedID == connection.id, pagerID == Screens.home { openOnHomeScreen() }
             }
             screens.merge(connection.id, groups: catalogue.agentGroups)
+            adoptInstalled(connection.id, catalogue, panel: panel)
             iconStores[connection.id]?.retryFailed()
         }
         loaders[connection.id] = l
         iconStores[connection.id] = IconStore(api: l.api, directory: DesktopPaths.icons(connection.id))
         DispatchQueue.main.async { Task { await l.refresh() } }
         return l
+    }
+
+    /// Pins the apps installed since the last look to this Mac's home screen, as the App Store
+    /// pinned them to the panel's (InstallRules).
+    private func adoptInstalled(_ id: UUID, _ catalogue: Catalogue, panel: [PanelScreen]) {
+        let before = installs.watch(id)
+        let (watch, pins) = InstallRules.adopt(before, apps: catalogue.apps.map(\.key), panelHome: panel.first?.items ?? [])
+        if watch != before { installs.save(watch, id) }
+        if !pins.isEmpty { screens.edit(id) { InstallRules.pinning($0, pins) } }
     }
 
     /// Puts the launcher on the selected Space's home screen: the first screen of pinned tiles,
@@ -458,6 +470,7 @@ final class AppModel: ObservableObject {
         settingsLoaders[id] = nil
         cookieSessions[id] = nil
         screens.forget(id)
+        installs.forget(id)
         SpaceLive.forget(id)
         store.remove(id)
         if selectedID == id { selectedID = store.defaultConnection?.id }
@@ -657,7 +670,8 @@ final class AppModel: ObservableObject {
     }
 
     /// The App Store (docs/app-catalog.md#the-app-store); `pickAll` ticks every installable app,
-    /// as the first-use card asks.
+    /// as the first-use card asks. What is installed there is pinned to this Mac's home screen
+    /// when the launcher comes back and reads the catalogue (`adoptInstalled`).
     func openStore(pickAll: Bool = false) {
         openPage(of: .store, at: StorePage.path(pickAll: pickAll))
     }

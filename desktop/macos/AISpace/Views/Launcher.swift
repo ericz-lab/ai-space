@@ -107,6 +107,8 @@ struct LauncherPage: View {
     /// Arranging the screen: pressing and holding a tile or a card starts it; each one then has a
     /// remove badge, each card its size, and Done, Esc or a click on the empty screen ends it.
     @State private var arranging = false
+    /// The home screen's first-use card: how many apps the catalog offers a Space that has none.
+    @StateObject private var offers = CatalogOffers()
 
     var body: some View {
         if let screenID, screenID == Screens.home {
@@ -117,11 +119,16 @@ struct LauncherPage: View {
                     if !model.query.isEmpty {
                         library(catalogue)
                     } else if let screen = screens.first(where: { $0.id == screenID }) {
+                        if offers.count > 0 { CatalogWelcome(model: model, connection: connection, offers: offers) }
                         self.screen(screen, catalogue)
                     }
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) { omnibox(on: Screens.home) }
+            .task(id: loader.status) {
+                guard loader.status == .ok, !CatalogWelcome.isDismissed(connection) else { return }
+                await offers.read(loader.api)
+            }
         } else if let screenID {
             page(menu: true) {
                 if let catalogue = loader.catalogue, let screen = screens.first(where: { $0.id == screenID }) {
@@ -340,6 +347,55 @@ struct LauncherPage: View {
               ["http", "https"].contains(url.scheme?.lowercased() ?? "")
         else { return model.open(entry) }
         model.openLink(url, from: connection)
+    }
+}
+
+/// The answer to "could this Space take its first apps from the catalog", read once per sign-in.
+@MainActor
+final class CatalogOffers: ObservableObject {
+    @Published var count = 0
+
+    func read(_ api: SpaceAPI) async {
+        count = (try? await api.data("/api/app-catalog")).map(CatalogOffer.count) ?? 0
+    }
+}
+
+/// The home screen's first-use card (docs/app-catalog.md#the-app-store, src/web/AppCatalog.tsx
+/// `CatalogWelcome`): a Space with no catalog app offers them, all ticked in the App Store, one
+/// click away. What is installed there lands on this home screen. "Not now" hides the card for
+/// this Space on this Mac.
+struct CatalogWelcome: View {
+    @ObservedObject var model: AppModel
+    let connection: Connection
+    @ObservedObject var offers: CatalogOffers
+
+    private static func key(_ connection: Connection) -> String { "catalogWelcomeDismissed.\(connection.id.uuidString)" }
+
+    static func isDismissed(_ connection: Connection) -> Bool { UserDefaults.standard.bool(forKey: key(connection)) }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Add your first apps").font(.headline).foregroundStyle(Theme.text)
+                Text("The app catalog has \(offers.count) apps for this Space. All are ticked; untick what you do not want.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button("Choose apps") {
+                offers.count = 0
+                model.openStore(pickAll: true)
+            }
+            .buttonStyle(.borderedProminent)
+            Button("Not now") {
+                offers.count = 0
+                UserDefaults.standard.set(true, forKey: Self.key(connection))
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(16)
+        .frame(maxWidth: 640, alignment: .leading)
+        .glass()
+        .accessibilityElement(children: .contain)
     }
 }
 
