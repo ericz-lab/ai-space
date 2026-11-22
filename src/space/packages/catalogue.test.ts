@@ -5,16 +5,17 @@ import type { PackageLinks } from "./links.ts";
 type Conn = { id: string; remoteSpaceId: string; enabled: boolean };
 
 function fake(conns: Conn[], answer: (id: string, meta: { operation: string; app?: string }) => Response) {
-  const listeners = new Set<(id: string) => void>();
+  const listeners = new Set<(id: string, change: { kind: string }) => void>();
   const links = {
     connections: {
       list: () => conns,
       get: (id: string) => conns.find((c) => c.id === id),
-      onChange: (fn: (id: string) => void) => { listeners.add(fn); return () => listeners.delete(fn); },
+      onChange: (fn: (id: string, change: { kind: string }) => void) => { listeners.add(fn); return () => listeners.delete(fn); },
+      setRemoteName: () => {},
     },
     request: async (id: string, meta: { operation: string; app?: string }) => answer(id, meta),
   } as unknown as PackageLinks;
-  return { links, changed: () => { for (const fn of listeners) fn("c1"); } };
+  return { links, changed: () => { for (const fn of listeners) fn("c1", { kind: "reset" }); } };
 }
 
 const SPACE = "0d8ce940-9bc8-4082-bab2-0ccb7e5dbd87";
@@ -88,5 +89,28 @@ test("fetches a shared app's icon once per version and falls back when the answe
     await catalogue.refresh();
     expect(icons()["voice-chat"]).toBe("/api/panel/shared-apps/c1/voice-chat/icon?v=0.2.0");
     expect(asked).toBe(5);
+  } finally { catalogue.close(); }
+});
+
+test("a refused catalogue's body is let go, so its stream does not stay open on the channel", async () => {
+  let cancelled = false;
+  const { links } = fake([{ id: "c1", remoteSpaceId: SPACE, enabled: true }], () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"error":"busy"}')); }, cancel() { cancelled = true; } }), { status: 503 }));
+  const catalogue = new RemoteCatalogue(links, { refreshMs: 3_600_000 });
+  try {
+    await catalogue.refresh();
+    expect(cancelled).toBe(true);
+    expect(catalogue.views(new Set())).toEqual([]);
+  } finally { catalogue.close(); }
+});
+
+test("records what the other Space lets this one do through its peer API, and the name it goes by", async () => {
+  const conns = [{ id: "c1", remoteSpaceId: SPACE, enabled: true, alias: null as string | null, remoteName: null }];
+  const { links } = fake(conns, () => Response.json({ spaceId: SPACE, name: "David", apps: [], peer: { scopes: ["panel", "bogus", "agents"], fullTrust: false } }));
+  const catalogue = new RemoteCatalogue(links, { refreshMs: 3_600_000 });
+  try {
+    await catalogue.refresh();
+    expect(catalogue.peerGrants()).toEqual([{ connection: "c1", spaceId: SPACE, label: "david", grant: { scopes: ["panel", "agents"], fullTrust: false }, ok: true }]);
+    conns[0]!.alias = "office";
+    expect(catalogue.peerGrants()[0]!.label).toBe("office");
   } finally { catalogue.close(); }
 });

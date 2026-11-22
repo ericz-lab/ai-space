@@ -77,7 +77,7 @@ box:dsh/deepseek-official:deepseek-flash
                         a colon after it stays the runtime's own (DeepSeek's provider:model)
 ```
 
-- The machine is a peer name from `SPACE_PEER_<NAME>`, or a name from the [`machines:`](#machines-without-ai-space) section. No prefix means this machine.
+- The machine is a peer name: a `SPACE_PEER_<NAME>` one or a [connection peer](peers.md#adding-a-peer)'s (the same name after `space peer migrate`, so a model naming the machine keeps working), or a name from the [`machines:`](#machines-without-ai-space) section. No prefix means this machine.
 - The model service, `SPACE_MODEL_DEFAULT`, the space's default model, the manifest's `model:` section and the panel's per-app and per-tag overrides (`model_overrides`) all accept the prefix. An operator can then move one app's answers to another machine without touching the others: the busy news app on `box:codex/basic`, the rest here.
 - A chat or an agent task that names a machine prefix is refused with a 400 that names the peer agent to use instead (`box/<app>/<agent>`). Nothing switches machines silently.
 - The registry resolves the prefix before the runtime. An unknown machine is an error, like an unknown runtime today.
@@ -100,7 +100,9 @@ The peer runs the call with its own registry: its own runtimes, its own tier cat
 - Tiers resolve where the CLI is installed. The hub no longer needs to read another machine's catalogue at boot.
 - Usage is recorded on the machine that paid for it (see [Ledger](#ledger)).
 
-The peer serves answers only when its operator turns it on: `SPACE_PEER_MODEL=codex,dsh` lists the runtimes a hub may use, and the default is none. The peer token can already open a chat with `bypassPermissions`, so the route gives no new power over the machine. It does spend the machine's accounts, though, and that should be a choice the operator makes on purpose. A runtime whose answers run on yet another machine (one with its own `ssh:`) is never offered: a forwarded call stays on the machine it was sent to.
+A peer reached over a package connection ([peers.md](peers.md#adding-a-peer)) serves the same routes over its channel, with no token: the hub needs the `model` scope there, which covers `model/run`, `model/image`, their cancel, the ledger and the app-model list ([app-packages.md](app-packages.md#peer-scopes)). Resuming works the same: a channel that drops and comes back is a dropped link like any other.
+
+The peer serves answers only when its operator turns it on: `SPACE_PEER_MODEL=codex,dsh` lists the runtimes a hub may use, and the default is none, whatever scope or trust a connection has. The peer token can already open a chat with `bypassPermissions`, so the route gives no new power over the machine. It does spend the machine's accounts, though, and that should be a choice the operator makes on purpose. A runtime whose answers run on yet another machine (one with its own `ssh:`) is never offered: a forwarded call stays on the machine it was sent to.
 
 ### Resuming
 

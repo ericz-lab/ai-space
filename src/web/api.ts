@@ -163,6 +163,8 @@ export type SpeechStatus = {
 export type PeerInfo = {
   name: string;
   url: string;
+  /** `http`: a SPACE_PEER_* peer on the legacy channel, which `space peer migrate` moves onto a `connection`. */
+  via?: "http" | "connection";
   health: "ok" | "down";
   asOf?: string;
   error?: string;

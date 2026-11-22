@@ -42,12 +42,14 @@ export function createPackagePanelRoutes(opts: Parameters<typeof createPackageRo
       const remotes = await Promise.all(opts.links.status().map(async (c) => {
         try {
           const response = await opts.links.request(c.id, { operation: "catalogue" }, null, AbortSignal.timeout(3000));
-          if (!response.ok) throw new Error("catalogue unavailable");
+          if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new Error("catalogue unavailable"); }
           const data = await response.json() as { apps: { app: string; title: string; version: string; page?: boolean }[] };
           return { connectionId: c.id, spaceId: c.remoteSpaceId, available: true, apps: data.apps.map((a) => ({ ...a, url: `/_space/connections/${c.id}/apps/${encodeURIComponent(a.app)}` })) };
         } catch { return { connectionId: c.id, spaceId: c.remoteSpaceId, available: false, apps: [] }; }
       }));
-      return Response.json({ ok: true, spaceId: opts.installer.store.spaceId, apps, remotes });
+      // What a grant can name here, spec-1 apps included; `page: false` ones are shared API-only.
+      const shareable = opts.links.shareable().map((a) => ({ app: a.app, title: a.title, page: a.page !== false }));
+      return Response.json({ ok: true, spaceId: opts.installer.store.spaceId, apps, shareable, remotes });
     } },
   };
 }

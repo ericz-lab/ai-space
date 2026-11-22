@@ -254,6 +254,26 @@ ask, then repeat with `trust: true`), `not-found`, `legacy`, `not-installed`, `u
 `upgrade-failed`, `install-failed`, `source-modified` (with `changed` and `dir`: the owner changed the app's source; repeat with `replaceSource`, or build theirs), `git-missing`, `git`, `dirty` (the checkout has changes of the
 owner's: commit them, or build them as they are), `build`.
 
+## ai-usage on several machines
+
+ai-usage shows the agent usage of every machine on one page. Each machine runs its own copy and
+records its own rows; the page gathers the others' one of two ways:
+
+- **With S3** (`BLOB_URL` an `s3://` prefix in the app's environment, the same one on every
+  machine): every machine publishes its rows to the bucket and reads the others' from it. A machine
+  that is asleep or offline still shows what it last published; nothing needs a connection between
+  the Spaces.
+- **Without S3**: the hub pulls each machine's `GET /api/export` through the hub's app proxy,
+  `/api/peers/<machine>/apps/ai-usage/proxy/api/export` ([peers.md](peers.md#an-apps-own-api)). The
+  machine reaches the hub through a [connection](app-packages.md#connected-space-api) it opens
+  outbound, so it needs no public port and works behind NAT; it has to be online to be pulled, and
+  while it is not its rows are missing from the page. On that machine its operator creates the
+  outgoing connection to the hub (`space connection create outgoing <hub's Space ID> --endpoint
+  <hub URL> --token-env <NAME>`, with the token the hub's operator made for it) and grants `ai-usage`
+  (`space connection grant <id> --apps ai-usage`). The grant lets the hub's own ai-usage, and the
+  hub's owner, read that machine's ai-usage `/api/`; no other app of the hub can. A machine that is
+  a legacy peer (`SPACE_PEER_*`) is pulled the same way without the connection.
+
 ## Not yet
 
 - The production publisher key in `publishers.json` and the first signed releases in the public

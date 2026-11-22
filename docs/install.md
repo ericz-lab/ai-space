@@ -328,6 +328,7 @@ Zero Trust → Access → Applications → Add → Self-hosted (or `cf zero-trus
 Bypass rules the space needs later:
 
 - **Peer routes** (step 9): the hub calls `/api/peer/*` on this hostname with a bearer token. Either add a policy `bypass` for the path `/api/peer/*` on that Access app, or create a service token (Access → Service Auth) and add a policy `Service Auth` that allows it; the hub then sends the token pair through `SPACE_PEER_<NAME>_HEADERS`.
+- **Package connections** ([peers.md](peers.md#adding-a-peer)): the other way round, a peer opens a WebSocket to `/api/connections/channel` on the **hub's** hostname with its connection token. Either a `bypass` policy for that path on the hub's Access app (the route checks its own token and the peer's Space id), or a service token the peer sends through its connection's `headersEnv` (`space peer migrate --hub-headers`, `space connection create … --headers-env`). A peer moved off `SPACE_PEER_*` by `space peer migrate` needs this instead of the rule above.
 - **App webhooks and API calls** from outside (a payment callback, a bot webhook): same choice, path bypass or service token, on that app's hostname.
 
 Check from the laptop: the panel hostname shows the Cloudflare login page, then the panel; an incognito window is blocked; `curl -I https://space.example.com/api/apps` is a 302 to the login.
@@ -385,6 +386,8 @@ A message arrives, or `GET /api/notify/channels` shows the provider's error. Bot
 ## 9. Peers
 
 Optional (`space setup peers`). Skip this on a single machine. Peers are not addressed by IP: a peer is reached by its tunnel hostname (step 5), so the same hostnames serve both the operator and the hub. Decide which role this machine has:
+
+What follows, and what `space setup peers` configures, is the older way (`SPACE_PEER_*` and `SPACE_HUB_TOKEN`), which keeps working. A peer is better added over a package connection, which needs no hostname on the peer ([peers.md](peers.md#adding-a-peer)), and a peer set up below is moved onto one later with `space peer migrate` on the hub ([peers.md](peers.md#moving-a-legacy-peer)).
 
 - **This is the only machine, or the hub** (the one whose panel you open): nothing to set now. When a second machine exists, add to this `.env` `SPACE_PEER_<NAME>=https://space-<name>.example.com`, `SPACE_PEER_<NAME>_TOKEN=<that machine's SPACE_HUB_TOKEN>` and, if its Access app is not bypassed on `/api/peer/*`, `SPACE_PEER_<NAME>_HEADERS=CF-Access-Client-Id: ...; CF-Access-Client-Secret: ...`; restart; `GET /api/peers` shows `ok` and the counts.
 - **This is a peer** of a hub elsewhere: `SPACE_HUB_TOKEN=$(openssl rand -hex 32)` and `SPACE_NAME=<name>` in this `.env`, the Access bypass or service token from step 6 on this panel hostname, and the token goes into the hub's `.env`.

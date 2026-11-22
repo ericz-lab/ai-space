@@ -8,8 +8,10 @@ import type { MachineInventory } from "../model/inventory.ts";
 import type { PeerModelInfo } from "./client.ts";
 
 /**
- * The peer side: `/api/peer/*`, present only when `SPACE_HUB_TOKEN` is set.
- * Every route requires that bearer token and mirrors a panel or agent route
+ * The peer side: `/api/peer/*`. Over HTTPS (`createPeerServeRoutes`) the routes are present only when
+ * `SPACE_HUB_TOKEN` is set and every one requires that bearer token; over a package connection
+ * (`createPeerServeHandlers` behind peers/connection-serve.ts) the same handlers answer a `peer`
+ * operation, each route under the scope peers/scopes.ts gives it. Every route mirrors a panel or agent route
  * the browser already uses, with the same handler behind the check, plus one
  * snapshot that bundles the four lists a hub merges. What changes the peer is
  * what its own panel could change: an uninstall, an app's model override.
@@ -57,6 +59,8 @@ import type { PeerModelInfo } from "./client.ts";
  *   POST /api/peer/model/image                     │ here for `<space>/<app>` in `x-space-caller` (docs/model-machines.md);
  *                                                  │ the snapshot's `model` says which runtimes. A run with a `ref` survives
  *   POST /api/peer/model/runs/:ref/cancel          ┘ a dropped link and is attached to again; the caller cancels it here
+ *   POST /api/peer/connections/adopt               over HTTPS only (adopt.ts): the hub asks this Space to open a package
+ *                                                  connection back to it, `space peer migrate` (docs/peers.md)
  *
  * Either side of a link may serve these routes: two spaces that list each other as peers call each
  * other's runtimes both ways.
@@ -65,9 +69,11 @@ import type { PeerModelInfo } from "./client.ts";
 // The server argument only matters to the terminal's socket route, which upgrades the request.
 type Handler = (req: Request & { params: Record<string, string> }, server: Bun.Server<unknown>) => Response | undefined | Promise<Response | undefined>;
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
-type Routes = Record<string, Handler | Partial<Record<Method, Handler>>>;
+export type PeerRoutes = Record<string, Handler | Partial<Record<Method, Handler>>>;
+type Routes = PeerRoutes;
 
 export type PeerServeOptions = {
+  /** `SPACE_HUB_TOKEN`: the bearer every HTTPS request must carry; empty = no HTTPS peer routes. */
   token: string;
   /** What this space calls itself (`SPACE_NAME`). */
   name: string;
@@ -101,17 +107,38 @@ export type PeerServeOptions = {
   tasks?: Routes;
   /** The feedback routes for a hub's Settings → Feedback (feedback/api.ts `createFeedbackPeerServeRoutes`). */
   feedback?: Routes;
+  /**
+   * `POST /api/peer/connections/adopt` (adopt.ts `createAdoptHandler`): a hub moving this Space onto a package
+   * connection. HTTPS only, behind the token; never one of `createPeerServeHandlers`, so no connection reaches it.
+   */
+  adopt?: (req: Request) => Response | Promise<Response>;
 };
 
 const PROXY_TIMEOUT_MS = 60_000;
 
+/** The HTTPS peer routes: every handler of `createPeerServeHandlers` behind the `SPACE_HUB_TOKEN` bearer check. */
 export function createPeerServeRoutes(opts: PeerServeOptions): Routes {
   if (!opts.token) return {};
+  const routes: Routes = {};
+  // The legacy channel's own routes (scopes.ts `LEGACY_ONLY_ROUTES`), not handlers a connection could reach.
+  const legacyOnly: Routes = opts.adopt ? { "/api/peer/connections/adopt": { POST: (req) => opts.adopt!(req) } } : {};
+  for (const [path, entry] of Object.entries({ ...createPeerServeHandlers(opts), ...legacyOnly })) {
+    const methods = typeof entry === "function" ? { GET: entry } : entry;
+    routes[path] = Object.fromEntries(Object.entries(methods).map(([method, h]) => [method, (async (req, server) => (tokenEquals(bearer(req), opts.token) ? h!(req, server) : json({ ok: false, error: "unauthorized" }, 401))) as Handler]));
+  }
+  return routes;
+}
 
+/**
+ * Every `/api/peer/*` route without the bearer check: whoever calls them has been let in already (the
+ * HTTPS token, or a connection's scope). What else applies is applied here, the same for both: the apps
+ * `allowApp` keeps out (installed packages, which a connection shares by its own grant), the options
+ * left unset (no terminal unless it is enabled, no model routes unless `SPACE_PEER_MODEL` names runtimes).
+ */
+export function createPeerServeHandlers(opts: Omit<PeerServeOptions, "token">): Routes {
   const guard =
     (h: Handler): Handler =>
     async (req, server) => {
-      if (!tokenEquals(bearer(req), opts.token)) return json({ ok: false, error: "unauthorized" }, 401);
       if (req.params.app && opts.allowApp?.(req.params.app) === false) return json({ ok: false, error: "application is not shared through legacy peers" }, 403);
       try {
         return await h(req, server);

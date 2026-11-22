@@ -38,6 +38,30 @@ test("connection grants only share named local apps and package removal requires
   expect(gone.calls[0]).toMatchObject({ method: "DELETE", url: expect.stringMatching(/\/api\/connections\/connection-id$/) });
 });
 
+test("connection scopes, full trust and the alias are set and shown", async () => {
+  const set = await runCli(["connection", "scopes", "c1", "--scopes", "panel, agents"]);
+  expect(set.code).toBe(0);
+  expect(set.calls[0]).toMatchObject({ method: "PATCH", url: expect.stringMatching(/\/api\/connections\/c1$/), body: { scopes: ["panel", "agents"] } });
+  expect((await runCli(["connection", "scopes", "c1", "--scopes", ""])).calls[0]?.body).toEqual({ scopes: [] });
+  // Full trust is asked for; without a terminal it needs --yes.
+  expect((await runCli(["connection", "scopes", "c1", "--full-trust", "on"])).calls).toHaveLength(0);
+  expect((await runCli(["connection", "scopes", "c1", "--full-trust", "on", "--yes"])).calls[0]?.body).toEqual({ fullTrust: true });
+  expect((await runCli(["connection", "scopes", "c1", "--full-trust", "off"])).calls[0]?.body).toEqual({ fullTrust: false });
+  expect((await runCli(["connection", "scopes", "c1", "--full-trust", "maybe"])).code).toBe(2);
+  expect((await runCli(["connection", "scopes", "c1"])).code).toBe(2);
+  expect((await runCli(["connection", "alias", "c1", "office"])).calls[0]?.body).toEqual({ alias: "office" });
+  expect((await runCli(["connection", "alias", "c1", "--clear"])).calls[0]?.body).toEqual({ alias: null });
+  const created = await runCli(["connection", "create", "incoming", "0d8ce940-9bc8-4082-bab2-0ccb7e5dbd87", "--scopes", "panel", "--alias", "box"]);
+  expect(created.calls[0]?.body).toEqual({ direction: "incoming", remoteSpaceId: "0d8ce940-9bc8-4082-bab2-0ccb7e5dbd87", apps: [], scopes: ["panel"], alias: "box" });
+  expect((await runCli(["connection", "create", "incoming", "0d8ce940-9bc8-4082-bab2-0ccb7e5dbd87", "--full-trust"])).calls).toHaveLength(0);
+  const row = { id: "c1", remoteSpaceId: "0d8ce940-9bc8-4082-bab2-0ccb7e5dbd87", direction: "outgoing", enabled: true, connected: true, apps: [], scopes: ["panel"], fullTrust: false, alias: null, remoteName: "hub", peer: { name: "hub", state: "peer", granted: { scopes: [], fullTrust: true } } };
+  const listed = await runCli(["connection", "ls"], (t) => t.scripted.reply({ status: 200, body: { spaceId: "me", connections: [row, { ...row, id: "c2", fullTrust: true, peer: { name: "x", state: "no-panel", reason: "no panel scope", granted: { scopes: [], fullTrust: false } } }] } }));
+  expect(listed.code).toBe(0);
+  const text = listed.out.join("\n");
+  expect(text).toMatch(/c1\s+outgoing\s+\S+\s+hub\s+up\s+-\s+panel\s+yes \(full trust\)/);
+  expect(text).toMatch(/c2\s+.*full trust\s+no: no panel scope/);
+});
+
 test("install and upgrade take a catalog app by name and a package file by path", async () => {
   const result = { app: "notes", version: "1.0.0", action: "installed", from: "package", ref: "v1.0.0" };
   const byName = await runCli(["app", "install", "notes", "--with-source"], (t) => t.scripted.reply({ status: 200, body: { ok: true, result } }));

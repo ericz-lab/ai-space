@@ -94,7 +94,7 @@ export function liveAttachment(opts: { service: SpeechService; caller: SpeechCal
     machine = target.machine;
     let socket: WebSocket;
     try {
-      socket = up = connect(target.url, target.headers);
+      socket = up = target.open ? target.open() : connect(target.url, target.headers);
     } catch (e) {
       return notOpened(`${candidate.name}: unreachable: ${(e as Error).message}`, "transport");
     }

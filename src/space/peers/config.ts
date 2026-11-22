@@ -31,6 +31,13 @@ export type PeerConfig = {
   /** Extra request headers, e.g. an access layer's service credentials. */
   headers: Record<string, string>;
   refreshMs: number;
+  /**
+   * The package connection this peer is reached over (peers/connection-peers.ts), instead of `url` and `token`:
+   * a peer made from a connection, never one from `SPACE_PEER_*`.
+   */
+  connection?: string;
+  /** The other Space's id, which a connection is bound to: the stable id of a connection peer's snapshot, whatever the snapshot says. */
+  spaceId?: string;
 };
 
 export type PeerLoad = {

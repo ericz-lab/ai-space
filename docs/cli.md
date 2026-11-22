@@ -30,7 +30,7 @@ space backup  run | ls | verify | restore
 space chat    ls | import
 space event   ls | emit
 space consumer ls | show | add | rotate | rm
-space peer    ls | rename
+space peer    ls | rename | migrate
 space connection ls | create | grant | enable | disable | rm
 space router  show | sync
 space api     <METHOD> <path> [body]  the escape hatch: one raw call with the token added
@@ -113,8 +113,9 @@ Rules:
 | `space consumer ls` / `show NAME` | external consumers of the bus: events, calls, token hint, last contact; one with its delivery counts ([events.md](events.md#external-consumers)) | `GET /api/consumers`, `GET /api/consumers/:name` |
 | `space consumer add NAME --event E [--filter k=v1,v2] [--call APP/CAP] [--description D]` | create one; `--filter` applies to every event and call; or a JSON body, `-`, `--json-file`; prints the token once | `POST /api/consumers` |
 | `space consumer rotate NAME [--yes]` / `rm NAME [--yes]` | a new token, or revoke; both end the old token and its open streams at once | `POST /api/consumers/:name/rotate`, `DELETE /api/consumers/:name` |
-| `space peer ls` | health, snapshot age, app counts | `GET /api/peers` |
+| `space peer ls` | how each peer is reached (`connection`, or `legacy` for `SPACE_PEER_*`, with a line naming `space peer migrate` while any is left), health, snapshot age, app counts | `GET /api/peers` |
 | `space peer rename OLD NEW` | rename a peer: its `.env` lines and everything the hub keeps under its name; publishes `space/peer.renamed` ([peers.md](peers.md#renaming-a-peer)) | `POST /api/peers/:peer/rename` |
+| `space peer migrate NAME \| --all [--manual \| --finish] [--dry-run] [--keep-legacy] [--hub-url URL] [--hub-headers H] [--peer-id ID] [--wait S]` | move a `SPACE_PEER_*` peer onto a package connection under the same name, keeping what the hub stores for it: the connection, the peer asked to dial back with full trust (or the commands to run there, `--manual`, then `--finish`), a bounded check, the `.env` lines commented out; no restart; exit 1 when a peer is not moved ([peers.md](peers.md#moving-a-legacy-peer)) | `GET /api/peers`, `POST /api/peers/:peer/migrate` |
 | `space router show` / `sync` | routes with status; write and reload | `GET /api/router`, `POST /api/router/sync` |
 | `space api METHOD PATH [BODY\|-] [--app]` | one call with the operator token (`--app`: the app's own); JSON pretty-printed, SSE one line per event | any |
 | `space init` / `setup` / `start` / `install-defaults` | the lifecycle commands, unchanged; `setup` is the basic configuration, `setup github` / `ingress` / `backup` / `notifications` / `peers` one optional extension each ([install.md](install.md)) | disk |
@@ -194,6 +195,10 @@ space connection create incoming PEER_UUID --apps notes
 space connection create outgoing HUB_UUID --endpoint https://hub.example.com --token-env MY_HUB_TOKEN
 space connection grant CONNECTION_UUID --apps notes
 space connection grant CONNECTION_UUID --apps ''
+space connection scopes CONNECTION_UUID --scopes panel,agents,events
+space connection scopes CONNECTION_UUID --full-trust on --yes
+space connection alias CONNECTION_UUID office
+space connection alias CONNECTION_UUID --clear
 space connection disable CONNECTION_UUID
 space connection enable CONNECTION_UUID
 space connection rm CONNECTION_UUID
@@ -201,4 +206,6 @@ space connection rm CONNECTION_UUID
 
 `--allow-unsigned` is an explicit trust decision for a package without a signature. Signed packages use the host's configured publisher keys. Install/upgrade/change commands print an operation UUID before writing; reuse it with `--operation-id UUID` if the response is interrupted. `app open` prints a one-use URL rather than launching a browser on the server. A use-only peer connection cannot install or manage remote apps; `--url` requires a separate operator credential for that Space.
 
-Creating an incoming connection returns its token once. Store it in the outgoing peer's host environment under the selected name; restart that Space to load a new environment variable. The `--apps` list always names apps **owned by the machine where the command runs**. On a peer's outgoing connection it controls Hub-to-peer access and starts empty. Existing `space peer ls` continues to describe legacy peer snapshots.
+Creating an incoming connection returns its token once. Store it in the outgoing peer's host environment under the selected name; restart that Space to load a new environment variable. `--headers-env NAME` on an outgoing connection names a second variable with `Name: value; Name: value`, headers it sends when it dials, for an access layer in front of the other Space (a Cloudflare Access service token). The `--apps` list always names apps **owned by the machine where the command runs**: installed packages, or spec-1 apps with a `service.port`, which are shared API-only ([app-packages.md](app-packages.md#source-apps-over-a-connection)). On a peer's outgoing connection it controls Hub-to-peer access and starts empty. `grant` replaces the list; an app left off it loses its in-flight requests and sockets, the connection and the other apps' streams stay up.
+
+`scopes` sets what the other Space may do through this machine's peer API ([app-packages.md](app-packages.md#peer-scopes)): `--scopes` replaces the ticked list (`panel`, `agents`, `events`, `model`, `tasks`, `terminal`, `apps`, `manage`; empty grants none), `--full-trust on|off` the switch that grants every scope, present and future. Turning full trust on asks first, or needs `--yes` without a terminal; `create` takes `--scopes`, `--full-trust` and `--alias` too. A removed scope ends only the streams that needed it. `alias` names the other Space here as a peer (default: the name it gives itself); give it a legacy peer's old name to keep that peer's stored state ([peers.md](peers.md#adding-a-peer)). `ls` shows for each connection what this machine grants (`apps here`, `scopes here`) and, under `peer`, whether the other Space is a peer here with what it grants, or why it is not. `space peer ls` lists every peer, legacy and connection ones; a connection peer's `url` reads `connection:<id>`.

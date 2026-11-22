@@ -178,17 +178,58 @@ function renameIds(v: unknown, from: string, to: string, hit: () => void): unkno
 
 /** Rewrite the workspace `.env` atomically (a temporary file renamed over it). */
 export function rewriteEnvFile(path: string, from: string, to: string): void {
-  let text: string;
+  editEnvFile(path, (text) => {
+    const next = renameEnvText(text, from, to);
+    if (next === text) throw new RenameError(`${ENV_PREFIX}${nameToEnv(from)} is not in ${path}; rename it where it is set`);
+    return next;
+  });
+}
+
+/**
+ * The one way the running service changes the workspace `.env`: read it, let `edit` return the new text,
+ * write that to a temporary file and rename it over the old one, keeping its mode (600 for a new file).
+ * `create` starts from an empty file when there is none. An edit that changes nothing writes nothing.
+ * The line rules are those of `renameEnvText` here and setup.ts `updateEnvText`; this only does the write.
+ */
+export function editEnvFile(path: string, edit: (text: string) => string, opts: { create?: boolean } = {}): void {
+  let text = "";
+  let mode = 0o600;
   try {
     text = readFileSync(path, "utf8");
+    mode = statSync(path).mode & 0o777;
   } catch (e) {
-    throw new RenameError(`cannot read ${path}: ${(e as Error).message}`);
+    if (!opts.create || (e as NodeJS.ErrnoException).code !== "ENOENT") throw new RenameError(`cannot read ${path}: ${(e as Error).message}`);
   }
-  const next = renameEnvText(text, from, to);
-  if (next === text) throw new RenameError(`${ENV_PREFIX}${nameToEnv(from)} is not in ${path}; rename it where it is set`);
-  const tmp = `${path}.rename-${process.pid}`;
-  writeFileSync(tmp, next, { mode: statSync(path).mode & 0o777 });
+  const next = edit(text);
+  if (next === text) return;
+  const tmp = `${path}.edit-${process.pid}`;
+  writeFileSync(tmp, next, { mode });
   renameSync(tmp, path);
+}
+
+/** The peer's own `.env` keys: `SPACE_PEER_<NAME>` and its `_TOKEN`, `_HEADERS`, `_REFRESH`. */
+export function peerEnvKeys(name: string): string[] {
+  return PEER_SUFFIXES.map((s) => `${ENV_PREFIX}${nameToEnv(name)}${s}`);
+}
+
+/**
+ * The `.env` text with the given keys' lines commented out in place (`# KEY=value`), a `note` line put
+ * once above the first of them, so the owner can put them back by removing the `#`. Every other line,
+ * and a line already commented, stays as it is. `found` lists the keys that had a line.
+ */
+export function commentEnvText(text: string, keys: string[], note: string): { text: string; found: { key: string; value: string }[] } {
+  const wanted = new Set(keys);
+  const found: { key: string; value: string }[] = [];
+  const out: string[] = [];
+  for (const line of text.split("\n")) {
+    const m = /^(\s*(?:export\s+)?)([A-Z][A-Z0-9_]*)(\s*=)(.*)$/.exec(line);
+    if (m && wanted.has(m[2]!)) {
+      if (!found.length) out.push(`# ${note}`);
+      found.push({ key: m[2]!, value: m[4]!.trim() });
+      out.push(`# ${line}`);
+    } else out.push(line);
+  }
+  return { text: out.join("\n"), found };
 }
 
 function escape(s: string): string {

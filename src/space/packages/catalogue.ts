@@ -2,11 +2,16 @@ import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { ICON_TYPES, MAX_ICON_BYTES } from "../panel/icons.ts";
 import type { AppView } from "../panel/view.ts";
+import type { Manifest } from "../scheduler/manifest.ts";
+import { PEER_SCOPES, type PeerScope } from "../peers/scopes.ts";
+import { peerLabel } from "./connections.ts";
 import type { PackageLinks, SharedApp } from "./links.ts";
 import type { RuntimeApp } from "./runtime.ts";
 
 type Icon = { version: string; type: string; bytes: Uint8Array };
-type Entry = { name?: string; spaceId: string; apps: SharedApp[]; ok: boolean; icons: Map<string, Icon> };
+/** What the other Space lets this one do through its `/api/peer/*` (connections.ts `grantedScopes`), from its catalogue. */
+export type RemotePeerGrant = { scopes: PeerScope[]; fullTrust: boolean };
+type Entry = { name?: string; spaceId: string; apps: SharedApp[]; ok: boolean; icons: Map<string, Icon>; peer: RemotePeerGrant };
 
 /** How a package's manifest icon travels to a connected Space: a short text as it is, an image file by request. */
 export function sharedIcon(app: RuntimeApp): { text?: string; file?: { path: string; type: string } } {
@@ -16,6 +21,19 @@ export function sharedIcon(app: RuntimeApp): { text?: string; file?: { path: str
   // Only a file the package's own index lists: the manifest cannot name a path outside the installation.
   if (type && app.index.files.some((f) => f.path === icon)) return { file: { path: join(app.dir, icon), type } };
   return !type && icon.length <= 16 && !/[\/\\.<>]/.test(icon) ? { text: icon } : {};
+}
+
+/**
+ * The local spec-1 (git-deployed) apps a connection can share next to the installed packages: those with a
+ * `service.port`, not archived, and not a package. They are shared API-only (`page: false`): the owning
+ * side serves a granted request's `/api/` paths from the service port (gateway.ts `servicePort`).
+ * A spec-1 app carries no version; its icon travels only as a short text.
+ */
+export function sourceSharedApps(manifests: readonly Manifest[], isPackage: (app: string) => boolean): SharedApp[] {
+  return manifests.filter((m) => m.spec !== 2 && m.service?.port && m.status !== "archived" && !isPackage(m.app)).map((m) => ({
+    app: m.app, title: m.title ?? m.app, version: "", page: false,
+    ...(m.icon && m.icon.length <= 16 && !/[\/\\.<>:]/.test(m.icon) ? { icon: m.icon } : {}),
+  }));
 }
 
 export async function sharedIconResponse(app: RuntimeApp | undefined): Promise<Response | undefined> {
@@ -41,24 +59,40 @@ export class RemoteCatalogue {
   constructor(private readonly links: PackageLinks, opts: { refreshMs?: number; timeoutMs?: number } = {}) {
     this.timeoutMs = opts.timeoutMs ?? 3000;
     this.timer = setInterval(() => void this.refresh(), opts.refreshMs ?? 30_000); this.timer.unref();
-    // A changed grant closes the channel; ask again once it had time to reconnect.
-    this.unsubscribe = links.connections.onChange(() => {
+    // A connection made, enabled, disabled, rotated or removed reopens its channel: ask again once it had
+    // time to reconnect. A change of this Space's own grants keeps the channel and changes nothing listed
+    // here, which shows what the OTHER Space shares; that Space sees it on its next round (`refreshMs`).
+    this.unsubscribe = links.connections.onChange((_id, change) => {
       this.prune();
+      this.updated();
+      if (change.kind !== "reset") return;
       clearTimeout(this.soon);
       this.soon = setTimeout(() => void this.refresh(), 6000); this.soon.unref();
     });
   }
   private readonly timeoutMs: number;
+  private readonly listeners = new Set<() => void>();
 
   refresh(): Promise<void> {
-    return this.running ??= this.load().finally(() => { this.running = undefined; });
+    return this.running ??= this.load().finally(() => { this.running = undefined; this.updated(); });
   }
 
-  /** One tile per shared app that has a page; ids are `<space name>/<app>`, like a peer's. */
+  /** Called after every round and every connection change, for what follows the catalogue (peers/connection-peers.ts). */
+  onUpdate(fn: () => void): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+
+  /**
+   * What each connected Space, as last read, lets this one do through its `/api/peer/*`, with the label it
+   * goes by here (connections.ts `peerLabel`) and whether that read is current.
+   */
+  peerGrants(): { connection: string; spaceId: string; label: string; grant: RemotePeerGrant; ok: boolean }[] {
+    return [...this.entries].map(([connection, e]) => ({ connection, spaceId: e.spaceId, label: this.label(connection, e), grant: e.peer, ok: e.ok }));
+  }
+
+  /** One tile per shared app that has a page; ids are `<label>/<app>`, like a peer's. */
   views(hidden: Set<string>): AppView[] {
     const out: AppView[] = [];
     for (const [connection, e] of this.entries) {
-      const label = e.name ?? e.spaceId.slice(0, 8);
+      const label = this.label(connection, e);
       for (const a of e.apps) {
         const id = `${label}/${a.app}`;
         out.push({
@@ -71,6 +105,24 @@ export class RemoteCatalogue {
     }
     return out;
   }
+
+  /**
+   * The connection whose Space is labelled `label` (its name, or the start of its UUID, as `views`
+   * names it) and whose last catalogue shares `app`: where the hub's `/api/peers/<label>/apps/<app>/proxy/*`
+   * goes when no legacy peer has that name. A stale entry still answers, so the caller reports the Space offline.
+   */
+  find(label: string, app: string): string | undefined {
+    for (const [connection, e] of this.entries) {
+      if (this.label(connection, e) === label && e.apps.some((a) => a.app === app)) return connection;
+    }
+    return undefined;
+  }
+
+  private label(connection: string, e: Entry): string {
+    const c = this.links.connections.get(connection);
+    return c ? peerLabel({ ...c, remoteName: c.remoteName ?? e.name?.toLowerCase() ?? null }) : e.name ?? e.spaceId.slice(0, 8);
+  }
+  private updated(): void { for (const fn of this.listeners) { try { fn(); } catch (e) { console.error(`[connections] ${(e as Error).message}`); } } }
 
   /** The image a shared app's tile shows, as last fetched from the Space that owns the app. */
   icon(connection: string, app: string): { type: string; bytes: Uint8Array } | undefined {
@@ -89,8 +141,9 @@ export class RemoteCatalogue {
     await Promise.all(this.links.connections.list().filter((c) => c.enabled).map(async (c) => {
       try {
         const response = await this.links.request(c.id, { operation: "catalogue" }, null, AbortSignal.timeout(this.timeoutMs));
-        if (!response.ok) throw new Error("catalogue unavailable");
-        const data = await response.json() as { spaceId?: unknown; name?: unknown; apps?: unknown };
+        // An answer not read holds its stream on both sides: an error's body is let go at once.
+        if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new Error("catalogue unavailable"); }
+        const data = await response.json() as { spaceId?: unknown; name?: unknown; apps?: unknown; peer?: unknown };
         // The connection is bound to one Space identity; an answer from another is not its catalogue.
         if (data.spaceId !== c.remoteSpaceId || !Array.isArray(data.apps)) throw new Error("catalogue does not match the connection");
         const apps = data.apps.filter(isSharedApp).slice(0, 1000);
@@ -104,7 +157,10 @@ export class RemoteCatalogue {
           const icon = have?.version === a.version ? have : await this.fetchIcon(c.id, a).catch(() => undefined);
           if (icon) icons.set(a.app, icon);
         }
-        if (this.links.connections.get(c.id)?.enabled) this.entries.set(c.id, { spaceId: c.remoteSpaceId, apps, ok: true, icons, ...(name ? { name } : {}) });
+        if (this.links.connections.get(c.id)?.enabled) {
+          this.entries.set(c.id, { spaceId: c.remoteSpaceId, apps, ok: true, icons, peer: peerGrant(data.peer), ...(name ? { name } : {}) });
+          this.links.connections.setRemoteName(c.id, name);
+        }
       } catch {
         const last = this.entries.get(c.id);
         if (last) last.ok = false;
@@ -120,6 +176,13 @@ export class RemoteCatalogue {
     const bytes = new Uint8Array(await response.arrayBuffer());
     return bytes.length && bytes.length <= MAX_ICON_BYTES ? { version: a.version, type, bytes } : undefined;
   }
+}
+
+/** The `peer` part of a catalogue: known scope names only; an older Space without it grants nothing. */
+function peerGrant(raw: unknown): RemotePeerGrant {
+  const p = raw as { scopes?: unknown; fullTrust?: unknown } | null;
+  const scopes = Array.isArray(p?.scopes) ? PEER_SCOPES.filter((s) => (p!.scopes as unknown[]).includes(s)) : [];
+  return { scopes, fullTrust: p?.fullTrust === true };
 }
 
 function isSharedApp(raw: unknown): raw is SharedApp {

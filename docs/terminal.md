@@ -65,6 +65,8 @@ A peer with the terminal enabled serves it to its hub under the bearer-guarded p
 
 On the hub the same four exist under `/api/peers/:peer/terminal/…`. The two HTTP ones are forwarded like chat, with the token, the access-layer headers and the passphrase header (`x-terminal-passphrase`) added: the passphrase, when the *peer* sets one, is typed on the hub's page and checked on the peer. The socket is bridged: the hub upgrades the browser, dials the peer's `/api/peer/terminal/ws?ticket=…` with the same headers, and copies frames both ways; the peer's close code and reason reach the browser, and the browser leaving closes the peer side. A peer that refuses the socket (bad ticket, wrong token, down) closes the browser side with code 4002 and says which peer refused.
 
+A peer reached over a package connection ([peers.md](peers.md#adding-a-peer)) serves the same four over its channel, with no token, when it grants the hub the `terminal` scope ([app-packages.md](app-packages.md#peer-scopes)) and its terminal is enabled; the socket is bridged over the channel as a framed stream instead of a second WebSocket. Every other rule is the same. Taking the scope away (or full trust, without the scope ticked) closes that peer's open terminal sockets at once; a change of any other scope or of the app list leaves them open.
+
 The hub keeps no session state for peer sessions and writes no audit row for them; the peer does both, as for its own. A peer session ends by the peer's rules (its idle limit, its cap).
 
 ## Configuration
@@ -94,7 +96,7 @@ What the terminal adds on top of the panel's exposure: nothing in kind (the chat
 - **Caps and idle.** A forgotten tab closes itself; a page cannot open more than the cap.
 - **Audit, not surveillance.** One row per session in `space.db` (`terminal_sessions`): when it started and ended, how it ended, the exit code, the user agent, bytes each way, the size. Keystrokes and output are never recorded, matching the chat's rule; an operator who wants a transcript runs `script` inside the session.
 
-What the hub token grants on a peer grows accordingly: it was a chat with `bypassPermissions`, it is now also a terminal, when the peer enables one. [peers.md](peers.md#trust-boundary) says to treat the hub's workspace as holding a shell on every peer; that stays true and is now literal.
+Over a package connection the `terminal` scope is that grant, and full trust includes it. What the hub token grants on a peer grows accordingly: it was a chat with `bypassPermissions`, it is now also a terminal, when the peer enables one. [peers.md](peers.md#trust-boundary) says to treat the hub's workspace as holding a shell on every peer; that stays true and is now literal.
 
 What the terminal does not do: it does not run as another user, does not confine the shell (no container, no seccomp), does not filter commands, does not record sessions, and does not reconnect a dropped socket. Each of these is a different product; the terminal here is the operator's own shell on the operator's own machine, reached through the operator's own access layer.
 
