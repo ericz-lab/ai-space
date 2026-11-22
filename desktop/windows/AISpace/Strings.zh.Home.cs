@@ -14,7 +14,7 @@ internal static partial class L
         ["Library"] = "资源库",
         ["Main"] = "主屏幕",
         ["Screen {0}"] = "屏幕 {0}",
-        ["Screen Actions"] = "屏幕操作",
+        ["More screens"] = "更多屏幕",
         ["Filter by kind"] = "按类型筛选",
         ["All"] = "全部",
         ["Agents"] = "智能体",

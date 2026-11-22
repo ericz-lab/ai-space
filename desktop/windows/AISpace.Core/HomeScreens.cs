@@ -149,6 +149,21 @@ public static class HomeScreens
     public static string Title(IReadOnlyList<HomeScreen> screens, int index, string main, Func<int, string> numbered) =>
         index >= 0 && index < screens.Count && screens[index].Name.Length > 0 ? screens[index].Name : index == 0 ? main : numbered(index + 1);
 
+    /// <summary>How many screens the main window's bar shows as tabs; the rest are in its overflow menu.</summary>
+    public const int InBar = 4;
+
+    /// <summary>
+    /// The screens the bar shows as tabs: the first <paramref name="max"/>, the shown one in the last
+    /// place when it is not among them (as the web tabs, <see cref="OpenTabLayout"/>), so many screens
+    /// never push the web tabs out of the bar.
+    /// </summary>
+    public static IReadOnlyList<string> BarTabs(IReadOnlyList<string> ids, string? shown, int max = InBar)
+    {
+        var tabs = ids.Take(Math.Max(1, max)).ToList();
+        if (shown is not null && ids.Contains(shown) && !tabs.Contains(shown)) tabs[^1] = shown;
+        return tabs;
+    }
+
     /// <summary>Reads screens.json, skipping anything malformed.</summary>
     public static Dictionary<string, ScreenRecord> DecodeFile(string json)
     {

@@ -91,23 +91,25 @@ internal sealed partial class HomePage
         }
     }
 
-    /// <summary>The actions on the screen on show: the ⋯ button beside the tabs.</summary>
-    private void ScreenMenu()
+    /// <summary>
+    /// The menu of a screen's tab in the main window's bar (right click, Shift+F10), filled as it
+    /// opens: a new screen; for a screen, rename it, copy the web panel's layout again, delete it.
+    /// The Library's tab offers a new screen only.
+    /// </summary>
+    public void FillPlaceMenu(ContextMenu menu, string id)
     {
-        if (_shownId == LibraryId) return;
-        var id = _shownId;
+        menu.Items.Clear();
         var screens = Screens();
-        var index = screens.ToList().FindIndex(s => s.Id == id);
-        if (index < 0) return;
-        var menu = new ContextMenu { PlacementTarget = _screenActions, Placement = PlacementMode.Bottom };
         var add = Item(L.T("New Screen"), () =>
         {
             if (HomeScreens.NewScreen(Screens()) is not { } made) return;
-            _shownId = made.Id;
             EditScreens(_ => made.Screens);
+            ShowPlace(made.Id);
         });
         add.IsEnabled = screens.Count < HomeScreens.Limit;
         menu.Items.Add(add);
+        var index = screens.ToList().FindIndex(s => s.Id == id);
+        if (index < 0) return;
         menu.Items.Add(Item(L.T("Rename Screen…"), () => RenameScreen(id)));
         menu.Items.Add(Item(L.T("Copy the Web Panel's Layout…"), () =>
         {
@@ -122,16 +124,18 @@ internal sealed partial class HomePage
             menu.Items.Add(Item(L.T("Delete Screen…"), () =>
             {
                 if (!Confirm(L.T("Delete this screen?"), L.T("Its apps, agents and widgets stay in the Library."))) return;
-                _shownId = index > 0 ? screens[index - 1].Id : HomeScreens.Home;
+                if (_shownId == id) _shownId = index > 0 ? screens[index - 1].Id : HomeScreens.Home;
                 EditScreens(all => HomeScreens.Remove(all, id));
             }));
         }
-        menu.IsOpen = true;
     }
+
+    /// <summary>The window the page is in, else the app's main window (a menu of the bar may act while Home is not shown).</summary>
+    private Window? OwnerWindow => Window.GetWindow(this) ?? Application.Current?.MainWindow;
 
     private bool Confirm(string title, string text)
     {
-        var owner = Window.GetWindow(this);
+        var owner = OwnerWindow;
         var answer = owner is null
             ? MessageBox.Show(text, title, MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel)
             : MessageBox.Show(owner, text, title, MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel);
@@ -144,7 +148,7 @@ internal sealed partial class HomePage
         var index = screens.ToList().FindIndex(s => s.Id == id);
         if (index < 0) return;
         var unnamed = screens.Select(s => s with { Name = "" }).ToList();
-        var dialog = new HomeRenameDialog(screens[index].Name, ScreenTitle(unnamed, index)) { Owner = Window.GetWindow(this) };
+        var dialog = new HomeRenameDialog(screens[index].Name, ScreenTitle(unnamed, index)) { Owner = OwnerWindow };
         if (dialog.ShowDialog() == true) EditScreens(all => HomeScreens.Rename(all, id, dialog.ScreenName));
     }
 }

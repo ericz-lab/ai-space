@@ -300,6 +300,18 @@ public class HomeTests
     }
 
     [Fact]
+    public void TheBarShowsAFewScreensAndTheOneShown()
+    {
+        string[] ids = ["home", "s1", "s2", "s3", "s4", "s5"];
+        Assert.Equal(["home", "s1", "s2", "s3"], HomeScreens.BarTabs(ids, "s1"));
+        Assert.Equal(["home", "s1", "s2", "s5"], HomeScreens.BarTabs(ids, "s5"));
+        // The Library (not a screen) and a screen that is gone change nothing.
+        Assert.Equal(["home", "s1", "s2", "s3"], HomeScreens.BarTabs(ids, "library"));
+        Assert.Equal(["home", "s1", "s2", "s3"], HomeScreens.BarTabs(ids, "gone"));
+        Assert.Equal(["home"], HomeScreens.BarTabs(["home"], "home"));
+    }
+
+    [Fact]
     public void TheScreenStoreKeepsItsFile()
     {
         var dir = Path.Combine(Path.GetTempPath(), "ai-space-home-" + Guid.NewGuid().ToString("N"));

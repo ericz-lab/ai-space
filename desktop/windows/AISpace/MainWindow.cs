@@ -13,10 +13,12 @@ using AISpace.Web;
 namespace AISpace;
 
 /// <summary>
-/// The main window. Its bar holds the Space picker, the Space's native pages (Home, Inbox with
-/// the unread count, Shortcuts, Settings) and its Terminal, then the web tabs (the apps opened, the
-/// chat, the terminal, the web panel), then, while a web tab is shown, Back, Forward, Reload and
-/// Open in Browser, and a menu with the web panel, Quick Chat and the app's settings. Below, the
+/// The main window. Its bar holds the Space picker, Home's places (the Library, then a tab per
+/// screen, <see cref="HomePage.Places"/>: each opens Home there), then the web tabs (the apps
+/// opened, the chat, the terminal, the web panel), then, while a web tab is shown, Back, Forward,
+/// Reload and Open in Browser, the Inbox with its count while something is unread, and a menu
+/// with the Space's other pages (Inbox, Shortcuts, Terminal, Settings), the web panel, Quick Chat
+/// and the app's settings. Below, the
 /// selected native page or web tab; while the Space needs a sign-in, its web panel's sign-in page
 /// in place of the native pages. Every page and tab stays loaded while another is shown, so
 /// switching keeps its state; closing the window only hides it while the app keeps running.
@@ -25,16 +27,23 @@ internal sealed class MainWindow : Window
 {
     /// <summary>The size a first window asks for; it never exceeds the work area of its monitor.</summary>
     private const double FirstWidth = 1280, FirstHeight = 820;
-    /// <summary>Under this width the bar's entries show their icons only.</summary>
+    /// <summary>Under this width the bar holds fewer screen tabs and the Library's shows its icon only.</summary>
     private const double LabelsFrom = 1100;
+    /// <summary>Screen tabs in the bar under <see cref="LabelsFrom"/>; above it, <see cref="HomeScreens.InBar"/>.</summary>
+    private const int NarrowScreens = 2;
 
     private readonly AppModel _model;
     private readonly Func<bool> _quitting;
     private readonly ComboBox _spaces = new() { MinWidth = 150, MaxWidth = 240, VerticalAlignment = VerticalAlignment.Center };
-    private readonly StackPanel _entries = new() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 4, 0) };
+    /// <summary>Home's places: the Library, then a tab per screen (the rest under a menu).</summary>
+    private readonly StackPanel _places = new() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 4, 0) };
+    /// <summary>Every Space's Home whose places the bar follows.</summary>
+    private readonly HashSet<HomePage> _homes = [];
+    private string? _placesDrawn;
     private readonly StackPanel _tabs = new() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-    private readonly Dictionary<string, (ToggleButton Button, TextBlock Label)> _entryButtons = [];
     private readonly Border _inboxBadge = Ui.Badge(0);
+    /// <summary>The Inbox with its count, in the bar only while something is unread (the menu always has the Inbox).</summary>
+    private readonly Button _inbox;
     private readonly Button _back, _forward, _reload, _browser, _menu;
     private readonly StackPanel _webActions;
     private readonly Grid _pages = new();
@@ -81,11 +90,10 @@ internal sealed class MainWindow : Window
             _menu.ContextMenu.IsOpen = true;
         };
 
-        Entry("home", Ui.Home, L.T("Home"), () => _model.ShowPage(null, PageKind.Home));
-        Entry("inbox", Ui.Inbox, L.T("Inbox"), () => _model.ShowPage(null, PageKind.Inbox), _inboxBadge);
-        Entry("shortcuts", Ui.Shortcuts, L.T("Shortcuts"), () => _model.ShowPage(null, PageKind.Shortcuts));
-        Entry("terminal", Ui.Terminal, L.T("Terminal"), () => _model.ShowTerminal());
-        Entry("settings", Ui.Settings, L.T("Settings"), () => _model.ShowPage(null, PageKind.Settings));
+        _inboxBadge.Margin = new Thickness(6, 0, 0, 0);
+        _inbox = Ui.IconButton(Ui.Inbox, L.T("Inbox"), () => _model.ShowPage(null, PageKind.Inbox));
+        _inbox.Content = Ui.Row(Ui.Glyph(Ui.Inbox, 16), _inboxBadge);
+        _inbox.Visibility = Visibility.Collapsed;
 
         _spaces.SelectionChanged += (_, _) =>
         {
@@ -110,13 +118,13 @@ internal sealed class MainWindow : Window
         DockPanel.SetDock(divider, Dock.Left);
         tabsRow.Children.Add(divider);
         tabsRow.Children.Add(tabsScroll);
-        var actions = Ui.Row(_webActions, _menu);
+        var actions = Ui.Row(_webActions, _inbox, _menu);
         Grid.SetColumn(_spaces, 0);
-        Grid.SetColumn(_entries, 1);
+        Grid.SetColumn(_places, 1);
         Grid.SetColumn(tabsRow, 2);
         Grid.SetColumn(actions, 3);
         bar.Children.Add(_spaces);
-        bar.Children.Add(_entries);
+        bar.Children.Add(_places);
         bar.Children.Add(tabsRow);
         bar.Children.Add(actions);
         _bar.Child = bar;
@@ -145,52 +153,38 @@ internal sealed class MainWindow : Window
         _welcome.Content = welcome();
         _model.Changed += Refresh;
         Loaded += (_, _) => Refresh();
-        SizeChanged += (_, _) => Labels();
+        SizeChanged += (_, _) => FillPlaces();
         PreviewKeyDown += OnKey;
-    }
-
-    /// <summary>An entry of the bar for a native page (or the terminal): its icon, its name when the window is wide enough, and an optional badge.</summary>
-    private void Entry(string key, string glyph, string label, Action click, UIElement? badge = null)
-    {
-        var text = Ui.Text(label, wrap: false);
-        text.Margin = new Thickness(8, 0, 0, 0);
-        var content = new StackPanel { Orientation = Orientation.Horizontal };
-        content.Children.Add(Ui.Glyph(glyph, 14));
-        content.Children.Add(text);
-        if (badge is FrameworkElement b)
-        {
-            b.Margin = new Thickness(6, 0, 0, 0);
-            content.Children.Add(b);
-        }
-        var button = new ToggleButton { Content = content, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 4, 0), ToolTip = label, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
-        System.Windows.Automation.AutomationProperties.SetName(button, label);
-        button.Click += (_, _) => click();
-        _entries.Children.Add(button);
-        _entryButtons[key] = (button, text);
-    }
-
-    private void Labels()
-    {
-        var wide = ActualWidth >= LabelsFrom;
-        foreach (var (_, (_, label)) in _entryButtons) label.Visibility = wide ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private ContextMenu Menu(Action openSettings)
     {
         var menu = new ContextMenu();
-        MenuItem Item(string header, string glyph, Action click)
+        MenuItem Item(string header, string glyph, Action click, string? keys = null)
         {
-            var item = new MenuItem { Header = header, Icon = Ui.Glyph(glyph, 14) };
+            var item = new MenuItem { Header = header, Icon = Ui.Glyph(glyph, 14), InputGestureText = keys ?? "" };
             item.Click += (_, _) => click();
             menu.Items.Add(item);
             return item;
         }
+        // The Space's pages the bar has no tab for (Home is its screens' tabs).
+        var inbox = Item(L.T("Inbox"), Ui.Inbox, () => _model.ShowPage(null, PageKind.Inbox), "Ctrl+2");
+        var shortcuts = Item(L.T("Shortcuts"), Ui.Shortcuts, () => _model.ShowPage(null, PageKind.Shortcuts), "Ctrl+3");
+        var terminal = Item(L.T("Terminal"), Ui.Terminal, () => _model.ShowTerminal(), "Ctrl+4");
+        var settings = Item(L.T("Settings"), Ui.Settings, () => _model.ShowPage(null, PageKind.Settings), "Ctrl+5");
+        menu.Items.Add(new Separator());
         var panel = Item(L.T("Open Web Panel"), Ui.Web, () => _model.ShowWebPanel());
         var chat = Item(L.T("Chat"), Ui.Chat, () => _model.ShowChat());
         Item(L.T("Quick Chat"), Ui.Chat, () => _model.OpenQuickChat?.Invoke(_model.Selected, null, null));
         menu.Items.Add(new Separator());
         Item(L.T("AI Space Settings…"), Ui.Settings, openSettings);
-        menu.Opened += (_, _) => panel.IsEnabled = chat.IsEnabled = _model.SelectedConnection is not null;
+        menu.Opened += (_, _) =>
+        {
+            var space = _model.SelectedConnection is not null;
+            foreach (var item in new[] { inbox, shortcuts, terminal, settings, panel, chat }) item.IsEnabled = space;
+            var unread = _model.SelectedLive?.Summary.Unread ?? 0;
+            inbox.Header = unread > 0 ? L.F("Inbox ({0} unread)", unread) : L.T("Inbox");
+        };
         return menu;
     }
 
@@ -219,7 +213,7 @@ internal sealed class MainWindow : Window
         Fill();
         var hasSpaces = _model.Store.Connections.Count > 0;
         _welcome.Visibility = hasSpaces ? Visibility.Collapsed : Visibility.Visible;
-        _entries.Visibility = _menu.Visibility = hasSpaces ? Visibility.Visible : Visibility.Collapsed;
+        _menu.Visibility = hasSpaces ? Visibility.Visible : Visibility.Collapsed;
 
         var shown = hasSpaces ? _model.ShownView() : null;
         var page = hasSpaces ? _model.ShownPage() : null;
@@ -263,23 +257,106 @@ internal sealed class MainWindow : Window
         _webActions.Visibility = shown is not null ? Visibility.Visible : Visibility.Collapsed;
         _back.IsEnabled = shown?.CanGoBack == true;
         _forward.IsEnabled = shown?.CanGoForward == true;
-        var selected = tab is not null ? (tab.Kind == WebTabKind.Terminal ? "terminal" : null) : _model.SelectedPage.ToString().ToLowerInvariant();
-        foreach (var (key, (button, _)) in _entryButtons)
-        {
-            // The theme's checked look is the accent fill; the bar marks the page shown with a subtle one.
-            button.IsChecked = key == selected;
-            if (key == selected) button.SetResourceReference(BackgroundProperty, "SubtleFillColorSecondaryBrush");
-            else button.Background = Brushes.Transparent;
-        }
-        var unread = _model.SelectedLive?.Summary.Unread ?? 0;
+        var unread = hasSpaces ? _model.SelectedLive?.Summary.Unread ?? 0 : 0;
         if (_inboxBadge.Child is TextBlock count) count.Text = unread > 99 ? "99+" : unread.ToString(System.Globalization.CultureInfo.CurrentCulture);
-        _inboxBadge.Visibility = unread > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _inbox.Visibility = unread > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _inbox.ToolTip = L.F("Inbox ({0} unread)", unread);
+        System.Windows.Automation.AutomationProperties.SetName(_inbox, L.F("Inbox ({0} unread)", unread));
+        FillPlaces();
         FillTabs();
         var c = _model.SelectedConnection;
         var what = tab is not null ? tab.Title : page?.Title ?? "";
         Title = c is null ? "AI Space" : what.Length > 0 ? $"{what} — {c.DisplayNameOr()}" : $"{c.DisplayNameOr()} — AI Space";
         Badge(_model.Unread);
-        Labels();
+    }
+
+    /// <summary>The selected Space's Home, for its places; null without a Space or while it needs a sign-in (the bar then shows none).</summary>
+    private HomePage? SelectedHome() =>
+        _model.SelectedConnection is { } c && !_model.NeedsSignIn(c.Id) ? _model.Page(c, PageKind.Home) as HomePage : null;
+
+    /// <summary>
+    /// Home's places as tabs: the Library, then a tab per screen, as many as the width allows (the rest, and the shown
+    /// one's place among them, as the web tabs do: <see cref="HomeScreens.BarTabs"/>). A tab is checked only while Home shows it; from any page it opens Home there. A right
+    /// click (Shift+F10) holds the screen's actions. Drawn again only when something it shows changed.
+    /// </summary>
+    private void FillPlaces()
+    {
+        var home = SelectedHome();
+        if (home is not null && _homes.Add(home)) home.PlacesChanged += _ => FillPlaces();
+        var onHome = home is not null && _model.ShownPage() == home;
+        var wide = ActualWidth >= LabelsFrom;
+        var places = home?.Places() ?? [];
+        var shown = home?.ShownPlace;
+        var sig = home is null ? "" : $"{home.Context.SpaceId}|{onHome}|{wide}|{shown}|{string.Join("|", places.Select(p => p.Id + "=" + p.Title))}";
+        if (sig == _placesDrawn) return;
+        _placesDrawn = sig;
+        _places.Children.Clear();
+        _places.Visibility = home is null ? Visibility.Collapsed : Visibility.Visible;
+        if (home is null) return;
+        // The Library first, as the web panel has it left of the screens; it never goes under the overflow menu.
+        var library = places.First(p => p.Id == HomePage.LibraryPlace).Title;
+        var libraryContent = wide ? Ui.Row(Ui.Glyph(Ui.Apps, 14), Ui.Text(library, wrap: false)) : (UIElement)Ui.Glyph(Ui.Apps, 14);
+        _places.Children.Add(Place(home, HomePage.LibraryPlace, libraryContent, library, onHome && shown == HomePage.LibraryPlace));
+        var screens = places.Where(p => p.Id != HomePage.LibraryPlace).ToList();
+        var inBar = HomeScreens.BarTabs(screens.Select(s => s.Id).ToList(), shown, wide ? HomeScreens.InBar : NarrowScreens);
+        foreach (var (id, title) in screens.Where(s => inBar.Contains(s.Id)))
+        {
+            _places.Children.Add(Place(home, id, Ui.Text(title, wrap: false), title, onHome && shown == id));
+        }
+        var rest = screens.Where(s => !inBar.Contains(s.Id)).ToList();
+        if (rest.Count > 0)
+        {
+            var more = Ui.IconButton("\uE70D", L.T("More screens"), () => { });
+            var menu = new ContextMenu();
+            foreach (var (id, title) in rest)
+            {
+                var item = new MenuItem { Header = title };
+                item.Click += (_, _) => home.ShowPlace(id);
+                menu.Items.Add(item);
+            }
+            more.ContextMenu = menu;
+            more.Click += (_, _) =>
+            {
+                menu.PlacementTarget = more;
+                menu.Placement = PlacementMode.Bottom;
+                menu.IsOpen = true;
+            };
+            more.Margin = new Thickness(0, 0, 4, 0);
+            _places.Children.Add(more);
+        }
+    }
+
+    /// <summary>
+    /// One place's tab. It acts on Checked and Unchecked rather than Click, so UI Automation's Toggle
+    /// (screen readers) works as a click does: either way the place is shown and the bar drawn anew.
+    /// </summary>
+    private ToggleButton Place(HomePage home, string id, UIElement content, string name, bool on)
+    {
+        if (content is TextBlock text)
+        {
+            text.TextTrimming = TextTrimming.CharacterEllipsis;
+            text.MaxWidth = 140;
+        }
+        var button = new ToggleButton { Content = content, IsChecked = on, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 4, 0), ToolTip = name, BorderThickness = new Thickness(0) };
+        // The theme's checked look is the accent fill; the bar marks the place shown with a subtle one.
+        if (on) button.SetResourceReference(BackgroundProperty, "SubtleFillColorSecondaryBrush");
+        else button.Background = Brushes.Transparent;
+        System.Windows.Automation.AutomationProperties.SetName(button, name);
+        void Pick()
+        {
+            home.ShowPlace(id);
+            // Clicking the tab already shown unchecks it and changes nothing else: draw the bar again.
+            Dispatcher.BeginInvoke(() =>
+            {
+                _placesDrawn = null;
+                FillPlaces();
+            });
+        }
+        button.Checked += (_, _) => Pick();
+        button.Unchecked += (_, _) => Pick();
+        button.ContextMenu = new ContextMenu();
+        button.ContextMenuOpening += (_, _) => home.FillPlaceMenu(button.ContextMenu, id);
+        return button;
     }
 
     /// <summary>A Space the native pages cannot reach: say so above them, with Try Again.</summary>
@@ -381,6 +458,11 @@ internal sealed class MainWindow : Window
             _ => null,
         };
         var label = glyph is null ? Ui.Row(Ui.Text(title, wrap: false), close) : Ui.Row(Ui.Glyph(glyph, 12), Ui.Text(title, wrap: false), close);
+        if (_model.SelectedTab == tab.Key)
+        {
+            // The checked tab is drawn on the accent fill: its words and icons in the colour made for it.
+            foreach (var word in new[] { label }.Concat(LogicalTreeHelper.GetChildren(label).OfType<object>()).Append(close.Content).OfType<TextBlock>()) word.SetResourceReference(TextBlock.ForegroundProperty, "TextOnAccentFillColorPrimaryBrush");
+        }
         var t = new ToggleButton
         {
             Content = label,
@@ -411,9 +493,15 @@ internal sealed class MainWindow : Window
             Reload();
             e.Handled = true;
         }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.PageDown or Key.PageUp && _model.ShownPage() is HomePage home)
+        {
+            // Ctrl+Page Down, Ctrl+Page Up: the next or previous of Home's places.
+            home.Step(e.Key == Key.PageDown ? 1 : -1);
+            e.Handled = true;
+        }
         else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is >= Key.D1 and <= Key.D5 && _model.SelectedConnection is not null)
         {
-            // Ctrl+1 … Ctrl+5: the bar's entries in their order.
+            // Ctrl+1 … Ctrl+5: Home, then the pages of the menu in its order.
             switch (e.Key)
             {
                 case Key.D1: _model.ShowPage(null, PageKind.Home); break;

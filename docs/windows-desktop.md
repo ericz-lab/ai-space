@@ -17,7 +17,7 @@ one click away, and the app adds what a page cannot do.
 
 | Part | What it does |
 | --- | --- |
-| Window | The bar: the Space menu (each saved Space with its state, Add a Space…); the Space's pages, Home, Inbox with the unread count, Shortcuts, Terminal and Settings (icons only under 1100 wide; Ctrl+1 to Ctrl+5); the web tabs, one per open app, the chat, the terminal and the web panel (past five, under More); while a web tab is shown, Back, Forward, Reload and Open in Browser; and a menu with Open Web Panel, Chat, Quick Chat and AI Space Settings…. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: Install AI Space on This Computer, or Connect to an AI Space on Another Machine with the address form ([below](#this-computer)). The window keeps its size and place, always wholly on one monitor's work area, so its title bar can be reached ([below](#the-window)) |
+| Window | The bar: the Space menu (each saved Space with its state, Add a Space…); Home's places, the Library and then a tab per screen, each opening Home there ([below](#the-window)); the web tabs, one per open app, the chat, the terminal and the web panel (past five, under More); while a web tab is shown, Back, Forward, Reload and Open in Browser; the Inbox with its count, only while something is unread; and a menu with the Space's Inbox (with the unread count), Shortcuts, Terminal and Settings (Ctrl+2 to Ctrl+5; Ctrl+1 is Home), then Open Web Panel, Chat, Quick Chat and AI Space Settings…. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: Install AI Space on This Computer, or Connect to an AI Space on Another Machine with the address form ([below](#this-computer)). The window keeps its size and place, always wholly on one monitor's work area, so its title bar can be reached ([below](#the-window)) |
 | Native pages | Home, Inbox, Shortcuts and Settings are the app's own (WPF, one set per Space, kept while hidden). Settings is the Space's own settings; it leads to AI Space Settings…, the app's. Not built yet: each says so and offers Open in Web Panel ([below](#the-window)) |
 | Web pages | The terminal (`/?page=terminal`), an agent's chat (`/?page=chat&agent=…`), each open app and the web panel are web pages in tabs. Each saved Space has its own WebView2 profile (cookies, storage, cache), so signing in on the panel signs in everything that Space's pages and native calls do. A link to one of the Space's own pages never leaves the app: it opens the native page, or its tab; a link to an app of the Space opens in that app's tab, a link off the Space in the default browser. A page that cannot load shows why, with Try Again, Open in Browser and Edit Space… |
 | Sign-in | While a Space needs a sign-in, the window shows its web panel, where the sign-in page appears, in place of the native pages, and the native page again once the panel has signed in |
@@ -55,6 +55,17 @@ and the window's ways of opening things), kept while hidden, told when they are 
 refreshed in the background or asked to reload, and closed when their Space is removed, signs out
 or changes its address. The desk pet's layer lies over Home (`Views/PetView.cs`).
 
+**The bar's places.** Right of the Space picker, a tab for the Library, then one for each of Home's
+screens, as the web panel has the library left of them (Home still opens on the first screen) (`HomePage.Places`, which the bar follows through `PlacesChanged`; each Space has its own
+Home and screens). A tab is checked only while Home shows that place, and a click on one from any
+page or web tab opens Home there, so they are also the way back to Home. The bar holds four screen
+tabs (two under 1100 wide, where the Library's tab shows its icon only); the others are under a
+menu beside them, the shown one taking the last tab's place (`HomeScreens.BarTabs`), so many
+screens never push the web tabs out; the Library's tab is never under that menu. A right click on a tab (Shift+F10) holds the screen's actions:
+New Screen, Rename Screen…, Copy the Web Panel's Layout… and Delete Screen…. Ctrl+Page Down and
+Ctrl+Page Up move through the places in that order while Home is shown. Without a Space, or while it needs a
+sign-in, the bar has no places.
+
 **Where a page of the Space opens** (`AISpace.Core/SpacePages.cs`, the forms of
 `src/web/panel-link.ts`): the panel's root and `/?page=inbox|shortcuts|settings` (and the fragment
 links `#inbox`, `#shortcuts`, `#settings`) open the native Home, Inbox, Shortcuts and Settings;
@@ -81,16 +92,16 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   panel's `ranking.ts`, the Mac's `OmniboxRules`). Enter opens the best match when its name holds
   the whole query; anything else, and Ctrl+Enter always, opens Space Assistant's chat with the text
   as a draft, never sent. Down moves into the results, Escape clears, Ctrl+F (or Ctrl+K) comes back.
-- **Tabs.** One per screen, then the Library; Ctrl+Page Down and Ctrl+Page Up move through them.
-  The Library shows the apps with the built-in pages (Inbox, Shortcuts, Terminal, Settings, Web
+- **Places.** Each screen and the Library are tabs of the window's bar ([above](#the-window)),
+  not of the page; the page shows the one chosen. The Library shows the apps with the built-in pages (Inbox, Shortcuts, Terminal, Settings, Web
   Panel), the agents (one tile per agent on several machines) and the widgets, with a filter by
   kind. A tile shows what is wrong (not answering, paused, its machine offline), an app's and the
   Inbox's unread count, and an agent at work; the library's tiles show their details under the
   pointer. A click opens an app in its tab, an agent's chat, a built-in page, a widget's page.
 - **Screens** are this computer's (`screens.json` beside the saved Spaces, by Space): the panel's
   screens (or the home screen the panel would seed) are copied once, then a tile's or a card's
-  menu (right click, Shift+F10) puts it on a screen or takes it off and moves it, and the ⋯ button
-  makes, renames and deletes screens or copies the web panel's layout again. Nothing is written to
+  menu (right click, Shift+F10) puts it on a screen or takes it off and moves it, and a screen
+  tab's menu in the bar makes, renames and deletes screens or copies the web panel's layout again. Nothing is written to
   the Space. A removed Space's screens go with it.
 - **Widget cards** follow the blocks contract ([panel.md](panel.md#widgets)): the first block is
   drawn large (metric with its change, trend as a line or bars, progress, gauge with its zones,
@@ -225,7 +236,7 @@ $o = [IO.File]::Create("desktop\windows\AISpace\Assets\pet-claude.png"); $e.Save
 
 ## Settings page
 
-Settings in the bar is the Space's own settings, drawn natively (`Views/SpaceSettings*.cs`): the
+Settings in the bar's menu (Ctrl+5) is the Space's own settings, drawn natively (`Views/SpaceSettings*.cs`): the
 web panel's Settings ([panel.md](panel.md)) in the Linux client's layout
 ([linux-desktop.md](linux-desktop.md#settings)). The sections are listed on the left (icons only,
 with their names as tooltips, below 900 wide), the chosen one on the right; the last one chosen is

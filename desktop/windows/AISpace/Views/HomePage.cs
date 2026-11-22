@@ -39,8 +39,6 @@ internal sealed partial class HomePage : NativePage
     private readonly ContentControl _banner = new() { Focusable = false };
     private readonly FrameworkElement _box;
     private readonly TextBox _field;
-    private readonly WrapPanel _tabs = new();
-    private readonly Button _screenActions;
     private readonly StackPanel _body = new();
     private HomeCatalogue? _catalogue;
     private DateTimeOffset? _catalogueAt;
@@ -49,7 +47,7 @@ internal sealed partial class HomePage : NativePage
     private string _query = "";
     private string _shownId = HomeScreens.Home;
     private LibraryFilter _filter = LibraryFilter.All;
-    private string? _drawn, _tabsDrawn;
+    private string? _drawn, _placesDrawn;
     /// <summary>While the page itself sets the tabs' and chips' state: their Checked and Unchecked are not the person's.</summary>
     private bool _syncing;
     private FrameworkElement? _first;
@@ -68,16 +66,8 @@ internal sealed partial class HomePage : NativePage
         _field.MinHeight = 40;
         _field.PreviewKeyDown += OnBoxKey;
 
-        _screenActions = Ui.IconButton(Ui.More, L.T("Screen Actions"), ScreenMenu);
-        DockPanel.SetDock(_screenActions, Dock.Right);
-        KeyboardNavigation.SetDirectionalNavigation(_tabs, KeyboardNavigationMode.Contained);
-        var tabsRow = new DockPanel { Margin = new Thickness(0, 14, 0, 0), LastChildFill = true };
-        tabsRow.Children.Add(_screenActions);
-        tabsRow.Children.Add(_tabs);
-        var header = new StackPanel();
-        header.Children.Add(_box);
-        header.Children.Add(tabsRow);
-        var headerFrame = new Border { Child = header, MaxWidth = 1100, Padding = new Thickness(32, 20, 32, 6) };
+        // The screens and the Library are tabs of the main window's bar (Places, below), not of the page.
+        var headerFrame = new Border { Child = _box, MaxWidth = 1100, Padding = new Thickness(32, 20, 32, 10) };
 
         // The bottom 140 scroll past the last row, so the desk pet never sits on a tile for good.
         var column = new Border { Child = _body, MaxWidth = 1100, Padding = new Thickness(32, 4, 32, 140) };
@@ -234,11 +224,6 @@ internal sealed partial class HomePage : NativePage
             _field.Focus();
             _field.SelectAll();
         }
-        else if (ctrl && e.Key is Key.PageDown or Key.PageUp)
-        {
-            e.Handled = true;
-            Step(e.Key == Key.PageDown ? 1 : -1);
-        }
         else if (e.Key == Key.Escape && _query.Length > 0 && !_field.IsKeyboardFocusWithin)
         {
             e.Handled = true;
@@ -336,7 +321,7 @@ internal sealed partial class HomePage : NativePage
     {
         var screens = Screens();
         if (_shownId != LibraryId && screens.All(s => s.Id != _shownId)) _shownId = HomeScreens.Home;
-        DrawTabs(screens);
+        NotifyPlaces(screens);
         DrawBanner();
         var sig = Signature(screens);
         if (sig == _drawn) return;
@@ -397,31 +382,38 @@ internal sealed partial class HomePage : NativePage
             : null;
     }
 
-    private void DrawTabs(IReadOnlyList<HomeScreen> screens)
+    // The seam with the main window's bar, which shows a tab per screen and the Library (one Home per Space).
+
+    /// <summary>The Library's place among the screens' ids.</summary>
+    public const string LibraryPlace = LibraryId;
+
+    /// <summary>The screens or their names changed, or another one is shown: the bar draws its tabs again.</summary>
+    public event Action<HomePage>? PlacesChanged;
+
+    /// <summary>What the bar shows, in order: the Library (left of the screens, as on the web panel), then each screen (its id and title).</summary>
+    public IReadOnlyList<(string Id, string Title)> Places()
     {
-        var sig = string.Join("\n", screens.Select(s => s.Id + "=" + s.Name));
-        if (sig != _tabsDrawn)
-        {
-            _tabsDrawn = sig;
-            _tabs.Children.Clear();
-            for (var i = 0; i < screens.Count; i++)
-            {
-                var id = screens[i].Id;
-                _tabs.Children.Add(Choice(OnAccent(Ui.Text(ScreenTitle(screens, i), 13, wrap: false)), ScreenTitle(screens, i), id, false, () => ShowTab(id)));
-            }
-            var lib = Ui.Row(OnAccent(Ui.Glyph(Ui.Apps, 13)), OnAccent(Ui.Text(L.T("Library"), 13, wrap: false)));
-            _tabs.Children.Add(Choice(lib, L.T("Library"), LibraryId, false, () => ShowTab(LibraryId)));
-        }
-        _syncing = true;
-        try
-        {
-            foreach (var t in _tabs.Children.OfType<ToggleButton>()) t.IsChecked = (string)t.Tag == _shownId && _query.Trim().Length == 0;
-        }
-        finally
-        {
-            _syncing = false;
-        }
-        _screenActions.Visibility = _shownId == LibraryId ? Visibility.Collapsed : Visibility.Visible;
+        var screens = Screens();
+        return screens.Select((s, i) => (s.Id, ScreenTitle(screens, i))).Prepend((LibraryId, L.T("Library"))).ToList();
+    }
+
+    /// <summary>The screen (or the Library) the page shows, or shows when it is next on screen.</summary>
+    public string ShownPlace => Screens().Any(s => s.Id == _shownId) || _shownId == LibraryId ? _shownId : HomeScreens.Home;
+
+    /// <summary>Home on that screen or the Library, from wherever the window is.</summary>
+    public void ShowPlace(string id)
+    {
+        if (id != LibraryId && Screens().All(s => s.Id != id)) return;
+        ShowTab(id);
+        if (!IsShown) Context.Show(PageKind.Home);
+    }
+
+    private void NotifyPlaces(IReadOnlyList<HomeScreen> screens)
+    {
+        var sig = string.Join("\n", screens.Select(s => s.Id + "=" + s.Name)) + "\n>" + _shownId;
+        if (sig == _placesDrawn) return;
+        _placesDrawn = sig;
+        PlacesChanged?.Invoke(this);
     }
 
     /// <summary>
@@ -487,10 +479,10 @@ internal sealed partial class HomePage : NativePage
         else Draw();
     }
 
-    /// <summary>The next tab (1) or the previous one (-1): the screens, then the Library.</summary>
-    private void Step(int by)
+    /// <summary>The next place (1) or the previous one (-1) in the bar's order, the Library then the screens (Ctrl+Page Down, Ctrl+Page Up).</summary>
+    public void Step(int by)
     {
-        var ids = Screens().Select(s => s.Id).Append(LibraryId).ToList();
+        var ids = Places().Select(p => p.Id).ToList();
         var i = ids.IndexOf(_shownId) + by;
         if (i >= 0 && i < ids.Count) ShowTab(ids[i]);
     }
