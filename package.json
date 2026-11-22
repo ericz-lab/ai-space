@@ -2,7 +2,7 @@
   "name": "ai-space",
   "module": "src/index.ts",
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "bin": {
     "space": "bin/space"

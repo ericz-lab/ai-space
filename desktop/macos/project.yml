@@ -10,7 +10,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: 0.2.0
+    MARKETING_VERSION: 0.2.1
     CURRENT_PROJECT_VERSION: 1
 targets:
   # The terminal emulator behind the Terminal page, from the sources scripts/fetch-deps.sh fetches
