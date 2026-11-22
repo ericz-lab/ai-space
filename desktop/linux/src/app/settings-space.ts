@@ -193,12 +193,14 @@ export function usageSection(page: any, ctx: Ctx): void {
   page.add(g);
 }
 
-// ------------------------------------------------------------------ feedback
+// ------------------------------------------------------------------ fix this (随手改)
 
 /**
- * Settings → Feedback (FeedbackSettings.tsx): the button on app pages, what happens to what is sent,
- * where the Fix Engineer runs and on which model, and which apps show the button. The recent list
- * stays in the panel; this section links nowhere else.
+ * Settings → Fix this, 随手改 in Chinese (FeedbackSettings.tsx; docs/feedback.md: the feature was
+ * called Feedback, and its routes and keys still are): the button on app pages, what happens to
+ * what is sent, where the Fix Engineer runs and on which model, and which apps show the button.
+ * It reads and saves the panel's own settings, and every word is the panel's (`tw`), so the name
+ * people see is the panel's. The recent list stays in the panel; this section links nowhere else.
  */
 export function feedbackSection(page: any, ctx: Ctx, space: Space): void {
   loading(page, { description: tw("feedback.enabledHelp") }, async (group) => {

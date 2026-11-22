@@ -74,12 +74,41 @@ export function appTexture(name: string): any | undefined {
   }
 }
 
+const builtinArt = new Map<string, any | undefined>();
+
+/** The picture of one of the panel's own tiles, shipped with the app (`data/builtin/<file>`, core/screens.ts BUILTIN_ART), drawn at twice the size. */
+export function builtinTexture(file: string | undefined, size: number): any | undefined {
+  if (!file) return undefined;
+  const key = `${file}@${size}`;
+  if (!builtinArt.has(key)) {
+    let texture: any | undefined;
+    try {
+      texture = Gdk.Texture.new_for_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_scale(path(APP_ROOT, "data", "builtin", file), size * 2, size * 2, true));
+    } catch {}
+    builtinArt.set(key, texture);
+  }
+  return builtinArt.get(key);
+}
+
 /** An icon as a widget of `size` pixels: an emoji label, the image once it has loaded, or the fallback glyph. */
 /** `exact`: the picture takes exactly `size`, not its own larger size (a small avatar beside a name). */
 /** `round`: an agent's avatar, cut to a circle; an app's icon is cut to a rounded square. */
-export function iconWidget(icon: string | undefined, size: number, client: SpaceClient | undefined, fallback = "application-x-executable-symbolic", exact = false, round = false): any {
+/** `first`: a picture at hand (a built-in tile's own) shown instead of the glyph, until the icon has loaded or when there is none. */
+export function iconWidget(icon: string | undefined, size: number, client: SpaceClient | undefined, fallback = "application-x-executable-symbolic", exact = false, round = false, first?: any): any {
   const box = new Gtk.Box({ width_request: size, height_request: size, halign: Gtk.Align.CENTER, valign: Gtk.Align.CENTER });
+  const picture = (texture: any) => {
+    const pic = exact
+      ? new Gtk.Image({ paintable: texture, pixel_size: size })
+      : new Gtk.Picture({ paintable: texture, content_fit: Gtk.ContentFit.CONTAIN, can_shrink: true, width_request: size, height_request: size });
+    pic.add_css_class("tile-image");
+    // A picture that fills its square brings no corners of its own: its shape cuts them. On the
+    // picture, not the box, which a roomy parent makes wider than what is drawn.
+    pic.add_css_class(iconShape(size, round));
+    pic.set_overflow(Gtk.Overflow.HIDDEN);
+    return pic;
+  };
   const glyph = () => {
+    if (first) return picture(first);
     const img = new Gtk.Image({ icon_name: fallback, pixel_size: Math.round(size * 0.6), hexpand: true, vexpand: true });
     img.add_css_class("dim-label");
     return img;
@@ -97,14 +126,7 @@ export function iconWidget(icon: string | undefined, size: number, client: Space
     void loadTexture(icon, client, size).then((texture) => {
       // A widget dropped before its icon came gets none.
       if (!texture || !box.get_parent()) return;
-      const pic = exact
-        ? new Gtk.Image({ paintable: texture, pixel_size: size })
-        : new Gtk.Picture({ paintable: texture, content_fit: Gtk.ContentFit.CONTAIN, can_shrink: true, width_request: size, height_request: size });
-      pic.add_css_class("tile-image");
-      // A picture that fills its square brings no corners of its own: its shape cuts them. On the
-      // picture, not the box, which a roomy parent makes wider than what is drawn.
-      pic.add_css_class(iconShape(size, round));
-      pic.set_overflow(Gtk.Overflow.HIDDEN);
+      const pic = picture(texture);
       box.remove(shown);
       shown = pic;
       box.append(pic);

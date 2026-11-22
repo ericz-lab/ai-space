@@ -164,9 +164,9 @@ export function decodePeerModels(peer: string, a: { status: number; body: string
   return { peer, apps, options };
 }
 
-// ------------------------------------------------------------------ feedback
+// ------------------------------------------------------------------ fix this (随手改)
 
-/** Settings → Feedback, `GET /api/panel/feedback/settings` (FeedbackSettings.tsx). */
+/** Settings → Fix this (随手改; called Feedback before, as its route still is), `GET /api/panel/feedback/settings` (FeedbackSettings.tsx). */
 export type FeedbackView = {
   settings: { enabled: boolean; appsDefault: boolean; apps: Record<string, string>; mode: "auto" | "later"; machine: string; model: string; effort: "high" | "xhigh" | "max"; errors: boolean };
   apps: { app: string; title: string; zh?: string; enabled: boolean }[];

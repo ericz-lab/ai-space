@@ -9,6 +9,8 @@
  *   terminal/terminal.js    xterm.js and the session glue, loaded into the terminal's web view
  *   terminal/xterm.css
  *   data/icons/…            the app icon (hicolor), shared with the Mac app's
+ *   data/builtin/…          the pictures of the panel's own tiles (App Store, Inbox, Shortcuts,
+ *                           Terminal, Settings), the web panel's files (src/web/public)
  *   share/                  the desktop entry and AppStream metadata, for install.sh
  *   bin/ai-space            the launcher (desktop/linux/ai-space.sh): `gjs -m main.js`
  *   install.sh              installs it for this user (desktop/linux/install.sh)
@@ -21,6 +23,7 @@ import { join, resolve } from "node:path";
 import { SPACE_ROOT } from "../../src/space/config.ts";
 import { readVersion } from "../../src/space/version.ts";
 import { run, stageRelease } from "../../release/server.ts";
+import { BUILTIN_ART } from "./src/core/screens.ts";
 
 const HERE = join(SPACE_ROOT, "desktop", "linux");
 export const APP_ID = "dev.ai_space.Desktop";
@@ -51,6 +54,9 @@ export async function buildLinux(opts: { out?: string; local?: boolean; root?: s
   const icons = join(dir, "data", "icons", "hicolor", "scalable", "apps");
   await mkdir(icons, { recursive: true });
   await cp(join(root, "desktop", "macos", "AISpace", "Resources", "AppIcon.svg"), join(icons, `${APP_ID}.svg`));
+  // The panel's own tiles are drawn with the panel's pictures (src/core/screens.ts BUILTIN_ART).
+  await mkdir(join(dir, "data", "builtin"), { recursive: true });
+  for (const file of Object.values(BUILTIN_ART)) await cp(join(root, "src", "web", "public", file), join(dir, "data", "builtin", file));
   await cp(join(HERE, "share"), join(dir, "share"), { recursive: true });
   await mkdir(join(dir, "bin"), { recursive: true });
   await cp(join(HERE, "ai-space.sh"), join(dir, "bin", "ai-space"));

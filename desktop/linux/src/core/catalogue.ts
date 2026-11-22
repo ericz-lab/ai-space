@@ -195,9 +195,14 @@ export function entriesByKey(c: Catalogue): Map<string, Entry> {
   return byKey;
 }
 
+/** The home screen a panel with no screens yet seeds: its own tiles, then the first apps, agents and widgets. */
+export function seededScreens(c: Catalogue): Screen[] {
+  return seedScreens(c.apps.map((a) => a.ref), c.agents.map((a) => a.ref), c.widgets.map((w) => w.id));
+}
+
 /** The panel's screens as a browser shows them: the stored ones, or the home screen it would seed. */
 export function panelScreens(c: Catalogue): Screen[] {
-  return c.screens ?? seedScreens(c.apps.map((a) => a.ref), c.agents.map((a) => a.ref), c.widgets.map((w) => w.id));
+  return c.screens ?? seededScreens(c);
 }
 
 /**
