@@ -426,6 +426,16 @@ The Server runs on Windows itself, without WSL. The short way installs the newes
 irm https://ai-space.me/install.ps1 | iex
 ```
 
+To remove it, in a new terminal (the installer put `space` on your `Path`):
+
+```powershell
+space uninstall --dry-run     # what it would do
+space uninstall               # stop the service, take space off your Path, delete %LOCALAPPDATA%\ai-space
+space uninstall --workspace   # also delete %USERPROFILE%\.ai-space: every app, database and setting
+```
+
+Without `--workspace` your apps and data stay, and installing again picks them up. The program directory goes a few seconds after the command ends, since Windows will not delete a running program; close a terminal or an Explorer window that is open inside it first, or that part is left behind. What a browser stored for the panel and the apps' pages is the browser's to clear ([release.md](release.md#one-command-install)).
+
 From a checkout it needs Bun (the version in `.bun-version` or newer), Git, and an agent CLI that is signed in (`claude`). In PowerShell:
 
 ```powershell
