@@ -140,7 +140,6 @@ internal static partial class L
         ["Terminal"] = "终端",
         ["Shortcuts"] = "快捷指令",
         ["Web Panel"] = "网页面板",
-        ["Open Web Panel"] = "打开网页面板",
         ["Open in Web Panel"] = "在网页面板中打开",
         ["More"] = "更多",
         ["AI Space Settings…"] = "AI Space 设置…",

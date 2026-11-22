@@ -16,10 +16,10 @@ namespace AISpace;
 /// The main window. Its bar holds the Space picker, Home's places (the Library, then a tab per
 /// screen, <see cref="HomePage.Places"/>: each opens Home there), then the web tabs (the apps
 /// opened, the chat, the terminal, the web panel), then, while a web tab is shown, Back, Forward,
-/// Reload and Open in Browser, the Inbox with its count while something is unread, and a menu
-/// with the Space's other pages (Inbox, Shortcuts, Terminal, Settings), the web panel, Quick Chat
-/// and the app's settings. Below, the
-/// selected native page or web tab; while the Space needs a sign-in, its web panel's sign-in page
+/// Reload and Open in Browser, and the Inbox with its count while something is unread. The
+/// Space's other pages are its tiles on Home and Ctrl+2 to Ctrl+5; Quick Chat and the app's
+/// settings are the notification area's and Settings › This Computer's. Below, the selected
+/// native page or web tab; while the Space needs a sign-in, its web panel's sign-in page
 /// in place of the native pages. Every page and tab stays loaded while another is shown, so
 /// switching keeps its state; closing the window only hides it while the app keeps running.
 /// </summary>
@@ -34,7 +34,14 @@ internal sealed class MainWindow : Window
 
     private readonly AppModel _model;
     private readonly Func<bool> _quitting;
-    private readonly ComboBox _spaces = new() { MinWidth = 150, MaxWidth = 240, VerticalAlignment = VerticalAlignment.Center };
+    /// <summary>
+    /// The Space picker. Its width is its own (<see cref="PickerWidth"/>): left to its template, the
+    /// box takes the width of its widest item once the drop-down has made and measured them, so it
+    /// would grow when first opened (the Add a Space… row is wider than most names) and again when
+    /// the list is filled anew.
+    /// </summary>
+    private readonly ComboBox _spaces = new() { VerticalAlignment = VerticalAlignment.Center };
+    private const double PickerMin = 150, PickerMax = 240;
     /// <summary>Home's places: the Library, then a tab per screen (the rest under a menu).</summary>
     private readonly StackPanel _places = new() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 4, 0) };
     /// <summary>Every Space's Home whose places the bar follows.</summary>
@@ -44,7 +51,7 @@ internal sealed class MainWindow : Window
     private readonly Border _inboxBadge = Ui.Badge(0);
     /// <summary>The Inbox with its count, in the bar only while something is unread (the menu always has the Inbox).</summary>
     private readonly Button _inbox;
-    private readonly Button _back, _forward, _reload, _browser, _menu;
+    private readonly Button _back, _forward, _reload, _browser;
     private readonly StackPanel _webActions;
     private readonly Grid _pages = new();
     private readonly DockPanel _nativeHost = new();
@@ -60,7 +67,7 @@ internal sealed class MainWindow : Window
     /// <summary>Normal or maximized, as the window last was before it was minimized: what Bring restores.</summary>
     private WindowState _shownState = WindowState.Normal;
 
-    public MainWindow(AppModel model, Func<bool> quitting, Action openSettings, Action addSpace, Func<FrameworkElement> welcome)
+    public MainWindow(AppModel model, Func<bool> quitting, Action addSpace, Func<FrameworkElement> welcome)
     {
         _model = model;
         _quitting = quitting;
@@ -81,14 +88,6 @@ internal sealed class MainWindow : Window
             if (_model.ShownView() is { } v) AppModel.OpenOutside(v.BrowserUrl);
         });
         _webActions = Ui.Row(_back, _forward, _reload, _browser);
-        _menu = Ui.IconButton(Ui.More, L.T("More"), () => { });
-        _menu.ContextMenu = Menu(openSettings);
-        _menu.Click += (_, _) =>
-        {
-            _menu.ContextMenu.PlacementTarget = _menu;
-            _menu.ContextMenu.Placement = PlacementMode.Bottom;
-            _menu.ContextMenu.IsOpen = true;
-        };
 
         _inboxBadge.Margin = new Thickness(6, 0, 0, 0);
         _inbox = Ui.IconButton(Ui.Inbox, L.T("Inbox"), () => _model.ShowPage(null, PageKind.Inbox));
@@ -118,7 +117,7 @@ internal sealed class MainWindow : Window
         DockPanel.SetDock(divider, Dock.Left);
         tabsRow.Children.Add(divider);
         tabsRow.Children.Add(tabsScroll);
-        var actions = Ui.Row(_webActions, _inbox, _menu);
+        var actions = Ui.Row(_webActions, _inbox);
         Grid.SetColumn(_spaces, 0);
         Grid.SetColumn(_places, 1);
         Grid.SetColumn(tabsRow, 2);
@@ -157,37 +156,6 @@ internal sealed class MainWindow : Window
         PreviewKeyDown += OnKey;
     }
 
-    private ContextMenu Menu(Action openSettings)
-    {
-        var menu = new ContextMenu();
-        MenuItem Item(string header, string glyph, Action click, string? keys = null)
-        {
-            var item = new MenuItem { Header = header, Icon = Ui.Glyph(glyph, 14), InputGestureText = keys ?? "" };
-            item.Click += (_, _) => click();
-            menu.Items.Add(item);
-            return item;
-        }
-        // The Space's pages the bar has no tab for (Home is its screens' tabs).
-        var inbox = Item(L.T("Inbox"), Ui.Inbox, () => _model.ShowPage(null, PageKind.Inbox), "Ctrl+2");
-        var shortcuts = Item(L.T("Shortcuts"), Ui.Shortcuts, () => _model.ShowPage(null, PageKind.Shortcuts), "Ctrl+3");
-        var terminal = Item(L.T("Terminal"), Ui.Terminal, () => _model.ShowTerminal(), "Ctrl+4");
-        var settings = Item(L.T("Settings"), Ui.Settings, () => _model.ShowPage(null, PageKind.Settings), "Ctrl+5");
-        menu.Items.Add(new Separator());
-        var panel = Item(L.T("Open Web Panel"), Ui.Web, () => _model.ShowWebPanel());
-        var chat = Item(L.T("Chat"), Ui.Chat, () => _model.ShowChat());
-        Item(L.T("Quick Chat"), Ui.Chat, () => _model.OpenQuickChat?.Invoke(_model.Selected, null, null));
-        menu.Items.Add(new Separator());
-        Item(L.T("AI Space Settings…"), Ui.Settings, openSettings);
-        menu.Opened += (_, _) =>
-        {
-            var space = _model.SelectedConnection is not null;
-            foreach (var item in new[] { inbox, shortcuts, terminal, settings, panel, chat }) item.IsEnabled = space;
-            var unread = _model.SelectedLive?.Summary.Unread ?? 0;
-            inbox.Header = unread > 0 ? L.F("Inbox ({0} unread)", unread) : L.T("Inbox");
-        };
-        return menu;
-    }
-
     private void Reload()
     {
         if (_model.ShownView() is { } v) v.Reload();
@@ -213,7 +181,6 @@ internal sealed class MainWindow : Window
         Fill();
         var hasSpaces = _model.Store.Connections.Count > 0;
         _welcome.Visibility = hasSpaces ? Visibility.Collapsed : Visibility.Visible;
-        _menu.Visibility = hasSpaces ? Visibility.Visible : Visibility.Collapsed;
 
         var shown = hasSpaces ? _model.ShownView() : null;
         var page = hasSpaces ? _model.ShownPage() : null;
@@ -385,10 +352,11 @@ internal sealed class MainWindow : Window
             {
                 var status = _model.Lives.TryGetValue(c.Id, out var l) ? l.Status : LiveStatus.Unknown;
                 var dot = new System.Windows.Shapes.Ellipse { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center, Fill = StatusBrush(status) };
-                var item = new ComboBoxItem { Tag = c.Id, Content = Ui.Row(dot, Ui.Text(c.DisplayNameOr(), wrap: false)), ToolTip = $"{c.Url}\n{StatusText(status)}" };
+                var item = new ComboBoxItem { Tag = c.Id, Content = SpaceLabel(dot, c.DisplayNameOr()), ToolTip = $"{c.Url}\n{StatusText(status)}" };
                 _spaces.Items.Add(item);
                 if (c.Id == _model.Selected) _spaces.SelectedItem = item;
             }
+            _spaces.Width = PickerWidth(_model.SelectedConnection?.DisplayNameOr() ?? "");
             _spaces.Items.Add(new ComboBoxItem { Tag = "add", Content = Ui.Row(Ui.Glyph(Ui.Add, 12), Ui.Text(L.T("Add a Space…"), wrap: false)) });
             _spaces.Visibility = _model.Store.Connections.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -396,6 +364,33 @@ internal sealed class MainWindow : Window
         {
             _filling = false;
         }
+    }
+
+    /// <summary>A Space's row: its state's dot and its name, which ends in an ellipsis where the box is too narrow for it.</summary>
+    private static DockPanel SpaceLabel(FrameworkElement dot, string name)
+    {
+        var row = new DockPanel { LastChildFill = true };
+        dot.Margin = new Thickness(0, 0, 8, 0);
+        DockPanel.SetDock(dot, Dock.Left);
+        row.Children.Add(dot);
+        var text = Ui.Text(name, wrap: false);
+        text.TextTrimming = TextTrimming.CharacterEllipsis;
+        row.Children.Add(text);
+        return row;
+    }
+
+    /// <summary>
+    /// The picker's width: the selected Space's name with its dot and the box's own chrome (padding,
+    /// border, the drop-down arrow), between <see cref="PickerMin"/> and <see cref="PickerMax"/>. It
+    /// depends on that name alone, never on the other items, so opening the list or filling it again
+    /// does not change it.
+    /// </summary>
+    private double PickerWidth(string name)
+    {
+        var probe = new TextBlock { Text = name, FontFamily = _spaces.FontFamily, FontSize = _spaces.FontSize };
+        probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        const double dotAndGap = 16, chrome = 64;
+        return Math.Clamp(Math.Ceiling(probe.DesiredSize.Width) + dotAndGap + chrome, PickerMin, PickerMax);
     }
 
     public static Brush StatusBrush(LiveStatus s) => s switch
