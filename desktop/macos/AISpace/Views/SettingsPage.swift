@@ -13,7 +13,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: return "Appearance"
         case .models: return "Models"
         case .automation: return "Automation"
-        case .feedback: return "Feedback"
+        case .feedback: return "Fix this"
         case .usage: return "Usage"
         case .status: return "Status"
         case .packages: return "Packages"
@@ -27,7 +27,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: return "circle.lefthalf.filled"
         case .models: return "cylinder.split.1x2"
         case .automation: return "clock"
-        case .feedback: return "exclamationmark.bubble"
+        case .feedback: return "wrench.adjustable"
         case .usage: return "chart.bar"
         case .status: return "waveform.path.ecg"
         case .packages: return "shippingbox"
@@ -37,7 +37,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 }
 
 /// The launcher's last page, sectioned as the web panel's Settings: General (the saved Spaces,
-/// this Mac's install, widgets, language, the Space's pages), Appearance, Models, Automation, Feedback,
+/// this Mac's install, widgets, language, the Space's pages), Appearance, Models, Automation, Fix this,
 /// Usage, Status (the Space, its peers, services and backups), Packages and Account (the session,
 /// the app). A section's row that leads to a page of the Space opens it inside the pane, as the
 /// web panel does; Inbox, Chat and Terminal open over the launcher.
@@ -592,10 +592,13 @@ struct MachineClisSection: View {
     }
 }
 
-/// Settings → Feedback (src/web/FeedbackSettings.tsx, docs/feedback.md): the button app pages show,
-/// what happens to what is sent with it, where the Fix Engineer runs and on which model, which apps
-/// show the button (each peer's too, which the Space sends these settings on to), and the feedback
-/// sent lately with a way to start the waiting ones. A choice shows at once and saves behind it.
+/// Settings → Fix this (随手改; the feature the code and the routes still call feedback:
+/// src/web/FeedbackSettings.tsx, docs/feedback.md): the button app pages show, what happens to what
+/// is sent with it (fix now or fix later), where the Fix Engineer runs and on which model, which
+/// apps show the button (each peer's too, which the Space sends these settings on to), and what was
+/// sent lately with a way to start the waiting ones. It reads and changes the Space's own settings
+/// (`GET`/`PUT /api/panel/feedback/settings`, FeedbackStore), the ones the web panel's page changes;
+/// off until the owner turns it on. A choice shows at once and saves behind it.
 struct FeedbackSections: View {
     @StateObject private var store: FeedbackStore
 
@@ -640,8 +643,8 @@ struct FeedbackSections: View {
     private func settings(_ v: FeedbackView) -> some View {
         let s = v.settings
         return Section {
-            Toggle("Feedback button on app pages", isOn: bind(s.enabled) { .enabled($0) })
-            Picker("What happens to feedback", selection: bind(s.mode) { .mode($0) }) {
+            Toggle("Fix this button on app pages", isOn: bind(s.enabled) { .enabled($0) })
+            Picker("What happens to what is sent", selection: bind(s.mode) { .mode($0) }) {
                 Text("Fix it right away").tag("auto")
                 Text("Record it, fix later together").tag("later")
             }
@@ -671,7 +674,7 @@ struct FeedbackSections: View {
                     .font(.callout)
             }
         } header: {
-            Text("Feedback")
+            Text("Fix this")
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
                 Text("A small button in the corner of each app page (Alt+Shift+F): people describe a problem, pick the element, add a picture, and it becomes an ai-todo task. Off until you turn it on.")
@@ -764,7 +767,7 @@ struct FeedbackSections: View {
             }
             if let notice = store.notice { Text(verbatim: notice).font(.callout).foregroundStyle(.secondary) }
         } header: {
-            Text("Recent feedback")
+            Text("Recently sent")
         }
     }
 
