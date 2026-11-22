@@ -1,4 +1,5 @@
-# Builds the Server, Client and Local editions (Mac, Linux and Windows) from one commit and one version (docs/release.md).
+# Builds AI Space (the service with its web panel) and AI Space Desktop (the native app) for Mac, Linux
+# and Windows from one commit and one version (docs/release.md).
 #
 # A tag vX.Y.Z (equal to package.json's version, set with `bun run set-version`) builds, checks and
 # packages everything, then creates a draft GitHub Release with the artifacts, SHA256SUMS and
@@ -85,7 +86,7 @@ jobs:
       - name: smoke test
         # The smoke test starts the archive through its bash launcher; the Windows archive is covered by release/get.test.ts.
         if: matrix.os != 'windows'
-        run: bun release/smoke.ts dist/ai-space-server-*.tar.gz
+        run: bun release/smoke.ts dist/ai-space-*.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: server-${{ matrix.os }}-${{ matrix.arch }}
@@ -93,7 +94,7 @@ jobs:
           if-no-files-found: error
 
   linux:
-    name: linux app ${{ matrix.arch }}
+    name: desktop linux ${{ matrix.arch }}
     needs: [version, check]
     strategy:
       matrix:
@@ -123,42 +124,9 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
-  # The Windows Local edition carries a Linux release for WSL 2, built on Linux of the same CPU.
-  windows-bundle:
-    name: windows local bundle ${{ matrix.arch }}
-    needs: [version, check]
-    strategy:
-      matrix:
-        include:
-          - runner: ubuntu-24.04
-            arch: x64
-          - runner: ubuntu-24.04-arm
-            arch: arm64
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - run: bun install --frozen-lockfile
-      - name: version
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          bun run set-version "$VERSION"
-          git -c user.name=release -c user.email=release@localhost commit -qam "release $VERSION" || true
-      - run: bun desktop/windows/build.ts --bundle-only --out bundle
-      # Not a release file: the windows job puts it inside the app.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wsl-bundle-${{ matrix.arch }}
-          path: bundle/
-          if-no-files-found: error
-
   windows:
-    name: windows app ${{ matrix.arch }}
-    needs: [version, windows-bundle]
+    name: desktop windows ${{ matrix.arch }}
+    needs: [version, check]
     strategy:
       matrix:
         arch: [x64, arm64]
@@ -179,11 +147,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: version
         run: bun run set-version "${{ needs.version.outputs.version }}"
-      - uses: actions/download-artifact@v4
-        with:
-          name: wsl-bundle-${{ matrix.arch }}
-          path: bundle
-      - run: bun release/windows.ts --out dist --arch ${{ matrix.arch }} --bundle bundle
+      - run: bun release/windows.ts --out dist --arch ${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}
@@ -191,7 +155,7 @@ jobs:
           if-no-files-found: error
 
   client:
-    name: client macOS
+    name: desktop macOS
     needs: [version, check]
     runs-on: macos-26
     timeout-minutes: 60
@@ -228,56 +192,9 @@ jobs:
         if: always() && env.MACOS_CERT_P12_BASE64 != ''
         run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
 
-  local:
-    name: local macOS
-    needs: [version, check]
-    runs-on: macos-26
-    timeout-minutes: 60
-    environment: release
-    env:
-      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: .bun-version
-      - run: bun install --frozen-lockfile
-      - name: version
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          bun run set-version "$VERSION"
-          # The service inside the app takes committed files only, as the Server archive does.
-          git -c user.name=release -c user.email=release@localhost commit -qam "release $VERSION" || true
-      - name: signing keychain
-        uses: ./.github/actions/macos-signing
-        with:
-          p12-base64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-          p12-password: ${{ secrets.MACOS_CERT_PASSWORD }}
-          identity: ${{ secrets.MACOS_SIGN_IDENTITY }}
-      - name: build the app with the service inside
-        env:
-          BUILD_NUMBER: ${{ github.run_number }}
-        run: bun release/local.ts --out dist
-      - name: smoke test
-        run: bun release/local-smoke.ts "dist/local/AI Space.app"
-      - name: package
-        run: EDITION=local APP="dist/local/AI Space.app" desktop/macos/scripts/package.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: local-macos
-          path: dist/*.dmg
-          if-no-files-found: error
-      - name: remove keychain
-        if: always() && env.MACOS_CERT_P12_BASE64 != ''
-        run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
-
   release:
     name: draft release
-    needs: [version, server, linux, windows, client, local]
+    needs: [version, server, linux, windows, client]
     if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -291,8 +208,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          # The release files only, not the WSL bundles the Windows app carries inside.
-          pattern: "{server,linux,windows,client,local}-*"
+          pattern: "{server,linux,windows,client}-*"
           merge-multiple: true
       - name: the one-command installer
         # ai-space.me/install.sh sends curl to this release asset (docs/release.md#one-command-install).

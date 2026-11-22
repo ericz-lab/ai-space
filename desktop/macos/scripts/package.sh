@@ -2,9 +2,11 @@
 # The Mac downloads (docs/release.md), in a .dmg with an Applications link, under dist/ at the
 # repository root:
 #
-#   ai-space-client-<version>-macos-<arch>.dmg            build/AISpace.app from build.sh
+#   ai-space-desktop-<version>-macos-<arch>.dmg           build/AISpace.app from build.sh: the
+#                                                         client, what a release publishes
 #   ai-space-local-<version>-macos-<arch>.dmg             EDITION=local APP=<AI Space.app> from
-#                                                         release/local.ts (already signed inside)
+#                                                         release/local.ts (already signed inside);
+#                                                         not published, built on request
 #   ...-unsigned.dmg                                      no Developer ID given: for testing only,
 #                                                         Gatekeeper blocks it for everyone else
 #
@@ -39,7 +41,9 @@ case "$EDITION" in
   *) echo "EDITION must be client or local" >&2; exit 2 ;;
 esac
 
-NAME="ai-space-$EDITION-$VERSION-macos-$ARCH"
+PRODUCT=desktop
+[ "$EDITION" = local ] && PRODUCT=local
+NAME="ai-space-$PRODUCT-$VERSION-macos-$ARCH"
 [ "$SIGNED" = yes ] || NAME="$NAME-unsigned"
 mkdir -p "$ROOT/dist"
 DMG="$ROOT/dist/$NAME.dmg"

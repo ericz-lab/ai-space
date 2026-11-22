@@ -155,7 +155,7 @@ git remote add <host> <host>:~/.ai-space/repos/ai-space.git
 git push <host> main      # checks out into the unit's checkout (~/.ai-space/core by default), runs deploy/install.sh, restarts the unit
 ```
 
-**From a release archive** instead of a checkout: a tagged release has an archive for Linux x64 and arm64 and for a Mac on Apple silicon, each with its own Bun, so the machine needs no Bun or Git for ai-space itself. `tar -xzf ai-space-server-<version>-linux-<arch>.tar.gz && bash ai-space-server-<version>-linux-<arch>/install.sh` installs the same unit (on a Mac a LaunchAgent, [release.md](release.md#the-background-service)), and installing the next archive upgrades it, with a rollback if it does not come up ([release.md](release.md)).
+**From a release archive** instead of a checkout: a tagged release has an archive for Linux x64 and arm64 and for a Mac on Apple silicon, each with its own Bun, so the machine needs no Bun or Git for ai-space itself. `tar -xzf ai-space-<version>-linux-<arch>.tar.gz && bash ai-space-<version>-linux-<arch>/install.sh` installs the same unit (on a Mac a LaunchAgent, [release.md](release.md#the-background-service)), and installing the next archive upgrades it, with a rollback if it does not come up ([release.md](release.md)).
 
 **Workspace `.env`**
 

@@ -2,9 +2,10 @@
  * `bun release/windows.ts [--out dist] [--arch x64|arm64] [--edition client|local|both] [--bundle <dir>]`:
  * the Windows app as zip files, one per edition (docs/windows-desktop.md, docs/editions.md):
  *
- *   ai-space-windows-client-<version>-<arch>.zip   the client (desktop/windows/build.ts)
- *   ai-space-windows-local-<version>-<arch>.zip    the client with local/, the Linux release it
- *                                                  sets up in WSL 2
+ *   ai-space-desktop-<version>-windows-<arch>.zip   the client (desktop/windows/build.ts): what a
+ *                                                   release publishes, and the default here
+ *   ai-space-local-<version>-windows-<arch>.zip     the client with local/, the Linux release it
+ *                                                   sets up in WSL 2; not published
  *
  * Each unpacks to one folder; AISpace.exe in it runs from there and offers to install itself for
  * the user. The Local edition takes its bundle from --bundle (made on Linux by
@@ -17,7 +18,7 @@ import { SPACE_ROOT } from "../src/space/config.ts";
 import { readVersion } from "../src/space/version.ts";
 import { run } from "./server.ts";
 
-export const windowsArchiveName = (edition: "client" | "local", version: string, arch: WindowsArch) => `ai-space-windows-${edition}-${version}-${arch}`;
+export const windowsArchiveName = (edition: "client" | "local", version: string, arch: WindowsArch) => `ai-space-${edition === "client" ? "desktop" : "local"}-${version}-windows-${arch}`;
 
 /** Zips `dir` into `archive` with the folder itself at the top. */
 async function zip(dir: string, archive: string): Promise<void> {
@@ -56,7 +57,7 @@ if (import.meta.main) {
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : undefined;
   };
-  const edition = value("--edition") ?? "both";
+  const edition = value("--edition") ?? "client";
   const editions = edition === "both" ? (["client", "local"] as const) : [edition as "client" | "local"];
   if (!editions.every((e) => e === "client" || e === "local")) throw new Error("--edition is client, local or both");
   const arch = value("--arch");

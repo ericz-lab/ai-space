@@ -2,8 +2,8 @@
  * `bun release/server.ts [--out dist]`: the Server edition's release archive for this machine's
  * system and CPU (docs/release.md).
  *
- *   ai-space-server-<version>-<os>-<arch>.tar.gz
- *     ai-space-server-<version>-<os>-<arch>/
+ *   ai-space-<version>-<os>-<arch>.tar.gz
+ *     ai-space-<version>-<os>-<arch>/
  *       install.sh          release/install.sh: install or upgrade from this directory
  *                           (the windows archive: install.ps1, release/install.ps1)
  *       RELEASE.json        product, version, commit, os, arch, bun
@@ -36,7 +36,7 @@ export const releaseOs = (platform: string = process.platform): string => (platf
 export const runtimeBun = (platform: string = process.platform): string => join("runtime", platform === "win32" ? "bun.exe" : "bun");
 
 export function archiveName(info: Pick<ReleaseInfo, "version" | "os" | "arch">): string {
-  return `ai-space-server-${info.version}-${info.os}-${info.arch}`;
+  return `ai-space-${info.version}-${info.os}-${info.arch}`;
 }
 
 export async function run(cmd: string[], cwd: string): Promise<string> {
