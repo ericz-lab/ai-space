@@ -84,7 +84,7 @@ export function cfCommands(plan: EdgePlan): CfCommand[] {
     { step: "log in (browser; or export CLOUDFLARE_API_TOKEN)", argv: ["cf", "auth", "login"] },
     { step: "find the account id", argv: ["cf", "accounts", "list"], note: "export CLOUDFLARE_ACCOUNT_ID=<id>" },
     { step: "find the zone id", argv: ["cf", "zones", "list", "--name", plan.zone], note: "export ZONE_ID=<id>" },
-    { step: "create the tunnel, managed from Cloudflare", argv: ["cf", "tunnels", "create", "--name", plan.machine, "--config-src", "cloudflare"], note: "export TUNNEL_ID=<id>" },
+    { step: "create the tunnel, managed from Cloudflare", argv: ["cf", "tunnels", "create", "--name", plan.machine, "--config-source", "cloudflare"], note: "export TUNNEL_ID=<id>" },
   ];
   for (const h of hosts) {
     out.push({ step: `Access in front of ${h.host}`, argv: ["cf", "zero-trust", "access", "applications", "create", "--body", JSON.stringify(accessApplication(h.host, plan.email))] });

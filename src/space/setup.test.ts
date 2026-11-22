@@ -363,7 +363,7 @@ describe("runSetup", () => {
       expect(out.extensions).toEqual({ ingress: "incomplete" });
       const log = io.log.join("\n");
       expect(log).toContain("bun add -g cf");
-      expect(log).toContain("cf tunnels create --name box --config-src cloudflare");
+      expect(log).toContain("cf tunnels create --name box --config-source cloudflare");
       expect(log).toContain('"hostname":"*.example.com","service":"http://127.0.0.1:8080"');
       expect(log).toContain("Access allows me@example.com");
     });

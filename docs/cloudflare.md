@@ -8,7 +8,7 @@ ai-space itself never calls Cloudflare's API. It spawns no Cloudflare tool at ru
 
 | Operation | Where in ai-space | Before | Now | Decision |
 | --- | --- | --- | --- | --- |
-| Create a tunnel, get its token | install.md step 5, install-by-agent phase 6 | Zero Trust dashboard, or `cloudflared tunnel login/create` | `cf tunnels create --config-src cloudflare`, `cf tunnels token get` | migrated |
+| Create a tunnel, get its token | install.md step 5, install-by-agent phase 6 | Zero Trust dashboard, or `cloudflared tunnel login/create` | `cf tunnels create --config-source cloudflare`, `cf tunnels token get` | migrated |
 | Tunnel ingress (panel, wildcard to Caddy, per-app hostnames) | install.md step 5, [router.md](router.md) | dashboard Public Hostnames, or `config.yml` | `cf tunnels config update <id> --body …` | migrated |
 | DNS: proxied CNAME to `<id>.cfargotunnel.com`, the wildcard `*` | install.md step 5 | dashboard (created by a hostname, by hand for the wildcard), or `cloudflared tunnel route dns` | `cf dns records create -z <zone-id> --body …` | migrated |
 | Access application and allow policy on the panel and `*.<domain>` | install.md step 6 | dashboard | `cf zero-trust access applications create --body …` | migrated |
@@ -25,7 +25,7 @@ The single list of these objects in code is `src/space/cloudflare.ts`: the ingre
 
 ## The cf CLI
 
-`cf` is Cloudflare's unified CLI, generated from its public OpenAPI (npm package `cf`, open beta, 1.0.0-beta.5 when this was written; the successor to Wrangler). The commands used here were checked against that release with `--help` and `--dry-run`; they create objects through the documented API endpoints (`/cfd_tunnel`, `/cfd_tunnel/<id>/configurations`, `/zones/<id>/dns_records`, `/access/apps`, `/access/service_tokens`, `/r2/buckets`).
+`cf` is Cloudflare's unified CLI, generated from its public OpenAPI (npm package `cf`, open beta, 1.0.0-beta.5 when this was written; the successor to Wrangler). The commands used here were checked against that release with `--help` and `--dry-run`, and the tunnel, ingress, DNS, token and Access ones run again against 1.0.0-rc.2, which renamed `tunnels create --config-src` to `--config-source` (the old name is refused); they create objects through the documented API endpoints (`/cfd_tunnel`, `/cfd_tunnel/<id>/configurations`, `/zones/<id>/dns_records`, `/access/apps`, `/access/service_tokens`, `/r2/buckets`).
 
 - **Install**: `bun add -g cf` (or `npm install -g cf`). The binary's shebang is `node` and it requires Node.js 22 or newer; it also runs under Bun (`bunx --bun cf …`, checked with help, schema, dry-run and `auth whoami`).
 - **Login**: `cf auth login` (OAuth in a browser, device flow by default) or `CLOUDFLARE_API_TOKEN`. `cf auth whoami` prints JSON and exits 0 either way; `setup` reads it.
@@ -41,7 +41,7 @@ For `space.example.com` and a router on `*.example.com` (drop the wildcard lines
 cf auth login
 cf accounts list                                  # export CLOUDFLARE_ACCOUNT_ID=<id>
 cf zones list --name example.com                  # export ZONE_ID=<id>
-cf tunnels create --name box --config-src cloudflare   # export TUNNEL_ID=<id>
+cf tunnels create --name box --config-source cloudflare   # export TUNNEL_ID=<id>
 
 # Access first, so no hostname is ever reachable without a login
 cf zero-trust access applications create --body '{"type":"self_hosted","name":"space.example.com","domain":"space.example.com","session_duration":"24h","policies":[{"name":"owner","decision":"allow","include":[{"email":{"email":"you@example.com"}}]}]}'

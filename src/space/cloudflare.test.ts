@@ -40,7 +40,7 @@ describe("cloudflare plan", () => {
     expect(shellArg(`{"a":"it's"}`)).toBe(`'{"a":"it'\\''s"}'`);
     expect(shellArg(`{"content":"$TUNNEL_ID.cfargotunnel.com"}`)).toBe(`"{\\"content\\":\\"$TUNNEL_ID.cfargotunnel.com\\"}"`);
     const lines = renderCfScript(cfCommands(plan));
-    expect(lines).toContain("cf tunnels create --name box --config-src cloudflare");
+    expect(lines).toContain("cf tunnels create --name box --config-source cloudflare");
     expect(lines).toContain("cf tunnels token get $TUNNEL_ID");
   });
 
