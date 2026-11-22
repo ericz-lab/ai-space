@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { AppRegistry } from "../panel/registry.ts";
 import { createPeerServeRoutes } from "../peers/serve.ts";
 import { Scheduler } from "../scheduler/scheduler.ts";
@@ -9,12 +9,13 @@ import { Store } from "../scheduler/store.ts";
 import { parsePackageManifest } from "./manifest.ts";
 import { PackageRuntime } from "./runtime.ts";
 import { runPackageTask } from "./tasks.ts";
+import { WINDOWS, removeTemp } from "../testing.ts";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const f of cleanup.splice(0).reverse()) await f(); });
 
 test("owner sync preserves overrides; HTTP tasks activate locally and commands do not start a service", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "space-package-tasks-")); cleanup.push(() => rm(dir, { recursive: true, force: true }));
+  const dir = await mkdtemp(join(tmpdir(), "space-package-tasks-")); cleanup.push(() => removeTemp(dir));
   await Bun.write(join(dir, "app.ts"), 'Bun.serve({hostname:"127.0.0.1",port:Number(process.env.PORT),fetch:r=>Response.json({status:"ok",trigger:r.headers.get("x-space-trigger")})});');
   const manifest = { ...parsePackageManifest(`spec: 2
 name: tasks
@@ -43,7 +44,8 @@ agents: [{name: helper, prompt: agents/helper.md}]
   expect(store.listTasks()).toHaveLength(2);
   expect(store.findTask("tasks", "refresh")).toMatchObject({ id: http.id, overrides: { enabled: false } });
   const result = await runPackageTask(runtime, command, { signal: new AbortController().signal });
-  expect(result.status).toBe("ok"); expect(result.output).toEndWith(dir.replace(/^\/var\//, "/private/var/"));
+  // Windows' host shell (Git Bash) prints the directory in its own form (/tmp/...): there it is matched by its unique name.
+  expect(result.status).toBe("ok"); expect(result.output).toEndWith(WINDOWS ? basename(dir) : dir.replace(/^\/var\//, "/private/var/"));
   expect(runtime.status("tasks")?.state).toBe("idle");
   expect(await runPackageTask(runtime, http, { signal: new AbortController().signal, trigger: "manual" })).toMatchObject({ status: "ok", output: expect.stringContaining('"trigger":"manual"') });
   expect(runtime.status("tasks")?.leases).toBe(0);

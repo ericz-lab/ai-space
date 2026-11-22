@@ -2,7 +2,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:te
 import { chmod, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { WINDOWS } from "../space/testing.ts";
 import { TEMPLATE_DIR } from "./newapp.ts";
+
+// deploy.sh targets a Linux host over SSH, and the stubs below are shell scripts found on PATH:
+// Windows starts neither, so the file runs on POSIX only.
+const posixTest = test.skipIf(WINDOWS);
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "space-deploy-")); });
@@ -20,6 +25,7 @@ async function executable(path: string, body: string) {
 let stubs: string;
 let bin: string;
 beforeAll(async () => {
+  if (WINDOWS) return;
   stubs = await mkdtemp(join(tmpdir(), "space-deploy-stubs-"));
   bin = join(stubs, "bin");
   await executable(join(bin, "ssh"), 'export HOME="$TEST_REMOTE_HOME"\nexec bash -c "$2"');
@@ -32,7 +38,7 @@ beforeAll(async () => {
   const names = ["ssh", "rsync", "systemctl", "sleep", "loginctl", "curl"].map((n) => join(bin, n));
   await Promise.all([...names, join(stubs, "bun")].map((p) => Bun.spawn([p, "--help", "true"], { env: { ...process.env, TEST_REMOTE_HOME: stubs, TEST_SERVICE_LOG: "/dev/null" }, stdout: "ignore", stderr: "ignore" }).exited));
 });
-afterAll(async () => { await rm(stubs, { recursive: true, force: true }); });
+afterAll(async () => { if (stubs) await rm(stubs, { recursive: true, force: true }); });
 
 // Run the actual template script against a fake SSH host. Only network, package
 // installation and service management are stubbed; path resolution and unit
@@ -76,9 +82,9 @@ async function deploy(opts: { installed?: string; workspace?: string; checkout?:
   expect(await Bun.file(join(checkout, ".env")).text()).toBe("PORT=8710\n");
 }
 
-test("deployment defaults to the remote home, not the developer home", () => deploy({ expectedWorkspace: ".ai-space" }));
-test("deployment follows the installed unit workspace", () => deploy({ installed: "REMOTE/custom-space", expectedWorkspace: "custom-space" }));
-test("deployment expands legacy systemd home paths", () => deploy({ installed: "%h/custom-space", expectedWorkspace: "custom-space" }));
-test("explicit workspace wins and a separate checkout does not change the data path", () => deploy({ installed: "REMOTE/old-space", workspace: "~/chosen space & 50%|", checkout: "code/demo-app", expectedWorkspace: "chosen space & 50%|", expectedCheckout: "code/demo-app" }));
-test("relative workspace paths resolve under the remote home", () => deploy({ workspace: "custom-space", expectedWorkspace: "custom-space" }));
-test("modern rsync receives literal paths with protected arguments", () => deploy({ workspace: "~/space with spaces", protectedArgs: true, expectedWorkspace: "space with spaces" }));
+posixTest("deployment defaults to the remote home, not the developer home", () => deploy({ expectedWorkspace: ".ai-space" }));
+posixTest("deployment follows the installed unit workspace", () => deploy({ installed: "REMOTE/custom-space", expectedWorkspace: "custom-space" }));
+posixTest("deployment expands legacy systemd home paths", () => deploy({ installed: "%h/custom-space", expectedWorkspace: "custom-space" }));
+posixTest("explicit workspace wins and a separate checkout does not change the data path", () => deploy({ installed: "REMOTE/old-space", workspace: "~/chosen space & 50%|", checkout: "code/demo-app", expectedWorkspace: "chosen space & 50%|", expectedCheckout: "code/demo-app" }));
+posixTest("relative workspace paths resolve under the remote home", () => deploy({ workspace: "custom-space", expectedWorkspace: "custom-space" }));
+posixTest("modern rsync receives literal paths with protected arguments", () => deploy({ workspace: "~/space with spaces", protectedArgs: true, expectedWorkspace: "space with spaces" }));

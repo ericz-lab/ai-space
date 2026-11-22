@@ -9,6 +9,7 @@ import { claudeOnly } from "../runtimes/registry.ts";
 import { loadManifest } from "../scheduler/manifest.ts";
 import type { Action } from "../shortcuts/types.ts";
 import { ShortcutStore } from "../shortcuts/store.ts";
+import { CAN_SYMLINK } from "../testing.ts";
 import { workspacePaths } from "../workspace.ts";
 import { createAgentRoutes } from "./api.ts";
 import { RunRegistry } from "./runs.ts";
@@ -37,7 +38,7 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
     inputs: [{ name: "title", label: "Title", type: "text", query: true, required: true }, { name: "date", label: "Date", type: "date" }, { name: "time", label: "Time", type: "time" }] }];
   actions.push({ id: "finance-news-feed/news", app: "finance-news-feed", builtin: false, title: "Financial news", keywords: ["金融新闻"],
     patterns: ["[查[{period}]]金融新闻"], effect: "read", result: "list", available: true, inputs: [{ name: "period", label: "Period", type: "period", default: "today" }] });
-  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createAgentRoutes({ ws, registry, layout: new LayoutStore(db), sessions, runs, runtimes: claudeOnly(["bun", cli]), shortcuts: store, actionCatalogue: () => actions }) });
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createAgentRoutes({ ws, registry, layout: new LayoutStore(db), sessions, runs, runtimes: claudeOnly([process.execPath, cli]), shortcuts: store, actionCatalogue: () => actions }) });
   const post = (path: string, body: unknown) => fetch(new URL(path, server.url), { method: "POST", body: JSON.stringify(body) });
   const config = { id: "financial-news", title: "Financial news", agent: "news/curator", skills: ["curate-news"], patterns: ["[查[{period}]]金融新闻[{suffix2}]"] };
   try {
@@ -108,10 +109,11 @@ test("skill loading refuses traversal and symlinks outside the app", async () =>
   const dir = join(home, "app");
   await mkdir(join(dir, "skills", "escape"), { recursive: true });
   await Bun.write(join(home, "secret.md"), "not a skill");
-  await symlink(join(home, "secret.md"), join(dir, "skills", "escape", "SKILL.md"));
+  // Windows without Developer Mode refuses to make the link, so only the traversal is checked there.
+  if (CAN_SYMLINK) await symlink(join(home, "secret.md"), join(dir, "skills", "escape", "SKILL.md"));
   try {
     await expect(skillContext(dir, ["../secret"])).rejects.toThrow(/Invalid/);
-    await expect(skillContext(dir, ["escape"])).rejects.toThrow(/outside/);
+    if (CAN_SYMLINK) await expect(skillContext(dir, ["escape"])).rejects.toThrow(/outside/);
     await expect(skillContext(dir, ["missing"])).rejects.toThrow(/Missing/);
   } finally { await rm(home, { recursive: true, force: true }); }
 });

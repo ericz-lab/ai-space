@@ -29,10 +29,9 @@ jobs:
       - run: bun run typecheck
       - run: bun test
 
-  # The Server on Windows itself (docs/install.md#windows). Not the whole suite yet: `test:windows` in
-  # package.json lists the tests of the code that differs there (links, the workspace lock, the search
-  # path and shell, package installs, the Task Scheduler service, the installer, the pseudoconsole).
-  # A test file joins the list once it passes on Windows; the aim is plain `bun test` here too.
+  # The Server on Windows itself (docs/install.md#windows): the same suite. A test of something Windows
+  # does not have (POSIX file modes and signals, systemd and launchd units, the sh installers) skips
+  # itself there; `src/space/testing.ts` holds what the tests share for that.
   server-windows:
     name: Server on Windows
     runs-on: windows-2025
@@ -44,7 +43,7 @@ jobs:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      - run: bun run test:windows
+      - run: bun test
 
   android:
     name: Android client

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseRuntimesYaml } from "../runtimes/config.ts";
 import { RuntimeRegistry, splitMachine } from "../runtimes/registry.ts";
 import type { RuntimeSpec } from "../runtimes/types.ts";
@@ -14,8 +14,12 @@ import { cellOf, probeTargets, statusTable } from "./machines.ts";
 import { ModelService, needsLocal } from "./service.ts";
 import { ModelStore } from "./store.ts";
 import { MODEL_PATTERN } from "./types.ts";
+import { WINDOWS } from "../testing.ts";
 
 /** Model calls by machine: docs/model-machines.md. */
+
+/** A program on a PATH every host has: `true`; Windows has neither, so there it is the Bun running these tests. */
+const [ON_PATH, HOST_PATH] = WINDOWS ? ["bun", dirname(process.execPath)] : ["true", "/usr/bin:/bin"];
 
 const input = (model: string) => ({ model, prompt: "hi", system: "be brief", tag: "notes", tools: [], timeoutMs: 10_000, maxTokens: 100 });
 
@@ -313,8 +317,8 @@ describe("status table", () => {
     const claude: RuntimeSpec = { name: "claude", kind: "claude-code", bin: ["claude-not-installed-here"], chatArgs: [] };
     expect(await probeRuntime(spawn, { PATH: "/nonexistent" })({ machine: "", spec: claude })).toMatchObject({ installed: false });
     expect(calls).toEqual([]);
-    expect(await probeRuntime(spawn, { PATH: "/usr/bin:/bin" })({ machine: "", spec: { ...claude, bin: ["true"] } })).toEqual({ installed: true, signedIn: true });
-    expect(calls).toEqual([["true", "--version"], ["true", "auth", "status"]]);
+    expect(await probeRuntime(spawn, { PATH: HOST_PATH })({ machine: "", spec: { ...claude, bin: [ON_PATH] } })).toEqual({ installed: true, signedIn: true });
+    expect(calls).toEqual([[ON_PATH, "--version"], [ON_PATH, "auth", "status"]]);
     // Over ssh through the login shell; 127 is a missing CLI there.
     const missing = (async () => ({ code: 127, stdout: "", stderr: "", timedOut: false, aborted: false })) as unknown as Parameters<typeof probeRuntime>[0];
     expect(await probeRuntime(missing)({ machine: "bare", spec: claude, ssh: "bare-alias" })).toMatchObject({ installed: false });
@@ -326,10 +330,10 @@ describe("status table", () => {
   });
 
   test("a status probe that times out is its own state, not signed out", async () => {
-    const claude: RuntimeSpec = { name: "claude", kind: "claude-code", bin: ["true"], chatArgs: [] };
+    const claude: RuntimeSpec = { name: "claude", kind: "claude-code", bin: [ON_PATH], chatArgs: [] };
     const slow = (async (cmd: string[]) =>
       cmd.includes("--version") ? { code: 0, stdout: "2.1.3 (Claude Code)", stderr: "", timedOut: false, aborted: false } : { code: null, stdout: "", stderr: "", timedOut: true, aborted: false }) as unknown as Parameters<typeof probeRuntime>[0];
-    const local = await probeRuntime(slow, { PATH: "/usr/bin:/bin" })({ machine: "", spec: claude });
+    const local = await probeRuntime(slow, { PATH: HOST_PATH })({ machine: "", spec: claude });
     expect(local).toMatchObject({ installed: true, version: "2.1.3", probeTimedOut: true });
     expect(local.signedIn).toBeUndefined();
     const remote = await probeRuntime(slow)({ machine: "box", spec: claude, ssh: "box" });

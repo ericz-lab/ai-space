@@ -16,7 +16,8 @@ export function catalogSources(raw: string | undefined, home: string): string[] 
   if (!items.length || (items.length === 1 && items[0] === "none")) return [];
   const out: string[] = [];
   for (const item of items) {
-    const url = item === "default" ? DEFAULT_CATALOG_URL : /^[a-z][a-z0-9+.-]*:/i.test(item) ? item : pathToFileURL(isAbsolute(item) ? item : resolve(home, item)).href;
+    // An absolute path first: a Windows one (`C:\...`) would otherwise pass for a URL scheme.
+    const url = item === "default" ? DEFAULT_CATALOG_URL : isAbsolute(item) ? pathToFileURL(item).href : /^[a-z][a-z0-9+.-]*:/i.test(item) ? item : pathToFileURL(resolve(home, item)).href;
     if (!allowedLocation(new URL(url))) throw new Error(`SPACE_APP_CATALOG: ${item} is not an https URL, a loopback http URL or a file`);
     if (!out.includes(url)) out.push(url);
   }

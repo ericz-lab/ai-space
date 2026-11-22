@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_APPS, applyEnvOverrides, cloneDefaultApps, describeInstalls, installDefaultApps, newPackagePort, newWorkspaceEnv, parseDefaultApps, urlOverrideKey, withManifestQuery } from "./defaults.ts";
 import { loadManifest } from "./scheduler/manifest.ts";
+import { WINDOWS } from "./testing.ts";
 import { workspacePaths } from "./workspace.ts";
 
 describe("parseDefaultApps", () => {
@@ -48,7 +49,8 @@ describe("cloneDefaultApps and installDefaultApps", () => {
     const src = join(root, "src-app");
     await mkdir(join(src, "deploy"), { recursive: true });
     await writeFile(join(src, "space.yaml"), "name: demo\ntitle: Demo\n");
-    await writeFile(join(src, "deploy", "install.sh"), "#!/bin/bash\necho installed in $(pwd)\n");
+    // Git Bash's `pwd` is an MSYS path (/tmp/...); cygpath gives the Windows one the test compares against.
+    await writeFile(join(src, "deploy", "install.sh"), `#!/bin/bash\necho installed in ${WINDOWS ? '"$(cygpath -w "$(pwd)")"' : "$(pwd)"}\n`);
     const git = async (...args: string[]) => {
       const p = Bun.spawn(["git", ...args], { cwd: src, stdout: "pipe", stderr: "pipe", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@x", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@x" } });
       if ((await p.exited) !== 0) throw new Error(await new Response(p.stderr).text());

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { probeRuntime } from "../model/health.ts";
 import { createClaudeCode } from "./claude-code.ts";
 import { parseRuntimesYaml } from "./config.ts";
@@ -25,10 +26,10 @@ describe("finding magpie", () => {
     expect(loopbackUrl("[::]:3425")).toBe("http://127.0.0.1:3425");
     expect(loopbackUrl("127.0.0.1:3425")).toBe("http://127.0.0.1:3425");
     expect(loopbackUrl("nonsense")).toBeUndefined();
-    expect(magpieConfigDir({ XDG_CONFIG_HOME: "/x" }, "/h")).toBe("/x/magpie");
-    expect(magpieConfigDir({}, "/h")).toBe("/h/.config/magpie");
+    expect(magpieConfigDir({ XDG_CONFIG_HOME: "/x" }, "/h")).toBe(join("/x", "magpie"));
+    expect(magpieConfigDir({}, "/h")).toBe(join("/h", ".config", "magpie"));
 
-    const file = (text: string | undefined) => (p: string) => (p === "/h/.config/magpie/gateway.json" ? text : undefined);
+    const file = (text: string | undefined) => (p: string) => (p === join("/h", ".config", "magpie", "gateway.json") ? text : undefined);
     expect(magpieAddress({ env: { MAGPIE_ADDR: "0.0.0.0:4000" }, home: "/h", readText: file('{"addr":"127.0.0.1:5000"}') })).toEqual({ url: "http://127.0.0.1:4000", from: "env" });
     expect(magpieAddress({ env: {}, home: "/h", readText: file('{"addr":"0.0.0.0:5000","pid":7,"version":"2.1.0"}') })).toEqual({ url: "http://127.0.0.1:5000", from: "gateway.json", version: "2.1.0" });
     expect(magpieAddress({ env: {}, home: "/h", readText: file("{half") })).toEqual({ url: "http://127.0.0.1:3425", from: "default" });

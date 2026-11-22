@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadChannels } from "./channels.ts";
 import { CAP, CAP_WINDOW_MS, NotifyService, STALE_MS } from "./engine.ts";
 import { NotifyStore } from "./store.ts";
 import { instantSleep, scriptedFetch } from "./testing.ts";
+import { removeTemp } from "../testing.ts";
 
 let dir: string;
 let store: NotifyStore;
@@ -38,7 +39,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   store.close();
-  await rm(dir, { recursive: true, force: true });
+  await removeTemp(dir);
 });
 
 const tgOk = (id = 1) => ({ status: 200, body: { ok: true, result: { message_id: id } } });

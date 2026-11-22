@@ -1,9 +1,9 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { workspacePaths } from "../workspace.ts";
 import { AppCatalog, CatalogError, createAppCatalogRoutes, newerVersion, parseCatalog } from "./app-catalog.ts";
@@ -16,6 +16,7 @@ import { readSourceRecord, sourceCondition } from "./source-copy.ts";
 import { buildSource } from "../studio.ts";
 import { PackageRuntime } from "./runtime.ts";
 import { PackageStore } from "./store.ts";
+import { WINDOWS, removeTemp } from "../testing.ts";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const f of cleanup.splice(0).reverse()) await f(); });
@@ -49,7 +50,7 @@ const releaseYaml = (name: string, version: string) => `spec: 2\nname: ${name}\n
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "space-app-catalog-"));
-  cleanup.push(() => rm(root, { recursive: true, force: true }));
+  cleanup.push(() => removeTemp(root));
   const ws = workspacePaths(join(root, "workspace"));
   for (const d of [ws.home, ws.data, ws.run, ws.logs]) await mkdir(d, { recursive: true });
   const db = new Database(":memory:");
@@ -67,7 +68,7 @@ async function fixture() {
   const publish = async (name: string, key: { private: string }) => {
     const r = await buildRelease({ dir: join(root, "repos", name), outDir: mirror, variants: ["bundle", "source"], signingKey: key.private });
     const [bundle, source] = r.packages;
-    return { version: r.version, tag: `v${r.version}`, package: { url: bundle!.path.split("/").pop()!, sha256: bundle!.sha256 }, sourcePackage: { url: source!.path.split("/").pop()!, sha256: source!.sha256 }, requires: { spaceApi: 1 } };
+    return { version: r.version, tag: `v${r.version}`, package: { url: basename(bundle!.path), sha256: bundle!.sha256 }, sourcePackage: { url: basename(source!.path), sha256: source!.sha256 }, requires: { spaceApi: 1 } };
   };
   await appRepo(root, "notes", "1.0.0");
   await appRepo(root, "other", "1.0.0");
@@ -208,7 +209,7 @@ describe("app catalog", () => {
     // Taking the release moves their copy aside, whole, and puts the release's in its place.
     const taken = await f.catalog.upgrade("notes", { replaceSource: true });
     expect(taken).toMatchObject({ version: "1.2.0", action: "upgraded", source: { action: "replaced" } });
-    expect(taken.source!.saved).toMatch(/app-src\/notes\.saved-\d{8}-\d{6}$/);
+    expect(taken.source!.saved).toMatch(WINDOWS ? /app-src\\notes\.saved-\d{8}-\d{6}$/ : /app-src\/notes\.saved-\d{8}-\d{6}$/);
     expect(await Bun.file(join(taken.source!.saved!, "src", "index.html")).text()).toBe("<p>mine</p>");
     expect(await Bun.file(join(taken.source!.saved!, "src", "extra.txt")).text()).toBe("new");
     expect(await Bun.file(join(src, "src", "index.html")).text()).toBe("<p>notes 1.2.0</p>");
@@ -291,7 +292,11 @@ describe("catalog sources and format", () => {
     expect(catalogSources(undefined, "/ws")).toEqual([DEFAULT_CATALOG_URL]);
     expect(catalogSources("none", "/ws")).toEqual([]);
     expect(catalogSources("", "/ws")).toEqual([]);
-    expect(catalogSources("default, https://example.com/c.json, mirror/catalog.json", "/ws")).toEqual([DEFAULT_CATALOG_URL, "https://example.com/c.json", "file:///ws/mirror/catalog.json"]);
+    // On Windows "/ws" resolves onto the current drive.
+    const mirrorUrl = WINDOWS ? pathToFileURL(resolve("/ws", "mirror", "catalog.json")).href : "file:///ws/mirror/catalog.json";
+    expect(catalogSources("default, https://example.com/c.json, mirror/catalog.json", "/ws")).toEqual([DEFAULT_CATALOG_URL, "https://example.com/c.json", mirrorUrl]);
+    // A drive-letter path is a file, not a URL scheme.
+    if (WINDOWS) expect(catalogSources("C:\\mirror\\catalog.json", "/ws")).toEqual(["file:///C:/mirror/catalog.json"]);
     expect(catalogSources("http://127.0.0.1:9000/c.json", "/ws")).toEqual(["http://127.0.0.1:9000/c.json"]);
     expect(() => catalogSources("http://example.com/c.json", "/ws")).toThrow();
     expect(() => catalogSources("ftp://example.com/c.json", "/ws")).toThrow();
@@ -321,7 +326,7 @@ describe("catalog sources and format", () => {
 
   test("a fetched catalog is cached for hours and kept when the network fails", async () => {
     const root = await mkdtemp(join(tmpdir(), "space-app-catalog-cache-"));
-    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    cleanup.push(() => removeTemp(root));
     const ws = workspacePaths(join(root, "ws"));
     for (const d of [ws.home, ws.run]) await mkdir(d, { recursive: true });
     const db = new Database(":memory:");

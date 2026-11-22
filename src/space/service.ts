@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { lstat, mkdir, readdir, readlink, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, normalize, resolve } from "node:path";
 import { SPACE_ROOT } from "./config.ts";
 import { LOCAL_LABEL, LOCAL_UNIT, localPaths, readOwnership, readRelease } from "./local.ts";
 import { Launchctl } from "./services/launchd.ts";
@@ -149,7 +149,8 @@ export type UnitInput = { root: string; bun: string; workspace: string; home: st
  */
 export function renderServerUnit(template: string, u: UnitInput): string {
   const binDir = dirname(u.bun);
-  const pathFix = binDir !== join(u.home, ".bun", "bin");
+  // Normalized: a POSIX-spelled Bun path on Windows differs from `join`'s only in the separator.
+  const pathFix = normalize(binDir) !== join(u.home, ".bun", "bin");
   return template
     .split("\n")
     .map((line) => {

@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { chatArgs, cliArgs, cliEnv, createClaudeCode, filesNote, parseCliOutput, readStreamLine, remoteCommand, reportedError } from "./claude-code.ts";
 import { fakeModelBin } from "./testing.ts";
 import type { ClaudeCodeSpec, CompleteInput } from "./types.ts";
+import { WINDOWS } from "../testing.ts";
 
+/** The stand-in as an ssh host would name it: a Windows path in Git Bash's forward-slash spelling, which the ssh word check admits. */
+const remoteBin = () => (WINDOWS ? fakeModelBin().map((p) => p.replaceAll("\\", "/")) : fakeModelBin());
 const input = (over: Partial<CompleteInput> = {}): CompleteInput => ({ prompt: "hello", system: "Be brief.", model: "haiku", tag: "t", tools: [], timeoutMs: 5000, maxTokens: 100, ...over });
 const spec = (over: Partial<ClaudeCodeSpec> = {}): ClaudeCodeSpec => ({ name: "claude", kind: "claude-code", bin: fakeModelBin(), chatArgs: [], ...over });
 
@@ -19,7 +22,7 @@ describe("cliArgs", () => {
       expect(args.includes("--tools")).toBe(mode === "slim");
       const r = await createClaudeCode(spec()).complete(request);
       expect(r.ok).toBe(true);
-      const remote = remoteCommand(fakeModelBin(), request);
+      const remote = remoteCommand(remoteBin(), request);
       if ("bad" in remote) throw new Error(remote.bad);
       const { spawnCollect } = await import("./process.ts");
       const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: request.prompt, timeoutMs: 5000 });
@@ -241,7 +244,7 @@ describe("complete, locally", () => {
 
 describe("complete, over ssh", () => {
   test("the remote command is built from validated pieces only", async () => {
-    const runtime = createClaudeCode(spec({ sshHost: "box" }));
+    const runtime = createClaudeCode(spec({ sshHost: "box", bin: remoteBin() }));
     expect(runtime.backend).toBe("ssh:box");
     const r = await runtime.complete(input({ model: "x y" }));
     expect(r).toMatchObject({ ok: false, error: "argument not allowed over ssh: x y", backend: "ssh:box" });

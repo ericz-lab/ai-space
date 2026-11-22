@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { importCalls, parseImportLine } from "./import.ts";
 import { ModelStore } from "./store.ts";
+import { removeTemp } from "../testing.ts";
 
 let dir: string;
 let store: ModelStore;
@@ -15,7 +16,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   store.close();
-  await rm(dir, { recursive: true, force: true });
+  await removeTemp(dir);
 });
 
 const line = (over: Record<string, unknown> = {}) =>

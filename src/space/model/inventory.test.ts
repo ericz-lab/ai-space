@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { markOwner } from "../auth.ts";
 import { parseRuntimesYaml } from "../runtimes/config.ts";
 import { RuntimeRegistry, type OptionAvailability } from "../runtimes/registry.ts";
+import { WINDOWS } from "../testing.ts";
 import { AGENT_CLIS, RuntimeHealth, availabilityOf, probeRuntime, readVersion, splitVersion, type ProbeResult, type ProbeTarget } from "./health.ts";
 import type { MagpieInfo } from "../runtimes/magpie.ts";
 import { addMagpieRuntimeText, addRuntimeText, createInventoryRoutes, inventory, machineRow, magpieTiers, peerRow } from "./inventory.ts";
@@ -52,7 +53,8 @@ describe("probing", () => {
     const home = await mkdtemp(join(tmpdir(), "space-inv-home-"));
     try {
       await mkdir(join(home, ".local", "bin"), { recursive: true });
-      const codex = join(home, ".local", "bin", "codex");
+      // Windows finds a program by its extension, not by a mode bit.
+      const codex = join(home, ".local", "bin", WINDOWS ? "codex.cmd" : "codex");
       await writeFile(codex, "#!/bin/sh\nexit 0\n");
       await chmod(codex, 0o755);
       const spawn = (async (cmd: string[]) => ({ code: 0, stdout: cmd[1] === "--version" ? "codex-cli 0.50.0" : "Logged in", stderr: "", timedOut: false, aborted: false })) as unknown as Parameters<typeof probeRuntime>[0];

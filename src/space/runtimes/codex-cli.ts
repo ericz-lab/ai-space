@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { spawnCollect } from "./process.ts";
 import { streamCodex } from "./codex-stream.ts";
 import { CodexLive } from "./codex-live.ts";
@@ -140,18 +140,18 @@ function transientCompletionError(error: string): boolean {
 /** Use the request as model instructions, not as a second user message. */
 export function codexArgs(bin: string[], input: CompleteInput, dir: string, fullCwd = process.cwd()): string[] {
   assertCompletionMode(input);
-  const images = completionFiles(input).flatMap((file) => ["--image", join(dir, file.name)]);
+  const images = completionFiles(input).flatMap((file) => ["--image", within(dir, file.name)]);
   // Explicit web-only lists must not inherit native shell, plugins or MCP tools.
   if (input.mode === "full" && !input.tools.length) {
     // Only the native tool set acts on the machine, so only here does the request's write tier widen the sandbox.
     const sandbox = input.permissionMode === "bypassPermissions" ? "danger-full-access" : input.permissionMode === "acceptEdits" ? "workspace-write" : "read-only";
     return [...bin, "exec", "--ephemeral", "--skip-git-repo-check", "--json", "--color", "never", "--sandbox", sandbox, "--model", input.model, "--cd", fullCwd, "-c", 'approval_policy="never"', "-c", 'web_search="live"',
-      ...(input.system ? ["-c", `model_instructions_file=${JSON.stringify(join(dir, "system.txt"))}`] : []), ...images, "-"];
+      ...(input.system ? ["-c", `model_instructions_file=${JSON.stringify(within(dir, "system.txt"))}`] : []), ...images, "-"];
   }
   const config: Record<string, string | number | boolean> = {
     // Full mode without `system` keeps Codex's own base instructions (docs/model-tiers-and-modes.md),
     // also when web tools put it in this isolated setup; an empty file would replace them with nothing.
-    ...(input.system || input.mode !== "full" ? { model_instructions_file: join(dir, "system.txt") } : {}),
+    ...(input.system || input.mode !== "full" ? { model_instructions_file: within(dir, "system.txt") } : {}),
     developer_instructions: "",
     "agents.enabled": false,
     include_apps_instructions: false,
@@ -183,7 +183,7 @@ export function codexArgs(bin: string[], input: CompleteInput, dir: string, full
  */
 export function codexImageArgs(bin: string[], input: Pick<ImageInput, "model" | "files">, dir: string): string[] {
   const config: Record<string, string | number | boolean> = {
-    model_instructions_file: join(dir, "system.txt"),
+    model_instructions_file: within(dir, "system.txt"),
     developer_instructions: "",
     "agents.enabled": false,
     include_apps_instructions: false,
@@ -205,7 +205,7 @@ export function codexImageArgs(bin: string[], input: Pick<ImageInput, "model" | 
     ...Object.entries(config).flatMap(([key, value]) => ["-c", `${key}=${JSON.stringify(value)}`]),
     ...disabled.flatMap((key) => ["--disable", key]),
     "--enable", "image_generation", "--enable", "code_mode", "--enable", "code_mode_host", "--enable", "skip_host_skill_discovery",
-    ...input.files.flatMap((f) => ["--image", join(dir, f.name)]), "-"];
+    ...input.files.flatMap((f) => ["--image", within(dir, f.name)]), "-"];
 }
 
 /** Marks each generated file after the event stream: `<marker> <name>`, then its base64 on one line. */
@@ -218,7 +218,7 @@ export const IMAGE_MARKER = "@@space-image@@";
  * as base64, and removes the directory. The request directory goes away on exit either way.
  */
 export async function codexImageCommand(bin: string[], input: ImageInput, remote: boolean): Promise<{ command: string; archive: Uint8Array; dir: string }> {
-  const dir = join(remote ? "/tmp" : tmpdir(), `space-codex-img-${randomUUID()}`);
+  const dir = remote ? `/tmp/space-codex-img-${randomUUID()}` : join(tmpdir(), `space-codex-img-${randomUUID()}`);
   const encode = (s: string) => new TextEncoder().encode(s);
   const entries = [{ name: "prompt.txt", bytes: encode(input.prompt) }, { name: "system.txt", bytes: encode(input.system) }];
   for (const f of input.files) entries.push({ name: f.name, bytes: new Uint8Array(await Bun.file(f.path).arrayBuffer()) });
@@ -267,6 +267,12 @@ export function splitImageOutput(stdout: string): { events: string; images: Gene
 /** Quote an entire shell argument, including embedded quotes, dollars and newlines. */
 function quote(value: string): string { return `'${value.replaceAll("'", "'\\''")}'`; }
 
+/**
+ * A file of a request directory. The directory of a remote call is a path on the ssh host
+ * (`/tmp/...`), which keeps its separator when this process runs on Windows.
+ */
+function within(dir: string, name: string): string { return dir.startsWith("/") ? posix.join(dir, name) : join(dir, name); }
+
 function completionFiles(input: CompleteInput) {
   const files = input.files ?? [];
   const names = new Set<string>();
@@ -284,7 +290,7 @@ export async function codexRemoteCommand(bin: string[], input: CompleteInput): P
   // The remote timeout bounds orphan lifetime after SSH disconnects. Retries share the original deadline; there is no model fallback.
   // `builtin cd`: the login shell may load a profile that wraps `cd` in a function, and RVM's
   // wrapper runs `trap - EXIT`, which dropped the cleanup and left the request files behind.
-  const command = `umask 077; mkdir ${quote(dir)} || exit 1; trap ${quote(`rm -rf -- ${quote(dir)}`)} EXIT; tar -xf - -C ${quote(dir)} || exit 1; ${input.mode === "full" ? "" : `builtin cd ${quote(dir)} || exit 1; `}timeout --signal=TERM --kill-after=5s ${Math.ceil(input.timeoutMs / 1000)}s ${codexArgs(bin, input, dir, ".").map(quote).join(" ")} < ${quote(join(dir, "prompt.txt"))}`;
+  const command = `umask 077; mkdir ${quote(dir)} || exit 1; trap ${quote(`rm -rf -- ${quote(dir)}`)} EXIT; tar -xf - -C ${quote(dir)} || exit 1; ${input.mode === "full" ? "" : `builtin cd ${quote(dir)} || exit 1; `}timeout --signal=TERM --kill-after=5s ${Math.ceil(input.timeoutMs / 1000)}s ${codexArgs(bin, input, dir, ".").map(quote).join(" ")} < ${quote(within(dir, "prompt.txt"))}`;
   const entries = [{ name: "prompt.txt", bytes: encode(input.prompt) }, { name: "system.txt", bytes: encode(input.system) }];
   for (const file of completionFiles(input)) entries.push({ name: file.name, bytes: new Uint8Array(await Bun.file(file.path).arrayBuffer()) });
   return { command, dir, archive: ustar(entries) };

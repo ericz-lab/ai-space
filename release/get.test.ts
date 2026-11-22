@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { WINDOWS } from "../src/space/testing.ts";
 
 /**
  * release/get.sh, the one-command installer, against a release made up here: a Server archive whose
@@ -18,6 +19,9 @@ const MAC: Machine = { os: "Darwin", cpu: "arm64" };
 const platOf = (m: Machine) => `${m.os === "Linux" ? "linux" : "macos"}-${m.cpu === "x86_64" ? "x64" : "arm64"}`;
 
 let root = "";
+
+/** get.sh and install.sh are the Linux and macOS installers; Windows has get.ps1 (get-ps1.test.ts). */
+const posixOnly = test.skipIf(WINDOWS);
 
 async function release(dir: string, opts: { version: string; badSum?: boolean; machine?: Machine }): Promise<string> {
   const name = `ai-space-server-${opts.version}-${platOf(opts.machine ?? LINUX)}`;
@@ -77,7 +81,7 @@ describe("the one-command installer", () => {
     expect(await Bun.spawn(["bash", "-n", SCRIPT]).exited).toBe(0);
   });
 
-  test("finds this machine's archive in the latest release, checks it and runs its installer", async () => {
+  posixOnly("finds this machine's archive in the latest release, checks it and runs its installer", async () => {
     const dir = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9" });
     const r = await run(dir);
     expect(r.err).toBe("");
@@ -88,7 +92,7 @@ describe("the one-command installer", () => {
     expect(r.out).toContain("No agent CLI found yet");
   });
 
-  test("names the port the workspace uses, and the SSH forward when it runs over SSH", async () => {
+  posixOnly("names the port the workspace uses, and the SSH forward when it runs over SSH", async () => {
     const dir = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9" });
     const r = await run(dir, { SPACE_PORT: "18765", SSH_CONNECTION: "192.0.2.2 50000 192.0.2.1 22" });
     expect(r.code).toBe(0);
@@ -96,7 +100,7 @@ describe("the one-command installer", () => {
     expect(r.out).toContain("ssh -L 18765:127.0.0.1:18765 tester@<this machine>");
   });
 
-  test("refuses an archive that does not match SHA256SUMS, before running anything", async () => {
+  posixOnly("refuses an archive that does not match SHA256SUMS, before running anything", async () => {
     const dir = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9", badSum: true });
     const r = await run(dir);
     expect(r.code).not.toBe(0);
@@ -104,7 +108,7 @@ describe("the one-command installer", () => {
     expect(r.err).toContain("does not match the release's SHA256SUMS");
   });
 
-  test("a pinned version must be the release's", async () => {
+  posixOnly("a pinned version must be the release's", async () => {
     const dir = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9" });
     const r = await run(dir, { AI_SPACE_VERSION: "v9.9.8" });
     expect(r.code).not.toBe(0);
@@ -113,7 +117,7 @@ describe("the one-command installer", () => {
     expect((await run(dir, { AI_SPACE_VERSION: "9.9.9" })).installed).toBe("installed 9.9.9");
   });
 
-  test("stops when no systemd user manager answers", async () => {
+  posixOnly("stops when no systemd user manager answers", async () => {
     const dir = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9" });
     const r = await run(dir, {}, { manager: false });
     expect(r.code).not.toBe(0);
@@ -121,7 +125,7 @@ describe("the one-command installer", () => {
     expect(r.err).toContain("no systemd user manager answers");
   });
 
-  test("on a Mac: takes the macOS archive, runs its installer and opens the panel", async () => {
+  posixOnly("on a Mac: takes the macOS archive, runs its installer and opens the panel", async () => {
     const dir = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9", machine: MAC });
     const r = await run(dir, { AI_SPACE_NO_OPEN: "" }, { machine: MAC });
     expect(r.err).toBe("");
@@ -132,7 +136,7 @@ describe("the one-command installer", () => {
     expect(r.out).toContain("runs while you are logged in");
   });
 
-  test("on a Mac over SSH: prints the forward and opens nothing", async () => {
+  posixOnly("on a Mac over SSH: prints the forward and opens nothing", async () => {
     const dir = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9", machine: MAC });
     const r = await run(dir, { AI_SPACE_NO_OPEN: "", SSH_CONNECTION: "192.0.2.2 50000 192.0.2.1 22" }, { machine: MAC });
     expect(r.code).toBe(0);
@@ -140,7 +144,7 @@ describe("the one-command installer", () => {
     expect(r.out).toContain("ssh -L 8700:127.0.0.1:8700 tester@<this machine>");
   });
 
-  test("an Intel Mac, and a Mac with nobody logged in, are told why", async () => {
+  posixOnly("an Intel Mac, and a Mac with nobody logged in, are told why", async () => {
     const dir = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9", machine: MAC });
     const intel = await run(dir, {}, { machine: { os: "Darwin", cpu: "x86_64" } });
     expect(intel.code).not.toBe(0);
@@ -151,7 +155,7 @@ describe("the one-command installer", () => {
     expect(nobody.err).toContain("no login session on the Mac");
   });
 
-  test("leaves a workspace of the AI Space app alone, on either system", async () => {
+  posixOnly("leaves a workspace of the AI Space app alone, on either system", async () => {
     for (const machine of [LINUX, MAC]) {
       const dir = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9", machine });
       const home = await mkdtemp(join(root, "home-"));

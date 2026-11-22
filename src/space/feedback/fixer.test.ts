@@ -192,8 +192,8 @@ describe("deploy from origin", () => {
       expect(r.ok).toBe(true);
       expect(ran).toEqual([
         "rev-parse --show-toplevel", "rev-parse --abbrev-ref HEAD", "status --porcelain", "remote get-url deploy", "pull --ff-only origin main", "rev-parse HEAD",
-        `(apps/usage) fetch ${src} main`,
-        `(apps/usage) merge-base --is-ancestor HEAD ${rev}`,
+        `(${join("apps", "usage")}) fetch ${src} main`,
+        `(${join("apps", "usage")}) merge-base --is-ancestor HEAD ${rev}`,
       ]);
       expect(spaceRan).toEqual([`(workspace) app deploy usage --rev ${rev}`]);
       expect(r.log).toContain(`$ space app deploy usage --rev ${rev}\nusage: deployed`);

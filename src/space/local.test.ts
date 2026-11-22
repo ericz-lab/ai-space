@@ -7,11 +7,15 @@ import { packApplication } from "./packages/pack.ts";
 import { LOCAL_LABEL, LOCAL_UNIT, LocalError, type LocalDeps, type LocalPlatform, findRuntimes, isHarnessAppCli, localInstall, localPaths, localRemoveService, localStatus, localStop, localStart, renderLocalPlist, renderLocalRuntimes, renderLocalUnit, readActivity } from "./local.ts";
 import { parseRuntimesYaml } from "./runtimes/config.ts";
 import { Database } from "bun:sqlite";
+import { WINDOWS, removeTemp } from "./testing.ts";
 
 // The Local edition's install, upgrade, rollback and removal, with a stand-in for launchctl that
 // runs the plist's program the way launchd would: real service processes on a temporary workspace.
 
 const REPO = resolve(import.meta.dir, "..", "..");
+// The Local edition runs on a Mac or on Linux; on Windows it runs inside WSL 2 (docs/local.md#on-windows), never on
+// the Windows host, whose paths, shell scripts and links these tests cannot stand in for.
+const localOnly = test.skipIf(WINDOWS);
 const roots: string[] = [];
 // The services these tests start get a home of their own: with the developer's HOME a service under
 // SPACE_SUPERVISOR=space sweeps ~/Library/LaunchAgents (or the systemd user directory) and removes the
@@ -28,7 +32,7 @@ afterEach(async () => {
   procs.clear();
 });
 afterAll(async () => {
-  for (const r of roots) await rm(r, { recursive: true, force: true });
+  for (const r of roots) await removeTemp(r);
 });
 
 /** A release tree like the app's Resources/space, linking to this checkout's files. */
@@ -203,7 +207,7 @@ async function setup(platform: LocalPlatform = "darwin") {
 }
 
 describe("agent CLIs", () => {
-  test("a chosen path must identify the expected agent; null leaves that one out", async () => {
+  localOnly("a chosen path must identify the expected agent; null leaves that one out", async () => {
     const root = await mkdtemp(join(tmpdir(), "space-local-rt-"));
     roots.push(root);
     const exe = join(root, "my claude");
@@ -229,7 +233,7 @@ describe("agent CLIs", () => {
     expect(await findRuntimes({ PATH: "/usr/bin:/bin" }, root, { claude: exe, codex: null, dsh: null })).toEqual({ claude: null, codex: null, dsh: null });
   });
 
-  test("a chosen DeepSeek Harness CLI must answer with a version and name the harness", async () => {
+  localOnly("a chosen DeepSeek Harness CLI must answer with a version and name the harness", async () => {
     const root = await mkdtemp(join(tmpdir(), "space-local-dsh-"));
     roots.push(root);
     const exe = join(root, "dsh");
@@ -276,7 +280,7 @@ describe("agent CLIs", () => {
 });
 
 describe("space local", () => {
-  test("a new workspace with no agent CLI is refused before anything is installed", async () => {
+  localOnly("a new workspace with no agent CLI is refused before anything is installed", async () => {
     const { root, workspace, deps } = await setup();
     await rm(workspace, { recursive: true });
     const v1 = await fakeRelease(join(root, "app1"), "0.1.0", "a".repeat(40));
@@ -287,7 +291,7 @@ describe("space local", () => {
     expect((await localStatus(none)).state).toBe("absent");
   });
 
-  test("a runtimes.yaml the workspace already has is left as it is", async () => {
+  localOnly("a runtimes.yaml the workspace already has is left as it is", async () => {
     const { root, workspace, port, deps } = await setup();
     await Bun.write(join(workspace, "installation.json"), JSON.stringify({ managedBy: "ai-space-local", installedAt: "2026-10-18T00:00:00.000Z", version: "0.0.0", release: "none" }));
     const mine = "default: api\nruntimes:\n  api:\n    kind: anthropic-api\n";
@@ -326,7 +330,7 @@ describe("space local", () => {
     expect(await readActivity({ ...deps("/unused"), fetch: (async (_input: string | URL | Request) => new Response("", { status: 404 })) as typeof fetch }, workspace, 1)).toBeUndefined();
   });
 
-  test("the LaunchAgent runs the current release's Bun on the workspace, edition local", () => {
+  localOnly("the LaunchAgent runs the current release's Bun on the workspace, edition local", () => {
     const p = localPaths({ SPACE_HOME: "/Users/u/.ai-space" }, "/Users/u", "darwin");
     const text = renderLocalPlist(p);
     expect(text).toContain(`<string>${LOCAL_LABEL}</string>`);
@@ -336,7 +340,7 @@ describe("space local", () => {
     expect(text).toContain("<key>SuccessfulExit</key><false/>");
   });
 
-  test("installs, starts as managed, upgrades, rolls a broken release back, stops, removes the service", async () => {
+  localOnly("installs, starts as managed, upgrades, rolls a broken release back, stops, removes the service", async () => {
     const { root, workspace, port, log, deps, claude } = await setup();
     // A workspace holding only the port is still "absent"-like? No: it has a file, so it would be foreign.
     // The app writes the port into a fresh workspace after this check; here we clear it for the first install.
@@ -407,7 +411,7 @@ describe("space local", () => {
     expect(log.filter((v) => v === "bootstrap").length).toBeGreaterThanOrEqual(4);
   }, 120_000);
 
-  test("an upgrade waits for the work in progress, and a failed one gets space.db back", async () => {
+  localOnly("an upgrade waits for the work in progress, and a failed one gets space.db back", async () => {
     const { root, workspace, port, deps } = await setup();
     await rm(workspace, { recursive: true });
     await mkdir(workspace);
@@ -477,7 +481,7 @@ describe("space local", () => {
 
   }, 120_000);
 
-  test("a workspace this app did not make is foreign: install refuses, migrate takes it once it is stopped", async () => {
+  localOnly("a workspace this app did not make is foreign: install refuses, migrate takes it once it is stopped", async () => {
     const { root, workspace, port, deps } = await setup();
     await Bun.write(join(workspace, "AGENTS.local.md"), "mine\n");
     const v1 = await fakeRelease(join(root, "app"), "0.1.0", "d".repeat(40));
@@ -511,7 +515,7 @@ describe("space local", () => {
     expect((await localStatus(deps(v1))).state).toBe("managed");
   }, 120_000);
 
-  test("stop, start and remove refuse an installation this app does not own", async () => {
+  localOnly("stop, start and remove refuse an installation this app does not own", async () => {
     const { root, deps } = await setup();
     const v1 = await fakeRelease(join(root, "app"), "0.1.0", "e".repeat(40));
     await expect(localStop(deps(v1))).rejects.toMatchObject({ code: "not-installed" });
@@ -521,14 +525,14 @@ describe("space local", () => {
 });
 
 describe("the Local edition on Linux", () => {
-  test("paths follow the XDG directories, apart from the Server edition's", () => {
+  localOnly("paths follow the XDG directories, apart from the Server edition's", () => {
     const p = localPaths({}, "/home/u", "linux");
     expect(p).toMatchObject({ prefix: "/home/u/.local/share/ai-space/local", current: "/home/u/.local/share/ai-space/local/current", unitFile: "/home/u/.config/systemd/user/ai-space-local.service", workspace: "/home/u/.ai-space" });
     const x = localPaths({ XDG_DATA_HOME: "/d", XDG_CONFIG_HOME: "/c", SPACE_HOME: "/w" }, "/home/u", "linux");
     expect(x).toMatchObject({ prefix: "/d/ai-space/local", unitFile: "/c/systemd/user/ai-space-local.service", workspace: "/w", logs: "/w/logs" });
   });
 
-  test("the user unit runs the current release's Bun on the workspace, quoted for systemd", () => {
+  localOnly("the user unit runs the current release's Bun on the workspace, quoted for systemd", () => {
     const p = localPaths({ SPACE_HOME: "/home/u/my space" }, "/home/u", "linux");
     const text = renderLocalUnit({ ...p, current: "/opt/100% ai/current" });
     expect(text).toContain('ExecStart="/opt/100%% ai/current/runtime/bun" "/opt/100%% ai/current/src/index.ts" "start"');
@@ -540,7 +544,7 @@ describe("the Local edition on Linux", () => {
     expect(systemdWords('"/opt/100%% ai/bun" "a \\"b\\"" "$$HOME"')).toEqual(["/opt/100% ai/bun", 'a "b"', "$HOME"]);
   });
 
-  test("installs as a systemd user unit, stops, starts and removes it; the workspace stays", async () => {
+  localOnly("installs as a systemd user unit, stops, starts and removes it; the workspace stays", async () => {
     const { root, workspace, port, log, deps } = await setup("linux");
     await rm(workspace, { recursive: true });
     const v1 = await fakeRelease(join(root, "app1"), "0.1.0", "a".repeat(40));
@@ -573,7 +577,7 @@ describe("the Local edition on Linux", () => {
     expect(await Bun.file(join(workspace, "data", "space.db")).exists()).toBe(true);
   }, 120_000);
 
-  test("a refusal names this computer, not a Mac", async () => {
+  localOnly("a refusal names this computer, not a Mac", async () => {
     const { root, deps } = await setup("linux");
     const v1 = await fakeRelease(join(root, "app1"), "0.1.0", "a".repeat(40));
     await expect(localStart(deps(v1))).rejects.toThrow("this computer has no ai-space installed by this app");

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createNotifyRoutes } from "./api.ts";
@@ -7,6 +7,7 @@ import { loadChannels } from "./channels.ts";
 import { NotifyService } from "./engine.ts";
 import { NotifyStore } from "./store.ts";
 import { instantSleep, scriptedFetch } from "./testing.ts";
+import { removeTemp } from "../testing.ts";
 
 let dir: string;
 let store: NotifyStore;
@@ -36,7 +37,7 @@ beforeEach(async () => {
 afterEach(async () => {
   server.stop(true);
   store.close();
-  await rm(dir, { recursive: true, force: true });
+  await removeTemp(dir);
 });
 
 const post = (path: string, body: unknown, token?: string) =>

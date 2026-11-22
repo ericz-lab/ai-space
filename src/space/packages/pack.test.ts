@@ -1,14 +1,15 @@
 import { afterEach, expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
-import { chmod, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { readArchive, writeArchive } from "./archive.ts";
 import { inspectPackage, packApplication } from "./pack.ts";
+import { CAN_SYMLINK, WINDOWS, removeTemp } from "../testing.ts";
 
 const dirs: string[] = [];
-afterEach(async () => { for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true }); });
+afterEach(async () => { for (const d of dirs.splice(0)) await removeTemp(d); });
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "space-package-")); dirs.push(root);
   const dir = join(root, "app");
@@ -73,15 +74,21 @@ test("payload changes, extra files and missing files cannot bypass the index", a
 
 test("rejects source links, links in include ancestors, missing entry and native portable payload", async () => {
   const opts = await fixture();
-  await symlink("index.html", join(opts.dir, "web/link"));
-  await expect(packApplication(opts)).rejects.toThrow(/symlink/);
-  await symlink("web", join(opts.dir, "linked"));
-  await expect(packApplication({ ...opts, include: ["linked/index.html"] })).rejects.toThrow(/ancestor/);
+  // Windows makes these links only in Developer Mode; the checks below need none.
+  if (CAN_SYMLINK) {
+    await symlink("index.html", join(opts.dir, "web/link"));
+    await expect(packApplication(opts)).rejects.toThrow(/symlink/);
+    await symlink("web", join(opts.dir, "linked"));
+    await expect(packApplication({ ...opts, include: ["linked/index.html"] })).rejects.toThrow(/ancestor/);
+  }
   await expect(packApplication({ ...opts, include: [] })).rejects.toThrow(/index is absent/);
   await Bun.write(join(opts.dir, "binary"), new Uint8Array([0x7f, 69, 76, 70]));
   await expect(packApplication({ ...opts, include: ["web/index.html", "binary"] })).rejects.toThrow(/native binary/);
-  await chmod(join(opts.dir, "space.yaml"), 0o755);
-  await expect(packApplication({ ...opts, include: ["web/index.html"] })).rejects.toThrow(/non-executable/);
+  // Windows has no execute bit for chmod to set.
+  if (!WINDOWS) {
+    await chmod(join(opts.dir, "space.yaml"), 0o755);
+    await expect(packApplication({ ...opts, include: ["web/index.html"] })).rejects.toThrow(/non-executable/);
+  }
 });
 
 test("reader enforces actual decompression bounds, file types and checksum", async () => {

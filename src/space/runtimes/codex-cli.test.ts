@@ -8,8 +8,11 @@ import { spawnCollect } from "./process.ts";
 import { parseCodexTranscript } from "./transcripts.ts";
 import { fakeCodexBin } from "./testing-codex.ts";
 import type { ChatTurn, CompleteInput, ImageInput } from "./types.ts";
+import { WINDOWS } from "../testing.ts";
 
 const input = (over: Partial<CompleteInput> = {}): CompleteInput => ({ model: "gpt-6-luna", system: "Translate into Chinese. Only JSON.", prompt: "hello", tools: [], tag: "test", maxTokens: 100, timeoutMs: 3000, ...over });
+/** Where a path of the "remote" shell is on this machine: Git Bash maps its POSIX paths (`/tmp`) onto Windows ones. */
+const hostPath = (path: string) => (WINDOWS ? Bun.spawnSync(["cygpath", "-w", path]).stdout.toString().trim() : path);
 const adapter = (mode = "ok") => createCodexCli({ name: "codex", kind: "codex-cli", bin: fakeCodexBin(mode) });
 
 describe("Codex completions", () => {
@@ -29,7 +32,7 @@ describe("Codex completions", () => {
       expect(result.code).toBe(0);
       expect(JSON.parse(parseCodexOutput(result.stdout).text!).args).toContain('web_search="live"');
       expect(JSON.parse(parseCodexOutput(result.stdout).text!).system).toBe(system || null);
-      expect(await Bun.file(`${remote.dir}/system.txt`).exists()).toBe(false);
+      expect(await Bun.file(join(hostPath(remote.dir), "system.txt")).exists()).toBe(false);
     }
   });
 
@@ -83,14 +86,14 @@ describe("Codex completions", () => {
     expect(result.code).toBe(0);
     const output = parseCodexOutput(result.stdout);
     // The CLI reports its real working directory; /tmp is a symlink on macOS.
-    expect(JSON.parse(output.text!)).toMatchObject({ prompt: request.prompt, system: request.system, cwd: join(realpathSync(dirname(remote.dir)), basename(remote.dir)) });
-    expect(await Bun.file(`${remote.dir}/system.txt`).exists()).toBe(false);
+    expect(JSON.parse(output.text!)).toMatchObject({ prompt: request.prompt, system: request.system, cwd: join(realpathSync(dirname(hostPath(remote.dir))), basename(remote.dir)) });
+    expect(await Bun.file(join(hostPath(remote.dir), "system.txt")).exists()).toBe(false);
   });
   test("remote timeout kills the CLI and removes request files", async () => {
     const remote = await codexRemoteCommand(fakeCodexBin("hang"), input({ timeoutMs: 50 }));
     const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 4000 });
     expect(result.code).toBe(124);
-    expect(await Bun.file(`${remote.dir}/system.txt`).exists()).toBe(false);
+    expect(await Bun.file(join(hostPath(remote.dir), "system.txt")).exists()).toBe(false);
   });
   test("does not accept an error followed by a success envelope", () => {
     expect(parseCodexOutput('{"type":"error","message":"bad auth"}\n{"type":"turn.completed"}').error).toBe("bad auth");
