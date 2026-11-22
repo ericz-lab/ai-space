@@ -85,8 +85,8 @@ describe("Codex completions", () => {
     const result = await spawnCollect(["bash", "-lc", remote.command], { stdin: remote.archive, timeoutMs: 5000 });
     expect(result.code).toBe(0);
     const output = parseCodexOutput(result.stdout);
-    // The CLI reports its real working directory; /tmp is a symlink on macOS.
-    expect(JSON.parse(output.text!)).toMatchObject({ prompt: request.prompt, system: request.system, cwd: join(realpathSync(dirname(hostPath(remote.dir))), basename(remote.dir)) });
+    // The CLI reports its real working directory; /tmp is a symlink on macOS. realpathSync.native also expands a Windows short name (RUNNER~1).
+    expect(JSON.parse(output.text!)).toMatchObject({ prompt: request.prompt, system: request.system, cwd: join(realpathSync.native(dirname(hostPath(remote.dir))), basename(remote.dir)) });
     expect(await Bun.file(join(hostPath(remote.dir), "system.txt")).exists()).toBe(false);
   });
   test("remote timeout kills the CLI and removes request files", async () => {

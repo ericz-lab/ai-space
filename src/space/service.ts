@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { lstat, mkdir, readdir, readlink, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, normalize, resolve } from "node:path";
+import { dirname, join, normalize, resolve, sep } from "node:path";
 import { SPACE_ROOT } from "./config.ts";
 import { LOCAL_LABEL, LOCAL_UNIT, localPaths, readOwnership, readRelease } from "./local.ts";
 import { Launchctl } from "./services/launchd.ts";
@@ -520,7 +520,7 @@ export async function planUninstall(d: ServiceDeps, opts: { workspace?: boolean 
     const to = await readlink(link).catch(() => undefined);
     if (to === undefined) continue;
     const real = await realpath(link).catch(() => resolve(dirname(link), to));
-    if (real === program || real.startsWith(`${program}/`)) steps.push({ what: "link", target: link, detail: `remove the ${name} command (${link})` });
+    if (real === program || real.startsWith(program + sep)) steps.push({ what: "link", target: link, detail: `remove the ${name} command (${link})` });
   }
   if (prefix) steps.push({ what: "program", target: prefix, detail: `delete the program (${prefix})` });
   else kept.push(`${d.root}: a checkout, not a release; delete it yourself`);

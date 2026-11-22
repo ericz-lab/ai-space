@@ -29,6 +29,12 @@ let db: Db;
 let deps: BackupDeps;
 let targetDir: string;
 let clock: Date;
+/** The databases `seedApp` leaves open: the running app. `stopApps` is the app stopping. */
+const running: Database[] = [];
+const stopApps = () => {
+  for (const d of running.splice(0)) d.close();
+  Bun.gc(true); // Windows keeps a closed database's file open until its statements are collected
+};
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "space-backup-"));
@@ -40,6 +46,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  stopApps();
   await db.close();
   await removeTemp(home);
 });
@@ -55,6 +62,7 @@ async function seedApp(app: string): Promise<string> {
   live.run("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)");
   live.run("INSERT INTO notes (body) VALUES ('one'), ('two')");
   // Left open on purpose: the app is running while the snapshot is taken, and the WAL is not checkpointed.
+  running.push(live);
   await Bun.write(join(dir, "watchlist.json"), '{"a":1}');
   await Bun.write(join(dir, "sessions", "tg.session"), "binary");
   await Bun.write(join(dir, "blobs", "img", "x.png"), "png");
@@ -332,6 +340,7 @@ describe.skipIf(NO_ARCHIVE)("restore", () => {
     await runBackup(deps, { app: "keep", dataDir, spec: parseBackupSpec({ include: ["databases", "files", "blobs"] }) });
     await Bun.write(join(dataDir, "blobs", "img", "x.png"), "changed");
     await Bun.write(join(dataDir, "blobs", "new.png"), "new");
+    stopApps(); // what `stopped: true` says happened; Windows will not move a directory with an open file
     const r = await restoreSnapshot(deps, { app: "keep", inPlace: true, stopped: true });
     expect(await Bun.file(join(dataDir, "blobs", "img", "x.png")).text()).toBe("png");
     expect(await Bun.file(join(dataDir, "blobs", "new.png")).exists()).toBe(false);
@@ -345,7 +354,7 @@ describe.skipIf(NO_ARCHIVE)("restore", () => {
     await expect(restoreSnapshot(deps, { app: "keep", inPlace: true })).rejects.toThrow(/stop the app first/);
     const stopped: string[] = [];
     clock = new Date("2026-09-06T10:00:00Z");
-    const r = await restoreSnapshot(deps, { app: "keep", inPlace: true, stopService: async (a) => void stopped.push(a), now: () => clock });
+    const r = await restoreSnapshot(deps, { app: "keep", inPlace: true, stopService: async (a) => { stopApps(); stopped.push(a); }, now: () => clock });
     expect(stopped).toEqual(["keep"]);
     expect(r.dir).toBe(dataDir);
     expect(r.asideDir).toBe(`${dataDir}.pre-restore-2026-09-06T10-00-00Z`);

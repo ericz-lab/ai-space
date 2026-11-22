@@ -1,4 +1,4 @@
-import { hostname } from "node:os";
+import { homedir, hostname } from "node:os";
 import { type AuthMode, parseAuthMode } from "./auth/gate.ts";
 import { join, resolve } from "node:path";
 import { type S3Config, StorageService, openDatabase, sqliteUrl } from "./storage/index.ts";
@@ -152,7 +152,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean)
-      .map((p) => resolve(p.replace(/^~(?=$|\/)/, process.env.HOME ?? "~"))),
+      .map((p) => resolve(p.replace(/^~(?=$|\/)/, process.env.HOME ?? homedir()))),
     apiToken: env.SPACE_API_TOKEN?.trim() ?? "",
     packageTrustKeys: (env.SPACE_PACKAGE_TRUST_KEYS ?? "").split(",").map((s) => s.trim()).filter(Boolean).map((p) => resolve(ws.home, p)),
     appCatalogs: catalogSources(env.SPACE_APP_CATALOG, ws.home),
