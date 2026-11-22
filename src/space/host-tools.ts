@@ -1,4 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
+import { win32 } from "node:path";
 
 /**
  * Programs ai-space may start on the host, found deliberately. On a Mac without the Command Line
@@ -57,7 +58,11 @@ export function whichUsable(name: string, opts: { PATH?: string } = {}): string 
  * launchd (the Local edition's background service) gets only `/usr/bin:/bin:/usr/sbin:/sbin`, not a
  * terminal's shell profile, so `claude`, `codex` and the tools they call would not be found.
  */
-export function userToolDirs(home: string): string[] {
+export function userToolDirs(home: string, platform: string = process.platform): string[] {
+  if (platform === "win32") {
+    // Claude Code's installer, Bun, npm's global prefix (where `codex` lands), Volta and Cargo.
+    return [win32.join(home, ".local", "bin"), win32.join(home, ".claude", "local"), win32.join(home, ".bun", "bin"), win32.join(home, "AppData", "Roaming", "npm"), win32.join(home, ".volta", "bin"), win32.join(home, ".cargo", "bin")];
+  }
   return [
     `${home}/.local/bin`,
     `${home}/.claude/local`,
@@ -72,9 +77,33 @@ export function userToolDirs(home: string): string[] {
 }
 
 /** `path` with the user tool directories that exist appended, each once, after what it already had. */
-export function withUserToolDirs(path: string | undefined, home: string, exists: (dir: string) => boolean = existsSync): string {
-  const parts = (path ?? "").split(":").filter(Boolean);
-  for (const dir of userToolDirs(home)) if (!parts.includes(dir) && exists(dir)) parts.push(dir);
-  for (const dir of ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]) if (!parts.includes(dir)) parts.push(dir);
-  return parts.join(":");
+export function withUserToolDirs(path: string | undefined, home: string, exists: (dir: string) => boolean = existsSync, platform: string = process.platform): string {
+  // Windows separates the entries with `;` (a `:` belongs to the drive) and has no /usr/bin.
+  const windows = platform === "win32";
+  const separator = windows ? ";" : ":";
+  const parts = (path ?? "").split(separator).filter(Boolean);
+  for (const dir of userToolDirs(home, platform)) if (!parts.includes(dir) && exists(dir)) parts.push(dir);
+  if (!windows) for (const dir of ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]) if (!parts.includes(dir)) parts.push(dir);
+  return parts.join(separator);
+}
+
+type Env = Record<string, string | undefined>;
+
+/**
+ * The search path of an environment. Windows names the variable `Path` and matches it without
+ * regard to case, which `process.env` does too, but a copy of it (`{ ...process.env }`) is a plain
+ * object that keeps only the spelling it was given.
+ */
+export function pathOf(env: Env, platform: string = process.platform): string | undefined {
+  if (env.PATH !== undefined || platform !== "win32") return env.PATH;
+  const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH");
+  return key === undefined ? undefined : env[key];
+}
+
+/** A copy of `env` with `PATH` as its search path and, on Windows, no second spelling of it left to win. */
+export function withPath(env: Env, PATH: string, platform: string = process.platform): Env {
+  const copy: Env = { ...env };
+  if (platform === "win32") for (const k of Object.keys(copy)) if (k.toUpperCase() === "PATH") delete copy[k];
+  copy.PATH = PATH;
+  return copy;
 }

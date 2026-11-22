@@ -418,6 +418,26 @@ Then check, in this order:
 6. Stop a task's target once so it fails three times, or post a test notification: the message arrives on the default channel.
 7. `git push <host> main` from the laptop redeploys and the unit comes back within seconds.
 
+## Windows, from a checkout
+
+The Server starts on Windows itself, without WSL, from a checkout. This is the first step toward a one-command install there; what is listed as missing below still is.
+
+Needed: Bun (the version in `.bun-version` or newer), Git, and an agent CLI that is signed in (`claude`). In PowerShell:
+
+```powershell
+git clone https://github.com/ericz-lab/ai-space.git; cd ai-space
+bun install
+bun src/index.ts init
+bun src/index.ts start
+```
+
+`init` finds the agent CLIs on `Path` and in the per-user tool directories (`%USERPROFILE%\.local\bin`, `%APPDATA%\npm`, ...) and writes `runtimes.yaml`; `start` serves the panel on `http://127.0.0.1:8700`. What differs from Linux and macOS:
+
+- **Links.** A user without Developer Mode may not make symbolic links. The skills in `<workspace>\.claude\skills\` are directory junctions, and `CLAUDE.md` is a copy of `AGENTS.md` that ai-space rewrites with it until someone else edits the copy. With Developer Mode on, `CLAUDE.md` is a symbolic link as elsewhere.
+- **One service per workspace.** The lock on `run\service.lock` is a handle opened with no sharing instead of `flock`; a second `start` on the same workspace is refused the same way.
+
+Not there yet on Windows: installing and running apps, the background service (`space service`), the one-command installer, the web terminal, and everything that runs a `bash` or `sh` command (command tasks, `deploy:` sections, an app's installer).
+
 ## What is not covered yet
 
 - **The workspace `.env`.** `~/.ai-space/data/` is snapshotted daily to the R2 bucket once step 7 is done (see [backup.md](backup.md); `bun src/index.ts backups` lists them, `backup-verify` opens the newest). `~/.ai-space/.env` is never in a snapshot: keep a copy in the password manager.

@@ -1,11 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { lstat, mkdtemp, readlink, symlink } from "node:fs/promises";
+import { lstat, mkdtemp, readlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GUIDE_HEAD, GUIDE_TEMPLATE, LOCAL_TEMPLATE, localMachine, type Machine, machineSection, renderGuide, syncGuide } from "./guide.ts";
+import { type Linking, hostLinking } from "./links.ts";
 
 async function home(): Promise<string> {
   return mkdtemp(join(tmpdir(), "space-guide-"));
+}
+
+/** CLAUDE.md is the link to the guide, or, on a Windows host that refuses symbolic links, its copy. */
+async function expectGuideLink(h: string): Promise<void> {
+  const path = join(h, "CLAUDE.md");
+  if ((await lstat(path)).isSymbolicLink()) expect(await readlink(path)).toBe("AGENTS.md");
+  else expect(hostLinking.copies).toBe(true);
 }
 
 const box: Machine = { name: "gpu-box", hostname: "ip-10-0-0-7", user: "ops", home: "/srv/space" };
@@ -39,7 +47,7 @@ describe("guide", () => {
     expect(first.created).toEqual([join(h, "AGENTS.local.md"), join(h, "AGENTS.md"), join(h, "CLAUDE.md")]);
     expect(first.updated).toEqual([]);
     expect(await Bun.file(join(h, "AGENTS.local.md")).text()).toBe(LOCAL_TEMPLATE);
-    expect(await readlink(join(h, "CLAUDE.md"))).toBe("AGENTS.md");
+    await expectGuideLink(h);
     expect(await Bun.file(join(h, "CLAUDE.md")).text()).toBe(renderGuide(LOCAL_TEMPLATE, box));
 
     // Nothing to do the second time.
@@ -69,7 +77,7 @@ describe("guide", () => {
     const r = await syncGuide(old);
     expect(r.created).toEqual([join(old, "AGENTS.local.md"), join(old, "CLAUDE.md")]);
     expect(r.updated).toEqual([join(old, "AGENTS.md")]);
-    expect(await readlink(join(old, "CLAUDE.md"))).toBe("AGENTS.md");
+    await expectGuideLink(old);
 
     const mine = await home();
     await Bun.write(join(mine, "CLAUDE.md"), "my own rules\n");
@@ -78,8 +86,37 @@ describe("guide", () => {
     expect(await Bun.file(join(mine, "CLAUDE.md")).text()).toBe("my own rules\n");
 
     const linked = await home();
-    await symlink("/elsewhere/CLAUDE.md", join(linked, "CLAUDE.md"));
-    await syncGuide(linked);
-    expect(await readlink(join(linked, "CLAUDE.md"))).toBe("/elsewhere/CLAUDE.md");
+    if (await hostLinking.file("elsewhere.md", join(linked, "CLAUDE.md"))) {
+      await syncGuide(linked);
+      expect(await readlink(join(linked, "CLAUDE.md"))).toBe("elsewhere.md");
+    }
+  });
+
+  test("where the host refuses the link, CLAUDE.md is a copy that follows the guide until someone else changes it", async () => {
+    const copying: Linking = { file: async () => false, copies: true };
+    const h = await home();
+    expect((await syncGuide(h, box, copying)).created).toContain(join(h, "CLAUDE.md"));
+    expect((await lstat(join(h, "CLAUDE.md"))).isFile()).toBe(true);
+    expect(await Bun.file(join(h, "CLAUDE.md")).text()).toBe(renderGuide(LOCAL_TEMPLATE, box));
+    expect(await syncGuide(h, box, copying)).toEqual({ created: [], updated: [] });
+
+    // The copy follows the guide.
+    await Bun.write(join(h, "AGENTS.local.md"), "The box with the GPU.\n");
+    expect(await syncGuide(h, box, copying)).toEqual({ created: [], updated: [join(h, "AGENTS.md")] });
+    expect(await Bun.file(join(h, "CLAUDE.md")).text()).toBe(renderGuide("The box with the GPU.\n", box));
+
+    // Once the operator has written their own, it is theirs.
+    await Bun.write(join(h, "CLAUDE.md"), "my own rules\n");
+    await Bun.write(join(h, "AGENTS.local.md"), "Moved to the rack.\n");
+    expect(await syncGuide(h, box, copying)).toEqual({ created: [], updated: [join(h, "AGENTS.md")] });
+    expect(await Bun.file(join(h, "CLAUDE.md")).text()).toBe("my own rules\n");
+
+    // A host that links never rewrites a regular CLAUDE.md, even one equal to the guide.
+    const linking: Linking = { file: async () => true, copies: false };
+    const same = await home();
+    await syncGuide(same, box, copying);
+    await Bun.write(join(same, "AGENTS.local.md"), "Changed.\n");
+    expect(await syncGuide(same, box, linking)).toEqual({ created: [], updated: [join(same, "AGENTS.md")] });
+    expect(await Bun.file(join(same, "CLAUDE.md")).text()).toBe(renderGuide(LOCAL_TEMPLATE, box));
   });
 });

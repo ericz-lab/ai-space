@@ -36,13 +36,31 @@ test("an unresolved path is still checked for a stub", () => {
 });
 
 test("whichUsable finds ordinary programs and nothing for a missing one", () => {
-  expect(whichUsable("sh")).toBeTruthy();
+  expect(whichUsable(process.platform === "win32" ? "cmd" : "sh")).toBeTruthy();
   expect(whichUsable("no-such-program-ai-space")).toBeUndefined();
 });
 
 test("the user tool directories are appended once, after the PATH a service was given", async () => {
   const { withUserToolDirs } = await import("./host-tools.ts");
   const have = new Set(["/h/.local/bin", "/opt/homebrew/bin"]);
-  const p = withUserToolDirs("/usr/bin:/bin:/opt/homebrew/bin", "/h", (d) => have.has(d));
+  const p = withUserToolDirs("/usr/bin:/bin:/opt/homebrew/bin", "/h", (d) => have.has(d), "linux");
   expect(p).toBe("/usr/bin:/bin:/opt/homebrew/bin:/h/.local/bin:/usr/sbin:/sbin");
+});
+
+test("on Windows the search path is split on semicolons and gets no POSIX directories", async () => {
+  const { withUserToolDirs } = await import("./host-tools.ts");
+  const home = "C:\\Users\\me";
+  const have = new Set([`${home}\\.local\\bin`, `${home}\\AppData\\Roaming\\npm`]);
+  const p = withUserToolDirs(`C:\\Windows\\system32;${home}\\.local\\bin`, home, (d) => have.has(d), "win32");
+  expect(p).toBe(`C:\\Windows\\system32;${home}\\.local\\bin;${home}\\AppData\\Roaming\\npm`);
+});
+
+test("a copied Windows environment keeps its search path under one name", async () => {
+  const { pathOf, withPath } = await import("./host-tools.ts");
+  const copied = { Path: "C:\\bin", HOME: "C:\\Users\\me" };
+  expect(pathOf(copied, "win32")).toBe("C:\\bin");
+  expect(pathOf(copied, "linux")).toBeUndefined();
+  expect(pathOf({ PATH: "/bin", Path: "other" }, "win32")).toBe("/bin");
+  expect(withPath(copied, "C:\\tools", "win32")).toEqual({ PATH: "C:\\tools", HOME: "C:\\Users\\me" });
+  expect(withPath({ PATH: "/bin", Path: "kept" }, "/usr/bin", "linux")).toEqual({ PATH: "/usr/bin", Path: "kept" });
 });
