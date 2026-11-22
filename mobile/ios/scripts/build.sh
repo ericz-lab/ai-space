@@ -39,7 +39,7 @@ xcrun swiftc $FLAGS -parse-as-library -swift-version 5 -module-name AISpace \
 
 # The Info.plist is Xcode's, with build settings in it; fill them in and add what a Mac bundle needs.
 sed -e 's/$(EXECUTABLE_NAME)/AISpace/' -e 's/$(PRODUCT_BUNDLE_IDENTIFIER)/dev.ai-space.ios/' \
-    -e 's/$(MARKETING_VERSION)/0.2.1/' -e 's/$(CURRENT_PROJECT_VERSION)/1/' AISpace/Info.plist > "$APP/Contents/Info.plist"
+    -e 's/$(MARKETING_VERSION)/0.3.0/' -e 's/$(CURRENT_PROJECT_VERSION)/1/' AISpace/Info.plist > "$APP/Contents/Info.plist"
 PB=/usr/libexec/PlistBuddy
 $PB -c "Delete :LSRequiresIPhoneOS" "$APP/Contents/Info.plist"
 $PB -c "Add :LSMinimumSystemVersion string 14.0" "$APP/Contents/Info.plist"
