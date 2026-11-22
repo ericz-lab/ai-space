@@ -54,11 +54,11 @@ describe("the release manifest", () => {
       await Bun.write(join(dir, "ai-space-1.0.0-windows-x64.tar.gz"), "server for windows");
       await Bun.write(join(dir, "ai-space-desktop-1.0.0-macos-arm64-unsigned.dmg"), "client");
       await Bun.write(join(dir, "ai-space-desktop-1.0.0-linux-x64.tar.gz"), "linux");
-      await Bun.write(join(dir, "ai-space-desktop-1.0.0-windows-x64.zip"), "windows");
+      await Bun.write(join(dir, "ai-space-desktop-1.0.0-windows-x64.exe"), "windows");
       await Bun.write(join(dir, "install.sh"), "#!/usr/bin/env bash\n");
       await Bun.write(join(dir, "SHA256SUMS"), "stale");
       const list = await artifacts(dir);
-      expect(list.map((a) => a.name)).toEqual(["ai-space-1.0.0-linux-x64.tar.gz", "ai-space-1.0.0-windows-x64.tar.gz", "ai-space-desktop-1.0.0-linux-x64.tar.gz", "ai-space-desktop-1.0.0-macos-arm64-unsigned.dmg", "ai-space-desktop-1.0.0-windows-x64.zip", "install.sh"]);
+      expect(list.map((a) => a.name)).toEqual(["ai-space-1.0.0-linux-x64.tar.gz", "ai-space-1.0.0-windows-x64.tar.gz", "ai-space-desktop-1.0.0-linux-x64.tar.gz", "ai-space-desktop-1.0.0-macos-arm64-unsigned.dmg", "ai-space-desktop-1.0.0-windows-x64.exe", "install.sh"]);
       expect(list[0]!.sha256).toBe(new Bun.CryptoHasher("sha256").update("server").digest("hex"));
       expect(sums(list)).toBe(list.map((a) => `${a.sha256}  ${a.name}\n`).join(""));
       const text = notes({ product: "ai-space", version: "1.0.0", commit: "0123456789abcdef", created: "", artifacts: list });
@@ -68,7 +68,7 @@ describe("the release manifest", () => {
       expect(text).toContain("| `ai-space-1.0.0-windows-x64.tar.gz` | AI Space (the service and its web panel) for Windows");
       expect(text).toContain("<dir>\\install.ps1");
       expect(text).toContain("| `ai-space-desktop-1.0.0-linux-x64.tar.gz` | AI Space Desktop for Linux");
-      expect(text).toContain("| `ai-space-desktop-1.0.0-windows-x64.zip` | AI Space Desktop for Windows");
+      expect(text).toContain("| `ai-space-desktop-1.0.0-windows-x64.exe` | AI Space Desktop for Windows");
       expect(text).toContain("| `ai-space-desktop-1.0.0-macos-arm64-unsigned.dmg` | AI Space Desktop for Mac, **not signed**");
       expect(text).not.toContain("| |");
       expect(text).toContain("bash <dir>/install.sh");

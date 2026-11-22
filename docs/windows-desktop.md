@@ -102,24 +102,32 @@ The projects build on Linux too (`EnableWindowsTargeting`), which the checks use
 does the program file get its icon and version information (the SDK warns NETSDK1074 elsewhere),
 so releases are built on Windows.
 
+The app is published as one program file: a self-contained, single-file `dotnet publish`
+(`PublishSingleFile`, compressed, not trimmed, since WPF does not support trimming), so the
+computer needs no .NET. The native libraries WPF and WebView2 load (`WebView2Loader.dll` among
+them) are inside it and unpack themselves on the first start into a folder of the user's temporary
+files, named after the program file (`%TEMP%\.net\AISpace\` for the installed copy). These publish settings are passed by `build.ts`, not set in the
+project, so `dotnet build` and the tests stay a plain build.
+
 | Command | Does |
 | --- | --- |
 | `bun run windows:test` | the core library's tests (`dotnet test`) and the strings check |
-| `bun run windows:build` | `desktop/windows/build/ai-space`: `dotnet publish` for this machine's CPU, self-contained (no .NET needed on the computer), and `VERSION.json` |
+| `bun run windows:build` | `desktop/windows/build/ai-space/AISpace.exe`: the one program file for this machine's CPU, self-contained (no .NET needed on the computer) |
 | `bun desktop/windows/build.ts --arch arm64 --out <dir>` | the same for the other CPU |
-| `bun release/windows.ts --arch x64` (`bun run release:windows`) | the app as `ai-space-desktop-<version>-windows-x64.zip` in `dist/` ([release.md](release.md)) |
+| `bun release/windows.ts --arch x64` (`bun run release:windows`) | the app as `ai-space-desktop-<version>-windows-x64.exe` in `dist/` ([release.md](release.md)) |
 
 ## Installing
 
 Needs Windows 10 1809 or later, or Windows 11, and the Microsoft Edge WebView2 Runtime, which
 Windows 11 and an up-to-date Windows 10 have; without it the app offers Microsoft's download.
 
-Unzip a release (or a build) and run `AISpace.exe`. It runs from where it is, and once asks to
-install itself for this user, with no administrator:
+Download a release's `ai-space-desktop-<version>-windows-<arch>.exe` (or build `AISpace.exe`) and
+run it. It runs from where it is, and once asks to install itself for this user, with no
+administrator; installing copies only that one file, as `AISpace.exe`:
 
 | Where | What |
 | --- | --- |
-| `%LOCALAPPDATA%\Programs\AI Space\` | the app, replaced on every install or update |
+| `%LOCALAPPDATA%\Programs\AI Space\` | `AISpace.exe`, the app; the folder is replaced whole on every install or update, so an older installation's files go too |
 | Start menu › AI Space | the shortcut (it also names the app in notifications) |
 | Settings › Apps › Installed apps | the uninstall entry (`HKCU\…\Uninstall\dev.ai-space.windows`) |
 | `HKCU\Software\Classes\aispace` | the `aispace://` link handler |

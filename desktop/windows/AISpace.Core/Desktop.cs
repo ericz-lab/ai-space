@@ -150,6 +150,50 @@ public static class Install
 
     public static string Directory(string localAppData) => Path.Combine(localAppData, "Programs", DisplayName);
 
+    /// <summary>Whether <paramref name="exe"/> is the installed program, not a copy run from elsewhere.</summary>
+    public static bool IsInstalled(string exe, string directory) =>
+        string.Equals(Path.GetFullPath(exe), Path.GetFullPath(Path.Combine(directory, ExeName)), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Puts the one-file program <paramref name="exe"/> (however the download is named) into
+    /// <paramref name="directory"/> as <see cref="ExeName"/>. A new folder replaces the old one whole,
+    /// so the files of an older installation (a folder of libraries) go too; when the swap fails the
+    /// old folder is put back. Returns why the old folder could not be removed afterwards, or null.
+    /// </summary>
+    public static string? Place(string exe, string directory)
+    {
+        var part = directory + ".new";
+        if (System.IO.Directory.Exists(part)) System.IO.Directory.Delete(part, true);
+        System.IO.Directory.CreateDirectory(part);
+        File.Copy(exe, Path.Combine(part, ExeName));
+        if (!System.IO.Directory.Exists(directory))
+        {
+            System.IO.Directory.Move(part, directory);
+            return null;
+        }
+        var old = directory + ".old";
+        if (System.IO.Directory.Exists(old)) System.IO.Directory.Delete(old, true);
+        System.IO.Directory.Move(directory, old);
+        try
+        {
+            System.IO.Directory.Move(part, directory);
+        }
+        catch
+        {
+            System.IO.Directory.Move(old, directory);
+            throw;
+        }
+        try
+        {
+            System.IO.Directory.Delete(old, true);
+            return null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return e.Message;
+        }
+    }
+
     public static string ProtocolCommand(string exe) => $"\"{exe}\" \"%1\"";
 
     /// <summary>Start at sign-in: in the background, the window stays closed.</summary>

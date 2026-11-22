@@ -8,7 +8,7 @@ namespace AISpace.Shell;
 /// The per-user installation (docs/windows-desktop.md#installing): the program under
 /// <c>%LOCALAPPDATA%\Programs\AI Space</c>, a Start menu shortcut, the <c>aispace:</c> link handler,
 /// start at sign-in and an entry in Installed apps, all in the user's own registry hive, so no
-/// administrator is needed. A copy run from elsewhere (just unpacked) offers to install itself.
+/// administrator is needed. A copy run from elsewhere (just downloaded) offers to install itself.
 /// </summary>
 internal static class Registration
 {
@@ -22,7 +22,7 @@ internal static class Registration
 
     public static string Shortcut => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), Install.DisplayName + ".lnk");
 
-    public static bool IsInstalled => string.Equals(Path.GetFullPath(AppContext.BaseDirectory).TrimEnd('\\'), Path.GetFullPath(InstallDirectory).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+    public static bool IsInstalled => Install.IsInstalled(Exe, InstallDirectory);
 
     /// <summary>The installed copy's version, when there is one.</summary>
     public static string? InstalledVersion()
@@ -81,35 +81,12 @@ internal static class Registration
         }
     }
 
-    /// <summary>Copies this program into the installation folder and registers it there; returns the installed program.</summary>
+    /// <summary>Copies this program (one file) into the installation folder and registers it there; returns the installed program.</summary>
     public static string InstallCopy()
     {
-        var source = Path.GetFullPath(AppContext.BaseDirectory);
         var dest = InstallDirectory;
-        // A newer copy replaces the files of the older one; files it no longer has go.
-        var part = dest + ".new";
-        if (Directory.Exists(part)) Directory.Delete(part, true);
-        CopyTree(source, part);
-        if (Directory.Exists(dest))
-        {
-            var old = dest + ".old";
-            if (Directory.Exists(old)) Directory.Delete(old, true);
-            Directory.Move(dest, old);
-            Directory.Move(part, dest);
-            try
-            {
-                Directory.Delete(old, true);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                Log.Write($"install: could not remove the old copy: {e.Message}");
-            }
-        }
-        else
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-            Directory.Move(part, dest);
-        }
+        // Only the running program file: the folder it was downloaded to holds the person's other files.
+        if (Install.Place(Exe, dest) is { } left) Log.Write($"install: could not remove the old copy: {left}");
         var exe = InstalledExe;
         Native.CreateShortcut(Shortcut, exe, "AI Space");
         using (var k = Registry.CurrentUser.CreateSubKey(Install.UninstallKey))
@@ -172,13 +149,6 @@ internal static class Registration
         if (!Directory.Exists(dir)) return;
         // The running program cannot delete itself: a hidden shell does, a moment after it exits.
         Try(() => Process.Start(new ProcessStartInfo("cmd.exe", $"/d /c timeout /t 3 /nobreak >nul & rmdir /s /q \"{dir}\"") { CreateNoWindow = true, UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden }));
-    }
-
-    private static void CopyTree(string from, string to)
-    {
-        Directory.CreateDirectory(to);
-        foreach (var file in Directory.EnumerateFiles(from)) File.Copy(file, Path.Combine(to, Path.GetFileName(file)), true);
-        foreach (var dir in Directory.EnumerateDirectories(from)) CopyTree(dir, Path.Combine(to, Path.GetFileName(dir)));
     }
 
     private static long Size(string dir) => new DirectoryInfo(dir).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);

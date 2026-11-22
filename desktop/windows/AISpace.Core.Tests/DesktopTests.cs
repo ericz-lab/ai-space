@@ -32,6 +32,46 @@ public class DesktopTests
     }
 
     [Fact]
+    public void InstallingPlacesOnlyTheProgramFileUnderItsOwnName()
+    {
+        using var dir = new TempDir();
+        var downloads = dir.File("Downloads");
+        Directory.CreateDirectory(downloads);
+        var download = Path.Combine(downloads, "ai-space-desktop-1.2.3-windows-x64.exe");
+        File.WriteAllText(download, "new");
+        File.WriteAllText(Path.Combine(downloads, "holiday.jpg"), "not ours");
+        var dest = Install.Directory(dir.File("Local"));
+
+        Assert.Null(Install.Place(download, dest));
+        Assert.Equal(new[] { Install.ExeName }, Directory.GetFileSystemEntries(dest).Select(p => Path.GetFileName(p)!));
+        Assert.Equal("new", File.ReadAllText(Path.Combine(dest, Install.ExeName)));
+        Assert.True(Install.IsInstalled(Path.Combine(dest, Install.ExeName), dest));
+        Assert.False(Install.IsInstalled(download, dest));
+        Assert.True(File.Exists(download));
+    }
+
+    [Fact]
+    public void AnUpdateReplacesAFolderInstallationWhole()
+    {
+        using var dir = new TempDir();
+        var dest = Install.Directory(dir.File("Local"));
+        Directory.CreateDirectory(Path.Combine(dest, "runtimes"));
+        File.WriteAllText(Path.Combine(dest, Install.ExeName), "old");
+        File.WriteAllText(Path.Combine(dest, "AISpace.dll"), "old");
+        File.WriteAllText(Path.Combine(dest, "runtimes", "WebView2Loader.dll"), "old");
+        Directory.CreateDirectory(dest + ".new");
+        File.WriteAllText(Path.Combine(dest + ".new", "left.txt"), "an interrupted install");
+        var exe = dir.File("AISpace-new.exe");
+        File.WriteAllText(exe, "new");
+
+        Assert.Null(Install.Place(exe, dest));
+        Assert.Equal(new[] { Install.ExeName }, Directory.GetFileSystemEntries(dest).Select(p => Path.GetFileName(p)!));
+        Assert.Equal("new", File.ReadAllText(Path.Combine(dest, Install.ExeName)));
+        Assert.False(Directory.Exists(dest + ".new"));
+        Assert.False(Directory.Exists(dest + ".old"));
+    }
+
+    [Fact]
     public void PreferencesRoundTripAndSurviveAMissingFile()
     {
         using var dir = new TempDir();

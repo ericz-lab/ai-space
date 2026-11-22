@@ -90,7 +90,7 @@ internal sealed class SettingsWindow : Window
         }
         else
         {
-            install.Add(Ui.Text(L.T("This copy runs from where it was unpacked. Installing copies it under your user folder, adds it to the Start menu and to Installed apps; no administrator is needed."), 13, secondary: true));
+            install.Add(Ui.Text(L.T("This copy runs from where it was downloaded. Installing copies it under your user folder, adds it to the Start menu and to Installed apps; no administrator is needed."), 13, secondary: true));
             install.Add(Ui.Button(L.T("Install for This User"), () => _app.InstallAndRestart()));
         }
 

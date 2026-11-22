@@ -102,7 +102,7 @@ internal static partial class L
         ["this computer"] = "这台电脑",
         ["This Computer"] = "这台电脑",
         ["This computer forgets it and its sign-in. The Space itself, its agents and its data are not changed."] = "这台电脑会忘记它和它的登录状态。Space 本身、它的智能体和数据都不会改变。",
-        ["This copy runs from where it was unpacked. Installing copies it under your user folder, adds it to the Start menu and to Installed apps; no administrator is needed."] = "现在是从解压的位置运行。安装会把它复制到你的用户文件夹，并加入“开始”菜单和“已安装的应用”，不需要管理员权限。",
+        ["This copy runs from where it was downloaded. Installing copies it under your user folder, adds it to the Start menu and to Installed apps; no administrator is needed."] = "现在是从下载的位置运行。安装会把它复制到你的用户文件夹，并加入“开始”菜单和“已安装的应用”，不需要管理员权限。",
         ["Try Again"] = "重试",
         ["Uninstall AI Space"] = "卸载 AI Space",
         ["Uninstall AI Space from this computer? Spaces and their agents keep running wherever they run."] = "从这台电脑卸载 AI Space 吗？各个 Space 和它们的智能体会在原处继续运行。",

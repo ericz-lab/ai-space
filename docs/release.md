@@ -28,7 +28,7 @@ find those.
 | `ai-space-desktop-<version>-macos-arm64.dmg` | AI Space Desktop for Mac, signed with a Developer ID and notarized |
 | `ai-space-desktop-<version>-macos-arm64-unsigned.dmg` | Built when no signing identity is configured: for testing, macOS blocks it for everyone else |
 | `ai-space-desktop-<version>-linux-x64.tar.gz`, `…-linux-arm64.tar.gz` | AI Space Desktop for Linux ([linux-desktop.md](linux-desktop.md)); `./install.sh` in it installs it for the user |
-| `ai-space-desktop-<version>-windows-x64.zip`, `…-windows-arm64.zip` | AI Space Desktop for Windows ([windows-desktop.md](windows-desktop.md)), not signed; `AISpace.exe` in it runs and offers to install itself for the user |
+| `ai-space-desktop-<version>-windows-x64.exe`, `…-windows-arm64.exe` | AI Space Desktop for Windows ([windows-desktop.md](windows-desktop.md)), not signed; one program file that runs and offers to install itself for the user |
 | `install.sh`, `install.ps1` | The one-command installers of AI Space ([below](#one-command-install)); `release/get.sh` and `release/get.ps1` in the repository |
 | `SHA256SUMS` | `sha256sum -c SHA256SUMS --ignore-missing` checks a download |
 | `manifest.json` | Version, commit, the run that built it, every file's size and SHA-256 |
@@ -294,10 +294,11 @@ notarization, so `SHA256SUMS` is what a download is checked against.
 
 The **windows** job runs on Windows for x64 and arm64, after the checks, where the program file
 gets its icon and version: `bun release/windows.ts --arch <arch>` publishes the app self-contained
-(`dotnet publish -r win-<arch> --self-contained`) and zips it into one folder. By hand:
+as one program file (`dotnet publish -r win-<arch> --self-contained -p:PublishSingleFile=true`) and
+names it after the release. By hand:
 
 ```bash
-bun release/windows.ts --arch x64            # dist/ai-space-desktop-<version>-windows-x64.zip
+bun release/windows.ts --arch x64            # dist/ai-space-desktop-<version>-windows-x64.exe
 ```
 
 On Linux the app builds without its icon. Nothing is signed yet; SmartScreen asks once, and
@@ -315,7 +316,7 @@ set the service up in WSL 2: AI Space runs on Windows itself ([above](#one-comma
   `curl -fsSL https://ai-space.me/install.sh | bash` on another one.
 - On a GNOME desktop (Ubuntu 24.04): unpack AI Space Desktop, `./install.sh`, open it from the app
   grid, connect it to a Space, send a chat message, open a terminal.
-- On Windows 11 and Windows 10 (x64; arm64 when there is one): unzip AI Space Desktop, run `AISpace.exe`,
+- On Windows 11 and Windows 10 (x64; arm64 when there is one): run the downloaded AI Space Desktop `.exe`,
   install it, connect it to a Space, get an inbox notification and open it, open Quick Chat with
   its shortcut, open an `aispace://inbox` link; uninstall from Installed apps.
 - On a clean Mac: open the DMG, drag the app to Applications, open it without a Gatekeeper warning,
