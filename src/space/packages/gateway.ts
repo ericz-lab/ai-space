@@ -59,7 +59,7 @@ export class PackageGateway {
     }
     this.prune();
     if (this.tickets.size + this.sessions.size >= 1024) throw new Error("application session limit reached");
-    const label = sha256(new TextEncoder().encode(installationKey(target.spaceId, target.app))).slice(0, 40);
+    const label = originLabel(target.spaceId, target.app);
     const origin = new URL(this.base); origin.hostname = `${label}.${origin.hostname}`;
     const entry = { ...target, label, origin: origin.origin };
     this.entries.set(origin.host, entry);
@@ -234,6 +234,18 @@ export class PackageGateway {
   private prune(): void {
     for (const map of [this.tickets, this.sessions]) for (const [key, value] of map) if (value.expires <= Date.now()) map.delete(key);
   }
+}
+
+/**
+ * The host label of an installation's origin: the app's name, so the address bar says which app
+ * it is, then 16 hex digits of the installation key's hash, which keep the same app of two Spaces
+ * (and two names that read alike) on separate origins. One DNS label: an app id's `.` and `_`
+ * become `-`, runs of `-` collapse (no `xn--`), and the name part is cut to 40 characters.
+ */
+export function originLabel(spaceId: string, app: string): string {
+  const hash = sha256(new TextEncoder().encode(installationKey(spaceId, app))).slice(0, 16);
+  const name = app.replace(/[._-]+/g, "-").slice(0, 40).replace(/^-+|-+$/g, "");
+  return `${name}-${hash}`;
 }
 
 function appHeaders(raw: unknown): Headers {
