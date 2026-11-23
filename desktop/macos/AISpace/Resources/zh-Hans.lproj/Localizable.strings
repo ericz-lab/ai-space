@@ -754,22 +754,22 @@
 "Claude walks along the bottom and shows what the Space is doing. Click it to open that chat or the inbox. Space → Desk Pet shows or hides it too." = "Claude 在底部走来走去，显示 Space 正在做什么。点它可以打开对应的对话或收件箱。“Space → 桌宠”菜单也可以显示或隐藏它。";
 "Claude walks along the bottom and shows what the Space is doing: it looks on while agents work, hops in the corner while one waits for you, spins when a turn is done and sleeps when all is quiet. Click it to open that chat or the inbox. On the desktop, drag it along the bottom; right-click to hide it." = "Claude 在底部走来走去，显示 Space 正在做什么：agent 干活时它在旁边看，有 agent 等你时它在角落里跳，一轮做完时它转一圈，一切安静时它睡觉。点它可以打开对应的对话或收件箱。在桌面上可以沿底部拖动它；右键可以隐藏它。";
 
-/* First launch of the desktop app: find or install AI Space on this Mac (FirstLaunchView.swift) */
+/* First launch of the desktop app: connect to AI Space on this Mac (installed first when there is none) or on another machine (FirstLaunchView.swift) */
 "Looking for AI Space on this Mac…" = "正在这台 Mac 上查找 AI Space…";
 "Welcome to AI Space" = "欢迎使用 AI Space";
-"No AI Space was found on this Mac. Install it here, or connect to one that runs on another machine." = "这台 Mac 上没有找到 AI Space。可以在这里安装，也可以连接到另一台机器上运行的 AI Space。";
-"Install AI Space on This Mac" = "在这台 Mac 上安装 AI Space";
-"Runs the official one-command installer for your user account, with no administrator password. AI Space then runs in the background on its own: this app does not update or remove it, and deleting the app leaves it in place (`space uninstall` removes it)." = "将为你的用户账户运行官方的一键安装脚本，不需要管理员密码。之后 AI Space 会独立在后台运行：本应用不会更新或移除它，删除本应用也不会影响它（用 `space uninstall` 移除）。";
-"Connect to an AI Space on Another Machine…" = "连接到另一台机器上的 AI Space…";
+"Connect to Local AI Space" = "连接本机 AI Space";
+"Connect to a Remote AI Space…" = "连接远程 AI Space…";
+"Found on this Mac" = "已在这台 Mac 上找到";
+"Not on this Mac yet: it is downloaded and installed first" = "这台 Mac 上还没有：会先下载并安装";
+"Connecting to AI Space…" = "正在连接 AI Space…";
 "Enter the address of an AI Space that is already running on another machine." = "请输入另一台机器上已在运行的 AI Space 的地址。";
 "Installing AI Space…" = "正在安装 AI Space…";
-"This downloads AI Space and starts it in the background. It can take a few minutes." = "正在下载 AI Space 并在后台启动它，可能需要几分钟。";
-"Waiting for AI Space to start…" = "正在等待 AI Space 启动…";
 "AI Space did not start" = "AI Space 没有启动";
 "AI Space was not installed" = "AI Space 没有安装成功";
 "The installer could not be downloaded: %@" = "无法下载安装脚本：%@";
-"The installer stopped with exit code %lld. Its last lines are below." = "安装脚本已停止，退出码为 %lld。下面是它最后输出的几行。";
+"The installer stopped with exit code %lld." = "安装脚本已停止，退出码为 %lld。";
 "The installer finished, but AI Space is not answering on this Mac yet. Retry looks for it again." = "安装脚本已完成，但这台 Mac 上的 AI Space 还没有响应。点“重试”会再查找一次。";
+"Details" = "详细信息";
 "Installer output" = "安装脚本输出";
 
 /* Built-in tiles and the first-use card */
