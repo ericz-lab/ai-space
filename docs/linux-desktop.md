@@ -1,8 +1,8 @@
 # Linux desktop client
 
 Status: built and run on Ubuntu 24.04 (GNOME, Wayland). AI Space Desktop (the Client edition)
-connects to Spaces that exist: at its first launch it looks for an AI Space on this computer and,
-with none, offers to install one or to connect to another machine ([below](#first-launch)). It
+connects to Spaces that exist: at its first launch it offers to connect to the AI Space on this
+computer (installed first when there is none) or to one on another machine ([below](#first-launch)). It
 carries no service. The Local edition, no longer published, is the same app with a service inside,
 which it sets up and runs on this computer as a systemd user service ([local.md](local.md#on-linux)).
 The app follows the Mac client ([macos-desktop.md](macos-desktop.md)) where Linux allows, and says
@@ -56,29 +56,38 @@ navigation.
 
 ## First launch
 
-AI Space Desktop carries no service. Started with no saved Space, it looks for an AI Space on this
-computer (`core/first-launch.ts`, tested with `bun test`; `app/first-launch.ts` does the requests):
+AI Space Desktop carries no service. With no saved Space the welcome screen shows two entries and
+does neither by itself (`core/first-launch.ts`, tested with `bun test`; `app/first-launch.ts` does
+the requests and runs the installer; `app/welcome.ts` draws it):
+
+- **Connect to Local AI Space**: the AI Space on this computer. Under it one line says what the
+  click will do, from a look made when the screen shows: "Found on this computer", or "Not on this
+  computer yet: it is downloaded and installed first". The look saves nothing.
+- **Connect to a Remote AI Space** opens the address form.
+
+Looking for the AI Space on this computer:
 
 1. The ports: `SPACE_PORT` from the workspace's `.env` (`$SPACE_HOME/.env`, else
    `~/.ai-space/.env`) when it can be read, then 8700.
 2. `GET http://127.0.0.1:<port>/api/space`, giving up after 2 seconds; only JSON that says
    `product: "ai-space"` counts ([editions.md](editions.md#service-identity)).
-3. **Found**: it is saved as "This Computer", selected and shown. Nothing is asked.
-4. **Not found**: the welcome screen offers two things, and does neither by itself:
-   - **Install AI Space on This Computer** runs the release's own one-command installer
-     ([release.md](release.md#one-command-install)), never a copy inside the app: it downloads
-     `https://github.com/ericz-lab/ai-space/releases/latest/download/install.sh` to a file in a new
-     private temporary directory (from `$AI_SPACE_DOWNLOAD/install.sh` when that variable is set,
-     which the installer reads too: a mirror, or `file://` for a test), refuses anything that is
-     not a script, and runs `bash <file>` in the app's environment with `AI_SPACE_NO_OPEN=1` and no
-     input. Its output shows line by line. Exit code 0: the app looks again each second for up to
-     30 seconds, then saves and shows the Space. Any other code: the end of the output and Try
-     Again. No answer in that time: Try Again looks once more.
-   - **Connect to an AI Space on Another Machine** opens the address form.
 
-The Space is saved without a question only on the first look of an app that started with no saved
-Space. When the person later removes the last saved Space, the welcome screen looks again but only
-offers what it finds, in one click, so removing "This Computer" does not bring it straight back.
+A click on **Connect to Local AI Space** looks again. **Found**: it is saved as "This Computer",
+selected and shown. **Not found**: it is installed first, then connected, with only "Installing AI
+Space…" and one progress bar on the screen:
+
+- The app runs the release's own one-command installer
+  ([release.md](release.md#one-command-install)), never a copy inside the app: it downloads
+  `https://github.com/ericz-lab/ai-space/releases/latest/download/install.sh` to a file in a new
+  private temporary directory (from `$AI_SPACE_DOWNLOAD/install.sh` when that variable is set,
+  which the installer reads too: a mirror, or `file://` for a test), refuses anything that is
+  not a script, and runs `bash <file>` in the app's environment with `AI_SPACE_NO_OPEN=1` and no
+  input.
+- The bar follows the lines the installer prints at each step (`InstallProgress`,
+  [editions.md](editions.md#the-install-progress-bar)); the lines themselves are not shown.
+- Exit code 0: the app looks again each second for up to 30 seconds, then saves and shows the
+  Space. Any other code: one line of why, Try Again, and the end of the output folded under
+  Details. No answer in that time: Try Again looks once more.
 
 The app only ever installs. It never upgrades, stops or uninstalls the service: `space upgrade` and
 `space uninstall` do. Removing the app (`install.sh --uninstall`) leaves AI Space, its workspace

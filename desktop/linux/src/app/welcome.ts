@@ -4,7 +4,7 @@ import Gtk from "gi://Gtk?version=4.0";
 import Pango from "gi://Pango";
 import { classifyIdentity } from "../core/check.ts";
 import { type Connection, LOCAL_DEFAULT_URL } from "../core/connections.ts";
-import { type InstallOutcome, welcomeDecision } from "../core/first-launch.ts";
+import { type InstallOutcome, InstallProgress } from "../core/first-launch.ts";
 import type { Key } from "../core/i18n.ts";
 import { ConnectionUrlError, normalizeConnectionUrl, resolveUrl, sameOrigin } from "../core/url.ts";
 import { bytesToText, t } from "./env.ts";
@@ -17,9 +17,8 @@ import type { AppModel } from "./model.ts";
 
 /**
  * The first window, before any Space is saved (and Settings' Add). The app without a service
- * (AI Space Desktop) looks for an AI Space on this computer: at the first launch one found is
- * saved and shown without a question; with none it offers to install the standard one with the
- * release's installer, or to connect to another machine (core/first-launch.ts). The Local
+ * (AI Space Desktop) offers two entries: connect to the AI Space on this computer (installed first,
+ * behind one progress bar, when there is none) or to one on another machine (core/first-launch.ts). The Local
  * edition, which carries its service, shows its setup and the address form instead.
  */
 
@@ -115,7 +114,7 @@ export function connectForm(model: AppModel, onDone: () => void, editing?: Conne
   return box;
 }
 
-/** How many lines of the installer's output the screen keeps. */
+/** How many lines of the installer's output are kept for the failure's details. */
 const OUTPUT_LINES = 200;
 
 export class WelcomePage {
@@ -123,9 +122,10 @@ export class WelcomePage {
   private readonly body: any;
   /** The part that changes with what was found; only in the app without a service. */
   private readonly holder: any;
-  private entered = false;
   private installing = false;
   private look = 0;
+  /** What the look at this computer found: a Space's address, null for none, undefined while looking. */
+  private here: string | null | undefined;
 
   constructor(
     private readonly model: AppModel,
@@ -153,25 +153,32 @@ export class WelcomePage {
     this.widget.connect("map", () => GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => (this.widget.get_vadjustment().set_value(0), GLib.SOURCE_REMOVE)));
   }
 
-  /** The window shows this screen (again): look for a Space on this computer, then say what can be done. */
+  /**
+   * The window shows this screen (again): the two entries, at once. A look at this computer runs
+   * meanwhile, only so the first entry can say what its click will do; it saves nothing.
+   */
   enter(): void {
     if (!this.holder || this.installing) return;
-    // Only the first look of an app started with no saved Space saves what it finds unasked.
-    const atLaunch = !this.entered && this.model.startedEmpty;
-    this.entered = true;
     const look = ++this.look;
-    this.show(t("lookingLocal"), [new Gtk.Spinner({ spinning: true, halign: Gtk.Align.CENTER, width_request: 24, height_request: 24 })]);
+    this.here = undefined;
+    this.choices();
     void lookForLocalSpace().then((found) => {
-      if (look !== this.look || this.installing || this.model.current) return;
-      const d = welcomeDecision(found, atLaunch);
-      if (d.kind === "adopt") this.adopt(d.url);
-      else if (d.kind === "suggest") this.show(t("welcomeBody"), [connectForm(this.model, this.onDone, undefined, { suggest: d.url })]);
-      else this.choices();
+      if (look !== this.look || this.installing) return;
+      this.here = found ?? null;
+      if (this.note) this.note.set_label(this.hereNote());
     });
+  }
+
+  private note: any;
+
+  private hereNote(): string {
+    return this.here === undefined ? t("lookingLocal") : this.here ? t("localFound") : t("localAbsent");
   }
 
   private show(body: string, children: any[]): void {
     this.body.set_label(body);
+    this.body.set_visible(body !== "");
+    this.note = undefined;
     for (let c = this.holder.get_first_child(); c; ) {
       const next = c.get_next_sibling();
       this.holder.remove(c);
@@ -194,45 +201,50 @@ export class WelcomePage {
     return b;
   }
 
-  /** No Space here: install the standard one, or connect to another machine. Neither happens unasked. */
+  /** The two entries: the AI Space on this computer, or one on another machine. Neither happens unasked. */
   private choices(): void {
-    const about = new Gtk.Label({ label: t("installHereBody"), wrap: true, justify: Gtk.Justification.CENTER, margin_bottom: 12, css_classes: ["dim-label", "caption"] });
-    this.show(t("welcomeNoneBody"), [
-      this.button(t("installHere"), () => void this.install(), ["pill", "suggested-action"]),
-      about,
-      this.button(t("connectElsewhere"), () => this.connect(), ["pill"]),
+    const note = new Gtk.Label({ label: this.hereNote(), wrap: true, justify: Gtk.Justification.CENTER, margin_bottom: 12, css_classes: ["dim-label", "caption"] });
+    this.show(t("welcomeBody"), [
+      this.button(t("connectLocal"), () => void this.connectLocal(), ["pill", "suggested-action"]),
+      note,
+      this.button(t("connectRemote"), () => this.connect(), ["pill"]),
     ]);
+    this.note = note;
   }
 
   private connect(): void {
     this.show(t("welcomeBody"), [connectForm(this.model, this.onDone, undefined, { suggest: null }), this.button(t("back"), () => this.choices(), ["flat"])]);
   }
 
-  /** Runs the release's installer, its output on screen as it comes; then the Space it started is saved and shown. */
+  /** The first entry: the Space on this computer, looked for again at the click; installed first when there is none. */
+  private async connectLocal(): Promise<void> {
+    if (this.installing) return;
+    this.installing = true;
+    const spinner = new Gtk.Spinner({ spinning: true, halign: Gtk.Align.CENTER, width_request: 24, height_request: 24 });
+    this.show("", [new Gtk.Label({ label: t("connectingLocal"), css_classes: ["title-4"] }), spinner]);
+    const found = await lookForLocalSpace();
+    this.installing = false;
+    if (found) return this.adopt(found);
+    this.here = null;
+    await this.install();
+  }
+
+  /** Runs the release's installer behind one progress bar; then the Space it started is saved and shown. */
   private async install(again?: "look"): Promise<void> {
     if (this.installing) return;
     this.installing = true;
     const lines: string[] = [];
-    const status = new Gtk.Label({ label: t(again ? "installStarting" : "installing"), wrap: true, xalign: 0, hexpand: true });
-    const spinner = new Gtk.Spinner({ spinning: true });
-    const head = new Gtk.Box({ spacing: 10 });
-    head.append(spinner);
-    head.append(status);
-    const output = new Gtk.Label({ xalign: 0, yalign: 0, wrap: true, wrap_mode: Pango.WrapMode.WORD_CHAR, selectable: true, css_classes: ["tool-detail"] });
-    const scroll = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, min_content_height: 200, max_content_height: 200, child: output, visible: false });
-    const write = (text: string[]) => {
-      output.set_label(text.join("\n"));
-      scroll.set_visible(text.length > 0);
-      // The newest line stays in view.
-      GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-        const adj = scroll.get_vadjustment();
-        adj.set_value(adj.get_upper() - adj.get_page_size());
-        return GLib.SOURCE_REMOVE;
-      });
+    const meter = new InstallProgress(Date.now(), again ? "starting" : "fetching");
+    const status = new Gtk.Label({ label: t("installing"), css_classes: ["title-4"] });
+    const bar = new Gtk.ProgressBar({ fraction: meter.value(Date.now()), margin_start: 24, margin_end: 24 });
+    let shown = 0;
+    const tick = () => {
+      shown = Math.max(shown, meter.value(Date.now()));
+      bar.set_fraction(shown);
     };
-    const buttons = new Gtk.Box({ spacing: 8, halign: Gtk.Align.END, visible: false });
-    this.show("", [head, scroll, buttons]);
-    this.body.set_visible(false);
+    // The bar creeps on within a step, four times a second, while the installer runs.
+    const timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => (tick(), GLib.SOURCE_CONTINUE));
+    this.show("", [status, bar]);
 
     let outcome: InstallOutcome;
     try {
@@ -244,27 +256,33 @@ export class WelcomePage {
           line: (line) => {
             lines.push(line);
             if (lines.length > OUTPUT_LINES) lines.shift();
-            write(lines);
+            meter.read(line, Date.now());
+            tick();
           },
-          starting: () => status.set_label(t("installStarting")),
+          starting: () => (meter.enter("starting", Date.now()), tick()),
         });
       }
     } catch (e) {
       outcome = { ok: false, reason: "failed", code: -1, tail: [e instanceof Error ? e.message : String(e)] };
     }
+    GLib.source_remove(timer);
     this.installing = false;
-    this.body.set_visible(true);
-    if (outcome.ok) return this.adopt(outcome.url);
+    if (outcome.ok) {
+      bar.set_fraction(1);
+      return this.adopt(outcome.url);
+    }
 
-    // What went wrong, the end of what the installer said, and another go.
-    spinner.set_visible(false);
-    status.add_css_class("error");
-    status.set_label(outcome.reason === "download" ? t("installDownloadFailed") : outcome.reason === "silent" ? t("installSilent") : t("installFailed", { code: outcome.code ?? -1 }));
-    this.body.set_label(t("welcomeNoneBody"));
-    write(outcome.tail);
-    const silent = outcome.reason === "silent";
+    // What went wrong in one line, the installer's last lines folded away, and another go.
+    const why = new Gtk.Label({ label: outcome.reason === "download" ? t("installDownloadFailed") : outcome.reason === "silent" ? t("installSilent") : t("installFailed", { code: outcome.code ?? -1 }), wrap: true, justify: Gtk.Justification.CENTER, css_classes: ["error"] });
+    const children: any[] = [why];
+    if (outcome.tail.length) {
+      const output = new Gtk.Label({ label: outcome.tail.join("\n"), xalign: 0, yalign: 0, wrap: true, wrap_mode: Pango.WrapMode.WORD_CHAR, selectable: true, css_classes: ["tool-detail"] });
+      children.push(new Gtk.Expander({ label: t("details"), child: output }));
+    }
+    const buttons = new Gtk.Box({ spacing: 8, halign: Gtk.Align.CENTER });
     buttons.append(this.button(t("back"), () => this.choices(), ["flat"]));
-    buttons.append(this.button(t("tryAgain"), () => void this.install(silent ? "look" : undefined), ["pill", "suggested-action"]));
-    buttons.set_visible(true);
+    buttons.append(this.button(t("tryAgain"), () => void this.install(outcome.ok === false && outcome.reason === "silent" ? "look" : undefined), ["pill", "suggested-action"]));
+    children.push(buttons);
+    this.show("", children);
   }
 }
