@@ -11,13 +11,15 @@ import {
   installerEnviron,
   installerProblem,
   installerUrl,
+  INSTALL_STAGES,
+  InstallProgress,
+  installStageOf,
   installLocalSpace,
   localSpaceUrl,
   outputTail,
   portFromEnv,
   type Probe,
   waitForLocalSpace,
-  welcomeDecision,
   workspaceEnvFile,
 } from "./first-launch.ts";
 
@@ -104,13 +106,6 @@ describe("looking for a Space on this computer", () => {
     expect(await findLocalSpace([8700], probeOf({ "http://127.0.0.1:8700/api/space": { status: 200, body: "<html></html>" } }))).toBeUndefined();
     expect(await findLocalSpace([8700], probeOf({ "http://127.0.0.1:8700/api/space": { status: 404, body: "" } }))).toBeUndefined();
     expect(await findLocalSpace([8700], probeOf({}))).toBeUndefined();
-  });
-
-  test("found at launch is saved without a question; later it is only offered; none gives the choices", () => {
-    expect(welcomeDecision("http://127.0.0.1:8700/", true)).toEqual({ kind: "adopt", url: "http://127.0.0.1:8700/" });
-    expect(welcomeDecision("http://127.0.0.1:8700/", false)).toEqual({ kind: "suggest", url: "http://127.0.0.1:8700/" });
-    expect(welcomeDecision(undefined, true)).toEqual({ kind: "offer" });
-    expect(welcomeDecision(undefined, false)).toEqual({ kind: "offer" });
   });
 
   test("waiting looks again until a Space answers", async () => {
@@ -243,5 +238,40 @@ describe("the installer", () => {
     const r = await w.run();
     expect(r).toEqual({ ok: false, reason: "silent", tail: ["ai-space: downloading", "ai-space is running."] });
     expect(w.seen.looks).toBe(31);
+  });
+});
+
+describe("the install progress bar", () => {
+  test("the installer's lines mark its steps, on Linux and Windows alike", () => {
+    expect(installStageOf("ai-space: looking for the latest release for linux-x64")).toBe("looking");
+    expect(installStageOf("ai-space: downloading ai-space-0.3.0-linux-x64.tar.gz")).toBe("downloading");
+    expect(installStageOf("ai-space 0.3.0 (bd7cae0) in /home/a/.local/share/ai-space/releases/0.3.0")).toBe("placing");
+    expect(installStageOf("ai-space 0.3.0 (bd7cae0) in C:\\Users\\a\\AppData\\Local\\ai-space\\releases\\0.3.0")).toBe("placing");
+    expect(installStageOf("ai-space core: installed, answering on 127.0.0.1:8700 (workspace /home/a/.ai-space)")).toBe("apps");
+    expect(installStageOf("ai-space is running. Open the panel: http://127.0.0.1:8700/")).toBe("starting");
+    expect(installStageOf("default apps: an installer failed")).toBeUndefined();
+  });
+
+  test("the bar only goes forward and stays below 1", () => {
+    let t = 1_000_000;
+    const p = new InstallProgress(t);
+    let last = p.value(t);
+    expect(last).toBe(0);
+    for (const line of ["ai-space: looking for x", "ai-space: downloading x.tar.gz", "noise", "ai-space 0.3.0 (abc) in /x", "ai-space core: installed, answering", "ai-space is running."]) {
+      t += 600_000;
+      const creeping = p.value(t);
+      expect(creeping).toBeGreaterThanOrEqual(last);
+      p.read(line, t);
+      last = p.value(t);
+      expect(last).toBeGreaterThanOrEqual(creeping);
+    }
+    expect(p.stage).toBe("starting");
+    expect(p.value(t + 3_600_000)).toBeLessThan(1);
+    p.read("ai-space: downloading again", t);
+    expect(p.stage).toBe("starting");
+  });
+
+  test("each step starts above the ceiling of the one before", () => {
+    for (let i = 1; i < INSTALL_STAGES.length; i++) expect(INSTALL_STAGES[i - 1]!.to).toBeLessThanOrEqual(INSTALL_STAGES[i]!.from);
   });
 });

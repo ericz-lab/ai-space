@@ -160,3 +160,47 @@ struct SpaceInstallerTests {
         }
     }
 }
+
+struct InstallProgressTests {
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    @Test func theInstallersLinesMarkItsSteps() {
+        #expect(InstallProgress.stage(of: "ai-space: looking for the latest release for macos-arm64") == .looking)
+        #expect(InstallProgress.stage(of: "ai-space: downloading ai-space-0.3.0-macos-arm64.tar.gz") == .downloading)
+        #expect(InstallProgress.stage(of: "ai-space 0.3.0 (bd7cae0) in /Users/a/.local/share/ai-space/releases/0.3.0") == .placing)
+        #expect(InstallProgress.stage(of: "ai-space core: installed, answering on 127.0.0.1:8700 (workspace /Users/a/.ai-space)") == .apps)
+        #expect(InstallProgress.stage(of: "ai-space is running. Open the panel: http://127.0.0.1:8700/") == .starting)
+        #expect(InstallProgress.stage(of: "default apps: an installer failed") == nil)
+        #expect(InstallProgress.stage(of: "") == nil)
+    }
+
+    @Test func theBarOnlyGoesForward() {
+        var p = InstallProgress(at: t0)
+        var last = p.value(at: t0)
+        #expect(last == 0)
+        let script = ["ai-space: looking for the latest release", "ai-space: downloading x.tar.gz", "noise",
+                      "ai-space 0.3.0 (abc) in /x", "ai-space core: installed, answering", "ai-space is running."]
+        var time = t0
+        for line in script {
+            // A long step creeps toward its ceiling and never passes the next step's start.
+            time = time.addingTimeInterval(600)
+            let creeping = p.value(at: time)
+            #expect(creeping >= last && creeping < p.stage.span.to + 1e-9)
+            p.read(line, at: time)
+            let now = p.value(at: time)
+            #expect(now >= creeping)
+            last = now
+        }
+        #expect(p.stage == .starting)
+        #expect(p.value(at: time.addingTimeInterval(3600)) < 1)
+        // An earlier step's line later on does not move the bar back.
+        p.read("ai-space: downloading again", at: time)
+        #expect(p.stage == .starting)
+    }
+
+    @Test func eachStepStartsAboveTheCeilingOfTheOneBefore() {
+        let all = InstallProgress.Stage.allCases
+        for (a, b) in zip(all, all.dropFirst()) { #expect(a.span.to <= b.span.from) }
+        #expect(all.last!.span.to < 1)
+    }
+}

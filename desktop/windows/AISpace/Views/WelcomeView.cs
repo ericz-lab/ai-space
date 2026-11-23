@@ -6,9 +6,10 @@ using AISpace.Core;
 namespace AISpace.Views;
 
 /// <summary>
-/// The window before any Space is saved (docs/windows-desktop.md#this-computer). The app has
-/// looked for an AI Space on this computer by then and found none, so the page offers two
-/// choices and takes neither by itself: install AI Space here, or connect to one elsewhere.
+/// The window before any Space is saved (docs/windows-desktop.md#this-computer): two entries, and
+/// neither is taken by itself. Connect to Local AI Space uses the one on this computer, installing
+/// it first behind a single progress bar when there is none; Connect to a Remote AI Space opens the
+/// address form.
 /// </summary>
 internal static class WelcomeView
 {
@@ -18,30 +19,29 @@ internal static class WelcomeView
         var icon = BitmapDecoder.Create(new Uri("pack://application:,,,/Assets/AISpace.ico"), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
         var logo = new System.Windows.Controls.Image { Source = icon.Frames.MaxBy(f => f.PixelWidth), Width = 64, Height = 64, HorizontalAlignment = HorizontalAlignment.Left };
         System.Windows.Media.RenderOptions.SetBitmapScalingMode(logo, System.Windows.Media.BitmapScalingMode.HighQuality);
+        var setup = model.ThisComputer;
         var connect = Ui.Card(ConnectForm(model));
         connect.Visibility = Visibility.Collapsed;
-        Button elsewhere = null!;
-        elsewhere = Ui.Button(L.T("Connect to an AI Space on Another Machine"), () =>
-        {
-            connect.Visibility = Visibility.Visible;
-            elsewhere.Visibility = Visibility.Collapsed;
-        });
-        var column = Ui.Column(16, logo, Ui.Text(L.T("Welcome to AI Space"), 28, bold: true), Ui.Card(ThisComputerCard(model.ThisComputer)), Ui.Row(elsewhere), connect);
-        column.Margin = new Thickness(32, 48, 32, 48);
-        column.MaxWidth = 660;
-        column.HorizontalAlignment = HorizontalAlignment.Center;
-        var scroll = new ScrollViewer { Content = column, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        Ui.Background(scroll);
-        return scroll;
-    }
 
-    /// <summary>Where the search stands, the button that installs AI Space, and what its installer prints.</summary>
-    private static FrameworkElement ThisComputerCard(ThisComputerSetup setup)
-    {
-        var status = Ui.Text("", secondary: true);
-        var note = Ui.Text(L.T("Installing downloads the latest release and runs its own installer. AI Space then runs in the background for your user, with or without this app. This app never updates or removes it: the command \"space uninstall\" does."), 12, secondary: true);
-        var install = Ui.Button(L.T("Install AI Space on This Computer"), () => _ = setup.Install(), accent: true);
-        var output = new TextBox
+        // The two entries.
+        var local = Ui.Button(L.T("Connect to Local AI Space"), () => _ = setup.ConnectLocal(), accent: true);
+        Button Remote() => Ui.Button(L.T("Connect to a Remote AI Space"), () =>
+        {
+            setup.Dismiss();
+            connect.Visibility = Visibility.Visible;
+        });
+        var remote = Remote();
+        var here = Ui.Text("", 12, secondary: true);
+        var entries = Ui.Column(8, Ui.Row(local), here, Ui.Row(remote));
+
+        // While it connects or installs: one line and one bar.
+        var status = Ui.Text("", 18, bold: true);
+        var bar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 6, MaxWidth = 420, HorizontalAlignment = HorizontalAlignment.Left };
+        var working = Ui.Column(12, status, bar);
+
+        // A failure: why in one line, Retry, and the installer's last lines folded away.
+        var why = Ui.Text("", secondary: true);
+        var tail = new TextBox
         {
             IsReadOnly = true,
             FontFamily = new System.Windows.Media.FontFamily("Cascadia Mono, Consolas"),
@@ -50,33 +50,40 @@ internal static class WelcomeView
             TextWrapping = TextWrapping.Wrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
+        var details = new Expander { Header = L.T("Details"), Content = tail };
+        var failed = Ui.Column(12, why, Ui.Row(Ui.Button(L.T("Retry"), () => _ = setup.ConnectLocal(), accent: true), Remote()), details);
+
         void Fill()
         {
             var phase = setup.Phase;
-            status.Text = phase switch
+            here.Text = setup.Here switch
             {
-                ThisComputerPhase.Looking => L.T("Looking for an AI Space on this computer…"),
-                ThisComputerPhase.Installing => L.T("Installing AI Space…"),
-                ThisComputerPhase.Failed => setup.Failure,
-                _ => L.T("No AI Space is running on this computer. Install it here, or connect to one on another machine."),
+                ThisComputerHere.Found => L.T("Found on this computer"),
+                ThisComputerHere.None => L.T("Not on this computer yet: it is downloaded and installed first"),
+                _ => L.T("Looking for an AI Space on this computer…"),
             };
-            install.Content = phase == ThisComputerPhase.Failed ? L.T("Retry") : L.T("Install AI Space on This Computer");
-            install.IsEnabled = phase is ThisComputerPhase.NotFound or ThisComputerPhase.Failed;
-            install.Visibility = phase == ThisComputerPhase.Looking ? Visibility.Collapsed : Visibility.Visible;
-            note.Visibility = phase == ThisComputerPhase.NotFound ? Visibility.Visible : Visibility.Collapsed;
-            // While it runs, every line as it comes; once it has failed, the end, which says why.
-            output.Text = phase switch
-            {
-                ThisComputerPhase.Installing => string.Join("\n", setup.Lines),
-                ThisComputerPhase.Failed => ServiceInstaller.Tail(setup.Lines),
-                _ => "",
-            };
-            output.Visibility = output.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-            output.ScrollToEnd();
+            local.IsEnabled = phase is ThisComputerPhase.Choose or ThisComputerPhase.Failed;
+            entries.Visibility = phase is ThisComputerPhase.Choose ? Visibility.Visible : Visibility.Collapsed;
+            working.Visibility = phase is ThisComputerPhase.Connecting or ThisComputerPhase.Installing ? Visibility.Visible : Visibility.Collapsed;
+            status.Text = phase == ThisComputerPhase.Installing ? L.T("Installing AI Space…") : L.T("Connecting to AI Space…");
+            bar.IsIndeterminate = phase == ThisComputerPhase.Connecting;
+            bar.Value = setup.Progress;
+            failed.Visibility = phase == ThisComputerPhase.Failed ? Visibility.Visible : Visibility.Collapsed;
+            why.Text = setup.Failure;
+            tail.Text = phase == ThisComputerPhase.Failed ? ServiceInstaller.Tail(setup.Lines) : "";
+            details.Visibility = tail.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            if (phase != ThisComputerPhase.Choose && phase != ThisComputerPhase.Failed) connect.Visibility = Visibility.Collapsed;
         }
         setup.Changed += Fill;
         Fill();
-        return Ui.Column(12, Ui.Text(L.T("AI Space on This Computer"), 18, bold: true), status, output, Ui.Row(install), note);
+
+        var column = Ui.Column(16, logo, Ui.Text(L.T("Welcome to AI Space"), 28, bold: true), entries, working, failed, connect);
+        column.Margin = new Thickness(32, 48, 32, 48);
+        column.MaxWidth = 660;
+        column.HorizontalAlignment = HorizontalAlignment.Center;
+        var scroll = new ScrollViewer { Content = column, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Ui.Background(scroll);
+        return scroll;
     }
 
     private static FrameworkElement ConnectForm(AppModel model)

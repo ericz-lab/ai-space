@@ -70,8 +70,6 @@ export class AppModel {
   readonly list: ConnectionList;
   /** Why the saved file could not be read; it was set aside under this name. */
   loadError: string | undefined;
-  /** No Space was saved when the app started: the first launch, when a Space on this computer is saved without a question (core/first-launch.ts). */
-  readonly startedEmpty: boolean;
   private readonly spaces = new Map<string, Space>();
   private currentId: string | undefined;
   private readonly listeners = new Set<(c: Change, space?: Space) => void>();
@@ -98,7 +96,6 @@ export class AppModel {
       }
     }
     this.list = new ConnectionList(saved, newId);
-    this.startedEmpty = saved.length === 0;
     this.currentId = this.list.default?.id;
   }
 

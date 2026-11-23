@@ -45,31 +45,45 @@ struct FirstLaunchTests {
 
     final class Found { var urls: [URL] = [] }
 
-    @Test func aSpaceOnThisMacIsTakenWithoutAQuestion() async {
+    @Test func theLookAtLaunchOnlySaysWhatIsHere() async {
         let mac = Mac()
         mac.answering = true
         let (first, found) = launch(mac)
         await first.look()
-        #expect(found().map(\.absoluteString) == ["http://127.0.0.1:8700/"])
-        #expect(mac.installs == 0)
-    }
-
-    @Test func withoutOneTheChoicesWaitAndNothingIsInstalled() async {
-        let mac = Mac()
-        let (first, found) = launch(mac)
-        await first.look()
+        #expect(first.here == .found(URL(string: "http://127.0.0.1:8700/")!))
         #expect(first.phase == .choose)
         #expect(found().isEmpty)
         #expect(mac.installs == 0)
     }
 
-    @Test func installingRunsTheInstallerThenSavesTheSpace() async {
+    @Test func withoutOneTheEntriesWaitAndNothingIsInstalled() async {
         let mac = Mac()
         let (first, found) = launch(mac)
         await first.look()
-        await first.install()
+        #expect(first.here == .none)
+        #expect(first.phase == .choose)
+        #expect(found().isEmpty)
+        #expect(mac.installs == 0)
+    }
+
+    @Test func connectingToALocalSpaceThatIsHereConnectsStraightAway() async {
+        let mac = Mac()
+        mac.answering = true
+        let (first, found) = launch(mac)
+        await first.look()
+        await first.connectLocal()
+        #expect(found().map(\.absoluteString) == ["http://127.0.0.1:8700/"])
+        #expect(mac.installs == 0)
+    }
+
+    @Test func connectingToALocalSpaceThatIsNotHereInstallsItFirst() async {
+        let mac = Mac()
+        let (first, found) = launch(mac)
+        await first.look()
+        await first.connectLocal()
         #expect(mac.installs == 1)
         #expect(found().map(\.absoluteString) == ["http://127.0.0.1:8700/"])
+        #expect(first.progress == 1)
         for _ in 0..<50 where first.lines.isEmpty { await Task.yield() }
         #expect(first.lines == ["ai-space: stand-in"])
     }
@@ -79,7 +93,7 @@ struct FirstLaunchTests {
         let (first, found) = launch(mac)
         await first.look()
         mac.answering = true
-        await first.install()
+        await first.connectLocal()
         #expect(mac.installs == 0)
         #expect(found().count == 1)
     }
@@ -87,7 +101,7 @@ struct FirstLaunchTests {
     @Test func aFailedInstallerCanBeRunAgain() async {
         let mac = Mac()
         let (first, found) = launch(mac, exit: 3)
-        await first.install()
+        await first.connectLocal()
         #expect(first.phase == .failed(.exit(3)))
         await first.retry()
         #expect(mac.installs == 2)
@@ -99,7 +113,7 @@ struct FirstLaunchTests {
     @Test func aFailedDownloadSaysSoAndRunsNothing() async {
         let mac = Mac()
         let (first, _) = launch(mac, download: false)
-        await first.install()
+        await first.connectLocal()
         guard case .failed(.download(let why)) = first.phase else {
             Issue.record("expected a failed download, got \(first.phase)")
             return
@@ -111,7 +125,7 @@ struct FirstLaunchTests {
     @Test func anInstalledSpaceThatDoesNotAnswerIsLookedForAgainNotReinstalled() async {
         let mac = Mac()
         let (first, found) = launch(mac, starts: false)
-        await first.install()
+        await first.connectLocal()
         #expect(first.phase == .failed(.notAnswering))
         mac.answering = true
         await first.retry()
