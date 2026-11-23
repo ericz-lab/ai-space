@@ -17,7 +17,7 @@ one click away, and the app adds what a page cannot do.
 
 | Part | What it does |
 | --- | --- |
-| Window | The bar: the Space menu (each saved Space with its state, Add a Space…); Home's places, the Library and then a tab per screen, each opening Home there ([below](#the-window)); the web tabs, one per open app, the chat, the terminal and the web panel (past five, under More); while a web tab is shown, Back, Forward, Reload and Open in Browser; and the Inbox with its count, only while something is unread. The bar has no menu: the Space's App Store, Inbox, Shortcuts, Terminal and Settings are tiles on Home and in the Library, the last four also Ctrl+2 to Ctrl+5 (Ctrl+1 is Home), the web panel has no entry of its own (it shows by itself while a Space needs a sign-in, and Settings opens its Settings for what has no native copy: Appearance, Fix this' recent requests, installing apps and connections, a task's model, peers' app models), an agent's chat is its tile, Quick Chat is the notification area's, its shortcut's and the floating ball's, and AI Space Settings… is in the notification area's menu and Settings › This Computer. The Space picker keeps one width, from the selected Space's name (a long one ends in an ellipsis), whether its list is open or not. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: Install AI Space on This Computer, or Connect to an AI Space on Another Machine with the address form ([below](#this-computer)). The window keeps its size and place, always wholly on one monitor's work area, so its title bar can be reached ([below](#the-window)) |
+| Window | The bar: the Space menu (each saved Space with its state, Add a Space…); Home's places, the Library and then a tab per screen, each opening Home there ([below](#the-window)); the web tabs, one per open app, the chat, the terminal and the web panel (past five, under More); while a web tab is shown, Back, Forward, Reload and Open in Browser; and the Inbox with its count, only while something is unread. The bar has no menu: the Space's App Store, Inbox, Shortcuts, Terminal and Settings are tiles on Home and in the Library, the last four also Ctrl+2 to Ctrl+5 (Ctrl+1 is Home), the web panel has no entry of its own (it shows by itself while a Space needs a sign-in, and Settings opens its Settings for what has no native copy: Appearance, Fix this' recent requests, installing apps and connections, a task's model, peers' app models), an agent's chat is its tile, Quick Chat is the notification area's, its shortcut's and the floating ball's, and AI Space Settings… is in the notification area's menu and Settings › This Computer. The Space picker keeps one width, from the selected Space's name (a long one ends in an ellipsis), whether its list is open or not. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: Connect to Local AI Space (installing it first when there is none), or Connect to a Remote AI Space with the address form ([below](#this-computer)). The window keeps its size and place, always wholly on one monitor's work area, so its title bar can be reached ([below](#the-window)) |
 | Native pages | Home, Inbox, Shortcuts and Settings are the app's own (WPF, one set per Space, kept while hidden). Settings is the Space's own settings; it leads to AI Space Settings…, the app's. Not built yet: each says so and offers Open in Web Panel ([below](#the-window)) |
 | Web pages | The terminal (`/?page=terminal`), an agent's chat (`/?page=chat&agent=…`), the App Store (`/?page=store`), each open app and the web panel are web pages in tabs. Each saved Space has its own WebView2 profile (cookies, storage, cache), so signing in on the panel signs in everything that Space's pages and native calls do. A link to one of the Space's own pages never leaves the app: it opens the native page, or its tab; a link to an app of the Space opens in that app's tab, a link off the Space in the default browser. A page that cannot load shows why, with Try Again, Open in Browser and Edit Space… |
 | Sign-in | While a Space needs a sign-in, the window shows its web panel, where the sign-in page appears, in place of the native pages, and the native page again once the panel has signed in |
@@ -430,18 +430,17 @@ the user on `127.0.0.1:8700`, without WSL. The app is a client of it and treats 
 Space on any other machine. What it adds is the first launch (`AISpace.Core/ThisComputer.cs`,
 `AISpace/ThisComputerSetup.cs`; the Mac and Linux apps follow the same contract):
 
-With no saved Space the welcome page shows two entries and takes neither by itself:
+With no saved Space the welcome page shows two entries side by side, with nothing under them, and
+takes neither by itself. The page's column keeps one width (480 at most), so the mark and the title
+stay put while what is under them changes.
 
-- **Connect to Local AI Space**: the AI Space on this computer. Under it one line says what the
-  click will do, from a look the app makes when it starts: "Found on this computer", or "Not on
-  this computer yet: it is downloaded and installed first". The look saves nothing.
+- **Connect to Local AI Space**: the AI Space on this computer, looked for only on the click.
 - **Connect to a Remote AI Space** opens the address form.
 
 1. **Looking.** The app asks this computer: `GET http://127.0.0.1:<port>/api/space`, two seconds
    at most per port, first the `SPACE_PORT` of the workspace's `.env` (`%SPACE_HOME%\.env`, else
    `%USERPROFILE%\.ai-space\.env`) when that is set, then 8700. Only an answer that says
-   `"product": "ai-space"` ([editions.md](editions.md#service-identity)) counts. A click on the
-   first entry looks again.
+   `"product": "ai-space"` ([editions.md](editions.md#service-identity)) counts.
 2. **Found.** It is saved as This Computer, selected and shown.
 3. **Not found.** It is installed first, then connected, with only "Installing AI Space…" and one
    progress bar on the page. The app runs the release's own installer, never a copy inside the

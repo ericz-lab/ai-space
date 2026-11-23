@@ -198,9 +198,35 @@ struct InstallProgressTests {
         #expect(p.stage == .starting)
     }
 
-    @Test func eachStepStartsAboveTheCeilingOfTheOneBefore() {
+    @Test func theCeilingsRiseAndStayBelowOne() {
         let all = InstallProgress.Stage.allCases
-        for (a, b) in zip(all, all.dropFirst()) { #expect(a.span.to <= b.span.from) }
+        for (a, b) in zip(all, all.dropFirst()) { #expect(a.span.to < b.span.to) }
         #expect(all.last!.span.to < 1)
+    }
+
+    @Test func aStepThatEndsEarlyMakesNoJump() {
+        var p = InstallProgress(at: t0)
+        let t = t0.addingTimeInterval(1)
+        let before = p.value(at: t)
+        p.read("ai-space: downloading x.tar.gz", at: t)
+        #expect(abs(p.value(at: t) - before) < 1e-9)
+        #expect(p.value(at: t.addingTimeInterval(1)) > before)
+    }
+
+    @Test func stepsOfTheirUsualLengthMoveTheBarEvenly() {
+        // Each step taking its usual length, the bar moves at one pace, 1 % at most off a straight line.
+        let all = InstallProgress.Stage.allCases
+        let total = all.reduce(0.0) { $0 + $1.span.seconds }
+        var p = InstallProgress(at: t0)
+        var t = t0
+        for stage in all {
+            p.enter(stage, at: t)
+            for x in stride(from: 0.0, to: stage.span.seconds, by: 0.5) {
+                let at = t.addingTimeInterval(x)
+                let straight = 0.95 * at.timeIntervalSince(t0) / total
+                #expect(abs(p.value(at: at) - straight) <= 0.01)
+            }
+            t = t.addingTimeInterval(stage.span.seconds)
+        }
     }
 }

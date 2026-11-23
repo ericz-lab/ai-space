@@ -21,24 +21,37 @@ public enum InstallStage
 
 /// <summary>
 /// The one progress bar the first launch shows while AI Space is installed
-/// (docs/editions.md#ai-space-client). The installer prints no percentages, so the bar moves by the
-/// lines it prints at each step (the same in release/get.ps1 and release/get.sh) and creeps on
-/// within a step, slowing as it nears the step's ceiling, so a long download never looks stuck.
-/// Each step starts above the ceiling of the one before: the bar only goes forward. The Mac's
-/// InstallProgress and the Linux client's are the same.
+/// (docs/editions.md#the-install-progress-bar). The installer prints no percentages, so the bar
+/// moves by the lines it prints at each step (the same in release/get.ps1 and release/get.sh). In a
+/// step it goes in a straight line, from where it stood when the step began toward the step's
+/// ceiling, over the step's usual length; only a step that runs over slows down near its ceiling,
+/// so a long download never looks stuck. A step that ends early makes no jump: the next one starts
+/// where the bar is and goes a little faster. The Mac's InstallProgress and the Linux client's are
+/// the same.
 /// </summary>
 public sealed class InstallProgress
 {
-    /// <summary>Where the bar starts in a step, the ceiling it creeps toward, and the step's usual length.</summary>
-    public static (double From, double To, double Seconds) Span(InstallStage stage) => stage switch
+    /// <summary>
+    /// The ceiling the bar heads for in a step, and the step's usual length in seconds (from a real
+    /// install). In its usual length a step covers 0.8 of the way to its ceiling; the ceilings are set
+    /// so that the bar then stands at 0.95 times the share of the usual lengths gone by: steps that
+    /// take their usual length move it at one pace, to 95 % when the installer ends.
+    /// </summary>
+    public static (double To, double Seconds) Span(InstallStage stage) => stage switch
     {
-        InstallStage.Fetching => (0.00, 0.05, 4),
-        InstallStage.Looking => (0.05, 0.10, 4),
-        InstallStage.Downloading => (0.10, 0.55, 45),
-        InstallStage.Placing => (0.60, 0.80, 20),
-        InstallStage.Apps => (0.85, 0.95, 40),
-        _ => (0.95, 0.99, 8),
+        InstallStage.Fetching => (0.094, 3),
+        InstallStage.Looking => (0.1375, 2),
+        InstallStage.Downloading => (0.5, 12),
+        InstallStage.Placing => (0.8, 12),
+        InstallStage.Apps => (0.881, 5),
+        _ => (0.975, 4),
     };
+
+    /// <summary>
+    /// How far toward its ceiling the bar is after <paramref name="x"/> times a step's usual length:
+    /// a straight line to 0.8 at the usual length, then easing toward 1 without reaching it.
+    /// </summary>
+    public static double Along(double x) => x <= 1 ? 0.8 * Math.Max(0, x) : 0.8 + 0.2 * (1 - Math.Exp(-4 * (x - 1)));
 
     private static readonly Regex PlacedLine = new(@"^ai-space \S+ \(\S+\) in ", RegexOptions.CultureInvariant);
 
@@ -56,6 +69,7 @@ public sealed class InstallProgress
 
     public InstallStage Stage { get; private set; }
     private DateTimeOffset _since;
+    private double _from;
 
     public InstallProgress(DateTimeOffset now, InstallStage stage = InstallStage.Fetching)
     {
@@ -63,10 +77,11 @@ public sealed class InstallProgress
         _since = now;
     }
 
-    /// <summary>Moves to <paramref name="next"/> when it is a later step; an earlier or the same one changes nothing.</summary>
+    /// <summary>Moves to <paramref name="next"/> when it is a later step, from where the bar stands; an earlier or the same one changes nothing.</summary>
     public void Enter(InstallStage next, DateTimeOffset now)
     {
         if (next <= Stage) return;
+        _from = Value(now);
         Stage = next;
         _since = now;
     }
@@ -76,11 +91,11 @@ public sealed class InstallProgress
         if (StageOf(line) is { } next) Enter(next, now);
     }
 
-    /// <summary>The bar's value, 0 to 1 (1 only once the Space answers, which is not a step here).</summary>
+    /// <summary>The bar's value, 0 to below 1 (1 only once the Space answers, which is not a step here).</summary>
     public double Value(DateTimeOffset now)
     {
-        var (from, to, seconds) = Span(Stage);
+        var (to, seconds) = Span(Stage);
         var elapsed = Math.Max(0, (now - _since).TotalSeconds);
-        return from + (to - from) * (1 - Math.Exp(-elapsed / seconds));
+        return _from + Math.Max(0, to - _from) * Along(elapsed / seconds);
     }
 }

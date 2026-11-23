@@ -23,20 +23,20 @@ internal static class WelcomeView
         var connect = Ui.Card(ConnectForm(model));
         connect.Visibility = Visibility.Collapsed;
 
-        // The two entries.
+        // The two entries, side by side.
         var local = Ui.Button(L.T("Connect to Local AI Space"), () => _ = setup.ConnectLocal(), accent: true);
         Button Remote() => Ui.Button(L.T("Connect to a Remote AI Space"), () =>
         {
             setup.Dismiss();
             connect.Visibility = Visibility.Visible;
         });
-        var remote = Remote();
-        var here = Ui.Text("", 12, secondary: true);
-        var entries = Ui.Column(8, Ui.Row(local), here, Ui.Row(remote));
+        var entries = Ui.Row(local, Remote());
 
         // While it connects or installs: one line and one bar.
         var status = Ui.Text("", 18, bold: true);
-        var bar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 6, MaxWidth = 420, HorizontalAlignment = HorizontalAlignment.Left };
+        var bar = new ProgressBar { Minimum = 0, Maximum = 1, Height = 6, BorderThickness = new Thickness(0) };
+        // The part still to go is faint, so the part done reads at a glance.
+        bar.SetResourceReference(Control.BackgroundProperty, "DividerStrokeColorDefaultBrush");
         var working = Ui.Column(12, status, bar);
 
         // A failure: why in one line, Retry, and the installer's last lines folded away.
@@ -56,12 +56,6 @@ internal static class WelcomeView
         void Fill()
         {
             var phase = setup.Phase;
-            here.Text = setup.Here switch
-            {
-                ThisComputerHere.Found => L.T("Found on this computer"),
-                ThisComputerHere.None => L.T("Not on this computer yet: it is downloaded and installed first"),
-                _ => L.T("Looking for an AI Space on this computer…"),
-            };
             local.IsEnabled = phase is ThisComputerPhase.Choose or ThisComputerPhase.Failed;
             entries.Visibility = phase is ThisComputerPhase.Choose ? Visibility.Visible : Visibility.Collapsed;
             working.Visibility = phase is ThisComputerPhase.Connecting or ThisComputerPhase.Installing ? Visibility.Visible : Visibility.Collapsed;
@@ -77,10 +71,14 @@ internal static class WelcomeView
         setup.Changed += Fill;
         Fill();
 
-        var column = Ui.Column(16, logo, Ui.Text(L.T("Welcome to AI Space"), 28, bold: true), entries, working, failed, connect);
+        var title = Ui.Text(L.T("Welcome to AI Space"), 28, bold: true);
+        // More room under the title than between the mark and it: the entries, the bar or the form start a part of their own.
+        title.Margin = new Thickness(0, 0, 0, 16);
+        var column = Ui.Column(16, logo, title, entries, working, failed, connect);
         column.Margin = new Thickness(32, 48, 32, 48);
-        column.MaxWidth = 660;
-        column.HorizontalAlignment = HorizontalAlignment.Center;
+        // One width whatever the page shows, so the mark and the title stay put when the entries, the
+        // bar or the form below them change: a column as wide as its content would be centred again.
+        column.MaxWidth = 480;
         var scroll = new ScrollViewer { Content = column, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         // The page's ground: a range of mountains in faint binary digits along the bottom, under the text.
         var page = new Grid();

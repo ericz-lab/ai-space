@@ -42,9 +42,43 @@ public class InstallProgressTests
     }
 
     [Fact]
-    public void EachStepStartsAboveTheCeilingOfTheOneBefore()
+    public void TheCeilingsRiseAndStayBelowOne()
     {
         var all = Enum.GetValues<InstallStage>();
-        for (var i = 1; i < all.Length; i++) Assert.True(InstallProgress.Span(all[i - 1]).To <= InstallProgress.Span(all[i]).From);
+        for (var i = 1; i < all.Length; i++) Assert.True(InstallProgress.Span(all[i - 1]).To < InstallProgress.Span(all[i]).To);
+        Assert.True(InstallProgress.Span(all[^1]).To < 1);
+    }
+
+    [Fact]
+    public void AStepThatEndsEarlyMakesNoJump()
+    {
+        var p = new InstallProgress(T0);
+        var t = T0.AddSeconds(1);
+        var before = p.Value(t);
+        p.Read("ai-space: downloading x.tar.gz", t);
+        Assert.Equal(before, p.Value(t), 9);
+        Assert.True(p.Value(t.AddSeconds(1)) > before);
+    }
+
+    [Fact]
+    public void StepsOfTheirUsualLengthMoveTheBarEvenly()
+    {
+        // Each step taking its usual length, the bar moves at one pace, 1% at most off a straight line.
+        var p = new InstallProgress(T0);
+        var all = Enum.GetValues<InstallStage>();
+        var total = all.Sum(s => InstallProgress.Span(s).Seconds);
+        var t = T0;
+        foreach (var stage in all)
+        {
+            p.Enter(stage, t);
+            var seconds = InstallProgress.Span(stage).Seconds;
+            for (var s = 0.0; s < seconds; s += 0.5)
+            {
+                var at = t.AddSeconds(s);
+                var straight = 0.95 * (at - T0).TotalSeconds / total;
+                Assert.InRange(p.Value(at), straight - 0.01, straight + 0.01);
+            }
+            t = t.AddSeconds(seconds);
+        }
     }
 }

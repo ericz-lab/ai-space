@@ -172,23 +172,38 @@ export async function installLocalSpace(deps: InstallDeps): Promise<InstallOutco
 }
 
 /**
- * The one progress bar shown while AI Space is installed (docs/editions.md#ai-space-client). The
- * installer prints no percentages, so the bar moves by the lines it prints at each step (the same
- * in release/get.sh and release/install.ps1) and creeps on within a step, slowing as it nears the
- * step's ceiling, so a long download never looks stuck. Each step starts above the ceiling of the
- * one before: the bar only goes forward. The Mac's `InstallProgress` (SpaceInstaller.swift) is the same.
+ * The one progress bar shown while AI Space is installed (docs/editions.md#the-install-progress-bar).
+ * The installer prints no percentages, so the bar moves by the lines it prints at each step (the same
+ * in release/get.sh and release/get.ps1). In a step it goes in a straight line, from where it stood
+ * when the step began toward the step's ceiling, over the step's usual length; only a step that runs
+ * over slows down near its ceiling, so a long download never looks stuck. A step that ends early
+ * makes no jump: the next one starts where the bar is and goes a little faster. The Mac's
+ * `InstallProgress` (SpaceInstaller.swift) and the Windows client's are the same.
  */
 export type InstallStage = "fetching" | "looking" | "downloading" | "placing" | "apps" | "starting";
 
-/** In order; each step's start, the ceiling it creeps toward, and its usual length in seconds. */
-export const INSTALL_STAGES: readonly { stage: InstallStage; from: number; to: number; seconds: number }[] = [
-  { stage: "fetching", from: 0, to: 0.05, seconds: 4 },
-  { stage: "looking", from: 0.05, to: 0.1, seconds: 4 },
-  { stage: "downloading", from: 0.1, to: 0.55, seconds: 45 },
-  { stage: "placing", from: 0.6, to: 0.8, seconds: 20 },
-  { stage: "apps", from: 0.85, to: 0.95, seconds: 40 },
-  { stage: "starting", from: 0.95, to: 0.99, seconds: 8 },
+/**
+ * In order: the ceiling the bar heads for in each step and the step's usual length in seconds (from a
+ * real install). In its usual length a step covers 0.8 of the way to its ceiling; the ceilings are
+ * set so that the bar then stands at 0.95 times the share of the usual lengths gone by: steps that
+ * take their usual length move it at one pace, to 95 % when the installer ends.
+ */
+export const INSTALL_STAGES: readonly { stage: InstallStage; to: number; seconds: number }[] = [
+  { stage: "fetching", to: 0.094, seconds: 3 },
+  { stage: "looking", to: 0.1375, seconds: 2 },
+  { stage: "downloading", to: 0.5, seconds: 12 },
+  { stage: "placing", to: 0.8, seconds: 12 },
+  { stage: "apps", to: 0.881, seconds: 5 },
+  { stage: "starting", to: 0.975, seconds: 4 },
 ];
+
+/**
+ * How far toward its ceiling the bar is after `x` times a step's usual length: a straight line to
+ * 0.8 at the usual length, then easing toward 1 without reaching it.
+ */
+export function installAlong(x: number): number {
+  return x <= 1 ? 0.8 * Math.max(0, x) : 0.8 + 0.2 * (1 - Math.exp(-4 * (x - 1)));
+}
 
 /** The step a line of the installer's output begins, if it begins one. */
 export function installStageOf(line: string): InstallStage | undefined {
@@ -204,6 +219,7 @@ export function installStageOf(line: string): InstallStage | undefined {
 export class InstallProgress {
   private index = 0;
   private since: number;
+  private from = 0;
 
   constructor(now: number, stage: InstallStage = "fetching") {
     this.since = now;
@@ -214,10 +230,11 @@ export class InstallProgress {
     return INSTALL_STAGES[this.index]!.stage;
   }
 
-  /** Moves to `stage` when it is a later step; an earlier or the same one changes nothing. */
+  /** Moves to `stage` when it is a later step, from where the bar stands; an earlier or the same one changes nothing. */
   enter(stage: InstallStage, now: number): void {
     const i = INSTALL_STAGES.findIndex((s) => s.stage === stage);
     if (i <= this.index) return;
+    this.from = this.value(now);
     this.index = i;
     this.since = now;
   }
@@ -227,10 +244,10 @@ export class InstallProgress {
     if (stage) this.enter(stage, now);
   }
 
-  /** The bar's value, 0 to 1 (1 only once the Space answers, which is not a step here). */
+  /** The bar's value, 0 to below 1 (1 only once the Space answers, which is not a step here). */
   value(now: number): number {
     const s = INSTALL_STAGES[this.index]!;
     const elapsed = Math.max(0, now - this.since) / 1000;
-    return s.from + (s.to - s.from) * (1 - Math.exp(-elapsed / s.seconds));
+    return this.from + Math.max(0, s.to - this.from) * installAlong(elapsed / s.seconds);
   }
 }

@@ -159,10 +159,12 @@ struct LineBuffer {
 }
 
 /// The one progress bar the first launch shows while AI Space is installed
-/// (docs/editions.md#ai-space-client). The installer prints no percentages, so the bar moves by
-/// the lines it prints at each step (the same in `release/get.sh` and `release/install.ps1`), and
-/// creeps on within a step, slowing as it nears the step's ceiling, so a long download never
-/// looks stuck. Each step starts above the ceiling of the one before: the bar only goes forward.
+/// (docs/editions.md#the-install-progress-bar). The installer prints no percentages, so the bar
+/// moves by the lines it prints at each step (the same in `release/get.sh` and `release/get.ps1`).
+/// In a step it goes in a straight line, from where it stood when the step began toward the step's
+/// ceiling, over the step's usual length; only a step that runs over slows down near its ceiling,
+/// so a long download never looks stuck. A step that ends early makes no jump: the next one starts
+/// where the bar is and goes a little faster. The Linux and Windows clients' are the same.
 struct InstallProgress: Equatable {
     enum Stage: Int, Comparable, CaseIterable {
         /// The app fetches the installer itself.
@@ -180,17 +182,26 @@ struct InstallProgress: Equatable {
 
         static func < (a: Stage, b: Stage) -> Bool { a.rawValue < b.rawValue }
 
-        /// Where the bar starts in this step, the ceiling it creeps toward, and the step's usual length.
-        var span: (from: Double, to: Double, seconds: Double) {
+        /// The ceiling the bar heads for in this step, and the step's usual length in seconds (from a
+        /// real install). In its usual length a step covers 0.8 of the way to its ceiling; the ceilings
+        /// are set so that the bar then stands at 0.95 times the share of the usual lengths gone by:
+        /// steps that take their usual length move it at one pace, to 95 % when the installer ends.
+        var span: (to: Double, seconds: Double) {
             switch self {
-            case .fetching: return (0.00, 0.05, 4)
-            case .looking: return (0.05, 0.10, 4)
-            case .downloading: return (0.10, 0.55, 45)
-            case .placing: return (0.60, 0.80, 20)
-            case .apps: return (0.85, 0.95, 40)
-            case .starting: return (0.95, 0.99, 8)
+            case .fetching: return (0.094, 3)
+            case .looking: return (0.1375, 2)
+            case .downloading: return (0.5, 12)
+            case .placing: return (0.8, 12)
+            case .apps: return (0.881, 5)
+            case .starting: return (0.975, 4)
             }
         }
+    }
+
+    /// How far toward its ceiling the bar is after `x` times a step's usual length: a straight line
+    /// to 0.8 at the usual length, then easing toward 1 without reaching it.
+    static func along(_ x: Double) -> Double {
+        x <= 1 ? 0.8 * max(0, x) : 0.8 + 0.2 * (1 - exp(-4 * (x - 1)))
     }
 
     /// The step a line of the installer's output begins, if it begins one.
@@ -206,12 +217,14 @@ struct InstallProgress: Equatable {
 
     private(set) var stage: Stage = .fetching
     private(set) var since: Date
+    private var from = 0.0
 
     init(at start: Date = Date()) { since = start }
 
-    /// Moves to `next` when it is a later step; an earlier or the same one changes nothing.
+    /// Moves to `next` when it is a later step, from where the bar stands; an earlier or the same one changes nothing.
     mutating func enter(_ next: Stage, at time: Date = Date()) {
         guard next > stage else { return }
+        from = value(at: time)
         stage = next
         since = time
     }
@@ -220,10 +233,10 @@ struct InstallProgress: Equatable {
         if let next = Self.stage(of: line) { enter(next, at: time) }
     }
 
-    /// The bar's value, 0 to 1 (1 only once the Space answers, which is not a step here).
+    /// The bar's value, 0 to below 1 (1 only once the Space answers, which is not a step here).
     func value(at time: Date = Date()) -> Double {
         let s = stage.span
         let elapsed = max(0, time.timeIntervalSince(since))
-        return s.from + (s.to - s.from) * (1 - exp(-elapsed / s.seconds))
+        return from + max(0, s.to - from) * Self.along(elapsed / s.seconds)
     }
 }

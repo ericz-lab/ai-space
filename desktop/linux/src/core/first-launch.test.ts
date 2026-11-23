@@ -271,7 +271,31 @@ describe("the install progress bar", () => {
     expect(p.stage).toBe("starting");
   });
 
-  test("each step starts above the ceiling of the one before", () => {
-    for (let i = 1; i < INSTALL_STAGES.length; i++) expect(INSTALL_STAGES[i - 1]!.to).toBeLessThanOrEqual(INSTALL_STAGES[i]!.from);
+  test("the ceilings rise and stay below 1", () => {
+    for (let i = 1; i < INSTALL_STAGES.length; i++) expect(INSTALL_STAGES[i - 1]!.to).toBeLessThan(INSTALL_STAGES[i]!.to);
+    expect(INSTALL_STAGES.at(-1)!.to).toBeLessThan(1);
+  });
+
+  test("a step that ends early makes no jump", () => {
+    const p = new InstallProgress(0);
+    const before = p.value(1_000);
+    p.read("ai-space: downloading x.tar.gz", 1_000);
+    expect(p.value(1_000)).toBeCloseTo(before, 9);
+    expect(p.value(2_000)).toBeGreaterThan(before);
+  });
+
+  test("steps of their usual length move the bar evenly", () => {
+    // Each step taking its usual length, the bar moves at one pace, 1 % at most off a straight line.
+    const total = INSTALL_STAGES.reduce((sum, s) => sum + s.seconds, 0);
+    const p = new InstallProgress(0);
+    let t = 0;
+    for (const s of INSTALL_STAGES) {
+      p.enter(s.stage, t);
+      for (let x = 0; x < s.seconds; x += 0.5) {
+        const at = t + x * 1000;
+        expect(Math.abs(p.value(at) - (0.95 * at) / 1000 / total)).toBeLessThanOrEqual(0.01);
+      }
+      t += s.seconds * 1000;
+    }
   });
 });
