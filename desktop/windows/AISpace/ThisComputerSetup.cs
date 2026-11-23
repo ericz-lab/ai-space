@@ -5,24 +5,34 @@ using AISpace.Shell;
 
 namespace AISpace;
 
-/// <summary>Where the search for an AI Space on this computer stands, for the welcome page.</summary>
+/// <summary>Where the first entry of the welcome page stands.</summary>
 internal enum ThisComputerPhase
 {
-    /// <summary>Asking this computer's ports.</summary>
-    Looking,
-    /// <summary>None answers: the person chooses to install one or to connect elsewhere.</summary>
-    NotFound,
+    /// <summary>The two entries wait for a click.</summary>
+    Choose,
+    /// <summary>Looking at this computer's ports after the click.</summary>
+    Connecting,
+    /// <summary>The installer runs, behind the progress bar.</summary>
     Installing,
     /// <summary>The installer failed, or what it installed does not answer.</summary>
     Failed,
 }
 
+/// <summary>What the look at the app's start found on this computer.</summary>
+internal enum ThisComputerHere
+{
+    Unknown,
+    Found,
+    None,
+}
+
 /// <summary>
-/// The first launch (docs/windows-desktop.md#this-computer): with no saved Space the app looks for
-/// an AI Space on this computer and saves the one it finds, asking nothing. When there is none
-/// the person may have it installed: the app fetches the release's own one-command installer and
-/// runs it (<see cref="ServiceInstaller"/>), then looks again. AI Space is never part of the app:
-/// the app does not carry, update, stop or remove it.
+/// The first launch (docs/windows-desktop.md#this-computer): two entries, the AI Space on this
+/// computer or one on another machine. The app looks at this computer when it starts with no saved
+/// Space, only so the first entry can say what its click will do. That click connects straight to
+/// the one found; with none, the app fetches the release's own one-command installer and runs it
+/// (<see cref="ServiceInstaller"/>) behind a single progress bar (<see cref="InstallProgress"/>),
+/// then connects. AI Space is never part of the app: the app does not carry, update, stop or remove it.
 /// </summary>
 internal sealed class ThisComputerSetup(AppModel model)
 {
@@ -31,16 +41,21 @@ internal sealed class ThisComputerSetup(AppModel model)
     private const int MaxLines = 400;
     private readonly HttpClient _probe = new(new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, UseProxy = false });
     private readonly List<string> _lines = [];
+    private InstallProgress _meter = new(DateTimeOffset.Now);
+    private System.Windows.Threading.DispatcherTimer? _ticker;
 
-    public ThisComputerPhase Phase { get; private set; } = ThisComputerPhase.NotFound;
-    /// <summary>What the installer printed so far.</summary>
+    public ThisComputerPhase Phase { get; private set; } = ThisComputerPhase.Choose;
+    public ThisComputerHere Here { get; private set; } = ThisComputerHere.Unknown;
+    /// <summary>The progress bar while installing, 0 to 1.</summary>
+    public double Progress { get; private set; }
+    /// <summary>What the installer printed so far, kept for the failure's details; not shown while it runs.</summary>
     public IReadOnlyList<string> Lines => _lines;
     /// <summary>Why the installation failed, in the interface's language.</summary>
     public string Failure { get; private set; } = "";
 
     public event Action? Changed;
 
-    /// <summary>At the app's start: looks only when no Space is saved, and takes the one found.</summary>
+    /// <summary>At the app's start: looks only when no Space is saved, and saves nothing.</summary>
     public void Start()
     {
         if (model.Store.Connections.Count > 0) return;
@@ -49,11 +64,9 @@ internal sealed class ThisComputerSetup(AppModel model)
 
     private async Task LookAtStart()
     {
-        Set(ThisComputerPhase.Looking);
         var found = await Look();
-        // A Space the person added while the search ran stays the one shown.
-        if (found is not null && model.Store.Connections.Count == 0) model.AdoptThisComputer(found);
-        Set(ThisComputerPhase.NotFound);
+        if (Phase == ThisComputerPhase.Choose) Here = found is null ? ThisComputerHere.None : ThisComputerHere.Found;
+        Changed?.Invoke();
     }
 
     /// <summary>The address of the AI Space that answers on this computer, or null.</summary>
@@ -73,26 +86,37 @@ internal sealed class ThisComputerSetup(AppModel model)
     }
 
     /// <summary>
-    /// The person's choice to install AI Space here (also Retry). One that answers by now is taken
-    /// as it is: the installer runs only when there is none.
+    /// "Connect to Local AI Space" (also Retry): the one on this computer, looked for again at the
+    /// click, is used as it is; the installer runs only when there is none.
     /// </summary>
-    public async Task Install()
+    public async Task ConnectLocal()
     {
-        if (Phase is ThisComputerPhase.Installing or ThisComputerPhase.Looking) return;
+        if (Phase is ThisComputerPhase.Installing or ThisComputerPhase.Connecting) return;
+        var retryLook = Phase == ThisComputerPhase.Failed && _installed;
+        if (!retryLook) _installed = false;
         _lines.Clear();
         Failure = "";
-        Set(ThisComputerPhase.Installing);
+        Set(ThisComputerPhase.Connecting);
         try
         {
             var found = await Look();
             if (found is null)
             {
-                var code = await RunInstaller();
-                if (code != 0)
+                Here = ThisComputerHere.None;
+                StartMeter(retryLook ? InstallStage.Starting : InstallStage.Fetching);
+                Set(ThisComputerPhase.Installing);
+                if (!retryLook)
                 {
-                    Fail(L.F("The installer stopped with code {0}.", code));
-                    return;
+                    var code = await RunInstaller();
+                    if (code != 0)
+                    {
+                        Fail(L.F("The installer stopped with code {0}.", code));
+                        return;
+                    }
                 }
+                _installed = true;
+                _meter.Enter(InstallStage.Starting, DateTimeOffset.Now);
+                Tick();
                 found = await ThisComputer.WaitFor(Look, attempts: 15, pause: () => Task.Delay(TimeSpan.FromSeconds(2)));
             }
             if (found is null)
@@ -100,14 +124,52 @@ internal sealed class ThisComputerSetup(AppModel model)
                 Fail(L.T("AI Space was installed, but it does not answer on this computer yet."));
                 return;
             }
+            StopMeter();
+            Progress = 1;
+            Here = ThisComputerHere.Found;
+            _installed = false;
             model.AdoptThisComputer(found);
-            Set(ThisComputerPhase.NotFound);
+            Set(ThisComputerPhase.Choose);
         }
         catch (Exception e) when (e is IOException or HttpRequestException or OperationCanceledException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             Log.Write($"install AI Space: {e}");
             Fail(e.Message);
         }
+    }
+
+    /// <summary>The installer ended well before: Retry only looks for the Space again.</summary>
+    private bool _installed;
+
+    /// <summary>Leaves the failure for the two entries.</summary>
+    public void Dismiss()
+    {
+        if (Phase == ThisComputerPhase.Failed) Set(ThisComputerPhase.Choose);
+    }
+
+    /// <summary>The bar follows the installer's steps and creeps on within one, four times a second.</summary>
+    private void StartMeter(InstallStage stage)
+    {
+        _meter = new InstallProgress(DateTimeOffset.Now, stage);
+        Progress = _meter.Value(DateTimeOffset.Now);
+        _ticker?.Stop();
+        _ticker = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _ticker.Tick += (_, _) => Tick();
+        _ticker.Start();
+    }
+
+    private void StopMeter()
+    {
+        _ticker?.Stop();
+        _ticker = null;
+    }
+
+    private void Tick()
+    {
+        var value = Math.Max(Progress, _meter.Value(DateTimeOffset.Now));
+        if (value == Progress) return;
+        Progress = value;
+        Changed?.Invoke();
     }
 
     /// <summary>Fetches the release's installer into a temporary file and runs it hidden; its exit code.</summary>
@@ -191,6 +253,8 @@ internal sealed class ThisComputerSetup(AppModel model)
 
     private void Add(string line)
     {
+        _meter.Read(line, DateTimeOffset.Now);
+        Progress = Math.Max(Progress, _meter.Value(DateTimeOffset.Now));
         _lines.Add(line);
         if (_lines.Count > MaxLines) _lines.RemoveRange(0, _lines.Count - MaxLines);
         Changed?.Invoke();
@@ -198,6 +262,7 @@ internal sealed class ThisComputerSetup(AppModel model)
 
     private void Fail(string why)
     {
+        StopMeter();
         Failure = why;
         Set(ThisComputerPhase.Failed);
     }

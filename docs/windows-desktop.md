@@ -4,8 +4,8 @@ Status: built, its core library tested (`dotnet test`), and run on a Windows 11 
 AI Space on the same machine. Home, Inbox, Shortcuts and the Space's Settings are native pages;
 the terminal and agent chat are the Space's own pages in tabs of the window. It is a client: it opens Spaces
 that run on this computer or elsewhere and carries no AI Space of its own. At its first launch it
-looks for an AI Space on this computer and, when there is none, offers to run AI Space's own
-installer ([below](#this-computer)). It follows the Mac client
+offers to connect to the AI Space on this computer (installed first with AI Space's own installer
+when there is none) or to one on another machine ([below](#this-computer)). It follows the Mac client
 ([macos-desktop.md](macos-desktop.md)): the same parts, the same rules, the same names, and says
 below where it does less.
 
@@ -430,25 +430,32 @@ the user on `127.0.0.1:8700`, without WSL. The app is a client of it and treats 
 Space on any other machine. What it adds is the first launch (`AISpace.Core/ThisComputer.cs`,
 `AISpace/ThisComputerSetup.cs`; the Mac and Linux apps follow the same contract):
 
-1. **Looking.** Started with no saved Space, the app asks this computer: `GET
-   http://127.0.0.1:<port>/api/space`, two seconds at most per port, first the `SPACE_PORT` of the
-   workspace's `.env` (`%SPACE_HOME%\.env`, else `%USERPROFILE%\.ai-space\.env`) when that is set,
-   then 8700. Only an answer that says `"product": "ai-space"`
-   ([editions.md](editions.md#service-identity)) counts.
-2. **Found.** It is saved as This Computer, selected and shown. Nothing is asked.
-3. **Not found.** The welcome page offers two choices and takes neither by itself:
-   - **Install AI Space on This Computer** runs the release's own installer, never a copy inside
-     the app: it downloads
-     `https://github.com/ericz-lab/ai-space/releases/latest/download/install.ps1` to a temporary
-     file (`<base>/install.ps1` when `AI_SPACE_DOWNLOAD` names a mirror or a directory, the
-     variable the installer itself honours) and runs it with
-     `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy
-     Bypass -File <file>`, hidden, with `AI_SPACE_NO_OPEN=1` so no browser opens. The page shows
-     what it prints, line by line. When it ends with code 0 the app looks again, for up to about
-     30 seconds, and saves and shows the Space. Otherwise the page shows the end of the output
-     and Retry. If an AI Space answers by the time the button is pressed, it is taken as it is and
-     nothing is installed.
-   - **Connect to an AI Space on Another Machine** opens the address form.
+With no saved Space the welcome page shows two entries and takes neither by itself:
+
+- **Connect to Local AI Space**: the AI Space on this computer. Under it one line says what the
+  click will do, from a look the app makes when it starts: "Found on this computer", or "Not on
+  this computer yet: it is downloaded and installed first". The look saves nothing.
+- **Connect to a Remote AI Space** opens the address form.
+
+1. **Looking.** The app asks this computer: `GET http://127.0.0.1:<port>/api/space`, two seconds
+   at most per port, first the `SPACE_PORT` of the workspace's `.env` (`%SPACE_HOME%\.env`, else
+   `%USERPROFILE%\.ai-space\.env`) when that is set, then 8700. Only an answer that says
+   `"product": "ai-space"` ([editions.md](editions.md#service-identity)) counts. A click on the
+   first entry looks again.
+2. **Found.** It is saved as This Computer, selected and shown.
+3. **Not found.** It is installed first, then connected, with only "Installing AI Space…" and one
+   progress bar on the page. The app runs the release's own installer, never a copy inside the
+   app: it downloads `https://github.com/ericz-lab/ai-space/releases/latest/download/install.ps1`
+   (`release/get.ps1`) to a temporary file (`<base>/install.ps1` when `AI_SPACE_DOWNLOAD` names a
+   mirror or a directory, the variable the installer itself honours) and runs it with
+   `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy
+   Bypass -File <file>`, hidden, with `AI_SPACE_NO_OPEN=1` so no browser opens. It fetches the
+   `ai-space-<version>-windows-x64` Server archive, checks it and installs it. The bar follows the
+   lines it prints at each step (`AISpace.Core/InstallProgress.cs`,
+   [editions.md](editions.md#the-install-progress-bar)); the lines themselves are not shown. When
+   it ends with code 0 the app looks again, for up to about 30 seconds, and saves and shows the
+   Space. Otherwise the page shows one line of why, Retry, and the end of the output folded under
+   Details; when the installer went through but nothing answers yet, Retry only looks again.
 
 The app never carries, updates, stops or uninstalls AI Space. Quitting or uninstalling the app
 leaves it running, with its program (`%LOCALAPPDATA%\ai-space`), its task and its workspace
