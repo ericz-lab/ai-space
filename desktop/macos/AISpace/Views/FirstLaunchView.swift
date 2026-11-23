@@ -8,11 +8,39 @@ struct FirstLaunchView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        if model.local.available {
-            LocalSetupView(model: model, local: model.local)
-        } else {
-            WelcomeView(model: model, first: model.firstLaunch)
+        Group {
+            if model.local.available {
+                LocalSetupView(model: model, local: model.local)
+            } else {
+                WelcomeView(model: model, first: model.firstLaunch)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The window's ground: a range of mountains in faint binary digits along the bottom.
+        .background(alignment: .bottom) { RidgeView().frame(height: 200) }
+    }
+}
+
+/// `RidgeArt` at whatever width the window has, in a monospaced font and the primary colour
+/// faded far back, so it reads as ground in light and dark alike.
+struct RidgeView: View {
+    private static let glyph: CGFloat = 11, line: CGFloat = 12
+
+    var body: some View {
+        Canvas { context, size in
+            let font = NSFont.monospacedSystemFont(ofSize: Self.glyph, weight: .regular)
+            let cell = ("0" as NSString).size(withAttributes: [.font: font]).width
+            guard cell > 0 else { return }
+            let rows = Int(size.height / Self.line)
+            let lines = RidgeArt.lines(cols: Int((size.width / cell).rounded(.up)), rows: rows, cellAspect: cell / Self.line)
+            let top = size.height - CGFloat(rows) * Self.line
+            for (y, text) in lines.enumerated() where text.contains(where: { $0 != " " }) {
+                context.draw(Text(verbatim: text).font(Font(font)).foregroundStyle(.primary.opacity(0.16)),
+                             at: CGPoint(x: 0, y: top + CGFloat(y) * Self.line), anchor: .topLeading)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

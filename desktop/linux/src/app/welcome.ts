@@ -5,6 +5,7 @@ import Pango from "gi://Pango";
 import { classifyIdentity } from "../core/check.ts";
 import { type Connection, LOCAL_DEFAULT_URL } from "../core/connections.ts";
 import { type InstallOutcome, InstallProgress } from "../core/first-launch.ts";
+import { ridgeLines } from "../core/ridge-art.ts";
 import type { Key } from "../core/i18n.ts";
 import { ConnectionUrlError, normalizeConnectionUrl, resolveUrl, sameOrigin } from "../core/url.ts";
 import { bytesToText, t } from "./env.ts";
@@ -14,6 +15,7 @@ import { plainRequest } from "./http.ts";
 import type { LocalManager } from "./local-manager.ts";
 import { LocalPanel } from "./local-view.ts";
 import type { AppModel } from "./model.ts";
+import { colors } from "./widget-card.ts";
 
 /**
  * The first window, before any Space is saved (and Settings' Add). The app without a service
@@ -148,9 +150,12 @@ export class WelcomePage {
       column.append(this.holder);
     }
     const clamp = new Adw.Clamp({ maximum_size: 560, child: column });
-    this.widget = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, vexpand: true, child: clamp });
+    const scroll = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, vexpand: true, child: clamp });
     // Start at the top, not scrolled to wherever the focus landed.
-    this.widget.connect("map", () => GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => (this.widget.get_vadjustment().set_value(0), GLib.SOURCE_REMOVE)));
+    scroll.connect("map", () => GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => (scroll.get_vadjustment().set_value(0), GLib.SOURCE_REMOVE)));
+    // The page's ground: a range of mountains in faint binary digits along the bottom, under the text.
+    this.widget = new Gtk.Overlay({ child: ridgeArea() });
+    this.widget.add_overlay(scroll);
   }
 
   /**
@@ -286,3 +291,38 @@ export class WelcomePage {
     this.show("", children);
   }
 }
+
+const RIDGE_HEIGHT = 260;
+const RIDGE_GLYPH = 11;
+const RIDGE_LINE = 12;
+
+/**
+ * `ridgeLines` along the bottom of the area at whatever width it has, in a monospaced face and
+ * the theme's text colour faded far back, so it reads as ground in light and dark alike.
+ */
+function ridgeArea(): any {
+  const area = new Gtk.DrawingArea({ hexpand: true, vexpand: true, can_target: false });
+  area.set_draw_func((a: any, cr: any, w: number, h: number) => {
+    const { fg } = colors(a);
+    cr.selectFontFace("monospace", 0, 0);
+    cr.setFontSize(RIDGE_GLYPH);
+    const cell = cr.textExtents("0").xAdvance;
+    if (cell > 0) {
+      const rows = Math.floor(Math.min(h, RIDGE_HEIGHT) / RIDGE_LINE);
+      const lines = ridgeLines(Math.ceil(w / cell), rows, cell / RIDGE_LINE);
+      const top = h - rows * RIDGE_LINE;
+      cr.setSourceRGBA(fg[0], fg[1], fg[2], fg[3] * 0.16);
+      lines.forEach((line, y) => {
+        // Each digit at its own column, so a face that is not quite monospaced keeps the picture.
+        for (let x = 0; x < line.length; x++) {
+          if (line[x] === " ") continue;
+          cr.moveTo(x * cell, top + (y + 1) * RIDGE_LINE - 3);
+          cr.showText(line[x]);
+        }
+      });
+    }
+    cr.$dispose?.();
+  });
+  return area;
+}
+
