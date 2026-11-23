@@ -51,6 +51,16 @@ describe("application contract", () => {
     assertPackageCompatibility(m);
   });
 
+  test("a capability described with ' ... ' validates (no YAML round trip)", () => {
+    // Bun 1.3.0 reads " ... " in a double-quoted string as a document end, and only reads it unquoted when
+    // nested, as ai-todo's provides: has it. The components must not be written out and read back.
+    const description = "Undo it. Answers { ok, items [{ id, status, ... }] }.";
+    const yaml = ["spec: 2", "name: notes", "version: 1.0.0", "requires: { spaceApi: 1, bun: 1.3.0 }", "offline: { features: [Read], online: [] }",
+      "launch: { kind: process, runtime: bun, entry: dist/index.js, health: /healthz }", "provides:", "  undo:", `    description: ${description}`,
+      "    http: { method: POST, path: /api/undo }", ""].join("\n");
+    expect(parsePackageManifest(yaml).provides?.[0]?.description).toBe(description);
+  });
+
   test("process uses an argument vector, explicit runtime and on-demand default", () => {
     const m = parsePackageManifest(app({ requires: { spaceApi: 1, bun: "1.3.0" }, launch: { kind: "process", runtime: "bun", entry: "dist/server.js", args: ["--label", "$(not-a-shell)"], health: "/healthz" } }));
     expect(m.launch).toMatchObject({ mode: "on-demand", idleTimeoutMs: 300_000, args: ["--label", "$(not-a-shell)"] });

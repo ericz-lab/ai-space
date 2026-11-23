@@ -64,6 +64,10 @@ export async function packApplication(opts: {
     files.set("space.yaml", { path: "space.yaml", bytes: content, executable: false });
   }
   const entries = [...files.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  if (opts.target.os === "any") {
+    const found = entries.flatMap((f) => urlPathnameUses(f.path, f.bytes));
+    if (found.length) throw new Error(`a portable package must run on Windows, where new URL(..., import.meta.url).pathname is /C:/... and no file opens: use Bun.fileURLToPath(new URL(...)) or import.meta.dir (${found.join(", ")})`);
+  }
   const index = parsePackageIndex({ format: 1, target: opts.target, sourceIncluded: opts.sourceIncluded, files: entries.map((f) => ({ path: f.path, size: f.bytes.length, sha256: sha256(f.bytes), executable: f.executable })) });
   const manifest = validatePayload(index, files);
   const metadata = new TextEncoder().encode(JSON.stringify(index));
@@ -157,4 +161,16 @@ function excludedPath(path: string): boolean {
 function nativeMagic(bytes: Uint8Array): boolean {
   const magic = Buffer.from(bytes.subarray(0, 4)).toString("hex");
   return ["7f454c46", "feedface", "feedfacf", "cefaedfe", "cffaedfe", "cafebabe", "bebafeca"].includes(magic) || bytes[0] === 77 && bytes[1] === 90;
+}
+
+const SCRIPT = /\.(?:[cm]?[jt]s|[jt]sx)$/;
+// `new URL("../icon.png", import.meta.url).pathname` and `new URL(import.meta.url).pathname`: a URL's
+// path, not a file path. On Windows it reads /C:/Users/..., which Bun.file and node:fs cannot open.
+const URL_PATHNAME = /import\.meta\.url\s*\)\s*\.pathname\b/g;
+
+/** Where a script turns a module URL into a path with `.pathname`, as `path:line`. */
+export function urlPathnameUses(path: string, bytes: Uint8Array): string[] {
+  if (!SCRIPT.test(path)) return [];
+  const text = new TextDecoder().decode(bytes);
+  return [...text.matchAll(URL_PATHNAME)].map((m) => `${path}:${text.slice(0, m.index).split("\n").length}`);
 }
