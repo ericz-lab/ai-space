@@ -116,7 +116,6 @@ internal sealed class AppModel
     public void Start()
     {
         SyncLives();
-        ThisComputer.Start();
     }
 
     public void SavePrefs() => Prefs.Save(Paths.Preferences);

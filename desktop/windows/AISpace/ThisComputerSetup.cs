@@ -18,19 +18,10 @@ internal enum ThisComputerPhase
     Failed,
 }
 
-/// <summary>What the look at the app's start found on this computer.</summary>
-internal enum ThisComputerHere
-{
-    Unknown,
-    Found,
-    None,
-}
-
 /// <summary>
 /// The first launch (docs/windows-desktop.md#this-computer): two entries, the AI Space on this
-/// computer or one on another machine. The app looks at this computer when it starts with no saved
-/// Space, only so the first entry can say what its click will do. That click connects straight to
-/// the one found; with none, the app fetches the release's own one-command installer and runs it
+/// computer or one on another machine. A click on the first looks at this computer and connects
+/// straight to the one found; with none, the app fetches the release's own one-command installer and runs it
 /// (<see cref="ServiceInstaller"/>) behind a single progress bar (<see cref="InstallProgress"/>),
 /// then connects. AI Space is never part of the app: the app does not carry, update, stop or remove it.
 /// </summary>
@@ -45,7 +36,6 @@ internal sealed class ThisComputerSetup(AppModel model)
     private System.Windows.Threading.DispatcherTimer? _ticker;
 
     public ThisComputerPhase Phase { get; private set; } = ThisComputerPhase.Choose;
-    public ThisComputerHere Here { get; private set; } = ThisComputerHere.Unknown;
     /// <summary>The progress bar while installing, 0 to 1.</summary>
     public double Progress { get; private set; }
     /// <summary>What the installer printed so far, kept for the failure's details; not shown while it runs.</summary>
@@ -54,20 +44,6 @@ internal sealed class ThisComputerSetup(AppModel model)
     public string Failure { get; private set; } = "";
 
     public event Action? Changed;
-
-    /// <summary>At the app's start: looks only when no Space is saved, and saves nothing.</summary>
-    public void Start()
-    {
-        if (model.Store.Connections.Count > 0) return;
-        _ = LookAtStart();
-    }
-
-    private async Task LookAtStart()
-    {
-        var found = await Look();
-        if (Phase == ThisComputerPhase.Choose) Here = found is null ? ThisComputerHere.None : ThisComputerHere.Found;
-        Changed?.Invoke();
-    }
 
     /// <summary>The address of the AI Space that answers on this computer, or null.</summary>
     private async Task<Uri?> Look()
@@ -102,7 +78,6 @@ internal sealed class ThisComputerSetup(AppModel model)
             var found = await Look();
             if (found is null)
             {
-                Here = ThisComputerHere.None;
                 StartMeter(retryLook ? InstallStage.Starting : InstallStage.Fetching);
                 Set(ThisComputerPhase.Installing);
                 if (!retryLook)
@@ -126,7 +101,6 @@ internal sealed class ThisComputerSetup(AppModel model)
             }
             StopMeter();
             Progress = 1;
-            Here = ThisComputerHere.Found;
             _installed = false;
             model.AdoptThisComputer(found);
             Set(ThisComputerPhase.Choose);
