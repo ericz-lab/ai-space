@@ -168,6 +168,11 @@ export function parseManifest(yaml: string, dir: string): Manifest {
   } catch (e) {
     throw new Error(`invalid YAML: ${(e as Error).message}`);
   }
+  return manifestFromDocument(doc, dir);
+}
+
+/** The checks of parseManifest on a document already parsed (a package's components, for one). */
+export function manifestFromDocument(doc: unknown, dir: string): Manifest {
   if (doc === null || doc === undefined) doc = {};
   if (!isRecord(doc)) throw new Error("manifest must be a mapping");
   for (const key of Object.keys(doc)) if (!TOP_LEVEL_KEYS.includes(key)) throw new Error(`unknown top-level key "${key}"`);

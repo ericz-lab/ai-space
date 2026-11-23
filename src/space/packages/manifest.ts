@@ -1,4 +1,4 @@
-import { parseManifest, type Manifest } from "../scheduler/manifest.ts";
+import { manifestFromDocument, type Manifest } from "../scheduler/manifest.ts";
 import { parseStorageSpec } from "../storage/spec.ts";
 import { parseBackupSpec } from "../storage/backup/spec.ts";
 import { parseNotifySpec } from "../notify/spec.ts";
@@ -47,8 +47,9 @@ export function parsePackageManifest(yaml: string): PackageManifest {
 
   // Reuse the existing component validators without accepting v2 in the running registry.
   // The synthetic service only satisfies checks' validation; it never escapes this function.
+  // The document goes over as it is: Bun 1.3.0 cannot read back its own YAML for a quoted string with " ... " in it.
   const common = Object.fromEntries(COMMON.filter((key) => Object.hasOwn(doc, key)).map((key) => [key, doc[key]]));
-  const legacy = parseManifest(Bun.YAML.stringify({ ...common, spec: 1, ...(launch?.kind === "process" ? { service: { command: "package-validation-only", port: 1 } } : {}) }), `/packages/${name}`);
+  const legacy = manifestFromDocument(structuredClone({ ...common, spec: 1, ...(launch?.kind === "process" ? { service: { command: "package-validation-only", port: 1 } } : {}) }), `/packages/${name}`);
   parseStorageSpec(doc.storage);
   parseNotifySpec(doc.notify);
   const backup = parseBackupSpec(doc.backup);

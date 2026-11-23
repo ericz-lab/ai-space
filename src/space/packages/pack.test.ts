@@ -112,3 +112,14 @@ test("archive bounds apply before output is created and long paths round trip", 
   const path = "app/" + "a".repeat(90) + "/" + "b".repeat(90);
   expect((await readArchive(writeArchive([{ path, bytes: new Uint8Array([1, 2]), executable: true }])))[0]?.path).toBe(path);
 });
+
+test("a portable package refuses a module URL's pathname used as a file path", async () => {
+  const opts = await fixture();
+  await Bun.write(join(opts.dir, "web/server.js"), `const a = 1;\nconst icon = Bun.file(new URL("../icon.png", import.meta.url).pathname);\n`);
+  await expect(packApplication(opts)).rejects.toThrow(/Windows.*web\/server\.js:2/);
+  await Bun.write(join(opts.dir, "web/server.js"), `const icon = Bun.file(Bun.fileURLToPath(new URL("../icon.png", import.meta.url)));\nconst p = new URL(req.url).pathname;\n`);
+  expect((await packApplication(opts)).files).toBe(3);
+  // A concrete target is the publisher's own declaration of where it runs.
+  await Bun.write(join(opts.dir, "web/server.js"), `Bun.file(new URL(import.meta.url).pathname);\n`);
+  expect((await packApplication({ ...opts, output: opts.output + ".linux", target: { os: "linux", arch: "x64" } })).files).toBe(3);
+});
