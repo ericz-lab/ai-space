@@ -119,12 +119,14 @@ the Space service, its scheduler and the apps' processes running in the backgrou
 Local are for computers (Local starts on the Mac); a phone always connects to a Space on another
 machine.
 
-**At first launch** with no saved Space, the desktop apps look for an AI Space on the computer (the
-workspace's `SPACE_PORT`, then 8700; `GET /api/space` must say `product: "ai-space"`) and save the one
-they find without a question. With none they offer two choices: run the release's one-command
-installer on this computer (the same `install.sh` or `install.ps1`, with `AI_SPACE_NO_OPEN=1`), or
-connect to another machine ([macos-desktop.md](macos-desktop.md#connections-and-first-launch),
-[linux-desktop.md](linux-desktop.md), [windows-desktop.md](windows-desktop.md)). That is all the app does to
+**At first launch** with no saved Space, the desktop apps show two entries: **Connect to Local AI
+Space** and **Connect to a Remote AI Space**. They look for an AI Space on the computer (the
+workspace's `SPACE_PORT`, then 8700; `GET /api/space` must say `product: "ai-space"`) only to say
+under the first entry whether one is there. A click on it connects straight to the one found; with
+none, it runs the release's one-command installer on this computer first (the same `install.sh` or
+`install.ps1`, with `AI_SPACE_NO_OPEN=1`) behind a single progress bar, then connects. The remote
+entry is the address form ([macos-desktop.md](macos-desktop.md#connections-and-first-launch),
+[linux-desktop.md](linux-desktop.md#first-launch), [windows-desktop.md](windows-desktop.md#this-computer)). That is all the app does to
 a service: it **never** carries, starts, stops, upgrades or removes one. `space upgrade` and
 `space uninstall` do that, and removing the app leaves AI Space in place. Remote use needs no Bun,
 no Git and no developer tools on the client machine.
@@ -138,6 +140,26 @@ builds the Linux app into tarballs and the Windows app into one `.exe` per CPU (
 arm64, and the Mac app into a `.dmg`, signed and notarized once the Developer ID secrets are configured
 ([release.md](release.md)). Missing: the Developer ID certificate itself, the Share extension in
 the release build, and store or test-channel distribution for the phones.
+
+### The install progress bar
+
+The installers print no percentages, so all three apps move one bar by the lines `release/get.sh`
+and `release/get.ps1` print at each step, and let it creep on within a step, slower as it nears
+the step's ceiling, so a long download never looks stuck. A step's start is above the ceiling of
+the one before, so the bar only goes forward; it reaches the end only when the Space answers.
+
+| Step | Begins with the line | Bar from | Creeps toward | Usual length |
+| --- | --- | --- | --- | --- |
+| fetching | (the app downloads the installer) | 0 % | 5 % | 4 s |
+| looking | `ai-space: looking for …` | 5 % | 10 % | 4 s |
+| downloading | `ai-space: downloading <archive>` | 10 % | 55 % | 45 s |
+| placing | `ai-space <version> (<commit>) in <dir>` | 60 % | 80 % | 20 s |
+| apps | `ai-space core: installed, answering …` | 85 % | 95 % | 40 s |
+| starting | `ai-space is running…`, or the installer ended well | 95 % | 99 % | 8 s |
+
+The same table is `InstallProgress` in `desktop/macos/AISpace/Services/SpaceInstaller.swift`,
+`desktop/linux/src/core/first-launch.ts` and `desktop/windows/AISpace.Core/InstallProgress.cs`;
+a change to those lines in the installers needs the same change there.
 
 ## AI Space Local
 
