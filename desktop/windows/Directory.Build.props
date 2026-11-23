@@ -2,7 +2,7 @@
   <!-- Shared by every project of the Windows client (docs/windows-desktop.md). -->
   <PropertyGroup>
     <!-- A copy of package.json's version: `bun run set-version <x.y.z>` rewrites it (src/space/version.ts). -->
-    <Version>0.4.0</Version>
+    <Version>0.3.1</Version>
     <Product>AI Space</Product>
     <Company>ai-space</Company>
     <LangVersion>latest</LangVersion>
