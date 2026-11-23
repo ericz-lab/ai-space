@@ -1,4 +1,21 @@
-# Editions: Server, Client and Local
+# Editions: Server, Client and LocalThe installers print no percentages, so all three apps move one bar by the lines `release/get.sh`
+and `release/get.ps1` print at each step, at one pace. In a step the bar goes in a straight line,
+from where it stood when the step began toward the step's ceiling, covering 0.8 of the way in the
+step's usual length; a step that runs over then slows down near its ceiling, so a long download
+never looks stuck, and one that ends early makes no jump: the next step starts where the bar is and
+only goes a little faster. The ceilings are set so that steps of their usual length (from a real
+install, about 40 s in all) move the bar evenly to 95 %; it reaches the end only when the Space
+answers.
+
+| Step | Begins with the line | Heads toward | Usual length |
+| --- | --- | --- | --- |
+| fetching | (the app downloads the installer) | 9.4 % | 3 s |
+| looking | `ai-space: looking for …` | 13.75 % | 2 s |
+| downloading | `ai-space: downloading <archive>` | 50 % | 12 s |
+| placing | `ai-space <version> (<commit>) in <dir>` | 80 % | 12 s |
+| apps | `ai-space core: installed, answering …` | 88.1 % | 5 s |
+| starting | `ai-space is running…`, or the installer ended well | 97.5 % | 4 s |
+
 
 Status: plan. None of the three editions ships as a release yet (`v0.1.0` is a draft). This document says what each one is,
 where the lines between them run, and what has to exist before each can be published. The work
@@ -144,18 +161,22 @@ the release build, and store or test-channel distribution for the phones.
 ### The install progress bar
 
 The installers print no percentages, so all three apps move one bar by the lines `release/get.sh`
-and `release/get.ps1` print at each step, and let it creep on within a step, slower as it nears
-the step's ceiling, so a long download never looks stuck. A step's start is above the ceiling of
-the one before, so the bar only goes forward; it reaches the end only when the Space answers.
+and `release/get.ps1` print at each step, at one pace. In a step the bar goes in a straight line,
+from where it stood when the step began toward the step's ceiling, covering 0.8 of the way in the
+step's usual length; a step that runs over then slows down near its ceiling, so a long download
+never looks stuck, and one that ends early makes no jump: the next step starts where the bar is and
+only goes a little faster. The ceilings are set so that steps of their usual length (from a real
+install, about 40 s in all) move the bar evenly to 95 %. The bar only goes forward and reaches the
+end only when the Space answers.
 
-| Step | Begins with the line | Bar from | Creeps toward | Usual length |
-| --- | --- | --- | --- | --- |
-| fetching | (the app downloads the installer) | 0 % | 5 % | 4 s |
-| looking | `ai-space: looking for …` | 5 % | 10 % | 4 s |
-| downloading | `ai-space: downloading <archive>` | 10 % | 55 % | 45 s |
-| placing | `ai-space <version> (<commit>) in <dir>` | 60 % | 80 % | 20 s |
-| apps | `ai-space core: installed, answering …` | 85 % | 95 % | 40 s |
-| starting | `ai-space is running…`, or the installer ended well | 95 % | 99 % | 8 s |
+| Step | Begins with the line | Heads toward | Usual length |
+| --- | --- | --- | --- |
+| fetching | (the app downloads the installer) | 9.4 % | 3 s |
+| looking | `ai-space: looking for …` | 13.75 % | 2 s |
+| downloading | `ai-space: downloading <archive>` | 50 % | 12 s |
+| placing | `ai-space <version> (<commit>) in <dir>` | 80 % | 12 s |
+| apps | `ai-space core: installed, answering …` | 88.1 % | 5 s |
+| starting | `ai-space is running…`, or the installer ended well | 97.5 % | 4 s |
 
 The same table is `InstallProgress` in `desktop/macos/AISpace/Services/SpaceInstaller.swift`,
 `desktop/linux/src/core/first-launch.ts` and `desktop/windows/AISpace.Core/InstallProgress.cs`;
