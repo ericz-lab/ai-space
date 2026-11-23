@@ -157,3 +157,73 @@ struct LineBuffer {
         return s
     }
 }
+
+/// The one progress bar the first launch shows while AI Space is installed
+/// (docs/editions.md#ai-space-client). The installer prints no percentages, so the bar moves by
+/// the lines it prints at each step (the same in `release/get.sh` and `release/install.ps1`), and
+/// creeps on within a step, slowing as it nears the step's ceiling, so a long download never
+/// looks stuck. Each step starts above the ceiling of the one before: the bar only goes forward.
+struct InstallProgress: Equatable {
+    enum Stage: Int, Comparable, CaseIterable {
+        /// The app fetches the installer itself.
+        case fetching
+        /// "ai-space: looking for the latest release …"
+        case looking
+        /// "ai-space: downloading ai-space-<version>-<os>-<arch>.tar.gz"
+        case downloading
+        /// "ai-space <version> (<commit>) in <dir>": the program is in place, the service starts.
+        case placing
+        /// "ai-space core: installed, answering …": the default apps are set up.
+        case apps
+        /// The installer ended well ("ai-space is running"); the app waits for the Space.
+        case starting
+
+        static func < (a: Stage, b: Stage) -> Bool { a.rawValue < b.rawValue }
+
+        /// Where the bar starts in this step, the ceiling it creeps toward, and the step's usual length.
+        var span: (from: Double, to: Double, seconds: Double) {
+            switch self {
+            case .fetching: return (0.00, 0.05, 4)
+            case .looking: return (0.05, 0.10, 4)
+            case .downloading: return (0.10, 0.55, 45)
+            case .placing: return (0.60, 0.80, 20)
+            case .apps: return (0.85, 0.95, 40)
+            case .starting: return (0.95, 0.99, 8)
+            }
+        }
+    }
+
+    /// The step a line of the installer's output begins, if it begins one.
+    static func stage(of line: String) -> Stage? {
+        let l = line.trimmingCharacters(in: .whitespaces)
+        if l.hasPrefix("ai-space: looking for") { return .looking }
+        if l.hasPrefix("ai-space: downloading ") { return .downloading }
+        if l.hasPrefix("ai-space core: installed") { return .apps }
+        if l.hasPrefix("ai-space is running") { return .starting }
+        if l.range(of: #"^ai-space \S+ \(\S+\) in "#, options: .regularExpression) != nil { return .placing }
+        return nil
+    }
+
+    private(set) var stage: Stage = .fetching
+    private(set) var since: Date
+
+    init(at start: Date = Date()) { since = start }
+
+    /// Moves to `next` when it is a later step; an earlier or the same one changes nothing.
+    mutating func enter(_ next: Stage, at time: Date = Date()) {
+        guard next > stage else { return }
+        stage = next
+        since = time
+    }
+
+    mutating func read(_ line: String, at time: Date = Date()) {
+        if let next = Self.stage(of: line) { enter(next, at: time) }
+    }
+
+    /// The bar's value, 0 to 1 (1 only once the Space answers, which is not a step here).
+    func value(at time: Date = Date()) -> Double {
+        let s = stage.span
+        let elapsed = max(0, time.timeIntervalSince(since))
+        return s.from + (s.to - s.from) * (1 - exp(-elapsed / s.seconds))
+    }
+}

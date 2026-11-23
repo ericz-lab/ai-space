@@ -54,16 +54,23 @@ Apple's [WKWebView](https://developer.apple.com/documentation/webkit/wkwebview) 
 
 A connection stores a stable client identifier, display name and panel URL. Desktop preferences belong under the application's own Application Support directory, separate from the Space workspace.
 
-**First launch** (the desktop app, which carries no service; the Local edition's first run is in [local.md](local.md)). With no saved Space the app looks for an AI Space on this Mac before it asks anything (`Services/LocalSpace.swift`, `Services/FirstLaunch.swift`):
+**First launch** (the desktop app, which carries no service; the Local edition's first run is in [local.md](local.md)). With no saved Space the welcome view shows two entries and takes neither by itself (`Services/FirstLaunch.swift`, `Views/FirstLaunchView.swift`):
+
+- **Connect to Local AI Space** (primary): the AI Space on this Mac. Under it one line says what the click will do, from a look the app makes at launch: "Found on this Mac", or "Not on this Mac yet: it is downloaded and installed first". The look saves nothing.
+- **Connect to a Remote AI Space…** (secondary) is the address form below.
+
+Looking for the AI Space on this Mac (`Services/LocalSpace.swift`):
 
 1. The candidate ports are `SPACE_PORT` from the workspace's `.env` (`$SPACE_HOME/.env`, else `~/.ai-space/.env`) when that file can be read, then 8700, the default in `src/space/config.ts`.
 2. Each gets `GET http://127.0.0.1:<port>/api/space` with a 2-second timeout. A reachable port alone is not proof that the service is ai-space: only an answer whose JSON has `product: "ai-space"` counts (`SpaceCheck.isSpace`).
-3. **Found:** the Space is saved as "This Mac", selected, and the window opens on it. Nothing is asked.
-4. **Not found:** the welcome view offers two choices and takes neither by itself:
-   - **Install AI Space on This Mac** (primary) runs the release's own one-command installer ([release.md](release.md#one-command-install)), never a copy inside the app (`Services/SpaceInstaller.swift`). The app downloads `https://github.com/ericz-lab/ai-space/releases/latest/download/install.sh` to a temporary file (`<AI_SPACE_DOWNLOAD>/install.sh` when that variable is set, which the installer honours too: mirrors and tests use it) and runs `/bin/bash <file>` with `AI_SPACE_NO_OPEN=1` and `/usr/bin:/bin:/usr/sbin:/sbin` at the front of `PATH`, since a GUI app's `PATH` is bare and the script needs curl, tar and launchctl. Its output is shown line by line. On exit code 0 the app looks again, once a second for up to 30 seconds, then saves and selects the Space. On any other exit code it shows the last lines of the output and Retry; when the installer went through but nothing answers yet, Retry only looks again. A click on Install looks once more first, and a Space that has come up meanwhile is used as it is rather than installed over.
-   - **Connect to an AI Space on Another Machine…** (secondary) is the address form below.
 
-The look happens once, at launch: removing every saved Space later shows the two choices without adding one back.
+A click on **Connect to Local AI Space** looks again. **Found:** the Space is saved as "This Mac", selected, and the window opens on it. **Not found:** the app installs it first and then connects, showing only "Installing AI Space…" and one progress bar:
+
+- It runs the release's own one-command installer ([release.md](release.md#one-command-install)), never a copy inside the app (`Services/SpaceInstaller.swift`). The app downloads `https://github.com/ericz-lab/ai-space/releases/latest/download/install.sh` to a temporary file (`<AI_SPACE_DOWNLOAD>/install.sh` when that variable is set, which the installer honours too: mirrors and tests use it) and runs `/bin/bash <file>` with `AI_SPACE_NO_OPEN=1` and `/usr/bin:/bin:/usr/sbin:/sbin` at the front of `PATH`, since a GUI app's `PATH` is bare and the script needs curl, tar and launchctl.
+- The bar follows the lines the installer prints at each step (`InstallProgress`, [editions.md](editions.md#the-install-progress-bar)); the lines themselves are not shown.
+- On exit code 0 the app looks again, once a second for up to 30 seconds, then saves and selects the Space. On any other exit code it shows one line of why, Retry, and the installer's last lines folded under Details; when the installer went through but nothing answers yet, Retry only looks again. A Space that has come up meanwhile is used as it is rather than installed over.
+
+Removing every saved Space later shows the two entries again without adding one back.
 
 What the app installs this way is the standard AI Space, the same as the command in a terminal gives: a LaunchAgent `ai.space.server` of the user's own, on `127.0.0.1:8700`, with the workspace `~/.ai-space`. It is an external installation in the terms of [Managed local installation](#managed-local-installation): the desktop app never bundles, upgrades, stops or uninstalls it, and removing the app leaves AI Space in place (`space uninstall` removes it; running the one-command installer again upgrades it).
 

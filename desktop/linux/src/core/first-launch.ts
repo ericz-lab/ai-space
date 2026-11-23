@@ -1,10 +1,10 @@
 import { parseEnvText } from "./peer.ts";
 
 /**
- * The first launch of the app that carries no service (AI Space Desktop): it looks for an AI Space
- * on this computer, saves the one it finds and asks nothing; with none it offers to install the
- * standard one, with the release's own one-command installer (release/get.sh, published as
- * `install.sh`), or to connect to another machine. The app never bundles, upgrades, stops or
+ * The first launch of the app that carries no service (AI Space Desktop): two entries, the AI Space
+ * on this computer or one on another machine. The first connects straight to the one found here;
+ * with none it installs the standard one first, with the release's own one-command installer
+ * (release/get.sh, published as `install.sh`), behind a single progress bar (`InstallProgress`). The app never bundles, upgrades, stops or
  * removes that service. Everything here is text and injected calls; `app/welcome.ts` draws it and
  * `app/first-launch.ts` does the requests and runs the installer.
  */
@@ -85,19 +85,6 @@ export async function waitForLocalSpace(find: () => Promise<string | undefined>,
     if (clock.now() + everyMs > until) return undefined;
     await clock.sleep(everyMs);
   }
-}
-
-/**
- * What the welcome screen does with the look. At launch with no saved Space, a Space found is
- * saved and shown without a question. Later in the same run (the person removed the last saved
- * Space) it is only offered, or removing this computer's Space would bring it straight back.
- * With none, the two choices: install it here, or connect to another machine.
- */
-export type WelcomeDecision = { kind: "adopt"; url: string } | { kind: "suggest"; url: string } | { kind: "offer" };
-
-export function welcomeDecision(found: string | undefined, atLaunch: boolean): WelcomeDecision {
-  if (!found) return { kind: "offer" };
-  return { kind: atLaunch ? "adopt" : "suggest", url: found };
 }
 
 /** Where the installer comes from: `AI_SPACE_DOWNLOAD` (a mirror, or `file://` in tests), which the installer reads too, else the latest release. */
@@ -182,4 +169,68 @@ export async function installLocalSpace(deps: InstallDeps): Promise<InstallOutco
   deps.onStarting?.();
   const url = await waitForLocalSpace(deps.find, deps.clock);
   return url ? { ok: true, url } : { ok: false, reason: "silent", tail: outputTail(lines) };
+}
+
+/**
+ * The one progress bar shown while AI Space is installed (docs/editions.md#ai-space-client). The
+ * installer prints no percentages, so the bar moves by the lines it prints at each step (the same
+ * in release/get.sh and release/install.ps1) and creeps on within a step, slowing as it nears the
+ * step's ceiling, so a long download never looks stuck. Each step starts above the ceiling of the
+ * one before: the bar only goes forward. The Mac's `InstallProgress` (SpaceInstaller.swift) is the same.
+ */
+export type InstallStage = "fetching" | "looking" | "downloading" | "placing" | "apps" | "starting";
+
+/** In order; each step's start, the ceiling it creeps toward, and its usual length in seconds. */
+export const INSTALL_STAGES: readonly { stage: InstallStage; from: number; to: number; seconds: number }[] = [
+  { stage: "fetching", from: 0, to: 0.05, seconds: 4 },
+  { stage: "looking", from: 0.05, to: 0.1, seconds: 4 },
+  { stage: "downloading", from: 0.1, to: 0.55, seconds: 45 },
+  { stage: "placing", from: 0.6, to: 0.8, seconds: 20 },
+  { stage: "apps", from: 0.85, to: 0.95, seconds: 40 },
+  { stage: "starting", from: 0.95, to: 0.99, seconds: 8 },
+];
+
+/** The step a line of the installer's output begins, if it begins one. */
+export function installStageOf(line: string): InstallStage | undefined {
+  const l = line.trim();
+  if (l.startsWith("ai-space: looking for")) return "looking";
+  if (l.startsWith("ai-space: downloading ")) return "downloading";
+  if (l.startsWith("ai-space core: installed")) return "apps";
+  if (l.startsWith("ai-space is running")) return "starting";
+  if (/^ai-space \S+ \(\S+\) in /.test(l)) return "placing";
+  return undefined;
+}
+
+export class InstallProgress {
+  private index = 0;
+  private since: number;
+
+  constructor(now: number, stage: InstallStage = "fetching") {
+    this.since = now;
+    this.enter(stage, now);
+  }
+
+  get stage(): InstallStage {
+    return INSTALL_STAGES[this.index]!.stage;
+  }
+
+  /** Moves to `stage` when it is a later step; an earlier or the same one changes nothing. */
+  enter(stage: InstallStage, now: number): void {
+    const i = INSTALL_STAGES.findIndex((s) => s.stage === stage);
+    if (i <= this.index) return;
+    this.index = i;
+    this.since = now;
+  }
+
+  read(line: string, now: number): void {
+    const stage = installStageOf(line);
+    if (stage) this.enter(stage, now);
+  }
+
+  /** The bar's value, 0 to 1 (1 only once the Space answers, which is not a step here). */
+  value(now: number): number {
+    const s = INSTALL_STAGES[this.index]!;
+    const elapsed = Math.max(0, now - this.since) / 1000;
+    return s.from + (s.to - s.from) * (1 - Math.exp(-elapsed / s.seconds));
+  }
 }
