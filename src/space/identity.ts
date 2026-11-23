@@ -9,6 +9,8 @@ import { isOperator } from "./auth.ts";
  *                    operator token or the owner's session. `installation` is "managed" when the
  *                    Local app installed this service (installation.json in the workspace), else
  *                    "external": the app uses it to tell its own service from someone else's.
+ *                    The operator also gets `uptime: { startedAt, totalMs }`, this run's start and
+ *                    every recorded run added up (docs/usage.md#uptime).
  *
  * A public route (docs/auth.md#access-policy): a client asks before anyone has signed in.
  */
@@ -42,13 +44,20 @@ export type SpaceIdentity = {
   id?: string;
   /** SPACE_NAME, default the hostname; the operator's only. */
   name?: string;
+  /** This run's start and the Space's whole recorded running time (docs/usage.md#uptime); the operator's only. */
+  uptime?: { startedAt: string; totalMs: number };
 };
 
-export function createIdentityRoutes(opts: { version: string; edition: Edition; id: string; name: string; token: string; managed?: boolean }) {
+export function createIdentityRoutes(opts: { version: string; edition: Edition; id: string; name: string; token: string; managed?: boolean; uptime?: () => { startedAt: string; totalMs: number } | undefined }) {
   const open: SpaceIdentity = { product: PRODUCT, api: API_LEVEL, version: opts.version, edition: opts.edition, installation: opts.managed ? "managed" : "external" };
   return {
     "/api/space": {
-      GET: (req: Request) => Response.json(isOperator(req, opts.token) ? { ...open, id: opts.id, name: opts.name } : open, { headers: { "cache-control": "no-store" } }),
+      GET: (req: Request) => {
+        if (!isOperator(req, opts.token)) return Response.json(open, { headers: { "cache-control": "no-store" } });
+        const up = opts.uptime?.();
+        const body: SpaceIdentity = { ...open, id: opts.id, name: opts.name, ...(up ? { uptime: { startedAt: up.startedAt, totalMs: up.totalMs } } : {}) };
+        return Response.json(body, { headers: { "cache-control": "no-store" } });
+      },
     },
   };
 }

@@ -34,6 +34,7 @@ import { buildFeedbackScript } from "./web/feedback-widget/build.ts";
 import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/services/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
 import { createIdentityRoutes } from "./space/identity.ts";
+import { UptimeStore, createUptimeRoutes } from "./space/uptime.ts";
 import { readVersion } from "./space/version.ts";
 import { withUserToolDirs } from "./space/host-tools.ts";
 import { readOwnership } from "./space/local.ts";
@@ -250,6 +251,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const sessions = new SessionStore(store.db);
   // How often apps, agents and the panel's windows are opened, and for how long (docs/usage.md).
   const usage = new UsageService(new UsageStore(store.db, { retentionDays: config.usageRetentionDays }));
+  // How long this Space has run, across restarts (docs/usage.md#uptime); the segment opens once it listens.
+  const uptime = new UptimeStore(store.db);
   packageGateway.usageBeat = (app, tab) => { usage.beat(app, tab); };
   // Panel chat turns run in the background: a page closing does not stop them (docs/panel.md#chat).
   const agentRuns = new RunRegistry(store.db, { timeoutMs: config.chatTimeoutMs, onRunStart: usage.runStarted, onRunEnd: usage.runEnded });
@@ -697,7 +700,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag), machines: machineCells, servesPeers: config.peerModel, space: config.name, ...(peers.names().length ? { peerLedgers: new PeerLedgers(peers, config.name) } : {}) })],
       ["owner", createAppModelRoutes(appModelRouteOpts)],
       ["app", createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget })],
-      ["public", createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name, token: config.apiToken, managed: Boolean(await readOwnership(ws.home)) })],
+      ["public", createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name, token: config.apiToken, managed: Boolean(await readOwnership(ws.home)), uptime: () => uptime.summary() })],
+      ["owner", createUptimeRoutes({ uptime, token: config.apiToken })],
       ["owner", panelRoutes],
       ["owner", createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage })],
       ["owner", createActivityRoutes({ token: config.apiToken, tasks: () => scheduler.running(), modelCalls: () => model.inFlight(), agentTurns: () => agentRuns.running(), terminals: () => terminal.status().active, packageChanges: () => packageInstaller.busy + packageLifecycle.busy })],
@@ -804,6 +808,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     fetch: () => new Response(JSON.stringify({ ok: false, error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }),
   });
   console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}${terminal.enabled ? ` · terminal ${terminal.backend}` : ""}${router.enabled ? ` · router ${config.router.backend} :${config.router.port}` : ""} · services by ${supervisor.mode} · runtimes ${runtimes.describe()} (${loaded.source})`);
+  uptime.start({ version, edition: config.edition });
 
   // A restart must not cut the work in flight: no new runs are started, then the task runs and the
   // model calls apps are blocked on get SPACE_DRAIN_SECONDS to finish. The server keeps serving while
@@ -836,6 +841,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     await bus.idle();
     await notify.idle();
     await shortcuts.idle();
+    uptime.stop();
     store.close();
     busStore.close();
     shortcutStore.close();

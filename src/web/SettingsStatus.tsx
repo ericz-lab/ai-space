@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { getJson, relTime, sendJson, untilTime, type BackupInfo, type MachineCell, type PeerInfo, type ServiceInfo, type SpeechCell, type SpeechStatus } from "./api.ts";
+import { fmtDuration, getJson, relTime, sendJson, untilTime, type BackupInfo, type MachineCell, type PeerInfo, type ServiceInfo, type SpeechCell, type SpeechStatus } from "./api.ts";
 import { failureText } from "./call-trace.ts";
 import { localized, useLang } from "./i18n.ts";
-import type { Key } from "./messages.ts";
+import { LOCALE, type Key } from "./messages.ts";
 import { HEALTH, Icon, STATUS } from "./Tiles.tsx";
 import { fmtCost } from "./Usage.tsx";
 
@@ -64,6 +64,13 @@ export default function SettingsStatus() {
       })
       .catch(() => setBackups([]));
   }, []);
+  // This Space's running time across restarts (docs/usage.md#uptime); an older Space has no route and the row stays away.
+  const [uptime, setUptime] = useState<{ currentMs: number; totalMs: number; firstStartedAt: string } | null>(null);
+  useEffect(() => {
+    getJson<{ uptime?: { currentMs: number; totalMs: number; firstStartedAt: string } }>("/api/space/uptime")
+      .then((d) => setUptime(d.uptime ?? null))
+      .catch(() => setUptime(null));
+  }, []);
   // The status section has a page of its own, so its rows start shown.
   const [statusOpen, setStatusOpen] = useState(true);
   const statusLoaded = services !== null && backups !== null;
@@ -88,6 +95,11 @@ export default function SettingsStatus() {
     : t("common.loading");
   return (
     <>
+      {uptime && (
+        <div className="setrow" title={t("settings.uptimeHint")}>
+          <span className="svc-name">{t("settings.uptime", { current: fmtDuration(uptime.currentMs, lang), total: fmtDuration(uptime.totalMs, lang), since: new Date(uptime.firstStartedAt).toLocaleDateString(LOCALE[lang]) })}</span>
+        </div>
+      )}
       <button className="setrow setlink" aria-expanded={statusOpen} onClick={() => setStatusOpen((o) => !o)}>
         <span className="svc-name">{statusSummary}</span>
         {statusLoaded && (

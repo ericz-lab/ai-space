@@ -35,6 +35,16 @@ describe("GET /api/space", () => {
     expect(await (await get({ authorization: "Bearer nope" })).json()).not.toHaveProperty("id");
   });
 
+  test("the operator also gets this run's start and the whole running time; nobody else does", async () => {
+    const withUptime = createIdentityRoutes({ version: "1.2.3", edition: "server", id, name: "mac", token: "op", uptime: () => ({ startedAt: "2026-10-01T00:00:00.000Z", totalMs: 5000, currentMs: 1000, firstStartedAt: "2026-09-01T00:00:00.000Z", restarts: 3 }) as { startedAt: string; totalMs: number } });
+    const get = (headers: Record<string, string> = {}) => withUptime["/api/space"].GET(new Request("http://x/api/space", { headers }));
+    expect((await (await get({ authorization: "Bearer op" })).json()).uptime).toEqual({ startedAt: "2026-10-01T00:00:00.000Z", totalMs: 5000 });
+    expect(await (await get()).json()).not.toHaveProperty("uptime");
+    // Before the run has started there is nothing to show, and no empty field.
+    const early = createIdentityRoutes({ version: "1.2.3", edition: "server", id, name: "mac", token: "op", uptime: () => undefined });
+    expect(await (await early["/api/space"].GET(new Request("http://x/api/space", { headers: { authorization: "Bearer op" } }))).json()).not.toHaveProperty("uptime");
+  });
+
   test("says managed when the Local app installed it", async () => {
     const managed = createIdentityRoutes({ version: "1.2.3", edition: "local", id, name: "mac", token: "op", managed: true });
     expect(await (await managed["/api/space"].GET(new Request("http://x/api/space"))).json()).toMatchObject({ installation: "managed" });
