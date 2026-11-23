@@ -310,10 +310,12 @@ describe("other nouns", () => {
         { status: 200, body: { ok: true, target: "s3://b/", backups: [{ app: "a", stale: true }] } },
         { status: 200, body: { ok: true, runtimes: [{ name: "claude", default: true }], maxConcurrency: 4, running: 1, waiting: 0 } },
         { status: 200, body: { ok: true, peers: [] } },
+        { status: 200, body: { ok: true, uptime: { startedAt: "2026-11-20T00:00:00.000Z", currentMs: 3 * 3_600_000, totalMs: 412 * 3_600_000, firstStartedAt: "2026-10-01T08:00:00.000Z", restarts: 1 } } },
       ),
     );
     expect(r.code).toBe(0);
     expect(r.out[0]).toBe("ai-space at http://127.0.0.1:8700: ok");
+    expect(r.out[6]).toBe("uptime    3h this run · 17d 4h in all since 2026-10-01 · 1 restart");
     expect(r.out[2]).toBe("services  2 · 1 up · 1 DOWN: b");
     expect(r.out[3]).toBe("tasks     2 · 2 enabled · 1 FAILING: demo/fail");
     expect(r.out[4]).toBe("backups   1 apps → s3://b/ · 1 STALE: a");

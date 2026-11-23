@@ -1,16 +1,17 @@
-import { ago, until } from "./output.ts";
+import { ago, span, until } from "./output.ts";
 import { type Noun } from "./types.ts";
 import { type TaskView, taskRef } from "./common.ts";
 
 /**
- * `space status`: the machine at a glance, composed from six routes the panel
+ * `space status`: the machine at a glance, composed from seven routes the panel
  * already answers from its caches: health, services, tasks, backups, model
- * load and peers. There is no `/api/status`: this is the only reader.
+ * load, peers and uptime. There is no `/api/status`: this is the only reader.
  */
 
 type Services = { services: { app: string; peer?: string; port: number; health: string; status: string; supervision?: { action: string; error?: string } }[]; peers: unknown[]; supervisor?: string };
 type Backups = { enabled?: boolean; target: string | null; backups: { app: string; lastOkAt?: number; lastStatus?: string; lastError?: string; stale: boolean; nextRunAt?: number }[] };
 type Model = { backend: string; runtimes: { name: string; kind: string; backend: string; default: boolean }[]; maxConcurrency: number; running: number; waiting: number };
+type Uptime = { uptime: { startedAt: string; currentMs: number; totalMs: number; firstStartedAt: string; restarts: number } };
 type Peers = { peers: { name: string; url: string; health: string; asOf?: string; stale: boolean; apps: number; error?: string }[] };
 
 export const statusNoun: Noun = {
@@ -24,12 +25,14 @@ export const statusNoun: Noun = {
       run: async (ctx) => {
         const c = await ctx.client();
         const health = await c.get<{ ok: boolean }>("/healthz");
-        const [services, tasks, backups, model, peers] = await Promise.all([
+        const [services, tasks, backups, model, peers, up] = await Promise.all([
           c.get<Services>("/api/services").catch(() => undefined),
           c.get<{ tasks: TaskView[] }>("/api/tasks").catch(() => undefined),
           c.get<Backups>("/api/backups").catch(() => undefined),
           c.get<Model>("/api/model/status").catch(() => undefined),
           c.get<Peers>("/api/peers").catch(() => undefined),
+          // An older Space has no uptime route; the line then stays away.
+          c.get<Uptime>("/api/space/uptime").catch(() => undefined),
         ]);
         const now = Date.now();
         const failing = (tasks?.tasks ?? []).filter((t) => t.enabled && !t.orphaned && t.state.lastStatus === "error");
@@ -41,7 +44,7 @@ export const statusNoun: Noun = {
         // last run can still be fresh; say so, or "all fresh" reads as "all well".
         const failedBackups = (backups?.backups ?? []).filter((b) => !b.stale && b.lastStatus === "error");
         if (ctx.flags.json) {
-          ctx.print.data({ ok: health.ok, url: c.url, services: services?.services ?? [], tasks: { total: tasks?.tasks.length ?? 0, failing, overdue, running }, backups: backups?.backups ?? [], model, peers: peers?.peers ?? [] });
+          ctx.print.data({ ok: health.ok, url: c.url, services: services?.services ?? [], tasks: { total: tasks?.tasks.length ?? 0, failing, overdue, running }, backups: backups?.backups ?? [], model, peers: peers?.peers ?? [], uptime: up?.uptime });
           return 0;
         }
         const p = ctx.print;
@@ -60,6 +63,7 @@ export const statusNoun: Noun = {
           p.line(`backups   ${backups.target ? `${b.length} apps → ${backups.target}` : backups.enabled === false ? "off (SPACE_BACKUP_URL is not set)" : "no target (SPACE_BACKUP_URL)"}${staleBackups.length ? ` · ${staleBackups.length} STALE: ${staleBackups.map((x) => x.app).join(", ")}` : b.length ? " · all fresh" : ""}${failedBackups.length ? ` · last run FAILED for ${failedBackups.length}: ${failedBackups.map((x) => x.app).join(", ")}` : ""}`);
         }
         if (model) p.line(`model     ${model.runtimes.map((r) => `${r.name}${r.default ? "*" : ""}`).join(", ")} · ${model.running} running, ${model.waiting} waiting (cap ${model.maxConcurrency})`);
+        if (up?.uptime) p.line(`uptime    ${span(up.uptime.currentMs)} this run · ${span(up.uptime.totalMs)} in all since ${up.uptime.firstStartedAt.slice(0, 10)} · ${up.uptime.restarts} restart${up.uptime.restarts === 1 ? "" : "s"}`);
         if (peers?.peers.length) p.line(`peers     ${peers.peers.map((x) => `${x.name} ${x.health}${x.asOf ? ` (${ago(x.asOf, now)})` : ""}`).join(" · ")}`);
         if (failing.length) {
           p.line("");

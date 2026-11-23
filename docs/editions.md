@@ -203,7 +203,9 @@ a client asks before anyone has signed in.
 - `version` is `package.json`'s; `edition` is `SPACE_EDITION` (`server` by default, `local` when the
   Local edition starts the service). There is no `client` value: a client never runs the service.
 - With the operator token or the owner's session, the answer also has `id`, the Space's stable id
-  (the same one packages and connections use), and `name` (`SPACE_NAME`, by default the hostname).
+  (the same one packages and connections use), `name` (`SPACE_NAME`, by default the hostname), and
+  `uptime: { startedAt, totalMs }`, this run's start and the service's whole recorded running time
+  on this machine ([usage.md](usage.md#uptime)).
 - `installation` is `managed` when the Local app installed the service (`installation.json` in its
   workspace), `external` otherwise: the app's way to tell its own service from someone else's
   ([local.md](local.md#ownership-and-exclusion)).

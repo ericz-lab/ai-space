@@ -173,3 +173,28 @@ Storage adds `app` and `sequence` columns to device segments and a deduplicated
 null app attribution. The usage retention policy covers both tables. Native
 reports read when opened, when filters change and on pull/toolbar refresh; they
 can show a zero-duration visit until a later heartbeat has arrived and is read.
+
+## Uptime
+
+How long this Space's own service has run on this machine, every restart added up (`src/space/uptime.ts`). It is about the service, not about people using it, and it is separate from the opens and time in use above.
+
+- Each start of the service opens a segment once it listens. A tick every 60 s moves the segment's end to now, and shutdown moves it one last time. A crash or power cut loses at most the time since the last tick. A clock set back never shortens a recorded segment.
+- The figures are this machine's own. A hub never adds its peers' to them, like the usage figures.
+- Every start is kept: one small row each, outside `SPACE_USAGE_RETENTION_DAYS`.
+
+```sql
+uptime_segments(id, started_at, last_at, version, edition)
+  -- one row per start of the service; epoch milliseconds (docs/time.md)
+```
+
+```
+GET /api/space/uptime    owner
+     → { ok, uptime: { startedAt, currentMs, totalMs, firstStartedAt, restarts } }
+```
+
+`startedAt` and `firstStartedAt` are UTC ISO instants, the durations are milliseconds. `totalMs` includes the current run, and `restarts` counts the recorded starts after the first. Before the current run has opened its segment the route answers `503`. `GET /api/space` also carries `uptime: { startedAt, totalMs }` for the operator ([editions.md](editions.md#service-identity)), so a client that just connected can show it without a second request.
+
+- `space status` prints `uptime    3h this run · 17d 4h in all since 2026-10-01 · 1 restart` (the date is the UTC day of the first recorded start).
+- **Settings → Status** shows one line above the status summary: "Running for 3 h · 17 d 4 h in all since 10/1/2026".
+
+A Space upgraded to this version starts counting from that upgrade; earlier running time was never recorded.
