@@ -29,6 +29,7 @@ find those.
 | `ai-space-desktop-<version>-macos-arm64-unsigned.dmg` | Built when no signing identity is configured: for testing, macOS blocks it for everyone else |
 | `ai-space-desktop-<version>-linux-x64.tar.gz`, `…-linux-arm64.tar.gz` | AI Space Desktop for Linux ([linux-desktop.md](linux-desktop.md)); `./install.sh` in it installs it for the user |
 | `ai-space-desktop-<version>-windows-x64.exe`, `…-windows-arm64.exe` | AI Space Desktop for Windows ([windows-desktop.md](windows-desktop.md)), not signed; one program file that runs and offers to install itself for the user |
+| `ai-space-desktop-<os>-<arch>.<ext>` | Copies of the AI Space Desktop files above without the version (and without `-unsigned`), so `releases/latest/download/ai-space-desktop-macos-arm64.dmg` and the download links on ai-space.me stay the same from release to release |
 | `install.sh`, `install.ps1` | The one-command installers of AI Space ([below](#one-command-install)); `release/get.sh` and `release/get.ps1` in the repository |
 | `SHA256SUMS` | `sha256sum -c SHA256SUMS --ignore-missing` checks a download |
 | `manifest.json` | Version, commit, the run that built it, every file's size and SHA-256 |
@@ -61,7 +62,7 @@ The tag must equal `package.json`'s version, or the run stops at its first job. 
    signing secrets exist signs it, notarizes it with `notarytool`, staples the ticket and checks it
    with `spctl`. A signed build without notarization credentials fails instead of shipping.
 4. **linux** and **windows**: the Linux and Windows apps ([below](#linux-app), [below](#windows-app)).
-5. **draft release**: `bun release/manifest.ts` writes `SHA256SUMS`, `manifest.json` and the notes;
+5. **draft release**: `bun release/manifest.ts` copies each Desktop file to its versionless name, writes `SHA256SUMS`, `manifest.json` and the notes;
    the draft is created, or refreshed when a rerun built the same commit. A published release, or a
    draft holding another commit's files, is never overwritten.
 

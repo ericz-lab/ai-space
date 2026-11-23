@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { artifacts, notes, sums } from "./manifest.ts";
+import { addStableNames, artifacts, notes, stableName, sums } from "./manifest.ts";
 import { linuxArchiveName } from "./linux.ts";
 import { windowsArchiveName } from "./windows.ts";
 import { archiveName, included } from "./server.ts";
@@ -73,6 +73,38 @@ describe("the release manifest", () => {
       expect(text).not.toContain("| |");
       expect(text).toContain("bash <dir>/install.sh");
       expect(text).toContain("curl -fsSL https://ai-space.me/install.sh | bash");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("stable download names", () => {
+  test("drop the version (and -unsigned) from AI Space Desktop files only", () => {
+    expect(stableName("ai-space-desktop-0.3.0-macos-arm64-unsigned.dmg")).toBe("ai-space-desktop-macos-arm64.dmg");
+    expect(stableName("ai-space-desktop-0.3.0-macos-arm64.dmg")).toBe("ai-space-desktop-macos-arm64.dmg");
+    expect(stableName("ai-space-desktop-1.2.3-dev.abc1234-windows-arm64.exe")).toBe("ai-space-desktop-windows-arm64.exe");
+    expect(stableName("ai-space-desktop-0.3.0-linux-x64.tar.gz")).toBe("ai-space-desktop-linux-x64.tar.gz");
+    expect(stableName("ai-space-desktop-macos-arm64.dmg")).toBeUndefined();
+    expect(stableName("ai-space-0.3.0-linux-x64.tar.gz")).toBeUndefined();
+    expect(stableName("install.sh")).toBeUndefined();
+  });
+
+  test("are copies listed in SHA256SUMS that the installers' Server patterns never pick", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "space-stable-"));
+    try {
+      await Bun.write(join(dir, "ai-space-1.0.0-macos-arm64.tar.gz"), "server");
+      await Bun.write(join(dir, "ai-space-desktop-1.0.0-macos-arm64-unsigned.dmg"), "mac");
+      await Bun.write(join(dir, "ai-space-desktop-1.0.0-windows-x64.exe"), "win");
+      expect(await addStableNames(dir)).toEqual(["ai-space-desktop-macos-arm64.dmg", "ai-space-desktop-windows-x64.exe"]);
+      expect(await Bun.file(join(dir, "ai-space-desktop-macos-arm64.dmg")).text()).toBe("mac");
+      const list = await artifacts(dir);
+      const text = notes({ product: "ai-space", version: "1.0.0", commit: "0123456789abcdef", created: "", artifacts: list });
+      expect(text).toContain("| `ai-space-desktop-macos-arm64.dmg` | The same file as `ai-space-desktop-1.0.0-macos-arm64-unsigned.dmg`");
+      expect(text).not.toContain("| |");
+      // release/get.sh and get.ps1 look for ai-space-(server-)?<digit>…-<os>-<arch>.tar.gz
+      const server = sums(list).split("\n").filter((l) => /  ai-space-(server-)?[0-9][^ ]*-[a-z]+-[a-z0-9]+\.tar\.gz$/.test(l));
+      expect(server.map((l) => l.split("  ")[1])).toEqual(["ai-space-1.0.0-macos-arm64.tar.gz"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
