@@ -82,8 +82,12 @@ internal static class WelcomeView
         column.MaxWidth = 660;
         column.HorizontalAlignment = HorizontalAlignment.Center;
         var scroll = new ScrollViewer { Content = column, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        Ui.Background(scroll);
-        return scroll;
+        // The page's ground: a range of mountains in faint binary digits along the bottom, under the text.
+        var page = new Grid();
+        Ui.Background(page);
+        page.Children.Add(new RidgeView { Height = 260, VerticalAlignment = VerticalAlignment.Bottom, IsHitTestVisible = false });
+        page.Children.Add(scroll);
+        return page;
     }
 
     private static FrameworkElement ConnectForm(AppModel model)
@@ -121,4 +125,54 @@ internal static class WelcomeView
             Ui.Text(L.T("Sign in on the page that opens when the Space asks for it; this app keeps the sign-in for that Space only."), 12, secondary: true),
             error, Ui.Row(button, local));
     }
+}
+
+/// <summary>
+/// <see cref="RidgeArt"/> at whatever width the page has, in a monospaced font and the theme's text
+/// colour faded far back, so it reads as ground in light and dark alike. It is drawn again when the
+/// size or the theme changes, not otherwise.
+/// </summary>
+internal sealed class RidgeView : FrameworkElement
+{
+    private const double GlyphSize = 11, LineHeight = 12, Fade = 0.16;
+    private static readonly System.Windows.Media.Typeface Face = new(new System.Windows.Media.FontFamily("Cascadia Mono, Consolas"), FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+
+    public static readonly DependencyProperty ForegroundProperty = DependencyProperty.Register(
+        nameof(Foreground), typeof(System.Windows.Media.Brush), typeof(RidgeView),
+        new FrameworkPropertyMetadata(System.Windows.Media.Brushes.Gray, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    public System.Windows.Media.Brush Foreground
+    {
+        get => (System.Windows.Media.Brush)GetValue(ForegroundProperty);
+        set => SetValue(ForegroundProperty, value);
+    }
+
+    public RidgeView() => SetResourceReference(ForegroundProperty, "TextFillColorPrimaryBrush");
+
+    protected override void OnRender(System.Windows.Media.DrawingContext dc)
+    {
+        if (ActualWidth <= 0 || ActualHeight <= 0) return;
+        try
+        {
+            var dip = System.Windows.Media.VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            var brush = new System.Windows.Media.SolidColorBrush(Foreground is System.Windows.Media.SolidColorBrush s ? s.Color : System.Windows.Media.Colors.Gray) { Opacity = Fade };
+            brush.Freeze();
+            var cell = Text("0", brush, dip).WidthIncludingTrailingWhitespace;
+            var cols = (int)Math.Ceiling(ActualWidth / cell);
+            var rows = (int)Math.Floor(ActualHeight / LineHeight);
+            var lines = RidgeArt.Lines(cols, rows, cell / LineHeight);
+            if (lines.Length == 0) return;
+            var text = Text(string.Join("\n", lines), brush, dip);
+            text.LineHeight = LineHeight;
+            dc.DrawText(text, new Point(0, ActualHeight - rows * LineHeight));
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException)
+        {
+            // A throw here would stop every layout pass of the window: the picture is left out instead.
+            Shell.Log.Write($"Welcome ridges not drawn: {e.Message}");
+        }
+    }
+
+    private static System.Windows.Media.FormattedText Text(string s, System.Windows.Media.Brush brush, double dip) =>
+        new(s, System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight, Face, GlyphSize, brush, dip);
 }
