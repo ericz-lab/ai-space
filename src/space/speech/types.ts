@@ -56,6 +56,12 @@ export type OpenAiSpec = {
   selfHosted: boolean;
   responseFormat?: "json" | "verbose_json";
   price?: Price;
+  /**
+   * Through a model gateway (docs/model-gateway.md#speech): the built-in one (`space`) or magpie,
+   * and the provider behind it; the models are then `<provider>/<model>`, and the address and the
+   * key are the gateway's, so a key is configured once, in gateway.yaml (or magpie).
+   */
+  gateway?: { via: "space" | "magpie"; provider: string };
 };
 
 export type DashscopeSpec = { name: string; kind: "dashscope"; apiKeyEnv?: string };

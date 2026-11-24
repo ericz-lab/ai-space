@@ -320,11 +320,17 @@ export type ClaudeCodeSpec = {
   /** Home directory whose `.claude/projects` holds the transcripts; default the process's (tests). */
   transcriptHome?: string;
   /**
-   * magpie's gateway (`http://127.0.0.1:3425`): the CLI answers through it, with ai-space's caller key
-   * and the `models:` pins as its models (docs/runtimes.md#magpie). Such a runtime runs on this
-   * machine only, never over ssh.
+   * An external model gateway's address, magpie's (`http://127.0.0.1:3425`) or another that is
+   * set up the same way: the CLI answers through it, with ai-space's caller key and the `models:`
+   * pins as its models (docs/model-gateway.md#magpie). `magpie:` or `gateway: magpie | <url>` in
+   * runtimes.yaml. Such a runtime runs on this machine only, never over ssh.
    */
   magpie?: string;
+  /**
+   * `space`: the CLI answers through the built-in model gateway (`gateway: space`,
+   * docs/model-gateway.md), each process with a token of its own. This machine only.
+   */
+  gateway?: "space";
 };
 
 /** The Messages API with a key: answers only, no tools, no login state. */
@@ -333,6 +339,8 @@ export type AnthropicApiSpec = {
   kind: "anthropic-api";
   apiKey: string;
   apiUrl: string;
+  /** `space`: the built-in model gateway, with a token issued per call instead of a key (docs/model-gateway.md). */
+  gateway?: "space";
 };
 
 /**

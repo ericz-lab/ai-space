@@ -1,7 +1,9 @@
+import type { GatewayLink } from "../gateway/types.ts";
 import { createAnthropicApi } from "./anthropic-api.ts";
 import { createClaudeCode } from "./claude-code.ts";
 import { createCodexCli } from "./codex-cli.ts";
 import { createDeepseekHarness } from "./deepseek-harness.ts";
+import { overGatewayTiers } from "./magpie.ts";
 import { MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_NAME_PATTERN, type MachineSpec, type ModelTier, type TierModels, type RuntimeAdapter, type RuntimeSpec, type RuntimesConfig } from "./types.ts";
 
 /**
@@ -14,7 +16,11 @@ import { MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_NAME_PATTERN, type MachineSp
  * ssh login under `machines:`, whose answers this space's own adapter runs over ssh, or a peer,
  * whose adapter the peers module supplies (`attachRemote`): the peer resolves the tier itself.
  */
-export type RegistryDeps = { fetch?: typeof fetch };
+export type RegistryDeps = {
+  fetch?: typeof fetch;
+  /** The built-in model gateway, for runtimes with `gateway: space` (docs/model-gateway.md). */
+  gateway?: GatewayLink;
+};
 
 /** Runtimes on other spaces (the peers): an adapter for `machine:runtime`, or why there is none. */
 export type RemoteRuntimes = {
@@ -41,9 +47,9 @@ export type MachineTierOption = TierOption & { machine: string };
 /** Kinds whose answers can run over ssh. */
 const SSH_KINDS = new Set<RuntimeSpec["kind"]>(["claude-code", "codex-cli", "deepseek-harness"]);
 
-/** Whether a runtime's answers can run on another machine's login: its kind can, and it does not go through magpie here. */
+/** Whether a runtime's answers can run on another machine's login: its kind can, and it does not go through a model gateway here. */
 function runsOverSsh(spec: RuntimeSpec): boolean {
-  return SSH_KINDS.has(spec.kind) && !(spec.kind === "claude-code" && spec.magpie);
+  return SSH_KINDS.has(spec.kind) && !(spec.kind === "claude-code" && (spec.magpie || spec.gateway));
 }
 
 /** `machine:runtime/model` → its parts; `undefined` when the string names no machine. */
@@ -163,7 +169,7 @@ export class RuntimeRegistry {
     if (cached) return cached;
     const spec = this.specs.get(runtime);
     if (!spec) throw new Error(`unknown runtime: ${runtime}`);
-    if (!runsOverSsh(spec)) throw new Error(`runtime ${runtime} (${spec.kind}${spec.kind === "claude-code" ? " through magpie" : ""}) cannot run on another machine`);
+    if (!runsOverSsh(spec)) throw new Error(`runtime ${runtime} (${spec.kind}${spec.kind === "claude-code" ? " through a model gateway" : ""}) cannot run on another machine`);
     const { streamCompletions: _, ...rest } = spec as RuntimeSpec & { streamCompletions?: boolean };
     const adapter: RuntimeAdapter = { ...createAdapter({ ...rest, sshHost: m.ssh } as RuntimeSpec, this.deps), machine };
     this.machineAdapters.set(key, adapter);
@@ -171,20 +177,20 @@ export class RuntimeRegistry {
   }
 
   /** `runtime/model` → that runtime and the bare model; `model` → the default runtime. Throws on an unknown runtime. */
-  resolve(model: string): { runtime: RuntimeAdapter; model: string } {
+  resolve(model: string, purpose: "text" | "image" = "text"): { runtime: RuntimeAdapter; model: string } {
     const remote = splitMachine(model);
     if (remote) return this.resolveOn(remote.machine, remote.runtime, remote.model, model);
     const slash = model.indexOf("/");
     if (slash < 0) {
       if (!this.default) throw new Error(`model ${model} names no runtime: write it as ${[...this.byName.keys()].map((n) => `${n}/${model}`).join(" or ")}`);
-      return { runtime: this.default, model: this.tierModel(this.default.name, model) };
+      return { runtime: this.default, model: this.tierModel(this.default.name, model, purpose) };
     }
     const name = model.slice(0, slash);
     const bare = model.slice(slash + 1);
     if (!RUNTIME_NAME_PATTERN.test(name) || !bare) throw new Error(`invalid model: ${model}`);
     const runtime = this.byName.get(name);
     if (!runtime) throw new Error(`unknown runtime: ${name}`);
-    return { runtime, model: this.tierModel(name, bare) };
+    return { runtime, model: this.tierModel(name, bare, purpose) };
   }
 
   private resolveOn(machine: string, name: string, bare: string, model: string): { runtime: RuntimeAdapter; model: string } {
@@ -199,9 +205,28 @@ export class RuntimeRegistry {
     throw new Error(`unknown machine: ${machine} (neither a peer nor under machines: in runtimes.yaml)`);
   }
 
-  private tierModel(name: string, model: string): string {
+  /**
+   * A runtime's tier table now: for one with `gateway: space`, its own `models:` pins over the
+   * built-in gateway's `tiers:` (read per call, so a tier saved in Settings applies), over the
+   * kind's defaults; else what it was given.
+   */
+  private tiersOf(name: string): TierModels {
+    const spec = this.specs.get(name);
+    const base = this.models.get(name) ?? {};
+    if (!spec || !("gateway" in spec) || spec.gateway !== "space" || !this.deps.gateway) return base;
+    const over = overGatewayTiers(spec.models, this.deps.gateway.tiers());
+    const out: TierModels = {};
+    for (const tier of MODEL_TIERS) if (over[tier] ?? base[tier]) out[tier] = over[tier] ?? base[tier];
+    return out;
+  }
+
+  private tierModel(name: string, model: string, purpose: "text" | "image" = "text"): string {
     if (!(MODEL_TIERS as readonly string[]).includes(model)) return model;
-    const resolved = this.models.get(name)?.[model as ModelTier];
+    // Pictures through the built-in gateway: any tier goes to its picture tier, when it has one.
+    const spec = this.specs.get(name);
+    const image = purpose === "image" && spec && "gateway" in spec && spec.gateway === "space" ? this.deps.gateway?.tiers().image : undefined;
+    if (image) return image;
+    const resolved = this.tiersOf(name)[model as ModelTier];
     if (!resolved) throw new Error(`runtime ${name} has no model for tier ${model}`);
     return resolved;
   }
@@ -256,7 +281,7 @@ export class RuntimeRegistry {
       const a = opts.all ? undefined : this.availability?.("", runtime.name);
       if (a?.state === "missing") return [];
       const unavailable = a?.state === "disabled" ? { unavailable: a.reason } : {};
-      return Object.entries(this.models.get(runtime.name) ?? {}).map(([tier, model]) => ({ value: `${runtime.name}/${tier}`, runtime: runtime.name, tier: tier as ModelTier, model: model!, capabilities: runtime.capabilities, ...unavailable }));
+      return Object.entries(this.tiersOf(runtime.name)).map(([tier, model]) => ({ value: `${runtime.name}/${tier}`, runtime: runtime.name, tier: tier as ModelTier, model: model!, capabilities: runtime.capabilities, ...unavailable }));
     });
   }
 
@@ -276,7 +301,7 @@ function createAdapter(spec: RuntimeSpec, deps: RegistryDeps): RuntimeAdapter {
     case "codex-cli":
       return createCodexCli(spec);
     case "claude-code":
-      return createClaudeCode(spec);
+      return createClaudeCode(spec, deps.gateway ? { gateway: deps.gateway } : {});
     case "anthropic-api":
       return createAnthropicApi(spec, deps);
     case "deepseek-harness":

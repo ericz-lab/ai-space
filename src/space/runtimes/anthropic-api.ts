@@ -1,17 +1,25 @@
-import type { AnthropicApiSpec, Backend, CompleteInput, CompleteOutcome, RuntimeAdapter, Usage } from "./types.ts";
-import { Unsupported } from "./types.ts";
+import type { GatewayLink } from "../gateway/types.ts";
+import { sniffImage } from "../model/images.ts";
+import { readUsage } from "../gateway/forward.ts";
+import type { AnthropicApiSpec, Backend, CompleteInput, CompleteOutcome, GeneratedImage, ImageInput, ImageOutcome, RuntimeAdapter, Usage } from "./types.ts";
+import { FILE_NAME_PATTERN, Unsupported } from "./types.ts";
 
 /**
  * The Messages API as a runtime: answers only. No login state, no tools (a
  * request that asks for them is refused rather than quietly served without),
- * no agent runs or chats. Aliases the CLI understands are mapped to model ids;
+ * no agent runs or chats. Files (images an app or the chat service sends) go
+ * in the user message as base64 image blocks. Aliases the CLI understands are mapped to model ids;
  * anything else is passed to the API as is. Cost is computed from the list
  * prices below for the models listed, and left unknown otherwise.
  *
  * `url` may point at a gateway that speaks the same API, such as magpie on this machine
- * (docs/runtimes.md#magpie): its `provider/model` ids come from the runtime's `models:` pins, and
+ * (docs/model-gateway.md#magpie): its `provider/model` ids come from the runtime's `models:` pins, and
  * what it says answered (`X-Magpie-Model`) goes into the call's trace as `served`. A refusal's
  * Retry-After is kept in the error (`retry after 30s`), where failure.ts reads when to try again.
+ *
+ * `gateway: space` (docs/model-gateway.md) answers through the built-in model gateway: its loopback
+ * address, a token issued for the one call instead of a key, and what answered read from that
+ * token's trace as `served`.
  */
 
 export const DEFAULT_API_URL = "https://api.anthropic.com/v1/messages";
@@ -36,18 +44,43 @@ export function apiCost(model: string, u: Usage): number | undefined {
   return (u.inputTokens * p[0] + u.cacheWriteTokens * p[1] + u.cacheReadTokens * p[2] + u.outputTokens * p[3]) / 1e6;
 }
 
-export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeof fetch } = {}): RuntimeAdapter {
+export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeof fetch; gateway?: GatewayLink } = {}): RuntimeAdapter {
   const doFetch = deps.fetch ?? fetch;
   const backend: Backend = "api";
+  /** Where one call goes, and with which key: the spec's, or the built-in gateway's with a token of its own. */
+  const target = (): { apiUrl: string; apiKey: string; run?: string } | { error: string } => {
+    if (spec.gateway !== "space") return { apiUrl: spec.apiUrl || DEFAULT_API_URL, apiKey: spec.apiKey };
+    const base = deps.gateway?.base();
+    if (!deps.gateway || !base) return { error: `runtime ${spec.name} answers through the built-in model gateway, which is off: ${deps.gateway?.problem() ?? "this space has none"}` };
+    const grant = deps.gateway.issue();
+    return { apiUrl: `${base}/v1/messages`, apiKey: grant.token, run: grant.run };
+  };
   return {
     name: spec.name,
     kind: "anthropic-api",
     backend,
-    capabilities: { complete: true, agent: false, chat: false },
-    complete: (input, signal) =>
-      input.files?.length
-        ? Promise.resolve({ ok: false, error: "files need a runtime with a Read tool; the API backend takes text only", backend })
-        : runApi(input, { apiKey: spec.apiKey, apiUrl: spec.apiUrl || DEFAULT_API_URL, fetch: doFetch, signal }),
+    // Pictures through the built-in gateway when one of its providers has an OpenAI-style base (docs/model-gateway.md#images).
+    capabilities: { complete: true, agent: false, chat: false, ...(spec.gateway === "space" && deps.gateway?.has("openai") ? { image: true } : {}) },
+    ...(spec.gateway === "space" && deps.gateway?.has("openai")
+      ? {
+          image: async (input: ImageInput, signal?: AbortSignal): Promise<ImageOutcome> => {
+            const base = deps.gateway!.base();
+            if (!base) return { ok: false, error: `runtime ${spec.name} answers through the built-in model gateway, which is off: ${deps.gateway!.problem()}`, backend };
+            const grant = deps.gateway!.issue();
+            const outcome = await runImage(input, { base: `${base}/v1`, token: grant.token, fetch: doFetch, signal });
+            const served = deps.gateway!.trace(grant.run)?.served;
+            // What answered goes in the account of the pictures; the ledger row keeps the model asked for.
+            return outcome.ok && served ? { ...outcome, text: `${outcome.text} by ${served}` } : outcome;
+          },
+        }
+      : {}),
+    complete: async (input, signal) => {
+      const t = target();
+      if ("error" in t) return { ok: false, error: t.error, backend };
+      const outcome = await runApi(input, { apiKey: t.apiKey, apiUrl: t.apiUrl, fetch: doFetch, signal });
+      const served = t.run ? deps.gateway!.trace(t.run)?.served : undefined;
+      return served ? { ...outcome, served } : outcome;
+    },
     runAgent: () => Promise.reject(new Unsupported(spec.name, "agent runs")),
     chat: () => {
       throw new Unsupported(spec.name, "chat");
@@ -55,9 +88,33 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
   };
 }
 
+/**
+ * The user message: the prompt alone, or, with files, each image as a base64 block after a text
+ * block naming it (the prompt refers to files by name, `img1.png`), then the prompt.
+ */
+export async function userContent(input: Pick<CompleteInput, "prompt" | "files">): Promise<string | Record<string, unknown>[]> {
+  if (!input.files?.length) return input.prompt;
+  const blocks: Record<string, unknown>[] = [];
+  for (const f of input.files) {
+    const bytes = await Bun.file(f.path).bytes();
+    const type = sniffImage(bytes);
+    if (!type) throw new Error(`${f.name} is not a png, jpeg, gif or webp image`);
+    blocks.push({ type: "text", text: f.name }, { type: "image", source: { type: "base64", media_type: type, data: Buffer.from(bytes).toString("base64") } });
+  }
+  blocks.push({ type: "text", text: input.prompt });
+  return blocks;
+}
+
 async function runApi(input: CompleteInput, o: { apiKey: string; apiUrl: string; fetch: typeof fetch; signal?: AbortSignal }): Promise<CompleteOutcome> {
   const backend: Backend = "api";
   if (input.tools.length) return { ok: false, error: "tools need a CLI runtime; the API has none", backend };
+  if (input.files?.some((f) => !FILE_NAME_PATTERN.test(f.name))) return { ok: false, error: "file name not allowed", backend };
+  let content: Awaited<ReturnType<typeof userContent>>;
+  try {
+    content = await userContent(input);
+  } catch (e) {
+    return { ok: false, error: `could not read a file: ${(e as Error).message}`, backend };
+  }
   const model = API_MODELS[input.model] ?? input.model;
   const signal = o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs);
   let res: Response;
@@ -65,7 +122,7 @@ async function runApi(input: CompleteInput, o: { apiKey: string; apiUrl: string;
     res = await o.fetch(o.apiUrl, {
       method: "POST",
       headers: { "x-api-key": o.apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens: input.maxTokens, system: input.system, messages: [{ role: "user", content: input.prompt }] }),
+      body: JSON.stringify({ model, max_tokens: input.maxTokens, system: input.system, messages: [{ role: "user", content }] }),
       signal,
     });
   } catch (e) {
@@ -95,6 +152,54 @@ async function runApi(input: CompleteInput, o: { apiKey: string; apiUrl: string;
     .trim();
   if (!text) return { ok: false, error: "empty answer", usage, costUsd, backend, ...upstream };
   return { ok: true, text, usage, costUsd, backend, ...upstream };
+}
+
+/**
+ * One OpenAI Images call through the built-in gateway: `images/generations` from the prompt, or
+ * `images/edits` (multipart, one `image[]` per input file) when input images are given. The
+ * pictures must come back as `b64_json`: ai-space does not fetch a URL an answer names. GPT image
+ * models always answer base64 and refuse `response_format`, so it is asked only of the others.
+ */
+async function runImage(input: ImageInput, o: { base: string; token: string; fetch: typeof fetch; signal?: AbortSignal }): Promise<ImageOutcome> {
+  const backend: Backend = "api";
+  const prompt = input.system ? `${input.system}\n\n${input.prompt}` : input.prompt;
+  const bare = input.model.slice(input.model.indexOf("/") + 1);
+  const format = /^gpt-image/i.test(bare) ? {} : { response_format: "b64_json" };
+  const signal = o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs);
+  let res: Response;
+  try {
+    if (input.files.length) {
+      const form = new FormData();
+      form.append("model", input.model);
+      form.append("prompt", prompt);
+      for (const [k, v] of Object.entries(format)) form.append(k, v);
+      for (const f of input.files) {
+        if (!FILE_NAME_PATTERN.test(f.name)) return { ok: false, error: "file name not allowed", backend };
+        const bytes = await Bun.file(f.path).bytes();
+        form.append("image[]", new File([bytes], f.name, { type: sniffImage(bytes) ?? "application/octet-stream" }));
+      }
+      res = await o.fetch(`${o.base}/images/edits`, { method: "POST", headers: { authorization: `Bearer ${o.token}` }, body: form, signal });
+    } else {
+      res = await o.fetch(`${o.base}/images/generations`, { method: "POST", headers: { authorization: `Bearer ${o.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: input.model, prompt, n: 1, ...format }), signal });
+    }
+  } catch (e) {
+    const err = e as Error;
+    return { ok: false, error: err.name === "TimeoutError" ? `timed out after ${Math.round(input.timeoutMs / 1000)}s` : err.message, backend };
+  }
+  const body = (await res.json().catch(() => ({}))) as { data?: { b64_json?: unknown; url?: unknown }[]; usage?: unknown; error?: { message?: string } };
+  const usage = readUsage(body.usage);
+  if (!res.ok) return { ok: false, error: `API ${res.status}: ${body.error?.message ?? "request failed"}`, backend, ...(usage ? { usage } : {}) };
+  const images: GeneratedImage[] = [];
+  for (const d of body.data ?? []) {
+    if (typeof d.b64_json !== "string") continue;
+    const bytes = new Uint8Array(Buffer.from(d.b64_json, "base64"));
+    images.push({ type: sniffImage(bytes) ?? "image/png", bytes });
+  }
+  if (!images.length) {
+    const urls = (body.data ?? []).some((d) => typeof d.url === "string");
+    return { ok: false, error: urls ? "the provider answered with image URLs; ai-space takes b64_json only" : "no image produced", backend, ...(usage ? { usage } : {}) };
+  }
+  return { ok: true, text: `${images.length} image${images.length === 1 ? "" : "s"}`, images, backend, ...(usage ? { usage } : {}) };
 }
 
 /** Retry-After as whole seconds: a number of seconds, or an HTTP date. */

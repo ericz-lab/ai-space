@@ -84,7 +84,7 @@ Each kind is one adapter (`src/space/speech/voice-studio.ts`, `openai.ts`) and d
 | `openai-compatible` | transcribe, speak | `POST {url}/audio/transcriptions` (multipart: `file`, `model`, `language`, `prompt` from `context`, `response_format`) and `POST {url}/audio/speech` (`model`, `input`, `voice`, `response_format: wav`) with the key as a bearer. A cloud API unless `selfHosted: true` (a server the operator runs, such as a Whisper server on the LAN). | 25 MB per file, 4,096 characters per text, one voice |
 | `dashscope` | — | not built yet: the provider loads as off with a warning ([Later](#later)) | |
 
-`openai-compatible` further takes `voices` (the voices it accepts: an unknown one is refused before the call), `selfHosted`, `responseFormat` (`verbose_json`, which carries segments and the duration, is the default for `whisper*` models; `json` for the others, which do not support it) and `price` ([Ledger](#ledger)). Whisper names the language in full (`chinese`); the adapter answers its code (`zh`).
+`openai-compatible` may instead point at a model gateway, `gateway: space` (the built-in one) or `gateway: magpie`, with `provider:` naming the gateway's provider; it then has no `url` or key of its own, and its models are sent as `<provider>/<model>` ([model-gateway.md](model-gateway.md#speech)). `openai-compatible` further takes `voices` (the voices it accepts: an unknown one is refused before the call), `selfHosted`, `responseFormat` (`verbose_json`, which carries segments and the duration, is the default for `whisper*` models; `json` for the others, which do not support it) and `price` ([Ledger](#ledger)). Whisper names the language in full (`chinese`); the adapter answers its code (`zh`).
 
 ## Choosing a provider
 

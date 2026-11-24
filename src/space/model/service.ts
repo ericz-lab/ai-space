@@ -92,7 +92,7 @@ function whyNot(runtime: RuntimeAdapter, input: RunInput): string | undefined {
   const local = input.tools.filter((t) => !WEB_TOOLS.has(t.split("(")[0]!));
   if (input.tools.length && runtime.kind === "anthropic-api") return "the API runtime takes no tools";
   if (local.length && (runtime.kind === "codex-cli" || runtime.kind === "deepseek-harness")) return `runtime ${runtime.name} answers with WebSearch/WebFetch only`;
-  if (input.files?.length && (runtime.kind === "anthropic-api" || runtime.kind === "deepseek-harness")) return `runtime ${runtime.name} takes no files`;
+  if (input.files?.length && runtime.kind === "deepseek-harness") return `runtime ${runtime.name} takes no files`;
   return undefined;
 }
 
@@ -166,7 +166,7 @@ export class ModelService {
 
   /** The runtime a request for pictures names; throws when it cannot make them. */
   resolveImage(model: string): { runtime: RuntimeAdapter; model: string } {
-    const r = this.runtimes.resolve(model);
+    const r = this.runtimes.resolve(model, "image");
     if (!r.runtime.capabilities.image || !r.runtime.image) throw new Error(`runtime ${r.runtime.name} does not make images`);
     return r;
   }

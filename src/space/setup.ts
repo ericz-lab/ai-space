@@ -62,7 +62,7 @@ export type SetupDeps = {
   fetch: typeof fetch;
   randomToken(): string;
   hostname(): string;
-  /** magpie on this machine (docs/runtimes.md#magpie): where it listens and what it offers. */
+  /** magpie on this machine (docs/model-gateway.md#magpie): where it listens and what it offers. */
   findMagpie(): Promise<MagpieInfo>;
   /** ai-space's own background service on this machine (src/space/service.ts): whether it is installed, how to restart it, where its log is. */
   service(): Promise<{ installed: boolean; restart(): Promise<void>; logs: string }>;
@@ -586,7 +586,7 @@ export async function runSetup(d: SetupDeps, opts: SetupOptions = {}): Promise<S
 type RuntimesAdd = { file: string; text: string; name: string; what: string };
 
 /**
- * magpie (docs/runtimes.md#magpie): shown with the tools, and when its gateway answers here and no
+ * magpie (docs/model-gateway.md#magpie): shown with the tools, and when its gateway answers here and no
  * runtime uses it yet, offered as one: Claude Code through it when `claude` is installed (chat,
  * agent tasks, answers, with tools), else its Messages API (answers only). Nothing is written here.
  */
@@ -594,7 +594,7 @@ async function sectionMagpie({ d, set, merged }: Section): Promise<RuntimesAdd |
   const { io } = d;
   const line = (ok: boolean, detail: string, hint?: string) => io.say(`  ${ok ? "ok  " : "--  "} ${"magpie".padEnd(13)} ${detail}${hint ? `  →  ${hint}` : ""}`);
   const info = await d.findMagpie();
-  if (!info.bin && !info.running) return line(false, "not found", "optional: one gateway for GLM, Kimi, MiniMax and other providers (docs/runtimes.md#magpie)"), undefined;
+  if (!info.bin && !info.running) return line(false, "not found", "optional: one gateway for GLM, Kimi, MiniMax and other providers (docs/model-gateway.md#magpie)"), undefined;
   if (!info.running) return line(false, `installed, its gateway does not answer at ${info.url}`, "start it (magpie serve, or open the magpie app), then run setup again"), undefined;
   line(true, `answering at ${info.url}, ${info.models.length} model${info.models.length === 1 ? "" : "s"}`);
   const file = join(d.ws.home, RUNTIMES_FILE);
@@ -605,7 +605,7 @@ async function sectionMagpie({ d, set, merged }: Section): Promise<RuntimesAdd |
       const uses = config.runtimes.filter((r) => usesGateway(r, info.url));
       if (uses.length) return io.say(`         used by runtime ${uses.map((r) => r.name).join(", ")}`), undefined;
     } catch (e) {
-      return io.say(`         ${RUNTIMES_FILE} does not parse (${(e as Error).message}); add magpie by hand (docs/runtimes.md#magpie)`), undefined;
+      return io.say(`         ${RUNTIMES_FILE} does not parse (${(e as Error).message}); add magpie by hand (docs/model-gateway.md#magpie)`), undefined;
     }
   }
   if (!info.models.length) return io.say("         it offers no model yet: add a provider in magpie, then run setup again"), undefined;

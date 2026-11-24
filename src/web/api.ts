@@ -31,11 +31,29 @@ export type ModelChoice = { value: string; runtime: string; tier: "basic" | "jun
 /** One agent CLI on one machine (`GET /api/model/inventory`). */
 export type CliInfo = { cli: string; kind: string; installed?: boolean; signedIn?: boolean; version?: string; path?: string; detail?: string; checkedAt?: string; configured: boolean; runtimes: string[] };
 export type MachineInventory = { machine: string; via: "local" | "ssh" | "peer"; reachable?: boolean; stale?: boolean; old?: boolean; clis: CliInfo[] };
-/** magpie on this machine (docs/runtimes.md#magpie): where it listens, its models, which runtimes use it, what adding it makes. */
+/** magpie on this machine (docs/model-gateway.md#magpie): where it listens, its models, which runtimes use it, what adding it makes. */
 export type MagpieTiers = Partial<Record<"basic" | "junior" | "intermediate" | "advanced", string>>;
 /** A runtime through magpie and its tier pins as runtimes.yaml has them; `loaded` false until a restart. */
 export type MagpiePins = { runtime: string; kind: "claude-code" | "anthropic-api"; models: MagpieTiers; loaded: boolean };
 export type MagpieInfo = { bin?: string; url: string; running: boolean; version?: string; models: string[]; groups: string[]; error?: string; configured: boolean; runtimes: string[]; pins: MagpiePins[]; suggested: MagpieTiers; adds: "claude-code" | "anthropic-api" };
+/** The built-in model gateway's tiers: the four text tiers and `image` for pictures (docs/model-gateway.md#tiers). */
+export type GatewayTiers = MagpieTiers & { image?: string };
+/** One provider of gateway.yaml: its bases, why it is off, until when it rests, its models. */
+export type GatewayProviderInfo = { name: string; preset?: string; messages?: string; openai?: string; off?: string; resting?: { until: string; kind: string }; models: string[] };
+/** The built-in model gateway as Settings → Models shows it (`gateway` of `GET /api/model/inventory`). */
+export type GatewayInfo = {
+  configured: boolean;
+  problem?: string;
+  providers: GatewayProviderInfo[];
+  groups: Record<string, string[]>;
+  models: string[];
+  imageModels: string[];
+  tiers: GatewayTiers;
+  file: string;
+  exists: boolean;
+  pins: MagpiePins[];
+  saved: GatewayTiers;
+};
 
 /** Icons of the panel's own tiles; `/api/apps` returns the active icon pack's over these. */
 export const BUILTIN_ICONS = { store: "/store.svg", inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" };

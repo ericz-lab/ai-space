@@ -7,7 +7,8 @@ import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, W
 import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
-import { availabilityOf } from "./space/model/health.ts";
+import { availabilityOf, probeRuntime } from "./space/model/health.ts";
+import { ModelGateway, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
 import { createInventoryRoutes, peerRow } from "./space/model/inventory.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
 import { AppModels, createAppModelRoutes, createPeerAppModelRoutes } from "./space/model/app-models.ts";
@@ -16,7 +17,7 @@ import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
 import { refreshCodexTiers } from "./space/runtimes/codex-upgrade.ts";
 import { Bus, BusStore, Consumers, capabilityCaller, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
-import { SpeechService, SpeechStore, buildAdapters, createSpeechRoutes, loadSpeech } from "./space/speech/index.ts";
+import { SpeechService, SpeechStore, buildAdapters, checkGatewayProviders, createSpeechRoutes, loadSpeech } from "./space/speech/index.ts";
 import { type Manifest, Scheduler, Store, createPeerTaskRoutes, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts";
 import { BACKUP_TASK, SPACE_APP, backupTask, createBackupRoutes, parseBackupSpec, spaceManifest } from "./space/storage/backup/index.ts";
@@ -177,9 +178,16 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     channelErrors,
     imageDir: (app) => join(storage.appDataDir(app), "notify"),
   });
+  // The built-in model gateway (docs/model-gateway.md): gateway.yaml's providers, loopback only. No file: off.
+  // A file that does not load leaves it off with the reason, and the space running.
+  const gatewayLoaded = await loadGateway(ws.home, env).then((l) => ({ loaded: l, error: undefined }), (e: Error) => ({ loaded: undefined, error: e.message }));
+  if (gatewayLoaded.error) console.error(`[model-gateway] ${gatewayLoaded.error}; the built-in model gateway answers 503 until it is fixed`);
+  for (const w of gatewayLoaded.loaded?.warnings ?? []) console.warn(`[model-gateway] ${w}`);
+  const modelGateway = new ModelGateway({ ...(gatewayLoaded.loaded ? { config: gatewayLoaded.loaded.config } : {}), ...(gatewayLoaded.error ? { error: gatewayLoaded.error } : {}) });
   const loaded = await loadRuntimes(ws.home, env);
   for (const w of loaded.warnings) console.warn(`[runtimes] ${w}`);
-  const runtimes = new RuntimeRegistry(loaded.config);
+  for (const r of loaded.config.runtimes) if ("gateway" in r && r.gateway === "space" && !gatewayLoaded.loaded) console.error(`[runtimes] runtime ${r.name} answers through the built-in model gateway, but ${gatewayLoaded.error ?? "there is no gateway.yaml in the workspace"}`);
+  const runtimes = new RuntimeRegistry(loaded.config, { gateway: modelGateway.link });
   // Codex tiers from the installed CLI's catalogue, in the background: the built-in names serve until it answers.
   void refreshCodexTiers(runtimes, loaded.config.runtimes, (l) => console.log(`[runtimes] ${l}`), undefined, (loaded.config.machines ?? []).map((m) => m.ssh));
   // The bus (docs/events.md): http and stream deliveries of every stored event, and calls between apps.
@@ -201,7 +209,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const baseDefaultModel = () => modelPreferences.read() ?? config.chatModel;
   const modelStore = new ModelStore(config.dbPath, { retentionDays: config.model.retentionDays });
   // The status table (docs/model-machines.md#status): limits and successes from the calls, installed and signed in from probes.
-  const runtimeHealth = new RuntimeHealth();
+  const runtimeHealth = new RuntimeHealth({ prober: probeRuntime(undefined, undefined, undefined, undefined, () => modelGateway.problem()) });
   runtimeHealth.seed(modelStore.lastOk());
   // The choices leave out a runtime whose CLI is missing and grey one that is not signed in (docs/model-machines.md#inventory).
   runtimes.setAvailability((machine, runtime) => availabilityOf(runtimeHealth.get(machine, runtime)));
@@ -334,6 +342,11 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // A file that does not load leaves speech off with the reason, and the space running.
   const speechLoaded = await loadSpeech(ws.home, env).then((l) => ({ ...l, error: undefined }), (e: Error) => ({ config: undefined, source: "file" as const, warnings: [], error: e.message }));
   if (speechLoaded.error) console.error(`[speech] ${speechLoaded.error}; speech calls answer 503 until it is fixed`);
+  // A provider through the built-in model gateway names one of gateway.yaml's providers with an openai base (docs/model-gateway.md#speech).
+  if (speechLoaded.config) speechLoaded.warnings.push(...checkGatewayProviders(speechLoaded.config, (name) => {
+    const p = modelGateway.link.provider(name);
+    return p ? { openai: Boolean(p.openai), ...(gatewayLoaded.loaded?.config.off[name] ? { off: gatewayLoaded.loaded.config.off[name] } : {}) } : undefined;
+  }, modelGateway.enabled));
   for (const w of speechLoaded.warnings) console.warn(`[speech] ${w}`);
   for (const p of speechLoaded.config?.providers ?? []) if (p.kind === "voice-studio" && p.machine && !peers.get(p.machine)) console.error(`[speech] provider ${p.name} names machine ${p.machine}, which is not a peer here`);
   const speechCalls = capabilityCaller({ bus, store: busStore, remote });
@@ -351,6 +364,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
             callRemote: (req, caller, peer, app, cap) => speechCalls.callRemote(req, caller, peer, app, cap),
             peers,
           },
+          gateway: modelGateway.link,
         })
       : [],
     store: new SpeechStore(config.dbPath),
@@ -701,6 +715,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         home: ws.home,
         token: config.apiToken,
         env,
+        gateway: modelGateway,
       })],
       ["owner", createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel })],
       ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag), machines: machineCells, servesPeers: config.peerModel, space: config.name, ...(peers.names().length ? { peerLedgers: new PeerLedgers(peers, config.name) } : {}) })],
@@ -727,6 +742,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", terminalRoutes],
       // `space peer migrate` on a hub (docs/peers.md#moving-a-legacy-peer); the peer's side is the adopt route below.
       ["owner", createMigrateRoutes({ token: config.apiToken, deps: { hub: peers, connections: packageConnections, links: packageLinks, connectionPeers, catalogue: packageCatalogue, envFile: ws.envFile, env, ...(config.router.panelHost ? { hubUrl: `https://${config.router.panelHost}` } : {}), ...(config.router.domain ? { domain: config.router.domain } : {}) } })],
+      // The built-in model gateway: its own token check (ai-space's issued tokens) and loopback only (docs/model-gateway.md).
+      ["self", createGatewayRoutes(modelGateway)],
       ["self", createPeerServeRoutes({ token: config.hubToken, ...peerServe, adopt: createAdoptHandler({ connections: packageConnections, links: packageLinks, env, envFile: ws.envFile, isPeer: (id) => peers.names().some((n) => peers.get(n)?.config.spaceId === id || peers.get(n)?.snapshot?.id === id), log: (l) => console.log(l) }) })],
       ["public", createWebRoutes()],
       ["public", createUiKitRoutes(uiKit)],
@@ -813,7 +830,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     websocket: terminalWebSocket,
     fetch: () => new Response(JSON.stringify({ ok: false, error: "not found" }), { status: 404, headers: { "content-type": "application/json" } }),
   });
-  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}${terminal.enabled ? ` · terminal ${terminal.backend}` : ""}${router.enabled ? ` · router ${config.router.backend} :${config.router.port}` : ""} · services by ${supervisor.mode} · runtimes ${runtimes.describe()} (${loaded.source})`);
+  const gatewayAt = gatewayBase(config.host, server.port ?? config.port);
+  modelGateway.listen("base" in gatewayAt ? gatewayAt.base : undefined, "reason" in gatewayAt ? gatewayAt.reason : undefined);
+  if (modelGateway.enabled && "reason" in gatewayAt) console.error(`[model-gateway] ${gatewayAt.reason}`);
+  console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}${terminal.enabled ? ` · terminal ${terminal.backend}` : ""}${router.enabled ? ` · router ${config.router.backend} :${config.router.port}` : ""} · services by ${supervisor.mode} · runtimes ${runtimes.describe()} (${loaded.source})${gatewayLoaded.loaded ? ` · model gateway ${gatewayLoaded.loaded.config.providers.map((p) => p.name + (gatewayLoaded.loaded!.config.off[p.name] ? " (off)" : "")).join(", ")}` : ""}`);
   uptime.start({ version, edition: config.edition });
 
   // A restart must not cut the work in flight: no new runs are started, then the task runs and the

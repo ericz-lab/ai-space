@@ -352,6 +352,13 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .magpie-tier { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 2px 8px; align-items: center; }
 .magpie-tier .setselect { max-width: 100%; min-width: 0; }
 .magpie-tier small { grid-column: 2; }
+.magpie-tier input.setselect { cursor: text; font-family: inherit; }
+/* The built-in model gateway's block: its providers, and what to write when it has no file. */
+.gateway-providers { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 4px; }
+.gateway-providers li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.gateway-providers li b { font-weight: 500; }
+.gateway-providers small { overflow-wrap: anywhere; }
+.gateway-example { margin: 4px 0; padding: 8px 10px; max-width: 100%; overflow-x: auto; border: 1px solid var(--hairline); border-radius: 9px; font-size: 12px; line-height: 1.45; }
 @media (max-width: 640px) {
   .setlayout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
   .setnav { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 0 12px 8px; border-bottom: 1px solid var(--hairline); scrollbar-width: none; }

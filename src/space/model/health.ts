@@ -243,9 +243,14 @@ export function readVersion(text: string): string | undefined {
 }
 
 /** The default prober: no tokens spent, the same command line the adapter itself would run. */
-export function probeRuntime(spawn: Spawn = spawnCollect, env: Record<string, string | undefined> = process.env, home = homedir(), fetchFn: typeof fetch = fetch): Prober {
+export function probeRuntime(spawn: Spawn = spawnCollect, env: Record<string, string | undefined> = process.env, home = homedir(), fetchFn: typeof fetch = fetch, gatewayProblem?: () => string | undefined): Prober {
+  // Through the built-in model gateway (docs/model-gateway.md) what counts is that it can answer: a provider on, ai-space on loopback.
+  const viaGateway = (): ProbeResult => {
+    const problem = gatewayProblem ? gatewayProblem() : "this space has no built-in model gateway";
+    return problem ? { signedIn: false, detail: `model gateway: ${problem}` } : { signedIn: true };
+  };
   return async ({ spec, ssh, discover }) => {
-    if (spec.kind === "anthropic-api") return { installed: true, signedIn: Boolean(spec.apiKey) };
+    if (spec.kind === "anthropic-api") return spec.gateway === "space" ? { installed: true, ...viaGateway() } : { installed: true, signedIn: Boolean(spec.apiKey) };
     let bin = spec.bin.length ? spec.bin : [defaultBin(spec.kind)];
     const host = ssh ?? spec.sshHost;
     if (host) return probeRemote(spawn, host, spec, bin);
@@ -265,6 +270,7 @@ export function probeRuntime(spawn: Spawn = spawnCollect, env: Record<string, st
     if (spec.kind === "deepseek-harness") return { ...dshSignedIn(spec.home, spec.provider ?? (path && isHarnessAppCli(path) ? "deepseek-account" : undefined), env), ...extra };
     // Through magpie the CLI's own sign-in is not used: what counts is that the gateway answers with models.
     if (spec.kind === "claude-code" && spec.magpie) return { installed: true, ...extra, ...(await magpieSignedIn(spec.magpie, env, fetchFn)) };
+    if (spec.kind === "claude-code" && spec.gateway === "space") return { installed: true, ...extra, ...viaGateway() };
     const r = await spawn([...bin, ...statusArgs(spec.kind)], { timeoutMs: PROBE_TIMEOUT_MS, env });
     if (r.timedOut) return { installed: true, ...extra, ...timedOut(`${bin[0]} ${statusArgs(spec.kind).join(" ")}`) };
     return { installed: true, ...extra, ...readStatus(spec.kind, r.code, r.stdout, r.stderr) };
