@@ -12,7 +12,8 @@ const input = "(input_tokens + COALESCE(cache_write_tokens, 0) + COALESCE(cache_
  * Date-suffixed snapshot ids inherit the exact base model price; other ids do not.
  */
 const modelId = "CASE WHEN model GLOB '*-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN substr(model, 1, length(model) - 11) ELSE model END";
-export const MODEL_COST_SQL = `COALESCE(cost_usd, CASE
+// A row priced by the built-in model gateway (price_basis) keeps the gateway's figure: no estimate fills its gap.
+export const MODEL_COST_SQL = `CASE WHEN price_basis IS NOT NULL THEN cost_usd ELSE COALESCE(cost_usd, CASE
   WHEN input_tokens >= 0 AND output_tokens >= 0
     AND COALESCE(cache_write_tokens, 0) >= 0 AND COALESCE(cache_read_tokens, 0) >= 0
   THEN CASE ${modelId}
@@ -25,4 +26,4 @@ export const MODEL_COST_SQL = `COALESCE(cost_usd, CASE
           + output_tokens * ${p.output} * ${om}) / ${GPT_PRICING.unitTokens}.0 ELSE NULL END`;
     }).join("\n")}
     ELSE NULL END
-  ELSE NULL END)`;
+  ELSE NULL END) END`;

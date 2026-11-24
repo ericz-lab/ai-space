@@ -181,6 +181,23 @@ describe("Messages passthrough", () => {
     expect(trace.unpriced).toEqual(["ds/other"]);
   });
 
+  test("pictures are counted and priced per picture; the answers kept for the ledger to price again", async () => {
+    const v = vendor(() => json({ data: [{ b64_json: "aGk=" }, { b64_json: "aGk=" }] }));
+    started.push(v);
+    const home = await mkdtemp(join(tmpdir(), "gw-prices-"));
+    await Bun.write(join(home, PRICES_FILE), "ark/seedream-5: { perImage: 0.03 }\n");
+    const prices = new PriceBook({ home, fetch: (async () => new Response("offline", { status: 503 })) as unknown as typeof fetch, log: () => {} });
+    await prices.load();
+    const { post, gateway, grant } = serve(`providers:\n  ark: { openai: '${v.url}/v1', apiKeyEnv: K }\n`, { K: "sk" }, prices);
+    expect((await post("/v1/images/generations", { model: "ark/seedream-5", prompt: "a cat" })).status).toBe(200);
+    const trace = gateway.traces.get(grant.run)!;
+    expect(trace.costUsd).toBeCloseTo(0.06, 12);
+    expect(trace.priceBasis).toEqual([{ m: "ark/seedream-5", img: 2 }]);
+    expect(gateway.priceOf("ark/seedream-5")).toEqual({ perImage: 0.03 });
+    expect(gateway.priceOf("ark/other")).toBeUndefined();
+    expect(gateway.priceOf("gone/x")).toBeNull();
+  });
+
   test("x-api-key for a provider that wants it", async () => {
     const v = vendor(() => json(message("ok")));
     started.push(v);

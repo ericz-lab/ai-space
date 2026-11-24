@@ -41,6 +41,16 @@ export type Usage = {
   outputTokens: number;
 };
 
+/**
+ * One answer of the built-in model gateway as the ledger keeps it, so its cost can be worked out
+ * again when a price changes (docs/model-gateway.md#prices): `m` the `provider/model` that answered,
+ * then its tokens (input, output, cache read, cache write), pictures, seconds of audio and
+ * characters spoken. Zeros are left out.
+ */
+export type PricedAnswer = { m: string; i?: number; o?: number; cr?: number; cw?: number; img?: number; sec?: number; ch?: number };
+/** A call's answers through the built-in gateway, in order. */
+export type PriceBasis = PricedAnswer[];
+
 /** One request for an answer, after validation (the model service's request body). */
 export type CompleteInput = {
   prompt: string;
@@ -106,8 +116,8 @@ export type OnDelta = (text: string) => void;
  * in the call's trace.
  */
 export type CompleteOutcome =
-  | { ok: true; text: string; usage?: Usage; costUsd?: number; backend: Backend; model?: string; served?: string }
-  | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend; model?: string; served?: string };
+  | { ok: true; text: string; usage?: Usage; costUsd?: number; priceBasis?: PriceBasis; backend: Backend; model?: string; served?: string }
+  | { ok: false; error: string; usage?: Usage; costUsd?: number; priceBasis?: PriceBasis; backend: Backend; model?: string; served?: string };
 
 /** Write authorisation tiers a chat turn or an agent task may ask for; absent means read-only (the headless default). */
 export const PERMISSION_MODES = ["acceptEdits", "bypassPermissions", "plan"] as const;
@@ -142,6 +152,7 @@ export type AgentOutcome = {
   text?: string;
   usage?: Usage;
   costUsd?: number;
+  priceBasis?: PriceBasis;
   timedOut: boolean;
   backend: Backend;
 };
@@ -264,8 +275,8 @@ export type ImageInput = {
 export type GeneratedImage = { type: string; bytes: Uint8Array };
 
 export type ImageOutcome =
-  | { ok: true; text: string; images: GeneratedImage[]; usage?: Usage; costUsd?: number; backend: Backend; model?: string }
-  | { ok: false; error: string; usage?: Usage; costUsd?: number; backend: Backend; model?: string };
+  | { ok: true; text: string; images: GeneratedImage[]; usage?: Usage; costUsd?: number; priceBasis?: PriceBasis; backend: Backend; model?: string }
+  | { ok: false; error: string; usage?: Usage; costUsd?: number; priceBasis?: PriceBasis; backend: Backend; model?: string };
 
 /**
  * A past conversation as the chat panel shows it: the user's texts and the assistant's, with the

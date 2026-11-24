@@ -1,4 +1,5 @@
 import type { GatewayLink } from "../gateway/types.ts";
+import { gatewayFigures } from "../gateway/trace.ts";
 import { sniffImage } from "../model/images.ts";
 import { readUsage } from "../gateway/forward.ts";
 import type { AnthropicApiSpec, Backend, CompleteInput, CompleteOutcome, GeneratedImage, ImageInput, ImageOutcome, RuntimeAdapter, Usage } from "./types.ts";
@@ -72,9 +73,12 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
             if (!base) return { ok: false, error: `runtime ${spec.name} answers through the built-in model gateway, which is off: ${deps.gateway!.problem()}`, backend };
             const grant = deps.gateway!.issue();
             const outcome = await runImage(input, { base: `${base}/v1`, token: grant.token, fetch: doFetch, signal });
-            const served = deps.gateway!.trace(grant.run)?.served;
+            const trace = deps.gateway!.trace(grant.run);
+            const served = trace?.served;
+            // The pictures' cost at the answering model's price (per picture, or its tokens), and the answers to price them again.
+            const priced = { ...outcome, ...(trace?.costUsd !== undefined ? { costUsd: trace.costUsd } : {}), ...(trace?.priceBasis ? { priceBasis: trace.priceBasis } : {}) } as ImageOutcome;
             // What answered goes in the account of the pictures; the ledger row keeps the model asked for.
-            return outcome.ok && served ? { ...outcome, text: `${outcome.text} by ${served}` } : outcome;
+            return priced.ok && served ? { ...priced, text: `${priced.text} by ${served}` } : priced;
           },
         }
       : {}),
@@ -84,9 +88,8 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
       const outcome = await runApi(input, { apiKey: t.apiKey, apiUrl: t.apiUrl, fetch: doFetch, signal });
       if (!t.run) return outcome;
       // Through the built-in gateway: what answered, and its cost at that model's price, from the run's trace.
-      const trace = deps.gateway!.trace(t.run);
       const { costUsd: _, ...rest } = outcome;
-      return { ...rest, ...(trace?.served ? { served: trace.served } : {}), ...(trace?.costUsd !== undefined ? { costUsd: trace.costUsd } : {}) } as typeof outcome;
+      return gatewayFigures(rest as CompleteOutcome, deps.gateway!.trace(t.run));
     },
     runAgent: () => Promise.reject(new Unsupported(spec.name, "agent runs")),
     chat: () => {

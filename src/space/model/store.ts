@@ -1,4 +1,6 @@
 import { Database } from "bun:sqlite";
+import { repriceBasis, type Price } from "../gateway/prices.ts";
+import type { PriceBasis } from "../runtimes/types.ts";
 import { MODEL_COST_SQL } from "./pricing.ts";
 import { type CallStatus, type CallTrace, type ModelCall, type ModelCallInput, type Origin, type Usage, type UsageTotals } from "./types.ts";
 
@@ -43,6 +45,8 @@ const ADDED_COLUMNS: { table: string; column: string; ddl: string }[] = [
   { table: "model_calls", column: "fallback_from", ddl: "TEXT" },
   { table: "model_calls", column: "tries", ddl: "INTEGER" },
   { table: "model_calls", column: "trace", ddl: "TEXT" },
+  // Through the built-in model gateway: each answer as JSON, to cost the call again when a price changes (docs/model-gateway.md#prices).
+  { table: "model_calls", column: "price_basis", ddl: "TEXT" },
 ];
 
 /** Days of ledger kept; 0 keeps everything (the default: the ledger is the history the panel shows). */
@@ -73,6 +77,7 @@ type Row = {
   fallback_from: string | null;
   tries: number | null;
   trace: string | null;
+  price_basis: string | null;
   effective_cost_usd: number | null;
 };
 
@@ -163,8 +168,8 @@ export class ModelStore {
     const r = this.db
       .query(
         `INSERT INTO model_calls (app, tag, model, runtime, machine, mode, model_source, backend, origin, status, error, started_at, duration_ms, prompt_chars, output_chars,
-                                  input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, cost_usd, fallback_from, tries, trace)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                  input_tokens, cache_write_tokens, cache_read_tokens, output_tokens, cost_usd, fallback_from, tries, trace, price_basis)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         c.app,
@@ -190,10 +195,40 @@ export class ModelStore {
         c.fallbackFrom ?? null,
         c.tries ?? null,
         c.trace ? JSON.stringify(c.trace) : null,
+        c.priceBasis?.length ? JSON.stringify(c.priceBasis) : null,
       );
     if (this.retentionMs) this.db.query("DELETE FROM model_calls WHERE started_at < ?").run(c.startedAt - this.retentionMs);
     this.writes++;
     return { ...c, id: Number(r.lastInsertRowid), costUsd: this.get(Number(r.lastInsertRowid))?.costUsd };
+  }
+
+  /**
+   * Cost the gateway's rows again at today's prices (docs/model-gateway.md#prices): every row with
+   * answers kept. A row whose answers lost their provider is left as it is. Returns the rows changed.
+   */
+  reprice(priceOf: (served: string) => Price | undefined | null): number {
+    const rows = this.db.query<{ id: number; cost_usd: number | null; price_basis: string }, []>("SELECT id, cost_usd, price_basis FROM model_calls WHERE price_basis IS NOT NULL").all();
+    const update = this.db.query("UPDATE model_calls SET cost_usd = ? WHERE id = ?");
+    let changed = 0;
+    this.db.transaction(() => {
+      for (const r of rows) {
+        let basis: PriceBasis;
+        try {
+          basis = JSON.parse(r.price_basis) as PriceBasis;
+        } catch {
+          continue;
+        }
+        if (!Array.isArray(basis)) continue;
+        const next = repriceBasis(basis, priceOf);
+        if (next === "keep") continue;
+        const cost = next.costUsd ?? null;
+        if (cost === r.cost_usd || (cost !== null && r.cost_usd !== null && Math.abs(cost - r.cost_usd) < 1e-12)) continue;
+        update.run(cost, r.id);
+        changed++;
+      }
+    })();
+    if (changed) this.writes++;
+    return changed;
   }
 
   /** Insert imported rows in one transaction, skipping those already present (same app, start, tag, duration). */

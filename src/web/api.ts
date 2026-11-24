@@ -58,7 +58,7 @@ export type GatewayProviderInfo = {
   /** What names it: groups with its members (`emptied`: those left with none), tiers on it. */
   usedBy: { groups: string[]; tiers: string[]; emptied: string[] };
 };
-export type GatewayPrice = { input: number; output: number; cacheRead?: number; cacheWrite?: number; tiers?: { over: number }[]; source: string };
+export type GatewayPrice = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: { over: number }[]; perImage?: number; perMinute?: number; perMillionChars?: number; source: string };
 export type GatewaySite = "intl" | "cn";
 /** `sites`: a vendor with a China and an international site, the bases of each (one account works on one only). */
 export type GatewayPreset = { name: string; label: string; messages?: string; openai?: string; auth: "x-api-key" | "bearer"; hasList: boolean; defaults: string[]; sites?: Record<GatewaySite, { messages?: string; openai?: string }> };

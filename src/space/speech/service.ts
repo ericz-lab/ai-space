@@ -220,12 +220,14 @@ export class SpeechService {
       throw new SpeechError(out.error.status >= 400 && out.error.status < 500 ? out.error.status : 502, out.error.message, call);
     }
     const r = out.value;
-    const costUsd = out.used.adapter.cost?.("transcribe", { ...(r.audioSeconds !== undefined ? { audioSeconds: r.audioSeconds } : {}) });
+    const { priced, ...result } = r;
+    const costUsd = priced ? priced.costUsd : out.used.adapter.cost?.("transcribe", { ...(r.audioSeconds !== undefined ? { audioSeconds: r.audioSeconds } : {}) });
     const call = this.record(base, {
       inputBytes: input.file.size, chars: [...r.text].length, ...(r.audioSeconds !== undefined ? { audioSeconds: r.audioSeconds } : {}),
-      ...(r.language ? { language: r.language } : {}), ...(costUsd !== undefined ? { costUsd } : {}),
+      ...(r.language ? { language: r.language } : {}), ...(costUsd !== undefined ? { costUsd: Math.round(costUsd * 1e6) / 1e6 } : {}),
+      ...(priced?.basis ? { priceBasis: priced.basis } : {}),
     });
-    return { result: r, call };
+    return { result, call };
   }
 
   /**
@@ -278,8 +280,12 @@ export class SpeechService {
       throw new SpeechError(out.error.status >= 400 && out.error.status < 500 ? out.error.status : 502, out.error.message, call);
     }
     const seconds = wavSeconds(out.value.audio);
-    const costUsd = out.used.adapter.cost?.("speak", { chars });
-    const call = this.record(base, { chars, ...(seconds !== undefined ? { audioSeconds: seconds } : {}), ...(voice ? { voice } : {}), ...(costUsd !== undefined ? { costUsd } : {}) });
+    const priced = out.value.priced;
+    const costUsd = priced ? priced.costUsd : out.used.adapter.cost?.("speak", { chars });
+    const call = this.record(base, {
+      chars, ...(seconds !== undefined ? { audioSeconds: seconds } : {}), ...(voice ? { voice } : {}), ...(costUsd !== undefined ? { costUsd: Math.round(costUsd * 1e6) / 1e6 } : {}),
+      ...(priced?.basis ? { priceBasis: priced.basis } : {}),
+    });
     return { audio: out.value.audio, contentType: out.value.contentType, voices: out.value.voices, call };
   }
 

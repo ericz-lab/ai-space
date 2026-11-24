@@ -1,3 +1,4 @@
+import type { PriceBasis } from "../runtimes/types.ts";
 import { join } from "node:path";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
 import { spawnCollect } from "../runtimes/process.ts";
@@ -25,6 +26,8 @@ export type RunResult = {
   /** Agent targets: what the runtime reported about the model call, for the model ledger. */
   usage?: { inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number };
   costUsd?: number;
+  /** Through the built-in model gateway: each answer, for the ledger to price again (docs/model-gateway.md#prices). */
+  priceBasis?: PriceBasis;
   promptChars?: number;
   /** Agent targets: where the runtime ran (`local`, `ssh:<host>`), for the ledger. */
   backend?: string;
@@ -162,7 +165,7 @@ async function runAgent(target: Extract<Target, { kind: "agent" }>, ctx: RunCont
     prompt, cwd, env, model: selected?.model ?? target.model, signal: ctx.signal,
     ...(target.permissionMode ? { permissionMode: target.permissionMode } : {}), ...(target.tools?.length ? { allowedTools: target.tools } : {}),
   });
-  const base = { runtime: runtime.name, model: selected?.model ?? target.model, promptChars: prompt.length, backend: r.backend, ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) };
+  const base = { runtime: runtime.name, model: selected?.model ?? target.model, promptChars: prompt.length, backend: r.backend, ...(r.usage ? { usage: r.usage } : {}), ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}), ...(r.priceBasis ? { priceBasis: r.priceBasis } : {}) };
   if (!r.ok) return { status: "error", error: r.error ?? "failed", output: truncate(r.output), ...base };
   const answer = r.text ?? r.output;
   if (target.verify) {

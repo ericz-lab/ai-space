@@ -80,6 +80,9 @@ test("prices: each model's input / output with its source on hover; models witho
   expect(html).toContain("from models.dev deepseek");
   expect(html).toContain("cache read $0.044");
   expect(html).toContain("No price: odd-one");
+  const units = renderToStaticMarkup(<PriceList p={{ ...base, models: [], prices: { "whisper-1": { perMinute: 0.006, source: "price file" }, "gpt-image-2": { input: 5, output: 40, perImage: 0.04, source: "price file" } } }} t={t} />);
+  expect(units).toContain("whisper-1 $0.0060 per minute");
+  expect(units).toContain("gpt-image-2 $5 / $40, $0.04 per picture");
 });
 
 test("the model chooser: ticked models and a field for ids typed by hand; groups with their order and the controls to change it", () => {

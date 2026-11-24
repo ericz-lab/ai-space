@@ -116,7 +116,7 @@ Each base answered an unauthenticated Messages call with 401 or 403 on 2026-11-2
 
 ## Prices
 
-What a call through the built-in gateway costs is worked out by the gateway itself, per answer: the tokens the vendor's `usage` reported, at the price of the model that answered, at that provider. A run's answers are summed in its [trace](#trace-not-a-second-ledger) (`costUsd`), and the `claude-code` and `anthropic-api` runtimes put that figure on the ledger row. An answer from a model without a price makes the whole run unpriced (the trace lists it under `unpriced`), so the row has no cost rather than a low one. A price is one provider's tariff for one model, in USD per million tokens, and is looked for in this order:
+What a call through the built-in gateway costs is worked out by the gateway itself, per answer: the tokens the vendor's `usage` reported, and for pictures their number, at the price of the model that answered, at that provider. A run's answers are summed in its [trace](#trace-not-a-second-ledger) (`costUsd`), and the `claude-code` and `anthropic-api` runtimes put that figure on the ledger row, for text and for [pictures](#images). An answer from a model without a price makes the whole run unpriced (the trace lists it under `unpriced`), so the row has no cost rather than a low one. A price is one provider's tariff for one model, and is looked for in this order:
 
 1. `<workspace>/gateway-prices.yaml`, the owner's price for `provider/model`;
 2. the same file's `provider/*`, for every model of that provider (a relay's discount, a plan);
@@ -125,12 +125,23 @@ What a call through the built-in gateway costs is worked out by the gateway itse
 ```yaml
 # gateway-prices.yaml: input, output[, cache read, cache write], USD per million tokens
 deepseek/deepseek-v4-pro: [1.32, 3.96, 0.044, 1.32]
-relay/*: [0.5, 2]        # every model of provider "relay"
+relay/*: [0.5, 2]                          # every model of provider "relay"
+# or a mapping, for what is not priced by the token (USD)
+ark/doubao-seedream-5: { perImage: 0.03 }  # per picture made
+openai/whisper-1: { perMinute: 0.006 }     # per minute of audio transcribed
+openai/tts-1: { perMillionChars: 15 }      # per million characters spoken
+openai/gpt-image-2: { input: 5, output: 40 }
 ```
 
-A missing cache price is the input price. models.dev's long-context tiers apply: once a call's prompt (input, cache reads and writes) is over a tier's size, the whole call is at that tier's prices. The file is its own, not a key of `gateway.yaml`, whose parser refuses unknown keys, so an older ai-space keeps its gateway on a rollback. It is re-read when it changes; a file that does not parse keeps the prices read before, and Settings shows why. models.dev is fetched at boot when the cached copy (`run/models-dev-prices.json`, only the prices) is missing or a day old; a failed fetch keeps the copy. Settings → Gateway lists each provider's models with their price (input / output) and source, and names the ones without a price.
+A mapping takes `input`, `output` (together), `cacheRead`, `cacheWrite`, `perImage`, `perMinute` and `perMillionChars`. A unit price takes over from the tokens of an answer that has that unit: a picture answer with a `perImage` price costs that per picture; without one it is priced by the tokens it reported (OpenAI's GPT image models report them), and one that reported none is unpriced. models.dev has no prices for pictures or speech; they come from the file. A missing cache price is the input price. models.dev's long-context tiers apply: once a call's prompt (input, cache reads and writes) is over a tier's size, the whole call is at that tier's prices. The file is its own, not a key of `gateway.yaml`, whose parser refuses unknown keys, so an older ai-space keeps its gateway on a rollback. It is looked at every minute and before each call, and re-read when it changed; a file that does not parse keeps the prices read before, and Settings shows why. models.dev is fetched at boot when the cached copy (`run/models-dev-prices.json`, only the prices) is missing or a day old, and once a day after; a failed fetch keeps the copy. Settings → Gateway lists each provider's models, and the other models the file prices for it, with their price and source, and names the ones without a price.
 
-Not done: a price is applied when the call is made, so changing one does not restate earlier rows (magpie re-prices when it reads); speech and pictures through the gateway are not costed here; the price file is edited by hand.
+**Speech** through the gateway ([Speech](#speech)) is priced the same way: the model that answered, its `perMinute` or `perMillionChars`, else the tokens the transcription reported. A `price:` on the speech provider in providers.yaml still wins, and OpenAI's list prices ([speech.md](speech.md#prices)) still apply when the gateway has no price and the provider is OpenAI's own host.
+
+### Earlier calls follow the prices
+
+The ledger keeps each gateway call's answers (`price_basis` on `model_calls` and `speech_calls`: per answer the `provider/model` that answered, its tokens, pictures, seconds and characters; no content). When a price changes (the file is edited, the catalogue comes back different, Settings changes `gateway.yaml`) and at every boot, ai-space costs those rows again at the prices then in force, so the usage page's totals, its history and a row's cost all follow; a row that was unpriced becomes priced once its model has a price. This is magpie's rule, re-pricing what was recorded, done when a price changes instead of on every read. A row whose answers name a provider no longer in `gateway.yaml` keeps its cost: today's prices cannot speak for it. A call with more than 5000 answers keeps its cost and no answers. A gateway row is never filled in by the GPT list-price estimate ([model.md](model.md#gpt-cost-estimates)): its cost is the gateway's or none.
+
+Not done: the price file is edited by hand; a peer's calls are re-priced by the peer, at its own prices; live dictation does not go through the gateway and is not priced here.
 
 ## Routes
 
@@ -211,7 +222,7 @@ Answers go to the built-in gateway's `/v1/messages` with a token issued for the 
 
 An `anthropic-api` runtime with `gateway: space` has the `image` operation when one of the gateway's providers is on and has an `openai` base. `POST /api/model/image` can then resolve to it as it resolves to `codex-cli` ([model.md](model.md#images)): the route's contract, its model resolution and `model.tags.image` do not change. Which model draws: the gateway's `image` [tier](#tiers) when the request names a tier, else the `provider/model` it names. Without input images it calls `images/generations`. With them it calls `images/edits`, multipart, with one `image[]` per input image. The system text goes before the prompt. The pictures must come back as `b64_json`; an answer that only names URLs is refused, since ai-space does not fetch what an answer names. `response_format: b64_json` is sent to every model except OpenAI's GPT image models, which always answer base64 and refuse the parameter (OpenAI's [Images reference](https://developers.openai.com/api/reference/resources/images)).
 
-Which vendors accept the OpenAI Images shape as is was checked on 2026-11-23. OpenAI accepts both endpoints. Together's generations ask for `response_format: base64`, not `b64_json`. Zhipu's and Z.ai's CogView generations answer with URLs only. DashScope's compatible mode gives `b64_json` for two Qwen image models only and has no `/images/edits`. xAI's edits take JSON, not multipart. So OpenAI is the one vendor known to work for both operations here. Others may work for generations once the answer shape fits, and none of the others accepts OpenAI's multipart edits.
+Which vendors accept the OpenAI Images shape as is was checked on 2026-11-23. OpenAI accepts both endpoints. Together's generations ask for `response_format: base64`, not `b64_json`. Zhipu's and Z.ai's CogView generations answer with URLs only. DashScope's compatible mode gives `b64_json` for two Qwen image models only and has no `/images/edits`. xAI's edits take JSON, not multipart. So OpenAI is the one vendor known to work for both operations here. Others may work for generations once the answer shape fits, and none of the others accepts OpenAI's multipart edits. The pictures' cost is the gateway's ([Prices](#prices)): per picture when the model has a `perImage` price, else the tokens the answer reported.
 
 ## Speech
 

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { ClaudeLive, claudeLiveFingerprint } from "./claude-live.ts";
 import { LivePool } from "./live.ts";
 import type { GatewayLink } from "../gateway/types.ts";
+import { gatewayFigures } from "../gateway/trace.ts";
 import { gatewayClaudeEnv, gatewayClaudeSettings, magpieClaudeEnv, magpieClaudeSettings, overGatewayTiers } from "./magpie.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
@@ -120,9 +121,11 @@ export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels },
       if (!parsed) return { ok: true, output, timedOut: false, backend: "local" };
       // Through the built-in gateway the CLI prices another vendor's model at Claude's list prices:
       // the gateway's own figure, at each answering model's price, is kept instead.
-      const costUsd = r.run ? deps.gateway!.trace(r.run)?.costUsd : parsed.costUsd;
-      if (parsed.error !== undefined) return { ok: false, error: parsed.error, output, usage: parsed.usage, costUsd, timedOut: false, backend: "local" };
-      return { ok: true, output, text: parsed.text, usage: parsed.usage, costUsd, timedOut: false, backend: "local" };
+      const trace = r.run ? deps.gateway!.trace(r.run) : undefined;
+      const costUsd = r.run ? trace?.costUsd : parsed.costUsd;
+      const basis = trace?.priceBasis ? { priceBasis: trace.priceBasis } : {};
+      if (parsed.error !== undefined) return { ok: false, error: parsed.error, output, usage: parsed.usage, costUsd, ...basis, timedOut: false, backend: "local" };
+      return { ok: true, output, text: parsed.text, usage: parsed.usage, costUsd, ...basis, timedOut: false, backend: "local" };
     },
 
     chat(original, cb) {
@@ -158,7 +161,7 @@ export const SPACE_GATEWAY_ENV: Record<string, string> = { CLAUDE_CODE_DISABLE_E
 export function servedFromTrace(outcome: CompleteOutcome, link: GatewayLink, run: string): CompleteOutcome {
   const trace = link.trace(run);
   const { costUsd: _, ...rest } = outcome;
-  return { ...rest, ...(trace?.served ? { served: trace.served } : {}), ...(trace?.costUsd !== undefined ? { costUsd: trace.costUsd } : {}) } as CompleteOutcome;
+  return gatewayFigures(rest as CompleteOutcome, trace);
 }
 
 // ---------------------------------------------------------------- complete

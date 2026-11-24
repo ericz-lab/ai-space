@@ -1,12 +1,13 @@
 import { mkdir, rename, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { Usage } from "../runtimes/types.ts";
+import type { PriceBasis, PricedAnswer, Usage } from "../runtimes/types.ts";
 import { GATEWAY_SITES } from "./config.ts";
 import type { GatewayProvider } from "./types.ts";
 
 /**
  * What a call through the built-in model gateway costs (docs/model-gateway.md#prices). A price is
- * one provider's tariff for one model, in USD per million tokens. It is looked for in this order:
+ * one provider's tariff for one model: USD per million tokens, and for pictures and speech per
+ * picture, per minute of audio or per million characters. It is looked for in this order:
  *
  *  1. `<workspace>/gateway-prices.yaml`: the owner's price for `provider/model`;
  *  2. the same file's `provider/*`: every model of that provider (a relay's discount, a plan);
@@ -23,12 +24,17 @@ export const MODELS_DEV_CACHE = join("run", "models-dev-prices.json");
 const REFRESH_MS = 24 * 3600_000;
 
 export type Price = {
-  input: number;
-  output: number;
+  /** USD per million tokens. A price of units only (below) has none. */
+  input?: number;
+  output?: number;
   cacheRead?: number;
   cacheWrite?: number;
   /** Long-context prices: the whole call is at a tier's prices once its prompt is over `over` tokens. */
   tiers?: { over: number; input: number; output: number; cacheRead?: number; cacheWrite?: number }[];
+  /** Per picture made, per minute of audio transcribed, per million characters spoken; each takes over from the tokens of a call that has it. */
+  perImage?: number;
+  perMinute?: number;
+  perMillionChars?: number;
 };
 export type PriceSource = "price file" | "price file (provider/*)" | `models.dev ${string}`;
 export type PriceLookup = { price: Price; source: PriceSource };
@@ -96,10 +102,26 @@ export function trimModelsDev(raw: unknown, now = new Date()): PriceCatalog {
   return { fetchedAt: now.toISOString(), providers };
 }
 
-/** `[input, output, cacheRead?, cacheWrite?]`, USD per million tokens: magpie's order. */
-function priceFromList(v: unknown, ctx: string): Price {
+const PRICE_KEYS = ["input", "output", "cacheRead", "cacheWrite", "perImage", "perMinute", "perMillionChars"] as const;
+
+/**
+ * `[input, output, cacheRead?, cacheWrite?]`, USD per million tokens (magpie's order), or a mapping
+ * of PRICE_KEYS: `{ perImage: 0.04 }`, `{ perMinute: 0.006 }`, `{ input: 2, output: 8, perImage: 0.02 }`.
+ */
+function priceFromEntry(v: unknown, ctx: string): Price {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    const out: Price = {};
+    for (const [k, x] of Object.entries(v)) {
+      if (!(PRICE_KEYS as readonly string[]).includes(k)) throw new Error(`${PRICES_FILE}: ${ctx}: unknown key ${k} (${PRICE_KEYS.join(", ")})`);
+      if (num(x) === undefined) throw new Error(`${PRICES_FILE}: ${ctx}: ${k} must be a number, 0 or more`);
+      out[k as (typeof PRICE_KEYS)[number]] = x as number;
+    }
+    if ((out.input === undefined) !== (out.output === undefined)) throw new Error(`${PRICES_FILE}: ${ctx}: input and output go together`);
+    if (out.input === undefined && out.perImage === undefined && out.perMinute === undefined && out.perMillionChars === undefined) throw new Error(`${PRICES_FILE}: ${ctx}: no price in it`);
+    return out;
+  }
   if (!Array.isArray(v) || v.length < 2 || v.length > 4 || v.some((x) => num(x) === undefined)) {
-    throw new Error(`${PRICES_FILE}: ${ctx} must be [input, output] or [input, output, cache read, cache write], USD per million tokens, each 0 or more`);
+    throw new Error(`${PRICES_FILE}: ${ctx} must be [input, output] or [input, output, cache read, cache write], USD per million tokens, each 0 or more, or a mapping of ${PRICE_KEYS.join(", ")}`);
   }
   const [input, output, cacheRead, cacheWrite] = v as number[];
   return { input: input!, output: output!, ...(cacheRead !== undefined ? { cacheRead } : {}), ...(cacheWrite !== undefined ? { cacheWrite } : {}) };
@@ -118,19 +140,70 @@ export function parsePricesYaml(text: string): Record<string, Price> {
   const out: Record<string, Price> = {};
   for (const [key, v] of Object.entries(doc as Record<string, unknown>)) {
     if (!/^[a-z][a-z0-9-]{0,31}\/\S+$/.test(key)) throw new Error(`${PRICES_FILE}: "${key}" must be provider/model or provider/*`);
-    out[key] = priceFromList(v, key);
+    out[key] = priceFromEntry(v, key);
   }
   return out;
 }
 
-/** The cost of one answer's tokens at `price`; a missing cache price is the input price. */
-export function costOf(price: Price, u: Usage): number {
-  const prompt = u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens;
+/** One answer as the ledger keeps it: the model that answered and what it consumed, zeros left out. */
+export function pricedAnswer(served: string, u: Usage | undefined, units: { images?: number; audioSeconds?: number; chars?: number } = {}): PricedAnswer {
+  const a: PricedAnswer = { m: served };
+  const put = (k: Exclude<keyof PricedAnswer, "m">, v: number | undefined) => {
+    if (v && v > 0) a[k] = v;
+  };
+  put("i", u?.inputTokens);
+  put("o", u?.outputTokens);
+  put("cr", u?.cacheReadTokens);
+  put("cw", u?.cacheWriteTokens);
+  put("img", units.images);
+  put("sec", units.audioSeconds);
+  put("ch", units.chars);
+  return a;
+}
+
+/**
+ * The cost of one answer at `price`, or undefined when the price does not cover it. A unit price for
+ * what the answer made (pictures, minutes, characters) takes over from its tokens; otherwise tokens
+ * at the token prices, a missing cache price being the input's, a long prompt priced whole at its tier.
+ */
+export function costOf(price: Price, a: PricedAnswer): number | undefined {
+  if (a.img && price.perImage !== undefined) return a.img * price.perImage;
+  if (a.sec && price.perMinute !== undefined) return (a.sec / 60) * price.perMinute;
+  if (a.ch && price.perMillionChars !== undefined) return (a.ch / 1e6) * price.perMillionChars;
+  if (price.input === undefined || price.output === undefined) return undefined;
+  const i = a.i ?? 0, o = a.o ?? 0, cr = a.cr ?? 0, cw = a.cw ?? 0;
+  // Pictures, audio or speech with no tokens reported: the token prices say nothing about them.
+  if (!(i || o || cr || cw) && (a.img || a.sec || a.ch)) return undefined;
+  const prompt = i + cr + cw;
   const tier = [...(price.tiers ?? [])].reverse().find((t) => prompt > t.over);
-  const p = tier ?? price;
+  const p = tier ?? { input: price.input, output: price.output, cacheRead: price.cacheRead, cacheWrite: price.cacheWrite };
   const read = p.cacheRead ?? price.cacheRead ?? p.input;
   const write = p.cacheWrite ?? price.cacheWrite ?? p.input;
-  return (u.inputTokens * p.input + u.outputTokens * p.output + u.cacheReadTokens * read + u.cacheWriteTokens * write) / 1e6;
+  return (i * p.input + o * p.output + cr * read + cw * write) / 1e6;
+}
+
+/**
+ * A stored call priced again: its cost now, undefined when an answer has no price, or `keep` when
+ * an answer's provider is gone from gateway.yaml (`priceOf` null) and today's prices cannot say.
+ */
+export function repriceBasis(basis: PriceBasis, priceOf: (served: string) => Price | undefined | null): { costUsd?: number } | "keep" {
+  const prices = basis.map((a) => priceOf(a.m));
+  if (!basis.length || prices.some((p) => p === null)) return "keep";
+  const cost = basisCost(basis, (served) => prices[basis.findIndex((a) => a.m === served)] ?? undefined);
+  return cost === undefined ? {} : { costUsd: cost };
+}
+
+/** A call's cost from its answers at today's prices; undefined when any answer has no price (or there are none). */
+export function basisCost(basis: PriceBasis, priceOf: (served: string) => Price | undefined): number | undefined {
+  if (!basis.length) return undefined;
+  let sum = 0;
+  for (const a of basis) {
+    const p = priceOf(a.m);
+    const c = p ? costOf(p, a) : undefined;
+    if (c === undefined) return undefined;
+    sum += c;
+  }
+  return sum;
 }
 
 const host = (url: string | undefined) => {
@@ -159,6 +232,8 @@ export class PriceBook {
   private ownError: string | undefined;
   private catalog: PriceCatalog | undefined;
   private refreshing: Promise<void> | undefined;
+  private readonly listeners: (() => void)[] = [];
+  private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(o: PriceBookOptions) {
     this.file = join(o.home, PRICES_FILE);
@@ -188,8 +263,10 @@ export class PriceBook {
         await mkdir(dirname(this.cache), { recursive: true });
         await Bun.write(`${this.cache}.tmp`, JSON.stringify(catalog));
         await rename(`${this.cache}.tmp`, this.cache);
+        const changed = JSON.stringify(catalog.providers) !== JSON.stringify(this.catalog?.providers);
         this.catalog = catalog;
         this.log(`models.dev prices: ${Object.keys(catalog.providers).length} providers`);
+        if (changed) this.changed();
       } catch (e) {
         this.log(`models.dev prices not refreshed (${(e as Error).message}); ${this.catalog ? `keeping those of ${this.catalog.fetchedAt}` : "calls not in the price file stay unpriced"}`);
       } finally {
@@ -197,6 +274,43 @@ export class PriceBook {
       }
     })();
     return this.refreshing;
+  }
+
+  /** Called after a price changed: the file was edited, or the catalogue came back different. */
+  onChange(listener: () => void): void {
+    this.listeners.push(listener);
+  }
+
+  /**
+   * Keep the prices current without waiting for a call: the file looked at every `fileMs`, the
+   * catalogue refreshed once a day. The timer does not keep the process alive.
+   */
+  watch(fileMs = 60_000): void {
+    if (this.timer) return;
+    let last = this.now();
+    this.timer = setInterval(() => {
+      void this.readOwn();
+      if (this.now() - last >= REFRESH_MS || (this.catalog && this.now() - Date.parse(this.catalog.fetchedAt) >= REFRESH_MS)) {
+        last = this.now();
+        void this.refresh();
+      }
+    }, fileMs);
+    (this.timer as { unref?: () => void }).unref?.();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+  }
+
+  private changed(): void {
+    for (const l of this.listeners) {
+      try {
+        l();
+      } catch (e) {
+        this.log(`after a price change: ${(e as Error).message}`);
+      }
+    }
   }
 
   /** When the catalogue was fetched, and why the price file did not load. */
@@ -237,6 +351,12 @@ export class PriceBook {
     return exact ? { price: exact, source: `models.dev ${id}` } : undefined;
   }
 
+  /** The models the price file names for this provider (not `provider/*`): pictures and speech are often not in its model list. */
+  fileModels(provider: string): string[] {
+    const prefix = `${provider}/`;
+    return Object.keys(this.own).filter((k) => k.startsWith(prefix) && k !== `${prefix}*`).map((k) => k.slice(prefix.length));
+  }
+
   /** The price file again when it changed (one stat when it did not); a bad file keeps the last good one and says why. */
   reload(): Promise<void> {
     return this.readOwn();
@@ -247,16 +367,21 @@ export class PriceBook {
     try {
       mtime = (await stat(this.file)).mtimeMs;
     } catch {
+      const had = Object.keys(this.own).length > 0;
       this.own = {};
       this.ownMtime = -1;
       this.ownError = undefined;
+      if (had) this.changed();
       return;
     }
     if (mtime === this.ownMtime) return;
     this.ownMtime = mtime;
     try {
-      this.own = parsePricesYaml(await Bun.file(this.file).text());
+      const next = parsePricesYaml(await Bun.file(this.file).text());
+      const changed = JSON.stringify(next) !== JSON.stringify(this.own);
+      this.own = next;
       this.ownError = undefined;
+      if (changed) this.changed();
     } catch (e) {
       this.ownError = (e as Error).message;
       this.log(`${this.ownError}; keeping the prices read before`);

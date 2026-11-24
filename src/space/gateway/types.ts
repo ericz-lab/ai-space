@@ -1,4 +1,5 @@
-import type { Usage } from "../runtimes/types.ts";
+import type { PriceBasis, Usage } from "../runtimes/types.ts";
+import type { Price } from "./prices.ts";
 
 /**
  * The built-in model gateway (docs/model-gateway.md): it sits between an AI runtime (Claude Code)
@@ -76,6 +77,8 @@ export type GatewayTrace = {
   costUsd?: number;
   /** The `provider/model`s that answered without a price: the run's cost is then unknown, not lower. */
   unpriced?: string[];
+  /** Each priced answer, for the ledger to cost the run again when a price changes (absent past 5000 answers). */
+  priceBasis?: PriceBasis;
   /** The last failure, when the last request failed. */
   error?: string;
   updatedAt: number;
@@ -94,6 +97,11 @@ export type GatewayLink = {
   base(): string | undefined;
   issue(): GatewayGrant;
   trace(run: string): GatewayTrace | undefined;
+  /**
+   * The price of `provider/model` now (docs/model-gateway.md#prices): undefined when it has none,
+   * null when there is no such provider any more (an old row is then left as it was).
+   */
+  price(served: string): Price | undefined | null;
   /** A provider by name, for the speech shorthand and the image operation. */
   provider(name: string): GatewayProvider | undefined;
   /** Whether some provider that is on has a base of this kind. */

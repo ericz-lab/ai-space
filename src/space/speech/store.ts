@@ -1,4 +1,6 @@
 import { Database } from "bun:sqlite";
+import { repriceBasis, type Price } from "../gateway/prices.ts";
+import type { PriceBasis } from "../runtimes/types.ts";
 import type { SpeechCall, SpeechCallInput, SpeechTotals, SpeechTrace } from "./types.ts";
 
 /**
@@ -69,18 +71,46 @@ export class SpeechStore {
     this.db = typeof path === "string" ? new Database(path, { create: true }) : path;
     if (typeof path === "string") this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
     this.db.exec(SCHEMA);
+    // Added later, nullable (docs/speech.md#ledger): the gateway's answer, to price the call again.
+    if (!this.db.query<{ name: string }, []>("PRAGMA table_info(speech_calls)").all().some((c) => c.name === "price_basis")) this.db.exec("ALTER TABLE speech_calls ADD COLUMN price_basis TEXT");
+  }
+
+  /** Cost the built-in gateway's rows again at today's prices; a row whose provider is gone is left. Returns the rows changed. */
+  reprice(priceOf: (served: string) => Price | undefined | null): number {
+    const rows = this.db.query<{ id: number; cost_usd: number | null; price_basis: string }, []>("SELECT id, cost_usd, price_basis FROM speech_calls WHERE price_basis IS NOT NULL").all();
+    const update = this.db.query("UPDATE speech_calls SET cost_usd = ? WHERE id = ?");
+    let changed = 0;
+    this.db.transaction(() => {
+      for (const r of rows) {
+        let basis: PriceBasis;
+        try {
+          basis = JSON.parse(r.price_basis) as PriceBasis;
+        } catch {
+          continue;
+        }
+        if (!Array.isArray(basis)) continue;
+        const next = repriceBasis(basis, priceOf);
+        if (next === "keep") continue;
+        const cost = next.costUsd === undefined ? null : Math.round(next.costUsd * 1e6) / 1e6;
+        if (cost === r.cost_usd) continue;
+        update.run(cost, r.id);
+        changed++;
+      }
+    })();
+    return changed;
   }
 
   add(input: SpeechCallInput): SpeechCall {
     const row = this.db
       .query<{ id: number }, (string | number | null)[]>(
-        `INSERT INTO speech_calls (app, tag, capability, provider, kind, machine, status, error, started_at, duration_ms, input_bytes, audio_seconds, chars, voice, language, cost_usd, fallback_from, tries, trace)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        `INSERT INTO speech_calls (app, tag, capability, provider, kind, machine, status, error, started_at, duration_ms, input_bytes, audio_seconds, chars, voice, language, cost_usd, fallback_from, tries, trace, price_basis)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       )
       .get(
         input.app, input.tag, input.capability, input.provider, input.kind, input.machine || null, input.status, input.error?.slice(0, 1000) ?? null,
         input.startedAt, Math.max(0, Math.round(input.durationMs)), input.inputBytes ?? null, input.audioSeconds ?? null, input.chars ?? null,
         input.voice || null, input.language || null, input.costUsd ?? null, input.fallbackFrom ?? null, input.tries ?? null, input.trace ? JSON.stringify(input.trace) : null,
+        input.priceBasis?.length ? JSON.stringify(input.priceBasis) : null,
       )!;
     return { ...input, id: row.id };
   }

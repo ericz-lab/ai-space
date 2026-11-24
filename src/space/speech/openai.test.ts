@@ -169,3 +169,13 @@ speech:
     expect(own.call?.trace?.candidates.find((c) => c.provider === "openai")?.skipped).toBe("voice zh-Xinran_woman is gpu's own");
   });
 });
+
+test("speech rows through the gateway follow today's prices; others keep theirs", () => {
+  const store = new SpeechStore(":memory:");
+  const row = { app: "a", tag: "t", capability: "speak" as const, provider: "gw", kind: "openai-compatible", status: "ok" as const, startedAt: 1, durationMs: 1, chars: 2000 };
+  const gw = store.add({ ...row, priceBasis: [{ m: "openai/tts-1", ch: 2000 }] });
+  store.add({ ...row, costUsd: 0.5 });
+  expect(store.reprice((m) => (m === "openai/tts-1" ? { perMillionChars: 15 } : undefined))).toBe(1);
+  expect(store.recent().find((c) => c.id === gw.id)?.costUsd).toBe(0.03);
+  expect(store.usage("24h", { now: 2 }).totals.costUsd).toBeCloseTo(0.53, 9);
+});

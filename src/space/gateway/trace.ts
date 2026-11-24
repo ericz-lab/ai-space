@@ -1,4 +1,4 @@
-import type { Usage } from "../runtimes/types.ts";
+import type { PricedAnswer, Usage } from "../runtimes/types.ts";
 import type { GatewayTrace } from "./types.ts";
 
 /**
@@ -12,7 +12,10 @@ import type { GatewayTrace } from "./types.ts";
 
 export type TraceStoreOptions = { max?: number; ttlMs?: number; now?: () => number };
 
-type Entry = Omit<GatewayTrace, "costUsd"> & { pinned: Map<string, string>; cost?: number };
+type Entry = Omit<GatewayTrace, "costUsd" | "priceBasis"> & { pinned: Map<string, string>; cost?: number; basis?: PricedAnswer[]; basisDropped?: boolean };
+
+/** Answers kept per run to price it again; a run with more keeps its cost but cannot be re-priced. */
+const MAX_BASIS = 5000;
 
 export class TraceStore {
   private readonly runs = new Map<string, Entry>();
@@ -29,13 +32,13 @@ export class TraceStore {
   get(run: string): GatewayTrace | undefined {
     const e = this.live(run);
     if (!e) return undefined;
-    const { pinned: _, ...trace } = e;
-    const { cost, ...rest } = trace;
+    const { pinned: _, cost, basis, basisDropped, ...rest } = e;
     return {
       ...rest,
-      tried: [...trace.tried],
-      ...(trace.usage ? { usage: { ...trace.usage } } : {}),
-      ...(trace.unpriced?.length ? { unpriced: [...trace.unpriced] } : cost !== undefined ? { costUsd: cost } : {}),
+      tried: [...rest.tried],
+      ...(rest.usage ? { usage: { ...rest.usage } } : {}),
+      ...(rest.unpriced?.length ? { unpriced: [...rest.unpriced] } : cost !== undefined ? { costUsd: cost } : {}),
+      ...(basis?.length && !basisDropped ? { priceBasis: basis.map((a) => ({ ...a })) } : {}),
     };
   }
 
@@ -58,16 +61,23 @@ export class TraceStore {
   }
 
   /**
-   * Tokens an answer reported, added to the run's sum, with what they cost at the answering model's
-   * price; `served` without a cost marks the run unpriced.
+   * Tokens an answer reported, added to the run's sum, with the answer as the ledger keeps it and
+   * what it cost at the answering model's price; an answer without a cost marks the run unpriced.
    */
-  addUsage(run: string, u: Usage, priced?: { served: string; costUsd?: number }): void {
+  addUsage(run: string, u: Usage, priced?: { answer: PricedAnswer; costUsd?: number }): void {
     const e = this.entry(run);
     if (priced) {
       if (priced.costUsd === undefined) {
         e.unpriced ??= [];
-        if (!e.unpriced.includes(priced.served)) e.unpriced.push(priced.served);
+        if (!e.unpriced.includes(priced.answer.m)) e.unpriced.push(priced.answer.m);
       } else e.cost = (e.cost ?? 0) + priced.costUsd;
+      if (!e.basisDropped) {
+        (e.basis ??= []).push(priced.answer);
+        if (e.basis.length > MAX_BASIS) {
+          e.basisDropped = true;
+          e.basis = [];
+        }
+      }
     }
     const s = e.usage ?? { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 };
     e.usage = { inputTokens: s.inputTokens + u.inputTokens, cacheWriteTokens: s.cacheWriteTokens + u.cacheWriteTokens, cacheReadTokens: s.cacheReadTokens + u.cacheReadTokens, outputTokens: s.outputTokens + u.outputTokens };
@@ -100,4 +110,14 @@ export class TraceStore {
     while (this.runs.size > this.max) this.runs.delete(this.runs.keys().next().value!);
     return e;
   }
+}
+
+/** The trace's served model, cost and answers on an outcome (docs/model-gateway.md#prices). */
+export function gatewayFigures<T extends object>(outcome: T, trace: GatewayTrace | undefined): T {
+  return {
+    ...outcome,
+    ...(trace?.served ? { served: trace.served } : {}),
+    ...(trace?.costUsd !== undefined ? { costUsd: trace.costUsd } : {}),
+    ...(trace?.priceBasis ? { priceBasis: trace.priceBasis } : {}),
+  };
 }

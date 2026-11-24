@@ -1,6 +1,10 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { GATEWAY_PREFIX, createGatewayRoutes } from "../gateway/api.ts";
 import { parseGatewayYaml } from "../gateway/config.ts";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PriceBook, PRICES_FILE } from "../gateway/prices.ts";
 import { ModelGateway } from "../gateway/service.ts";
 import { checkGatewayProviders, parseProvidersYaml } from "./config.ts";
 import { OpenAiAdapter } from "./openai.ts";
@@ -40,9 +44,9 @@ function audioVendor() {
   return { url: `http://127.0.0.1:${server.port}/v1`, seen };
 }
 
-function gatewayOver(openaiBase: string) {
+function gatewayOver(openaiBase: string, prices?: PriceBook) {
   const { config } = parseGatewayYaml(`providers:\n  openai: { openai: '${openaiBase}', apiKeyEnv: OA }\n  ds: { messages: 'http://127.0.0.1:9' }\n`, { OA: "sk-openai" });
-  const gateway = new ModelGateway({ config, log: () => {} });
+  const gateway = new ModelGateway({ config, log: () => {}, ...(prices ? { prices } : {}) });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createGatewayRoutes(gateway), fetch: () => new Response("", { status: 404 }) });
   stops.push(() => server.stop(true));
   gateway.listen(`http://127.0.0.1:${server.port}${GATEWAY_PREFIX}`);
@@ -104,6 +108,24 @@ describe("speech through the built-in gateway", () => {
     const r = await a.speak({ text: "hi", voices: [], language: "en" } as never);
     expect(new Uint8Array(r.audio)).toEqual(new Uint8Array([82, 73, 70, 70, 1, 2, 3]));
     expect(v.seen[0]!.json).toEqual({ model: "tts-1", input: "hi", voice: "alloy", response_format: "wav" });
+  });
+
+  test("priced at the gateway's prices, with the answer kept to price again; no gateway price: kept unpriced", async () => {
+    const home = await mkdtemp(join(tmpdir(), "speech-prices-"));
+    await Bun.write(join(home, PRICES_FILE), "openai/whisper-1: [2, 8]\nopenai/tts-1: { perMillionChars: 15 }\n");
+    const prices = new PriceBook({ home, fetch: (async () => new Response("offline", { status: 503 })) as unknown as typeof fetch, log: () => {} });
+    await prices.load();
+    const a = new OpenAiAdapter(spec, { gateway: gatewayOver(audioVendor().url, prices).link });
+    // The stand-in reports 12 input and 3 output tokens and no duration.
+    const t = await a.transcribe(file);
+    expect(t.priced?.costUsd).toBeCloseTo((12 * 2 + 3 * 8) / 1e6, 12);
+    expect(t.priced?.basis).toEqual([{ m: "openai/whisper-1", i: 12, o: 3 }]);
+    const s = await a.speak({ text: "hi", voices: [], language: "en" } as never);
+    expect(s.priced).toEqual({ costUsd: (2 / 1e6) * 15, basis: [{ m: "openai/tts-1", ch: 2 }] });
+    await Bun.sleep(5);
+    await Bun.write(join(home, PRICES_FILE), "");
+    await prices.reload();
+    expect((await a.speak({ text: "hi", voices: [], language: "en" } as never)).priced).toEqual({ basis: [{ m: "openai/tts-1", ch: 2 }] });
   });
 
   test("with the gateway off a call fails with 503 and the reason", async () => {

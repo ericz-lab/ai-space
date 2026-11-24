@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { getJson, sendJson, untilTime, type GatewayInfo, type GatewayModelList, type GatewayPreset, type GatewayProviderInfo, type GatewaySite, type GatewayTest, type GatewayTiers, type MagpieInfo, type MagpieTiers } from "./api.ts";
+import { getJson, sendJson, untilTime, type GatewayInfo, type GatewayModelList, type GatewayPreset, type GatewayPrice, type GatewayProviderInfo, type GatewaySite, type GatewayTest, type GatewayTiers, type MagpieInfo, type MagpieTiers } from "./api.ts";
 import { useLang } from "./i18n.ts";
 import { MagpieRow, TierPickers, type T } from "./MachineClis.tsx";
 import type { Lang } from "./messages.ts";
@@ -212,13 +212,19 @@ const usd = (n: number) => `$${n < 0.01 && n > 0 ? n.toPrecision(2) : Number(n.t
 
 /** Each model's price (input / output, USD per million tokens), its source on hover; unpriced ones said so. */
 export function PriceList({ p, t }: { p: GatewayProviderInfo; t: T }) {
-  const rows = p.models.map((m) => [m, p.prices?.[m] ?? null] as const);
+  const rows = Object.entries(p.prices ?? Object.fromEntries(p.models.map((m) => [m, null])));
   const unpriced = rows.filter(([, v]) => !v).map(([m]) => m);
+  const figures = (v: GatewayPrice) => [
+    v.input !== undefined && v.output !== undefined && `${usd(v.input)} / ${usd(v.output)}`,
+    v.perImage !== undefined && t("gateway.perImage", { usd: usd(v.perImage) }),
+    v.perMinute !== undefined && t("gateway.perMinute", { usd: usd(v.perMinute) }),
+    v.perMillionChars !== undefined && t("gateway.perMillionChars", { usd: usd(v.perMillionChars) }),
+  ].filter(Boolean).join(", ");
   return (
     <small className="gw-prices">
       {rows.filter(([, v]) => v).map(([m, v]) => (
-        <span key={m} title={[v!.cacheRead !== undefined && t("gateway.priceCache", { read: usd(v!.cacheRead), write: usd(v!.cacheWrite ?? v!.input) }), v!.tiers?.length && t("gateway.priceTiers"), t("gateway.priceSource", { source: v!.source })].filter(Boolean).join(" · ")}>
-          {m} {usd(v!.input)} / {usd(v!.output)}
+        <span key={m} title={[v!.cacheRead !== undefined && t("gateway.priceCache", { read: usd(v!.cacheRead), write: usd(v!.cacheWrite ?? v!.input ?? 0) }), v!.tiers?.length && t("gateway.priceTiers"), t("gateway.priceSource", { source: v!.source })].filter(Boolean).join(" · ")}>
+          {m} {figures(v!)}
         </span>
       ))}
       {unpriced.length > 0 && <span className="gw-unpriced">{t("gateway.unpriced", { list: unpriced.join(", ") })}</span>}
