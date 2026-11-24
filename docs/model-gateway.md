@@ -48,13 +48,27 @@ providers:
     apiKeyEnv: OPENAI_API_KEY
 groups:
   fast: [deepseek/deepseek-chat, mine/mine-small]   # tried in order
+tiers:                            # optional: what answers each ai-space tier ([below](#tiers))
+  basic: fast
+  advanced: mine/mine-large
+  image: openai/gpt-image-1
 ```
 
 - A provider declares which bases it has. `messages` is the base Claude Code's `ANTHROPIC_BASE_URL` would be: `/v1/messages` is appended. `openai` is an OpenAI-style base: `/audio/speech`, `/audio/transcriptions`, `/images/generations` and `/images/edits` are appended. The bases decide what the gateway can forward to that provider.
 - `auth` says how the key travels on the `messages` base. The default is `Authorization: Bearer`, which is what Claude Code sends for `ANTHROPIC_AUTH_TOKEN` and what the vendors below document. The `openai` base always uses a bearer.
 - `apiKeyEnv` names a variable from the environment or the workspace `.env`. A provider whose variable is empty stays listed but is off, with a warning at boot, as a speech provider is. A provider without `apiKeyEnv` gets no auth header, for a local server.
 - Model ids are `provider/model` or a group's name, the same convention as magpie. A group's members are `provider/model` each. A group may not be named like a provider.
-- Validation is strict. An unknown key, a URL with a query or credentials, a group member naming a provider the file lacks, or a key written in place of a variable name stops the file from loading. The gateway then answers 503 with the reason, and the space keeps running.
+- Validation is strict. An unknown key, a URL with a query or credentials, a group member naming a provider the file lacks, or a key written in place of a variable name stops the file from loading. The gateway then answers 503 with the reason, and the space keeps running. A tier is the exception ([below](#tiers)).
+
+### Tiers
+
+`tiers:` says which model or group answers each ai-space tier through this gateway, for every runtime with `gateway: space`. Each of the four tiers (`basic`, `junior`, `intermediate`, `advanced`) is any provider's model or a group, so one gateway can serve advanced from GLM and intermediate from DeepSeek. `image` is the model or group that makes pictures ([Images](#images)). It is a tier of its own because a text model cannot draw.
+
+- **Resolution order**, for a runtime with `gateway: space`: the runtime's own `models:` pin in `runtimes.yaml`, else the gateway's tier, else (Claude Code only) the nearest of those, a lower one first ([Claude Code](#claude-code-gateway)). An `anthropic-api` runtime with neither answers "no model for tier" as before. A request for pictures on such a runtime (`POST /api/model/image` naming any tier) goes to `image` when it is set, whatever the runtime pins for text; an explicit `provider/model` is sent as named.
+- **Checks**: a text tier needs a provider with a `messages` base, `image` one with an `openai` base (a group: at least one member that has it), and a `provider/model` must name a provider of the file. A tier that fails this, for example after its provider was removed, does not stop the file from loading. It stays, with a warning at boot, and its calls fail with the gateway's reason. A tier that is not a string, or an unknown tier name, does stop the file from loading.
+- **Read per call**: runtimes read the gateway's tiers on each call (Claude Code: each process), so a tier saved in Settings applies from the next call without a restart. An open live chat keeps its process, and its tiers, until it ends.
+
+magpie keeps its tiers where they were: each magpie runtime's `models:` in `runtimes.yaml`. magpie has no file of ai-space's to hold them, and both blocks in Settings work the same way ([Settings](#settings)).
 
 ### Presets
 
@@ -131,7 +145,7 @@ runtimes:
       intermediate: zhipu/glm-4.6
 ```
 
-- `gateway: space`: each process gets `ANTHROPIC_BASE_URL` set to the built-in gateway's loopback address and `ANTHROPIC_AUTH_TOKEN` set to a token issued for that process. It also gets each tier's pin behind Claude Code's alias for it, the basic pin as `ANTHROPIC_SMALL_FAST_MODEL`, and `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`. The same variables go as `--settings '{"env":{…}}'`, the mechanism magpie runtimes use ([below](#magpie)). `ANTHROPIC_API_KEY` is left out of the process. The gateway knows no Claude alias, so a tier left unpinned takes the nearest pinned one, a lower one first, and the CLI's background calls on `haiku` still name a model the gateway can route. A live chat's process is matched without its token, so a conversation keeps its process, and with it its run token and its vendor.
+- `gateway: space`: each process gets `ANTHROPIC_BASE_URL` set to the built-in gateway's loopback address and `ANTHROPIC_AUTH_TOKEN` set to a token issued for that process. It also gets each tier's pin behind Claude Code's alias for it, the basic pin as `ANTHROPIC_SMALL_FAST_MODEL`, and `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`. The same variables go as `--settings '{"env":{…}}'`, the mechanism magpie runtimes use ([below](#magpie)). `ANTHROPIC_API_KEY` is left out of the process. Each tier is the runtime's own pin, else the gateway's [tier](#tiers). The gateway knows no Claude alias, so a tier with neither takes the nearest of those, a lower one first, and the CLI's background calls on `haiku` still name a model the gateway can route. A live chat's process is matched without its token, so a conversation keeps its process, and with it its run token and its vendor.
 - `gateway: magpie`: magpie's address found as `space setup` finds it (`MAGPIE_ADDR`, its `gateway.json`, the default port), then exactly the `magpie:` behaviour below. `gateway: <url>`: another gateway at that address, set up the same way.
 - `magpie:` and `gateway:` together are refused. So is `ssh:`, and a `machines:` fallback entry on such a runtime: the gateway is on this machine's loopback.
 - Status: a `gateway: space` runtime counts as signed in while the built-in gateway can answer: a `gateway.yaml` that loaded, at least one provider on, ai-space listening on loopback.
@@ -143,16 +157,15 @@ runtimes:
   gw:
     kind: anthropic-api
     gateway: space                 # no apiKeyEnv, no url: the gateway issues a token per call
-    models:
+    models:                        # optional: over the gateway's tiers (above)
       basic: fast
-      junior: openai/gpt-image-1   # a tier /api/model/image can name (below)
 ```
 
 Answers go to the built-in gateway's `/v1/messages` with a token issued for the call, and `served` comes from that token's trace. A literal `url:` pointing at the gateway would need the port and a token, and only ai-space can issue one, so the runtime names the gateway instead. The runtime takes images (`CompleteInput.files`) as base64 image blocks, as every `anthropic-api` runtime now does, and still refuses tools.
 
 ### Images
 
-An `anthropic-api` runtime with `gateway: space` has the `image` operation when one of the gateway's providers is on and has an `openai` base. `POST /api/model/image` can then resolve to it as it resolves to `codex-cli` ([model.md](model.md#images)): the route's contract, its model resolution and `model.tags.image` do not change. Without input images it calls `images/generations`. With them it calls `images/edits`, multipart, with one `image[]` per input image. The system text goes before the prompt. The pictures must come back as `b64_json`; an answer that only names URLs is refused, since ai-space does not fetch what an answer names. `response_format: b64_json` is sent to every model except OpenAI's GPT image models, which always answer base64 and refuse the parameter (OpenAI's [Images reference](https://developers.openai.com/api/reference/resources/images)).
+An `anthropic-api` runtime with `gateway: space` has the `image` operation when one of the gateway's providers is on and has an `openai` base. `POST /api/model/image` can then resolve to it as it resolves to `codex-cli` ([model.md](model.md#images)): the route's contract, its model resolution and `model.tags.image` do not change. Which model draws: the gateway's `image` [tier](#tiers) when the request names a tier, else the `provider/model` it names. Without input images it calls `images/generations`. With them it calls `images/edits`, multipart, with one `image[]` per input image. The system text goes before the prompt. The pictures must come back as `b64_json`; an answer that only names URLs is refused, since ai-space does not fetch what an answer names. `response_format: b64_json` is sent to every model except OpenAI's GPT image models, which always answer base64 and refuse the parameter (OpenAI's [Images reference](https://developers.openai.com/api/reference/resources/images)).
 
 Which vendors accept the OpenAI Images shape as is was checked on 2026-11-23. OpenAI accepts both endpoints. Together's generations ask for `response_format: base64`, not `b64_json`. Zhipu's and Z.ai's CogView generations answer with URLs only. DashScope's compatible mode gives `b64_json` for two Qwen image models only and has no `/images/edits`. xAI's edits take JSON, not multipart. So OpenAI is the one vendor known to work for both operations here. Others may work for generations once the answer shape fits, and none of the others accepts OpenAI's multipart edits.
 
@@ -173,6 +186,21 @@ speech:
 ```
 
 With `gateway:` the provider takes no `url`, `apiKeyEnv` or `selfHosted`. Through the built-in gateway each call carries a token issued for it, and the address is read when the call is made. A provider that names a `gateway.yaml` provider that is missing, has no `openai` base or is off is turned off at boot with the reason, as one with a missing key is. Through magpie the address is magpie's and the key is magpie's caller key, so magpie's `/v1/audio/*` works the same way. OpenAI's list prices apply when the gateway provider's `openai` base is OpenAI's own host. Live dictation (`WS /api/speech/live`) does not go through a model gateway.
+
+## Settings
+
+Settings → Models shows one block per model gateway the space has, under the CLI table: the built-in one, then magpie on this machine ([below](#magpie)). Both have the same tier pickers, filled from the gateway's `/v1/models` with its groups listed apart, a **Save** button, and an empty choice to clear a tier. A saved value the gateway does not list now stays selected, marked and warned.
+
+The built-in gateway's block shows:
+
+- whether it answers, or why not (no file, a file that did not load, every provider off, not listening on loopback);
+- each provider of `gateway.yaml`: its name, its `messages` and `openai` bases, on or off and why (its key variable is empty), resting until when and why (credit, quota, rate, transport; from the failover's rest), and its models;
+- the four tier pickers and, when a provider can draw (or `image` is already set), a **Pictures** picker that offers only the ids on an `openai` base. Every picker also takes an id typed by hand (**Type an id…**): a `provider/model` the provider does not list is fine as long as the provider is in the file;
+- the runtimes with `gateway: space`, with their own pins, which win over the tiers.
+
+**Save** writes `tiers:` in `gateway.yaml` (`PUT /api/model/gateway/tiers {"tiers":{"basic":"fast","junior":"","image":"openai/gpt-image-1"}}`, operator only; `""` clears a tier, and none set removes the block). The text is edited rather than re-serialized: comments and order elsewhere in the file stay, the block keeps its place or goes at the end, and a tier that keeps its value keeps its comment (other comments inside the old block are dropped). The result must parse with exactly the tiers asked and every provider and group unchanged, or nothing is written. A new value must be a group of the file or `provider/model` with one of its providers that has the base the tier needs; a saved value may stay after its provider left. The gateway uses the new tiers from the next call. If it did not load at boot, the file is still written and a restart applies it.
+
+With no `gateway.yaml` the block says where to write it (`<workspace>/gateway.yaml`) and shows a short example. Adding or removing providers and entering keys stay in the file and `.env`; the browser never sees a key.
 
 ## magpie
 
@@ -197,7 +225,7 @@ Each process of that runtime gets `ANTHROPIC_BASE_URL` set to the gateway and `A
 **ai-space's pins override magpie's Agents page.** When magpie wires Claude Code from its Agents page, it writes an `env` block with these same variables into `~/.claude/settings.json`, and Claude Code lets that block win over the process environment. So the same variables also go to each process of the runtime as `--settings '{"env":{…}}'`, which Claude Code ranks above the user's settings file. A tier pinned in ai-space answers with that model whatever the file says. A tier left unpinned is not in `--settings`, so it is Claude Code's own: its alias (`haiku`, `sonnet`, …), or whatever the user's settings file (magpie's Agents page included) maps that alias to.
 
 - **Its tiers**: a pinned tier is magpie's id (`provider/model`, or a routing group such as `group/fast`); an unpinned one is Claude Code's alias for it, as for a plain `claude` runtime. `magpie/<provider>/<model>` sends magpie's own id. Pins may contain `/` for that reason.
-- **Picking them in Settings**: Settings → Models shows, for each runtime through magpie, a picker per tier filled from the gateway's `/v1/models`, with its routing groups (an id under `group/` or `auto/`, or an entry magpie labels as one) listed apart from its plain models. **Save** writes the runtime's `models:` in `runtimes.yaml`, the same pins the file and `space setup` use, editing the text so comments stay (`PUT /api/model/runtimes/models {"runtime","models":{"basic":"group/fast","junior":""}}`, operator only; `""` clears a tier). A running runtime uses the new pins from its next call (an open live chat keeps its process until it ends); one added since the last start needs a restart. A new pin must be one magpie lists now. A saved one it no longer lists stays, shown with a warning. While the gateway does not answer, the saved pins are shown and kept, and only clearing or keeping them is accepted.
+- **Picking them in Settings**: Settings → Models shows, in magpie's block ([Settings](#settings)), for each runtime through magpie, a picker per tier filled from the gateway's `/v1/models`, with its routing groups (an id under `group/` or `auto/`, or an entry magpie labels as one) listed apart from its plain models. **Save** writes the runtime's `models:` in `runtimes.yaml`, the same pins the file and `space setup` use, editing the text so comments stay (`PUT /api/model/runtimes/models {"runtime","models":{"basic":"group/fast","junior":""}}`, operator only; `""` clears a tier). A running runtime uses the new pins from its next call (an open live chat keeps its process until it ends); one added since the last start needs a restart. A new pin must be one magpie lists now. A saved one it no longer lists stays, shown with a warning. While the gateway does not answer, the saved pins are shown and kept, and only clearing or keeping them is accepted.
 - **Local only**: `ssh:` and a `machine:` fallback entry on it are refused, since the gateway listens on this machine's loopback.
 - **Status**: the CLI's own login is not asked. The cell counts as signed in while the gateway answers its model list with at least one model ([model-machines.md](model-machines.md#status)).
 
@@ -223,12 +251,13 @@ fallback:
 
 ## Code
 
-`src/space/gateway/`: `types.ts` (providers, groups, the trace, `GatewayLink`, what runtimes and speech hold of it), `config.ts` (`gateway.yaml`, the presets), `tokens.ts` (issued tokens), `trace.ts` (the per-run trace and the group member a run keeps), `forward.ts` (headers each way, usage read on the side of an SSE stream), `service.ts` (`ModelGateway`: the order of candidates, failover, rests, the answer), `api.ts` (the routes, the token and loopback check, the base a child process gets). The runtimes' side is in `runtimes/claude-code.ts`, `runtimes/anthropic-api.ts` and `runtimes/magpie.ts` (`gatewayClaudeEnv`); the speech side in `speech/config.ts` and `speech/openai.ts`. Boot wiring is in `src/index.ts`.
+`src/space/gateway/`: `types.ts` (providers, groups, the trace, `GatewayLink`, what runtimes and speech hold of it), `config.ts` (`gateway.yaml`, the presets, `tiers:` and its text edit), `tokens.ts` (issued tokens), `trace.ts` (the per-run trace and the group member a run keeps), `forward.ts` (headers each way, usage read on the side of an SSE stream), `service.ts` (`ModelGateway`: the order of candidates, failover, rests, the answer), `api.ts` (the routes, the token and loopback check, the base a child process gets). Settings' block is `GatewayBlock` in `src/web/MachineClis.tsx` with the routes in `model/inventory.ts`. The runtimes' side is in `runtimes/claude-code.ts`, `runtimes/anthropic-api.ts` and `runtimes/magpie.ts` (`gatewayClaudeEnv`); the speech side in `speech/config.ts` and `speech/openai.ts`. Boot wiring is in `src/index.ts`.
 
 ## Not done
 
 - Protocol translation, a native agent loop, subscription-account bridging, and Codex through the built-in gateway: out of scope by design.
-- Settings → Models pickers for a `gateway: space` runtime. `/v1/models` answers in the shape the magpie pickers read, but the panel only shows the magpie section; pins are written in `runtimes.yaml` by hand for now.
+- Per-runtime pickers for a `gateway: space` runtime in Settings: the block sets the gateway's tiers, which every such runtime uses; a runtime's own `models:` pins are listed there and edited in `runtimes.yaml`.
+- Editing providers or keys from the browser.
 - `served` for agent tasks and chat turns through the built-in gateway: their records have no field for it yet; the trace has it.
 - Rests and traces are in memory and start over at a restart.
 - Live dictation through a model gateway.

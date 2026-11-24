@@ -118,7 +118,7 @@ Without the file, the space has the one Claude Code runtime the `SPACE_MODEL_*` 
 
 ## Model gateways
 
-A runtime can answer through a model gateway instead of the vendor its CLI was made for: Claude Code with `gateway: space` (the built-in model gateway), `gateway: magpie` or `magpie: <url>` (magpie, an external one), and `anthropic-api` with `gateway: space` or a gateway's `url`. What a model gateway is, the built-in one's `gateway.yaml`, its limits (passthrough only: vendors with an Anthropic Messages endpoint for text, no Codex), and the magpie forms that were described here are in [model-gateway.md](model-gateway.md).
+A runtime can answer through a model gateway instead of the vendor its CLI was made for: Claude Code with `gateway: space` (the built-in model gateway), `gateway: magpie` or `magpie: <url>` (magpie, an external one), and `anthropic-api` with `gateway: space` or a gateway's `url`. What a model gateway is, the built-in one's `gateway.yaml` (with its `tiers:`, which every `gateway: space` runtime uses unless it pins its own `models:`), its limits (passthrough only: vendors with an Anthropic Messages endpoint for text, no Codex), and the magpie forms that were described here are in [model-gateway.md](model-gateway.md).
 
 ## Code
 
