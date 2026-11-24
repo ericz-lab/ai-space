@@ -120,11 +120,27 @@ test("kinds: a provider says what it serves and why not; the chooser marks each 
 test("a vendor's OpenAI-style base is offered, with the key caveat and its page, never added by itself", () => {
   const presets: GatewayPreset[] = [{ name: "zhipu", label: "Zhipu", messages: "https://open.bigmodel.cn/api/anthropic", auth: "bearer", hasList: false, defaults: [], openaiOffer: { cn: "https://open.bigmodel.cn/api/paas/v4", note: "speech and pictures", source: "https://docs.z.ai/devpack/faq" } }];
   const html = renderToStaticMarkup(<AddProvider presets={presets} taken={[]} busy={false} run={run} onDone={noop} t={t} />);
-  expect(html).toContain("OpenAI-style base for speech and pictures");
+  // A preset with a note in the dictionaries shows it in the page's language; any other shows the note as sent.
+  expect(html).toContain("OpenAI-style base for speech, transcription and pictures");
   expect(html).toContain("does not say this key works there too");
   expect(html).toContain('href="https://docs.z.ai/devpack/faq"');
   expect(html).toContain(">Use https://open.bigmodel.cn/api/paas/v4</button>");
   expect(html).not.toContain("openai https://open.bigmodel.cn/api/paas/v4");
+});
+
+test("a provider whose preset leaves that base out offers it on its own row, for its site, in one click", () => {
+  const preset: GatewayPreset = {
+    name: "minimax", label: "MiniMax", messages: "https://api.minimax.io/anthropic", auth: "bearer", hasList: true, defaults: [],
+    sites: { intl: { messages: "https://api.minimax.io/anthropic" }, cn: { messages: "https://api.minimaxi.com/anthropic" } },
+    openaiOffer: { intl: "https://api.minimax.io/v1", cn: "https://api.minimaxi.com/v1", note: "pictures only", source: "https://platform.minimax.io/docs" },
+  };
+  const mm: GatewayProviderInfo = { ...base, name: "minimax", preset: "minimax", label: "MiniMax", messages: "https://api.minimaxi.com/anthropic" };
+  const row = renderToStaticMarkup(<ProviderRow p={mm} preset={preset} editable busy={false} run={run} lang="zh" t={zh} />);
+  expect(row).toContain("可用于图片");
+  expect(row).toContain(">使用 https://api.minimaxi.com/v1</button>");
+  // Already added, or not the owner's to change: nothing is offered.
+  expect(renderToStaticMarkup(<ProviderRow p={{ ...mm, openai: "https://api.minimaxi.com/v1" }} preset={preset} editable busy={false} run={run} lang="zh" t={zh} />)).not.toContain("使用 https://");
+  expect(renderToStaticMarkup(<ProviderRow p={mm} preset={preset} editable={false} busy={false} run={run} lang="zh" t={zh} />)).not.toContain("使用 https://");
 });
 
 const gw = (over: Partial<GatewayInfo> = {}): GatewayInfo => ({ file: "/w/gateway.yaml", exists: true, answers: true, providers: [base], groups: {}, tiers: {}, models: [], imageModels: [], textModels: [], asrModels: [], ttsModels: [], presets: [], runtimes: [], offer: { claude: false }, ...over });
