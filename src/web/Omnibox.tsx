@@ -86,7 +86,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     }, 180);
     return () => { active = false; clearTimeout(timer); };
   }, [q]);
-  // In parallel with the resolver: a sentence of more than eight units also goes to the basic-tier
+  // In parallel with the resolver: a sentence of six units or more (four words in English) also goes to the basic-tier
   // model. Typing on aborts the request, which cancels the model call on the server.
   useEffect(() => {
     setGuess(null);

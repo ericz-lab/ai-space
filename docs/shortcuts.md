@@ -212,10 +212,11 @@ patterns now rank above agent intents and covered the same sentences.
 
 ## Model interpretation
 
-The last layer, and the only one that calls a model. When the text has more than
-eight units (a number such as `15:30` or `2026` is one unit, a Latin word is one,
-any other letter such as a Chinese character is one; spaces and punctuation do
-not count) and is not arithmetic or a currency conversion, the command box also
+The last layer, and the only one that calls a model. When the text has
+six units or more, or four for text in Latin letters alone (English) (a run of Latin letters and digits such as `meeting`, `2026`,
+`15:30` or `12pm` is one unit, any other letter such as a Chinese character is
+one; spaces and punctuation do not count: `明天12点开会` and `明天 12点开会` are six,
+`tomorrow meeting at 12pm` is four) and is not arithmetic or a currency conversion, the command box also
 calls `POST /api/shortcuts/interpret` `{ text, timezone }`, 600 ms after typing
 stops and in parallel with `resolve`. It never delays or replaces the other
 layers: while the call runs, a "reading with a model" line sits above "Ask Space

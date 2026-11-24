@@ -9,25 +9,29 @@ import type { Action } from "./types.ts";
  * answer is only a suggestion: nothing runs until the person submits the form or picks the agent.
  */
 
-/** Interpretation starts above this many units. */
-export const MIN_UNITS = 8;
+/** Interpretation starts at this many units: six for Chinese or mixed text, four for English alone. */
+export const MIN_UNITS = 6;
+export const MIN_WORDS_LATIN = 4;
 /** At most this many actions and agent intents go into one prompt. */
 const MAX_ACTIONS = 60;
 const MAX_INTENTS = 32;
 const MAX_OPTIONS = 20;
 
 /**
- * How long the text is, as a person counts it: a number (`2026`, `3.5`) or a Latin word is one
- * unit, any other letter (a Chinese character) is one; spaces and punctuation do not count.
+ * How long the text is, as a person counts it: a run of Latin letters and digits (`meeting`,
+ * `2026`, `15:30`, `12pm`) is one unit, any other letter (a Chinese character) is one; spaces and
+ * punctuation do not count. `明天12点开会` is six units, `tomorrow meeting at 12pm` four.
  */
 export function countUnits(text: string): number {
-  return text.match(/\d+(?:[.,:]\d+)*|[\p{Script=Latin}'-]+|[\p{L}\p{M}]/gu)?.length ?? 0;
+  return text.match(/(?:\d+(?:[.,:]\d+)*|[\p{Script=Latin}'-])+|[\p{L}\p{M}]/gu)?.length ?? 0;
 }
 
 /** Whether the text is worth a model call: long enough, and not arithmetic or a conversion the box already answers. */
 export function wantsInterpretation(text: string): boolean {
   const q = text.trim();
-  return countUnits(q) > MIN_UNITS && !isExpression(q) && !parseConversion(q);
+  // Any letter outside the Latin script (Chinese, mixed text) counts per character, so it needs more.
+  const latinOnly = !/(?![\p{Script=Latin}])[\p{L}]/u.test(q);
+  return countUnits(q) >= (latinOnly ? MIN_WORDS_LATIN : MIN_UNITS) && !isExpression(q) && !parseConversion(q);
 }
 
 export type InterpretIntent = { id: string; title: string };
