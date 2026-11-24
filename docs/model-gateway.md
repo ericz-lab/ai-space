@@ -64,6 +64,31 @@ tiers:                            # optional: what answers each ai-space tier ([
 - Model ids are `provider/model` or a group's name, the same convention as magpie. A group's members are `provider/model` each. A group may not be named like a provider.
 - Validation is strict. An unknown key, a URL with a query or credentials, a group member naming a provider the file lacks, or a key written in place of a variable name stops the file from loading. The gateway then answers 503 with the reason, and the space keeps running. A tier is the exception ([below](#tiers)).
 
+### Kinds
+
+Each model a provider lists is for one thing: `text` (Messages), `asr` (speech to text), `tts` (text to speech) or `image` (pictures). The gateway forwards any path to any provider; the kind decides where Settings offers a model: the text tiers and groups take text models, the [Speech group](#speech-group) speech models, the [Image group](#image-group) picture models.
+
+```yaml
+providers:
+  oa:
+    preset: openai
+    apiKeyEnv: OPENAI_API_KEY
+    models: [gpt-5, whisper-1, my-voice]
+    kinds: { my-voice: tts }      # only what differs from the rule below
+```
+
+A model's kind is, in order:
+
+1. `kinds:` in the file: what the owner set in Settings, or accepted from the vendor's list. Each key must be one of the provider's `models`, each value one of the four.
+2. A rule the vendor documents for its own ids: the table in `DOCUMENTED_KINDS` (`src/space/gateway/kinds.ts`), with its pages, for `openai`, `groq`, `zhipu`, `zai`, `minimax` and `ark-plan` ([below](#speech-and-pictures)).
+3. Otherwise `text`.
+
+A kind is never guessed from how a name looks: `whisper-1` on a provider without a preset is text until the owner says otherwise. A file with `models:` only loads as before, every model text unless rule 2 covers it. Settings writes only kinds that differ from the rule; changing one is one click on its chip, and setting it back to the rule drops it from the file.
+
+**From the vendor's list.** OpenRouter's documented `GET /models` leaves out speech, transcription and picture models; they come from `?output_modalities=speech`, `transcription` and `image` (its [OpenAPI document](https://openrouter.ai/openapi.json)). **Load the vendor's list** reads those three lists too and gives their models that kind; an entry of the main list whose `architecture.output_modalities` is `["image"]` alone is a picture model, one that also outputs text stays text. Other vendors' lists say nothing of kind, so their models get rule 2 or text, to be corrected in the page.
+
+**What a provider serves.** Text needs a `messages` base. Speech and pictures need an `openai` base and a vendor with the endpoint in the shape the gateway forwards; where a preset's vendor lacks one, the page says why (`PRESET_LACKS` in `kinds.ts`). `GET /v1/models` adds `kind` to each entry (`text`, `asr`, `tts`, `image`; a group stays `kind: "group"`), so magpie's catalogue reader and any other client that ignores it are unaffected.
+
 ### Tiers
 
 `tiers:` says which model or group answers each ai-space tier through this gateway, for every runtime with `gateway: space`. Each of the four tiers (`basic`, `junior`, `intermediate`, `advanced`) is any provider's model or a group, so one gateway can serve advanced from GLM and intermediate from DeepSeek. `image` is the model or group that makes pictures ([Images](#images)). It is a tier of its own because a text model cannot draw.
@@ -96,11 +121,34 @@ A preset fills in the bases only. The key always comes from `apiKeyEnv`, and a b
 
 The four rows from `ark` down were checked on 2026-11-24.
 
-**Volcengine Ark** has one base per way of paying, and its docs warn that a plan's quota is not used on another base (calls there are billed). Pick the preset that matches the key. Pay-as-you-go takes the dated Model IDs of Ark's model list (`doubao-seed-2-1-pro-260915`); the two plans take the plan's own names (`doubao-seed-2.1-pro`, `ark-code-latest`). Ark's plan pages describe the plans as for AI tools such as Claude Code, and the Agent Plan overview says its text models are not for API calls, so use a plan preset with a Claude Code runtime, not an API runtime. Ark's Claude Code pages set the key as `ANTHROPIC_AUTH_TOKEN` (bearer); its Messages API page shows `x-api-key`. The preset has no `openai` base: Ark's pictures (`/api/v3/images/generations`) were not confirmed to answer in `b64_json`, it has no `/images/edits`, and its speech is on another host with its own protocol. BytePlus ModelArk, the international site, is not a preset.
+**Volcengine Ark** has one base per way of paying, and its docs warn that a plan's quota is not used on another base (calls there are billed). Pick the preset that matches the key. Pay-as-you-go takes the dated Model IDs of Ark's model list (`doubao-seed-2-1-pro-260915`); the two plans take the plan's own names (`doubao-seed-2.1-pro`, `ark-code-latest`). Ark's plan pages describe the plans as for AI tools such as Claude Code, and the Agent Plan overview says its text models are not for API calls, so use a plan preset with a Claude Code runtime, not an API runtime. Ark's Claude Code pages set the key as `ANTHROPIC_AUTH_TOKEN` (bearer); its Messages API page shows `x-api-key`. The presets have no `openai` base. Ark's pictures are at `https://ark.cn-beijing.volces.com/api/v3/images/generations` (pay-as-you-go; the Agent Plan's at `…/api/plan/v3`), offered in Settings as a base to add ([below](#speech-and-pictures)); there is no `/images/edits`, and Doubao speech is on another host with its own protocol. BytePlus ModelArk, the international site, is not a preset.
 
-**OpenRouter** serves every model as `author/model` (`anthropic/claude-sonnet-4.5`) on one key. Its docs say Claude Code is made for Anthropic models and that other vendors' models "may not work correctly" through the Messages endpoint; the gateway forwards whatever is asked. Its `openai` base has `audio/speech` and `audio/transcriptions`. Pictures are at `/images`, not `/images/generations`, so the picture operation does not work through it.
+**OpenRouter** serves every model as `author/model` (`anthropic/claude-sonnet-4.5`) on one key. Its docs say Claude Code is made for Anthropic models and that other vendors' models "may not work correctly" through the Messages endpoint; the gateway forwards whatever is asked. Its `openai` base has `audio/speech` and `audio/transcriptions`. Pictures are `POST /api/v1/images`, not `/images/generations`, so the picture operation does not work through it. Its speech answers mp3 or pcm only, and ai-space's speech asks for wav, so OpenRouter is offered for transcription only.
 
 Not covered by a preset, so the base must be written out: DashScope's workspace and plan hosts, and any other vendor. For the Z.ai, Zhipu, Kimi, MiniMax and DashScope endpoints, none of those pages say whether `x-api-key` is accepted or whether `count_tokens` exists. The bearer default is what they document.
+
+#### Speech and pictures
+
+Which presets have OpenAI-style `audio/transcriptions`, `audio/speech` and `images/generations`, read from each vendor's documentation on 2026-11-24. "yes" means the endpoint exists in the shape the gateway forwards; the ids are the ones the page offers before a list is read (`DOCUMENTED_KINDS`, `DOCUMENTED_VOICES` in `src/space/gateway/kinds.ts`).
+
+| preset | transcriptions | speech | images/generations | source |
+| --- | --- | --- | --- | --- |
+| `openai` | yes: `whisper-1`, `gpt-transcribe`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` (and its dated id), `gpt-4o-transcribe-diarize` | yes: `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts` (and its dated id); voices alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse, marin, cedar | yes: `gpt-image-2.6-sunburst`, `gpt-image-2.6-flare`, `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini`, `chatgpt-image-latest`, `dall-e-2`, `dall-e-3` | https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create, https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create, https://developers.openai.com/api/reference/resources/images |
+| `groq` | yes: `whisper-large-v3`, `whisper-large-v3-turbo` | yes, wav only: `canopylabs/orpheus-v1-english` (autumn, diana, hannah, austin, daniel, troy), `canopylabs/orpheus-arabic-saudi` (abdullah, fahad, sultan, lulwa, noura, aisha) | no | https://console.groq.com/docs/speech-to-text, https://console.groq.com/docs/text-to-speech/orpheus |
+| `openrouter` | yes (ids from `?output_modalities=transcription`) | no: mp3 or pcm only | no: `POST /api/v1/images` | https://openrouter.ai/openapi.json |
+| `zhipu` | on `https://open.bigmodel.cn/api/paas/v4` (offered): `glm-asr-2512` (clips up to 30 s) | same base: `glm-tts`; voices tongtong, chuichui, xiaochen, jam, kazi, douji, luodo | same base: `glm-image`, `cogview-4-250304`, `cogview-4`, `cogview-3-flash`; URLs only | https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E8%AF%AD%E9%9F%B3%E8%BD%AC%E6%96%87%E6%9C%AC, https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E6%96%87%E6%9C%AC%E8%BD%AC%E8%AF%AD%E9%9F%B3, https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E5%9B%BE%E5%83%8F%E7%94%9F%E6%88%90 |
+| `zai` | on `https://api.z.ai/api/paas/v4` (offered): `glm-asr-2512` | no | same base: `glm-image`; URLs only | https://docs.z.ai/api-reference/audio/audio-transcriptions, https://docs.z.ai/api-reference/image/generate-image |
+| `minimax` | no: `/v1/speech_to_text` | no: `t2a_v2` answers JSON with hex audio | on `https://api.minimax.io/v1` (international) or `https://api.minimax.cn/v1` (China), offered: `MiniMax-H3-Image`, `MiniMax-H3-Image-Highspeed`; `b64_json` | https://platform.minimax.io/docs/api-reference/image-generation-h3-generations.md |
+| `ark` | no: speech is on openspeech.bytedance.com | no: likewise | on `https://ark.cn-beijing.volces.com/api/v3` (offered), Seedream; `b64_json` | https://docs.volcengine.com/docs/82379/1541523 |
+| `ark-plan` | no | no | on `https://ark.cn-beijing.volces.com/api/plan/v3` (offered): `doubao-seedream-5.5`, `doubao-seedream-5.0-pro`, `doubao-seedream-5.0-flash`, with the Agent Plan key | https://docs.volcengine.com/docs/ark/agent-plan-personal-visual-models?lang=zh |
+| `ark-coding` | no | no | no: a Coding Plan key is for coding tools only | https://docs.volcengine.com/docs/ark/coding-plan-personal-ai-claude-code?lang=zh |
+| `deepseek` | no: `/v1/tools/asr` | no: `/v1/tools/tts` | no | https://api-docs.deepseek.com |
+| `dashscope` | no: through chat completions | no: its own API | no: its own API | https://help.aliyun.com/zh/model-studio/ |
+| `anthropic`, `kimi` | no | no | no | |
+
+**Offered, not added.** `openai`, `groq` and `openrouter` carry their `openai` base in the preset. For Zhipu, Z.ai, MiniMax and the two Ark presets the base above is not added by the preset: their docs do not say that the key for the Anthropic-compatible base works on it too, and for GLM's Coding Plan they say it does not (https://docs.z.ai/devpack/faq). Settings → Gateway shows it on the provider as **Use …**, with that caveat and the vendor's page, and the provider's **Test** says whether the key works there. On a vendor with two sites the offer follows the site picked ([below](#china-and-international-sites)); where the vendor documents the base on one site only, the page says the other site's key will not work there. The list is `OPENAI_OFFERS` in `kinds.ts`.
+
+**Not verified:** whether one key works on both bases for a Zhipu, Z.ai or MiniMax pay-as-you-go account; OpenRouter's `/images/generations` as an alias; the exact Seedream ids on pay-as-you-go Ark (none are offered: the owner types them); whether the Agent Plan's pictures answer `b64_json` (a URL answer is fetched under the rule in [Images](#images)).
 
 #### China and international sites
 
@@ -220,9 +268,22 @@ Answers go to the built-in gateway's `/v1/messages` with a token issued for the 
 
 ### Images
 
-An `anthropic-api` runtime with `gateway: space` has the `image` operation when one of the gateway's providers is on and has an `openai` base. `POST /api/model/image` can then resolve to it as it resolves to `codex-cli` ([model.md](model.md#images)): the route's contract, its model resolution and `model.tags.image` do not change. Which model draws: the gateway's `image` [tier](#tiers) when the request names a tier, else the `provider/model` it names. Without input images it calls `images/generations`. With them it calls `images/edits`, multipart, with one `image[]` per input image. The system text goes before the prompt. The pictures must come back as `b64_json`; an answer that only names URLs is refused, since ai-space does not fetch what an answer names. `response_format: b64_json` is sent to every model except OpenAI's GPT image models, which always answer base64 and refuse the parameter (OpenAI's [Images reference](https://developers.openai.com/api/reference/resources/images)).
+An `anthropic-api` runtime with `gateway: space` has the `image` operation when one of the gateway's providers is on and has an `openai` base. `POST /api/model/image` can then resolve to it as it resolves to `codex-cli` ([model.md](model.md#images)): the route's contract, its model resolution and `model.tags.image` do not change. Which model draws: the gateway's `image` [tier](#tiers) when the request names a tier, else the `provider/model` it names. Without input images it calls `images/generations`. With them it calls `images/edits`, multipart, with one `image[]` per input image. The system text goes before the prompt. Up to four pictures are taken from the answer. `response_format: b64_json` is sent to every model except OpenAI's GPT image models, which always answer base64 and refuse the parameter (OpenAI's [Images reference](https://developers.openai.com/api/reference/resources/images)).
 
-Which vendors accept the OpenAI Images shape as is was checked on 2026-11-23. OpenAI accepts both endpoints. Together's generations ask for `response_format: base64`, not `b64_json`. Zhipu's and Z.ai's CogView generations answer with URLs only. DashScope's compatible mode gives `b64_json` for two Qwen image models only and has no `/images/edits`. xAI's edits take JSON, not multipart. So OpenAI is the one vendor known to work for both operations here. Others may work for generations once the answer shape fits, and none of the others accepts OpenAI's multipart edits. The pictures' cost is the gateway's ([Prices](#prices)): per picture when the model has a `perImage` price, else the tokens the answer reported.
+**A picture answered as a URL.** Some vendors answer only with a link (Zhipu's and Z.ai's CogView and GLM-Image). ai-space then fetches it, and only under these rules, each enforced in `src/space/model/vendor-image.ts` and tested in `vendor-image.test.ts`:
+
+- The URL comes from the vendor's answer to a picture request ai-space made through the built-in gateway (`gatewayImage` in `src/space/runtimes/anthropic-api.ts`). No route takes an image URL from a caller; `/api/model/image` still carries its input images as base64 only.
+- `https` on port 443, with no credentials in the URL.
+- Every address the host resolves to is public. One loopback, private, link-local (the cloud metadata address `169.254.169.254` and `fd00:ec2::254` among them), carrier-grade NAT, test-net, multicast or reserved address anywhere in the answer refuses the URL, and an IPv4 address inside IPv6 (mapped, NAT64, 6to4) is checked as IPv4 (`isPublicAddress`).
+- The connection goes to the address that was checked, with the host name kept for TLS (SNI and the certificate check) and `Host`, so a second DNS answer cannot move it elsewhere.
+- A redirect is refused, not followed.
+- At most 20 MB (the declared length and the bytes read) within 30 s.
+- The bytes must sniff as png, jpeg, gif or webp (`sniffImage` in `model/images.ts`).
+- No header of the gateway request is sent with it.
+
+A refused URL fails the call with the reason. `/images/edits` is unchanged.
+
+Which vendors accept the OpenAI Images shape as is was checked on 2026-11-23. OpenAI accepts both endpoints. Together's generations ask for `response_format: base64`, not `b64_json`. Zhipu's and Z.ai's CogView generations answer with URLs only (fetched as above). DashScope's compatible mode gives `b64_json` for two Qwen image models only and has no `/images/edits`. xAI's edits take JSON, not multipart. So OpenAI is the one vendor known to work for both operations here. Others may work for generations once the answer shape fits, and none of the others accepts OpenAI's multipart edits. The pictures' cost is the gateway's ([Prices](#prices)): per picture when the model has a `perImage` price, else the tokens the answer reported.
 
 ## Speech
 
@@ -240,17 +301,18 @@ speech:
       voice: alloy
 ```
 
-With `gateway:` the provider takes no `url`, `apiKeyEnv` or `selfHosted`. Through the built-in gateway each call carries a token issued for it, and the address is read when the call is made. A provider that names a `gateway.yaml` provider that is missing, has no `openai` base or is off is turned off at boot with the reason, as one with a missing key is. Through magpie the address is magpie's and the key is magpie's caller key, so magpie's `/v1/audio/*` works the same way. OpenAI's list prices apply when the gateway provider's `openai` base is OpenAI's own host. Live dictation (`WS /api/speech/live`) does not go through a model gateway.
+With `gateway:` the provider takes no `url`, `apiKeyEnv` or `selfHosted`. Through the built-in gateway each call carries a token issued for it, and the address is read when the call is made. A provider that names a `gateway.yaml` provider that is missing, has no `openai` base or is off is turned off at boot with the reason, as one with a missing key is. Through magpie the address is magpie's and the key is magpie's caller key, so magpie's `/v1/audio/*` works the same way. OpenAI's list prices apply when the gateway provider's `openai` base is OpenAI's own host. Live dictation (`WS /api/speech/live`) does not go through a model gateway. A provider with `gateway:` is a cloud provider (it takes no `selfHosted`), so an app with `speech.local: true` never reaches it ([speech.md](speech.md#privacy)). Settings → Gateway's [Speech group](#speech-group) writes such providers for you.
 
 ## Settings
 
 Settings → Gateway is a section of its own, apart from Models. Settings → Models keeps the runtimes and the CLIs on each machine, and under its table names the runtimes whose tiers come from a model gateway, with a button that opens this section. The section has, in order:
 
 - **Status**: whether the built-in gateway answers and with how many models and groups, or why not (no provider yet, a file that did not load, every provider off). When the gateway cannot exist on this space (`SPACE_HOST` is not a loopback address, [Who may call it](#who-may-call-it)) it says so and offers nothing to edit. The path of `gateway.yaml` is shown.
-- **Providers**: each one with its name and vendor, on, off or resting and why, its bases, its key (set, by the page or by hand in `.env`, or set by the environment, with at most its last four characters; [Keys](#keys)), its models, and **Test**, **Edit**, **Replace key**, **Turn off**/**Turn on** and **Remove**.
-- **Add provider**: a vendor of the [presets](#presets) needs only its key; **Use another address** overrides a base. **Custom** asks for a name, a messages and/or OpenAI-style base, the key header and an optional key (a local server needs none). Then the models: **Load the vendor's list** reads the vendor's model list where it documents one ([Model lists](#model-lists)) and each model gets a tick box; ids can be typed by hand; **Refresh** reads the list again. A preset without a list shows the ids its docs name, ticked, and the same field for others. **Add** writes the provider, and the gateway uses it at once: the first provider creates `gateway.yaml`.
+- **Providers**: each one with its name and vendor, on, off or resting and why, its bases, its key (set, by the page or by hand in `.env`, or set by the environment, with at most its last four characters; [Keys](#keys)), its models with the kind of those that are not text, what it serves (text, speech to text, text to speech, pictures, each with the reason when it cannot; [Kinds](#kinds)), and **Test**, **Edit**, **Replace key**, **Turn off**/**Turn on** and **Remove**.
+- **Add provider**: a vendor of the [presets](#presets) needs only its key; **Use another address** overrides a base. **Custom** asks for a name, a messages and/or OpenAI-style base, the key header and an optional key (a local server needs none). Then the models: **Load the vendor's list** reads the vendor's model list where it documents one ([Model lists](#model-lists)) and each model gets a tick box, and each ticked one a chip with its [kind](#kinds) that one click changes; ids can be typed by hand; **Refresh** reads the list again. A preset without a list shows the ids its docs name, ticked, and the same field for others. **Add** writes the provider, and the gateway uses it at once: the first provider creates `gateway.yaml`. For a vendor whose speech or picture base is [offered, not added](#speech-and-pictures), the form and **Edit** show it with **Use …**, which fills the OpenAI-style base.
 - **Groups**: each group with its members in order, **↑ ↓** to reorder, **✕** to drop a member, a picker to add one, a field for a new group, and **Save**. A group a tier names cannot be removed here.
-- **Tiers**: the four tier pickers and **Pictures** (when a provider can draw or `image` is set), filled from the gateway's models with its groups apart. A value can be typed by hand (**Type an id…**), and a saved value the gateway does not list now stays selected with a warning.
+- **Tiers**: the four text tier pickers, filled from the gateway's text models and the groups of them. A value can be typed by hand (**Type an id…**), and a saved value the gateway does not list now stays selected with a warning.
+- **Speech** ([below](#speech-group)) and **Pictures** ([below](#image-group)).
 - **Runtimes through it**: the runtimes with `gateway: space`, **Add a Claude Code runtime** (when `claude` is installed here) and **Add an API runtime**. Either is written to `runtimes.yaml` the same comment-keeping way, named `gateway` or `gateway-api` (then `-2`, …), and answers at once: no restart.
 - **magpie**: magpie's row, as it was under Models ([below](#magpie)).
 
@@ -259,6 +321,28 @@ Settings → Gateway is a section of its own, apart from Models. Settings → Mo
 **Remove** says which groups and tiers name the provider. Its members leave those groups, a group left empty goes, and the tiers naming it or an emptied group are cleared. It asks whether to delete the stored key: ticked by default only for a key this page wrote; a key set by the environment is never touched.
 
 Every change edits the text of `gateway.yaml` rather than re-serializing it: comments and order elsewhere stay, an entry keeps its place, a line whose value is unchanged keeps its trailing comment, and a new block goes at the end (groups after providers). The result must parse back with the change asked and everything else unchanged, or nothing is written. A file the page cannot edit this way (a flow-style `providers:` or `groups:` on one line, a provider written as a flow mapping) is shown as it is, read-only, with the reason. A file that does not load is shown the same way, read-only with its error, until it is fixed by hand. The gateway reads the file again after each save.
+
+### Speech group
+
+What answers speech for apps ([speech.md](speech.md)) and where the gateway sits in it. It shows what answers ASR, TTS and live now (the running speech service's chains) and, for ASR and for TTS apart, three places:
+
+- **Not through the gateway** (what an upgrade leaves).
+- **After the current default**: the gateway's provider is appended to the role's fallback. This is the safe choice and the one the page offers first: the current default keeps answering, and the gateway answers only when it fails. With no default for the role, it becomes the default.
+- **The default**: the gateway's provider answers first, and the previous default moves to the front of the fallback. The page says this sends apps' calls to the vendor, where they cost.
+
+Then a provider (only those of `gateway.yaml` that can, [Kinds](#kinds)), a model (its speech models of that kind) and for TTS a default voice (the vendor's documented voices, or typed). While the choice differs from the file, **After saving** shows the chains the server would write. **Save** edits `<workspace>/providers.yaml` and the running speech service reloads it at once (`SpeechService.reload`); a change to `gateway.yaml` reloads it too, so a provider turned off turns its speech provider off.
+
+**The default stays unless chosen.** Opening or saving the group with both roles left at **Not through the gateway** writes nothing that moves a role. Upgrading changes nothing: voice-studio stays the default. Live is never offered and is written out as it was, since `providers.yaml` would otherwise derive it from the ASR default.
+
+**How it is written.** Each provider the page manages is named `gateway-<provider>`: `kind: openai-compatible`, `gateway: space`, `provider:` and its model and voice, the shorthand of [Speech](#speech). With no `providers.yaml`, the file is created with the built-in voice-studio provider and the built-in defaults written out (`builtinSpeech()`), so nothing about the default changes by writing it. A hand-written file keeps its comments, its other providers and its `voices:`; `default:` and `fallback:` are rewritten in block style, keeping the comment on their key line. A managed provider no role uses any more is removed, unless `voices:` names it. The result must parse back with the other providers, voices and live unchanged, or nothing is written. A file the page cannot edit this way (a flow-style `speech:` or `providers:`) is shown read-only with the reason. The file keeps its mode.
+
+**Tests**, on click only and each saying it costs: **Test TTS** speaks "Hello from ai-space." through the gateway with the chosen provider, model and voice and plays it in the page; **Transcribe that clip** sends that clip to the chosen ASR model and shows the text. A vendor's error is shown with the key redacted. With no provider that can, the group links to **Add a provider that can do this**.
+
+magpie's speech is not part of this group: a `gateway: magpie` provider is still written by hand.
+
+### Image group
+
+The `image` [tier](#tiers), which `POST /api/model/image` uses through an `anthropic-api` runtime with `gateway: space` ([Images](#images)). It lists each provider with whether it can draw and why not, a picker of the picture models (models of kind `image` on providers that can draw, and groups of them), **Save**, and **Make a test picture**: one small picture through the gateway (a red circle on white), shown in the page, on click only and saying it costs. It states the URL rule above.
 
 ### Keys
 
@@ -295,14 +379,18 @@ Every route is the operator's: the owner's session, a device credential or the o
 | route | does |
 | --- | --- |
 | `GET /api/model/gateway` | the section: the file, whether it can be edited, providers with their key state, groups, tiers, models, presets, runtimes |
-| `POST /api/model/gateway/providers` | `{name, preset?, messages?, openai?, auth?, key?, apiKeyEnv?, models}`: add one |
-| `PUT /api/model/gateway/providers/:name` | `{messages?, openai?, auth?, models?, disabled?}`; `""` removes a base override |
+| `POST /api/model/gateway/providers` | `{name, preset?, messages?, openai?, auth?, key?, apiKeyEnv?, models, kinds?}`: add one |
+| `PUT /api/model/gateway/providers/:name` | `{messages?, openai?, auth?, models?, kinds?, disabled?}`; `""` removes a base override |
 | `PUT /api/model/gateway/providers/:name/key` | `{key}`: set or replace its key |
 | `DELETE /api/model/gateway/providers/:name?key=delete\|keep` | remove it, with groups and tiers as above |
 | `POST /api/model/gateway/providers/:name/test` | `{model?}`: the test above; `{results: [{base, ok, ms, status?, error?, detail?}]}` |
-| `POST /api/model/gateway/models` | `{provider}` or `{preset\|messages\|openai, auth?, key?}`: `{source: "vendor"\|"defaults", models, defaults, error?}` |
+| `POST /api/model/gateway/models` | `{provider}` or `{preset\|messages\|openai, auth?, key?}`: `{source: "vendor"\|"defaults", models, defaults, kinds?, error?}` |
 | `PUT /api/model/gateway/groups` | `{groups: {name: [provider/model, …]}}`: the whole set |
 | `PUT /api/model/gateway/tiers` | `{tiers: {basic, …, image}}`; `""` clears a tier |
+| `GET /api/model/gateway/speech` | the Speech group: the file, what answers now, the page's choice, the providers that can with their speech models and voices |
+| `PUT /api/model/gateway/speech` | `{asr: {place, provider?, model?}, tts: {place, provider?, model?, voice?}, dryRun?}`: save (or preview) `providers.yaml`; `{after, applied, created}` |
+| `POST /api/model/gateway/speech/test` | `{role: "tts", provider, model, voice?, text?}` → base64 wav; `{role: "asr", provider, model, audio}` → text |
+| `POST /api/model/gateway/image/test` | `{model?}` (default the `image` tier): one small picture, base64 |
 | `POST /api/model/gateway/runtimes` | `{kind: "claude-code"\|"anthropic-api"}`: a runtime through it, in `runtimes.yaml`, loaded at once |
 
 ## magpie
@@ -354,13 +442,13 @@ fallback:
 
 ## Code
 
-`src/space/gateway/`: `types.ts` (providers, groups, the trace, `GatewayLink`, what runtimes and speech hold of it), `config.ts` (`gateway.yaml`, the presets, `tiers:` and its text edit), `tokens.ts` (issued tokens), `trace.ts` (the per-run trace and the group member a run keeps), `forward.ts` (headers each way, usage read on the side of an SSE stream), `service.ts` (`ModelGateway`: the order of candidates, failover, rests, the answer), `api.ts` (the routes, the token and loopback check, the base a child process gets). Settings → Gateway is `src/web/GatewaySettings.tsx` (the tier pickers and magpie's row come from `src/web/MachineClis.tsx`) with its routes in `gateway/settings.ts`, the text edits of `gateway.yaml` and `.env` in `gateway/edit.ts`, and the vendors' model lists and the test in `gateway/vendors.ts`. The runtimes' side is in `runtimes/claude-code.ts`, `runtimes/anthropic-api.ts` and `runtimes/magpie.ts` (`gatewayClaudeEnv`); the speech side in `speech/config.ts` and `speech/openai.ts`. Boot wiring is in `src/index.ts`.
+`src/space/gateway/`: `types.ts` (providers, groups, the trace, `GatewayLink`, what runtimes and speech hold of it), `config.ts` (`gateway.yaml`, the presets, `tiers:` and its text edit), `tokens.ts` (issued tokens), `trace.ts` (the per-run trace and the group member a run keeps), `forward.ts` (headers each way, usage read on the side of an SSE stream), `service.ts` (`ModelGateway`: the order of candidates, failover, rests, the answer), `api.ts` (the routes, the token and loopback check, the base a child process gets). Settings → Gateway is `src/web/GatewaySettings.tsx` (the tier pickers and magpie's row come from `src/web/MachineClis.tsx`) with its routes in `gateway/settings.ts`, the text edits of `gateway.yaml` and `.env` in `gateway/edit.ts`, and the vendors' model lists and the test in `gateway/vendors.ts`. Kinds, the documented ids and voices, what a preset lacks and the offered bases are `gateway/kinds.ts`; the Speech and Image groups are `src/web/GatewayMedia.tsx` with their routes in `gateway/settings-media.ts` and the `providers.yaml` edit in `gateway/speech-edit.ts`; a picture answered as a URL is fetched by `model/vendor-image.ts`. The runtimes' side is in `runtimes/claude-code.ts`, `runtimes/anthropic-api.ts` and `runtimes/magpie.ts` (`gatewayClaudeEnv`); the speech side in `speech/config.ts` and `speech/openai.ts`. Boot wiring is in `src/index.ts`.
 
 ## Not done
 
 - Protocol translation, a native agent loop, subscription-account bridging, and Codex through the built-in gateway: out of scope by design.
 - Per-runtime pickers for a `gateway: space` runtime in Settings: the section sets the gateway's tiers, which every such runtime uses; a runtime's own `models:` pins are edited in `runtimes.yaml`.
-- Removing a runtime from Settings; and a speech provider through the gateway is still written in `providers.yaml`.
+- Removing a runtime from Settings; a `gateway: magpie` speech provider is still written by hand in `providers.yaml`.
 - `served` for agent tasks and chat turns through the built-in gateway: their records have no field for it yet; the trace has it.
 - Rests and traces are in memory and start over at a restart.
 - Live dictation through a model gateway.

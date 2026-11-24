@@ -1,3 +1,4 @@
+import { fetchVendorImage, type VendorImageDeps } from "../model/vendor-image.ts";
 import type { GatewayLink } from "../gateway/types.ts";
 import { gatewayFigures } from "../gateway/trace.ts";
 import { sniffImage } from "../model/images.ts";
@@ -45,7 +46,7 @@ export function apiCost(model: string, u: Usage): number | undefined {
   return (u.inputTokens * p[0] + u.cacheWriteTokens * p[1] + u.cacheReadTokens * p[2] + u.outputTokens * p[3]) / 1e6;
 }
 
-export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeof fetch; gateway?: GatewayLink } = {}): RuntimeAdapter {
+export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeof fetch; gateway?: GatewayLink; vendorImage?: VendorImageDeps } = {}): RuntimeAdapter {
   const doFetch = deps.fetch ?? fetch;
   const backend: Backend = "api";
   /** Where one call goes, and with which key: the spec's, or the built-in gateway's with a token of its own. */
@@ -72,7 +73,7 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
             if (!deps.gateway!.has("openai")) return { ok: false, error: `runtime ${spec.name}: no provider of the built-in model gateway can make pictures (none is on with an openai base)`, backend };
             if (!base) return { ok: false, error: `runtime ${spec.name} answers through the built-in model gateway, which is off: ${deps.gateway!.problem()}`, backend };
             const grant = deps.gateway!.issue();
-            const outcome = await runImage(input, { base: `${base}/v1`, token: grant.token, fetch: doFetch, signal });
+            const outcome = await gatewayImage(input, { base: `${base}/v1`, token: grant.token, fetch: doFetch, signal, ...(deps.vendorImage ? { vendorImage: deps.vendorImage } : {}) });
             const trace = deps.gateway!.trace(grant.run);
             const served = trace?.served;
             // The pictures' cost at the answering model's price (per picture, or its tokens), and the answers to price them again.
@@ -166,15 +167,17 @@ async function runApi(input: CompleteInput, o: { apiKey: string; apiUrl: string;
 
 /**
  * One OpenAI Images call through the built-in gateway: `images/generations` from the prompt, or
- * `images/edits` (multipart, one `image[]` per input file) when input images are given. The
- * pictures must come back as `b64_json`: ai-space does not fetch a URL an answer names. GPT image
- * models always answer base64 and refuse `response_format`, so it is asked only of the others.
+ * `images/edits` (multipart, one `image[]` per input file) when input images are given. `b64_json`
+ * is asked for; a vendor that answers only with a URL (Zhipu, Z.ai) has that picture fetched under
+ * the rules of model/vendor-image.ts: the URL comes from the vendor's answer here, never from a
+ * caller. GPT image models always answer base64 and refuse `response_format`, so it is asked only
+ * of the others.
  */
-async function runImage(input: ImageInput, o: { base: string; token: string; fetch: typeof fetch; signal?: AbortSignal }): Promise<ImageOutcome> {
+export async function gatewayImage(input: ImageInput, o: { base: string; token: string; fetch: typeof fetch; signal?: AbortSignal; vendorImage?: VendorImageDeps }): Promise<ImageOutcome> {
   const backend: Backend = "api";
   const prompt = input.system ? `${input.system}\n\n${input.prompt}` : input.prompt;
   const bare = input.model.slice(input.model.indexOf("/") + 1);
-  const format = /^gpt-image/i.test(bare) ? {} : { response_format: "b64_json" };
+  const format = /^(gpt-image|chatgpt-image)/i.test(bare) ? {} : { response_format: "b64_json" };
   const signal = o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs);
   let res: Response;
   try {
@@ -200,15 +203,18 @@ async function runImage(input: ImageInput, o: { base: string; token: string; fet
   const usage = readUsage(body.usage);
   if (!res.ok) return { ok: false, error: `API ${res.status}: ${body.error?.message ?? "request failed"}`, backend, ...(usage ? { usage } : {}) };
   const images: GeneratedImage[] = [];
-  for (const d of body.data ?? []) {
-    if (typeof d.b64_json !== "string") continue;
-    const bytes = new Uint8Array(Buffer.from(d.b64_json, "base64"));
-    images.push({ type: sniffImage(bytes) ?? "image/png", bytes });
+  const refused: string[] = [];
+  for (const d of (body.data ?? []).slice(0, 4)) {
+    if (typeof d.b64_json === "string") {
+      const bytes = new Uint8Array(Buffer.from(d.b64_json, "base64"));
+      images.push({ type: sniffImage(bytes) ?? "image/png", bytes });
+    } else if (typeof d.url === "string") {
+      const got = await fetchVendorImage(d.url, o.vendorImage);
+      if (got.ok) images.push({ type: got.type, bytes: got.bytes });
+      else refused.push(got.error);
+    }
   }
-  if (!images.length) {
-    const urls = (body.data ?? []).some((d) => typeof d.url === "string");
-    return { ok: false, error: urls ? "the provider answered with image URLs; ai-space takes b64_json only" : "no image produced", backend, ...(usage ? { usage } : {}) };
-  }
+  if (!images.length) return { ok: false, error: refused[0] ?? "no image produced", backend, ...(usage ? { usage } : {}) };
   return { ok: true, text: `${images.length} image${images.length === 1 ? "" : "s"}`, images, backend, ...(usage ? { usage } : {}) };
 }
 

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { getJson, sendJson, untilTime, type GatewayInfo, type GatewayModelList, type GatewayPreset, type GatewayPrice, type GatewayProviderInfo, type GatewaySite, type GatewayTest, type GatewayTiers, type MagpieInfo, type MagpieTiers } from "./api.ts";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getJson, sendJson, untilTime, type GatewayInfo, type GatewayKind, type GatewayModelList, type GatewayPreset, type GatewayPrice, type GatewayProviderInfo, type GatewaySite, type GatewayTest, type GatewayTiers, type MagpieInfo, type MagpieTiers } from "./api.ts";
+import { ImageCard, SpeechCard } from "./GatewayMedia.tsx";
 import { useLang } from "./i18n.ts";
 import { MagpieRow, TierPickers, type T } from "./MachineClis.tsx";
 import type { Lang } from "./messages.ts";
@@ -8,12 +9,13 @@ import type { Lang } from "./messages.ts";
  * Settings → Gateway (docs/model-gateway.md#settings): the model gateways this space has, apart
  * from Models. The built-in one is configured here end to end: providers (a preset vendor and its
  * key, or a custom base), the models each exposes, a test, groups, the tiers every runtime through
- * it uses, and a runtime that answers through it. Every change is saved to gateway.yaml (and a
+ * it uses, what answers speech and draws pictures (GatewayMedia.tsx), and a runtime that answers
+ * through it. Every change is saved to gateway.yaml (and a
  * typed key to the workspace .env) and applies to the next call. magpie, an external gateway, keeps
  * its own row with the same tier pickers.
  */
 
-type Card = "providers" | "groups" | "tiers" | "runtimes";
+type Card = "providers" | "groups" | "tiers" | "image" | "runtimes";
 type Run = (what: () => Promise<unknown>, done?: string) => Promise<boolean>;
 
 export default function GatewaySettings() {
@@ -25,6 +27,12 @@ export default function GatewaySettings() {
   const [adding, setAdding] = useState(false);
   // The card whose action wrote the last message: it is shown there only.
   const [where, setWhere] = useState<Card>("providers");
+  const providersRef = useRef<HTMLDivElement>(null);
+  // "Add a provider that can do this" from the Speech and Image groups.
+  const addProvider = () => {
+    setAdding(true);
+    providersRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const load = useCallback(() => {
     getJson<GatewayInfo & { ok: boolean }>("/api/model/gateway").then(setG).catch((e) => setError((e as Error).message));
   }, []);
@@ -81,10 +89,10 @@ export default function GatewaySettings() {
       </div>
 
       {!g.unavailable && (
-        <div className="setcard gw">
+        <div className="setcard gw" ref={providersRef}>
           <p className="sethead">{t("gateway.providers")}</p>
           {g.providers.length === 0 && <p className="setnote">{t("gateway.noProviders")}</p>}
-          {g.providers.map((p) => <ProviderRow key={p.name} p={p} sites={g.presets.find((x) => x.name === p.preset)?.sites} editable={editable} busy={busy} run={runIn("providers")} lang={lang} t={t} />)}
+          {g.providers.map((p) => <ProviderRow key={p.name} p={p} preset={g.presets.find((x) => x.name === p.preset)} editable={editable} busy={busy} run={runIn("providers")} lang={lang} t={t} />)}
           {editable && (adding ? (
             <AddProvider presets={g.presets} taken={g.providers.map((p) => p.name)} busy={busy} run={runIn("providers")} onDone={() => setAdding(false)} t={t} />
           ) : (
@@ -113,20 +121,28 @@ export default function GatewaySettings() {
           <div className="gw-pad">
             <TierPickers
               key={JSON.stringify(g.tiers)}
-              list={{ models: g.models, groups: Object.keys(g.groups), running: g.answers }}
+              list={{ models: g.textModels, groups: Object.keys(g.groups).filter((n) => g.textModels.includes(n)), running: g.answers }}
               start={g.tiers}
               empty={t("magpie.noTier")}
               stale={t("gateway.staleWarn")}
               save={{ label: t("magpie.save"), mustChange: true, needOne: false }}
               typed={editable}
-              image={g.imageModels.length || g.tiers.image ? g.imageModels : undefined}
               busy={busy || !editable}
-              onSave={(tiers: GatewayTiers) => void runIn("tiers")(() => sendJson("PUT", "/api/model/gateway/tiers", { tiers }), t("gateway.saved"))}
+              // The picture tier is the Image group's; it is kept as it is.
+              onSave={(tiers: GatewayTiers) => void runIn("tiers")(() => sendJson("PUT", "/api/model/gateway/tiers", { tiers: { ...tiers, image: g.tiers.image } }), t("gateway.saved"))}
               t={t}
             />
           </div>
           {messages("tiers")}
         </div>
+      )}
+
+      {!g.unavailable && <SpeechCard g={g} editable={editable} onAddProvider={editable ? addProvider : undefined} t={t} />}
+
+      {!g.unavailable && (
+        <ImageCard g={g} editable={editable} busy={busy} onAddProvider={editable ? addProvider : undefined} onSave={(image) => void runIn("image")(() => sendJson("PUT", "/api/model/gateway/tiers", { tiers: { ...g.tiers, image } }), t("gateway.imageSaved"))} t={t}>
+          {messages("image")}
+        </ImageCard>
       )}
 
       {g.providers.length > 0 && (
@@ -158,7 +174,7 @@ export default function GatewaySettings() {
 }
 
 /** One provider: its state, key and models, and what can be done to it. */
-export function ProviderRow({ p, sites, editable, busy, run, lang, t }: { p: GatewayProviderInfo; sites?: GatewayPreset["sites"]; editable: boolean; busy: boolean; run: Run; lang: Lang; t: T }) {
+export function ProviderRow({ p, preset, editable, busy, run, lang, t }: { p: GatewayProviderInfo; preset?: GatewayPreset; editable: boolean; busy: boolean; run: Run; lang: Lang; t: T }) {
   const [open, setOpen] = useState<"" | "edit" | "key" | "remove">("");
   const [tests, setTests] = useState<GatewayTest[] | null>(null);
   const [testing, setTesting] = useState(false);
@@ -182,7 +198,8 @@ export function ProviderRow({ p, sites, editable, busy, run, lang, t }: { p: Gat
       </div>
       <small>{[p.messages && `messages ${p.messages}`, p.openai && `openai ${p.openai}`].filter(Boolean).join(" · ")}</small>
       <small>{keyText(p, t)}</small>
-      <small>{p.models.length ? t("gateway.models", { n: p.models.length, list: p.models.slice(0, 6).join(", ") + (p.models.length > 6 ? ", …" : "") }) : t("gateway.noModels")}</small>
+      <small>{p.models.length ? t("gateway.models", { n: p.models.length, list: p.models.slice(0, 6).map((m) => (p.kinds?.[m] && p.kinds[m] !== "text" ? `${m} (${kindLabel(p.kinds[m]!, t)})` : m)).join(", ") + (p.models.length > 6 ? ", …" : "") }) : t("gateway.noModels")}</small>
+      {p.serves && <Serves serves={p.serves} t={t} />}
       {p.prices && p.models.length > 0 && <PriceList p={p} t={t} />}
       <div className="gw-actions">
         <button className="btn2" disabled={busy || testing} onClick={() => void test()}>{testing ? t("gateway.testing") : t("gateway.test")}</button>
@@ -201,10 +218,28 @@ export function ProviderRow({ p, sites, editable, busy, run, lang, t }: { p: Gat
         </ul>
       )}
       {tests === null && p.messages && <small className="cli-dim">{t("gateway.testCost")}</small>}
-      {open === "edit" && <ProviderEditor p={p} sites={sites} busy={busy} run={run} onDone={() => setOpen("")} t={t} />}
+      {open === "edit" && <ProviderEditor p={p} preset={preset} busy={busy} run={run} onDone={() => setOpen("")} t={t} />}
       {open === "key" && <KeyForm busy={busy} onSave={(key) => void run(() => sendJson("PUT", `/api/model/gateway/providers/${p.name}/key`, { key }), t("gateway.keyReplaced", { name: p.name })).then((ok) => ok && setOpen(""))} t={t} />}
       {open === "remove" && <RemoveForm p={p} busy={busy} onRemove={(key) => void run(() => sendJson("DELETE", `/api/model/gateway/providers/${p.name}?key=${key}`), t("gateway.removed", { name: p.name }))} onCancel={() => setOpen("")} t={t} />}
     </div>
+  );
+}
+
+const KIND_ORDER: GatewayKind[] = ["text", "asr", "tts", "image"];
+export const kindLabel = (k: GatewayKind, t: T) => t(`gateway.kind.${k}`);
+
+/** What a provider can serve through the gateway: each kind, or why not (on hover and for screen readers). */
+export function Serves({ serves, t }: { serves: Record<GatewayKind, true | string>; t: T }) {
+  return (
+    <small className="gw-serves">
+      <span className="cli-dim">{t("gateway.serves")}</span>
+      {KIND_ORDER.map((k) => (
+        <span key={k} className={`gw-chip ${serves[k] === true ? "on" : "no"}`} title={serves[k] === true ? undefined : String(serves[k])}>
+          {serves[k] === true ? "✓" : "✕"} {kindLabel(k, t)}
+          {serves[k] !== true && <span className="sr-only">: {String(serves[k])}</span>}
+        </span>
+      ))}
+    </small>
   );
 }
 
@@ -283,7 +318,7 @@ export function RemoveForm({ p, busy, onRemove, onCancel, t }: { p: GatewayProvi
  * Which models a provider exposes: the vendor's list (or its documented ids where it has none),
  * each ticked or not, plus ids typed by hand. Refresh asks the vendor again.
  */
-export function ModelChooser({ selected, onChange, fetchList, busy, t }: { selected: string[]; onChange: (m: string[]) => void; fetchList: () => Promise<GatewayModelList>; busy: boolean; t: T }) {
+export function ModelChooser({ selected, onChange, fetchList, kinds, onKinds, busy, t }: { selected: string[]; onChange: (m: string[]) => void; fetchList: () => Promise<GatewayModelList>; kinds?: Record<string, GatewayKind>; onKinds?: (k: Record<string, GatewayKind>) => void; busy: boolean; t: T }) {
   const [list, setList] = useState<GatewayModelList | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -292,7 +327,10 @@ export function ModelChooser({ selected, onChange, fetchList, busy, t }: { selec
     setLoading(true);
     setError("");
     try {
-      setList(await fetchList());
+      const l = await fetchList();
+      setList(l);
+      // What the vendor's list (or its documented rule) says a model is for, unless the owner already set it.
+      if (onKinds && l.kinds) onKinds({ ...l.kinds, ...kinds });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -318,7 +356,10 @@ export function ModelChooser({ selected, onChange, fetchList, busy, t }: { selec
       {all.length > 0 && (
         <div className="gw-model-list">
           {all.map((m) => (
-            <label key={m} className="gw-check"><input type="checkbox" checked={selected.includes(m)} onChange={() => toggle(m)} disabled={busy} /> {m}</label>
+            <span key={m} className="gw-model">
+              <label className="gw-check"><input type="checkbox" checked={selected.includes(m)} onChange={() => toggle(m)} disabled={busy} /> {m}</label>
+              {onKinds && selected.includes(m) && <KindButton kind={kinds?.[m] ?? "text"} onChange={(k) => onKinds({ ...kinds, [m]: k })} model={m} busy={busy} t={t} />}
+            </span>
           ))}
         </div>
       )}
@@ -329,6 +370,19 @@ export function ModelChooser({ selected, onChange, fetchList, busy, t }: { selec
     </div>
   );
 }
+
+/** A model's kind; one click moves it to the next (text → speech to text → text to speech → pictures). */
+function KindButton({ kind, onChange, model, busy, t }: { kind: GatewayKind; onChange: (k: GatewayKind) => void; model: string; busy: boolean; t: T }) {
+  const next = KIND_ORDER[(KIND_ORDER.indexOf(kind) + 1) % KIND_ORDER.length]!;
+  return (
+    <button type="button" className={`gw-chip kind-${kind}`} disabled={busy} title={t("gateway.kindNext", { next: kindLabel(next, t) })} aria-label={t("gateway.kindAria", { model, kind: kindLabel(kind, t), next: kindLabel(next, t) })} onClick={() => onChange(next)}>
+      {kindLabel(kind, t)}
+    </button>
+  );
+}
+
+/** Kinds to send: those of the chosen models only. */
+const kindsOf = (models: string[], kinds: Record<string, GatewayKind>) => Object.fromEntries(models.filter((m) => kinds[m]).map((m) => [m, kinds[m]!]));
 
 const fetchModels = (body: Record<string, unknown>) => sendJson<GatewayModelList & { ok: boolean }>("POST", "/api/model/gateway/models", body);
 
@@ -371,12 +425,14 @@ export function AddProvider({ presets, taken, busy, run, onDone, t }: { presets:
   const [openai, setOpenai] = useState("");
   const [auth, setAuth] = useState<"bearer" | "x-api-key">("bearer");
   const [models, setModels] = useState<string[]>(p?.defaults ?? []);
+  const [kinds, setKinds] = useState<Record<string, GatewayKind>>({});
   const [advanced, setAdvanced] = useState(false);
   const pick = (next: string) => {
     setPreset(next);
     const q = presets.find((x) => x.name === next);
     setName(freeName(q ? q.name : ""));
     setModels(q?.defaults ?? []);
+    setKinds({});
     setMessages("");
     setOpenai("");
   };
@@ -435,31 +491,35 @@ export function AddProvider({ presets, taken, busy, run, onDone, t }: { presets:
           {[(messages.trim() || p?.messages) && `messages ${messages.trim() || p?.messages}`, p?.openai && `openai ${p.openai}`].filter(Boolean).join(" · ")} <button className="linkbtn" onClick={() => setAdvanced(true)}>{t("gateway.otherBase")}</button>
         </small>
       )}
-      <ModelChooser selected={models} onChange={setModels} fetchList={() => fetchModels(body())} busy={busy} t={t} />
+      <ModelChooser selected={models} onChange={setModels} fetchList={() => fetchModels(body())} kinds={kinds} onKinds={setKinds} busy={busy} t={t} />
+      {p?.openaiOffer && !p.openai && <OpenaiOffer offer={p.openaiOffer} site={siteOf(p.sites, messages.trim() || p.messages)} current={openai} onUse={(b) => { setOpenai(b); setAdvanced(true); }} busy={busy} t={t} />}
       <p className="setnote">{t("gateway.keyWhere")}</p>
       <div className="setbtns">
         <span className="setbtns-gap" />
         <button className="btn2" disabled={busy} onClick={onDone}>{t("common.cancel")}</button>
-        <button className="btn2 primary" disabled={busy || !ready} onClick={() => void run(() => sendJson("POST", "/api/model/gateway/providers", { name, models, ...body() }), t("gateway.added", { name })).then((ok) => ok && onDone())}>{t("gateway.addConfirm")}</button>
+        <button className="btn2 primary" disabled={busy || !ready} onClick={() => void run(() => sendJson("POST", "/api/model/gateway/providers", { name, models, kinds: kindsOf(models, kinds), ...body() }), t("gateway.added", { name })).then((ok) => ok && onDone())}>{t("gateway.addConfirm")}</button>
       </div>
     </div>
   );
 }
 
 /** Edit a provider: its models, and its bases. */
-function ProviderEditor({ p, sites, busy, run, onDone, t }: { p: GatewayProviderInfo; sites?: GatewayPreset["sites"]; busy: boolean; run: Run; onDone: () => void; t: T }) {
+function ProviderEditor({ p, preset, busy, run, onDone, t }: { p: GatewayProviderInfo; preset?: GatewayPreset; busy: boolean; run: Run; onDone: () => void; t: T }) {
+  const sites = preset?.sites;
   const [models, setModels] = useState(p.models);
+  const [kinds, setKinds] = useState<Record<string, GatewayKind>>(p.kinds ?? {});
   const [messages, setMessages] = useState(p.messages ?? "");
   const [openai, setOpenai] = useState(p.openai ?? "");
   const save = () => {
-    const body: Record<string, unknown> = { models };
+    const body: Record<string, unknown> = { models, kinds: kindsOf(models, kinds) };
     if (messages.trim() !== (p.messages ?? "")) body.messages = messages.trim();
     if (openai.trim() !== (p.openai ?? "")) body.openai = openai.trim();
     void run(() => sendJson("PUT", `/api/model/gateway/providers/${p.name}`, body), t("gateway.edited", { name: p.name })).then((ok) => ok && onDone());
   };
   return (
     <div className="gw-form">
-      <ModelChooser selected={models} onChange={setModels} fetchList={() => fetchModels({ provider: p.name })} busy={busy} t={t} />
+      <ModelChooser selected={models} onChange={setModels} fetchList={() => fetchModels({ provider: p.name })} kinds={kinds} onKinds={setKinds} busy={busy} t={t} />
+      <small className="cli-dim">{t("gateway.kindHelp")}</small>
       {sites && <SiteSwitch sites={sites} current={siteOf(sites, messages.trim())} onPick={(k) => setMessages(sites[k].messages ?? "")} busy={busy} t={t} />}
       <label className="gw-field">
         <span>{t("gateway.messagesBase")}</span>
@@ -469,12 +529,31 @@ function ProviderEditor({ p, sites, busy, run, onDone, t }: { p: GatewayProvider
         <span>{t("gateway.openaiBase")}</span>
         <input className="setselect" value={openai} spellCheck={false} onChange={(e) => setOpenai(e.target.value)} disabled={busy} />
       </label>
+      {preset?.openaiOffer && !preset.openai && !p.openai && <OpenaiOffer offer={preset.openaiOffer} site={siteOf(sites, messages.trim() || preset.messages)} current={openai} onUse={setOpenai} busy={busy} t={t} />}
       {p.preset && <small className="cli-dim">{t("gateway.baseClear")}</small>}
       <div className="setbtns">
         <span className="setbtns-gap" />
         <button className="btn2" disabled={busy} onClick={onDone}>{t("common.cancel")}</button>
         <button className="btn2 primary" disabled={busy} onClick={save}>{t("magpie.save")}</button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * A vendor's OpenAI-style base for speech or pictures that its preset leaves out: offered, never
+ * added by itself, since its docs do not say the same key works there (docs/model-gateway.md#presets).
+ */
+function OpenaiOffer({ offer, site, current, onUse, busy, t }: { offer: NonNullable<GatewayPreset["openaiOffer"]>; site?: GatewaySite; current: string; onUse: (base: string) => void; busy: boolean; t: T }) {
+  const base = (site && offer[site]) || offer.cn || offer.intl;
+  if (!base || current.trim() === base) return null;
+  const elsewhere = site && !offer[site];
+  return (
+    <div className="gw-offer">
+      <small>{t("gateway.offer", { what: offer.note })}</small>
+      <small className="cli-dim">{t("gateway.offerKey")} <a href={offer.source} target="_blank" rel="noreferrer">{t("gateway.offerSource")}</a></small>
+      {elsewhere && <small className="err">{t("gateway.offerOtherSite")}</small>}
+      <div><button type="button" className="btn2" disabled={busy} onClick={() => onUse(base)}>{t("gateway.offerUse", { base })}</button></div>
     </div>
   );
 }

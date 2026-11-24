@@ -55,13 +55,18 @@ export type GatewayProviderInfo = {
   models: string[];
   /** Each model's price in USD per million tokens and where it came from; null: unpriced (docs/model-gateway.md#prices). */
   prices?: Record<string, GatewayPrice | null>;
+  /** What each listed model is for, and the ones whose kind the file states (the rest: a vendor's rule, or text). */
+  kinds: Record<string, GatewayKind>;
+  kindSet: string[];
+  /** Per kind, true or why it cannot (no openai base, an endpoint shape the gateway does not forward). */
+  serves: Record<GatewayKind, true | string>;
   /** What names it: groups with its members (`emptied`: those left with none), tiers on it. */
   usedBy: { groups: string[]; tiers: string[]; emptied: string[] };
 };
 export type GatewayPrice = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: { over: number }[]; perImage?: number; perMinute?: number; perMillionChars?: number; source: string };
 export type GatewaySite = "intl" | "cn";
 /** `sites`: a vendor with a China and an international site, the bases of each (one account works on one only). */
-export type GatewayPreset = { name: string; label: string; messages?: string; openai?: string; auth: "x-api-key" | "bearer"; hasList: boolean; defaults: string[]; sites?: Record<GatewaySite, { messages?: string; openai?: string }> };
+export type GatewayPreset = { name: string; label: string; messages?: string; openai?: string; auth: "x-api-key" | "bearer"; hasList: boolean; defaults: string[]; sites?: Record<GatewaySite, { messages?: string; openai?: string }>; openaiOffer?: { intl?: string; cn?: string; note: string; source: string } };
 /** The built-in model gateway's section (docs/model-gateway.md#settings). */
 export type GatewayInfo = {
   file: string;
@@ -78,6 +83,9 @@ export type GatewayInfo = {
   tiers: GatewayTiers;
   models: string[];
   imageModels: string[];
+  textModels: string[];
+  asrModels: string[];
+  ttsModels: string[];
   presets: GatewayPreset[];
   /** Where prices come from: the owner's file, and when models.dev's catalogue was last fetched. */
   pricing?: { file: string; catalogFetchedAt?: string; fileError?: string };
@@ -85,7 +93,27 @@ export type GatewayInfo = {
   offer: { claude: boolean };
 };
 export type GatewayTest = { base: "messages" | "openai"; ok: boolean; ms: number; status?: number; error?: string; detail?: string };
-export type GatewayModelList = { source: "vendor" | "defaults"; models: string[]; defaults: string[]; error?: string; note?: string };
+export type GatewayModelList = { source: "vendor" | "defaults"; models: string[]; defaults: string[]; kinds?: Record<string, GatewayKind>; error?: string; note?: string };
+/** What a gateway model is for (docs/model-gateway.md#kinds). */
+export type GatewayKind = "text" | "asr" | "tts" | "image";
+export type SpeechPlace = "off" | "fallback" | "default";
+export type SpeechChoice = { asr: { place: SpeechPlace; provider?: string; model?: string }; tts: { place: SpeechPlace; provider?: string; model?: string; voice?: string } };
+export type SpeechChains = { asr: string[]; tts: string[]; live: string[] };
+/** One gateway provider as the Speech and Image groups offer it (`GET /api/model/gateway/speech`). */
+export type GatewayMediaProvider = { name: string; label: string; off?: string; serves: { asr: true | string; tts: true | string; image: true | string }; asrModels: string[]; ttsModels: string[]; imageModels: string[]; voices: Record<string, string[]> };
+export type GatewaySpeechInfo = {
+  file: string;
+  exists: boolean;
+  readOnly?: string;
+  problem?: string;
+  source: string;
+  now: SpeechChains;
+  kinds: Record<string, { kind: string; selfHosted: boolean; gateway?: string }>;
+  choice: SpeechChoice;
+  handWritten: string[];
+  providers: GatewayMediaProvider[];
+  restart?: boolean;
+};
 
 /** Icons of the panel's own tiles; `/api/apps` returns the active icon pack's over these. */
 export const BUILTIN_ICONS = { store: "/store.svg", inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" };

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { GatewayPreset, GatewayProviderInfo } from "./api.ts";
+import type { GatewayInfo, GatewayPreset, GatewayProviderInfo, GatewaySpeechInfo } from "./api.ts";
+import { ImageCard, SpeechCard } from "./GatewayMedia.tsx";
 import { AddProvider, PriceList, GroupsEditor, ModelChooser, ProviderRow, RemoveForm } from "./GatewaySettings.tsx";
 import { GatewayLink } from "./MachineClis.tsx";
 import { translate } from "./messages.ts";
@@ -10,7 +11,7 @@ const zh = (key: Parameters<typeof translate>[1], vars?: Record<string, string |
 const noop = () => {};
 const run = async () => true;
 
-const base: GatewayProviderInfo = { name: "ds", preset: "deepseek", label: "DeepSeek", messages: "https://api.deepseek.com/anthropic", auth: "bearer", key: { state: "workspace", last4: "abcd", page: true, variable: "SPACE_GATEWAY_DS_KEY" }, disabled: false, models: ["deepseek-v4-pro"], usedBy: { groups: [], tiers: [], emptied: [] } };
+const base: GatewayProviderInfo = { name: "ds", preset: "deepseek", label: "DeepSeek", messages: "https://api.deepseek.com/anthropic", auth: "bearer", key: { state: "workspace", last4: "abcd", page: true, variable: "SPACE_GATEWAY_DS_KEY" }, disabled: false, models: ["deepseek-v4-pro"], kinds: { "deepseek-v4-pro": "text" }, kindSet: [], serves: { text: true, asr: "its transcription is /v1/tools/asr", tts: "its speech is /v1/tools/tts", image: "the vendor documents none" }, usedBy: { groups: [], tiers: [], emptied: [] } };
 
 test("a provider row: its state, bases, models, and its key only as set and its last four characters", () => {
   const html = renderToStaticMarkup(<ProviderRow p={base} editable busy={false} run={run} lang="en" t={t} />);
@@ -103,4 +104,62 @@ test("Models links to Gateway; the section is in both languages", () => {
   expect(renderToStaticMarkup(<GatewayLink names={["gw", "magpie"]} onOpen={noop} t={t} />)).toContain("gw, magpie take their tiers from a model gateway");
   expect(renderToStaticMarkup(<GatewayLink names={[]} onOpen={noop} t={zh} />)).toContain("设置 → 网关");
   expect(zh("settings.section.gateway")).toBe("网关");
+});
+
+test("kinds: a provider says what it serves and why not; the chooser marks each ticked model's kind, one click to change", () => {
+  const row = renderToStaticMarkup(<ProviderRow p={{ ...base, models: ["deepseek-v4-pro", "x-tts"], kinds: { "deepseek-v4-pro": "text", "x-tts": "tts" } }} editable busy={false} run={run} lang="en" t={t} />);
+  expect(row).toContain("x-tts (text to speech)");
+  expect(row).toContain('class="gw-chip on"');
+  expect(row).toMatch(/class="gw-chip no" title="its speech is \/v1\/tools\/tts">✕ text to speech/);
+  const chooser = renderToStaticMarkup(<ModelChooser selected={["whisper-1", "chat"]} kinds={{ "whisper-1": "asr" }} onKinds={noop} onChange={noop} fetchList={async () => ({ source: "vendor", models: [], defaults: [] })} busy={false} t={t} />);
+  expect(chooser).toContain('aria-label="whisper-1 is speech to text; click to make it text to speech"');
+  expect(chooser).toContain('aria-label="chat is text; click to make it speech to text"');
+  expect(zh("gateway.kind.image")).toBe("图片");
+});
+
+test("a vendor's OpenAI-style base is offered, with the key caveat and its page, never added by itself", () => {
+  const presets: GatewayPreset[] = [{ name: "zhipu", label: "Zhipu", messages: "https://open.bigmodel.cn/api/anthropic", auth: "bearer", hasList: false, defaults: [], openaiOffer: { cn: "https://open.bigmodel.cn/api/paas/v4", note: "speech and pictures", source: "https://docs.z.ai/devpack/faq" } }];
+  const html = renderToStaticMarkup(<AddProvider presets={presets} taken={[]} busy={false} run={run} onDone={noop} t={t} />);
+  expect(html).toContain("OpenAI-style base for speech and pictures");
+  expect(html).toContain("does not say this key works there too");
+  expect(html).toContain('href="https://docs.z.ai/devpack/faq"');
+  expect(html).toContain(">Use https://open.bigmodel.cn/api/paas/v4</button>");
+  expect(html).not.toContain("openai https://open.bigmodel.cn/api/paas/v4");
+});
+
+const gw = (over: Partial<GatewayInfo> = {}): GatewayInfo => ({ file: "/w/gateway.yaml", exists: true, answers: true, providers: [base], groups: {}, tiers: {}, models: [], imageModels: [], textModels: [], asrModels: [], ttsModels: [], presets: [], runtimes: [], offer: { claude: false }, ...over });
+const oa = { name: "oa", label: "OpenAI", serves: { asr: true as const, tts: true as const, image: true as const }, asrModels: ["whisper-1"], ttsModels: ["tts-1"], imageModels: ["gpt-image-1"], voices: { "tts-1": ["alloy", "nova"] } };
+const speechInfo = (over: Partial<GatewaySpeechInfo> = {}): GatewaySpeechInfo => ({ file: "/w/providers.yaml", exists: false, source: "builtin", now: { asr: ["voice-studio"], tts: ["voice-studio"], live: ["voice-studio"] }, kinds: {}, choice: { asr: { place: "off" }, tts: { place: "off" } }, handWritten: [], providers: [oa], ...over });
+
+test("the Speech group: what answers now, the three places with the safe one named, live not through the gateway, tests that cost", () => {
+  const html = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo()} t={t} />);
+  expect(html).toContain("Answers now");
+  expect(html).toContain("<b>voice-studio</b>");
+  expect(html).toContain("Live conversation does not go through the gateway");
+  expect(html).toContain("After the current default (safe: the default keeps answering)");
+  expect(html).toMatch(/type="radio" name="speech-asr" checked=""\/>Not through the gateway/);
+  expect(html).toContain("cost a little");
+  expect(html).toMatch(/<button class="btn2" disabled="">Test TTS<\/button>/);
+  // As default: the warning, the provider, model and voice from the vendor's documentation.
+  const chosen = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo({ choice: { asr: { place: "fallback", provider: "oa", model: "whisper-1" }, tts: { place: "default", provider: "oa", model: "tts-1", voice: "nova" } } })} t={t} />);
+  expect(chosen).toContain("Apps&#x27; calls then go to this vendor first");
+  expect(chosen).toContain('<option value="nova" selected="">nova</option>');
+  expect(chosen).toContain(">Test TTS</button>");
+  // No provider can: said so, with a way to add one.
+  const none = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo({ providers: [{ ...oa, serves: { asr: "no openai base", tts: "no openai base", image: "no openai base" } }] })} onAddProvider={noop} t={t} />);
+  expect(none).toContain("No provider here can do this through the gateway yet.");
+  expect(none).toContain("Add a provider that can do this");
+  expect(renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo()} t={zh} />)).toContain("实时对话不走网关");
+});
+
+test("the Image group: who can draw and why not, the picture model, a test that costs, the URL rule", () => {
+  const p = { ...base, name: "oa", models: ["gpt-image-1"], kinds: { "gpt-image-1": "image" as const }, serves: { text: "no messages base", asr: true as const, tts: true as const, image: true as const } };
+  const html = renderToStaticMarkup(<ImageCard g={gw({ providers: [base, p], imageModels: ["oa/gpt-image-1"], tiers: { image: "oa/gpt-image-1" } })} editable busy={false} onSave={noop} t={t} />);
+  expect(html).toContain("<b>oa</b> can draw (1 picture models)");
+  expect(html).toContain("the vendor documents none");
+  expect(html).toContain('<option value="oa/gpt-image-1" selected="">oa/gpt-image-1</option>');
+  expect(html).toContain(">Make a test picture</button>");
+  expect(html).toContain("only over https from a public address");
+  const empty = renderToStaticMarkup(<ImageCard g={gw()} editable busy={false} onSave={noop} onAddProvider={noop} t={zh} />);
+  expect(empty).toContain("添加能做这件事的服务商");
 });

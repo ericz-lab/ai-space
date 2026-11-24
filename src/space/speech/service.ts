@@ -83,7 +83,7 @@ type Skip = { skip: string; status: number; code?: string };
 export const MAX_SPEAK_CHARS = 20_000;
 
 export class SpeechService {
-  private readonly adapters: Map<string, SpeechAdapter>;
+  private adapters: Map<string, SpeechAdapter>;
   readonly health: RuntimeHealth;
   private readonly now: () => number;
   private readonly log: (line: string) => void;
@@ -98,6 +98,20 @@ export class SpeechService {
 
   get config(): SpeechConfig | undefined {
     return this.opts.config;
+  }
+
+  /**
+   * Read `providers.yaml` again while ai-space runs (Settings → Gateway → Speech saved it, or the
+   * model gateway it speaks through changed): the next call uses the new providers. A call already
+   * running keeps the adapter it started with; status cells and rests are kept by provider name.
+   */
+  reload(next: Pick<SpeechServiceOptions, "config" | "configError" | "source" | "warnings" | "adapters">): void {
+    this.opts.config = next.config;
+    this.opts.configError = next.configError;
+    this.opts.source = next.source;
+    this.opts.warnings = next.warnings;
+    this.adapters = new Map(next.adapters.map((a) => [a.name, a]));
+    for (const w of next.warnings ?? []) this.log(w);
   }
 
   // ------------------------------------------------------------------------------------------- choosing

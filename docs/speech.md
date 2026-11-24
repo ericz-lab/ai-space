@@ -74,6 +74,14 @@ Without the file, or without its `speech:` section, the space has the one provid
 - **Keys** stay in the environment (the workspace `.env` is loaded into it). A provider whose `apiKeyEnv` is empty is kept but off, with a warning at boot; a call to it says so, and a fallback list skips it.
 - **`live`** uses `default.live` and `fallback.live` when given, else `asr`'s.
 
+### From Settings
+
+Settings → Gateway → **Speech** ([model-gateway.md](model-gateway.md#speech-group)) writes this file for the built-in model gateway: for ASR and for TTS apart, a provider of `gateway.yaml`, its model and (TTS) a default voice, placed **after the current default** (the safe choice: the default keeps answering, the gateway answers when it fails), as **the default** (the old default moves to the front of the fallback), or not at all. It shows what answers ASR, TTS and live before and after saving, and the running service reloads the file at once, no restart. It has a TTS test that plays in the page and an ASR test that transcribes that clip, on click only.
+
+**The default stays unless the owner chooses otherwise.** An upgrade writes nothing, so voice-studio (or whatever the file names) stays the default. Opening the section, or saving it with both roles off, moves no role. Only **The default** moves one, for the role it is picked for. Live never goes through the gateway: its default and fallback are written out as they were, since `live` would otherwise follow a new `asr` default.
+
+The entries it manages are named `gateway-<provider>` with `kind: openai-compatible`, `gateway: space`, `provider:` and the models. With no file, it writes the built-in `voice-studio` provider and the built-in defaults explicitly first. A hand-written file keeps its comments, other providers and `voices:`; a file it cannot edit is shown read-only. These entries are cloud providers, so a [local-only](#privacy) app never reaches them.
+
 ## Kinds
 
 Each kind is one adapter (`src/space/speech/voice-studio.ts`, `openai.ts`) and declares its capabilities: `transcribe` (a file), `live` (a microphone), `speak` (text to WAV), `clone` (a new voice from a sample; no adapter offers it through the Space yet). A call for a capability the chosen provider lacks is a 400 that names the provider and the capability, never a quiet move to another one.
@@ -161,7 +169,7 @@ speech:
   local-only: true
 ```
 
-Its calls then use only self-hosted providers (`voice-studio`, an `openai-compatible` with `selfHosted: true`): a cloud provider in a fallback list is skipped, and a cloud first choice is a 403 that says so. The panel and the operator are not an app and follow the configuration.
+Its calls then use only self-hosted providers (`voice-studio`, an `openai-compatible` with `selfHosted: true`): a cloud provider in a fallback list is skipped, and a cloud first choice is a 403 that says so. A provider through a model gateway (`gateway: space` or `magpie`) cannot be marked `selfHosted` and is always a cloud provider here, whatever the gateway's provider is. The panel and the operator are not an app and follow the configuration.
 
 ## What does not change
 

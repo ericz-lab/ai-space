@@ -5,8 +5,9 @@ import { carriesThinking, downstreamHeaders, errorText, readUsage, tapMessagesSt
 import { GatewayTokens } from "./tokens.ts";
 import { costOf, pricedAnswer, type Price, type PriceBook } from "./prices.ts";
 import { TraceStore } from "./trace.ts";
+import { kindOf, servesOf } from "./kinds.ts";
 import type { Usage } from "../runtimes/types.ts";
-import type { GatewayBase, GatewayConfig, GatewayLink, GatewayProvider, GatewayTiers } from "./types.ts";
+import type { GatewayBase, GatewayConfig, GatewayKind, GatewayLink, GatewayProvider, GatewayTiers } from "./types.ts";
 
 const NO_USAGE: Usage = { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 };
 
@@ -70,8 +71,13 @@ export type GatewayView = {
   groups: Record<string, string[]>;
   /** `/v1/models` ids: groups first, then provider/model. */
   models: string[];
-  /** The ids a picture can go to: on a provider with an openai base (a group: one of its members). */
+  /** The ids a picture can go to: a model of kind image on a provider that can draw (a group: one of its members). */
   imageModels: string[];
+  /** Text models and groups: what the four tiers offer. */
+  textModels: string[];
+  /** Speech models (`provider/model`) on a provider that serves them: transcription and speech. */
+  asrModels: string[];
+  ttsModels: string[];
   tiers: GatewayTiers;
 };
 
@@ -108,6 +114,11 @@ export class ModelGateway {
   /** Configured (a `gateway.yaml` that loaded). */
   get enabled(): boolean {
     return Boolean(this.config);
+  }
+
+  /** Why a provider of the file is off (its key is empty, or it is turned off); undefined when it is on or unknown. */
+  providerOff(name: string): string | undefined {
+    return this.config?.off[name];
   }
 
   /**
@@ -174,7 +185,7 @@ export class ModelGateway {
     const problem = this.problem();
     const list = this.models().data;
     const models = list.map((m) => String(m.id));
-    if (!this.config) return { configured: false, ...(problem ? { problem } : {}), providers: [], groups: {}, models, imageModels: [], tiers: {} };
+    if (!this.config) return { configured: false, ...(problem ? { problem } : {}), providers: [], groups: {}, models, imageModels: [], textModels: [], asrModels: [], ttsModels: [], tiers: {} };
     const config = this.config;
     const now = this.now();
     const providers = config.providers.map((p): GatewayProviderView => {
@@ -189,9 +200,18 @@ export class ModelGateway {
         models: models.filter((id) => id.startsWith(`${p.name}/`)),
       };
     });
-    const drawsOn = (id: string) => Boolean(config.providers.find((p) => p.name === splitModelId(id)?.provider)?.openai);
-    const imageModels = models.filter((id) => (config.groups[id] ? config.groups[id]!.some(drawsOn) : drawsOn(id)));
-    return { configured: true, ...(problem ? { problem } : {}), providers, groups: { ...config.groups }, models, imageModels, tiers: { ...this.tierTable } };
+    // A model counts for a kind when it is of that kind and its provider serves it (kinds.ts).
+    const is = (kind: GatewayKind) => (id: string) => {
+      const split = splitModelId(id);
+      const p = split && config.providers.find((x) => x.name === split.provider);
+      return Boolean(p && kindOf(p, split!.model) === kind && servesOf(p)[kind] === true);
+    };
+    const ofKind = (kind: GatewayKind, groups: boolean) => models.filter((id) => (config.groups[id] ? groups && config.groups[id]!.some(is(kind)) : is(kind)(id)));
+    return {
+      configured: true, ...(problem ? { problem } : {}), providers, groups: { ...config.groups }, models,
+      imageModels: ofKind("image", true), textModels: ofKind("text", true), asrModels: ofKind("asr", false), ttsModels: ofKind("tts", false),
+      tiers: { ...this.tierTable },
+    };
   }
 
   problem(): string | undefined {
@@ -218,7 +238,8 @@ export class ModelGateway {
       for (const id of ids) {
         if (seen.has(id)) continue;
         seen.add(id);
-        data.push({ id, object: "model", owned_by: p.name, bases: (["messages", "openai"] as const).filter((b) => p[b]) });
+        // `kind` says what the model is for (text, asr, tts, image); magpie's reader takes only `kind: "group"` as a group.
+        data.push({ id, object: "model", owned_by: p.name, bases: (["messages", "openai"] as const).filter((b) => p[b]), kind: kindOf(p, id.slice(p.name.length + 1)) });
       }
     }
     return { object: "list", data };

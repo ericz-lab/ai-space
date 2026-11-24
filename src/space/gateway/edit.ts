@@ -1,6 +1,6 @@
 import { GATEWAY_FILE, parseGatewayYaml } from "./config.ts";
 import { quoteEnvValue } from "../setup.ts";
-import type { GatewayAuth, GatewayConfig, GatewayProvider } from "./types.ts";
+import type { GatewayAuth, GatewayConfig, GatewayKind, GatewayProvider } from "./types.ts";
 
 /**
  * Settings → Gateway's edits of `gateway.yaml` (docs/model-gateway.md#settings). The file stays the
@@ -23,12 +23,14 @@ export type ProviderEntry = {
   apiKeyEnv?: string;
   models: string[];
   disabled?: boolean;
+  /** Models that are not text: written as `kinds:`. */
+  kinds?: Record<string, GatewayKind>;
 };
 
 const HEADER = "# The built-in model gateway (docs/model-gateway.md). Settings → Gateway edits this file; hand edits are kept.";
 
-const content = (l: string) => l.trim() !== "" && !l.trim().startsWith("#");
-const indentOf = (l: string) => /^(\s*)/.exec(l)![1]!.length;
+export const content = (l: string) => l.trim() !== "" && !l.trim().startsWith("#");
+export const indentOf = (l: string) => /^(\s*)/.exec(l)![1]!.length;
 
 /** A top-level key's block: its line and its last content line; undefined when absent. */
 function topBlock(lines: string[], key: string): { at: number; last: number } | undefined {
@@ -45,10 +47,10 @@ function topBlock(lines: string[], key: string): { at: number; last: number } | 
   return { at, last };
 }
 
-type Entry = { name: string; start: number; end: number; indent: number };
+export type Entry = { name: string; start: number; end: number; indent: number };
 
 /** The entries of a block, each from its key line to its last content line. */
-function entriesOf(lines: string[], block: { at: number; last: number }): Entry[] {
+export function entriesOf(lines: string[], block: { at: number; last: number }, fileName: string = GATEWAY_FILE): Entry[] {
   const out: Entry[] = [];
   let indent = -1;
   for (let i = block.at + 1; i <= block.last; i++) {
@@ -58,10 +60,10 @@ function entriesOf(lines: string[], block: { at: number; last: number }): Entry[
     if (indent < 0) indent = ind;
     if (ind === indent) {
       const m = /^\s+(["']?)([A-Za-z0-9._-]+)\1:/.exec(l);
-      if (!m) throw new GatewayEditError(`${GATEWAY_FILE} line ${i + 1} is not a key the page can edit; change it by hand`);
+      if (!m) throw new GatewayEditError(`${fileName} line ${i + 1} is not a key the page can edit; change it by hand`);
       if (out.length) out[out.length - 1]!.end = lastContentBefore(lines, i);
       out.push({ name: m[2]!, start: i, end: i, indent });
-    } else if (ind < indent) throw new GatewayEditError(`${GATEWAY_FILE} line ${i + 1} has an indent the page does not follow; change it by hand`);
+    } else if (ind < indent) throw new GatewayEditError(`${fileName} line ${i + 1} has an indent the page does not follow; change it by hand`);
   }
   if (out.length) out[out.length - 1]!.end = block.last;
   return out;
@@ -74,18 +76,18 @@ function lastContentBefore(lines: string[], i: number): number {
 }
 
 /** The indent the file uses for nested keys (2 when it has none). */
-function padOf(lines: string[]): string {
+export function padOf(lines: string[]): string {
   const nested = lines.find((l) => content(l) && indentOf(l) > 0);
   return " ".repeat(nested ? indentOf(nested) : 2);
 }
 
 /** A scalar as YAML: plain when it is safe so, else JSON-quoted. */
-function scalar(v: string): string {
+export function scalar(v: string): string {
   return /^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$/.test(v) && !/:\s/.test(v) && !/^(true|false|null|yes|no|on|off|~)$/i.test(v) ? v : JSON.stringify(v);
 }
 
 /** Trailing comments of an old entry's lines, by the line's text without the comment. */
-function commentsOf(lines: string[]): Map<string, string> {
+export function commentsOf(lines: string[]): Map<string, string> {
   const out = new Map<string, string>();
   for (const l of lines) {
     const m = /^(.*?\S)\s+(#.*)$/.exec(l);
@@ -99,7 +101,7 @@ function commentsOf(lines: string[]): Map<string, string> {
   return out;
 }
 
-function withComment(line: string, comments: Map<string, string>): string {
+export function withComment(line: string, comments: Map<string, string>): string {
   const c = comments.get(line.trim());
   return c ? `${line}   ${c}` : line;
 }
@@ -114,6 +116,8 @@ function providerLines(name: string, p: ProviderEntry, pad: string, old: string[
   if (p.auth) out.push(`${inner}auth: ${p.auth}`);
   if (p.apiKeyEnv) out.push(`${inner}apiKeyEnv: ${p.apiKeyEnv}`);
   out.push(`${inner}models: [${p.models.map(scalar).join(", ")}]`);
+  const kinds = Object.entries(p.kinds ?? {}).filter(([m]) => p.models.includes(m));
+  if (kinds.length) out.push(`${inner}kinds: { ${kinds.map(([m, k]) => `${scalar(m)}: ${k}`).join(", ")} }`);
   if (p.disabled) out.push(`${inner}disabled: true`);
   // The key line keeps its comment whatever changed below it.
   const keyComment = old[0] ? /^\s*(["']?)[A-Za-z0-9._-]+\1:\s*(#.*)$/.exec(old[0])?.[2] : undefined;
@@ -123,8 +127,13 @@ function providerLines(name: string, p: ProviderEntry, pad: string, old: string[
 /** What a parsed provider says, in the fields the page writes, to compare an edit's result with what was asked. */
 function shape(p: GatewayProvider | undefined, presetBases: { messages?: string; openai?: string; auth?: string } = {}): string {
   if (!p) return "none";
-  return JSON.stringify({ preset: p.preset, messages: p.messages ?? presetBases.messages, openai: p.openai ?? presetBases.openai, auth: p.auth, apiKeyEnv: p.apiKeyEnv, models: p.models, disabled: Boolean(p.disabled) });
+  return JSON.stringify({ preset: p.preset, messages: p.messages ?? presetBases.messages, openai: p.openai ?? presetBases.openai, auth: p.auth, apiKeyEnv: p.apiKeyEnv, models: p.models, disabled: Boolean(p.disabled), kinds: p.kinds ?? {} });
 }
+
+const kindsOf = (e: ProviderEntry) => {
+  const k = Object.fromEntries(Object.entries(e.kinds ?? {}).filter(([m]) => e.models.includes(m)));
+  return Object.keys(k).length ? k : undefined;
+};
 
 function parse(text: string, env: Record<string, string | undefined>): GatewayConfig {
   try {
@@ -181,7 +190,7 @@ export function setProviderText(current: string | undefined, name: string, entry
   const got = after.providers.find((p) => p.name === name);
   if (before && !sameExcept(before, after, name)) throw new GatewayEditError(`could not change provider ${name} in ${GATEWAY_FILE} safely; change it by hand`);
   if (entry) {
-    const want: GatewayProvider = { name, auth: entry.auth ?? got?.auth ?? "bearer", models: [...new Set(entry.models)], ...(entry.messages ? { messages: entry.messages } : {}), ...(entry.openai ? { openai: entry.openai } : {}), ...(entry.apiKeyEnv ? { apiKeyEnv: entry.apiKeyEnv } : {}), ...(entry.preset ? { preset: entry.preset } : {}), ...(entry.disabled ? { disabled: true } : {}) };
+    const want: GatewayProvider = { name, auth: entry.auth ?? got?.auth ?? "bearer", models: [...new Set(entry.models)], ...(entry.messages ? { messages: entry.messages } : {}), ...(entry.openai ? { openai: entry.openai } : {}), ...(entry.apiKeyEnv ? { apiKeyEnv: entry.apiKeyEnv } : {}), ...(entry.preset ? { preset: entry.preset } : {}), ...(entry.disabled ? { disabled: true } : {}), ...(kindsOf(entry) ? { kinds: kindsOf(entry) } : {}) };
     const bases = { messages: got?.messages, openai: got?.openai };
     if (shape(got) !== shape(want, entry.preset ? bases : {})) throw new GatewayEditError(`could not write provider ${name} to ${GATEWAY_FILE} as asked; change it by hand`);
   } else if (got) throw new GatewayEditError(`could not remove provider ${name} from ${GATEWAY_FILE}; change it by hand`);

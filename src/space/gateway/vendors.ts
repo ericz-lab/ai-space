@@ -1,5 +1,6 @@
 import { GATEWAY_PRESETS, GATEWAY_SITES, type GatewaySite } from "./config.ts";
-import type { GatewayAuth } from "./types.ts";
+import type { GatewayAuth, GatewayKind } from "./types.ts";
+import { OPENAI_OFFERS } from "./kinds.ts";
 
 /**
  * What Settings → Gateway knows of each preset vendor beyond its bases (docs/model-gateway.md#settings):
@@ -11,7 +12,13 @@ import type { GatewayAuth } from "./types.ts";
  * base was overridden (a proxy, a test stand-in) is asked at that base.
  */
 
-export type ModelList = { url: string; auth: "x-api-key" | "bearer"; anthropic?: boolean };
+export type ModelList = {
+  url: string;
+  auth: "x-api-key" | "bearer";
+  anthropic?: boolean;
+  /** Further lists whose every model is of one kind (OpenRouter's `?output_modalities=`), read after the main one. */
+  byKind?: { url: string; kind: GatewayKind }[];
+};
 
 export type VendorInfo = {
   label: string;
@@ -38,7 +45,8 @@ export const VENDORS: Record<string, VendorInfo> = {
   ark: { label: "Volcengine Ark (pay-as-you-go)", list: () => undefined, defaults: ["doubao-seed-2-1-pro-260915", "doubao-seed-2-1-lite-260915", "doubao-seed-evolving", "deepseek-v4-pro-ga-260813", "kimi-k3-1-pro-261024", "glm-5-3-flash-260828"], source: "https://ark.volcengine.com/region:cn-beijing/docs/model-list" },
   "ark-coding": { label: "Volcengine Ark (Coding Plan)", list: () => undefined, defaults: ["ark-code-latest", "doubao-seed-2.1-pro", "doubao-seed-2.1-lite", "deepseek-v4-pro", "kimi-k3.1-pro", "glm-5.3"], source: "https://docs.volcengine.com/docs/ark/coding-plan-personal-ai-claude-code?lang=zh" },
   "ark-plan": { label: "Volcengine Ark (Agent Plan)", list: () => undefined, defaults: ["doubao-seed-2.1-pro", "doubao-seed-2.1-lite", "deepseek-v4-pro", "kimi-k3.1-pro", "glm-5.4", "glm-5.3"], source: "https://ark.volcengine.com/region:cn-beijing/docs/agent-plan-personal-plan-overview" },
-  openrouter: { label: "OpenRouter", list: (b) => (b.openai ? { url: `${b.openai}/models`, auth: "bearer" } : undefined), defaults: [], source: "https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties.md" },
+  // Its plain list leaves out speech, transcription and image-only models; each has a list of its own (checked 2026-11-24).
+  openrouter: { label: "OpenRouter", list: (b) => (b.openai ? { url: `${b.openai}/models`, auth: "bearer", byKind: [{ url: `${b.openai}/models?output_modalities=transcription`, kind: "asr" }, { url: `${b.openai}/models?output_modalities=speech`, kind: "tts" }, { url: `${b.openai}/models?output_modalities=image`, kind: "image" }] } : undefined), defaults: [], source: "https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties.md" },
 };
 
 /**
@@ -53,7 +61,7 @@ export function customList(b: { messages?: string; openai?: string; auth: Gatewa
 }
 
 /** The presets as the page offers them. */
-export function presetList(): { name: string; label: string; messages?: string; openai?: string; auth: GatewayAuth; hasList: boolean; defaults: string[]; sites?: Record<GatewaySite, { messages?: string; openai?: string }> }[] {
+export function presetList(): { name: string; label: string; messages?: string; openai?: string; auth: GatewayAuth; hasList: boolean; defaults: string[]; sites?: Record<GatewaySite, { messages?: string; openai?: string }>; openaiOffer?: (typeof OPENAI_OFFERS)[string] }[] {
   return Object.entries(GATEWAY_PRESETS).map(([name, p]) => ({
     name,
     label: VENDORS[name]?.label ?? name,
@@ -63,6 +71,7 @@ export function presetList(): { name: string; label: string; messages?: string; 
     hasList: Boolean(VENDORS[name]?.list({ messages: p.messages, openai: p.openai })),
     defaults: VENDORS[name]?.defaults ?? [],
     ...(GATEWAY_SITES[name] ? { sites: GATEWAY_SITES[name] } : {}),
+    ...(OPENAI_OFFERS[name] ? { openaiOffer: OPENAI_OFFERS[name] } : {}),
   }));
 }
 
@@ -95,15 +104,54 @@ async function vendorError(res: Response, key: string | undefined): Promise<stri
   return redact(`HTTP ${res.status}${msg ? `: ${msg.trim().slice(0, 300)}` : ""}`, key);
 }
 
-/** The model ids at `list`: `data[].id` (OpenAI and Anthropic shapes). */
-export async function fetchModelList(list: ModelList, key: string | undefined, doFetch: typeof fetch = fetch): Promise<{ ok: true; models: string[] } | { ok: false; error: string }> {
+/**
+ * What a list entry itself says it is for, where the vendor's list says so: OpenRouter's
+ * `architecture.output_modalities` (an image-only output is a picture model). Nothing is read from
+ * the id.
+ */
+function entryKind(m: Record<string, unknown>): GatewayKind | undefined {
+  const out = (m.architecture as { output_modalities?: unknown } | undefined)?.output_modalities;
+  if (!Array.isArray(out)) return undefined;
+  if (out.includes("image") && !out.includes("text")) return "image";
+  if (out.length === 1 && out[0] === "speech") return "tts";
+  if (out.length === 1 && out[0] === "transcription") return "asr";
+  return undefined;
+}
+
+async function readList(url: string, list: ModelList, key: string | undefined, doFetch: typeof fetch): Promise<{ ok: true; entries: Record<string, unknown>[] } | { ok: false; error: string }> {
+  const res = await doFetch(url, { headers: authHeaders(list.auth, key, list.anthropic), signal: AbortSignal.timeout(LIST_TIMEOUT_MS) });
+  if (!res.ok) return { ok: false, error: await vendorError(res, key) };
+  const body = (await res.json()) as { data?: unknown };
+  if (!Array.isArray(body.data)) return { ok: false, error: "the answer has no data list" };
+  return { ok: true, entries: body.data.filter((m): m is Record<string, unknown> => typeof m === "object" && m !== null && typeof (m as { id?: unknown }).id === "string" && ((m as { id: string }).id.length > 0) && (m as { id: string }).id.length <= 200) };
+}
+
+/**
+ * The model ids at `list` (`data[].id`, OpenAI and Anthropic shapes) and the kind of each one the
+ * vendor's list states (`kinds`), from its entries or from a list of one kind. A model the list
+ * says nothing about is left out of `kinds`.
+ */
+export async function fetchModelList(list: ModelList, key: string | undefined, doFetch: typeof fetch = fetch): Promise<{ ok: true; models: string[]; kinds: Record<string, GatewayKind> } | { ok: false; error: string }> {
   try {
-    const res = await doFetch(list.url, { headers: authHeaders(list.auth, key, list.anthropic), signal: AbortSignal.timeout(LIST_TIMEOUT_MS) });
-    if (!res.ok) return { ok: false, error: await vendorError(res, key) };
-    const body = (await res.json()) as { data?: { id?: unknown }[] };
-    const ids = (body.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 200);
-    if (!Array.isArray(body.data)) return { ok: false, error: "the answer has no data list" };
-    return { ok: true, models: [...new Set(ids)].sort() };
+    const main = await readList(list.url, list, key, doFetch);
+    if (!main.ok) return main;
+    const kinds: Record<string, GatewayKind> = {};
+    const ids = new Set<string>();
+    for (const m of main.entries) {
+      ids.add(m.id as string);
+      const k = entryKind(m);
+      if (k) kinds[m.id as string] = k;
+    }
+    // A list of one kind that fails is left out: the main list still stands.
+    for (const extra of list.byKind ?? []) {
+      const r = await readList(extra.url, list, key, doFetch).catch(() => undefined);
+      if (!r?.ok) continue;
+      for (const m of r.entries) {
+        ids.add(m.id as string);
+        kinds[m.id as string] = entryKind(m) ?? extra.kind;
+      }
+    }
+    return { ok: true, models: [...ids].sort(), kinds };
   } catch (e) {
     return { ok: false, error: redact((e as Error).message, key) };
   }

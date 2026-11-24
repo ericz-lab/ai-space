@@ -211,10 +211,30 @@ describe("pictures through the built-in gateway (anthropic-api with gateway: spa
     expect(call).toMatchObject({ runtime: "gw", model: "openai/gpt-image-1", status: "ok", backend: "api" });
   });
 
-  test("an answer with URLs only is refused: ai-space does not fetch what an answer names", async () => {
-    const v = imageVendor(() => Response.json({ data: [{ url: "https://cdn.example.com/x.png" }] }));
-    const rt = createAnthropicApi({ name: "gw", kind: "anthropic-api", apiKey: "", apiUrl: "", gateway: "space" }, { gateway: gatewayWith(v.url).link });
-    expect(await rt.image!(image({ model: "openai/cogview-4" }))).toMatchObject({ ok: false, error: expect.stringMatching(/b64_json only/) });
+  test("an answer with a URL: the picture is fetched under model/vendor-image.ts's rules, pinned to the checked address", async () => {
+    const v = imageVendor(() => Response.json({ data: [{ url: "https://cdn.vendor.test/x.png?sig=1" }] }));
+    const asked: { url: string; host?: string; serverName?: string; auth?: string | null }[] = [];
+    const vendorImage = {
+      lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetch: (async (url: string, init: RequestInit & { tls?: { serverName?: string } }) => {
+        const h = new Headers(init.headers);
+        asked.push({ url, host: h.get("host") ?? undefined, serverName: init.tls?.serverName, auth: h.get("authorization") });
+        return new Response(png, { headers: { "content-type": "image/png" } });
+      }) as unknown as typeof fetch,
+    };
+    const rt = createAnthropicApi({ name: "gw", kind: "anthropic-api", apiKey: "", apiUrl: "", gateway: "space" }, { gateway: gatewayWith(v.url).link, vendorImage });
+    const out = await rt.image!(image({ model: "openai/cogview-4" }));
+    expect(out).toMatchObject({ ok: true, images: [{ type: "image/png" }] });
+    expect(asked).toEqual([{ url: "https://93.184.216.34/x.png?sig=1", host: "cdn.vendor.test", serverName: "cdn.vendor.test", auth: null }]);
+  });
+
+  test("an answer with a URL on a private address is refused, and nothing is fetched", async () => {
+    const v = imageVendor(() => Response.json({ data: [{ url: "https://metadata.vendor.test/latest" }] }));
+    let fetched = 0;
+    const vendorImage = { lookup: async () => [{ address: "169.254.169.254", family: 4 }], fetch: (async () => (fetched++, new Response(png))) as unknown as typeof fetch };
+    const rt = createAnthropicApi({ name: "gw", kind: "anthropic-api", apiKey: "", apiUrl: "", gateway: "space" }, { gateway: gatewayWith(v.url).link, vendorImage });
+    expect(await rt.image!(image({ model: "openai/cogview-4" }))).toMatchObject({ ok: false, error: expect.stringMatching(/non-public address \(169\.254\.169\.254\)/) });
+    expect(fetched).toBe(0);
   });
 
   test("a provider without an openai base: the gateway's own error", async () => {
