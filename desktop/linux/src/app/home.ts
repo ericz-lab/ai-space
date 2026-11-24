@@ -6,8 +6,9 @@ import { canonicalItems } from "../core/agents.ts";
 import { type Entry, type Widget, allEntries, entriesByKey, entryKey, fold, opensFirst, pageUrl, panelScreens, pickText, search, seededScreens, widgetEntry } from "../core/catalogue.ts";
 import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
+import { RESOLVE_AFTER_MS, RESOLVE_PATH, type ShortcutOffer, shortcutOffer } from "../core/shortcuts.ts";
 import { type BuiltinName, HOME, LIBRARY, type Screen, builtinArt, move, newScreen, openingPage, pageAfter, pagesOf, pin, removeScreen, rename, screenTitle, unpin } from "../core/screens.ts";
-import { lang, prefs, t, tw } from "./env.ts";
+import { lang, logError, prefs, t, tw } from "./env.ts";
 import { builtinTexture, iconWidget } from "./icons.ts";
 import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
@@ -35,6 +36,8 @@ export type HomeActions = {
   openInBrowser: (space: Space, entry: Entry) => void;
   /** A link of a widget (a row, a block), opened as the app's tab or in the browser. */
   openLink: (space: Space, url: string) => void;
+  /** The panel's Shortcuts page on the action the sentence names, its form filled from it (core/shortcuts.ts). */
+  runShortcut: (space: Space, text: string) => void;
 };
 
 /**
@@ -94,6 +97,9 @@ export class HomePage {
   private pages: Page[] = [];
   private space: Space | undefined;
   private query = "";
+  /** What the Space said the text runs (core/shortcuts.ts), for the text it answered. */
+  private offer: { q: string; offer: ShortcutOffer | null } | undefined;
+  private resolveTimer = 0;
   /** The page on show, by id: the window opens on the home screen (openingPage), never on the library. */
   private shownId = openingPage([]);
   /** While the pages are first placed, the page they are headed for: the carousel's own reports of page 0 meanwhile are not a swipe. */
@@ -309,17 +315,18 @@ export class HomePage {
       const q = entry.get_text();
       if (q === this.query) return;
       this.query = q;
+      this.resolveSoon();
       // Both boxes hold the same query.
       for (const p of this.pages) if (p.entry && p.entry !== entry && p.entry.get_text() !== q) p.entry.set_text(q);
       this.render();
     });
-    entry.connect("activate", () => this.submit(false));
+    entry.connect("activate", () => void this.submit(false));
     entry.connect("stop-search", () => entry.set_text(""));
     // Ctrl+Return always asks the assistant.
     const keys = new Gtk.EventControllerKey();
     keys.connect("key-pressed", (_c: unknown, keyval: number, _code: number, state: number) => {
       if ((keyval === Gdk.KEY_Return || keyval === Gdk.KEY_KP_Enter) && state & Gdk.ModifierType.CONTROL_MASK) {
-        this.submit(true);
+        void this.submit(true);
         return true;
       }
       return false;
@@ -333,10 +340,50 @@ export class HomePage {
     this.query = "";
   }
 
-  private submit(alwaysAsk: boolean): void {
+  /** Asks the Space what the text runs, once typing pauses; an answer for a text no longer in the box is dropped. */
+  private resolveSoon(): void {
+    if (this.resolveTimer) GLib.source_remove(this.resolveTimer);
+    this.resolveTimer = 0;
+    const q = this.query.trim();
+    if (!q || this.offer?.q === q) return;
+    this.resolveTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, RESOLVE_AFTER_MS, () => {
+      this.resolveTimer = 0;
+      void this.resolve(q);
+      return GLib.SOURCE_REMOVE;
+    });
+  }
+
+  private async resolve(q: string): Promise<ShortcutOffer | null> {
+    const space = this.space;
+    if (!space) return null;
+    if (this.offer?.q === q) return this.offer.offer;
+    try {
+      const answer = await space.client.send("POST", RESOLVE_PATH, { text: q, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
+      const offer = shortcutOffer(answer, lang, t("calculator"));
+      if (this.query.trim() === q) {
+        this.offer = { q, offer };
+        this.render();
+      }
+      return offer;
+    } catch (e) {
+      // An older Space has no resolver, or it does not answer: the box searches the library as before.
+      logError(e, "shortcuts");
+      return null;
+    }
+  }
+
+  private async submit(alwaysAsk: boolean): Promise<void> {
     const space = this.space;
     const q = this.query.trim();
     if (!space || !q) return;
+    if (!alwaysAsk && (await this.resolve(q))) {
+      if (this.query.trim() !== q) return;
+      this.actions.runShortcut(space, q);
+      this.clearQuery();
+      this.render();
+      return;
+    }
+    if (this.query.trim() !== q) return;
     const first = space.catalogue ? search(q, allEntries(space.catalogue), 1)[0] : undefined;
     if (!alwaysAsk && first && opensFirst(q, first)) this.actions.open(space, first);
     else this.actions.ask(space, q);
@@ -367,7 +414,8 @@ export class HomePage {
     for (const page of this.pages) {
       const index = screens.findIndex((s) => s.id === page.id);
       const query = page.id === LIBRARY || page.id === HOME ? q : "";
-      const key = signature([space.conn.id, space.catalogueVersion, space.stale, query, page.id === LIBRARY ? null : (screens[index] ?? null), prefs.noWidgets === true, this.ages]);
+      const offer = query && this.offer?.q === query ? this.offer.offer : null;
+      const key = signature([space.conn.id, space.catalogueVersion, space.stale, query, offer, page.id === LIBRARY ? null : (screens[index] ?? null), prefs.noWidgets === true, this.ages]);
       if (key === page.key) continue;
       this.empty(page);
       page.key = key;
@@ -432,9 +480,31 @@ export class HomePage {
   private results(space: Space, body: any, q: string): void {
     const c = space.catalogue!;
     const found = search(q, allEntries(c));
+    // The action the text names takes Enter, before a library match and the assistant.
+    const offer = this.offer?.q === q ? this.offer.offer : null;
+    if (offer) {
+      const run = new Gtk.Button({ halign: Gtk.Align.FILL, margin_bottom: 6, tooltip_text: t("enterRuns") });
+      run.add_css_class("ask-row");
+      run.add_css_class("suggested-action");
+      const line = new Gtk.Box({ spacing: 10 });
+      line.append(new Gtk.Image({ icon_name: "starred-symbolic" }));
+      const words = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, hexpand: true });
+      const title = new Gtk.Label({ label: offer.title, xalign: 0, ellipsize: 3 });
+      title.add_css_class("heading");
+      words.append(title);
+      if (offer.detail) words.append(new Gtk.Label({ label: offer.detail, xalign: 0, ellipsize: 3 }));
+      line.append(words);
+      run.set_child(line);
+      run.connect("clicked", () => {
+        this.actions.runShortcut(space, q);
+        this.clearQuery();
+        this.render();
+      });
+      body.append(run);
+    }
     const ask = new Gtk.Button({ halign: Gtk.Align.FILL, margin_bottom: 6 });
     ask.add_css_class("ask-row");
-    ask.add_css_class(found.length && opensFirst(q, found[0]) ? "flat" : "suggested-action");
+    ask.add_css_class(offer || (found.length && opensFirst(q, found[0])) ? "flat" : "suggested-action");
     const row = new Gtk.Box({ spacing: 10 });
     row.append(new Gtk.Image({ icon_name: "chat-message-new-symbolic" }));
     row.append(new Gtk.Label({ label: t("askAssistant", { q }), xalign: 0, ellipsize: 3, hexpand: true }));

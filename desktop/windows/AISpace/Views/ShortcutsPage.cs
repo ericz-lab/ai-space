@@ -161,7 +161,7 @@ internal sealed class ShortcutsPage : NativePage
         var lang = InboxParts.Lang;
         var shown = ShortcutRules.Search(actions, _query, lang);
         _state.Content = shown.Count > 0 ? null
-            : actions.Count == 0 ? Ui.EmptyState(Ui.Shortcuts, L.T("No actions on this Space"))
+            : !actions.Any(a => a.Available) ? Ui.EmptyState(Ui.Shortcuts, L.T("No actions on this Space"))
             : Ui.Text(L.T("No action matches."), 13, secondary: true);
         _catalogue.Children.Clear();
         foreach (var a in shown) _catalogue.Children.Add(Card(a, lang));

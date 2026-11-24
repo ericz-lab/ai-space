@@ -61,6 +61,20 @@ public sealed record ShortcutResult(
     string? Error,
     string? Output);
 
+/// <summary>
+/// What typed text can run (<c>POST /api/shortcuts/resolve</c>, src/space/shortcuts/resolve.ts
+/// <c>Intent</c>): <c>calc</c> with its <see cref="Expression"/>, <c>convert</c> or <c>action</c> with
+/// the action and the arguments read from the text. A <see cref="Strong"/> action was named at the
+/// start of the text.
+/// </summary>
+public sealed record ShortcutIntent(string Kind, string Key, ShortcutAction? Action, IReadOnlyDictionary<string, string> Args, bool Strong, bool Ambiguous, string? Expression);
+
+/// <summary>The answer of <c>POST /api/shortcuts/resolve</c>: the intents, best first, and how many agents' skills the text matched.</summary>
+public sealed record ShortcutResolution(IReadOnlyList<ShortcutIntent> Intents, int AgentIntents, bool Ambiguous)
+{
+    public static readonly ShortcutResolution None = new([], 0, false);
+}
+
 /// <summary>One run of <c>/api/shortcuts/runs</c>.</summary>
 public sealed record ShortcutRun(
     long Id,
@@ -118,6 +132,34 @@ public static class ShortcutJson
         var app = Str(a, "app") ?? id.Split('/')[0];
         return new ShortcutAction(id, Str(a, "peer"), app, Str(a, "title") ?? id, Str(a, "description"), Strings(a, "keywords"), Str(a, "effect") ?? "read", Str(a, "result") ?? "value",
             Bool(a, "idempotent"), inputs, i18n, Bool(a, "builtin"), !a.TryGetProperty("available", out var av) || av.ValueKind != JsonValueKind.False, Str(a, "reason"));
+    }
+
+    /// <summary>A resolve answer; an intent that is not one of the three kinds, or an action without its descriptor, is skipped.</summary>
+    public static ShortcutResolution Resolution(JsonElement root)
+    {
+        var list = new List<ShortcutIntent>();
+        foreach (var i in Array(root, "intents"))
+        {
+            if (i.ValueKind != JsonValueKind.Object || Str(i, "kind") is not { } kind) continue;
+            var args = new Dictionary<string, string>();
+            if (i.TryGetProperty("args", out var a) && a.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var p in a.EnumerateObject())
+                {
+                    if (ScalarOf(p.Value) is { } v) args[p.Name] = v;
+                }
+            }
+            var action = i.TryGetProperty("action", out var ad) ? Action(ad) : null;
+            var expression = Str(i, "expression");
+            var ok = kind switch
+            {
+                "calc" => expression is { Length: > 0 },
+                "convert" or "action" => action is not null,
+                _ => false,
+            };
+            if (ok) list.Add(new ShortcutIntent(kind, Str(i, "key") ?? action?.Key ?? kind, action, args, Bool(i, "strong"), Bool(i, "ambiguous"), expression));
+        }
+        return new ShortcutResolution(list, Array(root, "agentIntents").Count(), Bool(root, "ambiguous"));
     }
 
     public static IReadOnlyList<ShortcutRun> Runs(JsonElement root)

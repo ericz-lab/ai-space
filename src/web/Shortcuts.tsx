@@ -1,15 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ActionRunner, { RunCard } from "./ActionRunner.tsx";
-import { getJson, relTime } from "./api.ts";
+import { getJson, relTime, sendJson } from "./api.ts";
 import { type Key, useLang } from "./i18n.ts";
-import { type Action, type RunView, actionKey, actionText } from "./shortcuts.ts";
+import { type Action, type Intent, type RunView, actionKey, actionText, browserZone, intentToRun, runParam } from "./shortcuts.ts";
 import { PAGE } from "./panel-link.ts";
 import { pollWhileVisible } from "./poll.ts";
 
 // Shortcuts window (docs/shortcuts.md#user-experience): the action catalogue with a search, one
 // action's form and result, and the recent runs. A run started here or in the command box keeps
 // going when the window closes; it is listed here with its status and result when it reopens.
-// An action that cannot run says what it is missing instead of disappearing.
+// Only the actions that can run are listed: one the Space lists as unavailable (a template no app
+// fills, a capability it lacks) is left out until something provides it.
+//
+// `/?page=shortcuts&run=<text>` (what the native clients' command boxes open) has the Space read the
+// sentence and opens the action it names with what it filled: a complete read runs at once, a write
+// waits for Create. The parameter is then dropped from the address, so a reload does not run it again.
 
 export default function Shortcuts({ open, onClose, onOpenTasks }: { open: boolean; onClose: () => void; onOpenTasks: () => void }) {
   const { lang, t } = useLang();
@@ -19,6 +24,8 @@ export default function Shortcuts({ open, onClose, onOpenTasks }: { open: boolea
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [openRun, setOpenRun] = useState<number | null>(null);
+  const [prefill, setPrefill] = useState<{ key: string; args: Record<string, unknown>; serial: number } | null>(null);
+  const runTaken = useRef(false);
 
   const loadRuns = () =>
     getJson<{ runs: RunView[] }>("/api/shortcuts/runs?limit=30")
@@ -48,6 +55,26 @@ export default function Shortcuts({ open, onClose, onOpenTasks }: { open: boolea
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // A run= link, once the catalogue is here: the action the sentence names, opened with what it filled.
+  useEffect(() => {
+    if (!open || !actions || runTaken.current || PAGE !== "shortcuts") return;
+    const text = runParam(location.search);
+    runTaken.current = true;
+    if (!text) return;
+    const url = new URL(location.href);
+    url.searchParams.delete("run");
+    history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+    sendJson<{ intents: Intent[]; agentIntents: unknown[]; ambiguous: boolean }>("POST", "/api/shortcuts/resolve", { text, timezone: browserZone() })
+      .then((r) => {
+        const found = intentToRun(r, actions);
+        if (!found) return setQ(text);
+        const key = actionKey(found.action);
+        setSelected(key);
+        setPrefill((p) => ({ key, args: found.args, serial: (p?.serial ?? 0) + 1 }));
+      })
+      .catch((e) => setErr(String((e as Error).message || e)));
+  }, [open, actions]);
+
   const shown = useMemo(() => {
     const needle = q.trim().toLocaleLowerCase();
     const list = (actions ?? []).filter((a) => {
@@ -55,7 +82,7 @@ export default function Shortcuts({ open, onClose, onOpenTasks }: { open: boolea
       const tx = actionText(a, lang);
       return [tx.title, tx.description, a.title, a.app, ...a.keywords, ...Object.values(a.i18n ?? {}).flatMap((x) => [x.title, ...(x.keywords ?? [])])].some((w) => w?.toLocaleLowerCase().includes(needle));
     });
-    return [...list.filter((a) => a.available), ...list.filter((a) => !a.available)];
+    return list.filter((a) => a.available);
   }, [actions, q, lang]);
   const current = (actions ?? []).find((a) => actionKey(a) === selected);
   const byKey = (r: RunView) => (actions ?? []).find((a) => a.id === r.action && (a.peer ?? "") === (r.peer ?? ""));
@@ -95,9 +122,14 @@ export default function Shortcuts({ open, onClose, onOpenTasks }: { open: boolea
               </div>
               {current && (
                 <div className="sc-selected">
+                  {/* A run= link's action opens with what the sentence filled, and a complete read runs. */}
                   <h4>{actionText(current, lang).title}</h4>
                   {actionText(current, lang).description && <p className="sc-sub">{actionText(current, lang).description}</p>}
-                  <ActionRunner key={actionKey(current)} action={current} args={{}} onOpenTasks={onOpenTasks} />
+                  {prefill?.key === actionKey(current) ? (
+                    <ActionRunner key={`${actionKey(current)}#${prefill.serial}`} action={current} args={prefill.args} autoRun onOpenTasks={onOpenTasks} />
+                  ) : (
+                    <ActionRunner key={actionKey(current)} action={current} args={{}} onOpenTasks={onOpenTasks} />
+                  )}
                 </div>
               )}
               <h4 className="sc-h">{t("sc.recent")}</h4>

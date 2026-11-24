@@ -677,12 +677,20 @@ final class AppModel: ObservableObject {
 
     /// A built-in tile's page of the web panel (docs/panel.md#built-in-pages) as a tab of the main
     /// window, beside the open apps.
-    private func openPage(of builtin: Builtin) {
-        guard let c = selected, let page = builtin.page, let url = URL(string: page, relativeTo: c.url)?.absoluteURL else { return }
+    /// `path`, when given, is the page to show even in an open tab (a shortcut's sentence).
+    private func openPage(of builtin: Builtin, path: String? = nil) {
+        guard let c = selected, let page = path ?? builtin.page, let url = URL(string: page, relativeTo: c.url)?.absoluteURL else { return }
         let tile = AppInfo(id: builtin.key, name: builtin.rawValue, peer: nil, stale: nil, title: builtin.title, description: nil, i18n: nil,
                            icon: icon(builtin, in: c), url: builtin.page, status: nil, hidden: nil)
-        // An open tab keeps the page it is on.
-        openApp(tile, connection: c, url: tab(tile.id, connection: c.id) != nil ? nil : url)
+        // An open tab keeps the page it is on, unless a page is asked for.
+        openApp(tile, connection: c, url: path == nil && tab(tile.id, connection: c.id) != nil ? nil : url)
+    }
+
+    /// The Home box's shortcut (Services/ShortcutOffer.swift): the panel's Shortcuts page on the action
+    /// the sentence names, its form filled from the sentence.
+    func runShortcut(_ text: String) {
+        query = ""
+        openPage(of: .shortcuts, path: ShortcutOffer.runPath(text))
     }
 
     /// The screens, at the one last shown.
