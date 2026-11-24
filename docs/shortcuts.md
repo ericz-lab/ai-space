@@ -205,10 +205,10 @@ are retained with the chat session, including runtime session-id rotation, so
 follow-up turns reload the same skills. A disabled/missing or retargeted intent
 fails explicitly on resume.
 
-In the financial-news configuration, `whymove/curator` loads `curate-news` and
-handles the whole request. `finance-news-feed/news` remains a standalone read API
-action for callers that explicitly choose it; it is not the handler for a matching
-financial-news agent intent.
+Financial news is answered by `finance-news-feed/news` through its own sentence
+patterns. The earlier `financial-news` agent intent (to `whymove/curator` with
+`curate-news`) was removed from the Seoul space on 2026-11-24, since the app's
+patterns now rank above agent intents and covered the same sentences.
 
 ## Model interpretation
 
