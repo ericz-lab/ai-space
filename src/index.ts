@@ -748,7 +748,14 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       // Settings → Gateway (docs/model-gateway.md#settings): the built-in model gateway from the browser, operator only.
       ["owner", createGatewaySettingsRoutes({
         gateway: modelGateway,
-        speech: { config: () => speech.config, source: () => speech.status().source, configError: () => speech.status().configError },
+        speech: {
+          config: () => speech.config,
+          source: () => speech.status().source,
+          configError: () => speech.status().configError,
+          cells: () => speech.cells(),
+          speak: async (provider, text) => speech.speak({ app: "settings", tag: "settings-test" }, { text, voices: [], provider }),
+          transcribe: async (provider, file) => (await speech.transcribe({ app: "settings", tag: "settings-test" }, { file, filename: "test.wav", language: "", context: "", provider })).result,
+        },
         reloadSpeech,
         runtimes,
         home: ws.home,

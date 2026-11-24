@@ -2,25 +2,31 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { writeAtomic } from "../model/inventory.ts";
 import { gatewayImage } from "../runtimes/anthropic-api.ts";
-import { PROVIDERS_FILE, builtinSpeech, parseProvidersYaml } from "../speech/config.ts";
+import { PROVIDERS_FILE, builtinSpeech } from "../speech/config.ts";
 import { OpenAiAdapter } from "../speech/openai.ts";
-import type { SpeechConfig, SpeechRole } from "../speech/types.ts";
+import { KIND_CAPABILITIES, ROLE_CAPABILITY, type ProviderSpec, type SpeechConfig, type SpeechRole } from "../speech/types.ts";
 import { GATEWAY_FILE, parseGatewayYaml, splitModelId } from "./config.ts";
 import { GatewayEditError } from "./edit.ts";
 import { documentedIds, kindOf, servesOf, voicesFor } from "./kinds.ts";
 import type { ModelGateway } from "./service.ts";
-import { MANAGED_PREFIX, chainOf, isManaged, setSpeechText, speechEditProblem, type SpeechChoice, type SpeechPlace } from "./speech-edit.ts";
+import { MANAGED_PREFIX, chainOf, isManaged, setSpeechText, speechEditProblem, visibleSpeech, type BuiltinPresence, type ChainItem, type SpeechOrder } from "./speech-edit.ts";
 import { GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN, type GatewayConfig, type GatewayKind, type GatewayProvider } from "./types.ts";
 import { VENDORS, redact } from "./vendors.ts";
 
 /**
- * Settings → Gateway's Speech and Image groups (docs/model-gateway.md#speech-group): which of the
- * built-in gateway's providers transcribe, speak and draw, where its speech sits next to the
- * space's own (`providers.yaml`, edited by speech-edit.ts), and a test of each that spends a little.
+ * Settings → Gateway's Speech and Image groups (docs/model-gateway.md#speech-group): every speech
+ * provider in one list (the gateway's that can, and the space's own from `providers.yaml`, shown as
+ * custom), the order ASR and TTS try them in (`providers.yaml`, edited by speech-edit.ts), which of
+ * the gateway's providers draw, and a test of each that spends a little.
  *
- *   GET  /api/model/gateway/speech          what answers ASR, TTS and live now; the page's choice; the providers that can
- *   PUT  /api/model/gateway/speech          {asr, tts, dryRun?}: save (or only preview) where the gateway's speech sits
- *   POST /api/model/gateway/speech/test     {role: "tts", provider, model, voice?, text?} | {role: "asr", provider, model, audio}
+ * With no `providers.yaml` the built-in default's provider (voice-studio) is listed only when it is
+ * really there: the app on this machine or its capability on a peer, as the running speech service
+ * locates it (`SpeechService.cells`). Otherwise the page shows and writes none of it.
+ *
+ *   GET  /api/model/gateway/speech          the providers, the orders, live, the gateway's offers
+ *   PUT  /api/model/gateway/speech          {asr: ChainItem[], tts: ChainItem[], dryRun?}: save (or only preview) the orders
+ *   POST /api/model/gateway/speech/test     {role, provider, model, voice?, text?, audio?} through the gateway,
+ *                                           or {role, speech: name, audio?} for a provider of the speech configuration
  *   POST /api/model/gateway/image/test      {model?}: one small picture through the gateway
  *
  * Operator only, through the same guard as the other gateway routes (settings.ts).
@@ -31,7 +37,16 @@ export type MediaOptions = {
   home: string;
   env: Record<string, string | undefined>;
   /** The speech service as it runs: what answers now. */
-  speech?: { config(): SpeechConfig | undefined; source(): string; configError(): string | undefined };
+  speech?: {
+    config(): SpeechConfig | undefined;
+    source(): string;
+    configError(): string | undefined;
+    /** Where each running provider is (located, machine); no network probe. */
+    cells?(): { provider: string; located: boolean; where: string; off?: string }[];
+    /** A test call to one provider of the running configuration, as the operator. */
+    speak?(provider: string, text: string): Promise<{ audio: ArrayBuffer; contentType: string }>;
+    transcribe?(provider: string, audio: Blob): Promise<{ text: string }>;
+  };
   /** Read providers.yaml again into the running speech service. */
   reloadSpeech?: () => Promise<void>;
   fetch?: typeof fetch;
@@ -79,77 +94,103 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
     };
   }
 
-  /** The page's current choice, read back from the speech configuration. */
-  function choiceOf(config: SpeechConfig): SpeechChoice {
-    const out: SpeechChoice = { asr: { place: "off" }, tts: { place: "off" } };
-    for (const role of ROLES) {
-      const chain = chainOf(config, role);
-      const name = chain.find((n) => n.startsWith(MANAGED_PREFIX) && config.providers.some((p) => p.name === n && isManaged(p)));
-      if (!name) continue;
-      const p = config.providers.find((x) => x.name === name)!;
-      if (p.kind !== "openai-compatible" || !p.gateway) continue;
-      const place: SpeechPlace = chain[0] === name ? "default" : "fallback";
-      const model = (role === "asr" ? p.asrModel : p.ttsModel).slice(p.gateway.provider.length + 1);
-      out[role] = { place, provider: p.gateway.provider, model, ...(role === "tts" && p.voice ? { voice: p.voice } : {}) };
-    }
-    return out;
+  /**
+   * Whether the built-in default's provider is here: every provider of the built-in configuration
+   * located by the running speech service. Read only while the service runs that configuration;
+   * without one to ask, assumed present (today's behaviour: the default is written out, never dropped).
+   */
+  function builtinPresence(): BuiltinPresence {
+    const cells = o.speech?.cells?.();
+    if (!cells || o.speech?.source() !== "builtin") return "present";
+    return builtinSpeech().providers.every((p) => cells.some((c) => c.provider === p.name && c.located)) ? "present" : "absent";
   }
 
-  const chains = (c: SpeechConfig | undefined) => (c ? { asr: chainOf(c, "asr"), tts: chainOf(c, "tts"), live: chainOf(c, "live") } : { asr: [], tts: [], live: [] });
+  const chains = (c: SpeechConfig) => ({ asr: chainOf(c, "asr"), tts: chainOf(c, "tts"), live: chainOf(c, "live") });
+  const serves = (p: ProviderSpec) => ({ asr: KIND_CAPABILITIES[p.kind].includes(ROLE_CAPABILITY.asr), tts: KIND_CAPABILITIES[p.kind].includes(ROLE_CAPABILITY.tts), live: KIND_CAPABILITIES[p.kind].includes(ROLE_CAPABILITY.live) });
+
+  /** An order as the page edits it: the page's providers as their gateway provider and model, the rest by name. */
+  function orderOf(config: SpeechConfig): SpeechOrder {
+    const item = (name: string, role: "asr" | "tts"): ChainItem => {
+      const p = config.providers.find((x) => x.name === name);
+      if (!p || !isManaged(p) || p.kind !== "openai-compatible" || !p.gateway) return { provider: name };
+      const g = p.gateway.provider;
+      const model = (role === "asr" ? p.asrModel : p.ttsModel).slice(g.length + 1);
+      return { gateway: g, model, ...(role === "tts" && p.voice ? { voice: p.voice } : {}) };
+    };
+    return { asr: chainOf(config, "asr").map((n) => item(n, "asr")), tts: chainOf(config, "tts").map((n) => item(n, "tts")) };
+  }
 
   async function speechView(): Promise<Response> {
     const text = await readSpeech();
-    let fileConfig: SpeechConfig | undefined;
+    const builtin = builtinPresence();
+    let config: SpeechConfig | undefined;
+    let source: "file" | "builtin" = text === undefined ? "builtin" : "file";
     let error: string | undefined;
     try {
-      fileConfig = text === undefined ? builtinSpeech() : parseProvidersYaml(text, o.env).config;
+      ({ config, source } = visibleSpeech(text, o.env, builtin));
     } catch (e) {
       error = (e as Error).message;
     }
     const readOnly = text !== undefined ? speechEditProblem(text, o.env) : undefined;
-    const running = o.speech?.config();
+    const cells = new Map((o.speech?.cells?.() ?? []).map((c) => [c.provider, c]));
     const g = await gatewayConfig();
+    const custom = (config?.providers ?? []).filter((p) => !isManaged(p));
+    const live = config ? chainOf(config, "live") : [];
     return json({
       ok: true,
       file,
       exists: text !== undefined,
       ...(readOnly ? { readOnly } : {}),
       ...(error ? { problem: error } : {}),
-      source: o.speech?.source() ?? (text === undefined ? "builtin" : "file"),
-      // What answers now, as the running speech service has it.
-      now: chains(running),
-      kinds: Object.fromEntries((running?.providers ?? []).map((p) => [p.name, { kind: p.kind, selfHosted: p.kind === "voice-studio" || (p.kind === "openai-compatible" && p.selfHosted), ...(p.kind === "openai-compatible" && p.gateway ? { gateway: `${p.gateway.via}:${p.gateway.provider}` } : {}) }])),
-      choice: fileConfig ? choiceOf(fileConfig) : { asr: { place: "off" }, tts: { place: "off" } },
-      handWritten: (fileConfig?.providers ?? []).filter((p) => p.kind === "openai-compatible" && p.gateway?.via === "space" && !isManaged(p)).map((p) => p.name),
+      source,
+      // Every speech provider that is not the page's own: custom, with what it serves and where it is.
+      custom: custom.map((p) => {
+        const c = cells.get(p.name);
+        const machine = p.kind === "voice-studio" ? (c?.where || p.machine || "") : undefined;
+        return {
+          name: p.name,
+          kind: p.kind,
+          serves: serves(p),
+          ...(machine !== undefined ? { machine } : {}),
+          ...(c ? { located: c.located } : {}),
+          ...(config!.off[p.name] ? { off: config!.off[p.name] } : {}),
+          testable: Boolean(o.speech?.speak && cells.has(p.name)),
+        };
+      }),
+      order: config ? orderOf(config) : { asr: [], tts: [] },
+      // Live is not edited here (it never goes through the gateway); listed only when a provider can do it.
+      ...(config && config.providers.some((p) => serves(p).live) ? { live } : {}),
       providers: (g?.providers ?? []).map((p) => offer(p, g!.off[p.name])),
       ...(o.reloadSpeech ? {} : { restart: true }),
     });
   }
 
-  /** The choice in a request, checked against the gateway's providers. */
-  async function choiceFrom(body: Record<string, unknown>): Promise<SpeechChoice | Response> {
+  /** The orders in a request; a gateway provider is checked against gateway.yaml. */
+  async function orderFrom(body: Record<string, unknown>): Promise<SpeechOrder | Response> {
     const g = await gatewayConfig();
-    const out = {} as SpeechChoice;
+    const out: SpeechOrder = { asr: [], tts: [] };
     for (const role of ROLES) {
-      const r = body[role] as Record<string, unknown> | undefined;
-      const place = r?.place;
-      if (place !== "off" && place !== "fallback" && place !== "default") return json({ ok: false, error: `${role}.place must be off, fallback or default` }, 400);
-      if (place === "off") {
-        out[role] = { place };
-        continue;
+      const list = body[role];
+      if (!Array.isArray(list) || list.length > 16) return json({ ok: false, error: `${role} must be a list of providers` }, 400);
+      for (const raw of list as Record<string, unknown>[]) {
+        if (!raw || typeof raw !== "object") return json({ ok: false, error: `${role}: each entry is {provider} or {gateway, model}` }, 400);
+        if (typeof raw.provider === "string") {
+          out[role].push({ provider: raw.provider });
+          continue;
+        }
+        const provider = typeof raw.gateway === "string" ? raw.gateway : "";
+        const model = typeof raw.model === "string" ? raw.model.trim() : "";
+        const p = g?.providers.find((x) => x.name === provider);
+        if (!GATEWAY_NAME_PATTERN.test(provider) || !p) return json({ ok: false, error: `${role}: ${provider || "a provider"} is not a provider of ${GATEWAY_FILE}` }, 400);
+        const can = servesOf(p)[role];
+        if (can !== true) return json({ ok: false, error: `${role}: ${provider} cannot (${can})` }, 400);
+        if (!GATEWAY_MODEL_PATTERN.test(model)) return json({ ok: false, error: `${role}: pick a model for ${provider}` }, 400);
+        if (role === "tts") {
+          const voice = typeof raw.voice === "string" && raw.voice.trim() ? raw.voice.trim() : undefined;
+          const documented = voicesFor(p.preset, model);
+          out.tts.push({ gateway: provider, model, ...(voice ? { voice } : {}), ...(documented.length ? { voices: documented } : {}) });
+        } else out.asr.push({ gateway: provider, model });
       }
-      const provider = typeof r!.provider === "string" ? r!.provider : "";
-      const model = typeof r!.model === "string" ? r!.model.trim() : "";
-      const p = g?.providers.find((x) => x.name === provider);
-      if (!GATEWAY_NAME_PATTERN.test(provider) || !p) return json({ ok: false, error: `${role}: ${provider || "a provider"} is not a provider of ${GATEWAY_FILE}` }, 400);
-      const can = servesOf(p)[role];
-      if (can !== true) return json({ ok: false, error: `${role}: ${provider} cannot (${can})` }, 400);
-      if (!GATEWAY_MODEL_PATTERN.test(model)) return json({ ok: false, error: `${role}: pick a model` }, 400);
-      if (role === "tts") {
-        const voice = typeof r!.voice === "string" && r!.voice.trim() ? r!.voice.trim() : undefined;
-        const documented = voicesFor(p.preset, model);
-        out.tts = { place, provider, model, ...(voice ? { voice } : {}), ...(documented.length ? { voices: documented } : {}) };
-      } else out.asr = { place, provider, model };
     }
     return out;
   }
@@ -157,8 +198,8 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
   async function saveSpeech(req: Request): Promise<Response> {
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) return json({ ok: false, error: "the body must be JSON" }, 400);
-    const choice = await choiceFrom(body);
-    if (choice instanceof Response) return choice;
+    const order = await orderFrom(body);
+    if (order instanceof Response) return order;
     const text = await readSpeech();
     if (text !== undefined) {
       const why = speechEditProblem(text, o.env);
@@ -166,12 +207,13 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
     }
     let next: ReturnType<typeof setSpeechText>;
     try {
-      next = setSpeechText(text, choice, o.env);
+      next = setSpeechText(text, order, o.env, builtinPresence());
     } catch (e) {
       return json({ ok: false, error: (e as Error).message }, e instanceof GatewayEditError ? 409 : 400);
     }
     const after = chains(next.after);
     if (body.dryRun === true) return json({ ok: true, dryRun: true, after });
+    if (!next.changed) return json({ ok: true, after, applied: true, created: false, unchanged: true });
     let mode: number | undefined;
     try {
       mode = (await stat(file)).mode & 0o777;
@@ -182,7 +224,7 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
       await o.reloadSpeech();
       applied = true;
     }
-    log(`speech through the model gateway saved from Settings: asr ${choice.asr.place}, tts ${choice.tts.place}`);
+    log(`speech orders saved from Settings: asr ${after.asr.join(" > ") || "none"}, tts ${after.tts.join(" > ") || "none"}`);
     return json({ ok: true, after, applied, created: text === undefined, ...(applied ? {} : { restart: true }) });
   }
 
@@ -204,6 +246,7 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
     const role = body?.role;
     if (role !== "asr" && role !== "tts") return json({ ok: false, error: "role must be asr or tts" }, 400);
+    if (typeof body!.speech === "string") return testOwn(role, body!.speech, body!);
     const provider = typeof body!.provider === "string" ? body!.provider : "";
     const model = typeof body!.model === "string" ? body!.model.trim() : "";
     const g = await gatewayConfig();
@@ -228,6 +271,26 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
     } catch (e) {
       // The vendor's error as text; never the key.
       return json({ ok: true, role, ms: Date.now() - started, failed: true, error: redact((e as Error).message, key) });
+    }
+  }
+
+  /** A test of a provider of the speech configuration itself (a custom one), through the running speech service. */
+  async function testOwn(role: "asr" | "tts", name: string, body: Record<string, unknown>): Promise<Response> {
+    const running = o.speech?.config();
+    if (!running?.providers.some((p) => p.name === name) || !o.speech?.speak || !o.speech.transcribe) return json({ ok: false, error: `${name} is not a running speech provider here` }, 400);
+    const started = Date.now();
+    try {
+      if (role === "tts") {
+        const r = await o.speech.speak(name, TEST_TEXT);
+        return json({ ok: true, role, ms: Date.now() - started, text: TEST_TEXT, contentType: r.contentType, audio: Buffer.from(r.audio).toString("base64"), bytes: r.audio.byteLength });
+      }
+      const audio = Buffer.from(typeof body.audio === "string" ? body.audio : "", "base64");
+      if (!audio.length) return json({ ok: false, error: "send the clip to transcribe (run the TTS test first)" }, 400);
+      if (audio.length > MAX_TEST_AUDIO) return json({ ok: false, error: "the test clip is too large" }, 413);
+      const r = await o.speech.transcribe(name, new Blob([audio], { type: "audio/wav" }));
+      return json({ ok: true, role, ms: Date.now() - started, text: r.text });
+    } catch (e) {
+      return json({ ok: true, role, ms: Date.now() - started, failed: true, error: (e as Error).message });
     }
   }
 
