@@ -42,6 +42,13 @@ export const GATEWAY_PRESETS: Record<string, Pick<GatewayProvider, "messages" | 
   dashscope: { messages: "https://dashscope.aliyuncs.com/apps/anthropic", auth: "bearer" },
   openai: { openai: "https://api.openai.com/v1", auth: "bearer" },
   groq: { openai: "https://api.groq.com/openai/v1", auth: "bearer" },
+  // Volcengine Ark has one base per way of paying, and a key works on its own base only: pay-as-you-go,
+  // the Coding Plan and the Agent Plan (checked 2026-11-24). The plans are for AI tools such as Claude Code.
+  ark: { messages: "https://ark.cn-beijing.volces.com/api/compatible", auth: "bearer" },
+  "ark-coding": { messages: "https://ark.cn-beijing.volces.com/api/coding", auth: "bearer" },
+  "ark-plan": { messages: "https://ark.cn-beijing.volces.com/api/plan", auth: "bearer" },
+  // OpenRouter: Messages at /api/v1/messages, and an OpenAI-style base with audio (checked 2026-11-24).
+  openrouter: { messages: "https://openrouter.ai/api", openai: "https://openrouter.ai/api/v1", auth: "bearer" },
 };
 
 /**

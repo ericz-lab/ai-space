@@ -35,6 +35,10 @@ export const VENDORS: Record<string, VendorInfo> = {
   dashscope: { label: "Alibaba DashScope (Qwen)", list: () => undefined, defaults: ["qwen4-max", "qwen3.7-plus", "qwen3.8-flash", "qwen3-coder-flash"], source: "https://www.alibabacloud.com/help/en/model-studio/anthropic-api-messages" },
   openai: { label: "OpenAI", list: (b) => (b.openai ? { url: `${b.openai}/models`, auth: "bearer" } : undefined), defaults: [], source: "https://developers.openai.com/api/reference/resources/models/methods/list" },
   groq: { label: "Groq", list: (b) => (b.openai ? { url: `${b.openai}/models`, auth: "bearer" } : undefined), defaults: [], source: "https://console.groq.com/docs/models" },
+  ark: { label: "Volcengine Ark (pay-as-you-go)", list: () => undefined, defaults: ["doubao-seed-2-1-pro-260915", "doubao-seed-2-1-lite-260915", "doubao-seed-evolving", "deepseek-v4-pro-ga-260813", "kimi-k3-1-pro-261024", "glm-5-3-flash-260828"], source: "https://ark.volcengine.com/region:cn-beijing/docs/model-list" },
+  "ark-coding": { label: "Volcengine Ark (Coding Plan)", list: () => undefined, defaults: ["ark-code-latest", "doubao-seed-2.1-pro", "doubao-seed-2.1-lite", "deepseek-v4-pro", "kimi-k3.1-pro", "glm-5.3"], source: "https://docs.volcengine.com/docs/ark/coding-plan-personal-ai-claude-code?lang=zh" },
+  "ark-plan": { label: "Volcengine Ark (Agent Plan)", list: () => undefined, defaults: ["doubao-seed-2.1-pro", "doubao-seed-2.1-lite", "deepseek-v4-pro", "kimi-k3.1-pro", "glm-5.4", "glm-5.3"], source: "https://ark.volcengine.com/region:cn-beijing/docs/agent-plan-personal-plan-overview" },
+  openrouter: { label: "OpenRouter", list: (b) => (b.openai ? { url: `${b.openai}/models`, auth: "bearer" } : undefined), defaults: [], source: "https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties.md" },
 };
 
 /**
