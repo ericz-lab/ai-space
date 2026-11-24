@@ -55,7 +55,9 @@ export function parseGatewayYaml(text: string, env: Record<string, string | unde
   }
   if (!isRecord(doc)) throw new Error(`${GATEWAY_FILE}: must be a mapping`);
   for (const key of Object.keys(doc)) if (key !== "providers" && key !== "groups" && key !== "tiers") throw new Error(`${GATEWAY_FILE}: unknown key "${key}"`);
-  if (!isRecord(doc.providers) || Object.keys(doc.providers).length === 0) throw new Error(`${GATEWAY_FILE}: providers must be a non-empty mapping`);
+  // No provider yet (the last one removed in Settings): the gateway is on and answers nothing.
+  if (doc.providers === undefined || doc.providers === null) doc.providers = {};
+  if (!isRecord(doc.providers)) throw new Error(`${GATEWAY_FILE}: providers must be a mapping`);
 
   const warnings: string[] = [];
   const off: Record<string, string> = {};
@@ -63,7 +65,8 @@ export function parseGatewayYaml(text: string, env: Record<string, string | unde
   for (const [name, raw] of Object.entries(doc.providers)) {
     const p = parseProvider(name, raw, env);
     providers.push(p);
-    if (p.apiKeyEnv && !p.apiKey) {
+    if (p.disabled) off[name] = "turned off";
+    else if (p.apiKeyEnv && !p.apiKey) {
       off[name] = `${p.apiKeyEnv} is not set`;
       warnings.push(`model gateway provider ${name} is off: ${p.apiKeyEnv} is not set`);
     }
@@ -77,7 +80,7 @@ function parseProvider(name: string, raw: unknown, env: Record<string, string | 
   const ctx = `${GATEWAY_FILE}: provider ${name}`;
   if (!GATEWAY_NAME_PATTERN.test(name)) throw new Error(`${GATEWAY_FILE}: invalid provider name "${name}" (lowercase letters, digits and -)`);
   if (!isRecord(raw)) throw new Error(`${ctx} must be a mapping`);
-  for (const key of Object.keys(raw)) if (!["preset", "messages", "openai", "auth", "apiKeyEnv", "models"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
+  for (const key of Object.keys(raw)) if (!["preset", "messages", "openai", "auth", "apiKeyEnv", "models", "disabled"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
   const presetName = optionalString(raw.preset, `${ctx}: preset`);
   const preset = presetName === undefined ? undefined : GATEWAY_PRESETS[presetName];
   if (presetName !== undefined && !preset) throw new Error(`${ctx}: preset must be one of ${Object.keys(GATEWAY_PRESETS).join(", ")}`);
@@ -94,8 +97,10 @@ function parseProvider(name: string, raw: unknown, env: Record<string, string | 
     if (!Array.isArray(raw.models) || !raw.models.every((m) => typeof m === "string" && GATEWAY_MODEL_PATTERN.test(m.trim()))) throw new Error(`${ctx}: models must be a list of model names`);
     models = [...new Set((raw.models as string[]).map((m) => m.trim()))];
   }
+  if (raw.disabled !== undefined && raw.disabled !== null && typeof raw.disabled !== "boolean") throw new Error(`${ctx}: disabled must be true or false`);
   return {
     name, auth: auth as GatewayAuth, models,
+    ...(raw.disabled === true ? { disabled: true } : {}),
     ...(messages ? { messages } : {}), ...(openai ? { openai } : {}),
     ...(apiKeyEnv ? { apiKeyEnv } : {}), ...(apiKey ? { apiKey } : {}), ...(presetName ? { preset: presetName } : {}),
   };

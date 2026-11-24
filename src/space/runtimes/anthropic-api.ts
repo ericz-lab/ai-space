@@ -55,16 +55,20 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
     const grant = deps.gateway.issue();
     return { apiUrl: `${base}/v1/messages`, apiKey: grant.token, run: grant.run };
   };
+  // Pictures through the built-in gateway when one of its providers has an OpenAI-style base
+  // (docs/model-gateway.md#images). Read when asked: Settings → Gateway may add or remove that provider while ai-space runs.
+  const capabilities: RuntimeAdapter["capabilities"] = { complete: true, agent: false, chat: false };
+  if (spec.gateway === "space" && deps.gateway) Object.defineProperty(capabilities, "image", { enumerable: true, get: () => (deps.gateway!.has("openai") ? true : undefined) });
   return {
     name: spec.name,
     kind: "anthropic-api",
     backend,
-    // Pictures through the built-in gateway when one of its providers has an OpenAI-style base (docs/model-gateway.md#images).
-    capabilities: { complete: true, agent: false, chat: false, ...(spec.gateway === "space" && deps.gateway?.has("openai") ? { image: true } : {}) },
-    ...(spec.gateway === "space" && deps.gateway?.has("openai")
+    capabilities,
+    ...(spec.gateway === "space" && deps.gateway
       ? {
           image: async (input: ImageInput, signal?: AbortSignal): Promise<ImageOutcome> => {
             const base = deps.gateway!.base();
+            if (!deps.gateway!.has("openai")) return { ok: false, error: `runtime ${spec.name}: no provider of the built-in model gateway can make pictures (none is on with an openai base)`, backend };
             if (!base) return { ok: false, error: `runtime ${spec.name} answers through the built-in model gateway, which is off: ${deps.gateway!.problem()}`, backend };
             const grant = deps.gateway!.issue();
             const outcome = await runImage(input, { base: `${base}/v1`, token: grant.token, fetch: doFetch, signal });

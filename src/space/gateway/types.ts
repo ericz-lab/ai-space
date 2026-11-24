@@ -39,6 +39,8 @@ export type GatewayProvider = {
   models: string[];
   /** The preset its bases came from, when one did. */
   preset?: string;
+  /** Kept in the file, turned off (`disabled: true`, the switch in Settings → Gateway). */
+  disabled?: boolean;
 };
 
 /** The tiers a gateway defines: the four ai-space tiers for text, and `image` for pictures (a text model cannot draw). */

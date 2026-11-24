@@ -9,7 +9,8 @@ import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerM
 import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { availabilityOf, probeRuntime } from "./space/model/health.ts";
 import { ModelGateway, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
-import { createInventoryRoutes, peerRow } from "./space/model/inventory.ts";
+import { createInventoryRoutes, machineRow, peerRow } from "./space/model/inventory.ts";
+import { createGatewaySettingsRoutes } from "./space/gateway/settings.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
 import { AppModels, createAppModelRoutes, createPeerAppModelRoutes } from "./space/model/app-models.ts";
 import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts";
@@ -715,7 +716,22 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         home: ws.home,
         token: config.apiToken,
         env,
+      })],
+      // Settings → Gateway (docs/model-gateway.md#settings): the built-in model gateway from the browser, operator only.
+      ["owner", createGatewaySettingsRoutes({
         gateway: modelGateway,
+        runtimes,
+        home: ws.home,
+        envFile: ws.envFile,
+        env,
+        token: config.apiToken,
+        isAppCredential: async (t) => Boolean(await storage.appForToken(t)) || Boolean(consumers.authenticate(t)),
+        claude: () => {
+          const c = machineRow(runtimeHealth, runtimes, "", "local").clis.find((x) => x.kind === "claude-code");
+          return c?.installed && c.path ? c.path : undefined;
+        },
+        ...("reason" in gatewayBase(config.host, config.port) ? { unavailable: (gatewayBase(config.host, config.port) as { reason: string }).reason } : {}),
+        onRuntimeAdded: () => probeRuntimes(),
       })],
       ["owner", createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel })],
       ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag), machines: machineCells, servesPeers: config.peerModel, space: config.name, ...(peers.names().length ? { peerLedgers: new PeerLedgers(peers, config.name) } : {}) })],

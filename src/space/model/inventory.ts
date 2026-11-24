@@ -1,9 +1,6 @@
 import { chmod, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { isOperator } from "../auth.ts";
-import { GATEWAY_FILE, parseGatewayYaml, setGatewayTiersText, tierProblem } from "../gateway/config.ts";
-import type { GatewayView } from "../gateway/service.ts";
-import { GATEWAY_MODEL_PATTERN, GATEWAY_TIERS, type GatewayTier, type GatewayTiers } from "../gateway/types.ts";
 import { isHarnessAppCli } from "../local.ts";
 import { RUNTIMES_FILE, parseRuntimesYaml, runtimesFromEnv } from "../runtimes/config.ts";
 import { MAGPIE_CALLER_KEY, MAGPIE_MODEL_PATTERN, type MagpieInfo, findMagpie, suggestMagpieTiers } from "../runtimes/magpie.ts";
@@ -31,14 +28,6 @@ import { AGENT_CLIS, type HealthCell, type RuntimeHealth } from "./health.ts";
  *                                      `models:` in runtimes.yaml and applied at once when the runtime runs;
  *                                      "" clears a tier. A new pin must be one magpie offers now; a saved one
  *                                      it no longer lists may stay
- *   PUT  /api/model/gateway/tiers {tiers}
- *                                      the built-in model gateway's tiers (operator only, docs/model-gateway.md#tiers),
- *                                      written to `tiers:` in gateway.yaml and applied from the next call; "" clears
- *                                      a tier. A new value is a group of gateway.yaml or provider/model with one of
- *                                      its providers (typed by hand or picked); a saved one it no longer lists may stay
- *
- * The inventory's `gateway` is the built-in model gateway as Settings shows it: whether it answers,
- * its providers, models and tiers, and the runtimes through it with their own pins.
  * The inventory's `magpie` says whether magpie is on this machine, what it offers (its routing
  * groups marked), and each runtime through it with its tier pins as runtimes.yaml has them.
  */
@@ -118,23 +107,6 @@ export type InventoryOptions = {
   env?: Record<string, string | undefined>;
   /** Look for magpie on this machine; tests replace it. */
   magpie?: () => Promise<MagpieInfo>;
-  /** The built-in model gateway: what Settings shows of it, and its tiers set while it runs. */
-  gateway?: { view(): GatewayView; setTiers(tiers: GatewayTiers): boolean };
-};
-
-/** A runtime through the built-in model gateway and its own pins, which win over the gateway's tiers. */
-export type GatewayPins = { runtime: string; kind: "claude-code" | "anthropic-api"; models: TierModels; loaded: boolean };
-
-/** The built-in model gateway as Settings → Models shows it (docs/model-gateway.md#settings). */
-export type SpaceGatewayView = GatewayView & {
-  /** Where its file is (or would be). */
-  file: string;
-  /** The file exists (it may still have failed to load: `problem`). */
-  exists: boolean;
-  /** The runtimes with `gateway: space`, from runtimes.yaml when it parses. */
-  pins: GatewayPins[];
-  /** The tiers as gateway.yaml has them now (they differ from `tiers` until a restart when the gateway did not load). */
-  saved: GatewayTiers;
 };
 
 /** A runtime through magpie and its tier pins, as runtimes.yaml has them. */
@@ -158,11 +130,6 @@ export type MagpieView = MagpieInfo & {
   /** What adding it makes: Claude Code through magpie (chat, agents, tools), or its Messages API (answers only). */
   adds: "claude-code" | "anthropic-api";
 };
-
-/** A runtime with `gateway: space`: it answers through the built-in model gateway. */
-function runsThroughSpace(spec: RuntimeSpec | undefined): boolean {
-  return Boolean(spec && (spec.kind === "claude-code" || spec.kind === "anthropic-api") && spec.gateway === "space");
-}
 
 /** A runtime that answers through the gateway at `url`: Claude Code with `magpie:` there, or an API runtime at its `/v1/messages`. */
 export function usesGateway(spec: RuntimeSpec, url: string): boolean {
@@ -353,6 +320,37 @@ export function setTierPinsText(current: string, runtime: string, models: TierMo
   return next;
 }
 
+/**
+ * runtimes.yaml with a runtime through the built-in model gateway (docs/model-gateway.md#runtimes):
+ * Claude Code at `claude` (chat, agent tasks and answers, with tools) named `gateway`, or the
+ * Messages API (answers and pictures) named `gateway-api`, or the next free `-<n>`. Its tiers are
+ * the gateway's, so it pins none. Edited as text like the others; it must parse with the new runtime.
+ */
+export function addGatewayRuntimeText(current: string | undefined, entry: { kind: "claude-code" | "anthropic-api"; claude?: string }, env: Record<string, string | undefined> = process.env): { text: string; name: string } {
+  const text = current ?? envRuntimesText(runtimesFromEnv(env));
+  const lines = text.split("\n");
+  const at = lines.findIndex((l) => /^runtimes:\s*(#.*)?$/.test(l));
+  if (at < 0) throw new Error(`${RUNTIMES_FILE} has no block-style runtimes: mapping to add to; add the runtime by hand`);
+  const { config } = parseRuntimesYaml(text, env);
+  const taken = new Set(config.runtimes.map((r) => r.name));
+  const base = entry.kind === "claude-code" ? "gateway" : "gateway-api";
+  let name = base;
+  for (let i = 2; taken.has(name); i++) name = `${base}-${i}`;
+  const child = lines.slice(at + 1).find((l) => l.trim() && !l.trim().startsWith("#"));
+  const i1 = /^(\s+)/.exec(child ?? "")?.[1] ?? "  ";
+  const i2 = i1 + i1;
+  const block = [`${i1}${name}:`];
+  if (entry.kind === "claude-code") {
+    if (!entry.claude) throw new Error("Claude Code was not found on this machine");
+    block.push(`${i2}# Claude Code through the built-in model gateway: its tiers are the gateway's (Settings → Gateway, docs/model-gateway.md)`, `${i2}kind: claude-code`, `${i2}bin: [${JSON.stringify(entry.claude)}]`, `${i2}gateway: space`);
+  } else block.push(`${i2}# The built-in model gateway's Messages API: answers and pictures, no tools or chat (docs/model-gateway.md)`, `${i2}kind: anthropic-api`, `${i2}gateway: space`);
+  lines.splice(at + 1, 0, ...block);
+  const next = lines.join("\n");
+  const parsed = parseRuntimesYaml(next, env);
+  if (!parsed.config.runtimes.some((r) => r.name === name && r.kind === entry.kind)) throw new Error(`the new ${RUNTIMES_FILE} does not carry runtime ${name}`);
+  return { text: next, name };
+}
+
 /** The environment's runtimes as a file, so writing one keeps what the space runs today. Keys stay in the environment. */
 function envRuntimesText(config: RuntimesConfig): string {
   const out = ["# Written by ai-space when a runtime was added from the panel; it replaces SPACE_MODEL_* (docs/runtimes.md).", ...(config.default ? [`default: ${config.default}`] : []), "runtimes:"];
@@ -384,29 +382,12 @@ export function createInventoryRoutes(opts: InventoryOptions) {
       return undefined;
     }
   };
-  const gatewayFile = join(opts.home, GATEWAY_FILE);
-  /** gateway.yaml as it is now: its text and config, or undefined when there is none; `error` when it does not parse. */
-  const gatewayText = async (): Promise<{ text: string; config?: ReturnType<typeof parseGatewayYaml>["config"]; error?: string } | undefined> => {
-    const f = Bun.file(gatewayFile);
-    if (!(await f.exists())) return undefined;
-    const text = await f.text();
-    try {
-      return { text, config: parseGatewayYaml(text, env).config };
-    } catch (e) {
-      return { text, error: (e as Error).message };
-    }
-  };
-  const gatewayView = async (): Promise<SpaceGatewayView | undefined> => {
-    if (!opts.gateway) return undefined;
-    const view = opts.gateway.view();
-    const file = await gatewayText();
-    const config = await fileConfig();
-    const loaded = new Set(opts.runtimes.list().filter((r) => runsThroughSpace(opts.runtimes.spec(r.name))).map((r) => r.name));
-    const specs = config ? config.runtimes : opts.runtimes.list().map((r) => opts.runtimes.spec(r.name)).filter((x): x is RuntimeSpec => Boolean(x));
-    const pins = specs.filter(runsThroughSpace).map((spec) => ({ runtime: spec.name, kind: spec.kind as GatewayPins["kind"], models: { ...spec.models }, loaded: loaded.has(spec.name) }));
-    return { ...view, ...(file?.error && !view.problem ? { problem: file.error } : {}), file: gatewayFile, exists: Boolean(file), pins, saved: file?.config?.tiers ?? view.tiers };
-  };
-  const list = async () => json({ ok: true, machines: inventory(opts), magpie: magpieView(await findMagpieHere(), opts.runtimes, localClaude(), await fileConfig()), ...(opts.gateway ? { gateway: await gatewayView() } : {}) });
+  // Runtimes through the built-in model gateway: Settings → Models names them and links to Settings → Gateway.
+  const gatewayRuntimes = () => opts.runtimes.list().filter((r) => {
+    const spec = opts.runtimes.spec(r.name);
+    return spec && (spec.kind === "claude-code" || spec.kind === "anthropic-api") && spec.gateway === "space";
+  }).map((r) => r.name);
+  const list = async () => json({ ok: true, machines: inventory(opts), magpie: magpieView(await findMagpieHere(), opts.runtimes, localClaude(), await fileConfig()), gatewayRuntimes: gatewayRuntimes() });
   return {
     "/api/model/inventory": { GET: list },
     "/api/model/status/probe": {
@@ -439,14 +420,6 @@ export function createInventoryRoutes(opts: InventoryOptions) {
         await Bun.write(tmp, next.text);
         await rename(tmp, file);
         return json({ ok: true, runtime: next.name, restart: true });
-      },
-    },
-    "/api/model/gateway/tiers": {
-      PUT: async (req: Request) => {
-        if (!isOperator(req, opts.token)) return json({ ok: false, error: "unauthorized" }, 401);
-        const body = (await req.json().catch(() => null)) as { tiers?: unknown } | null;
-        if (!body?.tiers || typeof body.tiers !== "object" || Array.isArray(body.tiers)) return json({ ok: false, error: "tiers must map basic, junior, intermediate, advanced and image to a model or a group" }, 400);
-        return saveGatewayTiers(body.tiers as Record<string, unknown>);
       },
     },
     "/api/model/runtimes/models": {
@@ -498,40 +471,6 @@ export function createInventoryRoutes(opts: InventoryOptions) {
     return json({ ok: true, runtime, models, applied, ...(applied ? {} : { restart: true }) });
   }
 
-  /**
-   * The built-in model gateway's tiers from Settings: each a group of gateway.yaml or
-   * `provider/model` with one of its providers that has the base the tier needs, or the value
-   * already saved (kept after its provider left); "" clears the tier.
-   */
-  async function saveGatewayTiers(asked: Record<string, unknown>): Promise<Response> {
-    const file = await gatewayText();
-    if (!file) return json({ ok: false, error: `there is no ${GATEWAY_FILE} in the workspace (${gatewayFile}); write its providers first (docs/model-gateway.md#configuration)` }, 404);
-    if (!file.config) return json({ ok: false, error: `${file.error}; fix ${GATEWAY_FILE} first` }, 409);
-    const config = file.config;
-    const tiers: GatewayTiers = {};
-    for (const [tier, raw] of Object.entries(asked)) {
-      if (!(GATEWAY_TIERS as readonly string[]).includes(tier)) return json({ ok: false, error: `unknown tier ${tier}` }, 400);
-      if (raw === "" || raw === null || raw === undefined) continue;
-      const value = typeof raw === "string" ? raw.trim() : raw;
-      if (typeof value !== "string" || !GATEWAY_MODEL_PATTERN.test(value)) return json({ ok: false, error: `${tier}: not a model id` }, 400);
-      if (value !== config.tiers[tier as GatewayTier]) {
-        const why = tierProblem(tier as GatewayTier, value, config.providers, config.groups);
-        if (why) return json({ ok: false, error: `${tier}: ${why}` }, 400);
-      }
-      tiers[tier as GatewayTier] = value;
-    }
-    let next: string;
-    try {
-      next = setGatewayTiersText(file.text, tiers, env);
-    } catch (e) {
-      return json({ ok: false, error: (e as Error).message }, 409);
-    }
-    await writeAtomic(gatewayFile, next);
-    // Loaded: the next call of every runtime through it uses them; else (it did not load at boot) a restart does.
-    const applied = opts.gateway?.setTiers(tiers) ?? false;
-    return json({ ok: true, tiers, applied, ...(applied ? {} : { restart: true }) });
-  }
-
   /** Add magpie as a runtime: only a gateway this space found answering, with models it offers. */
   async function addMagpie(body: { model?: unknown; models?: unknown }): Promise<Response> {
     const info = await findMagpieHere();
@@ -565,7 +504,7 @@ export function createInventoryRoutes(opts: InventoryOptions) {
   }
 }
 
-async function writeAtomic(file: string, text: string, mode?: number): Promise<void> {
+export async function writeAtomic(file: string, text: string, mode?: number): Promise<void> {
   const tmp = `${file}.${process.pid}.tmp`;
   await Bun.write(tmp, text);
   if (mode !== undefined) await chmod(tmp, mode);
