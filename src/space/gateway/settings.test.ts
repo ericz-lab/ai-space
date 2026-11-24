@@ -144,7 +144,8 @@ describe("providers from the page", () => {
     const dotenv = await Bun.file(join(home, ".env")).text();
     expect(dotenv).toStartWith("# my env\nSPACE_NAME=box\n");
     expect(dotenv).toContain(`SPACE_GATEWAY_DS_KEY=${KEY}`);
-    expect((await stat(join(home, ".env"))).mode & 0o777).toBe(0o600);
+    // Windows has no permission bits to set or read back.
+    if (process.platform !== "win32") expect((await stat(join(home, ".env"))).mode & 0o777).toBe(0o600);
     expect(env.SPACE_GATEWAY_DS_KEY).toBe(KEY);
     // Hot: the gateway answers through the new provider at once.
     expect(gateway.problem()).toBeUndefined();
