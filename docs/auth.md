@@ -63,6 +63,7 @@ Rules the gate (`src/space/auth/gate.ts`) holds:
 - A request let through by the owner's session is marked, and `isOperator` and `identify` (`src/space/auth.ts`) count it as the operator. So a session can do what the operator token can, and an app token cannot reach an `owner` route.
 - The operator token is never empty under `builtin`: with no `SPACE_API_TOKEN` in `.env`, ai-space writes one to `<workspace>/run/operator-token` (mode 0600). The CLI reads that file when it talks to a space on loopback and has no other token, so `space …` on the machine keeps working. Being able to read the file is the local permission; a request from loopback without a credential is refused like any other, because the tunnel's requests come from loopback too.
 - A static route value (a page bundle, a fixed `Response`) has no handler to guard, so it must be `public`; anything else stops the boot.
+- Settings → Gateway's routes (`/api/model/gateway` and everything under it, [model-gateway.md](model-gateway.md#routes)) are `owner`, and their handlers also refuse an app's `SPACE_APP_TOKEN` and an external consumer's key with 403 in every mode, including `external` with no `SPACE_API_TOKEN`, where any other caller counts as the operator. They write `gateway.yaml`, `runtimes.yaml` and model keys in `.env`; no answer of theirs carries a key. Loopback alone is not trusted for them: tunnel traffic arrives from loopback too.
 
 ## Host names
 

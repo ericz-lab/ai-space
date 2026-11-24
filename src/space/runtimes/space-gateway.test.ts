@@ -170,7 +170,7 @@ describe("pictures through the built-in gateway (anthropic-api with gateway: spa
     const { config } = parseGatewayYaml("providers:\n  ds: { messages: 'http://127.0.0.1:9' }\n", {});
     const textOnly = createAnthropicApi({ name: "gw", kind: "anthropic-api", apiKey: "", apiUrl: "", gateway: "space" }, { gateway: new ModelGateway({ config }).link });
     expect(textOnly.capabilities.image).toBeUndefined();
-    expect(textOnly.image).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(textOnly.capabilities))).toEqual({ complete: true, agent: false, chat: false });
   });
 
   test("generations: the picture as b64_json, no response_format for a GPT image model, usage kept", async () => {

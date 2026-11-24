@@ -69,7 +69,10 @@ describe("gateway.yaml", () => {
 
   test("strict: unknown keys, missing bases, bad URLs, keys in the file, groups that name nothing", () => {
     const bad = (yaml: string, msg: RegExp) => expect(() => parseGatewayYaml(yaml, {})).toThrow(msg);
-    bad("providers: {}\n", /providers must be a non-empty mapping/);
+    bad("providers: []\n", /providers must be a mapping/);
+    expect(parseGatewayYaml("providers: {}\n", {}).config.providers).toEqual([]);
+    expect(parseGatewayYaml("# nothing yet\nproviders:\n", {}).config.providers).toEqual([]);
+    expect(parseGatewayYaml("providers:\n  a: { messages: 'http://x', disabled: true }\n", {}).config.off).toEqual({ a: "turned off" });
     bad("providers:\n  a: { messages: 'https://x' }\nextra: 1\n", /unknown key "extra"/);
     bad("providers:\n  a: { messages: 'https://x', apiKey: sk }\n", /unknown key "apiKey"/);
     bad("providers:\n  a: { apiKeyEnv: K }\n", /needs a messages or an openai base/);

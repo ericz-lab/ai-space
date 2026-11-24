@@ -76,8 +76,8 @@ type Body = { kind: "json"; value: Record<string, unknown> } | { kind: "form"; v
 export class ModelGateway {
   readonly tokens: GatewayTokens;
   readonly traces: TraceStore;
-  private readonly config: GatewayConfig | undefined;
-  private readonly error: string | undefined;
+  private config: GatewayConfig | undefined;
+  private error: string | undefined;
   private readonly fetch: typeof fetch;
   private readonly now: () => number;
   private readonly log: (line: string) => void;
@@ -123,6 +123,18 @@ export class ModelGateway {
   };
 
   /**
+   * gateway.yaml as it is now, read again after Settings → Gateway changed it (or the file is
+   * gone: off). The next request uses it; a request already forwarded finishes as it started.
+   * Rests of providers that are still there stay; traces stay.
+   */
+  reload(next: { config?: GatewayConfig; error?: string }): void {
+    this.config = next.config;
+    this.error = next.error;
+    this.tierTable = { ...next.config?.tiers };
+    for (const name of [...this.rests.keys()]) if (!next.config?.providers.some((p) => p.name === name)) this.rests.delete(name);
+  }
+
+  /**
    * New tiers, as Settings saved them to gateway.yaml: the next call of every runtime with
    * `gateway: space` resolves its tiers from them, without a restart. False when it is off.
    */
@@ -161,6 +173,7 @@ export class ModelGateway {
     if (this.error) return this.error;
     if (!this.config) return "no gateway.yaml in the workspace: the built-in model gateway is off";
     if (!this.baseUrl) return this.offReason ?? "the built-in model gateway is not listening yet";
+    if (!this.config.providers.length) return "gateway.yaml has no provider yet";
     if (this.config.providers.every((p) => this.config!.off[p.name])) return `every provider of gateway.yaml is off (${Object.values(this.config.off).join("; ")})`;
     return undefined;
   }

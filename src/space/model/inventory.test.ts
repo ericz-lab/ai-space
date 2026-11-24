@@ -3,8 +3,6 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { markOwner } from "../auth.ts";
-import { parseGatewayYaml } from "../gateway/config.ts";
-import { ModelGateway } from "../gateway/service.ts";
 import { parseRuntimesYaml } from "../runtimes/config.ts";
 import { RuntimeRegistry, type OptionAvailability } from "../runtimes/registry.ts";
 import { WINDOWS } from "../testing.ts";
@@ -385,58 +383,6 @@ describe("routes", () => {
     expect(after.magpie.pins).toEqual([{ runtime: "magpie", kind: "claude-code", models: {}, loaded: false }]);
     const saved = await call(routes["/api/model/runtimes/models"], "PUT", { runtime: "magpie", models: { basic: "group/basic" } });
     expect(await saved.json()).toEqual({ ok: true, runtime: "magpie", models: { basic: "group/basic" }, applied: false, restart: true });
-  });
-
-  test("the built-in model gateway: shown, its tiers saved to gateway.yaml with comments kept, operator only, bad ids refused, applied at once", async () => {
-    const gatewayYaml = "# the gateway\nproviders:\n  ds:\n    preset: deepseek   # DeepSeek\n    apiKeyEnv: DS\n    models: [deepseek-chat]\n  openai: { preset: openai, apiKeyEnv: OA, models: [gpt-image-1] }\ngroups:\n  fast: [ds/deepseek-chat]\ntiers:\n  basic: fast   # the cheap one\n";
-    const yaml = "runtimes:\n  gw:\n    kind: anthropic-api\n    gateway: space\n    models: { advanced: ds/deepseek-reasoner }\n";
-    const env = { DS: "k", OA: "k" };
-    const gateway = new ModelGateway({ config: parseGatewayYaml(gatewayYaml, env).config, log: () => {} });
-    await writeFile(join(home, "gateway.yaml"), gatewayYaml);
-    await writeFile(join(home, "runtimes.yaml"), yaml);
-    const runtimes = new RuntimeRegistry(parseRuntimesYaml(yaml, {}).config, { gateway: gateway.link });
-    const routes = createInventoryRoutes({ health: new RuntimeHealth({ prober: table({}) }), runtimes, peers: () => [], probe: async () => {}, home, token: "op", env, magpie: async () => magpieDown, gateway });
-    const shown = (await (await call(routes["/api/model/inventory"], "GET")).json()) as { gateway: Record<string, unknown> };
-    expect(shown.gateway).toMatchObject({ configured: true, exists: true, file: join(home, "gateway.yaml"), saved: { basic: "fast" }, models: ["fast", "ds/deepseek-chat", "openai/gpt-image-1"], imageModels: ["openai/gpt-image-1"] });
-    expect(shown.gateway.pins).toEqual([{ runtime: "gw", kind: "anthropic-api", models: { advanced: "ds/deepseek-reasoner" }, loaded: true }]);
-    expect((shown.gateway.providers as { name: string }[]).map((p) => p.name)).toEqual(["ds", "openai"]);
-
-    const put = (tiers: unknown, token = "op") => call(routes["/api/model/gateway/tiers"], "PUT", { tiers }, token);
-    expect((await put({ junior: "ds/deepseek-chat" }, "wrong")).status).toBe(401);
-    expect((await put({ huge: "fast" })).status).toBe(400);
-    expect((await put({ junior: "kimi/k2" })).status).toBe(400); // no such provider in gateway.yaml
-    expect((await put({ junior: "ds/bad id" })).status).toBe(400); // not a model id
-    expect((await put({ image: "ds/deepseek-chat" })).status).toBe(400); // no openai base: it cannot draw
-    expect(await Bun.file(join(home, "gateway.yaml")).text()).toBe(gatewayYaml);
-
-    // A model typed by hand that the provider does not list is fine: the provider is in the file.
-    const ok = await put({ basic: "", junior: "fast", advanced: "ds/deepseek-v4-pro", image: "openai/gpt-image-1" });
-    expect(await ok.json()).toEqual({ ok: true, tiers: { junior: "fast", advanced: "ds/deepseek-v4-pro", image: "openai/gpt-image-1" }, applied: true });
-    const text = await Bun.file(join(home, "gateway.yaml")).text();
-    expect(text).toStartWith("# the gateway\n");
-    expect(text).toContain("preset: deepseek   # DeepSeek");
-    expect(parseGatewayYaml(text, env).config.tiers).toEqual({ junior: "fast", advanced: "ds/deepseek-v4-pro", image: "openai/gpt-image-1" });
-    // From the next call, no restart: the runtime's own pin still wins.
-    expect(runtimes.resolve("gw/junior").model).toBe("fast");
-    expect(runtimes.resolve("gw/advanced").model).toBe("ds/deepseek-reasoner");
-    expect(runtimes.resolve("gw/basic", "image").model).toBe("openai/gpt-image-1");
-
-    // A saved value whose provider left the file stays; it can be kept, not newly picked.
-    const gone = text.replace("  openai: { preset: openai, apiKeyEnv: OA, models: [gpt-image-1] }\n", "");
-    await writeFile(join(home, "gateway.yaml"), gone);
-    expect((await put({ junior: "fast", image: "openai/gpt-image-1" })).status).toBe(200);
-    expect((await put({ junior: "openai/gpt-5" })).status).toBe(400);
-  });
-
-  test("no gateway.yaml: the view says where to write it; saving says so too", async () => {
-    const gateway = new ModelGateway({ log: () => {} });
-    const runtimes = new RuntimeRegistry(parseRuntimesYaml("runtimes:\n  claude:\n    kind: claude-code\n", {}).config, { gateway: gateway.link });
-    const routes = createInventoryRoutes({ health: new RuntimeHealth({ prober: table({}) }), runtimes, peers: () => [], probe: async () => {}, home, token: "op", env: {}, magpie: async () => magpieDown, gateway });
-    const shown = (await (await call(routes["/api/model/inventory"], "GET")).json()) as { gateway: Record<string, unknown> };
-    expect(shown.gateway).toMatchObject({ configured: false, exists: false, file: join(home, "gateway.yaml"), pins: [] });
-    const r = await call(routes["/api/model/gateway/tiers"], "PUT", { tiers: { basic: "ds/x" } });
-    expect(r.status).toBe(404);
-    expect(((await r.json()) as { error: string }).error).toContain("there is no gateway.yaml");
   });
 
   test("the owner's session counts as the operator", async () => {

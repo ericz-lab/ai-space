@@ -38,22 +38,47 @@ export type MagpiePins = { runtime: string; kind: "claude-code" | "anthropic-api
 export type MagpieInfo = { bin?: string; url: string; running: boolean; version?: string; models: string[]; groups: string[]; error?: string; configured: boolean; runtimes: string[]; pins: MagpiePins[]; suggested: MagpieTiers; adds: "claude-code" | "anthropic-api" };
 /** The built-in model gateway's tiers: the four text tiers and `image` for pictures (docs/model-gateway.md#tiers). */
 export type GatewayTiers = MagpieTiers & { image?: string };
-/** One provider of gateway.yaml: its bases, why it is off, until when it rests, its models. */
-export type GatewayProviderInfo = { name: string; preset?: string; messages?: string; openai?: string; off?: string; resting?: { until: string; kind: string }; models: string[] };
-/** The built-in model gateway as Settings → Models shows it (`gateway` of `GET /api/model/inventory`). */
-export type GatewayInfo = {
-  configured: boolean;
-  problem?: string;
-  providers: GatewayProviderInfo[];
-  groups: Record<string, string[]>;
+/** A provider's key as the page sees it: where it is set and its last four characters, never the key. */
+export type GatewayKey = { state: "workspace" | "environment" | "none"; last4?: string; page: boolean; variable?: string };
+/** One provider of gateway.yaml as Settings → Gateway shows it (`GET /api/model/gateway`). */
+export type GatewayProviderInfo = {
+  name: string;
+  preset?: string;
+  label?: string;
+  messages?: string;
+  openai?: string;
+  auth: "x-api-key" | "bearer";
+  key: GatewayKey;
+  disabled: boolean;
+  off?: string;
+  resting?: { until: string; kind: string };
   models: string[];
-  imageModels: string[];
-  tiers: GatewayTiers;
+  /** What names it: groups with its members (`emptied`: those left with none), tiers on it. */
+  usedBy: { groups: string[]; tiers: string[]; emptied: string[] };
+};
+export type GatewayPreset = { name: string; label: string; messages?: string; openai?: string; auth: "x-api-key" | "bearer"; hasList: boolean; defaults: string[] };
+/** The built-in model gateway's section (docs/model-gateway.md#settings). */
+export type GatewayInfo = {
   file: string;
   exists: boolean;
-  pins: MagpiePins[];
-  saved: GatewayTiers;
+  /** Why the built-in gateway cannot exist on this space. */
+  unavailable?: string;
+  /** Why the page cannot edit the file; it is then shown as `text`. */
+  readOnly?: string;
+  text?: string;
+  problem?: string;
+  answers: boolean;
+  providers: GatewayProviderInfo[];
+  groups: Record<string, string[]>;
+  tiers: GatewayTiers;
+  models: string[];
+  imageModels: string[];
+  presets: GatewayPreset[];
+  runtimes: MagpiePins[];
+  offer: { claude: boolean };
 };
+export type GatewayTest = { base: "messages" | "openai"; ok: boolean; ms: number; status?: number; error?: string; detail?: string };
+export type GatewayModelList = { source: "vendor" | "defaults"; models: string[]; defaults: string[]; error?: string; note?: string };
 
 /** Icons of the panel's own tiles; `/api/apps` returns the active icon pack's over these. */
 export const BUILTIN_ICONS = { store: "/store.svg", inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" };

@@ -318,7 +318,9 @@ checked; the two pets have not been tried by hand on a desktop yet.
 The sections and pages are the web panel's (`src/web/App.tsx`, `SettingsNav.tsx`), with the
 panel's strings: `src/web/messages.ts` holds its dictionaries without React, so this app uses the
 same words in English and Chinese. The rules behind the rows (status counts, task states, usage
-figures and the history grid) are in `src/core/settings.ts`, tested against the panel's.
+figures and the history grid) are in `src/core/settings.ts`, tested against the panel's. The
+panel's Gateway section (the built-in model gateway's providers, keys and tiers, and magpie;
+[model-gateway.md](model-gateway.md#settings)) is not here: it is configured in the web panel.
 
 | Section | What |
 | --- | --- |

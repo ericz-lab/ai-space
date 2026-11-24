@@ -114,6 +114,20 @@ export class RuntimeRegistry {
     }
   }
 
+  /**
+   * One more runtime while ai-space runs, as Settings → Gateway wrote it to runtimes.yaml: only one
+   * that answers through the built-in model gateway, which needs nothing started at boot. False
+   * when the name is taken. It is not the default; the next probe gives it a status.
+   */
+  add(spec: RuntimeSpec): boolean {
+    if (this.byName.has(spec.name)) return false;
+    if (!((spec.kind === "claude-code" || spec.kind === "anthropic-api") && spec.gateway === "space")) throw new Error(`only a runtime through the built-in model gateway is added while ai-space runs; restart for ${spec.name}`);
+    this.byName.set(spec.name, createAdapter(spec, this.deps));
+    this.specs.set(spec.name, spec);
+    this.models.set(spec.name, { ...TIER_DEFAULTS[spec.kind], ...spec.models });
+    return true;
+  }
+
   /** Tier models read from a runtime's own catalogue; the runtimes.yaml `models` pins still win. */
   applyCatalogTiers(name: string, tiers: TierModels): void {
     const spec = this.specs.get(name);
