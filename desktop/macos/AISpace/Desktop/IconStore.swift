@@ -110,7 +110,8 @@ final class IconStore {
         case nil:
             bytes = nil
         }
-        guard let bytes, !bytes.isEmpty, let image = NSImage(data: bytes) else { return nil }
+        // A cut-short picture still decodes, its lower part blank: keep it out of the cache.
+        guard let bytes, !bytes.isEmpty, PictureBytes.isComplete(bytes), let image = NSImage(data: bytes) else { return nil }
         // An SVG stays a drawing until it is drawn; a bitmap of it is what the cache keeps.
         return Icon.isSVG(bytes) ? Self.raster(image) : image
     }

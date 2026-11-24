@@ -107,7 +107,8 @@ final class IconStore {
     }
 
     private func load(_ icon: String) async -> UIImage? {
-        guard let data = await data(icon), !data.isEmpty else { return nil }
+        // A cut-short picture still decodes, its lower part blank: keep it out of the cache.
+        guard let data = await data(icon), !data.isEmpty, PictureBytes.isComplete(data) else { return nil }
         if Icon.isSVG(data) { return await SVGRasterizer.shared.image(svg: data) }
         return UIImage(data: data)
     }
