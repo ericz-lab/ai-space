@@ -7,7 +7,10 @@ import type { CompleteFile } from "../runtimes/types.ts";
  * Images an app sends with one call. They come inside the request as base64,
  * never as URLs for ai-space to fetch: the service runs on loopback next to
  * every app, and fetching what a request names would let one reach the
- * others. The bytes are written to a directory of their own for the length of
+ * others. (The one fetch of a picture is different: a model provider's own
+ * answer naming where the picture it made is, fetched only from a public
+ * https host under the rules of vendor-image.ts; a caller still cannot name a
+ * URL.) The bytes are written to a directory of their own for the length of
  * the call and handed to the runtime as files, the path the chat service's
  * attachments take (`docs/model.md`).
  */
