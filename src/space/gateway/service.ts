@@ -3,7 +3,9 @@ import { retryAfterSeconds } from "../runtimes/anthropic-api.ts";
 import { splitModelId } from "./config.ts";
 import { carriesThinking, downstreamHeaders, errorText, readUsage, tapMessagesStream, upstreamHeaders } from "./forward.ts";
 import { GatewayTokens } from "./tokens.ts";
+import { costOf, type PriceBook } from "./prices.ts";
 import { TraceStore } from "./trace.ts";
+import type { Usage } from "../runtimes/types.ts";
 import type { GatewayBase, GatewayConfig, GatewayLink, GatewayProvider, GatewayTiers } from "./types.ts";
 
 /**
@@ -37,6 +39,8 @@ export type ModelGatewayOptions = {
   log?: (line: string) => void;
   tokens?: GatewayTokens;
   traces?: TraceStore;
+  /** Prices for what answers cost (prices.ts); without one, runs carry tokens and no cost. */
+  prices?: PriceBook;
 };
 
 type Rest = { until: number; streak: number; kind: FailureKind };
@@ -76,6 +80,7 @@ type Body = { kind: "json"; value: Record<string, unknown> } | { kind: "form"; v
 export class ModelGateway {
   readonly tokens: GatewayTokens;
   readonly traces: TraceStore;
+  readonly prices: PriceBook | undefined;
   private config: GatewayConfig | undefined;
   private error: string | undefined;
   private readonly fetch: typeof fetch;
@@ -95,6 +100,7 @@ export class ModelGateway {
     this.log = opts.log ?? ((l) => console.log(`[model-gateway] ${l}`));
     this.tokens = opts.tokens ?? new GatewayTokens();
     this.traces = opts.traces ?? new TraceStore({ now: this.now });
+    this.prices = opts.prices;
   }
 
   /** Configured (a `gateway.yaml` that loaded). */
@@ -242,7 +248,7 @@ export class ModelGateway {
       if (res.ok) {
         this.rests.delete(t.provider.name);
         this.traces.note(run, { tried, served: t.id, requested: plan.requested, pin: op.pin && plan.group });
-        return this.answer(res, op, run, t.id);
+        return this.answer(res, op, run, t);
       }
       const bytes = await res.arrayBuffer().catch(() => new ArrayBuffer(0));
       const wait = retryAfterSeconds(res.headers.get("retry-after"));
@@ -306,18 +312,23 @@ export class ModelGateway {
   }
 
   /** The provider's answer, its bytes unchanged, its usage read on the side. */
-  private async answer(res: Response, op: GatewayOperation, run: string, served: string): Promise<Response> {
+  private async answer(res: Response, op: GatewayOperation, run: string, t: Target): Promise<Response> {
+    const served = t.id;
     const headers = downstreamHeaders(res.headers, served);
+    // The price of the model that answered, at this provider (the file re-read only when it changed).
+    await this.prices?.reload().catch(() => {});
+    const found = this.prices?.lookupSync(t.provider, t.model);
+    const record = (u: Usage) => this.traces.addUsage(run, u, this.prices ? { served, ...(found ? { costUsd: costOf(found.price, u) } : {}) } : undefined);
     const type = res.headers.get("content-type") ?? "";
     if (!res.body || op.usage === "none") return new Response(res.body, { status: res.status, headers });
     if (op.usage === "messages" && type.includes("text/event-stream")) {
-      return new Response(tapMessagesStream(res.body, (u) => u && this.traces.addUsage(run, u)), { status: res.status, headers });
+      return new Response(tapMessagesStream(res.body, (u) => u && record(u)), { status: res.status, headers });
     }
     if (!type.includes("json")) return new Response(res.body, { status: res.status, headers });
     const bytes = await res.arrayBuffer();
     try {
       const u = readUsage((JSON.parse(new TextDecoder().decode(bytes)) as { usage?: unknown }).usage);
-      if (u) this.traces.addUsage(run, u);
+      if (u) record(u);
     } catch {
       /* not JSON after all: passed on as it is */
     }

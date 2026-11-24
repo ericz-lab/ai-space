@@ -1,7 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readCatalog } from "../runtimes/magpie.ts";
 import { GATEWAY_PREFIX, createGatewayRoutes, gatewayBase } from "./api.ts";
 import { parseGatewayYaml, setGatewayTiersText } from "./config.ts";
+import { PriceBook, PRICES_FILE } from "./prices.ts";
 import { ModelGateway } from "./service.ts";
 import { GatewayTokens } from "./tokens.ts";
 import { TraceStore } from "./trace.ts";
@@ -39,9 +43,9 @@ afterAll(() => {
 });
 
 /** The gateway's routes on an ephemeral loopback port, over a gateway.yaml naming the stand-ins. */
-function serve(yaml: string, env: Record<string, string> = {}) {
+function serve(yaml: string, env: Record<string, string> = {}, prices?: PriceBook) {
   const { config } = parseGatewayYaml(yaml, env);
-  const gateway = new ModelGateway({ config, log: () => {} });
+  const gateway = new ModelGateway({ config, log: () => {}, ...(prices ? { prices } : {}) });
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createGatewayRoutes(gateway), fetch: () => new Response("nope", { status: 404 }) });
   started.push({ stop: () => server.stop(true) });
   const base = `http://127.0.0.1:${server.port}${GATEWAY_PREFIX}`;
@@ -157,6 +161,24 @@ describe("Messages passthrough", () => {
     expect(seen.headers["anthropic-version"]).toBe("2023-06-01");
     expect(JSON.parse(seen.body)).toEqual({ model: "deepseek-chat", max_tokens: 5, messages: [{ role: "user", content: "hi" }], metadata: { user_id: "x" } });
     expect(gateway.traces.get(grant.run)).toMatchObject({ requests: 1, served: "ds/deepseek-chat", tried: ["ds/deepseek-chat"], usage: { inputTokens: 11, outputTokens: 7, cacheReadTokens: 3, cacheWriteTokens: 0 } });
+  });
+
+  test("each answer is costed at the answering model's price; a model without one leaves the run unpriced", async () => {
+    const v = vendor(() => json(message("hello")));
+    started.push(v);
+    const home = await mkdtemp(join(tmpdir(), "gw-prices-"));
+    await Bun.write(join(home, PRICES_FILE), "ds/deepseek-chat: [2, 8, 0.5]\n");
+    const prices = new PriceBook({ home, fetch: (async () => new Response("offline", { status: 503 })) as unknown as typeof fetch, log: () => {} });
+    await prices.load();
+    const { post, gateway, grant } = serve(`providers:\n  ds: { messages: '${v.url}/anthropic', apiKeyEnv: K }\n`, { K: "sk" }, prices);
+    await post("/v1/messages", { model: "ds/deepseek-chat", max_tokens: 5, messages: [] });
+    await post("/v1/messages", { model: "ds/deepseek-chat", max_tokens: 5, messages: [] });
+    // 11 in at $2, 7 out at $8, 3 cache reads at $0.5, twice.
+    expect(gateway.traces.get(grant.run)?.costUsd).toBeCloseTo(2 * (11 * 2 + 7 * 8 + 3 * 0.5) / 1e6, 12);
+    await post("/v1/messages", { model: "ds/other", max_tokens: 5, messages: [] });
+    const trace = gateway.traces.get(grant.run)!;
+    expect(trace.costUsd).toBeUndefined();
+    expect(trace.unpriced).toEqual(["ds/other"]);
   });
 
   test("x-api-key for a provider that wants it", async () => {

@@ -82,8 +82,11 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
       const t = target();
       if ("error" in t) return { ok: false, error: t.error, backend };
       const outcome = await runApi(input, { apiKey: t.apiKey, apiUrl: t.apiUrl, fetch: doFetch, signal });
-      const served = t.run ? deps.gateway!.trace(t.run)?.served : undefined;
-      return served ? { ...outcome, served } : outcome;
+      if (!t.run) return outcome;
+      // Through the built-in gateway: what answered, and its cost at that model's price, from the run's trace.
+      const trace = deps.gateway!.trace(t.run);
+      const { costUsd: _, ...rest } = outcome;
+      return { ...rest, ...(trace?.served ? { served: trace.served } : {}), ...(trace?.costUsd !== undefined ? { costUsd: trace.costUsd } : {}) } as typeof outcome;
     },
     runAgent: () => Promise.reject(new Unsupported(spec.name, "agent runs")),
     chat: () => {

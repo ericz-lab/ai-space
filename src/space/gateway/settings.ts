@@ -11,6 +11,7 @@ import { GATEWAY_FILE, GATEWAY_PRESETS, parseGatewayYaml, setGatewayTiersText, s
 import { GatewayEditError, PAGE_KEY_PREFIX, type ProviderEntry, editProblem, pageKeyVar, removeEnvKeysText, setEnvKeyText, setGroupsText, setProviderText } from "./edit.ts";
 import type { ModelGateway } from "./service.ts";
 import { GATEWAY_AUTH, GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN, GATEWAY_TIERS, type GatewayAuth, type GatewayConfig, type GatewayProvider, type GatewayTier, type GatewayTiers } from "./types.ts";
+import { PRICES_FILE } from "./prices.ts";
 import { VENDORS, customList, fetchModelList, presetList, redact, testProvider } from "./vendors.ts";
 
 /**
@@ -176,6 +177,12 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
       }
     }
     const readOnly = text !== undefined ? editProblem(text, o.env) : undefined;
+    await o.gateway.prices?.reload().catch(() => {});
+    /** Each listed model's effective price and where it came from; null: none, its calls go unpriced. */
+    const pricesOf = (p: GatewayProvider) => Object.fromEntries(p.models.map((m) => {
+      const found = o.gateway.prices?.lookupSync(p, m);
+      return [m, found ? { ...found.price, source: found.source } : null];
+    }));
     const providers = await Promise.all(
       (config?.providers ?? []).map(async (p) => {
         const l = live.providers.find((x) => x.name === p.name);
@@ -190,6 +197,7 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
           ...(config!.off[p.name] ? { off: config!.off[p.name] } : {}),
           ...(l?.resting ? { resting: l.resting } : {}),
           models: p.models,
+          ...(o.gateway.prices ? { prices: pricesOf(p) } : {}),
           usedBy: usedBy(config!, p.name),
         };
       }),
@@ -212,6 +220,7 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
       models: live.models,
       imageModels: live.imageModels,
       presets: presetList(),
+      ...(o.gateway.prices ? { pricing: { file: join(o.home, PRICES_FILE), ...o.gateway.prices.status() } } : {}),
       runtimes,
       offer: { claude: Boolean(o.claude()) },
     });

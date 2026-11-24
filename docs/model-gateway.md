@@ -104,6 +104,24 @@ MiniMax, Kimi and DashScope each run a China site and an international site, and
 
 Each base answered an unauthenticated Messages call with 401 or 403 on 2026-11-24. The list is `GATEWAY_SITES` in `src/space/gateway/config.ts`.
 
+## Prices
+
+What a call through the built-in gateway costs is worked out by the gateway itself, per answer: the tokens the vendor's `usage` reported, at the price of the model that answered, at that provider. A run's answers are summed in its [trace](#trace-not-a-second-ledger) (`costUsd`), and the `claude-code` and `anthropic-api` runtimes put that figure on the ledger row. An answer from a model without a price makes the whole run unpriced (the trace lists it under `unpriced`), so the row has no cost rather than a low one. A price is one provider's tariff for one model, in USD per million tokens, and is looked for in this order:
+
+1. `<workspace>/gateway-prices.yaml`, the owner's price for `provider/model`;
+2. the same file's `provider/*`, for every model of that provider (a relay's discount, a plan);
+3. [models.dev](https://models.dev)'s catalogue, for the models.dev provider that matches the provider: by preset and [site](#china-and-international-sites) (`minimax` → `minimax` or `minimax-cn`, `kimi` → `moonshotai` or `moonshotai-cn`, `dashscope` → `alibaba` or `alibaba-cn`, `zhipu` → `zhipuai`, `zai`, `deepseek`, `anthropic`, `openai`, `groq`), or, for a provider written out with its URL, the one models.dev lists at that host when exactly one does. The model id is matched exactly, then ignoring case; a variant is never priced from a similar name.
+
+```yaml
+# gateway-prices.yaml: input, output[, cache read, cache write], USD per million tokens
+deepseek/deepseek-v4-pro: [1.32, 3.96, 0.044, 1.32]
+relay/*: [0.5, 2]        # every model of provider "relay"
+```
+
+A missing cache price is the input price. models.dev's long-context tiers apply: once a call's prompt (input, cache reads and writes) is over a tier's size, the whole call is at that tier's prices. The file is its own, not a key of `gateway.yaml`, whose parser refuses unknown keys, so an older ai-space keeps its gateway on a rollback. It is re-read when it changes; a file that does not parse keeps the prices read before, and Settings shows why. models.dev is fetched at boot when the cached copy (`run/models-dev-prices.json`, only the prices) is missing or a day old; a failed fetch keeps the copy. Settings → Gateway lists each provider's models with their price (input / output) and source, and names the ones without a price.
+
+Not done: a price is applied when the call is made, so changing one does not restate earlier rows (magpie re-prices when it reads); speech and pictures through the gateway are not costed here; the price file is edited by hand.
+
 ## Routes
 
 Under `/api/model-gateway`, which is the base a child process gets. Claude Code appends `/v1/messages?beta=true`; the query string is passed on.
@@ -144,7 +162,7 @@ A Claude Code process holds its token in its environment, so commands that proce
 
 The gateway stores no prompt or reply content. Per run token it keeps how many requests it forwarded, every `provider/model` it tried, the last one that answered (`served`), the token counts the answers reported (summed), and the last error. The trace is held in memory, at most 2,000 runs (oldest dropped first) and none older than a day. The model service and the speech service stay the owners of the ledgers.
 
-- A `claude-code` runtime with `gateway: space` reads its run's trace after an answer and sets the outcome's `served`. The call's [trace](model.md#trace) then names what answered, which a call through Claude Code could not do before. The CLI's own cost figure is dropped: it prices another vendor's model at Claude's list prices. Its token counts are kept.
+- A `claude-code` runtime with `gateway: space` reads its run's trace after an answer and sets the outcome's `served`. The call's [trace](model.md#trace) then names what answered, which a call through Claude Code could not do before. The CLI's own cost figure is dropped: it prices another vendor's model at Claude's list prices. Its token counts are kept, and the cost is the gateway's own, at the price of each model that answered ([Prices](#prices)).
 - An `anthropic-api` runtime with `gateway: space` does the same per call. For pictures, what served is named in the call's `text`.
 
 ## Runtimes
@@ -308,7 +326,7 @@ fallback:
 - **Finding it**: `MAGPIE_ADDR` when set, else the address the running gateway wrote to `gateway.json` in magpie's settings folder (`$XDG_CONFIG_HOME/magpie` or `~/.config/magpie`), else `127.0.0.1:3425`; then one `GET /v1/models` (no tokens spent). `src/space/runtimes/magpie.ts`.
 - **Adding it**: `space setup` offers it when the gateway answers and no runtime uses it yet. It asks for a model per tier and offers a routing group named for the tier (`basic`, `group/basic` or `ai-space-basic`, any case) as the default. Otherwise the tier is left empty, which means Claude Code's own model; the API form needs a model for at least one tier and fills the rest from the tier before. It then writes the runtime to `runtimes.yaml`: the Claude Code form when `claude` is installed, else the API form and `MAGPIE_API_KEY` in `.env`. Settings → Gateway shows the same four pickers, with the same suggested groups, and **Add as a runtime** (`POST /api/model/runtimes {"kind":"magpie","models":{...}}`). After adding, the runtime's own pickers are shown at once. Either way, a restart loads it.
 - **What answered**: magpie names the model that served a call in `X-Magpie-Model`, and an API call's [trace](model.md#trace) keeps it as `served`, so a group or magpie's own failover is visible in the ledger. A refused call's `Retry-After` is appended to the error (`(retry after 30s)`) and sets how long the cell rests.
-- **Cost**: priced like any API call when the model it names has a list price here, else left without one; magpie's own Usage page has its figures.
+- **Cost**: priced like any API call when the model it names has a list price here, else left without one; magpie's own Usage page has its figures. The built-in gateway's [prices](#prices) do not apply to magpie.
 - **Not done here**: the Codex CLI through magpie (its provider settings), and `served` for calls made through Claude Code via magpie (the CLI does not pass magpie's headers on; the built-in gateway's trace does this for `gateway: space`).
 
 ## Code

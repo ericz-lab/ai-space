@@ -183,6 +183,7 @@ export function ProviderRow({ p, sites, editable, busy, run, lang, t }: { p: Gat
       <small>{[p.messages && `messages ${p.messages}`, p.openai && `openai ${p.openai}`].filter(Boolean).join(" · ")}</small>
       <small>{keyText(p, t)}</small>
       <small>{p.models.length ? t("gateway.models", { n: p.models.length, list: p.models.slice(0, 6).join(", ") + (p.models.length > 6 ? ", …" : "") }) : t("gateway.noModels")}</small>
+      {p.prices && p.models.length > 0 && <PriceList p={p} t={t} />}
       <div className="gw-actions">
         <button className="btn2" disabled={busy || testing} onClick={() => void test()}>{testing ? t("gateway.testing") : t("gateway.test")}</button>
         {editable && <button className="btn2" disabled={busy} onClick={() => setOpen(open === "edit" ? "" : "edit")}>{t("gateway.edit")}</button>}
@@ -204,6 +205,25 @@ export function ProviderRow({ p, sites, editable, busy, run, lang, t }: { p: Gat
       {open === "key" && <KeyForm busy={busy} onSave={(key) => void run(() => sendJson("PUT", `/api/model/gateway/providers/${p.name}/key`, { key }), t("gateway.keyReplaced", { name: p.name })).then((ok) => ok && setOpen(""))} t={t} />}
       {open === "remove" && <RemoveForm p={p} busy={busy} onRemove={(key) => void run(() => sendJson("DELETE", `/api/model/gateway/providers/${p.name}?key=${key}`), t("gateway.removed", { name: p.name }))} onCancel={() => setOpen("")} t={t} />}
     </div>
+  );
+}
+
+const usd = (n: number) => `$${n < 0.01 && n > 0 ? n.toPrecision(2) : Number(n.toFixed(4))}`;
+
+/** Each model's price (input / output, USD per million tokens), its source on hover; unpriced ones said so. */
+export function PriceList({ p, t }: { p: GatewayProviderInfo; t: T }) {
+  const rows = p.models.map((m) => [m, p.prices?.[m] ?? null] as const);
+  const unpriced = rows.filter(([, v]) => !v).map(([m]) => m);
+  return (
+    <small className="gw-prices">
+      {rows.filter(([, v]) => v).map(([m, v]) => (
+        <span key={m} title={[v!.cacheRead !== undefined && t("gateway.priceCache", { read: usd(v!.cacheRead), write: usd(v!.cacheWrite ?? v!.input) }), v!.tiers?.length && t("gateway.priceTiers"), t("gateway.priceSource", { source: v!.source })].filter(Boolean).join(" · ")}>
+          {m} {usd(v!.input)} / {usd(v!.output)}
+        </span>
+      ))}
+      {unpriced.length > 0 && <span className="gw-unpriced">{t("gateway.unpriced", { list: unpriced.join(", ") })}</span>}
+      <span className="cli-dim">{t("gateway.priceUnit")}</span>
+    </small>
   );
 }
 

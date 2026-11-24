@@ -8,7 +8,7 @@ import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, c
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { availabilityOf, probeRuntime } from "./space/model/health.ts";
-import { ModelGateway, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
+import { ModelGateway, PriceBook, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
 import { createInventoryRoutes, machineRow, peerRow } from "./space/model/inventory.ts";
 import { createGatewaySettingsRoutes } from "./space/gateway/settings.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
@@ -184,7 +184,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const gatewayLoaded = await loadGateway(ws.home, env).then((l) => ({ loaded: l, error: undefined }), (e: Error) => ({ loaded: undefined, error: e.message }));
   if (gatewayLoaded.error) console.error(`[model-gateway] ${gatewayLoaded.error}; the built-in model gateway answers 503 until it is fixed`);
   for (const w of gatewayLoaded.loaded?.warnings ?? []) console.warn(`[model-gateway] ${w}`);
-  const modelGateway = new ModelGateway({ ...(gatewayLoaded.loaded ? { config: gatewayLoaded.loaded.config } : {}), ...(gatewayLoaded.error ? { error: gatewayLoaded.error } : {}) });
+  // What its calls cost: gateway-prices.yaml, then models.dev's catalogue, cached in run/ and refreshed daily.
+  const gatewayPrices = new PriceBook({ home: ws.home });
+  await gatewayPrices.load();
+  const modelGateway = new ModelGateway({ ...(gatewayLoaded.loaded ? { config: gatewayLoaded.loaded.config } : {}), ...(gatewayLoaded.error ? { error: gatewayLoaded.error } : {}), prices: gatewayPrices });
   const loaded = await loadRuntimes(ws.home, env);
   for (const w of loaded.warnings) console.warn(`[runtimes] ${w}`);
   for (const r of loaded.config.runtimes) if ("gateway" in r && r.gateway === "space" && !gatewayLoaded.loaded) console.error(`[runtimes] runtime ${r.name} answers through the built-in model gateway, but ${gatewayLoaded.error ?? "there is no gateway.yaml in the workspace"}`);
