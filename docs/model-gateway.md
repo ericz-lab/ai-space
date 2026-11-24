@@ -90,7 +90,19 @@ A preset fills in the bases only. The key always comes from `apiKeyEnv`, and a b
 | `openai` | openai `https://api.openai.com/v1` | bearer | https://developers.openai.com/api/reference/resources/audio |
 | `groq` | openai `https://api.groq.com/openai/v1` (audio) | bearer | https://console.groq.com/docs/speech-to-text |
 
-Not covered by a preset, so the base must be written out: Kimi's and MiniMax's China hosts, DashScope's workspace and plan hosts, and any other vendor. For the Z.ai, Zhipu, Kimi, MiniMax and DashScope endpoints, none of those pages say whether `x-api-key` is accepted or whether `count_tokens` exists. The bearer default is what they document.
+Not covered by a preset, so the base must be written out: DashScope's workspace and plan hosts, and any other vendor. For the Z.ai, Zhipu, Kimi, MiniMax and DashScope endpoints, none of those pages say whether `x-api-key` is accepted or whether `count_tokens` exists. The bearer default is what they document.
+
+#### China and international sites
+
+MiniMax, Kimi and DashScope each run a China site and an international site, and an account (with its key) works on one of them only: a key made on platform.minimaxi.com gets `401 invalid api key` at `api.minimax.io`. Settings → Gateway shows a **Site** switch (International / China) for these presets when adding or editing a provider. Picking the preset's own site leaves the base alone; picking the other writes its base as the provider's `messages` override, so `gateway.yaml` stays `preset:` plus a base. Z.ai and Zhipu are the same pair, kept as two presets.
+
+| preset | international | China |
+| --- | --- | --- |
+| `minimax` | `https://api.minimax.io/anthropic` (the preset's) | `https://api.minimaxi.com/anthropic` |
+| `kimi` | `https://api.moonshot.ai/anthropic` (the preset's) | `https://api.moonshot.cn/anthropic` |
+| `dashscope` | `https://dashscope-intl.aliyuncs.com/apps/anthropic` | `https://dashscope.aliyuncs.com/apps/anthropic` (the preset's) |
+
+Each base answered an unauthenticated Messages call with 401 or 403 on 2026-11-24. The list is `GATEWAY_SITES` in `src/space/gateway/config.ts`.
 
 ## Routes
 

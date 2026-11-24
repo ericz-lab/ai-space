@@ -44,6 +44,19 @@ export const GATEWAY_PRESETS: Record<string, Pick<GatewayProvider, "messages" | 
   groq: { openai: "https://api.groq.com/openai/v1", auth: "bearer" },
 };
 
+/**
+ * The vendors with a China and an international site: one account works on one site only, so a key
+ * from platform.minimaxi.com is refused at api.minimax.io and the other way round. The preset's own
+ * base is one of the two; Settings switches to the other by writing it as the provider's base
+ * override. Each base answered an unauthenticated Messages call with 401 or 403 on 2026-11-24.
+ */
+export type GatewaySite = "intl" | "cn";
+export const GATEWAY_SITES: Record<string, Record<GatewaySite, Pick<GatewayProvider, "messages" | "openai">>> = {
+  minimax: { intl: { messages: "https://api.minimax.io/anthropic" }, cn: { messages: "https://api.minimaxi.com/anthropic" } },
+  kimi: { intl: { messages: "https://api.moonshot.ai/anthropic" }, cn: { messages: "https://api.moonshot.cn/anthropic" } },
+  dashscope: { intl: { messages: "https://dashscope-intl.aliyuncs.com/apps/anthropic" }, cn: { messages: "https://dashscope.aliyuncs.com/apps/anthropic" } },
+};
+
 export type LoadedGateway = { config: GatewayConfig; warnings: string[] };
 
 export function parseGatewayYaml(text: string, env: Record<string, string | undefined> = process.env): LoadedGateway {

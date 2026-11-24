@@ -62,6 +62,18 @@ test("adding: the presets, Custom, a password field for the key, and the preset'
   expect(html).toContain("never shown again");
 });
 
+test("adding a vendor with two sites: the Site switch, its own site selected; vendors without one have no switch", () => {
+  const sites = { intl: { messages: "https://api.minimax.io/anthropic" }, cn: { messages: "https://api.minimaxi.com/anthropic" } };
+  const presets: GatewayPreset[] = [{ name: "minimax", label: "MiniMax", messages: "https://api.minimax.io/anthropic", auth: "bearer", hasList: true, defaults: ["MiniMax-M3"], sites }];
+  const html = renderToStaticMarkup(<AddProvider presets={presets} taken={[]} busy={false} run={run} onDone={noop} t={t} />);
+  expect(html).toContain(">Site<");
+  expect(html).toMatch(/class="btn2 primary" aria-pressed="true" title="https:\/\/api.minimax.io\/anthropic">International</);
+  expect(html).toMatch(/class="btn2" aria-pressed="false" title="https:\/\/api.minimaxi.com\/anthropic">China</);
+  expect(html).toContain("A key works only on the site it was made on.");
+  const plain = renderToStaticMarkup(<AddProvider presets={[{ ...presets[0]!, sites: undefined }]} taken={[]} busy={false} run={run} onDone={noop} t={t} />);
+  expect(plain).not.toContain(">Site<");
+});
+
 test("the model chooser: ticked models and a field for ids typed by hand; groups with their order and the controls to change it", () => {
   const chooser = renderToStaticMarkup(<ModelChooser selected={["a/b-1"]} onChange={noop} fetchList={async () => ({ source: "vendor", models: [], defaults: [] })} busy={false} t={t} />);
   expect(chooser).toContain("Load the vendor&#x27;s list");

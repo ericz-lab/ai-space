@@ -373,6 +373,7 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .gw-field .setselect, .gw-typed .setselect { width: 100%; min-width: 0; font-family: inherit; }
 .gw-field input.setselect, .gw-typed input.setselect { cursor: text; }
 .gw-bases { overflow-wrap: anywhere; }
+.gw-sites { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .gw-models { display: flex; flex-direction: column; gap: 6px; }
 .gw-models-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
 .gw-model-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 4px 12px; max-height: 220px; overflow-y: auto; }
