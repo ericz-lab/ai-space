@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseProvidersYaml } from "./config.ts";
+import { builtinSpeech, parseProvidersYaml } from "./config.ts";
 import { SpeechService } from "./service.ts";
 import { SpeechStore } from "./store.ts";
 import { ProviderError, SpeechError, type SpeechAdapter, type SpeechCapability, type SpeechKind } from "./types.ts";
@@ -188,6 +188,29 @@ describe("status", () => {
     ]);
     expect(svc.status()).toMatchObject({ configured: true, default: { asr: "gpu" }, usage24h: { calls: 0 } });
     expect(svc.canTranscribe()).toBe(true);
+  });
+
+  test("without a file the built-in provider counts only while it is somewhere", async () => {
+    const config = builtinSpeech();
+    let located = false;
+    const studio = fake("voice-studio");
+    studio.state = () => ({ where: "", machine: "", located });
+    const svc = new SpeechService({ config, source: "builtin", adapters: [studio], store: new SpeechStore(":memory:"), log: () => {} });
+    // Nowhere: no provider at all, and nothing names the app this space never had.
+    const e = (await svc.transcribe(SPACE, FILE).catch((x) => x)) as SpeechError;
+    expect([e.status, e.code]).toEqual([503, "no_provider"]);
+    expect(e.message).toContain("no speech provider is set up");
+    expect(e.message).not.toContain("voice-studio");
+    expect(svc.status()).toMatchObject({ configured: true, source: "builtin", default: {}, providers: [] });
+    expect(svc.canTranscribe()).toBe(false);
+    // It appears (the app is installed, or a peer lists it): the default is back with no reload.
+    located = true;
+    expect((await svc.transcribe(SPACE, FILE)).result.text).toBe("heard by voice-studio");
+    expect(svc.status().default).toEqual({ asr: "voice-studio", tts: "voice-studio", live: "voice-studio" });
+    // A file that names it is the owner's: kept as written wherever it is.
+    located = false;
+    const written = new SpeechService({ config, source: "file", adapters: [studio], store: new SpeechStore(":memory:"), log: () => {} });
+    expect(written.status().providers.map((c) => c.provider)).toEqual(["voice-studio"]);
   });
 
   test("a configuration that did not load refuses every call with its reason", async () => {

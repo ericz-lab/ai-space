@@ -77,6 +77,9 @@ export type SpeechCell = {
 
 type Candidate<T> = { adapter: SpeechAdapter; data: T };
 type Plan<T> = { first: string; candidates: Candidate<T>[]; trace: CandidateTrace[] };
+
+const NO_PROVIDERS: SpeechConfig = { providers: [], default: {}, fallback: {}, voices: {}, off: {} };
+
 /** Why one candidate cannot take the call, and what status refusing the call answers when it is the first choice. */
 type Skip = { skip: string; status: number; code?: string };
 
@@ -101,6 +104,17 @@ export class SpeechService {
   }
 
   /**
+   * The config calls and status go by. Without a `speech:` section the built-in provider counts only
+   * while it is somewhere (on this machine or a peer that lists it): a space that has none of it has
+   * no speech provider, and says so without naming an app it never had (docs/speech.md#built-in).
+   */
+  private active(): SpeechConfig | undefined {
+    const c = this.opts.config;
+    if (!c || this.opts.source !== "builtin") return c;
+    return c.providers.every((p) => this.adapters.get(p.name)?.state().located) ? c : NO_PROVIDERS;
+  }
+
+  /**
    * Read `providers.yaml` again while ai-space runs (Settings → Gateway → Speech saved it, or the
    * model gateway it speaks through changed): the next call uses the new providers. A call already
    * running keeps the adapter it started with; status cells and rests are kept by provider name.
@@ -122,11 +136,11 @@ export class SpeechService {
    * cannot is a refusal; one that rests or cannot be reached is tried after the others.
    */
   private plan<T>(role: SpeechRole, caller: SpeechCaller, pinned: string | undefined, prepare: (a: SpeechAdapter, first: boolean) => Skip | { data: T }): Plan<T> {
-    const config = this.opts.config;
+    const config = this.active();
     if (!config) throw new SpeechError(503, this.opts.configError ?? "speech is not configured", undefined, "unavailable");
     const capability = ROLE_CAPABILITY[role];
     const first = pinned ?? config.default[role];
-    if (!first) throw new SpeechError(503, `no ${role} provider: set speech.default.${role} in providers.yaml`, undefined, "no_provider");
+    if (!first) throw new SpeechError(503, config.providers.length ? `no ${role} provider: set speech.default.${role} in providers.yaml` : `no speech provider is set up on this space: add one in Settings → Gateway → Speech, or in providers.yaml`, undefined, "no_provider");
     if (!this.adapters.has(first)) throw new SpeechError(404, `no speech provider named ${first}`, undefined, "no_provider");
     const names = pinned ? [first] : [first, ...(config.fallback[role] ?? []).filter((n) => n !== first)];
     const localOnly = caller.app !== "space" && Boolean(this.opts.localOnly?.(caller.app));
@@ -251,7 +265,7 @@ export class SpeechService {
    */
   async speak(caller: SpeechCaller, input: { text: string; voices: string[]; provider?: string; signal?: AbortSignal }): Promise<SpeakResult & { call: SpeechCall; voices: string[] }> {
     const startedAt = this.now();
-    const config = this.opts.config;
+    const config = this.active();
     let pinned = input.provider;
     const asked = input.voices.map((v) => {
       const slash = v.indexOf("/");
@@ -359,7 +373,7 @@ export class SpeechService {
 
   /** Whether a file could be transcribed now: the default ASR provider or a fallback is somewhere (`GET /api/voice`). */
   canTranscribe(): boolean {
-    const config = this.opts.config;
+    const config = this.active();
     if (!config?.default.asr) return false;
     return [config.default.asr, ...(config.fallback.asr ?? [])].some((name) => {
       const a = this.adapters.get(name);
@@ -368,7 +382,7 @@ export class SpeechService {
   }
 
   cells(): SpeechCell[] {
-    const config = this.opts.config;
+    const config = this.active();
     if (!config) return [];
     const restingCells = new Map(this.health.list().map((c) => [c.runtime, c]));
     return config.providers.map((spec) => {
@@ -400,7 +414,7 @@ export class SpeechService {
     configured: boolean; source: string; configError?: string; warnings: string[];
     default: SpeechConfig["default"]; fallback: SpeechConfig["fallback"]; voices: SpeechConfig["voices"]; providers: SpeechCell[]; usage24h: SpeechTotals;
   } {
-    const config = this.opts.config;
+    const config = this.active();
     return {
       configured: Boolean(config),
       source: this.opts.source ?? "builtin",
@@ -416,7 +430,7 @@ export class SpeechService {
 
   /** Each provider's own voices: asked of the ones that can say, errors kept per provider. */
   async voices(signal?: AbortSignal): Promise<{ provider: string; voices?: string[]; error?: string }[]> {
-    const config = this.opts.config;
+    const config = this.active();
     if (!config) return [];
     return Promise.all(
       config.providers
