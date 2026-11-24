@@ -143,6 +143,8 @@ h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 
 .omni-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .omni-title em { font-style: normal; color: var(--muted); }
 .omni-kind { flex: none; font-size: 12px; color: var(--muted); }
+.omni-guessing { color: var(--muted); cursor: default; }
+.omni-guessing .omni-resolving { height: auto; }
 .omni-list kbd { flex: none; font: inherit; font-size: 12px; color: var(--muted); }
 .omni-ask { border-top: 1px solid var(--hairline); margin-top: 4px; }
 .omni-list li.omni-ask:first-child { border-top: 0; margin-top: 0; }

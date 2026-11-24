@@ -210,6 +210,36 @@ handles the whole request. `finance-news-feed/news` remains a standalone read AP
 action for callers that explicitly choose it; it is not the handler for a matching
 financial-news agent intent.
 
+## Model interpretation
+
+The last layer, and the only one that calls a model. When the text has more than
+eight units (a number such as `15:30` or `2026` is one unit, a Latin word is one,
+any other letter such as a Chinese character is one; spaces and punctuation do
+not count) and is not arithmetic or a currency conversion, the command box also
+calls `POST /api/shortcuts/interpret` `{ text, timezone }`, 600 ms after typing
+stops and in parallel with `resolve`. It never delays or replaces the other
+layers: while the call runs, a "reading with a model" line sits above "Ask Space
+Assistant"; its answer becomes one row there, after every deterministic row, and
+the highlight does not move to it.
+
+The server sends the basic tier of the space's default runtime (`model: basic`,
+slim, no tools, thinking off, 20 s, app `space`, tag `shortcut-interpret` in the
+ledger) the date and zone, the available actions (id, titles, effect, inputs with
+types and options; calculator and conversion left out) and the enabled,
+available agent intents (id and title), and asks for one JSON object: an action
+with arguments, an agent intent, or none. The answer is checked against the
+catalogue: an unknown or unavailable id is no suggestion, and every argument goes
+through the same input check as a sentence-pattern slot, so a value the form
+would not accept is dropped and the action's defaults stay.
+
+Picking an action row opens its form with what the model filled; it never runs by
+itself, even a complete read: Create, Run or the read's button submits it as
+usual. Picking an agent row starts that agent intent with the original sentence,
+as a pattern match would. Typing on aborts the request, which cancels the model
+call. The answer is `{ interpretation: null, skipped: true }` for short text,
+`{ interpretation: null, failed: true }` when the model call failed, and 503 when
+the space has no model service.
+
 ## Built-ins
 
 - **Calculator** (`space/calc`, `src/space/shortcuts/calc.ts`, shared with the page): numbers (decimals, `1,234.5` grouping, full-width digits), `+ - * / × ÷`, `^` or `**` (right-associative; `-2^2` is −4), postfix `%` (÷100), parentheses. A recursive-descent parser, never `eval`. Results are rounded to 12 significant digits and shown with up to 10 decimals; division by zero and non-finite results are errors. The box treats text as arithmetic only when it parses and holds an operator.
@@ -232,6 +262,7 @@ The panel's routes, like `/api/voice`: no token, browser writes held to the pane
 | --- | --- |
 | `POST /api/shortcuts/resolve` | `{ text, timezone }` → `{ intents, agentIntents, ambiguous }`; deterministic resolution only, never executes. Text is bounded to 4000 characters; timezone is a required valid IANA name. |
 | `GET /api/shortcuts/actions` | The catalogue: built-ins, app actions here and on peers, unfilled slots, each with `available` / `reason`. |
+| `POST /api/shortcuts/interpret` | `{ text, timezone }` → `{ interpretation, skipped, failed? }`; the basic-tier model's suggestion (an action with `args`, or `{ kind: "agent", intent }`), checked against the catalogue; never executes. |
 | `POST /api/shortcuts/patterns` | `{ action, peer?, patterns }` → updated catalogue; backend-managed custom sentence patterns. |
 | `POST /api/shortcuts/runs` | `{ action, peer?, args, timezone, requestId }` → `{ run, duplicate }` (201, or 200 for a repeat). |
 | `GET /api/shortcuts/runs?limit` | Recent runs, newest first. |

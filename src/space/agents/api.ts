@@ -3,6 +3,7 @@ import { bearer, tokenEquals } from "../auth.ts";
 import { intents } from "../shortcuts/resolve.ts";
 import type { Action } from "../shortcuts/types.ts";
 import { matchAgentIntents, parseAgentIntent, type AgentIntentView } from "../shortcuts/agent-intents.ts";
+import { SYSTEM as INTERPRET_SYSTEM, buildPrompt as interpretPrompt, parseInterpretation, wantsInterpretation } from "../shortcuts/interpret.ts";
 import type { ShortcutStore } from "../shortcuts/store.ts";
 import { isTimezone } from "../shortcuts/time.ts";
 import { skillContext } from "./skill-context.ts";
@@ -47,6 +48,7 @@ import { fixerSystemPrompt } from "../feedback/prompt.ts";
  *   GET  /api/agents/:app/:agent/watch             SSE: the agent's runs starting and ending (also those it starts by itself) and its conversations' background jobs
  *   GET  /api/agents/:app/:agent/sessions         recent sessions
  *   GET  /api/agents/:app/:agent/sessions/:sid    restored transcript; an `ai` message carries the `cards` of its tool outputs
+ *   POST /api/shortcuts/interpret                 { text, timezone } → a basic-tier model's guess: one action with its form filled, or one agent intent; never runs
  *   POST /api/agents/cards/state                   { agent, card } → the card's items as its app answers them now (docs/chat-cards.md)
  *   POST /api/agents/cards/action                  { token, card, action, items? } → run a card's action, while its turn is the conversation's latest
  *
@@ -57,6 +59,11 @@ export type AgentsApiOptions = {
   ws: Workspace;
   shortcuts?: ShortcutStore;
   actionCatalogue?: () => Action[];
+  /**
+   * One basic-tier model call for the command box's last layer (docs/shortcuts.md#model-interpretation):
+   * the answer text, or undefined when the call failed. Absent, `/api/shortcuts/interpret` answers 503.
+   */
+  interpret?: (prompt: string, system: string, signal: AbortSignal) => Promise<string | undefined>;
   registry: AppRegistry;
   layout: LayoutStore;
   sessions: SessionStore;
@@ -374,6 +381,26 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         // an ordinary action as an implicit fallback for a matching skill intent.
         const selected = agents.length ? [] : found;
         return json({ ok: true, intents: selected, agentIntents: agents, ambiguous: agents.length ? agents.length > 1 : selected.some((i) => i.kind === "action" && i.ambiguous) });
+      }),
+    },
+    "/api/shortcuts/interpret": {
+      POST: wrap(async (req) => {
+        const body = await req.json().catch(() => null);
+        if (!body || typeof body.text !== "string" || body.text.length > 4000 || typeof body.timezone !== "string" || !isTimezone(body.timezone)) {
+          return error(400, "Expected text (at most 4000 characters) and an IANA timezone");
+        }
+        if (!opts.interpret) return error(503, "Model interpretation is unavailable");
+        // Short text, arithmetic and conversions never reach the model.
+        if (!wantsInterpretation(body.text)) return json({ ok: true, skipped: true, interpretation: null });
+        const actions = opts.actionCatalogue?.() ?? [];
+        const enabled = (opts.shortcuts?.agentIntents() ?? []).filter((i) => i.enabled).map((i) => ({ ...i, available: true }));
+        const agents = (await availableIntents(enabled)).filter((i) => i.available);
+        const now = Date.now();
+        // The request's signal: a person who typed on cancels the call.
+        const answer = await opts.interpret(interpretPrompt(body.text, actions, agents, body.timezone, now), INTERPRET_SYSTEM, req.signal);
+        const found = answer === undefined ? null : parseInterpretation(answer, actions, agents, body.timezone, now);
+        const interpretation = found?.kind === "agent" ? { kind: "agent", intent: agents.find((i) => i.id === found.id)! } : found;
+        return json({ ok: true, skipped: false, interpretation, ...(answer === undefined ? { failed: true } : {}) });
       }),
     },
     "/api/shortcuts/agent-intents": {

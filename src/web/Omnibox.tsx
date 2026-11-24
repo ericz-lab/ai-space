@@ -9,6 +9,8 @@ import { opensByDefault, rank } from "./omnibox.ts";
 import { parseKey } from "./screens.ts";
 import { type Intent, type RunResult, type RunView, actionText, browserZone, complete } from "./shortcuts.ts";
 import { LiveVoice, type VoiceState } from "./voice.ts";
+import { wantsInterpretation } from "../space/shortcuts/interpret.ts";
+import type { Action } from "../space/shortcuts/types.ts";
 import { Icon } from "./Tiles.tsx";
 
 // The home screen's command box (docs/panel.md#omnibox): one field that finds an app, agent, widget
@@ -30,7 +32,11 @@ let takenSignal = 0;
 const previews = new Map<string, { at: number; result: RunResult | { error: string } }>();
 const PREVIEW_TTL_MS = 60_000;
 /** A row of the list: something to run, an entry to open, or the question for the assistant. */
-type Row = { type: "agentIntent"; intent: AgentIntentView } | { type: "intent"; intent: Intent } | { type: "entry"; entry: Entry } | { type: "ask" };
+type Row = { type: "agentIntent"; intent: AgentIntentView } | { type: "intent"; intent: Intent } | { type: "entry"; entry: Entry } | { type: "guess"; guess: Guess } | { type: "ask" };
+/** The basic-tier model's reading of a longer sentence (`/api/shortcuts/interpret`): shown last, never run by itself. */
+type Guess = { kind: "action"; key: string; action: Action; args: Record<string, unknown> } | { kind: "agent"; intent: AgentIntentView };
+/** The model is asked only after a longer pause than the deterministic resolver. */
+const GUESS_DELAY_MS = 600;
 /** How many loose action matches (names, tasks) follow the library's entries. */
 const LOOSE = 3;
 
@@ -44,6 +50,8 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   const agentStarting = useRef(false);
   const [agentError, setAgentError] = useState("");
   const [resolving, setResolving] = useState(false);
+  const [guess, setGuess] = useState<{ query: string; guess: Guess | null } | null>(null);
+  const [guessing, setGuessing] = useState(false);
   const [panel, setPanel] = useState<{ intent: Intent; autoRun: boolean } | null>(null);
   const [running, setRunning] = useState(0);
   // Enter in the field while an action is open submits it, like its button.
@@ -78,20 +86,46 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     }, 180);
     return () => { active = false; clearTimeout(timer); };
   }, [q]);
+  // In parallel with the resolver: a sentence of more than eight units also goes to the basic-tier
+  // model. Typing on aborts the request, which cancels the model call on the server.
+  useEffect(() => {
+    setGuess(null);
+    const want = wantsInterpretation(q);
+    setGuessing(want);
+    if (!want) return;
+    const aborter = new AbortController();
+    const timer = setTimeout(() => {
+      fetch("/api/shortcuts/interpret", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: q, timezone: browserZone() }), signal: aborter.signal })
+        .then((r) => r.json() as Promise<{ ok: boolean; interpretation?: Guess | null }>)
+        .then((r) => { setGuess({ query: q, guess: r.ok ? r.interpretation ?? null : null }); setGuessing(false); })
+        .catch(() => { if (!aborter.signal.aborted) { setGuess({ query: q, guess: null }); setGuessing(false); } });
+    }, GUESS_DELAY_MS);
+    return () => { aborter.abort(); clearTimeout(timer); };
+  }, [q]);
+  const modelGuess = guess?.query === q ? guess.guess : null;
   const found = useMemo(() => resolution?.query === q ? resolution.intents : [], [resolution, q]);
   const agentMatches = useMemo(() => resolution?.query === q ? resolution.agentIntents : [], [resolution, q]);
   // Direct results and an action named at the start come first; loose matches after the entries.
   const rows = useMemo<Row[]>(() => {
     const first = found.filter((i) => i.kind !== "action" || i.strong);
     const loose = found.filter((i) => i.kind === "action" && !i.strong).slice(0, LOOSE);
-    if (agentMatches.length) return [...agentMatches.map((intent): Row => ({ type: "agentIntent", intent })), { type: "ask" }];
-    return [...first.map((intent): Row => ({ type: "intent", intent })), ...results.map((entry): Row => ({ type: "entry", entry })), ...loose.map((intent): Row => ({ type: "intent", intent })), { type: "ask" }];
-  }, [found, results, agentMatches]);
+    // The model's row goes last, unless an agent row above already names the same intent.
+    const tail: Row[] = modelGuess && !(modelGuess.kind === "agent" && agentMatches.some((a) => a.id === modelGuess.intent.id)) ? [{ type: "guess", guess: modelGuess }] : [];
+    if (agentMatches.length) return [...agentMatches.map((intent): Row => ({ type: "agentIntent", intent })), ...tail, { type: "ask" }];
+    return [...first.map((intent): Row => ({ type: "intent", intent })), ...results.map((entry): Row => ({ type: "entry", entry })), ...loose.map((intent): Row => ({ type: "intent", intent })), ...tail, { type: "ask" }];
+  }, [found, results, agentMatches, modelGuess]);
   const askIndex = rows.length - 1;
   const ambiguous = resolution?.query === q && resolution.ambiguous;
   const direct = agentMatches.length > 0 || found.length > 0 && (found[0]!.kind !== "action" || found[0]!.strong);
   // A new query highlights the row Enter would pick.
-  useEffect(() => setSel(ambiguous ? -1 : direct ? 0 : opensByDefault(q, results[0]) ? 0 : askIndex), [q, rows]);
+  useEffect(() => setSel(ambiguous ? -1 : direct ? 0 : opensByDefault(q, results[0]) ? 0 : askIndex), [q, resolution, results]);
+  // The model's row arriving later does not move the highlight off the row it was on.
+  const hadGuess = useRef(false);
+  useEffect(() => {
+    const has = rows.some((r) => r.type === "guess");
+    if (has && !hadGuess.current) setSel((i) => (i === askIndex - 1 ? askIndex : i));
+    hadGuess.current = has;
+  }, [rows]);
   // Typing again leaves the action that was opened.
   useEffect(() => { setPanel(null); setAgentError(""); }, [q]);
 
@@ -132,14 +166,17 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     if (recorder.current || agentStarting.current || i < 0) return;
     const row = rows[i];
     if (!row || row.type === "ask") ask();
-    else if (row.type === "agentIntent") {
-      if (!row.intent.available) return;
+    else if (row.type === "agentIntent" || (row.type === "guess" && row.guess.kind === "agent")) {
+      const intent = row.type === "agentIntent" ? row.intent : (row.guess as Extract<Guess, { kind: "agent" }>).intent;
+      if (!intent.available) return;
       agentStarting.current = true;
       setAgentError("");
-      void onAgentIntent(row.intent, q).then(reset).catch((e) => setAgentError((e as Error).message)).finally(() => { agentStarting.current = false; });
+      void onAgentIntent(intent, q).then(reset).catch((e) => setAgentError((e as Error).message)).finally(() => { agentStarting.current = false; });
     }
+    // A model's guess only fills the form: even a complete read waits for its button.
+    else if (row.type === "guess" && row.guess.kind === "action") setPanel({ intent: { kind: "action", key: row.guess.key, action: row.guess.action, args: row.guess.args, strong: false }, autoRun: false });
     else if (row.type === "entry") open(row.entry);
-    else runIntent(row.intent);
+    else if (row.type === "intent") runIntent(row.intent);
   };
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -250,6 +287,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
                 {i === sel && row.intent.available && <kbd>↵</kbd>}
               </li>
             );
+            if (row.type === "guess") return <GuessRow key={`guess:${row.guess.kind === "agent" ? row.guess.intent.id : row.guess.key}`} guess={row.guess} on={i === sel} onHover={() => setSel(i)} onPick={() => act(i)} />;
             if (row.type === "intent") return <IntentRow key={row.intent.key} intent={row.intent} on={i === sel} onHover={() => setSel(i)} onPick={() => act(i)} />;
             const e = row.entry;
             return (
@@ -266,6 +304,13 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
               </li>
             );
           })}
+          {guessing && guess?.query !== q && (
+            <li className="omni-guessing" role="status" aria-live="polite">
+              <span className="omni-icon omni-glyph-icon" aria-hidden="true">✧</span>
+              <span className="omni-title">{t("omni.guessing")}</span>
+              <span className="omni-resolving" aria-hidden="true"><i /><i /><i /></span>
+            </li>
+          )}
           <li role="option" aria-selected={sel === askIndex} className={`omni-ask${sel === askIndex ? " on" : ""}`} onMouseEnter={() => setSel(askIndex)} onMouseDown={(ev) => ev.preventDefault()} onClick={ask}>
             <span className="omni-icon">
               <img src="/assistant.svg" alt="" />
@@ -294,6 +339,29 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
         </button>
       )}
     </div>
+  );
+}
+
+/** The model's row: the action with what it filled in, or the agent it would hand the sentence to. */
+function GuessRow({ guess, on, onHover, onPick }: { guess: Guess; on: boolean; onHover: () => void; onPick: () => void }) {
+  const { lang, t } = useLang();
+  let title: React.ReactNode;
+  if (guess.kind === "agent") title = <>{guess.intent.title}{!guess.intent.available && <em> · {guess.intent.reason}</em>}</>;
+  else {
+    const text = actionText(guess.action, lang);
+    const filled = Object.entries(guess.args).flatMap(([name, value]) => {
+      const input = guess.action.inputs.find((i) => i.name === name);
+      return input ? [`${text.input(input)}: ${input.options?.length ? text.option(String(value), input.options.find((o) => o.value === value)?.label ?? String(value)) : value}`] : [];
+    });
+    title = <>{text.title}{filled.length > 0 && <em> · {filled.join(" · ")}</em>}</>;
+  }
+  return (
+    <li role="option" aria-selected={on} className={`omni-intent omni-guess${on ? " on" : ""}`} onMouseEnter={onHover} onMouseDown={(ev) => ev.preventDefault()} onClick={onPick}>
+      <span className="omni-icon omni-glyph-icon" aria-hidden="true">✧</span>
+      <span className="omni-title">{title}</span>
+      <span className="omni-kind">{guess.kind === "agent" ? t("omni.guessAgent") : t("omni.guessAction")}</span>
+      {on && <kbd>↵</kbd>}
+    </li>
   );
 }
 
