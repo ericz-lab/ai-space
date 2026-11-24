@@ -76,7 +76,7 @@ What the app installs this way is the standard AI Space, the same as the command
 
 A Space on this Mac can also be added by hand: the form suggests `http://127.0.0.1:8700` and lets the operator change it. A missing service leads to retry and setup guidance, not an automatic second backend.
 
-For remote use, require HTTPS and keep the existing tunnel and access layer. The desktop connection picker switches complete Space panels. Existing hub and peer aggregation stays inside each server; the client does not recreate the peer catalogue or claim that a hub can manage every peer setting. See [peers.md](peers.md).
+For remote use, require HTTPS and keep the existing tunnel and access layer. The desktop connection picker switches complete Space panels. On the launcher it is the toolbar button with the status dot and the Space's name; it opens an AppKit menu with a checkmark on the Space on screen, not a SwiftUI `Menu`, whose toolbar label a build with the macOS 26 SDK draws as a bare chevron on macOS 27. Existing hub and peer aggregation stays inside each server; the client does not recreate the peer catalogue or claim that a hub can manage every peer setting. See [peers.md](peers.md).
 
 Connection states are connecting, ready, authentication required, unreachable and incompatible. Failures retain the chosen connection and show a useful retry action. Switching connections never stops agents or services on the previous machine. Warn about unsent page drafts before destroying the previous view; reconnecting does not automatically resend an agent prompt.
 

@@ -77,3 +77,17 @@ enum OpenTabLayout {
         return result
     }
 }
+
+/// The rows of the Space switcher's menu (Views/MainView.swift `ConnectionSwitcher`): every saved
+/// Space in the saved order, the one on screen marked.
+enum ConnectionMenu {
+    struct Entry: Equatable {
+        let id: UUID
+        let name: String
+        let current: Bool
+    }
+
+    static func entries(_ connections: [Connection], current: UUID?) -> [Entry] {
+        connections.map { Entry(id: $0.id, name: $0.name, current: $0.id == current) }
+    }
+}
