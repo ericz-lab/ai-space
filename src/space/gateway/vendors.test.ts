@@ -43,5 +43,14 @@ test("OpenRouter: Messages and an OpenAI-style base on one key, its model list r
   expect(p.messages).toBe("https://openrouter.ai/api");
   expect(p.openai).toBe("https://openrouter.ai/api/v1");
   expect(p.hasList).toBe(true);
-  expect(VENDORS.openrouter!.list({ messages: p.messages, openai: p.openai })).toEqual({ url: "https://openrouter.ai/api/v1/models", auth: "bearer" });
+  // The plain list leaves out speech, transcription and image-only models: each is read from a list of its own kind.
+  expect(VENDORS.openrouter!.list({ messages: p.messages, openai: p.openai })).toEqual({
+    url: "https://openrouter.ai/api/v1/models",
+    auth: "bearer",
+    byKind: [
+      { url: "https://openrouter.ai/api/v1/models?output_modalities=transcription", kind: "asr" },
+      { url: "https://openrouter.ai/api/v1/models?output_modalities=speech", kind: "tts" },
+      { url: "https://openrouter.ai/api/v1/models?output_modalities=image", kind: "image" },
+    ],
+  });
 });

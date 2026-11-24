@@ -10,8 +10,10 @@ import { readWorkspaceEnv } from "../workspace.ts";
 import { GATEWAY_FILE, GATEWAY_PRESETS, parseGatewayYaml, setGatewayTiersText, splitModelId, tierProblem } from "./config.ts";
 import { GatewayEditError, PAGE_KEY_PREFIX, type ProviderEntry, editProblem, pageKeyVar, removeEnvKeysText, setEnvKeyText, setGroupsText, setProviderText } from "./edit.ts";
 import type { ModelGateway } from "./service.ts";
-import { GATEWAY_AUTH, GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN, GATEWAY_TIERS, type GatewayAuth, type GatewayConfig, type GatewayProvider, type GatewayTier, type GatewayTiers } from "./types.ts";
+import { GATEWAY_AUTH, GATEWAY_KINDS, type GatewayKind, GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN, GATEWAY_TIERS, type GatewayAuth, type GatewayConfig, type GatewayProvider, type GatewayTier, type GatewayTiers } from "./types.ts";
 import { PRICES_FILE } from "./prices.ts";
+import { createGatewayMediaRoutes, type MediaOptions } from "./settings-media.ts";
+import { documentedKind, kindOf, servesOf } from "./kinds.ts";
 import { VENDORS, customList, fetchModelList, presetList, redact, testProvider } from "./vendors.ts";
 
 /**
@@ -58,6 +60,9 @@ export type GatewaySettingsOptions = {
   log?: (line: string) => void;
   /** A runtime was added while ai-space runs (probe it). */
   onRuntimeAdded?: (name: string) => void;
+  /** The speech service as it runs, and how to have it read providers.yaml again (the Speech group; settings-media.ts). */
+  speech?: MediaOptions["speech"];
+  reloadSpeech?: () => Promise<void>;
 };
 
 /** A provider's key as the page sees it: never the value. */
@@ -105,6 +110,8 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
     } catch { /* a new file */ }
     await writeAtomic(file, text, mode);
     reload(text);
+    // Speech through the gateway checks its providers at load (one removed or turned off is off there too).
+    await o.reloadSpeech?.().catch((e) => log(`speech did not reload: ${(e as Error).message}`));
   }
   function reload(text: string | undefined): void {
     if (text === undefined) return o.gateway.reload({});
@@ -150,8 +157,25 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
       ...(p.apiKeyEnv ? { apiKeyEnv: p.apiKeyEnv } : {}),
       models: [...p.models],
       ...(p.disabled ? { disabled: true } : {}),
+      ...(p.kinds ? { kinds: { ...p.kinds } } : {}),
     };
   }
+
+  /**
+   * The kinds a request asks for, as the file keeps them: only where they differ from what the
+   * vendor's documented rule (or text) already gives, so the file says only what the owner decided.
+   */
+  const kindsBody = (v: unknown, list: string[], preset: string | undefined): Record<string, GatewayKind> | undefined | Response => {
+    if (v === undefined) return undefined;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return json({ ok: false, error: `kinds must map a model to ${GATEWAY_KINDS.join(", ")}` }, 400);
+    const out: Record<string, GatewayKind> = {};
+    for (const [m, k] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof k !== "string" || !(GATEWAY_KINDS as readonly string[]).includes(k)) return json({ ok: false, error: `kinds.${m} must be one of ${GATEWAY_KINDS.join(", ")}` }, 400);
+      if (!list.includes(m)) continue;
+      if (k !== (documentedKind(preset, m) ?? "text")) out[m] = k as GatewayKind;
+    }
+    return out;
+  };
 
   /** Where a provider is used: groups with its members, tiers naming it (directly, or a group that would be emptied). */
   function usedBy(config: GatewayConfig, name: string): { groups: string[]; tiers: GatewayTier[]; emptied: string[] } {
@@ -197,6 +221,10 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
           ...(config!.off[p.name] ? { off: config!.off[p.name] } : {}),
           ...(l?.resting ? { resting: l.resting } : {}),
           models: p.models,
+          // What each listed model is for, and whether the file says so or a documented rule does.
+          kinds: Object.fromEntries(p.models.map((m) => [m, kindOf(p, m)])),
+          kindSet: Object.keys(p.kinds ?? {}),
+          serves: servesOf(p),
           ...(o.gateway.prices ? { prices: pricesOf(p) } : {}),
           usedBy: usedBy(config!, p.name),
         };
@@ -219,6 +247,9 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
       tiers: config?.tiers ?? {},
       models: live.models,
       imageModels: live.imageModels,
+      textModels: live.textModels,
+      asrModels: live.asrModels,
+      ttsModels: live.ttsModels,
       presets: presetList(),
       ...(o.gateway.prices ? { pricing: { file: join(o.home, PRICES_FILE), ...o.gateway.prices.status() } } : {}),
       runtimes,
@@ -273,7 +304,12 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
       setKey(variable, key);
       wrote = true;
     }
-    const entry: ProviderEntry = { ...(preset ? { preset } : {}), ...(str(body.messages) ? { messages: str(body.messages)!.replace(/\/+$/, "") } : {}), ...(str(body.openai) ? { openai: str(body.openai)!.replace(/\/+$/, "") } : {}), ...(auth ? { auth: auth as GatewayAuth } : {}), ...(variable ? { apiKeyEnv: variable } : {}), models: list };
+    const kinds = kindsBody(body.kinds, list, preset);
+    if (kinds instanceof Response) {
+      if (wrote) deleteKey(variable!);
+      return kinds;
+    }
+    const entry: ProviderEntry = { ...(preset ? { preset } : {}), ...(str(body.messages) ? { messages: str(body.messages)!.replace(/\/+$/, "") } : {}), ...(str(body.openai) ? { openai: str(body.openai)!.replace(/\/+$/, "") } : {}), ...(auth ? { auth: auth as GatewayAuth } : {}), ...(variable ? { apiKeyEnv: variable } : {}), models: list, ...(kinds && Object.keys(kinds).length ? { kinds } : {}) };
     try {
       const next = setProviderText(text, name, entry, o.env);
       await apply(next);
@@ -309,7 +345,17 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
       const list = models(body.models);
       if (list instanceof Response) return list;
       entry.models = list;
+      // Kinds of models no longer listed go with them.
+      if (entry.kinds) entry.kinds = Object.fromEntries(Object.entries(entry.kinds).filter(([m]) => list.includes(m)));
     }
+    if (body.kinds !== undefined) {
+      const kinds = kindsBody(body.kinds, entry.models, p.preset);
+      if (kinds instanceof Response) return kinds;
+      entry.kinds = { ...(entry.kinds ?? {}), ...kinds };
+      // A kind set back to what the rule gives leaves the file.
+      for (const [m, k] of Object.entries(body.kinds as Record<string, string>)) if (k === (documentedKind(p.preset, m) ?? "text")) delete entry.kinds[m];
+    }
+    if (entry.kinds && !Object.keys(entry.kinds).length) delete entry.kinds;
     if (body.disabled !== undefined) {
       if (typeof body.disabled !== "boolean") return json({ ok: false, error: "disabled must be true or false" }, 400);
       if (body.disabled) entry.disabled = true;
@@ -407,10 +453,12 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
     const vendor = preset ? VENDORS[preset] : undefined;
     const defaults = vendor?.defaults ?? [];
     const list = vendor ? vendor.list(bases) : customList(bases);
-    if (!list) return json({ ok: true, source: "defaults", models: defaults, defaults, note: "this vendor documents no model list: pick from its documented models or type ids" });
+    // Kinds: what the vendor's list said, else a documented rule for the id; the rest is text, for the owner to change.
+    const documented = (ids: string[]) => Object.fromEntries(ids.flatMap((m) => (documentedKind(preset, m) ? [[m, documentedKind(preset, m)!]] : [])));
+    if (!list) return json({ ok: true, source: "defaults", models: defaults, defaults, kinds: documented(defaults), note: "this vendor documents no model list: pick from its documented models or type ids" });
     const r = await fetchModelList(list, key, doFetch);
-    if (!r.ok) return json({ ok: true, source: "defaults", models: defaults, defaults, error: redact(r.error, key) });
-    return json({ ok: true, source: "vendor", models: r.models, defaults });
+    if (!r.ok) return json({ ok: true, source: "defaults", models: defaults, defaults, kinds: documented(defaults), error: redact(r.error, key) });
+    return json({ ok: true, source: "vendor", models: r.models, defaults, kinds: { ...documented(r.models), ...r.kinds } });
   }
 
   async function test(req: Req): Promise<Response> {
@@ -506,6 +554,7 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
 
   const guarded = (h: (req: Req) => Promise<Response>) => async (req: Req) => (await refuse(req)) ?? h(req);
   return {
+    ...createGatewayMediaRoutes({ gateway: o.gateway, home: o.home, env: o.env, ...(o.speech ? { speech: o.speech } : {}), ...(o.reloadSpeech ? { reloadSpeech: o.reloadSpeech } : {}), ...(o.fetch ? { fetch: o.fetch } : {}), log }, guarded),
     "/api/model/gateway": { GET: guarded(view) },
     "/api/model/gateway/providers": { POST: guarded(addProvider) },
     "/api/model/gateway/providers/:name": { PUT: guarded(editProvider), DELETE: guarded(removeProvider) },

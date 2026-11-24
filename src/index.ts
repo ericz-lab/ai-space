@@ -360,36 +360,45 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
 
   // Speech (docs/speech.md): providers by kind from providers.yaml, else voice-studio here or on its one peer.
   // A file that does not load leaves speech off with the reason, and the space running.
-  const speechLoaded = await loadSpeech(ws.home, env).then((l) => ({ ...l, error: undefined }), (e: Error) => ({ config: undefined, source: "file" as const, warnings: [], error: e.message }));
-  if (speechLoaded.error) console.error(`[speech] ${speechLoaded.error}; speech calls answer 503 until it is fixed`);
-  // A provider through the built-in model gateway names one of gateway.yaml's providers with an openai base (docs/model-gateway.md#speech).
-  if (speechLoaded.config) speechLoaded.warnings.push(...checkGatewayProviders(speechLoaded.config, (name) => {
-    const p = modelGateway.link.provider(name);
-    return p ? { openai: Boolean(p.openai), ...(gatewayLoaded.loaded?.config.off[name] ? { off: gatewayLoaded.loaded.config.off[name] } : {}) } : undefined;
-  }, modelGateway.enabled));
-  for (const w of speechLoaded.warnings) console.warn(`[speech] ${w}`);
-  for (const p of speechLoaded.config?.providers ?? []) if (p.kind === "voice-studio" && p.machine && !peers.get(p.machine)) console.error(`[speech] provider ${p.name} names machine ${p.machine}, which is not a peer here`);
+  // Read again when Settings → Gateway saves the speech choice or the gateway changes (SpeechService.reload).
+  const loadSpeechState = async () => {
+    const loaded = await loadSpeech(ws.home, env).then((l) => ({ ...l, error: undefined as string | undefined }), (e: Error) => ({ config: undefined, source: "file" as const, warnings: [] as string[], error: e.message }));
+    if (loaded.error) console.error(`[speech] ${loaded.error}; speech calls answer 503 until it is fixed`);
+    // A provider through the built-in model gateway names one of gateway.yaml's providers with an openai base (docs/model-gateway.md#speech).
+    if (loaded.config) loaded.warnings.push(...checkGatewayProviders(loaded.config, (name) => {
+      const p = modelGateway.link.provider(name);
+      const off = modelGateway.providerOff(name);
+      return p ? { openai: Boolean(p.openai), ...(off ? { off } : {}) } : undefined;
+    }, modelGateway.enabled));
+    for (const p of loaded.config?.providers ?? []) if (p.kind === "voice-studio" && p.machine && !peers.get(p.machine)) console.error(`[speech] provider ${p.name} names machine ${p.machine}, which is not a peer here`);
+    return {
+      ...(loaded.config ? { config: loaded.config } : {}),
+      ...(loaded.error ? { configError: loaded.error } : {}),
+      source: loaded.source,
+      warnings: loaded.warnings,
+      adapters: loaded.config
+        ? buildAdapters(loaded.config, {
+            voiceStudio: {
+              hasLocal: (app, cap) => Boolean(bus.capability(app, cap)),
+              servicePort: (app) => registry.get(app)?.manifest.service?.port,
+              callLocal: speechCalls.callLocal,
+              callRemote: (req, caller, peer, app, cap) => speechCalls.callRemote(req, caller, peer, app, cap),
+              peers,
+            },
+            gateway: modelGateway.link,
+          })
+        : [],
+    };
+  };
   const speechCalls = capabilityCaller({ bus, store: busStore, remote });
+  const speechState = await loadSpeechState();
+  for (const w of speechState.warnings) console.warn(`[speech] ${w}`);
   const speech = new SpeechService({
-    ...(speechLoaded.config ? { config: speechLoaded.config } : {}),
-    ...(speechLoaded.error ? { configError: speechLoaded.error } : {}),
-    source: speechLoaded.source,
-    warnings: speechLoaded.warnings,
-    adapters: speechLoaded.config
-      ? buildAdapters(speechLoaded.config, {
-          voiceStudio: {
-            hasLocal: (app, cap) => Boolean(bus.capability(app, cap)),
-            servicePort: (app) => registry.get(app)?.manifest.service?.port,
-            callLocal: speechCalls.callLocal,
-            callRemote: (req, caller, peer, app, cap) => speechCalls.callRemote(req, caller, peer, app, cap),
-            peers,
-          },
-          gateway: modelGateway.link,
-        })
-      : [],
+    ...speechState,
     store: speechStore,
     localOnly: (app) => registry.get(app)?.manifest.speech?.localOnly === true,
   });
+  const reloadSpeech = async () => speech.reload(await loadSpeechState());
   // Shortcuts (docs/shortcuts.md): the actions the command box and the Shortcuts panel run, as the operator.
   const shortcutStore = new ShortcutStore(config.dbPath);
   const shortcuts = new Shortcuts({
@@ -739,6 +748,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       // Settings → Gateway (docs/model-gateway.md#settings): the built-in model gateway from the browser, operator only.
       ["owner", createGatewaySettingsRoutes({
         gateway: modelGateway,
+        speech: { config: () => speech.config, source: () => speech.status().source, configError: () => speech.status().configError },
+        reloadSpeech,
         runtimes,
         home: ws.home,
         envFile: ws.envFile,

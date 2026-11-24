@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { GATEWAY_AUTH, GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN, GATEWAY_TIERS, type GatewayAuth, type GatewayConfig, type GatewayProvider, type GatewayTier, type GatewayTiers } from "./types.ts";
+import { GATEWAY_AUTH, GATEWAY_KINDS, GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN, GATEWAY_TIERS, type GatewayAuth, type GatewayConfig, type GatewayKind, type GatewayProvider, type GatewayTier, type GatewayTiers } from "./types.ts";
 
 /**
  * The built-in model gateway's configuration: `<workspace>/gateway.yaml` (docs/model-gateway.md#configuration).
@@ -100,7 +100,7 @@ function parseProvider(name: string, raw: unknown, env: Record<string, string | 
   const ctx = `${GATEWAY_FILE}: provider ${name}`;
   if (!GATEWAY_NAME_PATTERN.test(name)) throw new Error(`${GATEWAY_FILE}: invalid provider name "${name}" (lowercase letters, digits and -)`);
   if (!isRecord(raw)) throw new Error(`${ctx} must be a mapping`);
-  for (const key of Object.keys(raw)) if (!["preset", "messages", "openai", "auth", "apiKeyEnv", "models", "disabled"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
+  for (const key of Object.keys(raw)) if (!["preset", "messages", "openai", "auth", "apiKeyEnv", "models", "disabled", "kinds"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
   const presetName = optionalString(raw.preset, `${ctx}: preset`);
   const preset = presetName === undefined ? undefined : GATEWAY_PRESETS[presetName];
   if (presetName !== undefined && !preset) throw new Error(`${ctx}: preset must be one of ${Object.keys(GATEWAY_PRESETS).join(", ")}`);
@@ -118,12 +118,30 @@ function parseProvider(name: string, raw: unknown, env: Record<string, string | 
     models = [...new Set((raw.models as string[]).map((m) => m.trim()))];
   }
   if (raw.disabled !== undefined && raw.disabled !== null && typeof raw.disabled !== "boolean") throw new Error(`${ctx}: disabled must be true or false`);
+  const kinds = parseKinds(raw.kinds, models, ctx);
   return {
     name, auth: auth as GatewayAuth, models,
     ...(raw.disabled === true ? { disabled: true } : {}),
+    ...(kinds ? { kinds } : {}),
     ...(messages ? { messages } : {}), ...(openai ? { openai } : {}),
     ...(apiKeyEnv ? { apiKeyEnv } : {}), ...(apiKey ? { apiKey } : {}), ...(presetName ? { preset: presetName } : {}),
   };
+}
+
+/**
+ * `kinds:` maps a listed model to what it is for (`asr`, `tts`, `image`, or `text` to overrule a
+ * vendor's rule). A model left out is text. Each key must be one of the provider's `models:`.
+ */
+function parseKinds(raw: unknown, models: string[], ctx: string): Record<string, GatewayKind> | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!isRecord(raw)) throw new Error(`${ctx}: kinds must map a model to ${GATEWAY_KINDS.join(", ")}`);
+  const out: Record<string, GatewayKind> = {};
+  for (const [model, kind] of Object.entries(raw)) {
+    if (!models.includes(model)) throw new Error(`${ctx}: kinds names ${model}, which is not in its models`);
+    if (typeof kind !== "string" || !(GATEWAY_KINDS as readonly string[]).includes(kind)) throw new Error(`${ctx}: kinds.${model} must be one of ${GATEWAY_KINDS.join(", ")}`);
+    out[model] = kind as GatewayKind;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 function parseGroups(raw: unknown, providers: GatewayProvider[]): Record<string, string[]> {

@@ -22,6 +22,14 @@ export type GatewayAuth = (typeof GATEWAY_AUTH)[number];
 /** A provider's or group's name in `gateway.yaml` and in a model id (`deepseek/deepseek-chat`, `fast`). */
 export const GATEWAY_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
+/**
+ * What a provider's model is for (docs/model-gateway.md#kinds): text (Messages, the tiers),
+ * speech to text (`asr`), text to speech (`tts`) or pictures (`image`). Stored per provider in
+ * `kinds:`; a model without an entry is text, unless a documented rule of its vendor says otherwise.
+ */
+export const GATEWAY_KINDS = ["text", "asr", "tts", "image"] as const;
+export type GatewayKind = (typeof GATEWAY_KINDS)[number];
+
 /** The model part of `provider/model`: what the provider calls it, passed on as is. */
 export const GATEWAY_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/;
 
@@ -42,6 +50,8 @@ export type GatewayProvider = {
   preset?: string;
   /** Kept in the file, turned off (`disabled: true`, the switch in Settings → Gateway). */
   disabled?: boolean;
+  /** What a model is for when it is not text (`kinds:` in gateway.yaml, set in Settings → Gateway). */
+  kinds?: Record<string, GatewayKind>;
 };
 
 /** The tiers a gateway defines: the four ai-space tiers for text, and `image` for pictures (a text model cannot draw). */
