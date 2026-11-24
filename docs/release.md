@@ -96,7 +96,11 @@ curl -fsSL https://ai-space.me/install.sh | bash
 ```
 
 `https://ai-space.me/install.sh` redirects to the latest release's `install.sh` (`release/get.sh`),
-so the command always runs the installer that came with the newest published release. The same
+so the command always runs the installer that came with the newest published release. Every published
+release is also mirrored to R2 (`https://bucket.ai-space.me/releases/v<version>/` and
+`…/releases/latest/`, uploaded from the Mac by the `github-release` Task Shelf job, `mirror.ts`),
+and both installers download from that mirror first and from GitHub when the mirror does not
+answer or holds an archive that does not match its `SHA256SUMS`; `AI_SPACE_DOWNLOAD` replaces both. The same
 command works on Linux with systemd (x64 or arm64) and on a Mac (Apple silicon): it picks the
 Server archive for the machine from the same release, checks it against `SHA256SUMS`, unpacks it
 in a temporary folder and runs the archive's own `install.sh`
