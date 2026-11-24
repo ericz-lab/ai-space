@@ -5,6 +5,24 @@ import Testing
 #endif
 
 struct DesktopRulesTests {
+    @Test func picturesCutShortAreNotComplete() {
+        let png: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] + [UInt8](repeating: 7, count: 40)
+            + [0, 0, 0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]
+        #expect(PictureBytes.isComplete(Data(png)))
+        #expect(!PictureBytes.isComplete(Data(png.prefix(30))))
+        let jpeg: [UInt8] = [0xFF, 0xD8, 0xFF, 0xE0] + [UInt8](repeating: 1, count: 40) + [0xFF, 0xD9]
+        #expect(PictureBytes.isComplete(Data(jpeg)))
+        #expect(PictureBytes.isComplete(Data(jpeg + [0, 0])))
+        #expect(!PictureBytes.isComplete(Data(jpeg.prefix(20))))
+        #expect(PictureBytes.isComplete(Data("GIF89a....;".utf8)))
+        #expect(!PictureBytes.isComplete(Data("GIF89a....".utf8)))
+        var webp = Array("RIFF".utf8) + [20, 0, 0, 0] + Array("WEBP".utf8) + [UInt8](repeating: 0, count: 16)
+        #expect(PictureBytes.isComplete(Data(webp)))
+        webp.removeLast(4)
+        #expect(!PictureBytes.isComplete(Data(webp)))
+        #expect(PictureBytes.isComplete(Data("<svg xmlns='http://www.w3.org/2000/svg'/>".utf8)))
+    }
+
     @Test func openTabShortcutsRespectLimitAndSelection() {
         #expect(OpenTabLayout.visible([], selected: nil).isEmpty)
         #expect(OpenTabLayout.visible(["a"], selected: "a") == ["a"])
