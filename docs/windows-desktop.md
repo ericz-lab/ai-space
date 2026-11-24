@@ -62,7 +62,7 @@ page or web tab opens Home there, so they are also the way back to Home. The bar
 tabs (two under 1100 wide, where the Library's tab shows its icon only); the others are under a
 menu beside them, the shown one taking the last tab's place (`HomeScreens.BarTabs`), so many
 screens never push the web tabs out; the Library's tab is never under that menu. A right click on a tab (Shift+F10) holds the screen's actions:
-New Screen, Rename Screen…, Copy the Web Panel's Layout… and Delete Screen…. Ctrl+Page Down and
+New Screen, Edit Screen ([edit mode](#home)), Rename Screen…, Copy the Web Panel's Layout… and Delete Screen…. Ctrl+Page Down and
 Ctrl+Page Up move through the places in that order while Home is shown. Without a Space, or while it needs a
 sign-in, the bar has no places.
 
@@ -93,6 +93,16 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   panel's `ranking.ts`, the Mac's `OmniboxRules`). Enter opens the best match when its name holds
   the whole query; anything else, and Ctrl+Enter always, opens Space Assistant's chat with the text
   as a draft, never sent. Down moves into the results, Escape clears, Ctrl+F (or Ctrl+K) comes back.
+- **Shortcuts in the box** (`Views/HomeShortcuts.cs`, [shortcuts.md](shortcuts.md#native-search-and-shared-resolution)):
+  a quarter of a second after typing stops, the Space reads the text (`POST /api/shortcuts/resolve`):
+  arithmetic, a conversion, an action named at its start with the rest filling its inputs
+  (`待办 明天下午3点 写周报` is ai-todo's Create todo with title, date and time). Up to three rows above
+  Ask Space Assistant show what can run and what the text filled; the first takes Enter, before a
+  library match, when it is arithmetic, a conversion or a named action and the text means one thing
+  only (a matched agent skill leaves Enter to the assistant). Choosing one opens its form under the
+  box, the Shortcuts page's: a read whose inputs are filled runs at once, a write waits for Create (or
+  Enter again). Escape closes the form, then clears the box. A Space with no resolver, or one that
+  does not answer, leaves the box as before.
 - **Places.** Each screen and the Library are tabs of the window's bar ([above](#the-window)),
   not of the page; the page shows the one chosen. The Library shows the apps with the built-in pages (App Store, Inbox, Shortcuts, Terminal,
   Settings, the web panel's five in its order; the web panel has no tile, and a screen saved with its old tile simply no longer shows it), the agents (one tile per agent on several machines) and the widgets, with a filter by
@@ -111,6 +121,14 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   menu (right click, Shift+F10) puts it on a screen or takes it off and moves it, and a screen
   tab's menu in the bar makes, renames and deletes screens or copies the web panel's layout again. Nothing is written to
   the Space. A removed Space's screens go with it.
+- **Edit mode** (编辑屏幕), the web panel's ([panel.md](panel.md#arranging-hiding-and-uninstalling-apps)),
+  one screen at a time (`Views/HomeEdit.cs`): Edit Screen in its tab's menu or in a tile's or a
+  card's on it. The command box gives way to a bar naming the screen, with Rename…, Delete
+  Screen… (not on Main) and Done. Every tile and card has an ✕ that takes it off the screen, and
+  is dragged onto another of its kind to take that one's place (tiles and cards are drawn apart, as
+  the menu's Move Earlier and Move Later keep them); a click arranges and opens nothing. From the
+  keyboard, on the focused entry, Delete removes it and Ctrl with an arrow moves it. Done, Escape,
+  Ctrl+F or another place leaves edit mode. As the menus, it changes this computer's screens only.
 - **Apps from the App Store.** The web panel pins an app the store installs to its home screen
   ([app-catalog.md](app-catalog.md)); this computer keeps its own layout, so Home adds it to the
   home screen here too. `screens.json` remembers the apps on the panel's home screen (`panelHome`),
@@ -148,7 +166,7 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
 
 Where it differs from the Mac: an `embed` widget's page is not drawn inside its card (a web view
 does not scroll with the page's content); the card opens it. Tiles and cards are moved with their
-menu, not dragged, and the box does not run Shortcuts' actions.
+menu or in edit mode, and the box does not offer agent skills' intents of its own.
 
 ### Built-in icons
 
@@ -228,7 +246,8 @@ The native Shortcuts page (`Views/ShortcutsPage.cs`, `Views/ShortcutRunner.cs`) 
 panel's Shortcuts window ([shortcuts.md](shortcuts.md), `src/web/Shortcuts.tsx` and
 `ActionRunner.tsx`; the iPhone's native forms): the action catalogue
 (`GET /api/shortcuts/actions`) with a search over every language's titles, descriptions and
-keywords, the actions that can run first and one that cannot with what it misses. Choosing one
+keywords, only the actions that can run (one the Space lists as unavailable, a template no app
+fills or a capability it lacks, is left out, as on the web panel's). Choosing one
 opens its form under the catalogue: a field per input (text, number, a date typed or picked as
 today or tomorrow, a time, a period, a choice or a task), the required ones marked, with how a
 relative date or period reads today in this computer's zone, where a write goes and the zone

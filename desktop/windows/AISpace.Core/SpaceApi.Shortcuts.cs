@@ -24,6 +24,10 @@ public sealed partial class SpaceApi
         ShortcutJson.Run(await PostJson<JsonElement>(ShortcutRules.RunsPath, body, ct).ConfigureAwait(false))
         ?? throw new SpaceApiException(SpaceApiFailure.InvalidResponse, "not a run");
 
+    /// <summary><c>POST /api/shortcuts/resolve</c>: what the typed text can run, read by the Space (nothing runs, no model is called).</summary>
+    public async Task<ShortcutResolution> ResolveShortcut(string text, string timezone, CancellationToken ct = default) =>
+        ShortcutJson.Resolution(await PostJson<JsonElement>(ShortcutRules.ResolvePath, new Dictionary<string, object> { ["text"] = text, ["timezone"] = timezone }, ct).ConfigureAwait(false));
+
     /// <summary><c>POST /api/shortcuts/runs/:id/retry</c>: a failed run again (an unknown write only for an idempotent provider).</summary>
     public async Task<ShortcutRun> RetryShortcut(long id, CancellationToken ct = default) =>
         ShortcutJson.Run(await PostJson<JsonElement>($"{ShortcutRules.RunsPath}/{id.ToString(CultureInfo.InvariantCulture)}/retry", new Dictionary<string, object>(), ct).ConfigureAwait(false))

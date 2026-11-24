@@ -64,6 +64,16 @@ internal static partial class L
         ["Delete Screen…"] = "删除屏幕…",
         ["Delete this screen?"] = "删除这个屏幕？",
         ["Its apps, agents and widgets stay in the Library."] = "其中的应用、智能体和小组件仍保留在资源库中。",
+        ["Edit Screen"] = "编辑屏幕",
+
+        // Shortcuts in the command box.
+        ["Enter runs it"] = "按回车运行",
+        ["Close"] = "关闭",
+        ["Calculator"] = "计算器",
+        ["Editing {0}"] = "正在编辑{0}",
+        ["Drag a tile or a widget onto another to move it; ✕ takes it off this screen. Only this computer's screens change."] = "把磁贴或小组件拖到另一个上即可移动；点 ✕ 将其从此屏幕移除。只会改变这台电脑上的屏幕。",
+        ["Rename…"] = "重命名…",
+        ["Remove {0} from This Screen"] = "从此屏幕移除{0}",
 
         // Widget cards.
         ["No data"] = "无数据",

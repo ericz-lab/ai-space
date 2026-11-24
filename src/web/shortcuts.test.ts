@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { parseProvidesSpec } from "../space/bus/spec.ts";
 import type { Action } from "../space/shortcuts/types.ts";
-import { captureInput, complete, extractWhen, intents, parseConversion } from "./shortcuts.ts";
+import { captureInput, complete, extractWhen, intentToRun, intents, parseConversion, runParam, shortcutsRunHref } from "./shortcuts.ts";
 
 const NOW = Date.parse("2026-10-16T23:30:00Z"); // Saturday 17th in Seoul
 const TZ = "Asia/Seoul";
@@ -135,4 +135,22 @@ test("query slots retain period extraction and explicit slots take precedence", 
   const action = { ...ACTIONS[4]!, patterns: ["金融新闻[ {q}]", "查{period}的新闻[ {q}]"] };
   expect(intents("金融新闻 本周 美联储", [action], TZ, NOW)[0]).toMatchObject({ args: { period: "this-week", q: "美联储" } });
   expect(intents("查明天的新闻 本周 美联储", [action], TZ, NOW)[0]).toMatchObject({ args: { period: "tomorrow", q: "美联储" } });
+});
+
+test("a run= link carries the sentence, and the action it names is what Enter would run", () => {
+  const href = shortcutsRunHref("待办 明天下午3点 写周报");
+  expect(runParam(href.slice(1))).toBe("待办 明天下午3点 写周报");
+  expect(runParam("?page=shortcuts")).toBeNull();
+  expect(runParam("?page=shortcuts&run=%20%20")).toBeNull();
+
+  const run = (q: string, extra: { agentIntents?: unknown[]; ambiguous?: boolean } = {}) => intentToRun({ intents: intents(q, ACTIONS, TZ, NOW), ...extra }, ACTIONS);
+  expect(run("待办 明天下午3点 写周报")).toMatchObject({ action: { id: "ai-todo/create" }, args: { title: "写周报", dueDate: "tomorrow", dueTime: "15:00" } });
+  // Arithmetic runs the catalogue's calculator with the expression in its query input.
+  expect(run("128 * 3 + 56")).toMatchObject({ action: { id: "space/calc" }, args: { expression: "128 * 3 + 56" } });
+  // A matched agent skill or an ambiguous sentence leaves the choice to the page.
+  expect(run("待办 写周报", { agentIntents: [{}] })).toBeNull();
+  expect(run("待办 写周报", { ambiguous: true })).toBeNull();
+  // An action that cannot run here is not opened.
+  const off = intents("待办 写周报", ACTIONS, TZ, NOW).map((i) => (i.kind === "action" ? { ...i, action: { ...i.action, available: false } } : i));
+  expect(intentToRun({ intents: off }, ACTIONS)).toBeNull();
 });

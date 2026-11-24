@@ -53,13 +53,13 @@ public static class ShortcutRules
 
     /// <summary>
     /// The catalogue under a search (case-insensitive, on the titles, descriptions, app and keywords in
-    /// every language), the actions that can run first, each group in the catalogue's order.
+    /// every language), in the catalogue's order. Only the actions that can run: one the Space lists
+    /// as unavailable (a template no app fills, a capability it lacks) is left out.
     /// </summary>
     public static IReadOnlyList<ShortcutAction> Search(IEnumerable<ShortcutAction> actions, string query, string lang)
     {
         var needle = query.Trim();
-        var list = actions.Where(a => needle.Length == 0 || Words(a, lang).Any(w => w.Contains(needle, StringComparison.CurrentCultureIgnoreCase))).ToList();
-        return [.. list.Where(a => a.Available), .. list.Where(a => !a.Available)];
+        return actions.Where(a => a.Available && (needle.Length == 0 || Words(a, lang).Any(w => w.Contains(needle, StringComparison.CurrentCultureIgnoreCase)))).ToList();
     }
 
     private static IEnumerable<string> Words(ShortcutAction a, string lang)
@@ -82,6 +82,65 @@ public static class ShortcutRules
         var values = new Dictionary<string, string>();
         foreach (var i in a.Inputs) values[i.Name] = i.Default ?? (i.Type is "task" or "choice" && i.Options.Count > 0 ? i.Options[0].Value : "");
         return values;
+    }
+
+    // Home's command box (docs/shortcuts.md#native-search-and-shared-resolution): the Space reads the text, the client shows and runs it.
+
+    public const string ResolvePath = "/api/shortcuts/resolve";
+
+    /// <summary>The box asks the Space after this pause in typing (the web's debounce).</summary>
+    public static readonly TimeSpan ResolveAfter = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>
+    /// The intent Enter runs instead of asking Space Assistant: arithmetic, a conversion, or an action
+    /// named at the start of the text, when the text means one thing only and no agent's skill took it.
+    /// </summary>
+    public static ShortcutIntent? EnterIntent(ShortcutResolution r) =>
+        r.AgentIntents > 0 || r.Ambiguous ? null
+        : r.Intents.FirstOrDefault() is { } first && (first.Kind is "calc" or "convert" || first is { Kind: "action", Strong: true, Ambiguous: false }) && Runnable(first) ? first
+        : null;
+
+    /// <summary>Whether the intent's action can run here (arithmetic has none of its own: the catalogue's <c>space/calc</c>).</summary>
+    public static bool Runnable(ShortcutIntent i) => i.Kind == "calc" || i.Action is { Available: true };
+
+    /// <summary>The action the intent runs: its own, or for arithmetic the catalogue's calculator.</summary>
+    public static ShortcutAction? ActionOf(ShortcutIntent i, IEnumerable<ShortcutAction> catalogue) =>
+        i.Kind == "calc" ? catalogue.FirstOrDefault(a => a.Id == "space/calc" && a.Peer is null) : i.Action;
+
+    /// <summary>The form's values for the intent: the action's own, then what the text gave (arithmetic: its expression in the query input).</summary>
+    public static Dictionary<string, string> IntentValues(ShortcutIntent i, ShortcutAction a)
+    {
+        var values = InitialValues(a);
+        var query = a.Inputs.FirstOrDefault(x => x.Query) ?? a.Inputs.FirstOrDefault();
+        if (i.Kind == "calc" && i.Expression is { } e && query is not null) values[query.Name] = e;
+        foreach (var (k, v) in i.Args)
+        {
+            if (a.Inputs.Any(x => x.Name == k)) values[k] = v;
+        }
+        return values;
+    }
+
+    /// <summary>A read whose required inputs the text filled runs at once; a write or a task waits for its button.</summary>
+    public static bool RunsAtOnce(ShortcutAction a, IReadOnlyDictionary<string, string> values) => a.Effect == "read" && Missing(a, values).Count == 0;
+
+    /// <summary>What the text filled, as one line: "Title: Write the report · Date: 2026-11-25 · Time: 15:00" (a relative date shown as the date).</summary>
+    public static string IntentSummary(ShortcutIntent i, ShortcutAction a, string lang, DateOnly today)
+    {
+        if (i.Kind == "calc") return i.Expression ?? "";
+        var parts = new List<string>();
+        foreach (var input in a.Inputs)
+        {
+            if (!i.Args.TryGetValue(input.Name, out var v) || v.Length == 0) continue;
+            var shown = input.Type switch
+            {
+                "date" => ResolvedDate(v, today) ?? v,
+                "period" => ResolvedPeriodText(v, today) ?? v,
+                "choice" or "task" => input.Options.FirstOrDefault(o => o.Value == v) is { } o ? OptionLabel(a, o, lang) : v,
+                _ => v,
+            };
+            parts.Add($"{InputLabel(a, input, lang)}: {shown}");
+        }
+        return string.Join(" · ", parts);
     }
 
     /// <summary>The required inputs still empty.</summary>

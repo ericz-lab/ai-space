@@ -465,6 +465,8 @@ struct ScreenActions: View {
 /// names first, and Return either opens the best match (when its name holds the whole query) or
 /// hands the text to Space Assistant as a new conversation; ⌘Return always asks, Shift-Return
 /// breaks the line. The microphone fills the field from speech. ⌘F comes here.
+/// When the Space reads the text as a shortcut it can run (`待办 明天下午3点 写周报`,
+/// Services/ShortcutOffer.swift), that comes first and Return opens it on the Shortcuts page.
 struct OmniboxField: View {
     @ObservedObject var model: AppModel
     /// The pager page this field is on: ⌘F focuses the one on show.
@@ -473,6 +475,15 @@ struct OmniboxField: View {
     let api: SpaceAPI?
     @FocusState private var focused: Bool
     @StateObject private var voice = VoiceInput()
+    /// What the Space said the text runs, for the text it answered.
+    @State private var resolved: Resolved?
+
+    private struct Resolved: Equatable {
+        var query: String
+        var offer: ShortcutOffer?
+    }
+
+    private var offer: ShortcutOffer? { resolved?.query == text ? resolved?.offer : nil }
 
     private var text: String { model.query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var opens: Bool { OmniboxRules.opensByDefault(text, best) }
@@ -516,12 +527,17 @@ struct OmniboxField: View {
                 Text(verbatim: error).font(.caption).foregroundStyle(Theme.danger)
             } else if !text.isEmpty {
                 HStack(spacing: 8) {
+                    if let offer {
+                        choice(isDefault: true, key: "↵") { model.runShortcut(text) } label: {
+                            Text(verbatim: offer.detail.isEmpty ? offer.title : "\(offer.title) · \(offer.detail)")
+                        }
+                    }
                     if let best {
-                        choice(isDefault: opens, key: "↵") { model.open(best); model.query = "" } label: {
+                        choice(isDefault: opens && offer == nil, key: offer == nil ? "↵" : "") { model.open(best); model.query = "" } label: {
                             Text("Open \(best.displayTitle())")
                         }
                     }
-                    choice(isDefault: !opens, key: opens ? "⌘↵" : "↵") { model.ask(text) } label: {
+                    choice(isDefault: !opens && offer == nil, key: opens || offer != nil ? "⌘↵" : "↵") { model.ask(text) } label: {
                         Text("Ask Space Assistant")
                     }
                 }
@@ -532,15 +548,46 @@ struct OmniboxField: View {
         .frame(maxWidth: 640)
         .padding(.horizontal, 32)
         .onReceive(model.focusSearch) { if model.pagerID == page { focused = true } }
+        // Once typing pauses, the Space reads the text; a newer text cancels the wait.
+        .task(id: text) {
+            guard !text.isEmpty else { return }
+            try? await Task.sleep(for: ShortcutOffer.resolveAfter)
+            guard !Task.isCancelled else { return }
+            _ = await resolve(text)
+        }
+    }
+
+    /// What the Space says the text runs; nil when it names nothing or cannot be asked (the box goes on as before).
+    private func resolve(_ q: String) async -> ShortcutOffer? {
+        if let r = resolved, r.query == q { return r.offer }
+        guard !q.isEmpty, let api,
+              let data = try? await api.send("POST", ShortcutOffer.resolvePath, json: ["text": q, "timezone": TimeZone.current.identifier])
+        else { return nil }
+        let offer = ShortcutOffer.from(data, lang: Lang.current, calculator: String(localized: "Calculator"))
+        if text == q { resolved = Resolved(query: q, offer: offer) }
+        return offer
     }
 
     private func submit(ask: Bool) {
-        guard !text.isEmpty else { return }
-        if !ask, opens, let best {
-            model.open(best)
-            model.query = ""
-        } else {
-            model.ask(text)
+        let q = text
+        guard !q.isEmpty else { return }
+        if ask {
+            model.ask(q)
+            return
+        }
+        Task {
+            // A shortcut the text names comes first; Return before the answer waits for it.
+            if await resolve(q) != nil {
+                if text == q { model.runShortcut(q) }
+                return
+            }
+            guard text == q else { return }
+            if opens, let best {
+                model.open(best)
+                model.query = ""
+            } else {
+                model.ask(q)
+            }
         }
     }
 

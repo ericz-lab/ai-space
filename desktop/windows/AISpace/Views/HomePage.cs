@@ -101,6 +101,7 @@ internal sealed partial class HomePage : NativePage
 
     public override void Shown()
     {
+        _shortcut?.SetActive(true);
         if (_stale || _catalogue is null) Load();
         Draw();
         Dispatcher.BeginInvoke(() =>
@@ -120,6 +121,7 @@ internal sealed partial class HomePage : NativePage
     public override void Close()
     {
         _closed = true;
+        CloseShortcut(draw: false);
         // Removed (not signed out, nor moved to a new address): its screens go with it.
         if (Context.Connection is null) _store.Forget(SpaceKey);
     }
@@ -232,12 +234,18 @@ internal sealed partial class HomePage : NativePage
         // A new search shows every kind: the Library's filter would hide the match Enter opens.
         if (_query.Trim().Length == 0 && text.Trim().Length > 0) _filter = LibraryFilter.All;
         _query = text;
+        ShortcutQueryChanged();
         Draw();
     }
 
     private void OnBoxKey(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control)
+        if (e.Key == Key.Escape && Keyboard.Modifiers == ModifierKeys.None && CloseShortcut(draw: true))
+        {
+            // Escape closes an open form first, then clears the box.
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control)
         {
             e.Handled = true;
             Submit(alwaysAsk: true);
@@ -252,11 +260,27 @@ internal sealed partial class HomePage : NativePage
     private void OnPageKey(object sender, KeyEventArgs e)
     {
         var ctrl = Keyboard.Modifiers == ModifierKeys.Control;
-        if (ctrl && e.Key is Key.F or Key.K or Key.L)
+        if (_editing is not null && EditKey(e))
         {
             e.Handled = true;
+        }
+        else if (_editing is not null && e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            StopEditing();
+        }
+        else if (ctrl && e.Key is Key.F or Key.K or Key.L)
+        {
+            e.Handled = true;
+            if (_editing is not null) StopEditing();
             _field.Focus();
             _field.SelectAll();
+        }
+        else if (e.Key == Key.Escape && _shortcut is not null && !_field.IsKeyboardFocusWithin)
+        {
+            e.Handled = true;
+            CloseShortcut(draw: true);
+            _field.Focus();
         }
         else if (e.Key == Key.Escape && _query.Length > 0 && !_field.IsKeyboardFocusWithin)
         {
@@ -270,14 +294,21 @@ internal sealed partial class HomePage : NativePage
     {
         _query = "";
         if (_field.Text.Length > 0) _field.Text = "";
+        ShortcutQueryChanged();
         Draw();
     }
 
-    /// <summary>Enter: the best match when its name holds the whole query, else the text to Space Assistant as a draft.</summary>
-    private void Submit(bool alwaysAsk)
+    /// <summary>
+    /// Enter: an open shortcut form is sent, a shortcut the text names is run; else the best match when
+    /// its name holds the whole query, else the text to Space Assistant as a draft.
+    /// </summary>
+    private async void Submit(bool alwaysAsk)
     {
         var q = _query.Trim();
         if (q.Length == 0) return;
+        if (!alwaysAsk && await SubmitShortcut(q)) return;
+        // The box was changed while the Space was asked: this Enter was for the text that was there.
+        if (_query.Trim() != q) return;
         var first = _catalogue is { } c ? HomeSearch.Rank(q, Searchable(c), 1).FirstOrDefault() : null;
         if (!alwaysAsk && first is not null && HomeSearch.OpensByDefault(q, first)) Open(first);
         else Ask(q);
@@ -365,6 +396,9 @@ internal sealed partial class HomePage : NativePage
     {
         var screens = Screens();
         if (_shownId != LibraryId && screens.All(s => s.Id != _shownId)) _shownId = HomeScreens.Home;
+        // Edit mode belongs to the screen shown; the command box gives way to its bar.
+        if (_editing is not null && _editing != _shownId) _editing = null;
+        _box.Visibility = _editing is null ? Visibility.Visible : Visibility.Collapsed;
         NotifyPlaces(screens);
         DrawBanner();
         var sig = Signature(screens);
@@ -400,7 +434,8 @@ internal sealed partial class HomePage : NativePage
     private string Signature(IReadOnlyList<HomeScreen> screens)
     {
         var s = new StringBuilder();
-        s.Append(_error is null ? "" : "error\n").Append(_catalogue is null ? "none\n" : "").Append(_query.Trim()).Append('\n').Append(_shownId).Append('\n').Append(_filter).Append('\n');
+        s.Append(_error is null ? "" : "error\n").Append(_catalogue is null ? "none\n" : "").Append(_query.Trim()).Append('\n').Append(_shownId).Append('\n').Append(_filter).Append('\n').Append("editing=").Append(_editing).Append('\n');
+        s.Append(ShortcutSignature());
         // Ages ("5 minutes ago") move on every few minutes; the theme changes the drawings' colours.
         s.Append(DateTimeOffset.Now.ToUnixTimeSeconds() / 300).Append(Ui.SystemDark()).Append('\n');
         foreach (var sc in screens) s.Append(sc.Id).Append('=').Append(sc.Name).Append(':').AppendJoin(',', sc.Items).Append('\n');
@@ -520,6 +555,7 @@ internal sealed partial class HomePage : NativePage
 
     private void ShowTab(string id)
     {
+        if (id != _shownId) _editing = null;
         _placeChosen = true;
         _shownId = id;
         if (_query.Length > 0) ClearQuery();
@@ -568,7 +604,9 @@ internal sealed partial class HomePage : NativePage
     private void DrawResults(HomeCatalogue c, string q)
     {
         var all = HomeSearch.Rank(q, Searchable(c));
-        var opens = HomeSearch.OpensByDefault(q, all.FirstOrDefault());
+        // A shortcut the text names takes Enter before a library match and the assistant.
+        var shortcutTakes = DrawShortcuts(q);
+        var opens = shortcutTakes || HomeSearch.OpensByDefault(q, all.FirstOrDefault());
         var ask = new Button { Padding = new Thickness(14, 10, 14, 10), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 4), Tag = "ask" };
         if (!opens) ask.SetResourceReference(StyleProperty, "AccentButtonStyle");
         var label = Ui.Text(L.F("Ask Space Assistant: “{0}”", q), 14, wrap: false);
@@ -582,7 +620,7 @@ internal sealed partial class HomePage : NativePage
             ClearQuery();
         };
         _body.Children.Add(ask);
-        _first = ask;
+        _first ??= ask;
         _body.Children.Add(FilterRow(HomeSearch.Counts(all)));
         var found = all.Where(e => HomeSearch.Keeps(_filter, e)).ToList();
         var tiles = found.Where(e => e.Kind != HomeKind.Widget).ToList();
@@ -632,7 +670,16 @@ internal sealed partial class HomePage : NativePage
                 }
             }
         }
-        if (screen.Id == HomeScreens.Home && _offers > 0 && !_store.StoreCardHidden(SpaceKey)) _body.Children.Add(StoreCard(_offers));
+        var editing = EditingHere(screen.Id);
+        if (editing) _body.Children.Add(EditBar(Screens(), screen));
+        else if (screen.Id == HomeScreens.Home && _offers > 0 && !_store.StoreCardHidden(SpaceKey)) _body.Children.Add(StoreCard(_offers));
+        if (tiles.Count == 0 && widgets.Count == 0 && editing)
+        {
+            var empty = Ui.EmptyState(Ui.Apps, L.T("Nothing on this screen yet"), L.T("Right-click an app, agent or widget in the Library (or press Shift+F10 on it) and choose a screen to add it."));
+            empty.Margin = new Thickness(0, 32, 0, 0);
+            _body.Children.Add(empty);
+            return;
+        }
         if (tiles.Count == 0 && widgets.Count == 0)
         {
             var open = Ui.Button(L.T("Open Library"), () => ShowTab(LibraryId), accent: true);
@@ -713,23 +760,29 @@ internal sealed partial class HomePage : NativePage
     private WrapPanel TileGrid(IEnumerable<HomeEntry> entries, string? screen)
     {
         var grid = HomeTiles.Grid();
-        foreach (var e in entries) grid.Children.Add(Tile(e, screen));
-        if (_first is null && grid.Children.Count > 0) _first = (FrameworkElement)grid.Children[0];
+        var editing = EditingHere(screen);
+        foreach (var e in entries)
+        {
+            var tile = Tile(e, screen);
+            _first ??= tile;
+            grid.Children.Add(editing ? Editable(tile, e.Key, e.DisplayTitle(), screen!, card: false) : tile);
+        }
         return grid;
     }
 
     private WrapPanel CardGrid(IEnumerable<HomeWidget> widgets, string? screen)
     {
         var grid = HomeCards.Grid();
+        var editing = EditingHere(screen);
         foreach (var w in widgets)
         {
             var card = _cards.Card(w);
             var entry = HomeCatalogue.WidgetEntry(w);
             card.ContextMenu = new ContextMenu();
             card.ContextMenuOpening += (_, _) => FillEntryMenu(card.ContextMenu, entry, screen);
-            grid.Children.Add(card);
+            if (grid.Children.Count == 0) _first ??= FirstButton(card);
+            grid.Children.Add(editing ? Editable(card, entry.Key, entry.DisplayTitle(), screen!, card: true) : card);
         }
-        if (_first is null && grid.Children.Count > 0) _first = grid.Children[0] is FrameworkElement f ? FirstButton(f) : null;
         return grid;
     }
 
@@ -807,7 +860,11 @@ internal sealed partial class HomePage : NativePage
             tooltip = string.Join("\n", new[] { title, e.DisplayDetail(), where }.Where(x => !string.IsNullOrEmpty(x)));
         }
         var tile = HomeTiles.Tile(e.Key, icon, title, note, states.Count > 0 ? string.Join(", ", states) : null, mark, count,
-            dimmed: e.Reach is Reach.Paused or Reach.PeerOffline, tooltip, () => Open(e));
+            dimmed: e.Reach is Reach.Paused or Reach.PeerOffline, tooltip, () =>
+            {
+                // In edit mode a click arranges, it does not open.
+                if (!EditingHere(screen)) Open(e);
+            });
         tile.ContextMenu = new ContextMenu();
         tile.ContextMenuOpening += (_, _) => FillEntryMenu(tile.ContextMenu, e, screen);
         return tile;

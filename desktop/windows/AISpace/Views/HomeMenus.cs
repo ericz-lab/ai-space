@@ -7,8 +7,9 @@ namespace AISpace.Views;
 
 /// <summary>
 /// Home's menus: a tile's or a card's (open it, put it on a screen or take it off, move it, open
-/// its page in the browser, copy its address), opened by a right click, Shift+F10 or the menu key;
-/// and the screen's own (the ⋯ button: new, rename, copy the web panel's layout, delete). Every
+/// its page in the browser, copy its address, edit its screen), opened by a right click, Shift+F10
+/// or the menu key; and the screen's own (its tab in the bar: new, edit, rename, copy the web
+/// panel's layout, delete). Every
 /// change is this computer's own (<see cref="ScreenStore"/>).
 /// </summary>
 internal sealed partial class HomePage
@@ -41,13 +42,11 @@ internal sealed partial class HomePage
         {
             menu.Items.Add(Item(L.T("Remove from This Screen"), () => EditScreens(all => HomeScreens.Unpin(all, screen, key))));
             // Tiles and cards are drawn apart, so each moves among its own kind (what the screen shows).
-            var byKey = _catalogue?.ByKey() ?? new Dictionary<string, HomeEntry>();
-            bool IsCard(string k) => byKey.TryGetValue(k, out var x) && x.Kind == HomeKind.Widget;
-            var group = here.Items.Where(k => (k.StartsWith("builtin:", StringComparison.Ordinal) && HomeBuiltin.Of(k["builtin:".Length..]) is not null) || byKey.ContainsKey(k))
-                .Where(k => IsCard(k) == (e.Kind == HomeKind.Widget)).ToList();
+            var group = Group(here, e.Kind == HomeKind.Widget);
             var i = group.IndexOf(key);
             if (i > 0) menu.Items.Add(Item(L.T("Move Earlier"), () => EditScreens(all => HomeScreens.Move(all, screen, group, i, i - 1))));
             if (i >= 0 && i < group.Count - 1) menu.Items.Add(Item(L.T("Move Later"), () => EditScreens(all => HomeScreens.Move(all, screen, group, i, i + 1))));
+            if (_editing != screen) menu.Items.Add(Item(L.T("Edit Screen"), () => EditScreen(screen)));
         }
         if (screens.Count <= 1)
         {
@@ -110,6 +109,7 @@ internal sealed partial class HomePage
         menu.Items.Add(add);
         var index = screens.ToList().FindIndex(s => s.Id == id);
         if (index < 0) return;
+        menu.Items.Add(Item(L.T("Edit Screen"), () => EditScreen(id)));
         menu.Items.Add(Item(L.T("Rename Screen…"), () => RenameScreen(id)));
         menu.Items.Add(Item(L.T("Copy the Web Panel's Layout…"), () =>
         {
@@ -121,13 +121,19 @@ internal sealed partial class HomePage
         if (id != HomeScreens.Home)
         {
             menu.Items.Add(new Separator());
-            menu.Items.Add(Item(L.T("Delete Screen…"), () =>
-            {
-                if (!Confirm(L.T("Delete this screen?"), L.T("Its apps, agents and widgets stay in the Library."))) return;
-                if (_shownId == id) _shownId = index > 0 ? screens[index - 1].Id : HomeScreens.Home;
-                EditScreens(all => HomeScreens.Remove(all, id));
-            }));
+            menu.Items.Add(Item(L.T("Delete Screen…"), () => DeleteScreen(id)));
         }
+    }
+
+    /// <summary>Deletes a screen (never the Main one) once confirmed; Home shows the one before it if it was shown.</summary>
+    private void DeleteScreen(string id)
+    {
+        var screens = Screens();
+        var index = screens.ToList().FindIndex(s => s.Id == id);
+        if (index < 0 || id == HomeScreens.Home) return;
+        if (!Confirm(L.T("Delete this screen?"), L.T("Its apps, agents and widgets stay in the Library."))) return;
+        if (_shownId == id) _shownId = index > 0 ? screens[index - 1].Id : HomeScreens.Home;
+        EditScreens(all => HomeScreens.Remove(all, id));
     }
 
     /// <summary>The window the page is in, else the app's main window (a menu of the bar may act while Home is not shown).</summary>

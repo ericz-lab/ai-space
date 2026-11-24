@@ -11,6 +11,7 @@ import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
 import { type PetOpen, shownMood } from "../core/pet.ts";
 import { builtinPage } from "../core/screens.ts";
+import { shortcutsRunHref } from "../core/shortcuts.ts";
 import { sameOrigin } from "../core/url.ts";
 import { ChatPage } from "./chat-page.ts";
 import { lang, openExternally, prefs, savePrefs, t, tw } from "./env.ts";
@@ -82,6 +83,11 @@ export class MainWindow {
         if (url) openExternally(url);
       },
       openLink: (space, url) => this.openUrl(space, url),
+      runShortcut: (space, text) => {
+        // The one Shortcuts tab, taken to the sentence's action (core/shortcuts.ts).
+        this.tabs.open({ space, url: `${space.client.base}${shortcutsRunHref(text)}`, title: t("shortcuts"), key: "url:/?page=shortcuts" });
+        this.show("pages");
+      },
     });
     this.chat = new ChatPage(model, openLink);
     this.inbox = new InboxPage(model, (space, url) => this.openUrl(space, url));

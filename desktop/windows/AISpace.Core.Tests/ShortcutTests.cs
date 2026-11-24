@@ -43,10 +43,11 @@ public class ShortcutTests
     }
 
     [Fact]
-    public void SearchFindsEveryLanguagesWordsAndPutsWhatCanRunFirst()
+    public void SearchFindsEveryLanguagesWordsAndLeavesOutWhatCannotRun()
     {
         var a = Actions();
-        Assert.Equal(["space/calc", "laptop:ai-todo/create", "space/convert"], ShortcutRules.Search(a, "", "en").Select(x => x.Key));
+        Assert.Equal(["space/calc", "laptop:ai-todo/create"], ShortcutRules.Search(a, "", "en").Select(x => x.Key));
+        Assert.Empty(ShortcutRules.Search(a, "convert", "en"));
         Assert.Equal(["space/calc"], ShortcutRules.Search(a, "计算", "en").Select(x => x.Key));
         Assert.Equal(["space/calc"], ShortcutRules.Search(a, " MATH ", "en").Select(x => x.Key));
         Assert.Equal(["laptop:ai-todo/create"], ShortcutRules.Search(a, "ai-todo", "en").Select(x => x.Key));
@@ -157,5 +158,54 @@ public class ShortcutTests
         Assert.Equal("Asia/Shanghai", ShortcutRules.IanaZone(TimeZoneInfo.FindSystemTimeZoneById("China Standard Time")));
         Assert.Equal("Europe/Berlin", ShortcutRules.IanaZone(TimeZoneInfo.FindSystemTimeZoneById("Europe/Berlin")));
         Assert.Contains('/', ShortcutRules.IanaZone().Replace("UTC", "Etc/UTC", StringComparison.Ordinal));
+    }
+
+    // What POST /api/shortcuts/resolve answers for "待办 明天 写周报", with an intent of a kind this client does not know.
+    private const string Resolved = """
+        { "ok": true, "intents": [
+          { "kind": "action", "key": "ai-todo/create", "strong": true, "args": { "title": "写周报", "dueDate": "tomorrow", "count": 2 },
+            "action": { "id": "ai-todo/create", "app": "ai-todo", "title": "Create todo", "effect": "write", "available": true,
+              "inputs": [{ "name": "title", "type": "text", "label": "Title", "required": true, "query": true }, { "name": "dueDate", "type": "date", "label": "Date" }],
+              "i18n": { "zh": { "title": "新建待办", "inputs": { "title": "标题", "dueDate": "日期" } } } } },
+          { "kind": "action", "key": "no-descriptor", "strong": true },
+          { "kind": "later", "key": "x" }
+        ], "agentIntents": [], "ambiguous": false }
+        """;
+
+    [Fact]
+    public void AResolveAnswerDecodesAndAStrongActionTakesEnter()
+    {
+        var r = ShortcutJson.Resolution(Json(Resolved));
+        var todo = Assert.Single(r.Intents);
+        Assert.Equal("ai-todo/create", todo.Action!.Id);
+        Assert.Equal("2", todo.Args["count"]);
+        Assert.Same(todo, ShortcutRules.EnterIntent(r));
+        var values = ShortcutRules.IntentValues(todo, todo.Action);
+        Assert.Equal("写周报", values["title"]);
+        Assert.Equal("tomorrow", values["dueDate"]);
+        // An argument the form has no input for is not sent.
+        Assert.False(values.ContainsKey("count"));
+        Assert.False(ShortcutRules.RunsAtOnce(todo.Action, values));
+        Assert.Equal("标题: 写周报 · 日期: 2026-11-25", ShortcutRules.IntentSummary(todo, todo.Action, "zh", new DateOnly(2026, 11, 24)));
+
+        // A matched agent skill, an ambiguous text, a weak match or an action that cannot run leaves Enter to the box.
+        Assert.Null(ShortcutRules.EnterIntent(r with { AgentIntents = 1 }));
+        Assert.Null(ShortcutRules.EnterIntent(r with { Ambiguous = true }));
+        Assert.Null(ShortcutRules.EnterIntent(r with { Intents = [todo with { Strong = false }] }));
+        Assert.Null(ShortcutRules.EnterIntent(r with { Intents = [todo with { Action = todo.Action with { Available = false } }] }));
+    }
+
+    [Fact]
+    public void ArithmeticRunsTheCataloguesCalculatorAtOnce()
+    {
+        var r = ShortcutJson.Resolution(Json("""{ "intents": [{ "kind": "calc", "key": "calc", "expression": "1+2*3" }] }"""));
+        var calc = Assert.Single(r.Intents);
+        Assert.Same(calc, ShortcutRules.EnterIntent(r));
+        var action = ShortcutRules.ActionOf(calc, Actions());
+        Assert.Equal("space/calc", action!.Id);
+        var values = ShortcutRules.IntentValues(calc, action);
+        Assert.Equal("1+2*3", values["expression"]);
+        Assert.True(ShortcutRules.RunsAtOnce(action, values));
+        Assert.Null(ShortcutRules.ActionOf(calc, []));
     }
 }

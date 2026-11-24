@@ -41,12 +41,13 @@ internal sealed class ShortcutRunner
     private bool _active = true;
     private bool _closed;
 
-    public ShortcutRunner(PageContext context, ShortcutAction action, Action runsChanged)
+    /// <param name="values">The values the form opens with (what Home's command box read from the text); else the action's own.</param>
+    public ShortcutRunner(PageContext context, ShortcutAction action, Action runsChanged, Dictionary<string, string>? values = null)
     {
         _context = context;
         _action = action;
         _runsChanged = runsChanged;
-        _values = ShortcutRules.InitialValues(action);
+        _values = values ?? ShortcutRules.InitialValues(action);
         _follow.Tick += (_, _) => Follow();
         _again = Ui.Button(L.T("New"), Reset);
         _again.Margin = new Thickness(0, 0, 8, 0);
@@ -108,6 +109,18 @@ internal sealed class ShortcutRunner
     {
         _closed = true;
         _follow.Stop();
+    }
+
+    /// <summary>Sends the form as it is, when it can be sent (Home runs a complete read at once).</summary>
+    public void Run() => Submit();
+
+    /// <summary>Focus on the button when the form is complete, else on the first empty required input, for the keyboard.</summary>
+    public void FocusNext()
+    {
+        var missing = ShortcutRules.Missing(_action, _values).FirstOrDefault();
+        var i = missing is null ? -1 : _action.Inputs.ToList().FindIndex(x => x.Name == missing.Name);
+        Control target = i >= 0 && i < _inputs.Count ? _inputs[i] : _go;
+        _panel.Dispatcher.BeginInvoke(() => target.Focus(), DispatcherPriority.Input);
     }
 
     /// <summary>Focus on the first input (or the button when there is none), for the keyboard.</summary>
