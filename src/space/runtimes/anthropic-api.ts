@@ -1,3 +1,4 @@
+import type { GatewayLink } from "../gateway/types.ts";
 import type { AnthropicApiSpec, Backend, CompleteInput, CompleteOutcome, RuntimeAdapter, Usage } from "./types.ts";
 import { Unsupported } from "./types.ts";
 
@@ -12,6 +13,10 @@ import { Unsupported } from "./types.ts";
  * (docs/runtimes.md#magpie): its `provider/model` ids come from the runtime's `models:` pins, and
  * what it says answered (`X-Magpie-Model`) goes into the call's trace as `served`. A refusal's
  * Retry-After is kept in the error (`retry after 30s`), where failure.ts reads when to try again.
+ *
+ * `gateway: space` (docs/model-gateway.md) answers through the built-in model gateway: its loopback
+ * address, a token issued for the one call instead of a key, and what answered read from that
+ * token's trace as `served`.
  */
 
 export const DEFAULT_API_URL = "https://api.anthropic.com/v1/messages";
@@ -36,18 +41,30 @@ export function apiCost(model: string, u: Usage): number | undefined {
   return (u.inputTokens * p[0] + u.cacheWriteTokens * p[1] + u.cacheReadTokens * p[2] + u.outputTokens * p[3]) / 1e6;
 }
 
-export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeof fetch } = {}): RuntimeAdapter {
+export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeof fetch; gateway?: GatewayLink } = {}): RuntimeAdapter {
   const doFetch = deps.fetch ?? fetch;
   const backend: Backend = "api";
+  /** Where one call goes, and with which key: the spec's, or the built-in gateway's with a token of its own. */
+  const target = (): { apiUrl: string; apiKey: string; run?: string } | { error: string } => {
+    if (spec.gateway !== "space") return { apiUrl: spec.apiUrl || DEFAULT_API_URL, apiKey: spec.apiKey };
+    const base = deps.gateway?.base();
+    if (!deps.gateway || !base) return { error: `runtime ${spec.name} answers through the built-in model gateway, which is off: ${deps.gateway?.problem() ?? "this space has none"}` };
+    const grant = deps.gateway.issue();
+    return { apiUrl: `${base}/v1/messages`, apiKey: grant.token, run: grant.run };
+  };
   return {
     name: spec.name,
     kind: "anthropic-api",
     backend,
     capabilities: { complete: true, agent: false, chat: false },
-    complete: (input, signal) =>
-      input.files?.length
-        ? Promise.resolve({ ok: false, error: "files need a runtime with a Read tool; the API backend takes text only", backend })
-        : runApi(input, { apiKey: spec.apiKey, apiUrl: spec.apiUrl || DEFAULT_API_URL, fetch: doFetch, signal }),
+    complete: async (input, signal) => {
+      if (input.files?.length) return { ok: false, error: "files need a runtime with a Read tool; the API backend takes text only", backend };
+      const t = target();
+      if ("error" in t) return { ok: false, error: t.error, backend };
+      const outcome = await runApi(input, { apiKey: t.apiKey, apiUrl: t.apiUrl, fetch: doFetch, signal });
+      const served = t.run ? deps.gateway!.trace(t.run)?.served : undefined;
+      return served ? { ...outcome, served } : outcome;
+    },
     runAgent: () => Promise.reject(new Unsupported(spec.name, "agent runs")),
     chat: () => {
       throw new Unsupported(spec.name, "chat");

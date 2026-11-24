@@ -1,3 +1,4 @@
+import type { GatewayLink } from "../gateway/types.ts";
 import { createAnthropicApi } from "./anthropic-api.ts";
 import { createClaudeCode } from "./claude-code.ts";
 import { createCodexCli } from "./codex-cli.ts";
@@ -14,7 +15,11 @@ import { MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_NAME_PATTERN, type MachineSp
  * ssh login under `machines:`, whose answers this space's own adapter runs over ssh, or a peer,
  * whose adapter the peers module supplies (`attachRemote`): the peer resolves the tier itself.
  */
-export type RegistryDeps = { fetch?: typeof fetch };
+export type RegistryDeps = {
+  fetch?: typeof fetch;
+  /** The built-in model gateway, for runtimes with `gateway: space` (docs/model-gateway.md). */
+  gateway?: GatewayLink;
+};
 
 /** Runtimes on other spaces (the peers): an adapter for `machine:runtime`, or why there is none. */
 export type RemoteRuntimes = {
@@ -41,9 +46,9 @@ export type MachineTierOption = TierOption & { machine: string };
 /** Kinds whose answers can run over ssh. */
 const SSH_KINDS = new Set<RuntimeSpec["kind"]>(["claude-code", "codex-cli", "deepseek-harness"]);
 
-/** Whether a runtime's answers can run on another machine's login: its kind can, and it does not go through magpie here. */
+/** Whether a runtime's answers can run on another machine's login: its kind can, and it does not go through a model gateway here. */
 function runsOverSsh(spec: RuntimeSpec): boolean {
-  return SSH_KINDS.has(spec.kind) && !(spec.kind === "claude-code" && spec.magpie);
+  return SSH_KINDS.has(spec.kind) && !(spec.kind === "claude-code" && (spec.magpie || spec.gateway));
 }
 
 /** `machine:runtime/model` → its parts; `undefined` when the string names no machine. */
@@ -163,7 +168,7 @@ export class RuntimeRegistry {
     if (cached) return cached;
     const spec = this.specs.get(runtime);
     if (!spec) throw new Error(`unknown runtime: ${runtime}`);
-    if (!runsOverSsh(spec)) throw new Error(`runtime ${runtime} (${spec.kind}${spec.kind === "claude-code" ? " through magpie" : ""}) cannot run on another machine`);
+    if (!runsOverSsh(spec)) throw new Error(`runtime ${runtime} (${spec.kind}${spec.kind === "claude-code" ? " through a model gateway" : ""}) cannot run on another machine`);
     const { streamCompletions: _, ...rest } = spec as RuntimeSpec & { streamCompletions?: boolean };
     const adapter: RuntimeAdapter = { ...createAdapter({ ...rest, sshHost: m.ssh } as RuntimeSpec, this.deps), machine };
     this.machineAdapters.set(key, adapter);
@@ -276,7 +281,7 @@ function createAdapter(spec: RuntimeSpec, deps: RegistryDeps): RuntimeAdapter {
     case "codex-cli":
       return createCodexCli(spec);
     case "claude-code":
-      return createClaudeCode(spec);
+      return createClaudeCode(spec, deps.gateway ? { gateway: deps.gateway } : {});
     case "anthropic-api":
       return createAnthropicApi(spec, deps);
     case "deepseek-harness":

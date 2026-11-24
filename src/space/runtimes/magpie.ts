@@ -5,9 +5,9 @@ import { pathOf, whichUsable, withUserToolDirs } from "../host-tools.ts";
 import { MODEL_TIERS, type ModelTier, type TierModels } from "./types.ts";
 
 /**
- * magpie (https://github.com/yetone/magpie), a gateway on this machine in front of many model
- * providers: it holds their keys and sign-ins, speaks the Anthropic Messages API among others, and
- * fails over between them (docs/runtimes.md#magpie). ai-space does not install it or change its
+ * magpie (https://github.com/yetone/magpie), an external model gateway on this machine in front of
+ * many model providers: it holds their keys and sign-ins, speaks the Anthropic Messages API among
+ * others, and fails over between them (docs/model-gateway.md#magpie). ai-space does not install it or change its
  * settings. This file finds it (where it listens, whether it answers, the models it offers) and
  * says what a Claude Code process needs in its environment to answer through it, so GLM, Kimi,
  * MiniMax and the rest of magpie's providers serve chat, agent tasks and answers with Claude Code's
@@ -100,7 +100,8 @@ export function readModelList(body: unknown): string[] | undefined {
 /**
  * magpie's model list, with its routing groups told apart: an id under `group/` (or `auto/`, a group
  * magpie made itself), or an entry magpie labels as one (`magpie_by` or `magpie_label` saying
- * "routing group", as a group listed by its bare id is).
+ * "routing group", as a group listed by its bare id is). The built-in model gateway's list marks
+ * its groups with `kind: "group"` (docs/model-gateway.md#routes).
  */
 export function readCatalog(body: unknown): { models: string[]; groups: string[] } | undefined {
   const data = (body as { data?: unknown } | null)?.data;
@@ -108,11 +109,11 @@ export function readCatalog(body: unknown): { models: string[]; groups: string[]
   const models: string[] = [];
   const groups: string[] = [];
   for (const raw of data) {
-    const m = (raw ?? {}) as { id?: unknown; magpie_by?: unknown; magpie_label?: unknown };
+    const m = (raw ?? {}) as { id?: unknown; magpie_by?: unknown; magpie_label?: unknown; kind?: unknown };
     if (typeof m.id !== "string" || !MAGPIE_MODEL_PATTERN.test(m.id) || models.includes(m.id)) continue;
     models.push(m.id);
     const said = [m.magpie_by, m.magpie_label].some((x) => typeof x === "string" && /routing group/i.test(x));
-    if (said || /^(group|auto)\//.test(m.id)) groups.push(m.id);
+    if (said || m.kind === "group" || /^(group|auto)\//.test(m.id)) groups.push(m.id);
   }
   return { models, groups };
 }
@@ -173,16 +174,49 @@ const TIER_ALIAS_ENV: Record<ModelTier, string> = {
  * Anthropic key from the workspace `.env` is left out, so it never goes to the gateway.
  */
 export function magpieClaudeEnv(url: string, models: TierModels | undefined, base: Record<string, string | undefined> = process.env): Record<string, string | undefined> {
+  return gatewayClaudeEnv(url, MAGPIE_CALLER_KEY, models, base);
+}
+
+/**
+ * The environment of a Claude Code process that answers through a model gateway: magpie (above)
+ * or the built-in one (`gateway: space`, docs/model-gateway.md), which hands each process a token
+ * of its own. With `fill`, a tier left unpinned takes the nearest pinned one (a lower one first),
+ * since the built-in gateway knows no Claude alias: the CLI's background calls (titles, summaries,
+ * subagents on `haiku`) must name a model it can route. `extra` is added as is.
+ */
+export function gatewayClaudeEnv(url: string, token: string, models: TierModels | undefined, base: Record<string, string | undefined> = process.env, opts: { fill?: boolean; extra?: Record<string, string> } = {}): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...base };
   delete env.ANTHROPIC_API_KEY;
   env.ANTHROPIC_BASE_URL = url;
-  env.ANTHROPIC_AUTH_TOKEN = MAGPIE_CALLER_KEY;
+  env.ANTHROPIC_AUTH_TOKEN = token;
+  const pins = opts.fill ? filledTiers(models) : models;
   for (const tier of MODEL_TIERS) {
-    const pin = models?.[tier];
+    const pin = pins?.[tier];
     if (pin) env[TIER_ALIAS_ENV[tier]] = pin;
   }
-  if (models?.basic) env.ANTHROPIC_SMALL_FAST_MODEL = models.basic;
+  if (pins?.basic) env.ANTHROPIC_SMALL_FAST_MODEL = pins.basic;
+  Object.assign(env, opts.extra);
   return env;
+}
+
+/** Every tier with a model: its own pin, else the nearest lower pin, else the nearest higher one. */
+export function filledTiers(models: TierModels | undefined): TierModels {
+  const out: TierModels = {};
+  MODEL_TIERS.forEach((tier, i) => {
+    const below = MODEL_TIERS.slice(0, i + 1).reverse().find((t) => models?.[t]);
+    const above = MODEL_TIERS.slice(i + 1).find((t) => models?.[t]);
+    const pick = below ?? above;
+    if (pick) out[tier] = models![pick];
+  });
+  return out;
+}
+
+/** The same environment's gateway variables as a `--settings` JSON (see `magpieClaudeSettings`). */
+export function gatewayClaudeSettings(url: string, token: string, models: TierModels | undefined, opts: { fill?: boolean; extra?: Record<string, string> } = {}): string {
+  const env = gatewayClaudeEnv(url, token, models, {}, opts);
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) if (v !== undefined) out[k] = v;
+  return JSON.stringify({ env: out });
 }
 
 /**
@@ -193,10 +227,7 @@ export function magpieClaudeEnv(url: string, models: TierModels | undefined, bas
  * unpinned is the CLI's own (its alias, or what that file maps the alias to).
  */
 export function magpieClaudeSettings(url: string, models: TierModels | undefined): string {
-  const env = magpieClaudeEnv(url, models, {});
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) if (v !== undefined) out[k] = v;
-  return JSON.stringify({ env: out });
+  return gatewayClaudeSettings(url, MAGPIE_CALLER_KEY, models);
 }
 
 /**

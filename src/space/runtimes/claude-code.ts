@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { ClaudeLive, claudeLiveFingerprint } from "./claude-live.ts";
 import { LivePool } from "./live.ts";
-import { magpieClaudeEnv, magpieClaudeSettings } from "./magpie.ts";
+import type { GatewayLink } from "../gateway/types.ts";
+import { gatewayClaudeEnv, gatewayClaudeSettings, magpieClaudeEnv, magpieClaudeSettings } from "./magpie.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
@@ -47,19 +48,34 @@ import { assertCompletionMode, CHAT_EFFORTS, FILE_NAME_PATTERN, PERMISSION_MODES
 
 export { PERMISSION_MODES };
 
-export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels }): RuntimeAdapter {
+export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels }, deps: { gateway?: GatewayLink } = {}): RuntimeAdapter {
   const sshHost = spec.sshHost?.trim() ?? "";
   if (sshHost && !SSH_HOST_PATTERN.test(sshHost)) throw new Error(`runtime ${spec.name}: ssh host is not a host name: ${sshHost}`);
-  if (sshHost && spec.magpie) throw new Error(`runtime ${spec.name}: a runtime that answers through magpie runs on this machine, not over ssh`);
-  // Through magpie (docs/runtimes.md#magpie): every process this runtime starts gets the gateway in its environment.
-  const envOf = (base: Record<string, string | undefined> | undefined) => (spec.magpie ? magpieClaudeEnv(spec.magpie, spec.models, base ?? process.env) : base);
-  const withEnv = (turn: ChatTurn): ChatTurn => (spec.magpie ? { ...turn, env: envOf(turn.env) } : turn);
+  if (sshHost && (spec.magpie || spec.gateway)) throw new Error(`runtime ${spec.name}: a runtime that answers through a model gateway runs on this machine, not over ssh`);
   const cli = spec.bin.length ? spec.bin : ["claude"];
-  // Through magpie the pins also go as `--settings`, which outranks the user's ~/.claude/settings.json
-  // (where magpie's Agents page writes its own picks); read per call, so a pin saved in Settings applies.
-  const binOf = () => (spec.magpie ? [...cli, "--settings", magpieClaudeSettings(spec.magpie, spec.models)] : cli);
   const backend: Backend = sshHost ? `ssh:${sshHost}` : "local";
-  const live = new LivePool({ fingerprint: claudeLiveFingerprint });
+  const space = spec.gateway === "space";
+  // Through the built-in model gateway the CLI's own token does not name the process: a new one is
+  // issued per process, so a conversation's live process is matched without it.
+  const live = new LivePool({ fingerprint: space ? (t) => claudeLiveFingerprint({ ...t, env: { ...t.env, ANTHROPIC_AUTH_TOKEN: undefined } }) : claudeLiveFingerprint });
+
+  /**
+   * How one process reaches its model gateway (docs/model-gateway.md): magpie's address and caller
+   * key, or the built-in gateway's loopback address and a token issued for this process alone.
+   * The same variables go in its environment and, read per call so a pin saved in Settings
+   * applies, as `--settings`, which outranks the user's ~/.claude/settings.json. Nothing else.
+   */
+  type Route = { env: (base: Record<string, string | undefined> | undefined) => Record<string, string | undefined> | undefined; bin: string[]; run?: string } | { error: string };
+  const route = (): Route => {
+    if (spec.magpie) return { env: (b) => magpieClaudeEnv(spec.magpie!, spec.models, b ?? process.env), bin: [...cli, "--settings", magpieClaudeSettings(spec.magpie, spec.models)] };
+    if (!space) return { env: (b) => b, bin: cli };
+    const link = deps.gateway;
+    const url = link?.base();
+    if (!link || !url) return { error: `runtime ${spec.name} answers through the built-in model gateway, which is off: ${link?.problem() ?? "this space has none"}` };
+    const grant = link.issue();
+    const opts = { fill: true, extra: SPACE_GATEWAY_ENV };
+    return { env: (b) => gatewayClaudeEnv(url, grant.token, spec.models, b ?? process.env, opts), bin: [...cli, "--settings", gatewayClaudeSettings(url, grant.token, spec.models, opts)], run: grant.run };
+  };
 
   return {
     name: spec.name,
@@ -84,31 +100,61 @@ export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels })
         const stdin = remote.spool ? remote.spool.archive : input.prompt;
         return runCompletion(["ssh", "-o", "BatchMode=yes", sshHost, `bash -lc '${remote.command}'`], input, stdin, backend, signal, onDelta);
       }
-      return runCompletion(cliArgs(binOf(), input, stream), input, input.prompt + filesNote(input.files ?? [], (f) => f.path), "local", signal, onDelta, envOf(process.env));
+      const r = route();
+      if ("error" in r) return { ok: false, error: r.error, backend };
+      const outcome = await runCompletion(cliArgs(r.bin, input, stream), input, input.prompt + filesNote(input.files ?? [], (f) => f.path), "local", signal, onDelta, r.env(process.env));
+      return r.run ? servedFromTrace(outcome, deps.gateway!, r.run) : outcome;
     },
 
     async runAgent(run) {
-      const cmd = [...binOf(), ...agentArgs(run)];
-      const r = await spawnCollect(cmd, { cwd: run.cwd, env: envOf(run.env), stdin: run.prompt, signal: run.signal });
-      const output = joinOutput(r.stdout, r.stderr);
-      if (r.timedOut || r.aborted) return { ok: false, error: "timed out", output, timedOut: true, backend: "local" };
-      if (r.code !== 0) return { ok: false, error: reportedError(r.stdout.trim()) ?? `exit code ${r.code}`, output, timedOut: false, backend: "local" };
-      const parsed = parseCliOutput(r.stdout);
+      const r = route();
+      if ("error" in r) return { ok: false, error: r.error, output: "", timedOut: false, backend: "local" };
+      const cmd = [...r.bin, ...agentArgs(run)];
+      const res = await spawnCollect(cmd, { cwd: run.cwd, env: r.env(run.env), stdin: run.prompt, signal: run.signal });
+      const output = joinOutput(res.stdout, res.stderr);
+      if (res.timedOut || res.aborted) return { ok: false, error: "timed out", output, timedOut: true, backend: "local" };
+      if (res.code !== 0) return { ok: false, error: reportedError(res.stdout.trim()) ?? `exit code ${res.code}`, output, timedOut: false, backend: "local" };
+      const parsed = parseCliOutput(res.stdout);
       if (!parsed) return { ok: true, output, timedOut: false, backend: "local" };
-      if (parsed.error !== undefined) return { ok: false, error: parsed.error, output, usage: parsed.usage, costUsd: parsed.costUsd, timedOut: false, backend: "local" };
-      return { ok: true, output, text: parsed.text, usage: parsed.usage, costUsd: parsed.costUsd, timedOut: false, backend: "local" };
+      // Through the built-in gateway the CLI prices another vendor's model at Claude's list prices: not kept.
+      const costUsd = r.run ? undefined : parsed.costUsd;
+      if (parsed.error !== undefined) return { ok: false, error: parsed.error, output, usage: parsed.usage, costUsd, timedOut: false, backend: "local" };
+      return { ok: true, output, text: parsed.text, usage: parsed.usage, costUsd, timedOut: false, backend: "local" };
     },
 
     chat(original, cb) {
-      const turn = withEnv(original);
-      if (turn.interactive) return live.run(turn, cb, () => new ClaudeLive(binOf(), turn, spec.chatArgs));
-      return chatStream([...binOf(), ...chatArgs(turn, spec.chatArgs)], turn, cb);
+      const r = route();
+      if ("error" in r) {
+        queueMicrotask(() => cb.onFinish(r.error));
+        return { kill: () => {} };
+      }
+      const turn: ChatTurn = spec.magpie || space ? { ...original, env: r.env(original.env) } : original;
+      if (turn.interactive) return live.run(turn, cb, () => new ClaudeLive(r.bin, turn, spec.chatArgs));
+      return chatStream([...r.bin, ...chatArgs(turn, spec.chatArgs)], turn, cb);
     },
 
     closeLive: () => live.closeAll(),
 
     transcript: (cwd, sid) => readClaudeTranscript(cwd, sid, spec.transcriptHome),
   };
+}
+
+/**
+ * Set for a Claude Code process answering through the built-in model gateway: Claude Code's own
+ * switch that stops it sending pre-release fields and their `anthropic-beta` values, which another
+ * vendor's Messages endpoint refuses ("Extra inputs are not permitted"; Claude Code's LLM gateway
+ * documentation). Only in that process's environment.
+ */
+export const SPACE_GATEWAY_ENV: Record<string, string> = { CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1" };
+
+/**
+ * What the built-in gateway says answered the run, as the outcome's `served`; the CLI's cost
+ * figure is dropped, since it prices another vendor's model at Claude's list prices.
+ */
+export function servedFromTrace(outcome: CompleteOutcome, link: GatewayLink, run: string): CompleteOutcome {
+  const trace = link.trace(run);
+  const { costUsd: _, ...rest } = outcome;
+  return { ...rest, ...(trace?.served ? { served: trace.served } : {}) } as CompleteOutcome;
 }
 
 // ---------------------------------------------------------------- complete

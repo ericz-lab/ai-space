@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { validGatewayUrl } from "./magpie.ts";
+import { magpieAddress, validGatewayUrl } from "./magpie.ts";
 import { FALLBACK_MODEL_PATTERN, MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_KINDS, RUNTIME_NAME_PATTERN, SSH_HOST_PATTERN, type MachineSpec, type ModelTier, type RuntimeKind, type RuntimeSpec, type RuntimesConfig, type TierModels } from "./types.ts";
 
 /**
@@ -18,8 +18,9 @@ import { FALLBACK_MODEL_PATTERN, MACHINE_NAME_PATTERN, MODEL_TIERS, RUNTIME_KIND
  *       chatArgs: [--foo]         # optional: appended to every chat turn
  *     glm:
  *       kind: claude-code
- *       magpie: http://127.0.0.1:3425   # optional: answers through magpie's gateway (docs/runtimes.md#magpie)
- *       models: { basic: zhipu/glm-4.5-air, intermediate: zhipu/glm-4.6 }   # magpie's ids
+ *       gateway: magpie           # optional: answers through a model gateway: space (the built-in one),
+ *                                 # magpie, or an address (docs/model-gateway.md); `magpie: <url>` still works
+ *       models: { basic: zhipu/glm-4.5-air, intermediate: zhipu/glm-4.6 }   # the gateway's ids
  *     api:
  *       kind: anthropic-api
  *       apiKeyEnv: ANTHROPIC_API_KEY   # variable holding the key (default shown)
@@ -88,7 +89,7 @@ export function parseRuntimesYaml(text: string, env: Record<string, string | und
           if (!(MODEL_TIERS as readonly string[]).includes(tier)) throw new Error(`${RUNTIMES_FILE}: unknown model tier ${tier}`);
           // An API runtime's model never meets a shell, nor does a magpie runtime's (it never runs over ssh):
           // a gateway's `provider/model` id is taken as is.
-          const gateway = kind === "anthropic-api" || (spec.kind === "claude-code" && Boolean(spec.magpie));
+          const gateway = kind === "anthropic-api" || (spec.kind === "claude-code" && Boolean(spec.magpie || spec.gateway));
           const id = gateway ? /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/ : /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
           if (typeof model !== "string" || !id.test(model) || (MODEL_TIERS as readonly string[]).includes(model)) throw new Error(`${RUNTIMES_FILE}: ${tier} must name a concrete model`);
           models[tier as ModelTier] = model;
@@ -131,7 +132,7 @@ function parseFallback(raw: unknown, runtimes: RuntimeSpec[], machines: MachineS
       if (!spec && skipped.has(runtime!)) return undefined;
       if (!spec) throw new Error(`${where}: runtime ${runtime} is not configured`);
       if (machine && spec.kind === "anthropic-api") throw new Error(`${where}: runtime ${runtime} (anthropic-api) cannot run on another machine`);
-      if (machine && spec.kind === "claude-code" && spec.magpie) throw new Error(`${where}: runtime ${runtime} answers through magpie on this machine and cannot run on another`);
+      if (machine && spec.kind === "claude-code" && (spec.magpie || spec.gateway)) throw new Error(`${where}: runtime ${runtime} answers through a model gateway on this machine and cannot run on another`);
     }
     return tier;
   };
@@ -179,8 +180,8 @@ function parseMachines(raw: unknown): MachineSpec[] {
 function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>, env: Record<string, string | undefined>): RuntimeSpec | { warning: string } {
   const ctx = `${RUNTIMES_FILE}: runtime ${name}`;
   const allowed: Record<RuntimeKind, string[]> = {
-    "claude-code": ["kind", "ssh", "bin", "chatArgs", "magpie"],
-    "anthropic-api": ["kind", "apiKeyEnv", "url"],
+    "claude-code": ["kind", "ssh", "bin", "chatArgs", "magpie", "gateway"],
+    "anthropic-api": ["kind", "apiKeyEnv", "url", "gateway"],
     "deepseek-harness": ["kind", "ssh", "bin", "home", "profile", "liveProfile", "provider"],
     "codex-cli": ["kind", "ssh", "bin", "streamCompletions"],
   };
@@ -196,12 +197,29 @@ function parseSpec(name: string, kind: RuntimeKind, raw: Record<string, unknown>
     case "claude-code": {
       const sshHost = optionalString(raw.ssh, `${ctx}: ssh`);
       if (sshHost && !SSH_HOST_PATTERN.test(sshHost)) throw new Error(`${ctx}: ssh is not a host name`);
-      const magpie = optionalString(raw.magpie, `${ctx}: magpie`)?.replace(/\/+$/, "");
+      let magpie = optionalString(raw.magpie, `${ctx}: magpie`)?.replace(/\/+$/, "");
       if (magpie !== undefined && !validGatewayUrl(magpie)) throw new Error(`${ctx}: magpie must be the gateway's address, such as http://127.0.0.1:3425`);
-      if (magpie && sshHost) throw new Error(`${ctx}: a runtime that answers through magpie runs on this machine; drop ssh`);
-      return { name, kind, bin: command(raw.bin, `${ctx}: bin`), ...(sshHost ? { sshHost } : {}), chatArgs: command(raw.chatArgs, `${ctx}: chatArgs`), ...(magpie ? { magpie } : {}) };
+      // `gateway:` (docs/model-gateway.md): space (the built-in one), magpie (found as setup finds it), or an address.
+      const gateway = optionalString(raw.gateway, `${ctx}: gateway`)?.replace(/\/+$/, "");
+      if (gateway !== undefined && magpie !== undefined) throw new Error(`${ctx}: name the model gateway once, with gateway: (magpie: is its older spelling)`);
+      let space = false;
+      if (gateway === "space") space = true;
+      else if (gateway === "magpie") magpie = magpieAddress({ env }).url;
+      else if (gateway !== undefined) {
+        if (!validGatewayUrl(gateway)) throw new Error(`${ctx}: gateway must be space, magpie or a gateway's address, such as http://127.0.0.1:3425`);
+        magpie = gateway;
+      }
+      if ((magpie || space) && sshHost) throw new Error(`${ctx}: a runtime that answers through a model gateway runs on this machine; drop ssh`);
+      return { name, kind, bin: command(raw.bin, `${ctx}: bin`), ...(sshHost ? { sshHost } : {}), chatArgs: command(raw.chatArgs, `${ctx}: chatArgs`), ...(magpie ? { magpie } : {}), ...(space ? { gateway: "space" as const } : {}) };
     }
     case "anthropic-api": {
+      const gateway = optionalString(raw.gateway, `${ctx}: gateway`);
+      if (gateway !== undefined) {
+        // The built-in gateway issues its own token per call: no key, no address to write here.
+        if (gateway !== "space") throw new Error(`${ctx}: gateway must be space (for magpie, give its url and apiKeyEnv)`);
+        if (raw.apiKeyEnv !== undefined || raw.url !== undefined) throw new Error(`${ctx}: gateway: space takes no apiKeyEnv or url; the keys are in gateway.yaml`);
+        return { name, kind, apiKey: "", apiUrl: "", gateway: "space" };
+      }
       const keyEnv = optionalString(raw.apiKeyEnv, `${ctx}: apiKeyEnv`) ?? "ANTHROPIC_API_KEY";
       const apiKey = env[keyEnv]?.trim() ?? "";
       if (!apiKey) return { warning: `runtime ${name} skipped: ${keyEnv} is not set` };
