@@ -13,7 +13,7 @@ import type { ModelGateway } from "./service.ts";
 import { GATEWAY_AUTH, GATEWAY_KINDS, type GatewayKind, GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN, GATEWAY_TIERS, type GatewayAuth, type GatewayConfig, type GatewayProvider, type GatewayTier, type GatewayTiers } from "./types.ts";
 import { PRICES_FILE } from "./prices.ts";
 import { createGatewayMediaRoutes, type MediaOptions } from "./settings-media.ts";
-import { documentedKind, kindOf, servesOf } from "./kinds.ts";
+import { documentedIds, documentedKind, kindOf, servesOf } from "./kinds.ts";
 import { VENDORS, customList, fetchModelList, presetList, redact, testProvider } from "./vendors.ts";
 
 /**
@@ -225,6 +225,8 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
           kinds: Object.fromEntries(p.models.map((m) => [m, kindOf(p, m)])),
           kindSet: Object.keys(p.kinds ?? {}),
           serves: servesOf(p),
+          // Picture models the vendor documents that the provider does not list yet: the Pictures group adds one in a click.
+          ...(servesOf(p).image === true ? { imageOffer: documentedIds(p.preset, "image").filter((m) => !p.models.includes(m)) } : {}),
           ...(o.gateway.prices ? { prices: pricesOf(p) } : {}),
           usedBy: usedBy(config!, p.name),
         };

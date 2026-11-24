@@ -140,7 +140,7 @@ export default function GatewaySettings() {
       {!g.unavailable && <SpeechCard g={g} editable={editable} onAddProvider={editable ? addProvider : undefined} t={t} />}
 
       {!g.unavailable && (
-        <ImageCard g={g} editable={editable} busy={busy} onAddProvider={editable ? addProvider : undefined} onSave={(image) => void runIn("image")(() => sendJson("PUT", "/api/model/gateway/tiers", { tiers: { ...g.tiers, image } }), t("gateway.imageSaved"))} t={t}>
+        <ImageCard g={g} editable={editable} busy={busy} onAddProvider={editable ? addProvider : undefined} onAddModel={(p, model) => void runIn("image")(() => sendJson("PUT", `/api/model/gateway/providers/${p.name}`, { models: [...p.models, model], kinds: { [model]: "image" } }), t("imageg.added", { model: `${p.name}/${model}` }))} onSave={(image) => void runIn("image")(() => sendJson("PUT", "/api/model/gateway/tiers", { tiers: { ...g.tiers, image } }), t("gateway.imageSaved"))} t={t}>
           {messages("image")}
         </ImageCard>
       )}

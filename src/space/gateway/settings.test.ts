@@ -159,6 +159,26 @@ describe("providers from the page", () => {
     expect((await call("POST", "/api/model/gateway/providers", { name: "x", preset: "deepseek" })).json.error).toContain("API key");
   });
 
+  test("a provider that can draw offers its vendor's documented picture models; adding one makes it a picture model", async () => {
+    const v = vendor();
+    const { call } = await setup();
+    await call("POST", "/api/model/gateway/providers", { name: "minimax", preset: "minimax", messages: v.url, key: KEY, models: ["MiniMax-M3"] });
+    const before = ((await call("GET", "/api/model/gateway")).json as { providers: { imageOffer?: string[] }[] }).providers[0]!;
+    // No openai base yet: it cannot draw, so nothing is offered.
+    expect(before.imageOffer).toBeUndefined();
+    await call("PUT", "/api/model/gateway/providers/minimax", { openai: `${v.url}/v1` });
+    const based = (await call("GET", "/api/model/gateway")).json as { imageModels: string[]; providers: { imageOffer?: string[] }[] };
+    expect(based.providers[0]!.imageOffer).toEqual(["MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed"]);
+    expect(based.imageModels).toEqual([]);
+    // What the Pictures group sends: the model added to the list, marked as a picture model.
+    expect((await call("PUT", "/api/model/gateway/providers/minimax", { models: ["MiniMax-M3", "MiniMax-H3-Image"], kinds: { "MiniMax-H3-Image": "image" } })).status).toBe(200);
+    const after = (await call("GET", "/api/model/gateway")).json as { imageModels: string[]; textModels: string[]; providers: { imageOffer?: string[] }[] };
+    expect(after.imageModels).toEqual(["minimax/MiniMax-H3-Image"]);
+    expect(after.textModels).toEqual(["minimax/MiniMax-M3"]);
+    expect(after.providers[0]!.imageOffer).toEqual(["MiniMax-H3-Image-Highspeed"]);
+    expect((await call("PUT", "/api/model/gateway/tiers", { tiers: { image: "minimax/MiniMax-H3-Image" } })).status).toBe(200);
+  });
+
   test("a key the environment sets is shown so and never overwritten; replacing a workspace key applies at once", async () => {
     const v = vendor();
     const { call, env } = await setup({ env: { SPACE_GATEWAY_KM_KEY: KEY } });
