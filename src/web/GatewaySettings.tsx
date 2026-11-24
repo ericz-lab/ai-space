@@ -200,6 +200,10 @@ export function ProviderRow({ p, preset, editable, busy, run, lang, t }: { p: Ga
       <small>{keyText(p, t)}</small>
       <small>{p.models.length ? t("gateway.models", { n: p.models.length, list: p.models.slice(0, 6).map((m) => (p.kinds?.[m] && p.kinds[m] !== "text" ? `${m} (${kindLabel(p.kinds[m]!, t)})` : m)).join(", ") + (p.models.length > 6 ? ", …" : "") }) : t("gateway.noModels")}</small>
       {p.serves && <Serves serves={p.serves} t={t} />}
+      {/* The vendor's base for speech or pictures that the preset leaves out: one click here, not only inside Edit. */}
+      {editable && open !== "edit" && preset?.openaiOffer && !preset.openai && !p.openai && (
+        <OpenaiOffer name={preset.name} offer={preset.openaiOffer} site={siteOf(preset.sites, p.messages)} current="" onUse={(base) => void run(() => sendJson("PUT", `/api/model/gateway/providers/${p.name}`, { openai: base }), t("gateway.offerUsed", { name: p.name, base }))} busy={busy} t={t} />
+      )}
       {p.prices && p.models.length > 0 && <PriceList p={p} t={t} />}
       <div className="gw-actions">
         <button className="btn2" disabled={busy || testing} onClick={() => void test()}>{testing ? t("gateway.testing") : t("gateway.test")}</button>
@@ -492,7 +496,7 @@ export function AddProvider({ presets, taken, busy, run, onDone, t }: { presets:
         </small>
       )}
       <ModelChooser selected={models} onChange={setModels} fetchList={() => fetchModels(body())} kinds={kinds} onKinds={setKinds} busy={busy} t={t} />
-      {p?.openaiOffer && !p.openai && <OpenaiOffer offer={p.openaiOffer} site={siteOf(p.sites, messages.trim() || p.messages)} current={openai} onUse={(b) => { setOpenai(b); setAdvanced(true); }} busy={busy} t={t} />}
+      {p?.openaiOffer && !p.openai && <OpenaiOffer name={p.name} offer={p.openaiOffer} site={siteOf(p.sites, messages.trim() || p.messages)} current={openai} onUse={(b) => { setOpenai(b); setAdvanced(true); }} busy={busy} t={t} />}
       <p className="setnote">{t("gateway.keyWhere")}</p>
       <div className="setbtns">
         <span className="setbtns-gap" />
@@ -529,7 +533,7 @@ function ProviderEditor({ p, preset, busy, run, onDone, t }: { p: GatewayProvide
         <span>{t("gateway.openaiBase")}</span>
         <input className="setselect" value={openai} spellCheck={false} onChange={(e) => setOpenai(e.target.value)} disabled={busy} />
       </label>
-      {preset?.openaiOffer && !preset.openai && !p.openai && <OpenaiOffer offer={preset.openaiOffer} site={siteOf(sites, messages.trim() || preset.messages)} current={openai} onUse={setOpenai} busy={busy} t={t} />}
+      {preset?.openaiOffer && !preset.openai && !p.openai && <OpenaiOffer name={preset.name} offer={preset.openaiOffer} site={siteOf(sites, messages.trim() || preset.messages)} current={openai} onUse={setOpenai} busy={busy} t={t} />}
       {p.preset && <small className="cli-dim">{t("gateway.baseClear")}</small>}
       <div className="setbtns">
         <span className="setbtns-gap" />
@@ -540,17 +544,20 @@ function ProviderEditor({ p, preset, busy, run, onDone, t }: { p: GatewayProvide
   );
 }
 
+/** Presets whose offer has a note in both dictionaries (`gateway.offerNote.<preset>`); any other shows the note as sent. */
+const OFFER_NOTES = new Set(["zhipu", "zai", "minimax", "ark", "ark-plan"]);
+
 /**
  * A vendor's OpenAI-style base for speech or pictures that its preset leaves out: offered, never
  * added by itself, since its docs do not say the same key works there (docs/model-gateway.md#presets).
  */
-function OpenaiOffer({ offer, site, current, onUse, busy, t }: { offer: NonNullable<GatewayPreset["openaiOffer"]>; site?: GatewaySite; current: string; onUse: (base: string) => void; busy: boolean; t: T }) {
+function OpenaiOffer({ name, offer, site, current, onUse, busy, t }: { name: string; offer: NonNullable<GatewayPreset["openaiOffer"]>; site?: GatewaySite; current: string; onUse: (base: string) => void; busy: boolean; t: T }) {
   const base = (site && offer[site]) || offer.cn || offer.intl;
   if (!base || current.trim() === base) return null;
   const elsewhere = site && !offer[site];
   return (
     <div className="gw-offer">
-      <small>{t("gateway.offer", { what: offer.note })}</small>
+      <small>{t("gateway.offer", { what: OFFER_NOTES.has(name) ? t(`gateway.offerNote.${name}` as "gateway.offerNote.ark") : offer.note })}</small>
       <small className="cli-dim">{t("gateway.offerKey")} <a href={offer.source} target="_blank" rel="noreferrer">{t("gateway.offerSource")}</a></small>
       {elsewhere && <small className="err">{t("gateway.offerOtherSite")}</small>}
       <div><button type="button" className="btn2" disabled={busy} onClick={() => onUse(base)}>{t("gateway.offerUse", { base })}</button></div>

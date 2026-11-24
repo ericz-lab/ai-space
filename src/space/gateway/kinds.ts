@@ -85,7 +85,7 @@ export function voicesFor(preset: string | undefined, model: string | undefined)
 export const OPENAI_OFFERS: Record<string, { intl?: string; cn?: string; note: string; source: string }> = {
   zhipu: { cn: "https://open.bigmodel.cn/api/paas/v4", note: "speech, transcription and pictures; a GLM Coding Plan key works only on the coding endpoints", source: "https://docs.z.ai/devpack/faq" },
   zai: { intl: "https://api.z.ai/api/paas/v4", note: "transcription and pictures; a GLM Coding Plan key works only on the coding endpoints", source: "https://docs.z.ai/devpack/faq" },
-  minimax: { intl: "https://api.minimax.io/v1", cn: "https://api.minimax.cn/v1", note: "pictures only (its speech has its own shape)", source: "https://platform.minimax.io/docs/api-reference/image-generation-h3-generations.md" },
+  minimax: { intl: "https://api.minimax.io/v1", cn: "https://api.minimaxi.com/v1", note: "pictures only (its speech has its own shape)", source: "https://platform.minimax.io/docs/api-reference/image-generation-h3-generations.md" },
   ark: { cn: "https://ark.cn-beijing.volces.com/api/v3", note: "pictures (Seedream) only", source: "https://docs.volcengine.com/docs/82379/1541523" },
   "ark-plan": { cn: "https://ark.cn-beijing.volces.com/api/plan/v3", note: "pictures (Seedream) only, with the Agent Plan key", source: "https://docs.volcengine.com/docs/ark/agent-plan-personal-visual-models?lang=zh" },
 };
