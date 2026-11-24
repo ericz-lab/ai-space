@@ -43,6 +43,8 @@ export type GatewayKey = { state: "workspace" | "environment" | "none"; last4?: 
 /** One provider of gateway.yaml as Settings → Gateway shows it (`GET /api/model/gateway`). */
 export type GatewayProviderInfo = {
   name: string;
+  /** Picture models the vendor documents that this provider does not list yet (only when it can draw). */
+  imageOffer?: string[];
   preset?: string;
   label?: string;
   messages?: string;

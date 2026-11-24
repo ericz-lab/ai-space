@@ -314,7 +314,25 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
   );
 }
 
-export function ImageCard({ g, editable, busy, onAddProvider, onSave, t, children }: { g: GatewayInfo; editable: boolean; busy: boolean; onAddProvider?: () => void; onSave: (image: string) => void; t: T; children?: ReactNode }) {
+/**
+ * A picture model for a provider that can draw: the ids its vendor documents, one click each, or an
+ * id typed by hand (Ark's pay-as-you-go ids are dated and differ by account).
+ */
+function AddImageModel({ offered, taken, busy, onAdd, t }: { offered: string[]; taken: string[]; busy: boolean; onAdd: (model: string) => void; t: T }) {
+  const [id, setId] = useState("");
+  const typed = id.trim();
+  return (
+    <div className="gw-addmodel">
+      {offered.map((m) => (
+        <button key={m} type="button" className="btn2" disabled={busy} onClick={() => onAdd(m)}>{t("imageg.addOffered", { model: m })}</button>
+      ))}
+      <input className="setinput" value={id} placeholder={t("imageg.addPlaceholder")} aria-label={t("imageg.addPlaceholder")} disabled={busy} onChange={(e) => setId(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && typed && !taken.includes(typed)) { onAdd(typed); setId(""); } }} />
+      <button type="button" className="btn2" disabled={busy || !typed || taken.includes(typed)} onClick={() => { onAdd(typed); setId(""); }}>{t("imageg.add")}</button>
+    </div>
+  );
+}
+
+export function ImageCard({ g, editable, busy, onAddProvider, onAddModel, onSave, t, children }: { g: GatewayInfo; editable: boolean; busy: boolean; onAddProvider?: () => void; onAddModel?: (provider: GatewayInfo["providers"][number], model: string) => void; onSave: (image: string) => void; t: T; children?: ReactNode }) {
   const [model, setModel] = useState(g.tiers.image ?? "");
   const [testing, setTesting] = useState(false);
   const [picture, setPicture] = useState<{ src: string; ms: number; served?: string } | null>(null);
@@ -345,6 +363,7 @@ export function ImageCard({ g, editable, busy, onAddProvider, onSave, t, childre
             {g.providers.map((p) => (
               <li key={p.name} className={p.serves?.image === true ? "ok" : ""}>
                 <b>{p.name}</b> {p.serves?.image === true ? t("imageg.can", { n: p.models.filter((m) => p.kinds?.[m] === "image").length }) : <span className="cli-dim">{String(p.serves?.image ?? "")}</span>}
+                {editable && onAddModel && p.serves?.image === true && <AddImageModel offered={p.imageOffer ?? []} taken={p.models} busy={busy} onAdd={(m) => onAddModel(p, m)} t={t} />}
               </li>
             ))}
           </ul>

@@ -148,6 +148,17 @@ const oa = { name: "oa", label: "OpenAI", serves: { asr: true as const, tts: tru
 const speechInfo = (over: Partial<GatewaySpeechInfo> = {}): GatewaySpeechInfo => ({ file: "/w/providers.yaml", exists: false, source: "builtin", custom: [], order: { asr: [], tts: [] }, providers: [oa], ...over });
 const studio = { name: "voice-studio", kind: "voice-studio", serves: { asr: true, tts: true, live: true }, machine: "", located: true, testable: true };
 
+test("the Pictures group adds a picture model to a provider that can draw: the documented ids, or one typed", () => {
+  const mm: GatewayProviderInfo = { ...base, name: "minimax", preset: "minimax", openai: "https://api.minimaxi.com/v1", models: ["MiniMax-M3"], kinds: { "MiniMax-M3": "text" }, serves: { text: true, asr: "no", tts: "no", image: true }, imageOffer: ["MiniMax-H3-Image"] };
+  const html = renderToStaticMarkup(<ImageCard g={gw({ providers: [mm, base] })} editable busy={false} onAddModel={noop} onSave={noop} t={zh} />);
+  expect(html).toContain("能画图（0 个图片模型）");
+  expect(html).toContain(">+ MiniMax-H3-Image</button>");
+  expect(html).toContain('placeholder="厂商控制台里的图片模型 ID"');
+  // Only where it can draw, and only for the owner.
+  expect(html.match(/gw-addmodel/g)?.length).toBe(1);
+  expect(renderToStaticMarkup(<ImageCard g={gw({ providers: [mm] })} editable={false} busy={false} onAddModel={noop} onSave={noop} t={zh} />)).not.toContain("gw-addmodel");
+});
+
 test("the Speech group, nothing of the space's own: the gateway's providers only, empty orders, no live, nothing named that is not there", () => {
   for (const tr of [t, zh]) {
     const html = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo()} onAddProvider={noop} t={tr} />);
