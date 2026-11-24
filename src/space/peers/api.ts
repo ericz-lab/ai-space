@@ -25,9 +25,9 @@ import type { WsData } from "../terminal/service.ts";
  *   GET   /api/peers/:peer/tasks/:id/runs               one task's runs (forwarded)
  *   PATCH /api/peers/:peer/tasks/:id/model              {model}: set or clear a task's model on the peer
  *                                                       (forwarded; same-origin browser requests only, like the local route)
- *   GET   /api/peers/:peer/apps/:app/icon               ┐
- *   GET   /api/peers/:peer/apps/:app/appcolor           │
- *   GET   /api/peers/:peer/agents/:app/:agent/avatar    │ forwarded to the peer's /api/peer/... with
+ *   GET   /api/peers/:peer/apps/:app/icon               forwarded like the routes below, but read whole first
+ *   GET   /api/peers/:peer/agents/:app/:agent/avatar    (`picture`): a cut-short image is a 502, never a 200
+ *   GET   /api/peers/:peer/apps/:app/appcolor           ┐ forwarded to the peer's /api/peer/... with
  *   GET   /api/peers/:peer/widgets/:app/:name/embed     │ the token and extra headers added, the
  *   POST  /api/peers/:peer/agents/:app/:agent/chat      │ answer streamed back as is
  *   GET   /api/peers/:peer/agents/:app/:agent/sessions[/:sid] │
@@ -85,6 +85,8 @@ type Handler = (req: Request & { params: Record<string, string> }, server: Bun.S
 type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "PATCH" | "DELETE", Handler>>>;
 
 const FORWARD_TIMEOUT_MS = 8_000;
+/** Larger than any icon or avatar a Space accepts; a bigger answer is not a picture. */
+const MAX_PICTURE_BYTES = 4 << 20;
 const PROXY_TIMEOUT_MS = 65_000;
 /** A card's state or action is a bus call on the peer, bounded there by the capability's timeout. */
 const CARD_TIMEOUT_MS = 35_000;
@@ -112,6 +114,37 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
       const path = u.pathname.replace(/^\/api\/peers\/[^/]+/, "/api/peer") + u.search;
       try {
         return relayed(await client.forward(req, path, timeoutMs ? { timeoutMs } : {}));
+      } catch (e) {
+        return error(502, `peer ${client.name} unreachable: ${String((e as Error).message ?? e).slice(0, 200)}`);
+      }
+    };
+
+  /**
+   * An icon or an avatar: the whole picture or an error. Through `relayed` a body the link cuts short
+   * still ends as a complete 200, and a client that caches pictures (the Mac's and iPhone's icon
+   * stores) keeps the top part of an icon with nothing below for a day. A picture is small, so it
+   * is read here before anything is answered, and sent with its length.
+   */
+  const picture =
+    (timeoutMs: number): Handler =>
+    async (req) => {
+      let client;
+      try {
+        client = clientOf(req.params.peer);
+      } catch (e) {
+        return error(404, (e as Error).message);
+      }
+      const u = new URL(req.url);
+      const path = u.pathname.replace(/^\/api\/peers\/[^/]+/, "/api/peer") + u.search;
+      try {
+        const up = await client.forward(req, path, { timeoutMs });
+        const declared = Number(up.headers.get("content-length") ?? NaN);
+        const bytes = new Uint8Array(await up.arrayBuffer());
+        if (bytes.byteLength > MAX_PICTURE_BYTES) return error(502, `peer ${client.name} answered a picture larger than ${MAX_PICTURE_BYTES} bytes`);
+        if (Number.isFinite(declared) && declared !== bytes.byteLength) throw new Error(`picture cut short: ${bytes.byteLength} of ${declared} bytes`);
+        const headers = new Headers(up.headers);
+        headers.set("content-length", String(bytes.byteLength));
+        return new Response(bytes, { status: up.status, statusText: up.statusText, headers });
       } catch (e) {
         return error(502, `peer ${client.name} unreachable: ${String((e as Error).message ?? e).slice(0, 200)}`);
       }
@@ -246,9 +279,9 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
         return proxy(FORWARD_TIMEOUT_MS)(req, server);
       },
     },
-    "/api/peers/:peer/apps/:app/icon": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/apps/:app/icon": { GET: picture(FORWARD_TIMEOUT_MS) },
     "/api/peers/:peer/apps/:app/appcolor": { GET: proxy(FORWARD_TIMEOUT_MS) },
-    "/api/peers/:peer/agents/:app/:agent/avatar": { GET: proxy(FORWARD_TIMEOUT_MS) },
+    "/api/peers/:peer/agents/:app/:agent/avatar": { GET: picture(FORWARD_TIMEOUT_MS) },
     // The peer's embed page arrives on this panel's origin: it keeps the sandbox the peer gave it.
     "/api/peers/:peer/widgets/:app/:name/embed": {
       GET: async (req, server) => {
@@ -315,7 +348,8 @@ class NotFound extends Error {}
  * A peer's answer as this route's own: a body the peer, the link or the channel cuts short (a revoked scope,
  * a dropped connection, a stopped run) ends the response here. Bun.serve ends it the same way when its body
  * stream errors, but prints the error as if it were uncaught; the browser sees no difference, the log a
- * stack trace for every revocation.
+ * stack trace for every revocation. The response then looks complete, which suits a stream (events, a
+ * chat turn) but not a file: pictures go through `picture`, which reads the whole body first.
  */
 function relayed(res: Response): Response {
   if (!res.body) return res;
