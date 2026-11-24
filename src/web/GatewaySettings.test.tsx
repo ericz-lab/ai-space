@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { GatewayPreset, GatewayProviderInfo } from "./api.ts";
-import { AddProvider, GroupsEditor, ModelChooser, ProviderRow, RemoveForm } from "./GatewaySettings.tsx";
+import { AddProvider, PriceList, GroupsEditor, ModelChooser, ProviderRow, RemoveForm } from "./GatewaySettings.tsx";
 import { GatewayLink } from "./MachineClis.tsx";
 import { translate } from "./messages.ts";
 
@@ -72,6 +72,14 @@ test("adding a vendor with two sites: the Site switch, its own site selected; ve
   expect(html).toContain("A key works only on the site it was made on.");
   const plain = renderToStaticMarkup(<AddProvider presets={[{ ...presets[0]!, sites: undefined }]} taken={[]} busy={false} run={run} onDone={noop} t={t} />);
   expect(plain).not.toContain(">Site<");
+});
+
+test("prices: each model's input / output with its source on hover; models without one named", () => {
+  const html = renderToStaticMarkup(<PriceList p={{ ...base, models: ["deepseek-v4-pro", "odd-one"], prices: { "deepseek-v4-pro": { input: 1.32, output: 3.96, cacheRead: 0.044, source: "models.dev deepseek" }, "odd-one": null } }} t={t} />);
+  expect(html).toContain("deepseek-v4-pro $1.32 / $3.96");
+  expect(html).toContain("from models.dev deepseek");
+  expect(html).toContain("cache read $0.044");
+  expect(html).toContain("No price: odd-one");
 });
 
 test("the model chooser: ticked models and a field for ids typed by hand; groups with their order and the controls to change it", () => {

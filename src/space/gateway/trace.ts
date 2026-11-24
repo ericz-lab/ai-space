@@ -12,7 +12,7 @@ import type { GatewayTrace } from "./types.ts";
 
 export type TraceStoreOptions = { max?: number; ttlMs?: number; now?: () => number };
 
-type Entry = GatewayTrace & { pinned: Map<string, string> };
+type Entry = Omit<GatewayTrace, "costUsd"> & { pinned: Map<string, string>; cost?: number };
 
 export class TraceStore {
   private readonly runs = new Map<string, Entry>();
@@ -30,7 +30,13 @@ export class TraceStore {
     const e = this.live(run);
     if (!e) return undefined;
     const { pinned: _, ...trace } = e;
-    return { ...trace, tried: [...trace.tried], ...(trace.usage ? { usage: { ...trace.usage } } : {}) };
+    const { cost, ...rest } = trace;
+    return {
+      ...rest,
+      tried: [...trace.tried],
+      ...(trace.usage ? { usage: { ...trace.usage } } : {}),
+      ...(trace.unpriced?.length ? { unpriced: [...trace.unpriced] } : cost !== undefined ? { costUsd: cost } : {}),
+    };
   }
 
   /** The member that first answered `requested` (a group's name, or a `provider/model`) for this run. */
@@ -51,9 +57,18 @@ export class TraceStore {
     e.updatedAt = this.now();
   }
 
-  /** Tokens an answer reported, added to the run's sum. */
-  addUsage(run: string, u: Usage): void {
+  /**
+   * Tokens an answer reported, added to the run's sum, with what they cost at the answering model's
+   * price; `served` without a cost marks the run unpriced.
+   */
+  addUsage(run: string, u: Usage, priced?: { served: string; costUsd?: number }): void {
     const e = this.entry(run);
+    if (priced) {
+      if (priced.costUsd === undefined) {
+        e.unpriced ??= [];
+        if (!e.unpriced.includes(priced.served)) e.unpriced.push(priced.served);
+      } else e.cost = (e.cost ?? 0) + priced.costUsd;
+    }
     const s = e.usage ?? { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 };
     e.usage = { inputTokens: s.inputTokens + u.inputTokens, cacheWriteTokens: s.cacheWriteTokens + u.cacheWriteTokens, cacheReadTokens: s.cacheReadTokens + u.cacheReadTokens, outputTokens: s.outputTokens + u.outputTokens };
     e.updatedAt = this.now();

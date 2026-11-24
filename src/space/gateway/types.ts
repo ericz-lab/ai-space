@@ -72,6 +72,10 @@ export type GatewayTrace = {
   tried: string[];
   /** Summed over the answers that reported usage. */
   usage?: Usage;
+  /** USD for `usage`, at each answering model's price; absent when any answer had none (`unpriced`). */
+  costUsd?: number;
+  /** The `provider/model`s that answered without a price: the run's cost is then unknown, not lower. */
+  unpriced?: string[];
   /** The last failure, when the last request failed. */
   error?: string;
   updatedAt: number;

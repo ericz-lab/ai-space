@@ -118,8 +118,9 @@ export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels },
       if (res.code !== 0) return { ok: false, error: reportedError(res.stdout.trim()) ?? `exit code ${res.code}`, output, timedOut: false, backend: "local" };
       const parsed = parseCliOutput(res.stdout);
       if (!parsed) return { ok: true, output, timedOut: false, backend: "local" };
-      // Through the built-in gateway the CLI prices another vendor's model at Claude's list prices: not kept.
-      const costUsd = r.run ? undefined : parsed.costUsd;
+      // Through the built-in gateway the CLI prices another vendor's model at Claude's list prices:
+      // the gateway's own figure, at each answering model's price, is kept instead.
+      const costUsd = r.run ? deps.gateway!.trace(r.run)?.costUsd : parsed.costUsd;
       if (parsed.error !== undefined) return { ok: false, error: parsed.error, output, usage: parsed.usage, costUsd, timedOut: false, backend: "local" };
       return { ok: true, output, text: parsed.text, usage: parsed.usage, costUsd, timedOut: false, backend: "local" };
     },
@@ -150,13 +151,14 @@ export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels },
 export const SPACE_GATEWAY_ENV: Record<string, string> = { CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1" };
 
 /**
- * What the built-in gateway says answered the run, as the outcome's `served`; the CLI's cost
- * figure is dropped, since it prices another vendor's model at Claude's list prices.
+ * What the built-in gateway says answered the run, as the outcome's `served`, and what it cost at
+ * the answering models' prices (docs/model-gateway.md#prices). The CLI's own figure is dropped:
+ * it prices another vendor's model at Claude's list prices. No gateway price: no cost.
  */
 export function servedFromTrace(outcome: CompleteOutcome, link: GatewayLink, run: string): CompleteOutcome {
   const trace = link.trace(run);
   const { costUsd: _, ...rest } = outcome;
-  return { ...rest, ...(trace?.served ? { served: trace.served } : {}) } as CompleteOutcome;
+  return { ...rest, ...(trace?.served ? { served: trace.served } : {}), ...(trace?.costUsd !== undefined ? { costUsd: trace.costUsd } : {}) } as CompleteOutcome;
 }
 
 // ---------------------------------------------------------------- complete
