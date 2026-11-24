@@ -113,7 +113,7 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 | `fallbackFrom` | The first choice (`[machine:]runtime/model`) when another entry of its [fallback list](model-machines.md#fallback) answered; absent otherwise. |
 | `tries` | How many runtimes were tried: 1 for a plain call, more after a fallback; absent on rows that never ran (a refused request, a task, an import). |
 | `trace` | How the call was placed ([Trace](#trace)), when there was more to it than the row says. |
-| `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend. GPT-6 Astra/Sol/Luna, GPT-6.1 Sol/Terra, GPT-6.2 Sol and GPT-5.6 Sol/Terra/Luna calls without a reported cost use standard API list prices (verified 2026-09-23; GPT-6.1 Sol and Terra 2026-10-28; GPT-6.2 Sol 2026-11-20); absent for unknown models or incomplete usage. |
+| `costUsd` | The CLI's own figure (an equivalent API price, informational under a subscription), or the list price on the API backend. GPT-6 Astra/Sol/Luna, GPT-6.1 Sol/Terra, GPT-6.2 Astra/Sol and GPT-5.6 Sol/Terra/Luna calls without a reported cost use standard API list prices (verified 2026-09-23; GPT-6.1 Sol and Terra 2026-10-28; GPT-6.2 Sol 2026-11-20; GPT-6.2 Astra 2026-11-24); absent for unknown models or incomplete usage. |
 
 ### Trace
 
