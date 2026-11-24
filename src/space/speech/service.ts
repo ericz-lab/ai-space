@@ -1,3 +1,4 @@
+import type { GatewayLink } from "../gateway/types.ts";
 import { classifyFailure, type Failure, REST_KINDS } from "../model/failure.ts";
 import { RuntimeHealth } from "../model/health.ts";
 import { OpenAiAdapter } from "./openai.ts";
@@ -432,16 +433,17 @@ export type LiveSession = {
 };
 
 /** One adapter per configured provider; a provider that is off still has one, for its cell and its refusals. */
-export function buildAdapters(config: SpeechConfig, deps: { voiceStudio: VoiceStudioDeps; fetch?: typeof fetch }): SpeechAdapter[] {
+/** `gateway`: the built-in model gateway, for an openai-compatible provider with `gateway: space`. */
+export function buildAdapters(config: SpeechConfig, deps: { voiceStudio: VoiceStudioDeps; fetch?: typeof fetch; gateway?: GatewayLink }): SpeechAdapter[] {
   return config.providers.map((spec) => adapterFor(spec, deps));
 }
 
-function adapterFor(spec: ProviderSpec, deps: { voiceStudio: VoiceStudioDeps; fetch?: typeof fetch }): SpeechAdapter {
+function adapterFor(spec: ProviderSpec, deps: { voiceStudio: VoiceStudioDeps; fetch?: typeof fetch; gateway?: GatewayLink }): SpeechAdapter {
   switch (spec.kind) {
     case "voice-studio":
       return new VoiceStudioAdapter(spec, deps.voiceStudio);
     case "openai-compatible":
-      return new OpenAiAdapter(spec, deps.fetch ? { fetch: deps.fetch } : {});
+      return new OpenAiAdapter(spec, { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.gateway ? { gateway: deps.gateway } : {}) });
     case "dashscope":
       return {
         name: spec.name, kind: "dashscope", capabilities: new Set(KIND_CAPABILITIES.dashscope), selfHosted: false, limits: {},

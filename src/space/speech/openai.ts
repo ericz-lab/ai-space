@@ -1,3 +1,4 @@
+import type { GatewayLink } from "../gateway/types.ts";
 import { costOf, priceFor } from "./prices.ts";
 import { ProviderError, type OpenAiSpec, type Price, type ProviderState, type SpeakInput, type SpeakResult, type SpeechAdapter, type SpeechCapability, type TranscribeInput, type TranscribeResult } from "./types.ts";
 import { httpError } from "./voice-studio.ts";
@@ -11,6 +12,10 @@ import { httpError } from "./voice-studio.ts";
  *
  * The key travels as a bearer and is never logged. `verbose_json` (segments, the duration) is asked of
  * Whisper models; the `gpt-4o-*` transcription models only answer `json`.
+ *
+ * Through a model gateway (`gateway: space | magpie`, docs/model-gateway.md#speech) the same calls go
+ * to the gateway's `/v1/audio/*` with the models as `<provider>/<model>`; for the built-in one each
+ * call carries a token ai-space issued for it, and its address is read when the call is made.
  */
 
 export const OPENAI_LIMITS = { transcribeBytes: 25 * 1024 * 1024, speakChars: 4096, speakVoices: 1 };
@@ -23,8 +28,20 @@ export class OpenAiAdapter implements SpeechAdapter {
   readonly limits = OPENAI_LIMITS;
   private readonly price: Price | undefined;
 
-  constructor(readonly spec: OpenAiSpec, private readonly deps: { fetch?: typeof fetch } = {}) {
-    this.price = priceFor(spec);
+  constructor(readonly spec: OpenAiSpec, private readonly deps: { fetch?: typeof fetch; gateway?: GatewayLink } = {}) {
+    // Through a gateway, OpenAI's list prices apply when its provider is OpenAI's own host.
+    const via = spec.gateway;
+    const bare = (m: string) => (via ? m.slice(via.provider.length + 1) : m);
+    const url = via?.via === "space" ? deps.gateway?.provider(via.provider)?.openai ?? "" : via ? "" : spec.url;
+    this.price = priceFor({ ...spec, url, asrModel: bare(spec.asrModel), ttsModel: bare(spec.ttsModel) });
+  }
+
+  /** Where a call goes and with which key: the spec's, or the built-in gateway's with a token for this call. */
+  private endpoint(): { url: string; apiKey?: string } {
+    if (this.spec.gateway?.via !== "space") return { url: this.spec.url, ...(this.spec.apiKey ? { apiKey: this.spec.apiKey } : {}) };
+    const base = this.deps.gateway?.base();
+    if (!this.deps.gateway || !base) throw new ProviderError(`${this.name}: the built-in model gateway is off: ${this.deps.gateway?.problem() ?? "this space has none"}`, 503, "other");
+    return { url: `${base}/v1`, apiKey: this.deps.gateway.issue().token };
   }
 
   get name(): string {
@@ -40,18 +57,26 @@ export class OpenAiAdapter implements SpeechAdapter {
   }
 
   state(): ProviderState {
+    const via = this.spec.gateway;
+    if (via?.via === "space") {
+      const problem = this.deps.gateway ? this.deps.gateway.problem() : "this space has none";
+      return { where: `model gateway → ${via.provider}`, machine: "", located: true, signedIn: !problem, ...(problem ? { detail: problem } : {}) };
+    }
     let host = this.spec.url;
     try {
       host = new URL(this.spec.url).host;
     } catch {
       /* checked at load */
     }
+    if (via) host = `magpie → ${via.provider} (${host})`;
     // Nothing is probed: a call costs money. Signed in means a key is set when one is named.
     return { where: host, machine: "", located: true, ...(this.spec.apiKeyEnv ? { signedIn: Boolean(this.spec.apiKey) } : {}) };
   }
 
   async transcribe(input: TranscribeInput): Promise<TranscribeResult> {
-    const format = this.spec.responseFormat ?? (/^whisper/i.test(this.spec.asrModel) ? "verbose_json" : "json");
+    // Through a gateway the model is `<provider>/<model>`: the provider's own name decides.
+    const asr = this.spec.gateway ? this.spec.asrModel.slice(this.spec.gateway.provider.length + 1) : this.spec.asrModel;
+    const format = this.spec.responseFormat ?? (/^whisper/i.test(asr) ? "verbose_json" : "json");
     const form = new FormData();
     form.append("file", input.file, input.filename);
     form.append("model", this.spec.asrModel);
@@ -96,11 +121,12 @@ export class OpenAiAdapter implements SpeechAdapter {
 
   private async post(path: string, body: FormData | string, timeoutMs: number, signal?: AbortSignal, contentType?: string): Promise<Response> {
     const timeout = AbortSignal.timeout(timeoutMs);
+    const at = this.endpoint();
     let res: Response;
     try {
-      res = await (this.deps.fetch ?? fetch)(`${this.spec.url}${path}`, {
+      res = await (this.deps.fetch ?? fetch)(`${at.url}${path}`, {
         method: "POST",
-        headers: { ...(contentType ? { "content-type": contentType } : {}), ...(this.spec.apiKey ? { authorization: `Bearer ${this.spec.apiKey}` } : {}) },
+        headers: { ...(contentType ? { "content-type": contentType } : {}), ...(at.apiKey ? { authorization: `Bearer ${at.apiKey}` } : {}) },
         body,
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });

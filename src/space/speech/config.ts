@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { MAGPIE_CALLER_KEY, magpieAddress } from "../runtimes/magpie.ts";
 import {
   KIND_CAPABILITIES,
   PROVIDER_NAME_PATTERN,
@@ -154,7 +155,7 @@ function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unkno
   const ctx = `${PROVIDERS_FILE}: speech provider ${name}`;
   const allowed: Record<SpeechKind, string[]> = {
     "voice-studio": ["kind", "app", "machine"],
-    "openai-compatible": ["kind", "url", "apiKeyEnv", "asrModel", "ttsModel", "voice", "voices", "selfHosted", "responseFormat", "price"],
+    "openai-compatible": ["kind", "url", "apiKeyEnv", "asrModel", "ttsModel", "voice", "voices", "selfHosted", "responseFormat", "price", "gateway", "provider"],
     dashscope: ["kind", "apiKeyEnv", "url", "asrModel", "ttsModel", "voice", "voices", "price"],
   };
   for (const key of Object.keys(raw)) if (!allowed[kind].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
@@ -167,15 +168,20 @@ function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unkno
       return { spec: { name, kind, app, ...(machine ? { machine } : {}) } };
     }
     case "openai-compatible": {
-      const url = (optionalString(raw.url, `${ctx}: url`) ?? OPENAI_URL).replace(/\/+$/, "");
-      if (!/^https?:\/\/[^\s/]+/.test(url)) throw new Error(`${ctx}: url must be an http(s) URL`);
+      const via = parseGatewayShorthand(raw, ctx);
+      let url = (optionalString(raw.url, `${ctx}: url`) ?? OPENAI_URL).replace(/\/+$/, "");
+      // magpie is found where setup finds it; the built-in gateway's address is known once ai-space listens (buildAdapters).
+      if (via?.via === "magpie") url = `${magpieAddress({ env }).url}/v1`;
+      if (via?.via === "space") url = "";
+      if (!via && !/^https?:\/\/[^\s/]+/.test(url)) throw new Error(`${ctx}: url must be an http(s) URL`);
       const apiKeyEnv = optionalString(raw.apiKeyEnv, `${ctx}: apiKeyEnv`);
       if (apiKeyEnv !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(apiKeyEnv)) throw new Error(`${ctx}: apiKeyEnv must name an environment variable`);
-      const apiKey = apiKeyEnv ? env[apiKeyEnv]?.trim() || undefined : undefined;
+      const apiKey = via?.via === "magpie" ? MAGPIE_CALLER_KEY : apiKeyEnv ? env[apiKeyEnv]?.trim() || undefined : undefined;
       const model = (key: string, fallback: string) => {
         const v = optionalString(raw[key], `${ctx}: ${key}`) ?? fallback;
         if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(v)) throw new Error(`${ctx}: ${key} must name a model`);
-        return v;
+        // Through a gateway a model is the gateway's id for it: `<provider>/<model>`.
+        return via ? `${via.provider}/${v}` : v;
       };
       const voice = optionalString(raw.voice, `${ctx}: voice`);
       if (voice !== undefined && !VOICE_PATTERN.test(voice)) throw new Error(`${ctx}: voice must be a voice name`);
@@ -194,6 +200,7 @@ function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unkno
         selfHosted: raw.selfHosted === true,
         ...(apiKeyEnv ? { apiKeyEnv } : {}), ...(apiKey ? { apiKey } : {}), ...(voice ? { voice } : {}), ...(voices ? { voices } : {}),
         ...(responseFormat ? { responseFormat: responseFormat as OpenAiSpec["responseFormat"] } : {}), ...(price ? { price } : {}),
+        ...(via ? { gateway: via } : {}),
       };
       return { spec, ...(apiKeyEnv && !apiKey ? { off: `${apiKeyEnv} is not set` } : {}) };
     }
@@ -202,6 +209,47 @@ function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unkno
       return { spec: { name, kind, ...(apiKeyEnv ? { apiKeyEnv } : {}) }, off: "the dashscope kind is not built yet (docs/speech.md#later)" };
     }
   }
+}
+
+/**
+ * `gateway: space | magpie` with `provider: <name>` on an openai-compatible provider: it then
+ * speaks to that model gateway's `/v1/audio/*` as that provider, with no url or key of its own.
+ */
+function parseGatewayShorthand(raw: Record<string, unknown>, ctx: string): OpenAiSpec["gateway"] {
+  const via = optionalString(raw.gateway, `${ctx}: gateway`);
+  const provider = optionalString(raw.provider, `${ctx}: provider`);
+  if (via === undefined) {
+    if (provider !== undefined) throw new Error(`${ctx}: provider names a model gateway's provider; add gateway: space or gateway: magpie`);
+    return undefined;
+  }
+  if (via !== "space" && via !== "magpie") throw new Error(`${ctx}: gateway must be space or magpie`);
+  if (!provider || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(provider)) throw new Error(`${ctx}: gateway: ${via} needs provider: the gateway's provider name`);
+  if (raw.url !== undefined || raw.apiKeyEnv !== undefined) throw new Error(`${ctx}: through a model gateway the url and the key are the gateway's; drop url and apiKeyEnv`);
+  if (raw.selfHosted !== undefined) throw new Error(`${ctx}: selfHosted does not apply through a model gateway`);
+  return { via, provider };
+}
+
+/**
+ * Speech providers that name a provider of the built-in model gateway it does not have, or one
+ * without an `openai` base, or one that is off: turned off with the reason (a warning each), as a
+ * provider whose key is missing is.
+ */
+export function checkGatewayProviders(config: SpeechConfig, has: (provider: string) => { off?: string; openai: boolean } | undefined, configured: boolean): string[] {
+  const warnings: string[] = [];
+  for (const p of config.providers) {
+    if (p.kind !== "openai-compatible" || p.gateway?.via !== "space" || config.off[p.name]) continue;
+    const g = has(p.gateway.provider);
+    const why = !configured ? "the built-in model gateway is off (no gateway.yaml)"
+      : !g ? `${p.gateway.provider} is not a provider of gateway.yaml`
+      : !g.openai ? `the model gateway's provider ${p.gateway.provider} has no openai base`
+      : g.off ? `the model gateway's provider ${p.gateway.provider} is off (${g.off})`
+      : undefined;
+    if (why) {
+      config.off[p.name] = why;
+      warnings.push(`speech provider ${p.name} is off: ${why}`);
+    }
+  }
+  return warnings;
 }
 
 function parsePrice(raw: unknown, ctx: string): Price | undefined {

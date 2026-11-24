@@ -17,7 +17,7 @@ import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
 import { refreshCodexTiers } from "./space/runtimes/codex-upgrade.ts";
 import { Bus, BusStore, Consumers, capabilityCaller, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
-import { SpeechService, SpeechStore, buildAdapters, createSpeechRoutes, loadSpeech } from "./space/speech/index.ts";
+import { SpeechService, SpeechStore, buildAdapters, checkGatewayProviders, createSpeechRoutes, loadSpeech } from "./space/speech/index.ts";
 import { type Manifest, Scheduler, Store, createPeerTaskRoutes, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts";
 import { BACKUP_TASK, SPACE_APP, backupTask, createBackupRoutes, parseBackupSpec, spaceManifest } from "./space/storage/backup/index.ts";
@@ -342,6 +342,11 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // A file that does not load leaves speech off with the reason, and the space running.
   const speechLoaded = await loadSpeech(ws.home, env).then((l) => ({ ...l, error: undefined }), (e: Error) => ({ config: undefined, source: "file" as const, warnings: [], error: e.message }));
   if (speechLoaded.error) console.error(`[speech] ${speechLoaded.error}; speech calls answer 503 until it is fixed`);
+  // A provider through the built-in model gateway names one of gateway.yaml's providers with an openai base (docs/model-gateway.md#speech).
+  if (speechLoaded.config) speechLoaded.warnings.push(...checkGatewayProviders(speechLoaded.config, (name) => {
+    const p = modelGateway.link.provider(name);
+    return p ? { openai: Boolean(p.openai), ...(gatewayLoaded.loaded?.config.off[name] ? { off: gatewayLoaded.loaded.config.off[name] } : {}) } : undefined;
+  }, modelGateway.enabled));
   for (const w of speechLoaded.warnings) console.warn(`[speech] ${w}`);
   for (const p of speechLoaded.config?.providers ?? []) if (p.kind === "voice-studio" && p.machine && !peers.get(p.machine)) console.error(`[speech] provider ${p.name} names machine ${p.machine}, which is not a peer here`);
   const speechCalls = capabilityCaller({ bus, store: busStore, remote });
@@ -359,6 +364,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
             callRemote: (req, caller, peer, app, cap) => speechCalls.callRemote(req, caller, peer, app, cap),
             peers,
           },
+          gateway: modelGateway.link,
         })
       : [],
     store: new SpeechStore(config.dbPath),
