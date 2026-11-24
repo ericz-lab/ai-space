@@ -144,7 +144,7 @@ Audio and text are not stored, only their sizes.
 
 ### Prices
 
-ASR is priced per minute of audio, TTS per million characters, in USD. An `openai-compatible` provider's `price: { transcribePerMinute, speakPerMillionChars }` wins; else, for a provider whose `url` is OpenAI's own, `src/space/speech/prices.json` gives OpenAI's list prices (verified 2026-11-19: `whisper-1` and `gpt-4o-transcribe` $0.006 a minute, `gpt-4o-mini-transcribe` $0.003, `gpt-transcribe` $0.0045, `tts-1` $15 and `tts-1-hd` $30 per million characters). A model priced by tokens (`gpt-4o-mini-tts`), a call whose length the provider did not report, and a self-hosted provider have no cost.
+ASR is priced per minute of audio, TTS per million characters, in USD. An `openai-compatible` provider's `price: { transcribePerMinute, speakPerMillionChars }` wins; else, for a provider whose `url` is OpenAI's own, `src/space/speech/prices.json` gives OpenAI's list prices (verified 2026-11-19: `whisper-1` and `gpt-4o-transcribe` $0.006 a minute, `gpt-4o-mini-transcribe` $0.003, `gpt-transcribe` $0.0045, `tts-1` $15 and `tts-1-hd` $30 per million characters). A model priced by tokens (`gpt-4o-mini-tts`), a call whose length the provider did not report, and a self-hosted provider have no cost. A provider with `gateway: space` is priced by the built-in model gateway's prices first ([model-gateway.md](model-gateway.md#prices)), and its rows follow a later change of them.
 
 ## Status
 

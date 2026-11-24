@@ -1,4 +1,4 @@
-import type { Backend, CompleteInput, CompleteOutcome, CompletionMode, ImageInput, ImageOutcome, Usage } from "../runtimes/types.ts";
+import type { Backend, CompleteInput, CompleteOutcome, CompletionMode, ImageInput, ImageOutcome, PriceBasis, Usage } from "../runtimes/types.ts";
 import type { FailureKind } from "./failure.ts";
 
 /**
@@ -79,6 +79,8 @@ export type ModelCall = {
   outputChars?: number;
   usage?: Usage;
   costUsd?: number;
+  /** Through the built-in model gateway: each answer, so the cost follows a price change (docs/model-gateway.md#prices). */
+  priceBasis?: PriceBasis;
   /** The first choice, `[machine:]runtime/model`, when another candidate of its fallback list answered. */
   fallbackFrom?: string;
   /** How many runtimes were tried; absent on rows that never ran (a refused request, a task, an import). */

@@ -3,10 +3,12 @@ import { retryAfterSeconds } from "../runtimes/anthropic-api.ts";
 import { splitModelId } from "./config.ts";
 import { carriesThinking, downstreamHeaders, errorText, readUsage, tapMessagesStream, upstreamHeaders } from "./forward.ts";
 import { GatewayTokens } from "./tokens.ts";
-import { costOf, type PriceBook } from "./prices.ts";
+import { costOf, pricedAnswer, type Price, type PriceBook } from "./prices.ts";
 import { TraceStore } from "./trace.ts";
 import type { Usage } from "../runtimes/types.ts";
 import type { GatewayBase, GatewayConfig, GatewayLink, GatewayProvider, GatewayTiers } from "./types.ts";
+
+const NO_USAGE: Usage = { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 };
 
 /**
  * The built-in model gateway (docs/model-gateway.md): for one request, the providers that can take
@@ -123,10 +125,19 @@ export class ModelGateway {
     issue: () => this.tokens.issue(),
     trace: (run) => this.traces.get(run),
     provider: (name) => this.config?.providers.find((p) => p.name === name),
+    price: (served) => this.priceOf(served),
     has: (base) => Boolean(this.config?.providers.some((p) => p[base] && !this.config!.off[p.name])),
     problem: () => this.problem(),
     tiers: () => ({ ...this.tierTable }),
   };
+
+  /** The price of `provider/model` now; null when that provider is not in gateway.yaml (or there are no prices). */
+  priceOf(served: string): Price | undefined | null {
+    const id = splitModelId(served);
+    const provider = id && this.config?.providers.find((p) => p.name === id.provider);
+    if (!id || !provider || !this.prices) return null;
+    return this.prices.lookupSync(provider, id.model)?.price;
+  }
 
   /**
    * gateway.yaml as it is now, read again after Settings → Gateway changed it (or the file is
@@ -138,6 +149,14 @@ export class ModelGateway {
     this.error = next.error;
     this.tierTable = { ...next.config?.tiers };
     for (const name of [...this.rests.keys()]) if (!next.config?.providers.some((p) => p.name === name)) this.rests.delete(name);
+    for (const l of this.reloaded) l();
+  }
+
+  private readonly reloaded: (() => void)[] = [];
+
+  /** Called after gateway.yaml was read again: a provider's site or preset decides its prices. */
+  onReload(listener: () => void): void {
+    this.reloaded.push(listener);
   }
 
   /**
@@ -318,7 +337,11 @@ export class ModelGateway {
     // The price of the model that answered, at this provider (the file re-read only when it changed).
     await this.prices?.reload().catch(() => {});
     const found = this.prices?.lookupSync(t.provider, t.model);
-    const record = (u: Usage) => this.traces.addUsage(run, u, this.prices ? { served, ...(found ? { costUsd: costOf(found.price, u) } : {}) } : undefined);
+    const record = (u: Usage | undefined, images = 0) => {
+      const answer = pricedAnswer(served, u, { images });
+      const costUsd = found ? costOf(found.price, answer) : undefined;
+      this.traces.addUsage(run, u ?? NO_USAGE, this.prices ? { answer, ...(costUsd !== undefined ? { costUsd } : {}) } : undefined);
+    };
     const type = res.headers.get("content-type") ?? "";
     if (!res.body || op.usage === "none") return new Response(res.body, { status: res.status, headers });
     if (op.usage === "messages" && type.includes("text/event-stream")) {
@@ -327,8 +350,11 @@ export class ModelGateway {
     if (!type.includes("json")) return new Response(res.body, { status: res.status, headers });
     const bytes = await res.arrayBuffer();
     try {
-      const u = readUsage((JSON.parse(new TextDecoder().decode(bytes)) as { usage?: unknown }).usage);
-      if (u) record(u);
+      const body = JSON.parse(new TextDecoder().decode(bytes)) as { usage?: unknown; data?: unknown };
+      const u = readUsage(body.usage);
+      // Pictures are counted: a vendor that prices per picture often reports no tokens for them.
+      const images = op.path.startsWith("/images/") && res.ok && Array.isArray(body.data) ? body.data.length : 0;
+      if (u || images) record(u, images);
     } catch {
       /* not JSON after all: passed on as it is */
     }

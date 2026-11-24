@@ -1,6 +1,7 @@
+import { costOf as gatewayCost, pricedAnswer } from "../gateway/prices.ts";
 import type { GatewayLink } from "../gateway/types.ts";
 import { costOf, priceFor } from "./prices.ts";
-import { ProviderError, type OpenAiSpec, type Price, type ProviderState, type SpeakInput, type SpeakResult, type SpeechAdapter, type SpeechCapability, type TranscribeInput, type TranscribeResult } from "./types.ts";
+import { ProviderError, type OpenAiSpec, type Price, type ProviderState, type SpeakInput, type SpeakResult, type SpeechAdapter, type SpeechCapability, type GatewayPriced, type TranscribeInput, type TranscribeResult } from "./types.ts";
 import { httpError } from "./voice-studio.ts";
 
 /**
@@ -37,11 +38,29 @@ export class OpenAiAdapter implements SpeechAdapter {
   }
 
   /** Where a call goes and with which key: the spec's, or the built-in gateway's with a token for this call. */
-  private endpoint(): { url: string; apiKey?: string } {
+  private endpoint(): { url: string; apiKey?: string; run?: string } {
     if (this.spec.gateway?.via !== "space") return { url: this.spec.url, ...(this.spec.apiKey ? { apiKey: this.spec.apiKey } : {}) };
     const base = this.deps.gateway?.base();
     if (!this.deps.gateway || !base) throw new ProviderError(`${this.name}: the built-in model gateway is off: ${this.deps.gateway?.problem() ?? "this space has none"}`, 503, "other");
-    return { url: `${base}/v1`, apiKey: this.deps.gateway.issue().token };
+    const grant = this.deps.gateway.issue();
+    return { url: `${base}/v1`, apiKey: grant.token, run: grant.run };
+  }
+
+  /**
+   * A call through the built-in gateway priced at the gateway's prices (docs/model-gateway.md#prices):
+   * the unit price of the model that answered (per minute, per million characters), else its tokens.
+   * A `price:` in providers.yaml wins, and OpenAI's list prices still apply when the gateway has none;
+   * the answer is kept (`basis`) unless that list price priced it, so a gateway price set later applies.
+   */
+  private gatewayPriced(run: string | undefined, model: string, capability: "transcribe" | "speak", figures: { audioSeconds?: number; chars?: number }): GatewayPriced | undefined {
+    if (!run || this.spec.price || !this.deps.gateway) return undefined;
+    const trace = this.deps.gateway.trace(run);
+    const answer = pricedAnswer(trace?.served ?? model, trace?.usage, figures);
+    const price = this.deps.gateway.price(answer.m);
+    const usd = price ? gatewayCost(price, answer) : undefined;
+    if (usd !== undefined) return { costUsd: usd, basis: [answer] };
+    const listed = costOf(this.price, capability, figures);
+    return listed !== undefined ? { costUsd: listed } : { basis: [answer] };
   }
 
   get name(): string {
@@ -83,7 +102,8 @@ export class OpenAiAdapter implements SpeechAdapter {
     form.append("response_format", format);
     if (input.language) form.append("language", input.language);
     if (input.context) form.append("prompt", input.context);
-    const res = await this.post("/audio/transcriptions", form, TRANSCRIBE_TIMEOUT_MS, input.signal);
+    const at = this.endpoint();
+    const res = await this.post(at, "/audio/transcriptions", form, TRANSCRIBE_TIMEOUT_MS, input.signal);
     const body = (await res.json().catch(() => null)) as {
       text?: unknown; language?: unknown; duration?: unknown; segments?: unknown; usage?: { type?: unknown; seconds?: unknown };
     } | null;
@@ -95,19 +115,25 @@ export class OpenAiAdapter implements SpeechAdapter {
         })
       : [];
     const seconds = typeof body.duration === "number" ? body.duration : body.usage?.type === "duration" && typeof body.usage.seconds === "number" ? body.usage.seconds : undefined;
+    const audioSeconds = seconds !== undefined && seconds > 0 ? seconds : undefined;
+    const priced = this.gatewayPriced(at.run, this.spec.asrModel, "transcribe", audioSeconds !== undefined ? { audioSeconds } : {});
     return {
       text: body.text.trim(),
       language: typeof body.language === "string" && body.language ? languageCode(body.language) : input.language,
       segments,
-      ...(seconds !== undefined && seconds > 0 ? { audioSeconds: seconds } : {}),
+      ...(audioSeconds !== undefined ? { audioSeconds } : {}),
+      ...(priced ? { priced } : {}),
     };
   }
 
   async speak(input: SpeakInput): Promise<SpeakResult> {
     const voice = input.voices[0] ?? this.spec.voice;
     if (!voice) throw new ProviderError(`${this.name} needs a voice: name one, or set voice: in providers.yaml`, 400, "other");
-    const res = await this.post("/audio/speech", JSON.stringify({ model: this.spec.ttsModel, input: input.text, voice, response_format: "wav" }), SPEAK_TIMEOUT_MS, input.signal, "application/json");
-    return { audio: await res.arrayBuffer(), contentType: "audio/wav" };
+    const at = this.endpoint();
+    const res = await this.post(at, "/audio/speech", JSON.stringify({ model: this.spec.ttsModel, input: input.text, voice, response_format: "wav" }), SPEAK_TIMEOUT_MS, input.signal, "application/json");
+    const audio = await res.arrayBuffer();
+    const priced = this.gatewayPriced(at.run, this.spec.ttsModel, "speak", { chars: [...input.text].length });
+    return { audio, contentType: "audio/wav", ...(priced ? { priced } : {}) };
   }
 
   /** The configured list; without one, the API itself refuses a voice it does not have. */
@@ -119,9 +145,8 @@ export class OpenAiAdapter implements SpeechAdapter {
     return costOf(this.price, capability, figures);
   }
 
-  private async post(path: string, body: FormData | string, timeoutMs: number, signal?: AbortSignal, contentType?: string): Promise<Response> {
+  private async post(at: { url: string; apiKey?: string }, path: string, body: FormData | string, timeoutMs: number, signal?: AbortSignal, contentType?: string): Promise<Response> {
     const timeout = AbortSignal.timeout(timeoutMs);
-    const at = this.endpoint();
     let res: Response;
     try {
       res = await (this.deps.fetch ?? fetch)(`${at.url}${path}`, {

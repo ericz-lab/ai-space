@@ -195,3 +195,25 @@ test("shared catalogue covers older GPT models and snapshot ids without guessing
   expect(store.add(call({ model: "gpt-6-luna-2026-09-22", usage, costUsd: undefined })).costUsd).toBeCloseTo(0.00062, 10);
   expect(store.add(call({ model: "gpt-5.4", usage: { ...usage, cacheWriteTokens: 1 }, costUsd: undefined })).costUsd).toBeUndefined();
 });
+
+describe("gateway rows follow today's prices (docs/model-gateway.md#prices)", () => {
+  test("a changed price restates the row, totals and history; a gone provider leaves it; no estimate fills an unpriced one", () => {
+    const priced = store.add(call({ model: "glm", costUsd: 2, priceBasis: [{ m: "zhipu/glm-5.4", i: 1_000_000 }] }));
+    // A GPT model through the gateway without a price: not estimated at OpenAI's list prices.
+    const gpt = store.add(call({ model: "gpt-5.6-sol", costUsd: undefined, priceBasis: [{ m: "relay/gpt-5.6-sol", i: 1_000_000 }] }));
+    const plain = store.add(call({ costUsd: 0.5 }));
+    expect(store.get(gpt.id)?.costUsd).toBeUndefined();
+    const prices: Record<string, { input: number; output: number } | null | undefined> = { "zhipu/glm-5.4": { input: 3, output: 9 }, "relay/gpt-5.6-sol": undefined };
+    expect(store.reprice((m) => prices[m])).toBe(1);
+    expect(store.get(priced.id)?.costUsd).toBeCloseTo(3, 9);
+    expect(store.totals(0).costUsd).toBeCloseTo(3.5, 9);
+    expect(store.history().totals.costUsd).toBeCloseTo(3.5, 9);
+    expect(store.reprice((m) => prices[m])).toBe(0);
+    prices["relay/gpt-5.6-sol"] = { input: 1, output: 1 };
+    prices["zhipu/glm-5.4"] = null;
+    expect(store.reprice((m) => prices[m])).toBe(1);
+    expect(store.get(gpt.id)?.costUsd).toBeCloseTo(1, 9);
+    expect(store.get(priced.id)?.costUsd).toBeCloseTo(3, 9);
+    expect(store.get(plain.id)?.costUsd).toBe(0.5);
+  });
+});

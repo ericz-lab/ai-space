@@ -178,8 +178,8 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
     }
     const readOnly = text !== undefined ? editProblem(text, o.env) : undefined;
     await o.gateway.prices?.reload().catch(() => {});
-    /** Each listed model's effective price and where it came from; null: none, its calls go unpriced. */
-    const pricesOf = (p: GatewayProvider) => Object.fromEntries(p.models.map((m) => {
+    /** Each listed model's effective price and where it came from (null: none, its calls go unpriced), then the price file's other models of it. */
+    const pricesOf = (p: GatewayProvider) => Object.fromEntries([...new Set([...p.models, ...(o.gateway.prices?.fileModels(p.name) ?? [])])].map((m) => {
       const found = o.gateway.prices?.lookupSync(p, m);
       return [m, found ? { ...found.price, source: found.source } : null];
     }));

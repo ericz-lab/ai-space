@@ -342,6 +342,22 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     ]).then(() => undefined);
   const probeRuntimes = () => void probeAll().catch((e) => console.error(`[model] runtime probe failed: ${(e as Error).message}`));
   const remote = { name: config.name, capabilities: () => peers.capabilities(), providerOf: (app: string, cap?: string) => peers.providerOf(app, cap), get: (name: string) => peers.get(name) };
+  // The gateway's calls follow its prices (docs/model-gateway.md#prices): costed again at boot and after any price changes.
+  const speechStore = new SpeechStore(config.dbPath);
+  const repriceGateway = () => {
+    try {
+      const priceOf = (served: string) => modelGateway.priceOf(served);
+      const n = modelStore.reprice(priceOf) + speechStore.reprice(priceOf);
+      if (n) console.log(`[gateway-prices] ${n} earlier call${n === 1 ? "" : "s"} costed again at today's prices`);
+    } catch (e) {
+      console.error(`[gateway-prices] could not cost earlier calls again: ${(e as Error).message}`);
+    }
+  };
+  repriceGateway();
+  gatewayPrices.onChange(repriceGateway);
+  modelGateway.onReload(repriceGateway);
+  gatewayPrices.watch();
+
   // Speech (docs/speech.md): providers by kind from providers.yaml, else voice-studio here or on its one peer.
   // A file that does not load leaves speech off with the reason, and the space running.
   const speechLoaded = await loadSpeech(ws.home, env).then((l) => ({ ...l, error: undefined }), (e: Error) => ({ config: undefined, source: "file" as const, warnings: [], error: e.message }));
@@ -371,7 +387,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
           gateway: modelGateway.link,
         })
       : [],
-    store: new SpeechStore(config.dbPath),
+    store: speechStore,
     localOnly: (app) => registry.get(app)?.manifest.speech?.localOnly === true,
   });
   // Shortcuts (docs/shortcuts.md): the actions the command box and the Shortcuts panel run, as the operator.

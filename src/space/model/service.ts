@@ -1,4 +1,4 @@
-import { assertCompletionMode, type OnDelta, type RuntimeAdapter } from "../runtimes/types.ts";
+import { assertCompletionMode, type OnDelta, type PriceBasis, type RuntimeAdapter } from "../runtimes/types.ts";
 import { RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
 import type { ModelStore } from "./store.ts";
 import type { ModelSource } from "./app-models.ts";
@@ -191,6 +191,7 @@ export class ModelService {
         app, tag: input.tag, model: outcome.model ?? model, runtime: runtime?.name, ...(runtime?.machine ? { machine: runtime.machine } : {}), ...(source ? { modelSource: source } : {}),
         backend: outcome.backend, origin, status: outcome.ok ? "ok" : "error", error: outcome.ok ? undefined : outcome.error,
         startedAt, durationMs, promptChars: input.prompt.length, outputChars: outcome.ok ? outcome.text.length : undefined, usage: outcome.usage, costUsd: outcome.costUsd,
+        ...(outcome.priceBasis ? { priceBasis: outcome.priceBasis } : {}),
       });
     let target: { runtime: RuntimeAdapter; model: string };
     try {
@@ -399,6 +400,7 @@ export class ModelService {
       outputChars: outcome.ok ? outcome.text.length : undefined,
       usage: outcome.usage,
       costUsd: outcome.costUsd,
+      ...(outcome.priceBasis ? { priceBasis: outcome.priceBasis } : {}),
       ...extra,
     });
   }
@@ -418,6 +420,7 @@ export class ModelService {
     outputChars?: number;
     usage?: Usage;
     costUsd?: number;
+    priceBasis?: PriceBasis;
   }): ModelCall {
     if (entry.runtime) this.health?.note("", entry.runtime, entry.ok ? undefined : entry.error);
     return this.store.add({
@@ -435,6 +438,7 @@ export class ModelService {
       outputChars: entry.outputChars,
       usage: entry.usage,
       costUsd: entry.costUsd,
+      ...(entry.priceBasis ? { priceBasis: entry.priceBasis } : {}),
     });
   }
 

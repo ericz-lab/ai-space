@@ -31,6 +31,7 @@ export function recordAgentRun(service: ModelService, log: (m: string) => void =
         outputChars: result.status === "ok" ? result.output?.length : undefined,
         usage: result.usage,
         costUsd: result.costUsd,
+        ...(result.priceBasis ? { priceBasis: result.priceBasis } : {}),
       });
     } catch (e) {
       log(`${task.app}/${task.name}: could not record the agent run: ${(e as Error).message}`);

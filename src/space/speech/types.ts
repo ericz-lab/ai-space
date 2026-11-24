@@ -1,3 +1,4 @@
+import type { PriceBasis } from "../runtimes/types.ts";
 import type { FailureKind } from "../model/failure.ts";
 
 /**
@@ -99,7 +100,12 @@ export type TranscribeResult = {
   segments: Segment[];
   /** The input's length as the provider reported it; undefined when it did not say. */
   audioSeconds?: number;
+  /** Through the built-in model gateway: its cost at the gateway's prices and the answer to price again (docs/model-gateway.md#prices). */
+  priced?: GatewayPriced;
 };
+
+/** A speech call priced by the built-in model gateway; `basis` when a gateway price may apply to it later. */
+export type GatewayPriced = { costUsd?: number; basis?: PriceBasis };
 
 export type SpeakInput = {
   text: string;
@@ -108,7 +114,7 @@ export type SpeakInput = {
   signal?: AbortSignal;
 };
 
-export type SpeakResult = { audio: ArrayBuffer; contentType: string };
+export type SpeakResult = { audio: ArrayBuffer; contentType: string; priced?: GatewayPriced };
 
 /** Where a live session's provider socket is, speaking the Space's live protocol (docs/speech.md#live-protocol). */
 /** Where a live session's socket goes; `open`, when given, makes it (a peer's socket over a package connection) instead of `url` with `headers`. */
@@ -189,6 +195,8 @@ export type SpeechCallInput = {
   voice?: string;
   language?: string;
   costUsd?: number;
+  /** Through the built-in model gateway: the answer, so the cost follows a price change. */
+  priceBasis?: PriceBasis;
   fallbackFrom?: string;
   tries?: number;
   trace?: SpeechTrace;
