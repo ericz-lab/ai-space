@@ -47,7 +47,12 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
     expect(catalogue.intents[0]).toMatchObject({ id: config.id, available: true });
     expect(runs.list()).toHaveLength(0);
     const resolve = async (text: string) => (await post("/api/shortcuts/resolve", { text, timezone: "Asia/Seoul" })).json();
-    for (const text of ["金融新闻", "查今天金融新闻", "金融新闻。", "金融新闻一下", "查今天金融新闻？！"]) {
+    // An app action's complete sentence pattern ranks above an agent intent.
+    for (const text of ["金融新闻", "查今天金融新闻"]) {
+      expect(await resolve(text)).toMatchObject({ agentIntents: [], intents: [{ kind: "action", action: { id: "finance-news-feed/news" }, pattern: "[查[{period}]]金融新闻" }], ambiguous: false });
+    }
+    // Only the agent's pattern accepts trailing text; the keyword match does not hold the agent back.
+    for (const text of ["金融新闻。", "金融新闻一下", "查今天金融新闻？！"]) {
       const result = await resolve(text);
       expect(result.intents).toEqual([]);
       expect(result.agentIntents).toHaveLength(1);
@@ -61,15 +66,15 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
       expect((await post("/api/shortcuts/resolve", body)).status).toBe(400);
     }
     store.setAgentIntent({ ...config, id: "second", enabled: true });
-    expect(await resolve("查今天金融新闻")).toMatchObject({ intents: [], ambiguous: true });
+    expect(await resolve("查今天金融新闻？")).toMatchObject({ intents: [], ambiguous: true });
     store.setAgentIntent({ ...config, id: "second", enabled: false });
     // A configured but now unavailable skill remains a visible, disabled match.
     store.setAgentIntent({ ...config, id: "missing-skill", skills: ["missing"], enabled: true });
-    const unavailable = await resolve("查今天金融新闻");
+    const unavailable = await resolve("查今天金融新闻？");
     expect(unavailable.agentIntents.find((i: { id: string }) => i.id === "missing-skill")).toMatchObject({ available: false });
     expect(unavailable.intents).toEqual([]);
     store.setAgentIntent({ ...config, enabled: false });
-    const onlyUnavailable = await resolve("金融新闻");
+    const onlyUnavailable = await resolve("金融新闻。");
     expect(onlyUnavailable.intents).toEqual([]);
     expect(onlyUnavailable.agentIntents).toHaveLength(1);
     expect(onlyUnavailable.agentIntents[0].available).toBe(false);

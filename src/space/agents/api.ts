@@ -365,7 +365,10 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         }
         const found = intents(body.text, opts.actionCatalogue?.() ?? [], body.timezone);
         const definitions = (opts.shortcuts?.agentIntents() ?? []).map((i) => ({ ...i, available: true }));
-        const matched = found.some((i) => i.kind === "calc" || i.kind === "convert") ? [] : matchAgentIntents(body.text, definitions);
+        // Precedence: arithmetic and conversions, then app action sentence patterns, then agent
+        // intents, then keywords and names. A complete app pattern match leaves agents out.
+        const direct = found.some((i) => i.kind === "calc" || i.kind === "convert" || (i.kind === "action" && i.pattern !== undefined));
+        const matched = direct ? [] : matchAgentIntents(body.text, definitions);
         const agents = await availableIntents(matched);
         // Resolve precedence here, including unavailable agents: clients must never receive
         // an ordinary action as an implicit fallback for a matching skill intent.

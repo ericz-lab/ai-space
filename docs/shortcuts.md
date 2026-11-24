@@ -130,7 +130,7 @@ the command box resolves the next query against current definitions. No action
 runs when patterns are saved.
 
 Arithmetic and currency syntax keep priority. A complete sentence pattern comes
-next, followed by the existing keyword/name rules if no pattern matches.
+next, ahead of agent intents, followed by the existing keyword/name rules if no pattern matches.
 Equivalent action/argument matches collapse into one candidate. Distinct matches,
 including different peers or different captures, remain visible with parameters;
 none is selected automatically. Use the arrow keys or click to choose one. Reads
@@ -181,8 +181,10 @@ user's message. Multiple capture splits of the same intent produce one candidate
 The resolver applies precedence on the server: a matching agent makes `intents`
 an empty array, even when that agent is unavailable. Clients render the returned
 candidates and use the server's `ambiguous` flag; they do not select between competing
-agent and API results. Agent matches take precedence over API action patterns and keywords; direct
-arithmetic and currency conversion retain their existing precedence.
+agent and API results. Order: arithmetic and currency conversion first, then
+an app action's complete sentence pattern (provider or custom), then agent
+intents, then action keywords and names. An agent match hides keyword and name
+matches; an action pattern match hides agent intents.
 
 The initial scope is a local app agent, named `app/agent`, with 1–4 app-owned
 skills under `skills/<name>/SKILL.md`; peer routing and shared-skill aliases are
@@ -279,7 +281,7 @@ General workflow graphs, arbitrary scripts, and a new scheduling engine are outs
 
 ## Native search and shared resolution
 
-The web command box and iPhone call `POST /api/shortcuts/resolve` after a short typing pause. `src/space/shortcuts/resolve.ts` owns keyword, currency, sentence-pattern and calendar-input parsing; `ranking.ts` owns name scoring. The route is assembled with the agent routes so skill availability uses the same app-owned skill validation as chat. Resolution does not call a model, preview a provider, create a run, or send a message. Agent candidates take precedence over ordinary actions; arithmetic and currency conversions take precedence over agents. Multiple interpretations require an explicit selection.
+The web command box and iPhone call `POST /api/shortcuts/resolve` after a short typing pause. `src/space/shortcuts/resolve.ts` owns keyword, currency, sentence-pattern and calendar-input parsing; `ranking.ts` owns name scoring. The route is assembled with the agent routes so skill availability uses the same app-owned skill validation as chat. Resolution does not call a model, preview a provider, create a run, or send a message. Arithmetic and currency conversions come first, then app action sentence patterns, then agent candidates, then ordinary keyword and name matches. Multiple interpretations require an explicit selection.
 
 The response contains the existing intent union (`calc` with `expression`; `convert` or `action` with an action descriptor and `args`), available or unavailable `agentIntents`, and `ambiguous`. Input labels and translations remain in the action descriptor. Clients keep catalogue search local, ignore superseded responses, and use the existing preview/run/chat endpoints only after resolution. A request must supply the device/browser IANA timezone; calendar dates and local times remain strings, and execution validates and resolves them in that zone.
 
