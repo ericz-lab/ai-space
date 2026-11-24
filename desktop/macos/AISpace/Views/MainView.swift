@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The main window, laid out as the iPhone client: the launcher (Home, the screens, Settings)
@@ -122,27 +123,45 @@ struct LauncherPet: View {
 }
 
 /// The Space switcher and its state, at the leading edge of the launcher's toolbar.
+///
+/// A plain button whose label it draws itself, opening an AppKit menu, rather than a SwiftUI `Menu`:
+/// built with the macOS 26 SDK and run on macOS 27, a toolbar `Menu` with a custom label shows only
+/// its chevron (no status dot, no name) and its items lose their checkmark. A button's label and an
+/// `NSMenuItem`'s state draw the same with every SDK.
 struct ConnectionSwitcher: View {
     @ObservedObject var model: AppModel
     let connection: Connection
     @ObservedObject var loader: CatalogueLoader
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Menu {
-            ForEach(model.store.connections) { c in
-                Button { model.select(c.id) } label: {
-                    if c.id == connection.id { Label(c.name, systemImage: "checkmark") } else { Text(c.name) }
-                }
-            }
-            Divider()
-            SettingsLink { Text("Edit Connections…") }
-        } label: {
+        Button(action: showMenu) {
             HStack(spacing: 7) {
                 Circle().fill(statusColor).frame(width: 8, height: 8)
-                Text(verbatim: connection.name).font(.headline)
+                Text(verbatim: connection.name).font(.headline).lineLimit(1)
+                Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 6)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .fixedSize()
         .help(statusText)
+        .accessibilityLabel(Text(verbatim: connection.name))
+        .accessibilityValue(Text(statusText))
+    }
+
+    private func showMenu() {
+        let menu = NSMenu()
+        for entry in ConnectionMenu.entries(model.store.connections, current: connection.id) {
+            let item = ActionMenuItem(title: entry.name) { model.select(entry.id) }
+            item.state = entry.current ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        menu.addItem(ActionMenuItem(title: String(localized: "Edit Connections…")) { openSettings() })
+        // Below the pointer, where the click was: the button is in the toolbar, so that is under it.
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
     private var statusColor: Color {
@@ -163,6 +182,23 @@ struct ConnectionSwitcher: View {
         case .incompatible: return String(localized: "Not an ai-space panel")
         }
     }
+}
+
+/// A menu item that runs a closure: AppKit menus built in a SwiftUI view, where there is no
+/// responder to send a selector to.
+final class ActionMenuItem: NSMenuItem {
+    private let run: () -> Void
+
+    init(title: String, run: @escaping () -> Void) {
+        self.run = run
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("not used from a nib") }
+
+    @objc private func fire() { run() }
 }
 
 /// Up to five open apps, with the remaining pages in the overflow menu.

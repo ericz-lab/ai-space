@@ -17,6 +17,17 @@ struct DesktopRulesTests {
         #expect(OpenTabLayout.visible([], selected: "closed").isEmpty)
     }
 
+    @Test func connectionMenuMarksTheSpaceOnScreen() {
+        let mac = Connection(name: "This Mac", url: URL(string: "http://127.0.0.1:8700/")!, isDefault: true)
+        let hub = Connection(name: "space", url: URL(string: "https://space.example/")!)
+        #expect(ConnectionMenu.entries([mac, hub], current: hub.id) == [
+            .init(id: mac.id, name: "This Mac", current: false),
+            .init(id: hub.id, name: "space", current: true),
+        ])
+        #expect(ConnectionMenu.entries([mac, hub], current: nil).allSatisfy { !$0.current })
+        #expect(ConnectionMenu.entries([], current: mac.id).isEmpty)
+    }
+
     func item(_ thread: String, _ lastAt: String, unread: Bool = true, done: Bool = false) -> InboxItem {
         InboxItem(thread: thread, app: "todo", level: "info", title: nil, text: "x", url: nil, count: 1, lastAt: lastAt, unread: unread, done: done)
     }
