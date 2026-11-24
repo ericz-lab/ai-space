@@ -7,7 +7,7 @@ import type { Key } from "./messages.ts";
  * Settings → Models: which agent CLIs each machine has (docs/model-machines.md#inventory), with its
  * version, whether it is signed in and which runtime uses it. A CLI found on this machine that no
  * runtime uses can be added to runtimes.yaml; a peer's row is only shown, it is changed there.
- * Below the table, magpie on this machine (docs/runtimes.md#magpie): one gateway for GLM, Kimi,
+ * Below the table, magpie on this machine (docs/model-gateway.md#magpie): one gateway for GLM, Kimi,
  * MiniMax and the rest of its providers. Each runtime through it gets a picker per tier, filled from
  * the gateway's model list (routing groups apart), saved to that runtime's `models:` in runtimes.yaml.
  */

@@ -52,7 +52,7 @@ describe("anthropic-api runtime", () => {
   });
 });
 
-describe("a gateway that speaks the Messages API (magpie, docs/runtimes.md#magpie)", () => {
+describe("a gateway that speaks the Messages API (magpie, docs/model-gateway.md#magpie)", () => {
   const answer = (status: number, body: unknown, headers: Record<string, string> = {}) =>
     (async () => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } })) as unknown as typeof fetch;
   const gateway = (f: typeof fetch) => createAnthropicApi({ name: "magpie", kind: "anthropic-api", apiKey: "magpie-ai-space", apiUrl: "http://127.0.0.1:3425/v1/messages" }, { fetch: f });

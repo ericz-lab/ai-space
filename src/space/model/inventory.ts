@@ -19,7 +19,7 @@ import { AGENT_CLIS, type HealthCell, type RuntimeHealth } from "./health.ts";
  *   POST /api/model/runtimes {kind}    add the CLI found here as a runtime in runtimes.yaml (operator only);
  *                                      { ok, runtime, restart: true }: it is offered after ai-space restarts
  *   POST /api/model/runtimes {kind: "magpie", model | models}
- *                                      add magpie's gateway as a runtime (docs/runtimes.md#magpie): Claude Code
+ *                                      add magpie's gateway as a runtime (docs/model-gateway.md#magpie): Claude Code
  *                                      through it when this machine has Claude Code, else its Messages API;
  *                                      the models must be ones magpie offers now; Claude Code's tiers may be
  *                                      left out (the CLI's own model then)
@@ -119,7 +119,7 @@ export type MagpiePins = {
   loaded: boolean;
 };
 
-/** magpie on this machine, as the panel shows it (docs/runtimes.md#magpie). */
+/** magpie on this machine, as the panel shows it (docs/model-gateway.md#magpie). */
 export type MagpieView = MagpieInfo & {
   /** Some runtime answers through this gateway (a Claude Code runtime with `magpie:`, or an API runtime at its `/v1/messages`). */
   configured: boolean;
@@ -219,9 +219,9 @@ export function addMagpieRuntimeText(current: string | undefined, entry: { url: 
   const block = [`${i1}${name}:`];
   const envUpdates: Record<string, string> = {};
   if (entry.claude) {
-    block.push(`${i2}# Claude Code answering through magpie: GLM, Kimi, MiniMax and the other providers magpie holds (docs/runtimes.md#magpie)`, `${i2}kind: claude-code`, `${i2}bin: [${JSON.stringify(entry.claude)}]`, `${i2}magpie: ${entry.url}`);
+    block.push(`${i2}# Claude Code answering through magpie: GLM, Kimi, MiniMax and the other providers magpie holds (docs/model-gateway.md#magpie)`, `${i2}kind: claude-code`, `${i2}bin: [${JSON.stringify(entry.claude)}]`, `${i2}magpie: ${entry.url}`);
   } else {
-    block.push(`${i2}# magpie's Messages API: answers only, no tools or chat (docs/runtimes.md#magpie)`, `${i2}kind: anthropic-api`, `${i2}url: ${entry.url}/v1/messages`, `${i2}apiKeyEnv: MAGPIE_API_KEY`);
+    block.push(`${i2}# magpie's Messages API: answers only, no tools or chat (docs/model-gateway.md#magpie)`, `${i2}kind: anthropic-api`, `${i2}url: ${entry.url}/v1/messages`, `${i2}apiKeyEnv: MAGPIE_API_KEY`);
     if (!env.MAGPIE_API_KEY?.trim()) envUpdates.MAGPIE_API_KEY = MAGPIE_CALLER_KEY;
   }
   // Claude Code's tiers left out are the CLI's own; set them later in Settings → Models.

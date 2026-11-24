@@ -628,6 +628,8 @@ API, for apps and their agents:
 
 Mutating routes require the bearer token from `SPACE_API_TOKEN`, or the app's own `SPACE_APP_TOKEN` where the route acts on behalf of one app.
 
+An app never calls the model gateway (`/api/model-gateway/*`) or a vendor's API for text, pictures or speech: it declares what it needs and calls `/api/model/*` and `/api/speech/*`, which choose the model, keep the ledgers and may themselves answer through a model gateway ([model-gateway.md](model-gateway.md#who-may-call-it)). The model gateway takes only tokens ai-space issues to its own processes.
+
 ### Chat
 
 An app that wants an AI conversation on its page does not build one: it proxies `/space/chat/*` on its own origin to `${SPACE_API_URL}/api/chat/*` with its `SPACE_APP_TOKEN` (the page never holds the token and cannot reach ai-space itself), loads `/space/chat/widget.js` (a script element created at runtime: a bundler that builds the page, like Bun's HTML import, would otherwise try to resolve it at build time) and mounts `SpaceChat.mount(el, { scope, context })`. The space keeps the threads, messages and images per app under the app's own `scope` (`note:12`, `calendar`); the app hands over, on every turn, what the model should read first (`context()`), its presets and the actions it wants under an answer, and styles the widget with `--sc-*` tokens. The rest, the model, streaming, images the model can see, the ledger, is the space's; the person can pick the chat's model in the widget, stored per app, over the app's `model`. The proxy forwards every method (the model pick is a `PUT`). See [chat.md](chat.md).
@@ -748,6 +750,7 @@ notify:
 | Router, `/api/router` | Implemented (`src/space/router/`): with `SPACE_ROUTER=caddy` every app's hostname is routed on the machine, no per-app registration ([router.md](router.md)) |
 | `agents`, chat route | Implemented (`src/space/agents/`) on every chat runtime; `skills` listed in the agent's prompt per turn; `memory` parsed but not applied yet; an app reaches its own agents with its token, and every app's when the operator lists it in `SPACE_AGENT_CALLERS` ([panel.md](panel.md#apps-and-their-agents)) |
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |
+| Built-in model gateway, `/api/model-gateway/*` | Implemented (`src/space/gateway/`): passthrough of Anthropic Messages, OpenAI audio and OpenAI Images for ai-space's own runtimes and speech, never for apps ([model-gateway.md](model-gateway.md)) |
 | Speech service, `/api/speech/*`, `speech` | Implemented (`src/space/speech/`): `voice-studio` and `openai-compatible` providers; `dashscope`, live through an API and `clone` later ([speech.md](speech.md#later)) |
 | Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |
 | `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |

@@ -13,7 +13,7 @@ import { FILE_NAME_PATTERN, Unsupported } from "./types.ts";
  * prices below for the models listed, and left unknown otherwise.
  *
  * `url` may point at a gateway that speaks the same API, such as magpie on this machine
- * (docs/runtimes.md#magpie): its `provider/model` ids come from the runtime's `models:` pins, and
+ * (docs/model-gateway.md#magpie): its `provider/model` ids come from the runtime's `models:` pins, and
  * what it says answered (`X-Magpie-Model`) goes into the call's trace as `served`. A refusal's
  * Retry-After is kept in the error (`retry after 30s`), where failure.ts reads when to try again.
  *

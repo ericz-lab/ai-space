@@ -31,7 +31,7 @@ export type ModelChoice = { value: string; runtime: string; tier: "basic" | "jun
 /** One agent CLI on one machine (`GET /api/model/inventory`). */
 export type CliInfo = { cli: string; kind: string; installed?: boolean; signedIn?: boolean; version?: string; path?: string; detail?: string; checkedAt?: string; configured: boolean; runtimes: string[] };
 export type MachineInventory = { machine: string; via: "local" | "ssh" | "peer"; reachable?: boolean; stale?: boolean; old?: boolean; clis: CliInfo[] };
-/** magpie on this machine (docs/runtimes.md#magpie): where it listens, its models, which runtimes use it, what adding it makes. */
+/** magpie on this machine (docs/model-gateway.md#magpie): where it listens, its models, which runtimes use it, what adding it makes. */
 export type MagpieTiers = Partial<Record<"basic" | "junior" | "intermediate" | "advanced", string>>;
 /** A runtime through magpie and its tier pins as runtimes.yaml has them; `loaded` false until a restart. */
 export type MagpiePins = { runtime: string; kind: "claude-code" | "anthropic-api"; models: MagpieTiers; loaded: boolean };
