@@ -1,6 +1,7 @@
 import type { GatewayLink } from "../gateway/types.ts";
 import { sniffImage } from "../model/images.ts";
-import type { AnthropicApiSpec, Backend, CompleteInput, CompleteOutcome, RuntimeAdapter, Usage } from "./types.ts";
+import { readUsage } from "../gateway/forward.ts";
+import type { AnthropicApiSpec, Backend, CompleteInput, CompleteOutcome, GeneratedImage, ImageInput, ImageOutcome, RuntimeAdapter, Usage } from "./types.ts";
 import { FILE_NAME_PATTERN, Unsupported } from "./types.ts";
 
 /**
@@ -58,7 +59,21 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
     name: spec.name,
     kind: "anthropic-api",
     backend,
-    capabilities: { complete: true, agent: false, chat: false },
+    // Pictures through the built-in gateway when one of its providers has an OpenAI-style base (docs/model-gateway.md#images).
+    capabilities: { complete: true, agent: false, chat: false, ...(spec.gateway === "space" && deps.gateway?.has("openai") ? { image: true } : {}) },
+    ...(spec.gateway === "space" && deps.gateway?.has("openai")
+      ? {
+          image: async (input: ImageInput, signal?: AbortSignal): Promise<ImageOutcome> => {
+            const base = deps.gateway!.base();
+            if (!base) return { ok: false, error: `runtime ${spec.name} answers through the built-in model gateway, which is off: ${deps.gateway!.problem()}`, backend };
+            const grant = deps.gateway!.issue();
+            const outcome = await runImage(input, { base: `${base}/v1`, token: grant.token, fetch: doFetch, signal });
+            const served = deps.gateway!.trace(grant.run)?.served;
+            // What answered goes in the account of the pictures; the ledger row keeps the model asked for.
+            return outcome.ok && served ? { ...outcome, text: `${outcome.text} by ${served}` } : outcome;
+          },
+        }
+      : {}),
     complete: async (input, signal) => {
       const t = target();
       if ("error" in t) return { ok: false, error: t.error, backend };
@@ -137,6 +152,54 @@ async function runApi(input: CompleteInput, o: { apiKey: string; apiUrl: string;
     .trim();
   if (!text) return { ok: false, error: "empty answer", usage, costUsd, backend, ...upstream };
   return { ok: true, text, usage, costUsd, backend, ...upstream };
+}
+
+/**
+ * One OpenAI Images call through the built-in gateway: `images/generations` from the prompt, or
+ * `images/edits` (multipart, one `image[]` per input file) when input images are given. The
+ * pictures must come back as `b64_json`: ai-space does not fetch a URL an answer names. GPT image
+ * models always answer base64 and refuse `response_format`, so it is asked only of the others.
+ */
+async function runImage(input: ImageInput, o: { base: string; token: string; fetch: typeof fetch; signal?: AbortSignal }): Promise<ImageOutcome> {
+  const backend: Backend = "api";
+  const prompt = input.system ? `${input.system}\n\n${input.prompt}` : input.prompt;
+  const bare = input.model.slice(input.model.indexOf("/") + 1);
+  const format = /^gpt-image/i.test(bare) ? {} : { response_format: "b64_json" };
+  const signal = o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs);
+  let res: Response;
+  try {
+    if (input.files.length) {
+      const form = new FormData();
+      form.append("model", input.model);
+      form.append("prompt", prompt);
+      for (const [k, v] of Object.entries(format)) form.append(k, v);
+      for (const f of input.files) {
+        if (!FILE_NAME_PATTERN.test(f.name)) return { ok: false, error: "file name not allowed", backend };
+        const bytes = await Bun.file(f.path).bytes();
+        form.append("image[]", new File([bytes], f.name, { type: sniffImage(bytes) ?? "application/octet-stream" }));
+      }
+      res = await o.fetch(`${o.base}/images/edits`, { method: "POST", headers: { authorization: `Bearer ${o.token}` }, body: form, signal });
+    } else {
+      res = await o.fetch(`${o.base}/images/generations`, { method: "POST", headers: { authorization: `Bearer ${o.token}`, "content-type": "application/json" }, body: JSON.stringify({ model: input.model, prompt, n: 1, ...format }), signal });
+    }
+  } catch (e) {
+    const err = e as Error;
+    return { ok: false, error: err.name === "TimeoutError" ? `timed out after ${Math.round(input.timeoutMs / 1000)}s` : err.message, backend };
+  }
+  const body = (await res.json().catch(() => ({}))) as { data?: { b64_json?: unknown; url?: unknown }[]; usage?: unknown; error?: { message?: string } };
+  const usage = readUsage(body.usage);
+  if (!res.ok) return { ok: false, error: `API ${res.status}: ${body.error?.message ?? "request failed"}`, backend, ...(usage ? { usage } : {}) };
+  const images: GeneratedImage[] = [];
+  for (const d of body.data ?? []) {
+    if (typeof d.b64_json !== "string") continue;
+    const bytes = new Uint8Array(Buffer.from(d.b64_json, "base64"));
+    images.push({ type: sniffImage(bytes) ?? "image/png", bytes });
+  }
+  if (!images.length) {
+    const urls = (body.data ?? []).some((d) => typeof d.url === "string");
+    return { ok: false, error: urls ? "the provider answered with image URLs; ai-space takes b64_json only" : "no image produced", backend, ...(usage ? { usage } : {}) };
+  }
+  return { ok: true, text: `${images.length} image${images.length === 1 ? "" : "s"}`, images, backend, ...(usage ? { usage } : {}) };
 }
 
 /** Retry-After as whole seconds: a number of seconds, or an HTTP date. */
