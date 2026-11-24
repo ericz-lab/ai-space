@@ -1,92 +1,57 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { getJson, relTime, sendJson, untilTime, type CliInfo, type GatewayInfo, type GatewayTiers, type MachineInventory, type MagpieInfo, type MagpiePins, type MagpieTiers } from "./api.ts";
+import { getJson, relTime, sendJson, type CliInfo, type GatewayTiers, type MachineInventory, type MagpieInfo, type MagpiePins, type MagpieTiers } from "./api.ts";
 import { useLang } from "./i18n.ts";
-import type { Key, Lang } from "./messages.ts";
+import type { Key } from "./messages.ts";
 
 /**
  * Settings → Models: which agent CLIs each machine has (docs/model-machines.md#inventory), with its
  * version, whether it is signed in and which runtime uses it. A CLI found on this machine that no
  * runtime uses can be added to runtimes.yaml; a peer's row is only shown, it is changed there.
- * Below the table, one block per model gateway this space has (docs/model-gateway.md#settings): the
- * built-in one (its providers, and its tiers saved to `tiers:` in gateway.yaml) and magpie on this
- * machine (each runtime through it with its tiers saved to that runtime's `models:` in
- * runtimes.yaml). Both use the same tier pickers, filled from the gateway's model list.
+ * Model gateways have their own section (Settings → Gateway, GatewaySettings.tsx); below the table
+ * a line names the runtimes that take their tiers from one and opens it. The tier pickers and
+ * magpie's row live here and are used there.
  */
 
-const TIERS = ["basic", "junior", "intermediate", "advanced"] as const;
+export const TIERS = ["basic", "junior", "intermediate", "advanced"] as const;
 
-type T = (key: Key, vars?: Record<string, string | number>) => string;
+export type T = (key: Key, vars?: Record<string, string | number>) => string;
 
-export default function MachineClis() {
+export default function MachineClis({ onGateway }: { onGateway?: () => void }) {
   const { lang, t } = useLang();
   const [rows, setRows] = useState<MachineInventory[] | null>(null);
-  const [magpie, setMagpie] = useState<MagpieInfo | undefined>(undefined);
-  const [gateway, setGateway] = useState<GatewayInfo | undefined>(undefined);
+  const [through, setThrough] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [added, setAdded] = useState("");
-  const [saved, setSaved] = useState("");
   // Kinds added here and not running until ai-space restarts: their button goes.
   const [pending, setPending] = useState<string[]>([]);
+  type Inventory = { machines: MachineInventory[]; magpie?: MagpieInfo; gatewayRuntimes?: string[] };
+  const show = (d: Inventory) => {
+    setRows(d.machines);
+    setThrough([...(d.gatewayRuntimes ?? []), ...(d.magpie?.runtimes ?? [])]);
+  };
   const load = useCallback(() => {
-    getJson<{ machines: MachineInventory[]; magpie?: MagpieInfo; gateway?: GatewayInfo }>("/api/model/inventory")
-      .then((d) => {
-        setRows(d.machines);
-        setMagpie(d.magpie);
-        setGateway(d.gateway);
-      })
-      .catch((e) => setError((e as Error).message));
+    getJson<Inventory>("/api/model/inventory").then(show).catch((e) => setError((e as Error).message));
   }, []);
   useEffect(load, [load]);
   const recheck = async () => {
     setBusy(true);
     setError("");
     try {
-      const d = await sendJson<{ machines: MachineInventory[]; magpie?: MagpieInfo; gateway?: GatewayInfo }>("POST", "/api/model/status/probe", {});
-      setRows(d.machines);
-      setMagpie(d.magpie);
-      setGateway(d.gateway);
+      show(await sendJson<Inventory>("POST", "/api/model/status/probe", {}));
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   };
-  const add = async (kind: string, extra: Record<string, unknown> = {}) => {
+  const add = async (kind: string) => {
     setBusy(true);
     setError("");
     try {
-      const r = await sendJson<{ runtime: string }>("POST", "/api/model/runtimes", { kind, ...extra });
+      const r = await sendJson<{ runtime: string }>("POST", "/api/model/runtimes", { kind });
       setAdded(r.runtime);
       setPending((p) => [...p, kind]);
-      load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const save = async (runtime: string, models: MagpieTiers) => {
-    setBusy(true);
-    setError("");
-    setAdded("");
-    try {
-      const r = await sendJson<{ applied: boolean }>("PUT", "/api/model/runtimes/models", { runtime, models });
-      setSaved(t(r.applied ? "magpie.saved" : "magpie.savedRestart", { name: runtime }));
-      load();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const saveGateway = async (tiers: GatewayTiers) => {
-    setBusy(true);
-    setError("");
-    setAdded("");
-    try {
-      const r = await sendJson<{ applied: boolean }>("PUT", "/api/model/gateway/tiers", { tiers });
-      setSaved(t(r.applied ? "gateway.saved" : "gateway.savedRestart"));
       load();
     } catch (e) {
       setError((e as Error).message);
@@ -120,7 +85,7 @@ export default function MachineClis() {
                   </th>
                   {clis.map((name) => {
                     const c = r.clis.find((x) => x.cli === name);
-                    return <td key={name}>{r.old ? <span className="cli-dim">—</span> : <CliCell c={c} local={r.via === "local" && !pending.includes(c?.kind ?? "")} busy={busy} onAdd={add} t={t} />}</td>;
+                    return <td key={name}>{r.old ? <span className="cli-dim">—</span> : <CliCell c={c} local={r.via === "local" && !pending.includes(c?.kind ?? "")} busy={busy} onAdd={(kind) => void add(kind)} t={t} />}</td>;
                   })}
                 </tr>
               ))}
@@ -128,16 +93,27 @@ export default function MachineClis() {
           </table>
         </div>
       )}
-      {gateway && <GatewayBlock key={JSON.stringify(gateway.saved)} g={gateway} busy={busy} onSave={(tiers) => void saveGateway(tiers)} lang={lang} t={t} />}
-      {magpie && <MagpieRow m={magpie} busy={busy} onAdd={(models) => void add("magpie", { models })} onSave={save} t={t} />}
+      {onGateway && rows !== null && <GatewayLink names={through} onOpen={onGateway} t={t} />}
       <div className="setbtns">
         {checked && <span className="setnote">{t("clis.checked", { time: relTime(checked, lang) })}</span>}
         <span className="setbtns-gap" />
         <button className="btn2" disabled={busy} onClick={() => void recheck()}>{busy ? t("clis.checking") : t("clis.recheck")}</button>
       </div>
       {added && <p className="setnote" role="status">{t("clis.added", { name: added })}</p>}
-      {saved && <p className="setnote" role="status">{saved}</p>}
       {error && <p className="setnote err" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+/** Where the runtimes through a model gateway get their tiers: Settings → Gateway, not here. */
+export function GatewayLink({ names, onOpen, t }: { names: string[]; onOpen: () => void; t: T }) {
+  return (
+    <div className="magpie-row">
+      <b>{t("gateway.linkTitle")}</b>
+      <div className="cli-cell">
+        <span>{names.length ? t("gateway.linkUsed", { names: names.join(", ") }) : t("gateway.linkNone")}</span>
+        <button className="btn2" onClick={onOpen}>{t("gateway.open")}</button>
+      </div>
     </div>
   );
 }
@@ -272,88 +248,6 @@ export function MagpieTierPickers({ m, pins, busy, onSave, t }: { m: MagpieInfo;
     />
   );
 }
-
-/**
- * The built-in model gateway (docs/model-gateway.md#settings): whether it answers, each provider
- * of gateway.yaml with its bases, on or off and why, resting until when, and its models; then its
- * tiers, the same pickers as magpie's plus a picture tier, saved to `tiers:` in gateway.yaml. A
- * runtime's own `models:` pin wins over them and is listed. No file: where to write it, and what.
- */
-export function GatewayBlock({ g, busy, onSave, lang, t }: { g: GatewayInfo; busy: boolean; onSave: (tiers: GatewayTiers) => void; lang: Lang; t: T }) {
-  let body: ReactNode;
-  if (!g.exists) {
-    body = (
-      <>
-        <span className="cli-dim">{t("gateway.absent", { file: g.file })}</span>
-        <pre className="gateway-example">{GATEWAY_EXAMPLE}</pre>
-      </>
-    );
-  } else {
-    const running = g.configured && !g.problem;
-    body = (
-      <>
-        <span className={running ? undefined : "cli-dim"}>{running ? t("gateway.up", { n: g.models.length }) : t("gateway.down", { why: g.problem ?? "" })}</span>
-        {g.providers.length > 0 && (
-          <ul className="gateway-providers">
-            {g.providers.map((p) => (
-              <li key={p.name}>
-                <b>{p.name}</b>
-                <span className={`status ${p.off ? "paused" : p.resting ? "" : "ok"}`}>
-                  <i />
-                  {p.off ? t("gateway.off", { why: p.off }) : p.resting ? t("gateway.resting", { time: untilTime(p.resting.until, lang), kind: restKind(p.resting.kind, t) }) : t("gateway.on")}
-                </span>
-                <small>{[p.messages && `messages ${p.messages}`, p.openai && `openai ${p.openai}`].filter(Boolean).join(" · ")}</small>
-                {p.models.length > 0 && <small>{p.models.join(", ")}</small>}
-              </li>
-            ))}
-          </ul>
-        )}
-        {g.configured ? (
-          <TierPickers
-            list={{ models: g.models, groups: Object.keys(g.groups), running }}
-            start={g.saved}
-            heading={t("gateway.tiers")}
-            empty={t("magpie.noTier")}
-            stale={t("gateway.staleWarn")}
-            save={{ label: t("magpie.save"), mustChange: true, needOne: false }}
-            typed
-            image={g.imageModels.length || g.saved.image ? g.imageModels : undefined}
-            busy={busy}
-            onSave={onSave}
-            t={t}
-          />
-        ) : null}
-        <small>{g.pins.length ? t("gateway.used", { names: g.pins.map((p) => pinNote(p)).join("; ") }) : t("gateway.unused")}</small>
-      </>
-    );
-  }
-  return (
-    <div className="magpie-row">
-      <b>{t("gateway.title")}</b>
-      <div className="cli-cell">{body}</div>
-    </div>
-  );
-}
-
-/** Why a provider rests, in the reader's words; an unknown kind as it came. */
-function restKind(kind: string, t: T): string {
-  return ["credit", "quota", "rate", "transport"].includes(kind) ? t(`gateway.rest.${kind as "credit" | "quota" | "rate" | "transport"}`) : kind;
-}
-
-/** A runtime through the built-in gateway, with its own pins (which win) when it has any. */
-function pinNote(p: MagpiePins): string {
-  const own = TIERS.filter((tier) => p.models[tier]).map((tier) => `${tier} ${p.models[tier]}`);
-  return own.length ? `${p.runtime} (${own.join(", ")})` : p.runtime;
-}
-
-/** What to write when there is no gateway.yaml: one provider by its preset, and tiers. */
-const GATEWAY_EXAMPLE = `providers:
-  deepseek:
-    preset: deepseek
-    apiKeyEnv: DEEPSEEK_API_KEY   # the key goes in .env
-    models: [deepseek-chat]
-tiers:
-  intermediate: deepseek/deepseek-chat`;
 
 function machineNote(r: MachineInventory, t: T): string {
   if (r.old) return t("clis.old");

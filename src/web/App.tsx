@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type CatalogChange, CatalogWelcome } from "./AppCatalog.tsx";
 import { AddForm, UninstallForm } from "./AppForms.tsx";
 import MachineClis from "./MachineClis.tsx";
+import GatewaySettings from "./GatewaySettings.tsx";
 import ModelPreference from "./ModelPreference.tsx";
 import { AccountSettings, loadAuth } from "./Auth.tsx";
 import Chat, { type Ask, type Draft } from "./Chat.tsx";
@@ -153,7 +154,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   useEffect(() => {
     if (setsOpen) void loadAuth().then((s) => setHasAccount(s.mode === "builtin" && !!s.signedIn)).catch(() => {});
   }, [setsOpen]);
-  const setSections: SettingsSection[] = ["general", "appearance", "models", "automation", "feedback", "usage", "status", "packages", ...(hasAccount ? ["account" as const] : [])];
+  const setSections: SettingsSection[] = ["general", "appearance", "models", "gateway", "automation", "feedback", "usage", "status", "packages", ...(hasAccount ? ["account" as const] : [])];
   const [setSectionPicked, setSetSection] = useState<SettingsSection>(() => savedSection([...setSections, "account"]));
   const setSection = setSections.includes(setSectionPicked) ? setSectionPicked : "general";
   const [settingsPage, setSettingsPageRaw] = useState<"appModels" | "tasks" | "events" | "usage" | "activity" | null>(null);
@@ -1082,10 +1083,11 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                         }).catch(() => {});
                       }} />
                     </div>
-                    <MachineClis />
+                    <MachineClis onGateway={() => pickSection("gateway")} />
                     <AppModels selected={null} onSelect={openAppModel} />
                   </>
                 )}
+                {setSection === "gateway" && <GatewaySettings />}
                 {setSection === "automation" && (
                   <div className="setcard">
                     <button className="setrow setlink" onClick={() => setSettingsPage("tasks")}>

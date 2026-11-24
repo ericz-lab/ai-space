@@ -2,12 +2,14 @@ import type { ReactNode } from "react";
 import type { Key } from "./i18n.ts";
 
 // The settings dialog's sections: a list on the left, one section's cards on the right.
-export type SettingsSection = "general" | "appearance" | "models" | "automation" | "feedback" | "usage" | "status" | "packages" | "account";
+export type SettingsSection = "general" | "appearance" | "models" | "gateway" | "automation" | "feedback" | "usage" | "status" | "packages" | "account";
 
 const ICONS: Record<SettingsSection, ReactNode> = {
   general: <><circle cx="8" cy="8" r="2.2" /><path d="M8 1.6V3.2M8 12.8V14.4M1.6 8H3.2M12.8 8H14.4M3.5 3.5L4.6 4.6M11.4 11.4L12.5 12.5M3.5 12.5L4.6 11.4M11.4 4.6L12.5 3.5" /></>,
   appearance: <><circle cx="8" cy="8" r="6.2" /><path d="M8 1.8V14.2" /><path d="M8 1.8A6.2 6.2 0 0 1 8 14.2Z" fill="currentColor" stroke="none" /></>,
   models: <><ellipse cx="8" cy="3.8" rx="5.4" ry="2" /><path d="M2.6 3.8V8C2.6 9.1 5 10 8 10S13.4 9.1 13.4 8V3.8" /><path d="M2.6 8V12.2C2.6 13.3 5 14.2 8 14.2S13.4 13.3 13.4 12.2V8" /></>,
+  // Several lines entering one box and leaving as one: the gateway between runtimes and providers.
+  gateway: <><rect x="5.6" y="5.2" width="4.8" height="5.6" rx="1" /><path d="M1.8 4.4H5.6M1.8 8H5.6M1.8 11.6H5.6M10.4 8H14.2" /></>,
   automation: <><circle cx="8" cy="8" r="6.2" /><path d="M8 4.6V8L10.4 9.6" /></>,
   feedback: <><path d="M2.4 3.6C2.4 2.9 2.9 2.4 3.6 2.4H12.4C13.1 2.4 13.6 2.9 13.6 3.6V9.8C13.6 10.5 13.1 11 12.4 11H6.6L3.8 13.4V11H3.6C2.9 11 2.4 10.5 2.4 9.8Z" /><path d="M5.4 5.8H10.6M5.4 8H8.8" /></>,
   usage: <><path d="M2.4 13.6H13.6" /><path d="M4.4 11V7.6" /><path d="M8 11V3.8" /><path d="M11.6 11V6" /></>,
@@ -20,6 +22,7 @@ export const SECTION_LABEL: Record<SettingsSection, Key> = {
   general: "settings.section.general",
   appearance: "settings.section.appearance",
   models: "settings.section.models",
+  gateway: "settings.section.gateway",
   automation: "settings.section.automation",
   feedback: "settings.section.feedback",
   usage: "settings.section.usage",

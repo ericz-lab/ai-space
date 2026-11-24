@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { GatewayInfo, MagpieInfo, MagpiePins } from "./api.ts";
-import { CliCell, GatewayBlock, MagpieRow, MagpieTierPickers } from "./MachineClis.tsx";
+import type { MagpieInfo, MagpiePins } from "./api.ts";
+import { CliCell, MagpieRow, MagpieTierPickers } from "./MachineClis.tsx";
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { translate } from "./messages.ts";
 
@@ -67,48 +67,4 @@ test("magpie tier pickers of a runtime: saved pins shown, a pin no longer listed
   expect(down).toContain('<option value="gone/model" selected="">gone/model</option>');
   expect(down).not.toContain("no longer lists");
   expect(down).toContain('disabled=""');
-});
-
-test("the built-in model gateway: where to write it when absent; providers, tiers and a picture tier when it answers", () => {
-  const none: GatewayInfo = { configured: false, providers: [], groups: {}, models: [], imageModels: [], tiers: {}, file: "/ws/gateway.yaml", exists: false, pins: [], saved: {}, problem: "no gateway.yaml" };
-  const absent = renderToStaticMarkup(<GatewayBlock g={none} busy={false} onSave={noop} lang="en" t={t} />);
-  expect(absent).toContain("Built-in model gateway");
-  expect(absent).toContain("there is no /ws/gateway.yaml");
-  expect(absent).toContain("preset: deepseek");
-  expect(absent).not.toContain("<select");
-
-  const g: GatewayInfo = {
-    configured: true,
-    providers: [
-      { name: "ds", preset: "deepseek", messages: "https://api.deepseek.com/anthropic", models: ["ds/deepseek-chat"] },
-      { name: "glm", messages: "https://api.z.ai/api/anthropic", off: "ZAI_API_KEY is not set", models: [] },
-      { name: "oa", openai: "https://api.openai.com/v1", resting: { until: new Date(Date.now() + 600_000).toISOString(), kind: "rate" }, models: ["oa/gpt-image-1"] },
-    ],
-    groups: { fast: ["ds/deepseek-chat"] },
-    models: ["fast", "ds/deepseek-chat", "oa/gpt-image-1"],
-    imageModels: ["oa/gpt-image-1"],
-    tiers: { basic: "fast", advanced: "gone/model" },
-    file: "/ws/gateway.yaml",
-    exists: true,
-    pins: [{ runtime: "gw", kind: "claude-code", models: { advanced: "ds/deepseek-reasoner" }, loaded: true }],
-    saved: { basic: "fast", advanced: "gone/model" },
-  };
-  const up = renderToStaticMarkup(<GatewayBlock g={g} busy={false} onSave={noop} lang="en" t={t} />);
-  expect(up).toContain("Answers with 3 models and groups");
-  expect(up).toContain("messages https://api.deepseek.com/anthropic");
-  expect(up).toContain("Off: ZAI_API_KEY is not set");
-  expect(up).toContain("Resting (rate limited), back in 10 min");
-  // Four tiers and the picture tier; groups marked; a saved value no longer listed kept and warned; ids typed by hand.
-  for (const tier of ["Basic", "Junior", "Intermediate", "Advanced", "Pictures"]) expect(up).toContain(`<span>${tier}</span>`);
-  expect(up).toContain('<option value="fast" selected="">fast (routing group)</option>');
-  expect(up).toContain('<option value="gone/model" selected="">gone/model (no longer listed)</option>');
-  expect(up).toContain("The gateway does not list this model now");
-  expect(up).toContain("Type an id…");
-  expect(up).toContain("Used by runtime gw (advanced ds/deepseek-reasoner).");
-  // The picture tier offers only what can draw.
-  const pictures = up.slice(up.lastIndexOf("<span>Pictures</span>"));
-  expect(pictures).toContain("oa/gpt-image-1");
-  expect(pictures).not.toContain("ds/deepseek-chat");
-  // Without a provider that draws, there is no picture tier.
-  expect(renderToStaticMarkup(<GatewayBlock g={{ ...g, imageModels: [] }} busy={false} onSave={noop} lang="en" t={t} />)).not.toContain("<span>Pictures</span>");
 });

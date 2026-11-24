@@ -45,7 +45,9 @@ import {
 
 test("the panel's sections, in its order, under its names", () => {
   expect([...WEB_SECTIONS]).toEqual(["general", "appearance", "models", "automation", "feedback", "usage", "status", "packages", "account"]);
-  expect(SECTION_LABEL).toEqual(WEB_LABEL);
+  // Gateway (the built-in model gateway's providers and keys) is configured in the web panel only.
+  const { gateway: _webOnly, ...shared } = WEB_LABEL;
+  expect(SECTION_LABEL).toEqual(shared);
   expect(webText("zh", "settings.section.models")).toBe(MESSAGES.zh["settings.section.models"]);
   // Fix this (随手改), called Feedback before: the section takes the name the panel gives it, in both languages.
   for (const l of ["en", "zh"] as const) expect(webText(l, SECTION_LABEL.feedback)).toBe(MESSAGES[l]["settings.section.feedback"]);
